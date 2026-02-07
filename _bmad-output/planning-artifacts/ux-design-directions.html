@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>naic - UX Design Directions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0F0F12;
+            --surface: #16161D;
+            --accent: #3B82F6;
+            --success: #10B981;
+            --danger: #EF4444;
+            --border: #1F2937;
+            --text: #E5E7EB;
+            --text-muted: #9CA3AF;
+            --grid: rgba(31, 41, 55, 0.5);
+            --font-ui: 'Inter', sans-serif;
+            --font-data: 'JetBrains Mono', monospace;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-ui);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background: var(--surface);
+            padding: 1rem 2rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 1.25rem;
+            margin: 0;
+            letter-spacing: 0.1rem;
+            text-transform: uppercase;
+        }
+
+        .showcase {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 2rem;
+            padding: 2rem;
+        }
+
+        .direction-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.2s;
+        }
+
+        .direction-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--accent);
+        }
+
+        .mockup-preview {
+            height: 240px;
+            background: #000;
+            position: relative;
+            padding: 1rem;
+            overflow: hidden;
+        }
+
+        .direction-info {
+            padding: 1.5rem;
+        }
+
+        .direction-info h2 {
+            margin: 0 0 0.5rem 0;
+            color: var(--accent);
+            font-size: 1.1rem;
+        }
+
+        .direction-info p {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        /* Mockup Specific Styles */
+        .mockup-chart {
+            width: 100%;
+            height: 100px;
+            border-bottom: 1px solid var(--grid);
+            border-left: 1px solid var(--grid);
+            position: relative;
+        }
+
+        .trendline {
+            position: absolute;
+            height: 2px;
+            background: var(--success);
+            width: 80%;
+            top: 50%;
+            transform: rotate(-15deg);
+            box-shadow: 0 0 10px var(--success);
+        }
+
+        .hud-grid {
+            margin-top: 1rem;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            font-family: var(--font-data);
+            font-size: 0.7rem;
+        }
+
+        .grid-cell {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 4px;
+            text-align: right;
+            border: 0.5px solid var(--border);
+        }
+
+        /* Direction 1: The Absolute Void */
+        .void-preview { display: flex; align-items: center; justify-content: center; background: #000; }
+        .void-preview .trendline { width: 90%; }
+
+        /* Direction 2: Terminal Classic */
+        .terminal-preview .hud-grid { grid-template-columns: repeat(10, 1fr); }
+        .terminal-preview .mockup-preview { padding: 0.5rem; }
+
+        /* Direction 5: Zen Focus */
+        .zen-preview .mockup-preview { padding: 3rem; }
+        .zen-preview .trendline { background: var(--accent); box-shadow: 0 0 15px var(--accent); }
+
+        footer {
+            margin-top: auto;
+            padding: 2rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.7rem;
+            border-radius: 99px;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>naic // design directions</h1>
+    <div style="font-size: 0.8rem; color: var(--text-muted);">v1.0 - 2026-02-04</div>
+</header>
+
+<main class="showcase">
+    <!-- Direction 1 -->
+    <div class="direction-card">
+        <div class="mockup-preview void-preview">
+            <div class="trendline"></div>
+        </div>
+        <div class="direction-info">
+            <span class="badge">Institutional</span>
+            <h2>01. The Absolute Void</h2>
+            <p>Maximizes focus by removing all non-essential borders. The chart spans the entire viewport, with data overlays appearing only on interactive triggers.</p>
+        </div>
+    </div>
+
+    <!-- Direction 2 -->
+    <div class="direction-card">
+        <div class="mockup-preview terminal-preview">
+            <div class="mockup-chart"></div>
+            <div class="hud-grid">
+                <div class="grid-cell">12.5%</div><div class="grid-cell">14.1%</div><div class="grid-cell">13.8%</div>
+                <div class="grid-cell">8.2x</div><div class="grid-cell">9.1x</div><div class="grid-cell">8.7x</div>
+            </div>
+        </div>
+        <div class="direction-info">
+            <span class="badge">High Density</span>
+            <h2>02. The Terminal Classic</h2>
+            <p>Reminiscent of the Bloomberg Terminal. High-density grids, rigid borders, and monospace data everywhere. Designed for the power analyst conducting deep peer comparisons.</p>
+        </div>
+    </div>
+
+    <!-- Direction 3 -->
+    <div class="direction-card">
+        <div class="mockup-preview">
+            <div style="position: absolute; top: 10px; left: 10px; width: 40px; height: 100%; background: var(--surface); border-right: 1px solid var(--accent);"></div>
+            <div class="mockup-chart" style="margin-left: 50px;"></div>
+        </div>
+        <div class="direction-info">
+            <span class="badge">Workflow</span>
+            <h2>03. The Command Strip</h2>
+            <p>Emphasis on a persistent vertical navigation sidebar (The Command Strip). Simplifies switching between Search, Snapshot, Duel, and Portfolio modes.</p>
+        </div>
+    </div>
+
+    <!-- Direction 4 -->
+    <div class="direction-card">
+        <div class="mockup-preview">
+            <div style="border: 1px solid var(--danger); padding: 5px; color: var(--danger); font-size: 0.6rem; position: absolute; bottom: 10px; width: 90%;">! INTEGRITY ALERT: SMI DATA ADJUSTED FOR SPLIT (2021)</div>
+            <div class="mockup-chart"></div>
+        </div>
+        <div class="direction-info">
+            <span class="badge">Trust First</span>
+            <h2>04. Integrity Optimized</h2>
+            <p>Puts Data Integrity Flags at the forefront. Every ratio is annotated with its source and confidence level, reducing analyst skepticism for non-US markets.</p>
+        </div>
+    </div>
+
+    <!-- Direction 5 -->
+    <div class="direction-card">
+        <div class="mockup-preview zen-preview">
+            <div class="trendline" style="width: 50%; opacity: 0.5;"></div>
+            <div class="trendline"></div>
+        </div>
+        <div class="direction-info">
+            <span class="badge">Mindful</span>
+            <h2>05. Zen Focus</h2>
+            <p>Inspired by Todoist. High focus, larger spacing for the primary 10-year chart, and collapsible "detail" panels that only appear when the user wants to dive deep.</p>
+        </div>
+    </div>
+
+    <!-- Direction 6 -->
+    <div class="direction-card">
+        <div class="mockup-preview">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; height: 100%; border: 1px dashed var(--accent);">
+                <div style="border-right: 1px solid var(--accent);"></div>
+                <div></div>
+            </div>
+        </div>
+        <div class="direction-info">
+            <span class="badge">Comparative</span>
+            <h2>06. The Duelist</h2>
+            <p>A dual-workspace layout optimized for the "Peer Duel" feature. Allows side-by-side manipulation of two tickers with synchronized valuation signals.</p>
+        </div>
+    </div>
+</main>
+
+<footer>
+    &copy; 2026 naic open-source project. Defined for the professional growth analyst.
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,7 @@
+target/
+_bmad/
+_bmad-output/
+.git/
+.env
+.env.local
+**/node_modules/

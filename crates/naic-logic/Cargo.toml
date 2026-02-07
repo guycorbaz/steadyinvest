@@ -1,0 +1,8 @@
+[package]
+name = "naic-logic"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+rust_decimal = { workspace = true }
