@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use thirtyfour::prelude::*;
 use std::env;
 use anyhow::Result;

@@ -1,6 +1,6 @@
 # Story 2.1: Logarithmic SSG Chart Rendering
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -20,18 +20,18 @@ So that I can visually assess the relative growth rates regardless of the stock'
 
 ## Tasks / Subtasks
 
-- [ ] Implement Charting Service in Frontend <!-- id: 0 -->
-  - [ ] Integrate `charming` library into Leptos frontend components.
-  - [ ] Create a reusable `SSGChart` component.
-- [ ] Data Transformation <!-- id: 1 -->
-  - [ ] Format the 10-year historical data for `charming` series ingestion.
-  - [ ] Ensure logarithmic scaling is active for the value axis.
-- [ ] UI Integration <!-- id: 2 -->
-  - [ ] Expand the Analyst HUD to include the new chart.
-  - [ ] Apply the "Institutional HUD" styling to chart elements (axes, labels, series colors).
-- [ ] Verification <!-- id: 3 -->
-  - [ ] Verify render performance matches NFR1.
-  - [ ] Verify visual alignment with UX "Institutional HUD" scheme.
+- [x] Implement Charting Service in Frontend <!-- id: 0 -->
+  - [x] Integrate `charming` library into Leptos frontend components.
+  - [x] Create a reusable `SSGChart` component.
+- [x] Data Transformation <!-- id: 1 -->
+  - [x] Format the 10-year historical data for `charming` series ingestion.
+  - [x] Ensure logarithmic scaling is active for the value axis.
+- [x] UI Integration <!-- id: 2 -->
+  - [x] Expand the Analyst HUD to include the new chart.
+  - [x] Apply the "Institutional HUD" styling to chart elements (axes, labels, series colors).
+- [x] Verification <!-- id: 3 -->
+  - [x] Verify render performance matches NFR1.
+  - [x] Verify visual alignment with UX "Institutional HUD" scheme.
 
 ## Dev Notes
 

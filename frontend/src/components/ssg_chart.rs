@@ -34,7 +34,7 @@ pub fn SSGChart(data: HistoricalData) -> impl IntoView {
                 .series(Line::new().name("EPS").data(eps).smooth(true).line_style(LineStyle::new().color("#3498DB")))
                 .series(Line::new().name("Price High").data(prices).smooth(true).line_style(LineStyle::new().color("#F1C40F")));
 
-            let renderer = WasmRenderer::new(1200, 600);
+            let renderer = WasmRenderer::new(0, 0);
             renderer.render("ssg-chart-container", &chart).ok();
     });
 

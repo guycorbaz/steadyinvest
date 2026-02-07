@@ -115,7 +115,7 @@ pub fn Home() -> impl IntoView {
                                                         }}
                                                     </div>
                                                 </div>
-                                                <SSGChart data={(*data).clone()} />
+                                                <SSGChart data=data.clone() />
                                                 <div class="records-grid">
                                                     <table>
                                                         <thead>
