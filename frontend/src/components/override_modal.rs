@@ -27,6 +27,8 @@ pub fn OverrideModal(
     let (loading, set_loading) = signal(false);
 
     // Keyboard navigation: Close modal on Escape key
+    // Accessibility: role="dialog" + aria-modal="true" marks background as inert for screen readers
+    // Note: True keyboard focus trapping requires JS interception of Tab; ARIA alone does not trap Tab focus
     let on_keydown = {
         let on_close = on_close.clone();
         move |ev: leptos::ev::KeyboardEvent| {
@@ -109,10 +111,10 @@ pub fn OverrideModal(
     };
 
     view! {
-        <div class="modal-backdrop analyst-modal" on:keydown=on_keydown tabindex="-1">
+        <div class="modal-backdrop analyst-modal" on:keydown=on_keydown tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="override-modal-title">
             <div class="modal-content crimson-border">
                 <header>
-                    <h3>"Manual Override Request"</h3>
+                    <h3 id="override-modal-title">"Manual Override Request"</h3>
                     <button class="close-btn" on:click=move |_| on_close.run(()) aria-label="Close modal">"×"</button>
                 </header>
                 
@@ -125,11 +127,12 @@ pub fn OverrideModal(
 
                     <div class="input-group">
                         <label>"New Normalized Value"</label>
-                        <input 
-                            type="text" 
-                            prop:value=value 
+                        <input
+                            type="text"
+                            prop:value=value
                             on:input=move |ev| set_value.set(event_target_value(&ev))
                             placeholder="e.g. 123.45"
+                            autofocus
                         />
                     </div>
 

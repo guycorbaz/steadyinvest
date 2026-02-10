@@ -1,6 +1,10 @@
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
+fn encode_uri(s: &str) -> String {
+    js_sys::encode_uri_component(s).as_string().unwrap_or_default()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AuditEntry {
     pub id: i32,
@@ -18,6 +22,7 @@ pub struct AuditEntry {
 pub fn AuditLog() -> impl IntoView {
     let (ticker_filter, set_ticker_filter) = signal(String::new());
     let (type_filter, set_type_filter) = signal(String::new());
+    let (api_error, set_api_error) = signal(None::<String>);
 
     let audit_resource = LocalResource::new(move || {
         let t = ticker_filter.get();
@@ -25,23 +30,28 @@ pub fn AuditLog() -> impl IntoView {
         async move {
             let mut url = String::from("/api/v1/system/audit-logs?");
             if !t.is_empty() {
-                url.push_str(&format!("ticker={}&", t));
+                url.push_str(&format!("ticker={}&", encode_uri(&t)));
             }
             if !et.is_empty() {
-                url.push_str(&format!("event_type={}&", et));
+                url.push_str(&format!("event_type={}&", encode_uri(&et)));
             }
-            
+
             match gloo_net::http::Request::get(&url).send().await {
                 Ok(resp) => {
                     if resp.ok() {
+                        set_api_error.set(None);
                         resp.json::<Vec<AuditEntry>>().await.unwrap_or_default()
                     } else {
-                        leptos::logging::error!("Audit API failed with status: {}", resp.status());
+                        let msg = format!("Audit API returned status {}", resp.status());
+                        leptos::logging::error!("{}", msg);
+                        set_api_error.set(Some(msg));
                         vec![]
                     }
                 }
                 Err(e) => {
-                    leptos::logging::error!("Audit network error: {:?}", e);
+                    let msg = format!("Network error loading audit data: {:?}", e);
+                    leptos::logging::error!("{}", msg);
+                    set_api_error.set(Some(msg));
                     vec![]
                 }
             }
@@ -53,10 +63,10 @@ pub fn AuditLog() -> impl IntoView {
         let et = type_filter.get();
         let mut url = String::from("/api/v1/system/audit-logs/export?");
         if !t.is_empty() {
-            url.push_str(&format!("ticker={}&", t));
+            url.push_str(&format!("ticker={}&", encode_uri(&t)));
         }
         if !et.is_empty() {
-            url.push_str(&format!("event_type={}&", et));
+            url.push_str(&format!("event_type={}&", encode_uri(&et)));
         }
         url
     };
@@ -127,7 +137,11 @@ pub fn AuditLog() -> impl IntoView {
                             {move || {
                                 audit_resource.get().map(|data| {
                                     if data.is_empty() {
-                                        return view! { <tr><td colspan="6" class="audit-empty">"No integrity events recorded or access restricted."</td></tr> }.into_any();
+                                        return if let Some(err) = api_error.get() {
+                                            view! { <tr><td colspan="6" class="audit-empty error-msg">{format!("Failed to load audit data: {}", err)}</td></tr> }.into_any()
+                                        } else {
+                                            view! { <tr><td colspan="6" class="audit-empty">"No integrity events recorded or access restricted."</td></tr> }.into_any()
+                                        };
                                     }
                                     data.into_iter().map(|entry| {
                                         let type_class = if entry.event_type == "Anomaly" { "audit-type-anomaly" } else { "audit-type-override" };

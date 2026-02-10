@@ -25,6 +25,8 @@ pub fn LockThesisModal(
     let (loading, set_loading) = signal(false);
 
     // Keyboard navigation: Close modal on Escape key
+    // Accessibility: role="dialog" + aria-modal="true" marks background as inert for screen readers
+    // Note: True keyboard focus trapping requires JS interception of Tab; ARIA alone does not trap Tab focus
     let on_keydown = {
         let on_close = on_close.clone();
         move |ev: leptos::ev::KeyboardEvent| {
@@ -82,10 +84,10 @@ pub fn LockThesisModal(
     };
 
     view! {
-        <div class="modal-backdrop analyst-modal" on:keydown=on_keydown tabindex="-1">
+        <div class="modal-backdrop analyst-modal" on:keydown=on_keydown tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="lock-thesis-modal-title">
             <div class="modal-content standard-border">
                 <header>
-                    <h3>"Finalize & Lock Analysis"</h3>
+                    <h3 id="lock-thesis-modal-title">"Finalize & Lock Analysis"</h3>
                     <button class="close-btn" on:click=move |_| on_close.run(()) aria-label="Close modal">"×"</button>
                 </header>
                 
@@ -111,11 +113,12 @@ pub fn LockThesisModal(
 
                     <div class="input-group">
                         <label>"Investment Thesis Summary (Required)"</label>
-                        <textarea 
-                            prop:value=note 
+                        <textarea
+                            prop:value=note
                             on:input=move |ev| set_note.set(event_target_value(&ev))
                             placeholder="Why are you bullish/bearish? What are the key catalysts?"
                             rows="6"
+                            autofocus
                         ></textarea>
                     </div>
 
