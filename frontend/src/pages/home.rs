@@ -1,13 +1,17 @@
 use crate::components::search_bar::SearchBar;
-use crate::components::ssg_chart::SSGChart;
+use crate::components::analyst_hud::AnalystHUD;
+use crate::components::snapshot_hud::SnapshotHUD;
+use crate::types::LockedAnalysisModel;
 use leptos::prelude::*;
-use naic_logic::{HistoricalData, TickerInfo};
+use naic_logic::{HistoricalData, TickerInfo, AnalysisSnapshot};
 
 /// Default Home Page
 #[component]
 pub fn Home() -> impl IntoView {
     let (selected_ticker, set_selected_ticker) = signal(Option::<TickerInfo>::None);
     let (target_currency, set_target_currency) = signal("USD".to_string());
+    let (selected_snapshot_id, set_selected_snapshot_id) = signal(Option::<i32>::None);
+    let (imported_snapshot, set_imported_snapshot) = signal(Option::<AnalysisSnapshot>::None);
 
     let historicals = LocalResource::new(move || {
         let ticker_info = selected_ticker.get();
@@ -26,12 +30,10 @@ pub fn Home() -> impl IntoView {
                         .await
                         .map_err(|e| e.to_string())?;
                     
-                    // AC 5: Integrity Alert if data is incomplete
                     if !data.is_complete {
                         return Err("Integrity Alert: Data population incomplete for this ticker.".to_string());
                     }
 
-                    // Apply normalization if needed (AC 3, 5)
                     if data.currency != target_cur {
                         data.apply_normalization(&target_cur);
                     }
@@ -41,8 +43,30 @@ pub fn Home() -> impl IntoView {
                     Err(format!("Harvest failed: {}", response.status()))
                 }
             } else {
-                Ok(HistoricalData::default())
+                Ok::<HistoricalData, String>(HistoricalData::default())
             }
+        }
+    });
+
+    let snapshots = LocalResource::new(move || {
+        let ticker_info = selected_ticker.get();
+        async move {
+            let res: Result<Vec<LockedAnalysisModel>, String> = if let Some(info) = ticker_info {
+                let url = format!("/api/analyses/{}", info.ticker);
+                let response = gloo_net::http::Request::get(&url)
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                if response.ok() {
+                    response.json::<Vec<LockedAnalysisModel>>().await.map_err(|e| e.to_string())
+                } else {
+                    Ok(vec![])
+                }
+            } else {
+                Ok(vec![])
+            };
+            res
         }
     });
 
@@ -63,30 +87,84 @@ pub fn Home() -> impl IntoView {
                 </div>
             }
         }>
-            <SearchBar on_select=move |info| {
-                set_selected_ticker.set(Some(info));
-            } />
+            <SearchBar 
+                on_select=move |info| {
+                    set_selected_ticker.set(Some(info));
+                    set_selected_snapshot_id.set(None);
+                    set_imported_snapshot.set(None);
+                } 
+                on_import=move |snapshot| {
+                    set_imported_snapshot.set(Some(snapshot));
+                    set_selected_ticker.set(None);
+                }
+            />
 
             {move || selected_ticker.get().map(|ticker| {
                 view! {
                     <div class="analyst-hud-init">
-                        <div class="header-control-bar">
-                            <h2>"Analyzing: " {ticker.name} " (" {ticker.ticker} ")"</h2>
-                            <div class="currency-selector">
-                                <label>"Display Currency: "</label>
-                                <select on:change=move |ev| {
-                                    set_target_currency.set(event_target_value(&ev));
-                                }>
-                                    <option value="USD" selected={move || target_currency.get() == "USD"}>"USD"</option>
-                                    <option value="CHF" selected={move || target_currency.get() == "CHF"}>"CHF"</option>
-                                    <option value="EUR" selected={move || target_currency.get() == "EUR"}>"EUR"</option>
-                                </select>
+                        <div class="header-control-bar top-nav standard-border">
+                            <div class="ticker-box">
+                                <h2>{ticker.name.clone()} " (" {ticker.ticker.clone()} ")"</h2>
+                                <div class="hud-meta">
+                                    <span>"Ex: " {ticker.exchange.clone()}</span>
+                                    " | "
+                                    <span>"Rep: " {ticker.currency.clone()}</span>
+                                </div>
                             </div>
-                        </div>
-                        <div class="hud-meta">
-                            <span>"Exchange: " {ticker.exchange}</span>
-                            " | "
-                            <span>"Reporting Currency: " {ticker.currency}</span>
+                            <div class="hud-controls">
+                                <a 
+                                    href="/system" 
+                                    class="system-monitor-link" 
+                                    title="Go to System Monitor"
+                                    style="margin-right: 15px; color: #666; font-size: 10px; text-decoration: none; border: 1px solid #333; padding: 2px 6px; border-radius: 3px;"
+                                >
+                                    "SYS_MON"
+                                </a>
+                                <div class="currency-selector">
+                                    <label>"Display: "</label>
+                                    <select on:change=move |ev| {
+                                        set_target_currency.set(event_target_value(&ev));
+                                    }>
+                                        <option value="USD" selected={move || target_currency.get() == "USD"}>"USD"</option>
+                                        <option value="CHF" selected={move || target_currency.get() == "CHF"}>"CHF"</option>
+                                        <option value="EUR" selected={move || target_currency.get() == "EUR"}>"EUR"</option>
+                                    </select>
+                                </div>
+                                <div class="view-selector">
+                                    <label>"View: "</label>
+                                    <select on:change=move |ev| {
+                                        let val = event_target_value(&ev);
+                                        if val == "live" {
+                                            set_selected_snapshot_id.set(None);
+                                        } else {
+                                            set_selected_snapshot_id.set(val.parse::<i32>().ok());
+                                        }
+                                    }>
+                                        <option value="live" selected={move || selected_snapshot_id.get().is_none()}>"Live Analysis"</option>
+                                        <Suspense fallback=|| view! { <option disabled=true>"Loading snapshots..."</option> }>
+                                            {move || snapshots.get().map(|res: Result<Vec<LockedAnalysisModel>, String>| {
+                                                match res {
+                                                    Ok(list) => {
+                                                        list.iter().map(|s| {
+                                                            let id = s.id;
+                                                            let date = s.created_at.format("%Y-%m-%d %H:%M").to_string();
+                                                            view! {
+                                                                <option 
+                                                                    value=id.to_string()
+                                                                    selected={move || selected_snapshot_id.get() == Some(id)}
+                                                                >
+                                                                    {format!("Snapshot: {}", date)}
+                                                                </option>
+                                                            }
+                                                        }).collect_view().into_any()
+                                                    }
+                                                    _ => view! { <option disabled=true>"No snapshots"</option> }.into_any()
+                                                }
+                                            })}
+                                        </Suspense>
+                                    </select>
+                                </div>
+                            </div>
                         </div>
 
                         <Suspense fallback=|| view! {
@@ -95,60 +173,74 @@ pub fn Home() -> impl IntoView {
                                 <div class="status-text">"Querying Terminal Data..."</div>
                             </div>
                         }>
-                            {move || historicals.get().map(|res| {
-                                match res {
-                                    Ok(ref data) if !data.records.is_empty() => {
-                                        view! {
-                                            <div class="data-ready">
-                                                <div class="header-flex">
-                                                    <h3>"10-Year Historicals Populated"</h3>
-                                                    <div class="badge-group">
-                                                        {if data.is_split_adjusted {
-                                                            view! { <span class="badge split-badge">"Split-Adjusted"</span> }.into_any()
-                                                        } else {
-                                                            ().into_any()
-                                                        }}
-                                                        {if let Some(display_cur) = data.display_currency.as_ref() {
-                                                            view! { <span class="badge norm-badge">"Normalized to " {display_cur.to_string()}</span> }.into_any()
-                                                        } else {
-                                                            ().into_any()
-                                                        }}
-                                                    </div>
-                                                </div>
-                                                <SSGChart data=data.clone() />
-                                                <div class="records-grid">
-                                                    <table>
-                                                        <thead>
-                                                            <tr>
-                                                                <th>"Year"</th>
-                                                                <th>"Sales"</th>
-                                                                <th>"EPS"</th>
-                                                                <th>"High"</th>
-                                                                <th>"Low"</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {data.records.iter().map(|rec| {
-                                                                view! {
-                                                                    <tr>
-                                                                        <td>{rec.fiscal_year}</td>
-                                                                        <td>{rec.sales.to_string()}</td>
-                                                                        <td>{rec.eps.to_string()}</td>
-                                                                        <td>{rec.price_high.to_string()}</td>
-                                                                        <td>{rec.price_low.to_string()}</td>
-                                                                    </tr>
-                                                                }
-                                                            }).collect_view()}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </div>
-                                        }.into_any()
-                                    }
-                                    Ok(_) => view! { <div class="awaiting">"Awaiting population trigger..."</div> }.into_any(),
-                                    Err(e) => view! { <div class="integrity-alert">"Integrity Alert: " {e}</div> }.into_any(),
+                            {move || {
+                                // Priority 1: Imported File Snapshot
+                                if let Some(snapshot) = imported_snapshot.get() {
+                                    // Wrap in a temporary model for the HUD
+                                    let ticker_name = snapshot.historical_data.ticker.clone();
+                                    let model = LockedAnalysisModel {
+                                        id: 0,
+                                        ticker_id: 0,
+                                        snapshot_data: serde_json::to_value(snapshot.clone()).unwrap(),
+                                        analyst_note: snapshot.analyst_note.clone(),
+                                        created_at: snapshot.captured_at,
+                                    };
+                                    let ticker = TickerInfo {
+                                        ticker: ticker_name.clone(),
+                                        name: format!("{} (Imported)", ticker_name),
+                                        exchange: "Portable File".to_string(),
+                                        currency: snapshot.historical_data.currency.clone(),
+                                    };
+
+                                    return view! {
+                                        <div class="import-banner">
+                                            "Viewing Imported Analysis"
+                                            <button 
+                                                class="close-import" 
+                                                on:click=move |_| set_imported_snapshot.set(None)
+                                            >
+                                                "Close & Return to Terminal"
+                                            </button>
+                                        </div>
+                                        <SnapshotHUD ticker=ticker model=model />
+                                    }.into_any();
                                 }
-                            })}
+
+                                let ticker = ticker.clone();
+                                let target_id = selected_snapshot_id.get();
+                                if let Some(id) = target_id {
+                                    // Render Snapshot View
+                                    if let Some(Ok(list)) = snapshots.get() {
+                                        if let Some(model) = list.iter().find(|s: &&LockedAnalysisModel| s.id == id) {
+                                            return view! {
+                                                <SnapshotHUD 
+                                                    ticker=ticker.clone()
+                                                    model=model.clone()
+                                                />
+                                            }.into_any();
+                                        }
+                                    }
+                                    view! { <div class="error-msg">"Snapshot not found"</div> }.into_any()
+                                } else {
+                                    // Render Live HUD
+                                    match historicals.get() {
+                                        Some(Ok(res)) if !res.records.is_empty() => {
+                                            view! {
+                                                <AnalystHUD 
+                                                    ticker=ticker.clone()
+                                                    data=res
+                                                    on_refetch=Callback::new(move |_| {
+                                                        historicals.refetch();
+                                                        snapshots.refetch();
+                                                    })
+                                                />
+                                            }.into_any()
+                                        }
+                                        Some(Err(e)) => view! { <div class="integrity-alert">"Integrity Alert: " {e}</div> }.into_any(),
+                                        _ => view! { <div class="awaiting">"Awaiting population trigger..."</div> }.into_any(),
+                                    }
+                                }
+                            }}
                         </Suspense>
                     </div>
                 }

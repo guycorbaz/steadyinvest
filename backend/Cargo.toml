@@ -21,12 +21,18 @@ regex = { version = "1.11" }
 migration = { path = "migration" }
 sea-orm = { workspace = true }
 chrono = { version = "0.4" }
+csv = "1.1"
 validator = { version = "0.20" }
 uuid = { version = "1.6", features = ["v4"] }
 include_dir = { version = "0.7" }
 rust_decimal = { workspace = true }
 yahoo_finance_api = { workspace = true }
 reqwest = { workspace = true }
+charming = { version = "0.3.0", features = ["ssr"] }
+genpdf = { version = "0.2.0", features = ["images"] }
+resvg = "0.41.0"
+tiny-skia = "0.11.0"
+image = "0.24"
 
 [[bin]]
 name = "backend-cli"

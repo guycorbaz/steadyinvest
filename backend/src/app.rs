@@ -50,6 +50,9 @@ impl Hooks for App {
             .add_route(controllers::harvest::routes())
             .add_route(controllers::tickers::routes())
             .add_route(controllers::auth::routes())
+            .add_route(controllers::overrides::routes())
+            .add_route(controllers::analyses::routes())
+            .add_route(controllers::system::routes())
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
         queue.register(DownloadWorker::build(ctx)).await?;
@@ -67,6 +70,11 @@ impl Hooks for App {
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         db::seed::<users::ActiveModel>(&ctx.db, &base.join("users.yaml").display().to_string())
             .await?;
+        db::seed::<crate::models::historicals::ActiveModel>(
+            &ctx.db,
+            &base.join("historicals.yaml").display().to_string(),
+        )
+        .await?;
         Ok(())
     }
 }

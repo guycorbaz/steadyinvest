@@ -1,31 +1,36 @@
-# Test Automation Summary: Historical Data Adjustment
+# Test Automation Summary - Epic 5
 
 ## Generated Tests
 
+### API Tests (Backend)
+
+- [x] `backend/tests/requests/system.rs` - System Monitor & Health Check
+- [x] `backend/tests/requests/audit.rs` - Audit Log Listing & Harvest Anomaly
+
+### E2E Tests (UI)
+
+- [x] `tests/e2e/src/epic5_tests.rs` - System Monitor Dashboard & Audit Log Grid
+
+## Coverage & Execution Results
+
 ### API Tests
 
-- [x] `backend/tests/requests/harvest.rs`
-  - `verify_split_adjustment_metadata`: Confirms `is_split_adjusted` flag is `true` for split-affected tickers (AAPL).
-  - `verify_no_split_adjustment_for_standard_ticker`: Confirms flag is `false` for standard tickers (MSFT).
-  - Also verified existing `can_harvest_ticker` and `cannot_harvest_empty_ticker`.
+- **`requests::system`**: ✅ PASSED (2/2 tests)
+  - `can_get_system_health`: Verified 200 OK and provider status structure.
+  - `can_export_audit_logs_csv`: Verified CSV headers and content type.
+  
+- **`requests::audit`**: ⚠️ FAILED (Timeout/Deadlock)
+  - `can_list_audit_logs`: Failed (Timeout)
+  - `test_harvest_anomaly_logging`: Failed (Timeout)
+  - *Note: These tests exhibit symptoms of database locking issues or transaction conflicts in the `loco-rs` test harness. Remediation requires debugging the `AuditService` database interaction within the test context.*
 
 ### E2E Tests
 
-- [x] `tests/e2e/src/lib.rs`
-  - `test_split_adjustment_indicator`: Verifies "Split-Adjusted" badge is visible for AAPL.
-  - `test_no_split_adjustment_indicator`: Verifies badge is HIDDEN for MSFT.
-
-## Coverage
-
-- **API logic**: 100% coverage of split-adjustment flag states via mock integration.
-- **UI visibility**: 100% coverage of badge logic for adjusted vs non-adjusted data sets.
-
-## Verification Results
-
-- **Backend Tests**: PASSED (Verified via `cargo test -p backend harvest` with dedicated test DB).
-- **Unit Tests**: PASSED (Logic layer math verified).
+- **`epic5_tests`**: 🚧 SKIPPED (Environment)
+  - Validated compilation: ✅ Success (Fixed import and type inference errors)
+  - Execution skipped: Current headless environment lacks running Frontend (port 5173) and ChromeDriver (port 9515).
 
 ## Next Steps
 
-- Continue with **Story 1.5: Multi-Currency Normalization**.
-- Consider adding real-world split data tests once Yahoo Finance integration is live.
+1. **Fix Audit Tests**: Investigate `AuditService` transaction handling to resolve deadlocks in `requests::audit`.
+2. **Execute E2E**: Run `cargo test -p e2e-tests` in a CI/CD environment with full Selenium grid support.

@@ -1,4 +1,7 @@
 mod common;
+mod epic3_tests;
+mod epic4_tests;
+mod epic5_tests;
 
 #[cfg(test)]
 mod search_tests {

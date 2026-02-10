@@ -1,0 +1,1603 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /home/gcorbaz/synology/devel/naic/frontend/Cargo.toml
+workspace: /home/gcorbaz/synology/devel/naic/Cargo.toml
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running tests/mod.rs (/home/gcorbaz/synology/devel/naic/target/debug/deps/mod-f27b90b2053865b7)
+
+running 35 tests
+
+thread 'models::users::can_find_by_email' (101768) panicked at backend/tests/models/users.rs:95:10:
+Failed to boot test application: DB(Exec(SqlxError(Database(MySqlDatabaseError { code: Some("42000"), number: 1091, message: "Can't DROP FOREIGN KEY `fk-locked_analyses-ticker_id`; check that it exists" }))))
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::expect
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+   4: mod::models::users::can_find_by_email::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:95:10
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::users::can_find_by_email::{{closure}}
+             at ./tests/models/users.rs:105:54
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::users::can_find_by_email
+             at ./tests/models/users.rs:89:1
+  30: mod::models::users::can_find_by_email::{{closure}}
+             at ./tests/models/users.rs:89:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::can_find_by_email ... FAILED
+
+thread 'models::tickers::test_model' (101766) panicked at backend/tests/models/tickers.rs:18:41:
+called `Result::unwrap()` on an `Err` value: DB(Exec(SqlxError(Database(MySqlDatabaseError { code: Some("23000"), number: 1062, message: "Duplicate entry 'm20220101_000001_users' for key 'PRIMARY'" }))))
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::unwrap
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1233:23
+   4: mod::models::tickers::test_model::{{closure}}::{{closure}}
+             at ./tests/models/tickers.rs:18:41
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::tickers::test_model::{{closure}}
+             at ./tests/models/tickers.rs:19:50
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::tickers::test_model
+             at ./tests/models/tickers.rs:14:1
+  30: mod::models::tickers::test_model::{{closure}}
+             at ./tests/models/tickers.rs:14:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::tickers::test_model ... FAILED
+
+thread 'requests::analyses::can_lock_and_get_analyses' (101777) panicked at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:360:51:
+called `Result::unwrap()` on an `Err` value: DB(Exec(SqlxError(Database(MySqlDatabaseError { code: Some("42S02"), number: 1146, message: "Table 'naic_test.seaql_migrations' doesn't exist" }))))
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::unwrap
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1233:23
+   4: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:360:51
+   5: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+   6: mod::requests::analyses::can_lock_and_get_analyses::{{closure}}
+             at ./tests/requests/analyses.rs:55:6
+   7: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   8: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   9: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  10: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  11: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  13: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  14: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  15: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  16: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  17: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  18: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  19: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  20: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  21: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  22: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  24: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  25: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  26: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  27: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  28: mod::requests::analyses::can_lock_and_get_analyses
+             at ./tests/requests/analyses.rs:55:11
+  29: mod::requests::analyses::can_lock_and_get_analyses::{{closure}}
+             at ./tests/requests/analyses.rs:8:37
+  30: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  31: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::analyses::can_lock_and_get_analyses ... FAILED
+
+thread 'requests::system::can_get_system_health' (101821) panicked at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:360:51:
+called `Result::unwrap()` on an `Err` value: DB(Exec(SqlxError(Database(MySqlDatabaseError { code: Some("23000"), number: 1062, message: "Duplicate entry 'NESN.SW' for key 'ticker'" }))))
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::unwrap
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1233:23
+   4: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:360:51
+   5: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+   6: mod::requests::system::can_get_system_health::{{closure}}::{{closure}}
+             at ./tests/requests/system.rs:14:6
+   7: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   8: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   9: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  10: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  11: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  13: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  14: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  15: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  16: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  17: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  18: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  19: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  20: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  21: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  22: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  24: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  25: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  26: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  27: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  28: mod::requests::system::can_get_system_health::{{closure}}
+             at ./tests/requests/system.rs:14:11
+  29: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  30: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  31: mod::requests::system::can_get_system_health
+             at ./tests/requests/system.rs:6:1
+  32: mod::requests::system::can_get_system_health::{{closure}}
+             at ./tests/requests/system.rs:6:10
+  33: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  34: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::system::can_get_system_health ... FAILED
+
+thread 'models::users::handle_create_with_password_with_duplicate' (101774) panicked at backend/tests/models/users.rs:73:10:
+Failed to seed database: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::expect
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+   4: mod::models::users::handle_create_with_password_with_duplicate::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:73:10
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::users::handle_create_with_password_with_duplicate::{{closure}}
+             at ./tests/models/users.rs:85:37
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::users::handle_create_with_password_with_duplicate
+             at ./tests/models/users.rs:64:1
+  30: mod::models::users::handle_create_with_password_with_duplicate::{{closure}}
+             at ./tests/models/users.rs:64:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::handle_create_with_password_with_duplicate ... FAILED
+test models::users::can_create_with_password has been running for over 60 seconds
+test models::users::can_find_by_pid has been running for over 60 seconds
+test models::users::can_reset_password has been running for over 60 seconds
+test models::users::can_set_forgot_password_sent has been running for over 60 seconds
+test models::users::can_verification_token has been running for over 60 seconds
+test models::users::can_verified has been running for over 60 seconds
+test models::users::magic_link has been running for over 60 seconds
+test models::users::test_can_validate_model has been running for over 60 seconds
+test requests::audit::can_list_audit_logs has been running for over 60 seconds
+test requests::auth::can_auth_with_magic_link has been running for over 60 seconds
+test requests::auth::can_get_current_user has been running for over 60 seconds
+test requests::auth::can_login_with_verify::case_1 has been running for over 60 seconds
+test requests::auth::can_login_with_verify::case_2 has been running for over 60 seconds
+test requests::auth::can_login_without_verify has been running for over 60 seconds
+test requests::auth::can_register has been running for over 60 seconds
+test requests::auth::can_reject_invalid_email has been running for over 60 seconds
+test requests::auth::can_reject_invalid_magic_link_token has been running for over 60 seconds
+test requests::auth::can_resend_verification_email has been running for over 60 seconds
+test requests::auth::can_reset_password has been running for over 60 seconds
+test requests::auth::cannot_resend_email_if_already_verified has been running for over 60 seconds
+test requests::auth::invalid_verification_token has been running for over 60 seconds
+test requests::auth::login_with_un_existing_email has been running for over 60 seconds
+test requests::harvest::can_harvest_ticker has been running for over 60 seconds
+test requests::harvest::cannot_harvest_empty_ticker has been running for over 60 seconds
+test requests::harvest::verify_currency_normalization_metadata has been running for over 60 seconds
+test requests::harvest::verify_no_split_adjustment_for_standard_ticker has been running for over 60 seconds
+test requests::harvest::verify_normalization_math_consistency has been running for over 60 seconds
+test requests::harvest::verify_split_adjustment_metadata has been running for over 60 seconds
+test requests::tickers::can_get_search has been running for over 60 seconds
+test requests::tickers::can_get_tickers has been running for over 60 seconds
+test requests::tickers::can_get_search ... ok
+test requests::tickers::can_get_tickers ... ok
+
+thread 'models::users::can_find_by_pid' (101769) panicked at backend/tests/models/users.rs:118:10:
+Failed to seed database: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::expect
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+   4: mod::models::users::can_find_by_pid::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:118:10
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::users::can_find_by_pid::{{closure}}
+             at ./tests/models/users.rs:126:54
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::users::can_find_by_pid
+             at ./tests/models/users.rs:109:1
+  30: mod::models::users::can_find_by_pid::{{closure}}
+             at ./tests/models/users.rs:109:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::can_find_by_pid ... FAILED
+test requests::harvest::verify_currency_normalization_metadata ... ok
+
+thread 'requests::auth::can_auth_with_magic_link' (101779) panicked at backend/tests/requests/auth.rs:320:33:
+called `Result::unwrap()` on an `Err` value: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::unwrap
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1233:23
+   4: mod::requests::auth::can_auth_with_magic_link::{{closure}}::{{closure}}::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:320:33
+   5: loco_rs::testing::request::request_internal::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:271:48
+   6: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:361:57
+   7: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+   8: mod::requests::auth::can_auth_with_magic_link::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:368:6
+   9: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  10: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  11: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  12: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  13: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  14: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  15: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  16: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  17: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  18: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  19: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  20: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  21: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  22: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  23: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  24: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  25: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  26: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  27: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  28: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  29: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  30: mod::requests::auth::can_auth_with_magic_link::{{closure}}
+             at ./tests/requests/auth.rs:368:11
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  33: mod::requests::auth::can_auth_with_magic_link
+             at ./tests/requests/auth.rs:316:1
+  34: mod::requests::auth::can_auth_with_magic_link::{{closure}}
+             at ./tests/requests/auth.rs:316:10
+  35: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  36: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::auth::can_auth_with_magic_link ... FAILED
+
+thread 'models::users::can_set_forgot_password_sent' (101771) panicked at backend/tests/models/users.rs:185:10:
+Failed to seed database: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::expect
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+   4: mod::models::users::can_set_forgot_password_sent::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:185:10
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::users::can_set_forgot_password_sent::{{closure}}
+             at ./tests/models/users.rs:215:6
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::users::can_set_forgot_password_sent
+             at ./tests/models/users.rs:176:1
+  30: mod::models::users::can_set_forgot_password_sent::{{closure}}
+             at ./tests/models/users.rs:176:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::can_set_forgot_password_sent ... FAILED
+test requests::auth::can_get_current_user ... ok
+test requests::auth::can_login_without_verify ... ok
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Snapshot Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Snapshot file: backend/tests/requests/snapshots/resend_verification_user@auth_request.snap
+Snapshot: resend_verification_user@auth_request
+Source: backend/tests/requests/auth.rs:454
+────────────────────────────────────────────────────────────────────────────────
+Expression: user
+────────────────────────────────────────────────────────────────────────────────
+-old snapshot
++new results
+────────────┬───────────────────────────────────────────────────────────────────
+    1     1 │ Model {
+    2       │-    created_at: DATE,
+    3       │-    updated_at: DATE,
+          2 │+    created_at: DATEZ,
+          3 │+    updated_at: DATEZ,
+    4     4 │     id: ID
+    5     5 │     pid: PID,
+    6     6 │     email: "test@loco.com",
+    7     7 │     password: "PASSWORD",
+┈┈┈┈┈┈┈┈┈┈┈┈┼┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+   12    12 │     email_verification_token: Some(
+   13    13 │         "PID",
+   14    14 │     ),
+   15    15 │     email_verification_sent_at: Some(
+   16       │-        DATE,
+         16 │+        DATEZ,
+   17    17 │     ),
+   18    18 │     email_verified_at: None,
+   19    19 │     magic_link_token: None,
+   20    20 │     magic_link_expiration: None,
+────────────┴───────────────────────────────────────────────────────────────────
+stored new snapshot /home/gcorbaz/synology/devel/naic/backend/tests/requests/snapshots/resend_verification_user@auth_request.snap.new
+To update snapshots run `cargo insta review`
+Stopped on the first failure. Run `cargo insta test` to run all snapshots.
+
+thread 'requests::auth::can_resend_verification_email' (101787) panicked at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:719:13:
+snapshot assertion for 'resend_verification_user@auth_request' failed in line 454
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: insta::runtime::SnapshotAssertionContext::finalize
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:719:13
+   3: insta::runtime::assert_snapshot
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:936:13
+   4: mod::requests::auth::can_resend_verification_email::{{closure}}::{{closure}}::{{closure}}::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:454:13
+   5: insta::settings::Settings::bind
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/settings.rs:536:9
+   6: mod::requests::auth::can_resend_verification_email::{{closure}}::{{closure}}::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:451:9
+   7: loco_rs::testing::request::request_internal::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:271:48
+   8: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:361:57
+   9: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+  10: mod::requests::auth::can_resend_verification_email::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:457:6
+  11: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  12: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  14: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  15: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  16: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  17: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  18: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  20: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  21: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  22: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  23: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  24: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  25: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  26: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  27: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  28: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  29: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  30: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  31: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  32: mod::requests::auth::can_resend_verification_email::{{closure}}
+             at ./tests/requests/auth.rs:457:11
+  33: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  34: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  35: mod::requests::auth::can_resend_verification_email
+             at ./tests/requests/auth.rs:408:1
+  36: mod::requests::auth::can_resend_verification_email::{{closure}}
+             at ./tests/requests/auth.rs:408:10
+  37: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  38: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::auth::can_resend_verification_email ... FAILED
+test requests::harvest::verify_split_adjustment_metadata ... ok
+
+thread 'requests::harvest::cannot_harvest_empty_ticker' (101793) panicked at backend/tests/requests/harvest.rs:108:9:
+assertion failed: res.status_code() == 404 || res.status_code() == 405
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::panicking::panic
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:150:5
+   3: mod::requests::harvest::cannot_harvest_empty_ticker::{{closure}}::{{closure}}::{{closure}}::{{closure}}
+             at ./tests/requests/harvest.rs:108:9
+   4: loco_rs::testing::request::request_internal::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:271:48
+   5: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:361:57
+   6: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+   7: mod::requests::harvest::cannot_harvest_empty_ticker::{{closure}}::{{closure}}
+             at ./tests/requests/harvest.rs:110:6
+   8: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   9: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  11: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  12: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  14: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  15: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  16: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  17: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  18: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  19: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  20: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  21: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  22: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  23: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  24: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  25: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  26: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  27: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  28: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  29: mod::requests::harvest::cannot_harvest_empty_ticker::{{closure}}
+             at ./tests/requests/harvest.rs:110:11
+  30: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  31: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  32: mod::requests::harvest::cannot_harvest_empty_ticker
+             at ./tests/requests/harvest.rs:104:1
+  33: mod::requests::harvest::cannot_harvest_empty_ticker::{{closure}}
+             at ./tests/requests/harvest.rs:104:10
+  34: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  35: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::harvest::cannot_harvest_empty_ticker ... FAILED
+
+thread 'models::users::can_verified' (101773) panicked at backend/tests/models/users.rs:228:10:
+Failed to seed database: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::expect
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+   4: mod::models::users::can_verified::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:228:10
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::users::can_verified::{{closure}}
+             at ./tests/models/users.rs:253:6
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::users::can_verified
+             at ./tests/models/users.rs:219:1
+  30: mod::models::users::can_verified::{{closure}}
+             at ./tests/models/users.rs:219:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::can_verified ... FAILED
+test requests::auth::invalid_verification_token ... ok
+test models::users::test_can_validate_model ... ok
+test requests::harvest::verify_no_split_adjustment_for_standard_ticker ... ok
+test requests::harvest::verify_normalization_math_consistency ... ok
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Snapshot Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Snapshot file: backend/tests/models/snapshots/can_create_with_password@users.snap
+Snapshot: can_create_with_password@users
+Source: backend/tests/models/users.rs:60
+────────────────────────────────────────────────────────────────────────────────
+Expression: res
+────────────────────────────────────────────────────────────────────────────────
+-old snapshot
++new results
+────────────┬───────────────────────────────────────────────────────────────────
+    1     1 │ Ok(
+    2     2 │     Model {
+    3       │-        created_at: DATE,
+    4       │-        updated_at: DATE,
+          3 │+        created_at: DATEZ,
+          4 │+        updated_at: DATEZ,
+    5     5 │         id: ID
+    6     6 │         pid: PID,
+    7     7 │         email: "test@framework.com",
+    8     8 │         password: "PASSWORD",
+────────────┴───────────────────────────────────────────────────────────────────
+stored new snapshot /home/gcorbaz/synology/devel/naic/backend/tests/models/snapshots/can_create_with_password@users.snap.new
+To update snapshots run `cargo insta review`
+Stopped on the first failure. Run `cargo insta test` to run all snapshots.
+
+thread 'models::users::can_create_with_password' (101767) panicked at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:719:13:
+snapshot assertion for 'can_create_with_password@users' failed in line 60
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: insta::runtime::SnapshotAssertionContext::finalize
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:719:13
+   3: insta::runtime::assert_snapshot
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:936:13
+   4: mod::models::users::can_create_with_password::{{closure}}::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:60:9
+   5: insta::settings::Settings::bind
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/settings.rs:536:9
+   6: mod::models::users::can_create_with_password::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:57:5
+   7: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   8: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   9: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  10: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  11: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  13: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  14: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  15: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  16: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  17: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  18: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  19: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  20: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  21: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  22: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  24: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  25: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  26: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  27: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  28: mod::models::users::can_create_with_password::{{closure}}
+             at ./tests/models/users.rs:61:7
+  29: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  30: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  31: mod::models::users::can_create_with_password
+             at ./tests/models/users.rs:41:1
+  32: mod::models::users::can_create_with_password::{{closure}}
+             at ./tests/models/users.rs:41:10
+  33: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  34: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::can_create_with_password ... FAILED
+test requests::auth::can_login_with_verify::case_2 ... ok
+test requests::auth::cannot_resend_email_if_already_verified ... ok
+test requests::auth::login_with_un_existing_email ... ok
+
+thread 'models::users::magic_link' (101775) panicked at backend/tests/models/users.rs:299:42:
+called `Result::unwrap()` on an `Err` value: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::unwrap
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1233:23
+   4: mod::models::users::magic_link::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:299:42
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::users::magic_link::{{closure}}
+             at ./tests/models/users.rs:359:6
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::users::magic_link
+             at ./tests/models/users.rs:296:1
+  30: mod::models::users::magic_link::{{closure}}
+             at ./tests/models/users.rs:296:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::magic_link ... FAILED
+test requests::audit::can_list_audit_logs ... ok
+test requests::auth::can_reset_password ... ok
+
+thread 'requests::harvest::can_harvest_ticker' (101792) panicked at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:360:51:
+called `Result::unwrap()` on an `Err` value: DB(Exec(SqlxError(Database(MySqlDatabaseError { code: Some("42S02"), number: 1146, message: "Table 'naic_test.seaql_migrations' doesn't exist" }))))
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::unwrap
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1233:23
+   4: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:360:51
+   5: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+   6: mod::requests::harvest::can_harvest_ticker::{{closure}}::{{closure}}
+             at ./tests/requests/harvest.rs:17:6
+   7: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   8: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   9: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  10: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  11: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  13: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  14: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  15: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  16: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  17: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  18: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  19: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  20: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  21: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  22: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  24: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  25: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  26: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  27: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  28: mod::requests::harvest::can_harvest_ticker::{{closure}}
+             at ./tests/requests/harvest.rs:17:11
+  29: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  30: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  31: mod::requests::harvest::can_harvest_ticker
+             at ./tests/requests/harvest.rs:6:1
+  32: mod::requests::harvest::can_harvest_ticker::{{closure}}
+             at ./tests/requests/harvest.rs:6:10
+  33: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  34: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::harvest::can_harvest_ticker ... FAILED
+
+thread 'requests::auth::can_login_with_verify::case_1' (101781) panicked at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:360:51:
+called `Result::unwrap()` on an `Err` value: DB(Exec(SqlxError(Database(MySqlDatabaseError { code: Some("42S02"), number: 1146, message: "Table 'naic_test.seaql_migrations' doesn't exist" }))))
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::unwrap
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1233:23
+   4: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:360:51
+   5: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+   6: mod::requests::auth::can_login_with_verify::{{closure}}
+             at ./tests/requests/auth.rs:121:6
+   7: mod::requests::auth::can_login_with_verify::case_1::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:59:1
+   8: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   9: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  11: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  12: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  14: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  15: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  16: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  17: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  18: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  19: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  20: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  21: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  22: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  23: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  24: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  25: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  26: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  27: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  28: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  29: mod::requests::auth::can_login_with_verify::case_1::{{closure}}
+             at ./tests/requests/auth.rs:59:1
+  30: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  31: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  32: mod::requests::auth::can_login_with_verify::case_1
+             at ./tests/requests/auth.rs:63:1
+  33: mod::requests::auth::can_login_with_verify::case_1::{{closure}}
+             at ./tests/requests/auth.rs:63:10
+  34: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  35: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::auth::can_login_with_verify::case_1 ... FAILED
+test requests::auth::can_reject_invalid_email ... ok
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Snapshot Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Snapshot file: backend/tests/requests/snapshots/can_register@auth_request.snap
+Snapshot: can_register@auth_request
+Source: backend/tests/requests/auth.rs:44
+────────────────────────────────────────────────────────────────────────────────
+Expression: saved_user
+────────────────────────────────────────────────────────────────────────────────
+-old snapshot
++new results
+────────────┬───────────────────────────────────────────────────────────────────
+    1     1 │ Ok(
+    2     2 │     Model {
+    3       │-        created_at: DATE,
+    4       │-        updated_at: DATE,
+          3 │+        created_at: DATEZ,
+          4 │+        updated_at: DATEZ,
+    5     5 │         id: ID
+    6     6 │         pid: PID,
+    7     7 │         email: "test@loco.com",
+    8     8 │         password: "PASSWORD",
+┈┈┈┈┈┈┈┈┈┈┈┈┼┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+   13    13 │         email_verification_token: Some(
+   14    14 │             "PID",
+   15    15 │         ),
+   16    16 │         email_verification_sent_at: Some(
+   17       │-            DATE,
+         17 │+            DATEZ,
+   18    18 │         ),
+   19    19 │         email_verified_at: None,
+   20    20 │         magic_link_token: None,
+   21    21 │         magic_link_expiration: None,
+────────────┴───────────────────────────────────────────────────────────────────
+stored new snapshot /home/gcorbaz/synology/devel/naic/backend/tests/requests/snapshots/can_register@auth_request.snap.new
+To update snapshots run `cargo insta review`
+Stopped on the first failure. Run `cargo insta test` to run all snapshots.
+
+thread 'requests::auth::can_register' (101784) panicked at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:719:13:
+snapshot assertion for 'can_register@auth_request' failed in line 44
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: insta::runtime::SnapshotAssertionContext::finalize
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:719:13
+   3: insta::runtime::assert_snapshot
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:936:13
+   4: mod::requests::auth::can_register::{{closure}}::{{closure}}::{{closure}}::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:44:13
+   5: insta::settings::Settings::bind
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/settings.rs:536:9
+   6: mod::requests::auth::can_register::{{closure}}::{{closure}}::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:41:9
+   7: loco_rs::testing::request::request_internal::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:271:48
+   8: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:361:57
+   9: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+  10: mod::requests::auth::can_register::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:56:6
+  11: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  12: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  14: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  15: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  16: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  17: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  18: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  20: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  21: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  22: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  23: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  24: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  25: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  26: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  27: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  28: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  29: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  30: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  31: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  32: mod::requests::auth::can_register::{{closure}}
+             at ./tests/requests/auth.rs:56:11
+  33: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  34: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  35: mod::requests::auth::can_register
+             at ./tests/requests/auth.rs:21:1
+  36: mod::requests::auth::can_register::{{closure}}
+             at ./tests/requests/auth.rs:21:10
+  37: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  38: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::auth::can_register ... FAILED
+
+thread 'requests::auth::can_reject_invalid_magic_link_token' (101786) panicked at backend/tests/requests/auth.rs:395:33:
+called `Result::unwrap()` on an `Err` value: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::unwrap
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1233:23
+   4: mod::requests::auth::can_reject_invalid_magic_link_token::{{closure}}::{{closure}}::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:395:33
+   5: loco_rs::testing::request::request_internal::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:271:48
+   6: loco_rs::testing::request::request_with_config::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:361:57
+   7: loco_rs::testing::request::request::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/loco-rs-0.16.4/src/testing/request.rs:307:74
+   8: mod::requests::auth::can_reject_invalid_magic_link_token::{{closure}}::{{closure}}
+             at ./tests/requests/auth.rs:404:6
+   9: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  10: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  11: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+  12: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+  13: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  14: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  15: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  16: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  17: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  18: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  19: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  20: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  21: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  22: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  23: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  24: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  25: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  26: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  27: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  28: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  29: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  30: mod::requests::auth::can_reject_invalid_magic_link_token::{{closure}}
+             at ./tests/requests/auth.rs:404:11
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  33: mod::requests::auth::can_reject_invalid_magic_link_token
+             at ./tests/requests/auth.rs:391:1
+  34: mod::requests::auth::can_reject_invalid_magic_link_token::{{closure}}
+             at ./tests/requests/auth.rs:391:10
+  35: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  36: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test requests::auth::can_reject_invalid_magic_link_token ... FAILED
+
+thread 'models::users::can_verification_token' (101772) panicked at backend/tests/models/users.rs:139:10:
+Failed to seed database: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::expect
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+   4: mod::models::users::can_verification_token::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:139:10
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::users::can_verification_token::{{closure}}
+             at ./tests/models/users.rs:172:6
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::users::can_verification_token
+             at ./tests/models/users.rs:130:1
+  30: mod::models::users::can_verification_token::{{closure}}
+             at ./tests/models/users.rs:130:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::can_verification_token ... FAILED
+
+thread 'models::users::can_reset_password' (101770) panicked at backend/tests/models/users.rs:266:10:
+Failed to seed database: Message("Unsupported database backend: MySQL")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/result.rs:1867:5
+   3: core::result::Result<T,E>::expect
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+   4: mod::models::users::can_reset_password::{{closure}}::{{closure}}
+             at ./tests/models/users.rs:266:10
+   5: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   6: <core::pin::Pin<P> as core::future::future::Future>::poll
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+   7: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:70
+   8: tokio::task::coop::with_budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:167:5
+   9: tokio::task::coop::budget
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/task/coop/mod.rs:133:5
+  10: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:753:25
+  11: tokio::runtime::scheduler::current_thread::Context::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:442:19
+  12: tokio::runtime::scheduler::current_thread::CoreGuard::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:752:44
+  13: tokio::runtime::scheduler::current_thread::CoreGuard::enter::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:68
+  14: tokio::runtime::context::scoped::Scoped<T>::set
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/scoped.rs:40:9
+  15: tokio::runtime::context::set_scheduler::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:38
+  16: std::thread::local::LocalKey<T>::try_with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:513:12
+  17: std::thread::local::LocalKey<T>::with
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/local.rs:477:20
+  18: tokio::runtime::context::set_scheduler
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context.rs:176:17
+  19: tokio::runtime::scheduler::current_thread::CoreGuard::enter
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:840:27
+  20: tokio::runtime::scheduler::current_thread::CoreGuard::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:740:24
+  21: tokio::runtime::scheduler::current_thread::CurrentThread::block_on::{{closure}}
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:200:33
+  22: tokio::runtime::context::runtime::enter_runtime
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/context/runtime.rs:65:16
+  23: tokio::runtime::scheduler::current_thread::CurrentThread::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/scheduler/current_thread/mod.rs:188:9
+  24: tokio::runtime::runtime::Runtime::block_on_inner
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:368:52
+  25: tokio::runtime::runtime::Runtime::block_on
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.49.0/src/runtime/runtime.rs:342:18
+  26: mod::models::users::can_reset_password::{{closure}}
+             at ./tests/models/users.rs:292:6
+  27: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  28: serial_test::serial_code_lock::local_serial_core
+             at /home/gcorbaz/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serial_test-3.3.1/src/serial_code_lock.rs:36:5
+  29: mod::models::users::can_reset_password
+             at ./tests/models/users.rs:257:1
+  30: mod::models::users::can_reset_password::{{closure}}
+             at ./tests/models/users.rs:257:10
+  31: core::ops::function::FnOnce::call_once
+             at /home/gcorbaz/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  32: core::ops::function::FnOnce::call_once
+             at /rustc/254b59607d4417e9dffbc307138ae5c86280fe4c/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test models::users::can_reset_password ... FAILED
+
+failures:
+
+failures:
+    models::tickers::test_model
+    models::users::can_create_with_password
+    models::users::can_find_by_email
+    models::users::can_find_by_pid
+    models::users::can_reset_password
+    models::users::can_set_forgot_password_sent
+    models::users::can_verification_token
+    models::users::can_verified
+    models::users::handle_create_with_password_with_duplicate
+    models::users::magic_link
+    requests::analyses::can_lock_and_get_analyses
+    requests::auth::can_auth_with_magic_link
+    requests::auth::can_login_with_verify::case_1
+    requests::auth::can_register
+    requests::auth::can_reject_invalid_magic_link_token
+    requests::auth::can_resend_verification_email
+    requests::harvest::can_harvest_ticker
+    requests::harvest::cannot_harvest_empty_ticker
+    requests::system::can_get_system_health
+
+test result: FAILED. 16 passed; 19 failed; 0 ignored; 0 measured; 0 filtered out; finished in 876.81s
+
+error: test failed, to rerun pass `--test mod`

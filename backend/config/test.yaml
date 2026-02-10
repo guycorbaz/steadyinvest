@@ -60,7 +60,7 @@ mailer:
 # Database Configuration
 database:
   # Database connection URI
-  uri: {{ get_env(name="DATABASE_URL", default="postgres://loco:loco@localhost:5432/backend_test") }}
+  uri: {{ get_env(name="DATABASE_URL", default="mysql://naic:1000cpsvqrE$@192.168.1.5:3306/naic_test") }}
   # When enabled, the sql query will be logged.
   enable_logging: false
   # Set the timeout duration when acquiring a connection.

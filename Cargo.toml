@@ -19,9 +19,10 @@ tokio = { version = "1.45" }
 axum = { version = "0.8" }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-sea-orm = { version = "1.1", features = ["sqlx-sqlite", "sqlx-mysql", "runtime-tokio-rustls", "macros"] }
+sea-orm = { version = "1.1", features = ["sqlx-mysql", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
 migration = { path = "backend/migration" }
 naic-logic = { path = "crates/naic-logic" }
 rust_decimal = { version = "1", features = ["serde-float"] }
 yahoo_finance_api = "3"
 reqwest = { version = "0.12", features = ["json"] }
+csv = "1.1"

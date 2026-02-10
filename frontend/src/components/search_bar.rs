@@ -3,9 +3,13 @@ use naic_logic::TickerInfo;
 use gloo_net::http::Request;
 
 #[component]
-pub fn SearchBar<F>(on_select: F) -> impl IntoView
+pub fn SearchBar<F, G>(
+    on_select: F,
+    on_import: G,
+) -> impl IntoView
 where
     F: Fn(TickerInfo) + Send + Sync + Clone + 'static,
+    G: Fn(naic_logic::AnalysisSnapshot) + Send + Sync + Clone + 'static,
 {
     let (query, set_query) = signal(String::new());
     let (is_expanded, set_is_expanded) = signal(false);
@@ -48,7 +52,23 @@ where
                         }>"×"</button>
                     }.into_any()
                 } else {
-                    view! { <div /> }.into_any()
+                    view! {
+                        <button 
+                            class="open-analysis-btn" 
+                            title="Open Analysis from File"
+                            on:click={
+                                let on_import = on_import.clone();
+                                move |_| {
+                                    let on_import = on_import.clone();
+                                    let _ = crate::persistence::trigger_import(Callback::new(move |snapshot| {
+                                        on_import(snapshot);
+                                    }));
+                                }
+                            }
+                        >
+                            <span class="btn-icon">"📂"</span>
+                        </button>
+                    }.into_any()
                 }}
             </div>
 

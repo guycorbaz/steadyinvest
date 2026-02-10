@@ -1,0 +1,78 @@
+#[cfg(test)]
+mod tests {
+    use crate::common::TestContext;
+    use thirtyfour::prelude::*;
+    use anyhow::Result;
+
+    #[tokio::test]
+    async fn test_system_monitor_dashboard() -> Result<()> {
+        let ctx: TestContext = TestContext::new().await?;
+        ctx.navigate("/system").await?;
+        
+        // 1. Verify "System Monitor" header
+        let header: WebElement = ctx.driver.query(By::Tag("h1")).first().await?;
+        assert!(header.text().await?.contains("System Monitor"));
+        
+        // 2. Verify health indicator panels
+        let ch_provider: WebElement = ctx.driver.query(By::XPath("//div[contains(., 'CH (SWX)')]")).first().await?;
+        assert!(ch_provider.is_displayed().await?);
+        
+        let de_provider: WebElement = ctx.driver.query(By::XPath("//div[contains(., 'DE (DAX)')]")).first().await?;
+        assert!(de_provider.is_displayed().await?);
+        
+        let us_provider: WebElement = ctx.driver.query(By::XPath("//div[contains(., 'US (NYSE/NASDAQ)')]")).first().await?;
+        assert!(us_provider.is_displayed().await?);
+
+        // 3. Verify status indicator colors/text
+        let status: WebElement = ctx.driver.query(By::ClassName("status-online")).first().await?;
+        assert!(status.is_displayed().await?);
+        
+        ctx.cleanup().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_audit_log_page() -> Result<()> {
+        let ctx: TestContext = TestContext::new().await?;
+        ctx.navigate("/audit").await?;
+        
+        // 1. Verify Header
+        let header: WebElement = ctx.driver.query(By::Tag("h1")).first().await?;
+        assert!(header.text().await?.contains("Audit Log"));
+        
+        // 2. Verify high-density grid existence
+        let grid: WebElement = ctx.driver.query(By::ClassName("audit-grid")).first().await?;
+        assert!(grid.is_displayed().await?);
+        
+        // 3. Verify labels in the grid (at least one row header)
+        let ticker_label: WebElement = ctx.driver.query(By::XPath("//span[contains(text(), 'Ticker')]")).first().await?;
+        assert!(ticker_label.is_displayed().await?);
+
+        // 4. Verify Export CSV button
+        let export_btn: WebElement = ctx.driver.query(By::XPath("//button[contains(text(), 'Export CSV')]")).first().await?;
+        assert!(export_btn.is_displayed().await?);
+        
+        ctx.cleanup().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_system_health_latency_indicator() -> Result<()> {
+        let ctx: TestContext = TestContext::new().await?;
+        ctx.navigate("/system").await?;
+        
+        // Fulfills AC: Persistent health indicator in footer (Bloomberg Speed)
+        let indicator: WebElement = ctx.driver.query(By::ClassName("bloomberg-speed")).first().await?;
+        assert!(indicator.is_displayed().await?);
+        
+        let text = indicator.text().await?;
+        assert!(text.contains("ms"), "Indicator should show render time in ms");
+        
+        // Check if it has a color class (either healthy or warning)
+        let classes = indicator.class_name().await?.unwrap_or_default();
+        assert!(classes.contains("glow-"), "Indicator should have a glow class");
+
+        ctx.cleanup().await?;
+        Ok(())
+    }
+}

@@ -20,7 +20,14 @@ pub struct Model {
     pub price_low: Decimal,
     pub currency: String,
     pub is_split_adjusted: Option<bool>,
+    #[sea_orm(column_type = "Decimal(Some((10, 0)))", nullable)]
     pub adjustment_factor: Option<Decimal>,
+    #[sea_orm(column_type = "Decimal(Some((19, 4)))", nullable)]
+    pub net_income: Option<Decimal>,
+    #[sea_orm(column_type = "Decimal(Some((19, 4)))", nullable)]
+    pub pretax_income: Option<Decimal>,
+    #[sea_orm(column_type = "Decimal(Some((19, 4)))", nullable)]
+    pub total_equity: Option<Decimal>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

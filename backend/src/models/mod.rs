@@ -1,5 +1,9 @@
 pub mod _entities;
 pub mod users;
 pub mod tickers;
+pub mod audit_logs;
 pub mod historicals;
 pub mod exchange_rates;
+pub mod historicals_overrides;
+pub mod locked_analyses;
+pub mod provider_rate_limits;

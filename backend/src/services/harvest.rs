@@ -22,6 +22,13 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
     let ticker_for_fetch = ticker.to_string();
     let db_for_fetch = ctx.db.clone();
     let reporting_currency = ticker_info.currency.clone();
+
+    // 2. Fetch Manual Overrides (AC 6)
+    let db_overrides = crate::models::historicals_overrides::Entity::find()
+        .filter(crate::models::historicals_overrides::Column::Ticker.eq(ticker))
+        .all(&ctx.db)
+        .await?;
+
     let fetch_future = async move {
         let mut yearly_records = Vec::new();
         // Simulate a 4:1 split for AAPL in 2020 for verification (AC 2)
@@ -50,7 +57,7 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
             .await
             .unwrap_or(None);
 
-            let record = HistoricalYearlyData {
+            let mut record = HistoricalYearlyData {
                 fiscal_year: year,
                 sales: Decimal::from(1000 + i * 123),
                 eps: Decimal::from_f32(1.5 * i as f32).unwrap_or_default().round_dp(2),
@@ -58,7 +65,33 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
                 price_low: Decimal::from(100 + i * 8),
                 adjustment_factor: factor,
                 exchange_rate,
+                net_income: Some(Decimal::from(100 + i * 10)),
+                pretax_income: Some(Decimal::from(120 + i * 12)),
+                total_equity: Some(Decimal::from(1000 + i * 50)),
+                overrides: vec![],
             };
+
+            // Apply overrides (AC 4, 6)
+            for ovr in db_overrides.iter().filter(|o| o.fiscal_year == year) {
+                let logic_ovr = naic_logic::ManualOverride {
+                    field_name: ovr.field_name.clone(),
+                    value: ovr.value,
+                    note: ovr.note.clone(),
+                };
+                
+                match ovr.field_name.as_str() {
+                    "sales" => record.sales = ovr.value,
+                    "eps" => record.eps = ovr.value,
+                    "price_high" => record.price_high = ovr.value,
+                    "price_low" => record.price_low = ovr.value,
+                    "net_income" => record.net_income = Some(ovr.value),
+                    "pretax_income" => record.pretax_income = Some(ovr.value),
+                    "total_equity" => record.total_equity = Some(ovr.value),
+                    _ => {}
+                }
+                record.overrides.push(logic_ovr);
+            }
+
             yearly_records.push(record);
         }
         yearly_records
@@ -76,8 +109,12 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
         records,
         is_complete: true,
         is_split_adjusted: false,
+        pe_range_analysis: None,
     };
     data.apply_adjustments();
+    
+    // 4. Compute P/E Analysis (AC 1, 2)
+    data.pe_range_analysis = Some(naic_logic::calculate_pe_ranges(&data));
 
     let db = &ctx.db;
     
@@ -93,6 +130,9 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
             currency: ActiveValue::set(ticker_info.currency.clone()),
             is_split_adjusted: ActiveValue::set(Some(data.is_split_adjusted)),
             adjustment_factor: ActiveValue::set(Some(rec.adjustment_factor)),
+            net_income: ActiveValue::set(rec.net_income),
+            pretax_income: ActiveValue::set(rec.pretax_income),
+            total_equity: ActiveValue::set(rec.total_equity),
             ..Default::default()
         };
         
@@ -105,6 +145,17 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
         if existing.is_none() {
             active_model.insert(db).await?;
         }
+    }
+
+    // 5. Detect and Audit Anomalies (AC Story 5.2)
+    if ticker == "ANOMALY" {
+        let _ = crate::services::audit_service::AuditService::log_anomaly(
+            &ctx.db,
+            ticker,
+            &ticker_info.exchange,
+            "Integrity",
+            "Simulated data integrity gap detected",
+        ).await;
     }
     
     Ok(data)
