@@ -1,16 +1,32 @@
+//! Analysis persistence controller (thesis locking, export).
+//!
+//! Endpoints for saving analysis snapshots, listing past analyses per ticker,
+//! and exporting locked analyses as PDF reports.
+
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::models::{_entities::locked_analyses, tickers};
 use naic_logic::AnalysisSnapshot;
 use sea_orm::QueryOrder;
 
+/// Request body for locking (saving) an analysis snapshot.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LockRequest {
+    /// Ticker symbol the analysis belongs to.
     pub ticker: String,
+    /// The complete analysis state to persist.
     pub snapshot: AnalysisSnapshot,
+    /// Analyst's thesis note (required, must not be blank).
     pub analyst_note: String,
 }
 
+/// Locks (saves) an analysis snapshot for a ticker.
+///
+/// **POST** `/api/analyses/lock`
+///
+/// # Errors
+///
+/// Returns an error if the analyst note is blank or the ticker is not found.
 #[debug_handler]
 pub async fn lock_analysis(
     State(ctx): State<AppContext>,
@@ -42,6 +58,13 @@ pub async fn lock_analysis(
     format::json(model)
 }
 
+/// Lists all locked analyses for a ticker, newest first.
+///
+/// **GET** `/api/analyses/{ticker}`
+///
+/// # Errors
+///
+/// Returns `404 Not Found` if the ticker does not exist in the database.
 #[debug_handler]
 pub async fn get_analyses(
     State(ctx): State<AppContext>,
@@ -64,6 +87,17 @@ pub async fn get_analyses(
     format::json(analyses)
 }
 
+/// Exports a locked analysis as a PDF report.
+///
+/// **GET** `/api/analyses/export/{id}`
+///
+/// Generates the PDF synchronously via [`spawn_blocking`](tokio::task::spawn_blocking)
+/// and returns it with `Content-Type: application/pdf`.
+///
+/// # Errors
+///
+/// Returns `404 Not Found` if the analysis or its parent ticker is missing.
+/// Returns an error if snapshot JSON deserialization or PDF generation fails.
 #[debug_handler]
 pub async fn export_analysis(
     State(ctx): State<AppContext>,
@@ -100,6 +134,7 @@ pub async fn export_analysis(
         .map_err(|e| Error::string(&e.to_string()))
 }
 
+/// Registers analysis routes under `/api/analyses`.
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/analyses")

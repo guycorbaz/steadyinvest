@@ -1,3 +1,8 @@
+//! Authentication controller.
+//!
+//! Handles user registration, login (password and magic-link), email
+//! verification, and password reset flows via `/api/auth/` endpoints.
+
 use crate::{
     mailers::auth::AuthMailer,
     models::{
@@ -11,32 +16,43 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
+/// Lazily compiled regex for allowed email domains.
 pub static EMAIL_DOMAIN_RE: OnceLock<Regex> = OnceLock::new();
 
+/// Returns the compiled email domain allow-list regex.
 fn get_allow_email_domain_re() -> &'static Regex {
     EMAIL_DOMAIN_RE.get_or_init(|| {
         Regex::new(r"@example\.com$|@gmail\.com$").expect("Failed to compile regex")
     })
 }
 
+/// Parameters for the forgot-password endpoint.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ForgotParams {
+    /// The email address of the account requesting a password reset.
     pub email: String,
 }
 
+/// Parameters for the password-reset endpoint.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ResetParams {
+    /// The one-time reset token sent via email.
     pub token: String,
+    /// The new password to set.
     pub password: String,
 }
 
+/// Parameters for requesting a magic-link login email.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MagicLinkParams {
+    /// The email address to send the magic link to.
     pub email: String,
 }
 
+/// Parameters for re-sending the verification email.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ResendVerificationParams {
+    /// The email address to re-send verification to.
     pub email: String,
 }
 
@@ -158,6 +174,9 @@ async fn login(State(ctx): State<AppContext>, Json(params): Json<LoginParams>) -
     format::json(LoginResponse::new(&user, &token))
 }
 
+/// Returns the currently authenticated user's profile.
+///
+/// **GET** `/api/auth/current` (requires JWT)
 #[debug_handler]
 async fn current(auth: auth::JWT, State(ctx): State<AppContext>) -> Result<Response> {
     let user = users::Model::find_by_pid(&ctx.db, &auth.claims.pid).await?;
@@ -226,6 +245,11 @@ async fn magic_link_verify(
     format::json(LoginResponse::new(&user, &token))
 }
 
+/// Re-sends the email verification link to a user.
+///
+/// **POST** `/api/auth/resend-verification-mail`
+///
+/// No-ops silently if the user is already verified or does not exist.
 #[debug_handler]
 async fn resend_verification_email(
     State(ctx): State<AppContext>,
@@ -258,6 +282,7 @@ async fn resend_verification_email(
     format::json(())
 }
 
+/// Registers authentication routes under `/api/auth`.
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/api/auth")

@@ -1,7 +1,14 @@
+//! Manual data override modal dialog.
+//!
+//! Allows the analyst to replace a specific historical data field value with
+//! a corrected figure. An audit note is required. Supports creating, updating,
+//! and deleting overrides via the `/api/overrides` API.
+
 use leptos::prelude::*;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+/// JSON request body mirroring the backend's override endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct OverrideRequest {
     ticker: String,
@@ -11,6 +18,10 @@ struct OverrideRequest {
     note: Option<String>,
 }
 
+/// Modal dialog for creating, editing, or deleting a manual data override.
+///
+/// Opened by double-clicking a cell in the historical data grid.
+/// Closes on Escape key or Cancel button. Accessible via `role="dialog"`.
 #[component]
 pub fn OverrideModal(
     ticker: String,

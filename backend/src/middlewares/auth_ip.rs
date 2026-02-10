@@ -1,3 +1,8 @@
+//! IP-based access control middleware.
+//!
+//! Restricts endpoints (e.g., system monitoring) to loopback and private
+//! (RFC 1918) IPv4 addresses.
+
 use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
@@ -31,6 +36,7 @@ pub async fn auth_local_ip(
     next.run(req).await
 }
 
+/// Returns `true` if the IP is in a private IPv4 range (10.x, 172.16-31.x, 192.168.x).
 fn is_local_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(ipv4) => ipv4.is_private(),

@@ -210,16 +210,17 @@ pub fn SSGChart(
         // Use requestAnimationFrame to defer rendering until after DOM update
         let window = web_sys::window().expect("no global window");
         let render_callback = Closure::once(Box::new(move || {
-            // Get actual container width dynamically for responsive chart sizing
-            let container_width = web_sys::window()
+            // Get actual container dimensions dynamically for responsive chart sizing
+            let container = web_sys::window()
                 .and_then(|w| w.document())
-                .and_then(|d| d.get_element_by_id(&cid))
-                .map(|e| e.client_width())
-                .unwrap_or(800) as u32;  // Fallback to minimum width requirement
+                .and_then(|d| d.get_element_by_id(&cid));
+            let container_width = container.as_ref().map(|e| e.client_width()).unwrap_or(800) as u32;
+            let container_height = container.as_ref().map(|e| e.client_height()).unwrap_or(500) as u32;
 
-            // Ensure minimum width and use actual container width
-            let chart_width = container_width.max(800).min(1400);
-            let renderer = WasmRenderer::new(chart_width, 600);
+            // Ensure minimum dimensions and use actual container size
+            let chart_width = container_width.max(600).min(1400);
+            let chart_height = container_height.max(300).min(700);
+            let renderer = WasmRenderer::new(chart_width, chart_height);
             if let Err(e) = renderer.render(&cid, &chart) {
                 web_sys::console::log_1(&format!("Chart render error: {:?}", e).into());
             }
@@ -250,77 +251,69 @@ pub fn SSGChart(
             box-sizing: border-box;
             overflow: hidden;
         ">
-            <div style="
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: var(--spacing-4);
-                gap: var(--spacing-4);
-            ">
-                <div style="
-                    display: flex;
-                    gap: var(--spacing-4);
-                    align-items: center;
-                    flex-wrap: wrap;
-                ">
-                    <span style="
-                        color: var(--text-secondary);
-                        font-size: var(--text-sm);
-                        font-family: 'JetBrains Mono', monospace;
-                        min-width: 160px;
-                    ">"Projected Sales CAGR"</span>
-                    <input
-                        type="range" min="-20" max="50" step="0.1"
-                        prop:value=move || sales_projection_cagr.get()
-                        on:input=move |ev| {
-                            if let Ok(val) = event_target_value(&ev).parse::<f64>() {
-                                sales_projection_cagr.set(val);
+            <div class="chart-control-bar">
+                <div class="chart-slider-controls">
+                    <div class="chart-slider-row">
+                        <span style="
+                            color: var(--text-secondary);
+                            font-size: var(--text-sm);
+                            font-family: 'JetBrains Mono', monospace;
+                            min-width: 160px;
+                        ">"Projected Sales CAGR"</span>
+                        <input
+                            type="range" min="-20" max="50" step="0.1"
+                            prop:value=move || sales_projection_cagr.get()
+                            on:input=move |ev| {
+                                if let Ok(val) = event_target_value(&ev).parse::<f64>() {
+                                    sales_projection_cagr.set(val);
+                                }
                             }
-                        }
-                        style="
-                            width: 128px;
-                            accent-color: var(--sales-color);
-                            cursor: grab;
-                        "
-                    />
-                    <span style="
-                        color: var(--sales-color);
-                        font-family: 'JetBrains Mono', monospace;
-                        font-weight: bold;
-                        width: 48px;
-                        text-align: right;
-                    ">{move || format!("{:.1}%", sales_projection_cagr.get())}</span>
-
-                    <span style="
-                        color: var(--text-secondary);
-                        font-size: var(--text-sm);
-                        font-family: 'JetBrains Mono', monospace;
-                        margin-left: var(--spacing-4);
-                        min-width: 160px;
-                    ">"Projected EPS CAGR"</span>
-                    <input
-                        type="range" min="-20" max="50" step="0.1"
-                        prop:value=move || eps_projection_cagr.get()
-                        on:input=move |ev| {
-                            if let Ok(val) = event_target_value(&ev).parse::<f64>() {
-                                eps_projection_cagr.set(val);
+                            class="ssg-chart-slider"
+                            style="
+                                accent-color: var(--sales-color);
+                                cursor: grab;
+                            "
+                        />
+                        <span style="
+                            color: var(--sales-color);
+                            font-family: 'JetBrains Mono', monospace;
+                            font-weight: bold;
+                            width: 48px;
+                            text-align: right;
+                        ">{move || format!("{:.1}%", sales_projection_cagr.get())}</span>
+                    </div>
+                    <div class="chart-slider-row">
+                        <span style="
+                            color: var(--text-secondary);
+                            font-size: var(--text-sm);
+                            font-family: 'JetBrains Mono', monospace;
+                            min-width: 160px;
+                        ">"Projected EPS CAGR"</span>
+                        <input
+                            type="range" min="-20" max="50" step="0.1"
+                            prop:value=move || eps_projection_cagr.get()
+                            on:input=move |ev| {
+                                if let Ok(val) = event_target_value(&ev).parse::<f64>() {
+                                    eps_projection_cagr.set(val);
+                                }
                             }
-                        }
-                        style="
-                            width: 128px;
-                            accent-color: var(--eps-color);
-                            cursor: grab;
-                        "
-                    />
-                    <span style="
-                        color: var(--eps-color);
-                        font-family: 'JetBrains Mono', monospace;
-                        font-weight: bold;
-                        width: 48px;
-                        text-align: right;
-                    ">{move || format!("{:.1}%", eps_projection_cagr.get())}</span>
+                            class="ssg-chart-slider"
+                            style="
+                                accent-color: var(--eps-color);
+                                cursor: grab;
+                            "
+                        />
+                        <span style="
+                            color: var(--eps-color);
+                            font-family: 'JetBrains Mono', monospace;
+                            font-weight: bold;
+                            width: 48px;
+                            text-align: right;
+                        ">{move || format!("{:.1}%", eps_projection_cagr.get())}</span>
+                    </div>
                 </div>
                 <button
+                    class="chart-trend-toggle"
                     on:click=move |_| show_trends.update(|v| *v = !*v)
                     style="
                         padding: var(--spacing-2) var(--spacing-4);
@@ -341,8 +334,22 @@ pub fn SSGChart(
                     {move || if show_trends.get() { "Hide Trends" } else { "Show Trends" }}
                 </button>
             </div>
-            <div id=cid_for_view style="width: 100%; height: 600px; max-width: 100%; overflow: hidden;"></div>
-            <p style="
+            <div id=cid_for_view class="ssg-chart-container"></div>
+            <div class="chart-cagr-mobile-summary">
+                <div class="cagr-mobile-item">
+                    <span class="cagr-mobile-label">"Sales CAGR"</span>
+                    <span class="cagr-mobile-value" style="color: var(--sales-color);">
+                        {move || format!("{:.1}%", sales_projection_cagr.get())}
+                    </span>
+                </div>
+                <div class="cagr-mobile-item">
+                    <span class="cagr-mobile-label">"EPS CAGR"</span>
+                    <span class="cagr-mobile-value" style="color: var(--eps-color);">
+                        {move || format!("{:.1}%", eps_projection_cagr.get())}
+                    </span>
+                </div>
+            </div>
+            <p class="chart-hint" style="
                 color: var(--text-muted);
                 font-size: var(--text-xs);
                 margin-top: var(--spacing-2);

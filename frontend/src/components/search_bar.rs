@@ -1,7 +1,19 @@
+//! Ticker search bar with autocomplete dropdown.
+//!
+//! Provides a text input that queries `/api/tickers/search` as the user types
+//! (minimum 2 characters). Also includes an "Open from file" button for
+//! importing previously saved analysis snapshots.
+
 use leptos::prelude::*;
 use naic_logic::TickerInfo;
 use gloo_net::http::Request;
 
+/// Ticker search input with autocomplete results.
+///
+/// # Props
+///
+/// * `on_select` — Called with the chosen [`TickerInfo`] when a result is clicked.
+/// * `on_import` — Called with a deserialized snapshot when a file is imported.
 #[component]
 pub fn SearchBar<F, G>(
     on_select: F,

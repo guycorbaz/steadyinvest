@@ -1,3 +1,5 @@
+//! Ticker model — security registry and conversion helpers.
+
 pub use super::_entities::tickers::{self, ActiveModel, Column, Entity, Model};
 use loco_rs::prelude::*;
 
@@ -13,6 +15,7 @@ impl ActiveModelBehavior for ActiveModel {
 
 
 impl Model {
+    /// Converts the database model to the shared [`naic_logic::TickerInfo`] DTO.
     pub fn to_ticker_info(&self) -> naic_logic::TickerInfo {
         naic_logic::TickerInfo {
             ticker: self.ticker.clone(),

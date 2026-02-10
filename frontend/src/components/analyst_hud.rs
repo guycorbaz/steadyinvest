@@ -1,3 +1,10 @@
+//! Main analysis workspace component.
+//!
+//! The Analyst HUD is the primary interactive view, combining the SSG chart,
+//! valuation panel, quality dashboard, and historical data grid into a single
+//! cohesive workspace. It owns the shared projection signals that link the
+//! chart sliders to the valuation calculations.
+
 use crate::components::ssg_chart::SSGChart;
 use crate::components::quality_dashboard::QualityDashboard;
 use crate::components::valuation_panel::ValuationPanel;
@@ -6,6 +13,16 @@ use crate::components::lock_thesis_modal::LockThesisModal;
 use leptos::prelude::*;
 use naic_logic::{HistoricalData, TickerInfo};
 
+/// Multi-panel analysis workspace for live data.
+///
+/// Renders the SSG chart, valuation panel, quality dashboard, and data grid.
+/// Manages shared reactive signals for Sales/EPS CAGR and P/E projections.
+///
+/// # Props
+///
+/// * `ticker` — Identity info for the selected security.
+/// * `data` — The harvested 10-year historical data.
+/// * `on_refetch` — Callback to trigger a data refresh after overrides or locks.
 #[component]
 pub fn AnalystHUD(
     ticker: TickerInfo,

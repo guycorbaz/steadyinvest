@@ -11,12 +11,18 @@ pub struct TestContext {
 impl TestContext {
     pub async fn new() -> Result<Self> {
         dotenvy::dotenv().ok();
-        
-        let caps = DesiredCapabilities::chrome();
+
+        let mut caps = DesiredCapabilities::chrome();
+        // Enable headless mode for CI environments
+        if env::var("HEADLESS").unwrap_or_default() == "true" {
+            caps.add_chrome_arg("--headless")?;
+            caps.add_chrome_arg("--no-sandbox")?;
+            caps.add_chrome_arg("--disable-dev-shm-usage")?;
+        }
         // Use CHROME_DRIVER_URL from env or default to localhost:9515
         let webdriver_url = env::var("CHROME_DRIVER_URL")
             .unwrap_or_else(|_| "http://localhost:9515".to_string());
-        
+
         let driver = WebDriver::new(&webdriver_url, caps).await?;
         
         let base_url = env::var("BASE_URL")

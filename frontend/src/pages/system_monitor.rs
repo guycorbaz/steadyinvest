@@ -1,14 +1,28 @@
+//! System Monitor page (`/system-monitor`).
+//!
+//! Displays API provider health status cards with latency and rate-limit
+//! consumption. Includes a force-refresh button and links to the audit log.
+
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Frontend mirror of the backend's `ProviderHealth` response.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProviderHealth {
+    /// Provider display name (e.g., "US (NYSE/NASDAQ)").
     pub name: String,
+    /// Connectivity status string ("Online", "Degraded", "Offline").
     pub status: String,
+    /// Response latency in milliseconds.
     pub latency_ms: u64,
+    /// Percentage of API quota consumed (0-100).
     pub rate_limit_percent: u32,
 }
 
+/// System health monitoring dashboard page.
+///
+/// Fetches provider health from `/api/v1/system/health` and renders a card
+/// per provider with latency bar and status badge.
 #[component]
 pub fn SystemMonitor() -> impl IntoView {
     let health_resource = LocalResource::new(move || async move {
@@ -64,6 +78,7 @@ pub fn SystemMonitor() -> impl IntoView {
     }
 }
 
+/// Individual provider health card with latency and rate-limit indicators.
 #[component]
 fn HealthIndicator(provider: ProviderHealth) -> impl IntoView {
     let latency_class = if provider.latency_ms > 500 {

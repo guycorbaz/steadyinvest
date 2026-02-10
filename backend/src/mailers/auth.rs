@@ -1,4 +1,4 @@
-// auth mailer
+//! Authentication email templates (welcome, forgot password, magic link).
 #![allow(non_upper_case_globals)]
 
 use loco_rs::prelude::*;
@@ -10,6 +10,7 @@ static welcome: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/mailers/auth/wel
 static forgot: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/mailers/auth/forgot");
 static magic_link: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/mailers/auth/magic_link");
 
+/// Mailer for authentication-related transactional emails.
 #[allow(clippy::module_name_repetitions)]
 pub struct AuthMailer {}
 impl Mailer for AuthMailer {}

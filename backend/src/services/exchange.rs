@@ -1,7 +1,20 @@
+//! Currency exchange rate service.
+//!
+//! Provides cached exchange rate lookups from the database. Used during data
+//! harvesting to normalize foreign-currency financials to the user's display currency.
+
 use loco_rs::prelude::*;
 use crate::models::exchange_rates;
 use rust_decimal::Decimal;
 
+/// Looks up the exchange rate between two currencies for a given fiscal year.
+///
+/// Returns `Ok(Some(Decimal::ONE))` when `from == to` (no conversion needed),
+/// `Ok(None)` when no rate is cached for the requested pair and year.
+///
+/// # Errors
+///
+/// Returns a database error if the query fails.
 pub async fn get_rate(
     db: &DatabaseConnection,
     from: &str,

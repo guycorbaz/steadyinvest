@@ -1,8 +1,11 @@
+//! Audit log model — query helpers for the audit trail.
+
 use loco_rs::prelude::*;
 pub use super::_entities::audit_logs::{ActiveModel, Entity, Model};
 use sea_orm::{QueryOrder, QuerySelect};
 
 impl Model {
+    /// Returns the most recent `limit` audit log entries, newest first.
     pub async fn find_recent(db: &DatabaseConnection, limit: u64) -> Result<Vec<Self>, DbErr> {
         Entity::find()
             .order_by_desc(super::_entities::audit_logs::Column::CreatedAt)
@@ -11,6 +14,7 @@ impl Model {
             .await
     }
 
+    /// Inserts a new audit log record with the current UTC timestamp.
     pub async fn create(
         db: &DatabaseConnection,
         ticker: &str,

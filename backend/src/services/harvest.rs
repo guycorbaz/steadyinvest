@@ -1,3 +1,9 @@
+//! Data harvesting service.
+//!
+//! Orchestrates the full 10-year historical data fetch pipeline: resolve ticker,
+//! fetch yearly records, apply manual overrides, adjust for splits, compute
+//! P/E ranges, and persist to the database.
+
 use loco_rs::prelude::*;
 use crate::models::{historicals, tickers};
 use naic_logic::{HistoricalData, HistoricalYearlyData};
@@ -6,6 +12,15 @@ use chrono::Datelike;
 use std::time::Duration;
 use tokio::time::timeout;
 
+/// Executes the complete data harvest pipeline for a single ticker.
+///
+/// Steps: resolve ticker → fetch 10 years of data → apply manual overrides →
+/// adjust for splits → compute P/E ranges → persist records.
+///
+/// # Errors
+///
+/// Returns an error if the ticker is not found, data retrieval times out
+/// (4-second limit), or a database operation fails.
 pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalData> {
     // 1. Resolve Ticker Info from DB (AC Compliance)
     let ticker_info = tickers::Entity::find()

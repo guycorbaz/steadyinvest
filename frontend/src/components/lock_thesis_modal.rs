@@ -1,7 +1,14 @@
+//! Thesis lock confirmation modal.
+//!
+//! Presents a summary of the analyst's current projections and requires a
+//! thesis note before creating an immutable analysis snapshot via
+//! `POST /api/analyses/lock`.
+
 use leptos::prelude::*;
 use naic_logic::{HistoricalData, AnalysisSnapshot};
 use serde::{Deserialize, Serialize};
 
+/// JSON request body for the lock endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LockRequest {
     ticker: String,
@@ -9,6 +16,10 @@ struct LockRequest {
     analyst_note: String,
 }
 
+/// Modal dialog to finalize and lock an analysis snapshot.
+///
+/// Shows a read-only summary of Sales/EPS CAGR and target P/E, plus a required
+/// textarea for the investment thesis. Closes on Escape or Cancel.
 #[component]
 pub fn LockThesisModal(
     ticker: String,

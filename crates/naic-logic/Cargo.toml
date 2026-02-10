@@ -2,6 +2,7 @@
 name = "naic-logic"
 version = "0.1.0"
 edition = "2024"
+description = "Core NAIC SSG business logic for financial analysis — growth, P/E, quality calculations"
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }

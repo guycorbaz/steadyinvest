@@ -1,9 +1,22 @@
+//! Browser-based file persistence (save / load analysis snapshots).
+//!
+//! Uses the Web File API to trigger downloads and file-picker dialogs
+//! directly from the WASM frontend — no server round-trip needed.
+
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlAnchorElement, Url, Blob, BlobPropertyBag, HtmlInputElement, FileReader};
 use naic_logic::AnalysisSnapshot;
 use leptos::prelude::*;
 use leptos::prelude::Callable;
 
+/// Triggers a browser file download with the given filename and content.
+///
+/// Creates a temporary `<a>` element, assigns a blob URL, and clicks it.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error if DOM element creation, Blob construction,
+/// or URL generation fails.
 pub fn trigger_download(filename: &str, content: &str) -> Result<(), JsValue> {
     let window = web_sys::window().ok_or("no window")?;
     let document = window.document().ok_or("no document")?;
@@ -27,6 +40,13 @@ pub fn trigger_download(filename: &str, content: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
+/// Serializes an analysis snapshot to JSON and triggers a browser download.
+///
+/// The filename includes the ticker symbol and capture timestamp.
+///
+/// # Errors
+///
+/// Returns an error if JSON serialization or the browser download trigger fails.
 pub fn save_snapshot(snapshot: &AnalysisSnapshot) -> Result<(), String> {
     let json = serde_json::to_string_pretty(snapshot).map_err(|e| e.to_string())?;
     let filename = format!("naic_analysis_{}_{}.json", 
@@ -38,6 +58,14 @@ pub fn save_snapshot(snapshot: &AnalysisSnapshot) -> Result<(), String> {
     Ok(())
 }
 
+/// Opens a file picker for `.json` / `.naic` files and deserializes the selected file.
+///
+/// Calls `on_load` with the parsed [`AnalysisSnapshot`] on success,
+/// or shows a browser alert if the file is corrupt.
+///
+/// # Errors
+///
+/// Returns a `JsValue` error if the DOM file input element cannot be created.
 pub fn trigger_import(on_load: Callback<AnalysisSnapshot>) -> Result<(), JsValue> {
     let window = web_sys::window().ok_or("no window")?;
     let document = window.document().ok_or("no document")?;

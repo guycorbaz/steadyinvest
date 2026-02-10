@@ -1,9 +1,10 @@
+//! Provider rate-limit model — tracks API quota consumption per provider.
+
 use loco_rs::prelude::*;
 pub use super::_entities::provider_rate_limits::{ActiveModel, Entity, Model};
 
-// ActiveModelBehavior is already in _entities, so we don't need it here.
-
 impl Model {
+    /// Finds a provider rate-limit record by provider name.
     pub async fn find_by_name(db: &DatabaseConnection, name: &str) -> Result<Option<Self>, DbErr> {
         Entity::find()
             .filter(super::_entities::provider_rate_limits::Column::Name.eq(name))
@@ -11,6 +12,7 @@ impl Model {
             .await
     }
 
+    /// Upserts the quota consumption for a provider (creates if not found).
     pub async fn update_quota(
         db: &DatabaseConnection,
         name: &str,

@@ -1,23 +1,43 @@
+//! Audit Log page (`/audit-log`).
+//!
+//! Displays a filterable table of data-integrity events (anomalies and manual
+//! overrides) with an option to export the full log as CSV.
+
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// URL-encodes a string for use in query parameters.
 fn encode_uri(s: &str) -> String {
     js_sys::encode_uri_component(s).as_string().unwrap_or_default()
 }
 
+/// A single audit log entry as returned by the backend API.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AuditEntry {
+    /// Database row ID.
     pub id: i32,
+    /// Timestamp string (ISO 8601).
     pub created_at: String,
+    /// Ticker symbol of the affected security.
     pub ticker: String,
+    /// Exchange where the security is listed.
     pub exchange: String,
+    /// The data field that was changed or flagged.
     pub field_name: String,
+    /// Previous value (if applicable).
     pub old_value: Option<String>,
+    /// New or flagged value.
     pub new_value: Option<String>,
+    /// Event classification ("Anomaly" or "Override").
     pub event_type: String,
+    /// Event origin ("System" or "User").
     pub source: String,
 }
 
+/// Audit log viewer page with ticker and event-type filters.
+///
+/// Fetches audit entries from `/api/v1/system/audit-logs` and renders them
+/// in a sortable table. Provides a CSV export link and force-refresh button.
 #[component]
 pub fn AuditLog() -> impl IntoView {
     let (ticker_filter, set_ticker_filter) = signal(String::new());

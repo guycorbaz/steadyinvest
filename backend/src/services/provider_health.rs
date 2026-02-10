@@ -1,3 +1,9 @@
+//! API provider health monitoring service.
+//!
+//! Simulates connectivity checks for external financial data providers,
+//! records quota consumption to the database, and returns aggregated health
+//! status for the System Monitor dashboard.
+
 use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use crate::models::provider_rate_limits;

@@ -1,16 +1,36 @@
+//! Manual data override controller.
+//!
+//! Provides CRUD endpoints for analyst overrides of historical financial data.
+//! An audit note is required on every override to maintain a review trail.
+
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::models::historicals_overrides;
 
+/// Request body for creating or updating a manual data override.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OverrideRequest {
+    /// Ticker symbol the override applies to.
     pub ticker: String,
+    /// Fiscal year of the record being overridden.
     pub fiscal_year: i32,
+    /// The field being overridden (e.g., `"eps"`, `"sales"`).
     pub field_name: String,
+    /// The replacement value.
     pub value: rust_decimal::Decimal,
+    /// Audit note explaining the reason (required, must not be blank).
     pub note: Option<String>,
 }
 
+/// Creates or updates a manual data override.
+///
+/// **POST** `/api/overrides/`
+///
+/// Upserts by `(ticker, fiscal_year, field_name)` composite key.
+///
+/// # Errors
+///
+/// Returns an error if the audit note is missing or blank.
 #[debug_handler]
 pub async fn save_override(
     State(ctx): State<AppContext>,
@@ -52,6 +72,13 @@ pub async fn save_override(
     format::json(model)
 }
 
+/// Deletes a manual data override by ticker, year, and field.
+///
+/// **DELETE** `/api/overrides/{ticker}/{year}/{field}`
+///
+/// # Errors
+///
+/// Returns `404 Not Found` if no matching override exists.
 #[debug_handler]
 pub async fn delete_override(
     State(ctx): State<AppContext>,
@@ -74,6 +101,7 @@ pub async fn delete_override(
     Err(Error::NotFound)
 }
 
+/// Registers override routes under `/api/overrides`.
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/overrides")

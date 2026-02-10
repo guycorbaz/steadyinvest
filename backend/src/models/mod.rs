@@ -1,3 +1,17 @@
+//! Database model layer (SeaORM).
+//!
+//! Each sub-module wraps an auto-generated entity from [`_entities`] with
+//! domain-specific query helpers, validations, and conversion logic.
+//!
+//! - [`users`]                 — User accounts and authentication
+//! - [`tickers`]               — Security ticker registry
+//! - [`historicals`]           — 10-year historical financial records
+//! - [`historicals_overrides`] — Manual data overrides per year/field
+//! - [`exchange_rates`]        — Cached currency conversion rates
+//! - [`audit_logs`]            — Data-integrity and override audit trail
+//! - [`locked_analyses`]       — Saved analysis snapshots (thesis locks)
+//! - [`provider_rate_limits`]  — API provider rate-limit tracking
+
 pub mod _entities;
 pub mod users;
 pub mod tickers;

@@ -1,8 +1,19 @@
+//! # NAIC Frontend
+//!
+//! Leptos 0.8 CSR (Client-Side Rendered) single-page application for
+//! interactive NAIC Stock Selection Guide analysis.
+//!
+//! ## Architecture
+//!
+//! - [`components`] — Reusable UI components (chart, panels, modals, navigation)
+//! - [`pages`]      — Route-level page components (`/`, `/system-monitor`, `/audit-log`)
+//! - [`types`]      — Frontend-specific type definitions and DTOs
+//! - [`persistence`] — Browser-based file save/load via the File API
+
 use leptos::prelude::*;
 use leptos_meta::*;
 use leptos_router::{components::*, path};
 
-// Modules
 mod components;
 use crate::components::footer::Footer;
 use crate::components::command_strip::CommandStrip;
@@ -10,12 +21,11 @@ mod pages;
 pub mod types;
 pub mod persistence;
 
-// Top-Level pages
 use crate::pages::home::Home;
 use crate::pages::system_monitor::SystemMonitor;
 use crate::pages::audit_log::AuditLog;
 
-/// An app router which renders the homepage and handles 404's
+/// Root application component — sets up metadata, the router, and global layout.
 #[component]
 pub fn App() -> impl IntoView {
     // Provides context that manages stylesheets, titles, meta tags, etc.

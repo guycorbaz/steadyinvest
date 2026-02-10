@@ -1,3 +1,9 @@
+//! User model — authentication, validation, and token management.
+//!
+//! Wraps the auto-generated `_entities::users` entity with domain logic for
+//! password hashing, JWT generation, email verification, magic-link auth,
+//! and password reset flows.
+
 use async_trait::async_trait;
 use chrono::{offset::Local, Duration};
 use loco_rs::{auth::jwt, hash, prelude::*};
@@ -10,16 +16,23 @@ pub use super::_entities::users::{self, ActiveModel, Entity, Model};
 pub const MAGIC_LINK_LENGTH: i8 = 32;
 pub const MAGIC_LINK_EXPIRATION_MIN: i8 = 5;
 
+/// Parameters for the login endpoint.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LoginParams {
+    /// User's registered email address.
     pub email: String,
+    /// Plaintext password (verified against bcrypt hash).
     pub password: String,
 }
 
+/// Parameters for the registration endpoint.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RegisterParams {
+    /// Email address for the new account.
     pub email: String,
+    /// Plaintext password (will be hashed before storage).
     pub password: String,
+    /// Display name for the user.
     pub name: String,
 }
 

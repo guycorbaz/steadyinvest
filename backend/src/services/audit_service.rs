@@ -1,3 +1,9 @@
+//! Audit trail service.
+//!
+//! Provides a unified interface for recording data-integrity anomalies and
+//! manual override events to the audit log. All audit records are immutable
+//! once written.
+
 use loco_rs::prelude::*;
 use crate::models::audit_logs;
 

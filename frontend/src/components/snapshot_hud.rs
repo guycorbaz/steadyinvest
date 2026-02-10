@@ -1,3 +1,9 @@
+//! Read-only snapshot viewer.
+//!
+//! Renders a previously locked analysis in the same layout as the live
+//! Analyst HUD, but with all controls disabled and projections frozen.
+//! Includes "Save to File" and "Export PDF" actions.
+
 use crate::components::ssg_chart::SSGChart;
 use crate::components::quality_dashboard::QualityDashboard;
 use crate::components::valuation_panel::ValuationPanel;
@@ -5,6 +11,15 @@ use leptos::prelude::*;
 use naic_logic::TickerInfo;
 use crate::types::LockedAnalysisModel;
 
+/// Read-only view of a locked analysis snapshot.
+///
+/// Displays the same chart, valuation panel, quality dashboard, and data grid
+/// as the live HUD, but with frozen (non-interactive) projections.
+///
+/// # Props
+///
+/// * `ticker` — Identity info for the security.
+/// * `model` — The locked analysis record including snapshot data.
 #[component]
 pub fn SnapshotHUD(
     ticker: TickerInfo,

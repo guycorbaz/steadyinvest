@@ -1,3 +1,8 @@
+//! Application bootstrap and Loco lifecycle hooks.
+//!
+//! Implements the [`Hooks`] trait to wire up routes,
+//! background workers, database seeds, and initializers.
+
 use async_trait::async_trait;
 use loco_rs::{
     app::{AppContext, Hooks, Initializer},

@@ -1,3 +1,32 @@
+//! # NAIC Stock Selection Guide — Core Business Logic
+//!
+//! This crate contains the shared financial analysis logic used by both the
+//! backend API and the Leptos frontend (via WASM). It implements the key
+//! calculations from the **NAIC Stock Selection Guide (SSG)** methodology:
+//!
+//! - **Growth analysis** — logarithmic trendline regression and CAGR calculation
+//!   for Sales and EPS series ([`calculate_growth_analysis`])
+//! - **P/E range analysis** — historical High/Low P/E ratios averaged over the
+//!   last 10 years ([`calculate_pe_ranges`])
+//! - **Quality metrics** — ROE and Profit-on-Sales with year-over-year trend
+//!   indicators ([`calculate_quality_analysis`])
+//! - **Projections** — CAGR-based future trendlines for valuation zone
+//!   calculations ([`calculate_projected_trendline`])
+//!
+//! ## Key Types
+//!
+//! - [`HistoricalData`] — aggregated financial records with adjustment and
+//!   normalization methods
+//! - [`AnalysisSnapshot`] — point-in-time capture of an analyst's full thesis
+//! - [`TrendAnalysis`] — CAGR value plus best-fit trendline points
+//! - [`PeRangeAnalysis`] — per-year High/Low P/E with computed averages
+//!
+//! ## Design Principles
+//!
+//! All business logic lives in this crate — UI components consume results only.
+//! Financial values use [`rust_decimal::Decimal`] for precision; intermediate
+//! math (trendlines, CAGR) uses `f64` where acceptable.
+
 use serde::{Deserialize, Serialize};
 use rust_decimal::prelude::ToPrimitive;
 
@@ -14,24 +43,41 @@ pub struct TickerInfo {
     pub currency: String,
 }
 
-/// A manual data override for a specific field.
+/// A manual data override for a specific field in a [`HistoricalYearlyData`] record.
+///
+/// Overrides allow an analyst to replace API-sourced values with corrected figures
+/// (e.g., fixing a misreported EPS) while preserving an audit trail.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ManualOverride {
+    /// The name of the field being overridden (e.g., `"eps"`, `"sales"`).
     pub field_name: String,
+    /// The replacement value.
     pub value: rust_decimal::Decimal,
+    /// Optional analyst note explaining why the override was applied.
     pub note: Option<String>,
 }
 
 /// Financial results and pricing for a single fiscal year.
+///
+/// Each record represents one row in the SSG historical data table. Fields
+/// marked `Option` may be unavailable from certain data providers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct HistoricalYearlyData {
+    /// The calendar year of the fiscal period (e.g., 2023).
     pub fiscal_year: i32,
+    /// Total revenue / net sales.
     pub sales: rust_decimal::Decimal,
+    /// Earnings per share (diluted).
     pub eps: rust_decimal::Decimal,
+    /// Highest stock price during the fiscal year.
     pub price_high: rust_decimal::Decimal,
+    /// Lowest stock price during the fiscal year.
     pub price_low: rust_decimal::Decimal,
+    /// Net income after tax (used for ROE calculation).
     pub net_income: Option<rust_decimal::Decimal>,
+    /// Pre-tax income (used for Profit-on-Sales calculation).
     pub pretax_income: Option<rust_decimal::Decimal>,
+    /// Total shareholders' equity (used for ROE calculation).
     pub total_equity: Option<rust_decimal::Decimal>,
     /// Multiplier to adjust historical values for splits/dividends.
     pub adjustment_factor: rust_decimal::Decimal,
@@ -44,6 +90,7 @@ pub struct HistoricalYearlyData {
 /// A collection of historical financial records for a ticker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct HistoricalData {
+    /// The trading symbol this data belongs to (e.g., `"AAPL"`).
     pub ticker: String,
     /// Native currency of the historical data.
     pub currency: String,
@@ -60,7 +107,11 @@ pub struct HistoricalData {
 }
 
 impl HistoricalData {
-    /// Applies split and dividend adjustments to EPS and Price fields based on the adjustment factor.
+    /// Applies split and dividend adjustments to EPS and price fields.
+    ///
+    /// Multiplies `eps`, `price_high`, and `price_low` by each record's
+    /// `adjustment_factor`. Records with a factor of `1` are left unchanged.
+    /// This method is idempotent — calling it again after adjustment is a no-op.
     pub fn apply_adjustments(&mut self) {
         if self.is_split_adjusted {
             return;
@@ -80,7 +131,11 @@ impl HistoricalData {
         }
     }
 
-    /// Normalizes financial values to a target currency using the exchange rates in the records.
+    /// Normalizes all monetary fields to `target_currency` using per-record exchange rates.
+    ///
+    /// Converts `sales`, `eps`, `price_high`, `price_low`, `net_income`,
+    /// `pretax_income`, and `total_equity`. Records without an `exchange_rate`
+    /// are left unchanged. This method is idempotent for the same target currency.
     pub fn apply_normalization(&mut self, target_currency: &str) {
         if self.display_currency.as_deref() == Some(target_currency) {
             return;
@@ -104,6 +159,7 @@ impl HistoricalData {
 /// A single data point on a calculated trendline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TrendPoint {
+    /// Fiscal year of this data point.
     pub year: i32,
     /// The calculated value on the best-fit line.
     pub value: f64,
@@ -118,39 +174,63 @@ pub struct TrendAnalysis {
     pub trendline: Vec<TrendPoint>,
 }
 
+/// Year-over-year direction of a quality metric (ROE or Profit-on-Sales).
+///
+/// A threshold of ±0.1 percentage points is used to filter noise.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum TrendIndicator {
+    /// The metric changed by less than 0.1 pp from the prior year.
     #[default]
     Stable,
+    /// The metric increased by at least 0.1 pp from the prior year.
     Up,
+    /// The metric decreased by at least 0.1 pp from the prior year.
     Down,
 }
 
+/// A single year's quality metrics as displayed on the SSG Quality Dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct QualityPoint {
+    /// Fiscal year of the data point.
     pub year: i32,
+    /// Return on Equity (%), calculated as `net_income / total_equity * 100`.
     pub roe: f64,
+    /// Pre-tax Profit on Sales (%), calculated as `pretax_income / sales * 100`.
     pub profit_on_sales: f64,
+    /// Year-over-year trend direction for ROE.
     pub roe_trend: TrendIndicator,
+    /// Year-over-year trend direction for Profit-on-Sales.
     pub profit_trend: TrendIndicator,
 }
 
+/// Chronological series of quality metrics for the SSG Quality Dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct QualityAnalysis {
+    /// Quality data points sorted oldest-to-newest.
     pub points: Vec<QualityPoint>,
 }
 
+/// A single year's High and Low P/E ratios.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PeRangePoint {
+    /// Fiscal year of the data point.
     pub year: i32,
+    /// High P/E for the year (`price_high / eps`).
     pub high_pe: f64,
+    /// Low P/E for the year (`price_low / eps`).
     pub low_pe: f64,
 }
 
+/// P/E range analysis over the last 10 years of historical data.
+///
+/// Years with zero or negative EPS are excluded from the calculation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PeRangeAnalysis {
+    /// Per-year P/E data points (up to 10).
     pub points: Vec<PeRangePoint>,
+    /// Arithmetic mean of the yearly high P/E values.
     pub avg_high_pe: f64,
+    /// Arithmetic mean of the yearly low P/E values.
     pub avg_low_pe: f64,
 }
 
@@ -174,7 +254,39 @@ pub struct AnalysisSnapshot {
 }
 
 /// Computes historical High/Low P/E ratios and their averages.
-/// AC 1 & 2: Strictly limited to the LAST 10 completed years of data.
+///
+/// Strictly limited to the **last 10 completed years** of data. Years with
+/// zero or negative EPS are skipped (they produce meaningless P/E ratios).
+///
+/// # Arguments
+///
+/// * `data` — Historical financial data; only the `records` field is read.
+///
+/// # Returns
+///
+/// A [`PeRangeAnalysis`] with up to 10 per-year P/E points and their averages.
+///
+/// # Examples
+///
+/// ```
+/// use naic_logic::{HistoricalData, HistoricalYearlyData, calculate_pe_ranges};
+/// use rust_decimal::Decimal;
+///
+/// let data = HistoricalData {
+///     records: vec![HistoricalYearlyData {
+///         fiscal_year: 2023,
+///         eps: Decimal::from(10),
+///         price_high: Decimal::from(200),
+///         price_low: Decimal::from(100),
+///         ..Default::default()
+///     }],
+///     ..Default::default()
+/// };
+/// let result = calculate_pe_ranges(&data);
+/// assert_eq!(result.points.len(), 1);
+/// assert!((result.avg_high_pe - 20.0).abs() < 0.01);
+/// assert!((result.avg_low_pe - 10.0).abs() < 0.01);
+/// ```
 pub fn calculate_pe_ranges(data: &HistoricalData) -> PeRangeAnalysis {
     let mut eligible_records = data.records.clone();
     
@@ -226,7 +338,44 @@ pub fn calculate_pe_ranges(data: &HistoricalData) -> PeRangeAnalysis {
     }
 }
 
-/// Computes ROE and Profit on Sales ratios and determines YoY trends.
+/// Computes ROE and Profit-on-Sales ratios with year-over-year trend indicators.
+///
+/// Records are processed oldest-to-newest so that each year's trend is
+/// relative to the immediately preceding year. A ±0.1 pp dead-band prevents
+/// minor fluctuations from toggling the indicator.
+///
+/// # Arguments
+///
+/// * `data` — Historical data; uses `net_income`, `total_equity`,
+///   `pretax_income`, and `sales` from each record.
+///
+/// # Returns
+///
+/// A [`QualityAnalysis`] with one [`QualityPoint`] per record, sorted
+/// chronologically.
+///
+/// # Examples
+///
+/// ```
+/// use naic_logic::{HistoricalData, HistoricalYearlyData, calculate_quality_analysis};
+/// use rust_decimal::Decimal;
+///
+/// let data = HistoricalData {
+///     records: vec![HistoricalYearlyData {
+///         fiscal_year: 2023,
+///         sales: Decimal::from(1000),
+///         net_income: Some(Decimal::from(150)),
+///         pretax_income: Some(Decimal::from(200)),
+///         total_equity: Some(Decimal::from(1000)),
+///         ..Default::default()
+///     }],
+///     ..Default::default()
+/// };
+/// let result = calculate_quality_analysis(&data);
+/// assert_eq!(result.points.len(), 1);
+/// assert!((result.points[0].roe - 15.0).abs() < 0.01);
+/// assert!((result.points[0].profit_on_sales - 20.0).abs() < 0.01);
+/// ```
 pub fn calculate_quality_analysis(data: &HistoricalData) -> QualityAnalysis {
     let mut points = Vec::new();
     let mut last_roe: Option<f64> = None;
@@ -286,9 +435,32 @@ pub fn calculate_quality_analysis(data: &HistoricalData) -> QualityAnalysis {
 }
 
 /// Computes CAGR and a best-fit linear regression trendline for a series of values.
-/// 
-/// Regression is performed in log-space (`ln(y) = mx + b`) to produce a straight line
-/// on logarithmic charts, which represents constant percentage growth.
+///
+/// Regression is performed in log-space (`ln(y) = mx + b`) to produce a straight
+/// line on logarithmic charts, which represents constant percentage growth.
+/// Non-positive values are excluded from the regression (but the CAGR is still
+/// computed from the first and last values in the input).
+///
+/// # Arguments
+///
+/// * `years`  — Fiscal years corresponding to each value (must be same length as `values`).
+/// * `values` — Observed values (e.g., Sales or EPS) for each year.
+///
+/// # Returns
+///
+/// A [`TrendAnalysis`] containing the CAGR (as a percentage) and the trendline points.
+/// Returns [`TrendAnalysis::default()`] if fewer than 2 data points are provided.
+///
+/// # Examples
+///
+/// ```
+/// use naic_logic::calculate_growth_analysis;
+///
+/// let years  = vec![2020, 2021, 2022, 2023];
+/// let values = vec![100.0, 110.0, 121.0, 133.1];
+/// let result = calculate_growth_analysis(&years, &values);
+/// assert!((result.cagr - 10.0).abs() < 0.1);
+/// ```
 pub fn calculate_growth_analysis(years: &[i32], values: &[f64]) -> TrendAnalysis {
     if years.len() < 2 || years.len() != values.len() {
         return TrendAnalysis::default();
@@ -352,7 +524,30 @@ pub fn calculate_growth_analysis(years: &[i32], values: &[f64]) -> TrendAnalysis
 
 /// Generates a projected trendline based on a starting point and a target CAGR.
 ///
-/// Uses the formula: `value = start_value * (1 + cagr/100)^(year - start_year)`
+/// Uses the formula: `value = start_value * (1 + cagr/100)^(year - start_year)`.
+/// This is used by the Valuation Panel to compute future buy/sell zone prices.
+///
+/// # Arguments
+///
+/// * `start_year`  — The base year from which projection begins.
+/// * `start_value` — The value at `start_year` (must be positive).
+/// * `cagr`        — Target Compound Annual Growth Rate (as a percentage).
+/// * `years`       — The future years to project values for.
+///
+/// # Returns
+///
+/// A [`TrendAnalysis`] with the given `cagr` and one [`TrendPoint`] per requested year.
+/// Returns [`TrendAnalysis::default()`] if `years` is empty or `start_value` is non-positive.
+///
+/// # Examples
+///
+/// ```
+/// use naic_logic::calculate_projected_trendline;
+///
+/// let result = calculate_projected_trendline(2023, 100.0, 10.0, &[2024, 2025]);
+/// assert!((result.trendline[0].value - 110.0).abs() < 0.01);
+/// assert!((result.trendline[1].value - 121.0).abs() < 0.01);
+/// ```
 pub fn calculate_projected_trendline(
     start_year: i32,
     start_value: f64,

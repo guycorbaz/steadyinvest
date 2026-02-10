@@ -23,6 +23,10 @@
   --eps-color: #3498DB;            /* EPS projection (Blue) */
   --price-color: #F1C40F;          /* Price high (Yellow) */
 
+  /* Semantic UI Colors */
+  --warning: #F59E0B;              /* Amber - Warnings/Caution */
+  --info-purple: #A78BFA;          /* Purple-400 - User actions */
+
   /* Spacing System (4px Precision Grid) */
   --spacing-1: 0.25rem;            /* 4px */
   --spacing-2: 0.5rem;             /* 8px */
@@ -874,21 +878,259 @@ button:disabled {
 }
 
 /* ===================================================
-   Mobile Responsive Styles
+   SSG Chart Component Styles
    ================================================== */
+
+.chart-control-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-4);
+  gap: var(--spacing-4);
+}
+
+.chart-slider-controls {
+  display: flex;
+  gap: var(--spacing-4);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.chart-slider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-4);
+}
+
+.ssg-chart-slider {
+  width: 100%;
+  max-width: 200px;
+  min-width: 80px;
+}
+
+.ssg-chart-container {
+  width: 100%;
+  min-height: 400px;
+  height: 50vh;
+  max-height: 700px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.chart-trend-toggle {
+  white-space: nowrap;
+  min-height: 44px;
+}
+
+.chart-cagr-mobile-summary {
+  display: none;
+}
+
+.cagr-mobile-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-2) 0;
+}
+
+.cagr-mobile-label {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.cagr-mobile-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: bold;
+  font-size: var(--text-base);
+}
+
+/* System Monitor Link (home page header) */
+.system-monitor-link {
+  margin-right: var(--spacing-4);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  border: var(--border-width) solid rgba(255, 255, 255, 0.1);
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--border-radius-sharp);
+  font-family: 'JetBrains Mono', monospace;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.system-monitor-link:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-secondary);
+}
+
+.system-monitor-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Valuation Panel Grid (moved from inline styles) */
+.valuation-panel .valuation-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-8);
+}
+
+.valuation-panel .target-results {
+  margin-top: var(--spacing-8);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-5);
+}
+
+/* ===================================================
+   Responsive Styles
+   ================================================== */
+
+/* --- Desktop Standard (1024-1279px) --- */
+@media (max-width: 1279px) and (min-width: 1025px) {
+  .ssg-chart-container {
+    height: 45vh;
+    min-height: 350px;
+  }
+
+  .health-indicators-grid {
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  }
+}
+
+/* --- Tablet (768-1024px) --- */
+@media (max-width: 1024px) and (min-width: 769px) {
+  /* Command Strip: 120px semi-collapsed with abbreviated labels */
+  .command-strip {
+    width: 120px;
+  }
+
+  .strip-title {
+    font-size: var(--text-base);
+    letter-spacing: 0.05em;
+  }
+
+  .menu-label {
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .menu-link {
+    padding: var(--spacing-3);
+    min-height: 44px;
+  }
+
+  .menu-icon {
+    margin-right: var(--spacing-2);
+    min-width: var(--spacing-5);
+  }
+
+  body {
+    padding-left: 120px;
+  }
+
+  /* Analyst HUD */
+  .analyst-hud-init {
+    width: calc(100vw - 120px - var(--spacing-6) * 2);
+  }
+
+  /* SSG Chart */
+  .chart-control-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chart-slider-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-3);
+  }
+
+  .ssg-chart-slider {
+    max-width: 100%;
+  }
+
+  .ssg-chart-container {
+    height: 40vh;
+    min-height: 300px;
+    max-height: 500px;
+  }
+
+  /* Search Interface */
+  .search-wrapper {
+    max-width: 500px;
+  }
+
+  .autocomplete-results {
+    max-width: 500px;
+    max-height: min(400px, 50vh);
+  }
+
+  .result-item {
+    grid-template-columns: minmax(60px, 80px) 1fr minmax(70px, 100px);
+  }
+
+  /* Data Grids */
+  .quality-dashboard .quality-grid {
+    overflow-x: auto;
+  }
+
+  .quality-dashboard .trend-cell {
+    min-width: 32px;
+    width: auto;
+  }
+
+  /* Valuation Panel */
+  .valuation-panel .valuation-grid {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-4);
+  }
+
+  /* Health Indicators */
+  .health-indicators-grid {
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  }
+
+  /* Filter Inputs */
+  .filter-input {
+    width: auto;
+    min-width: 80px;
+  }
+
+  /* Modal */
+  .modal-content {
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+}
+
+/* --- Mobile (<768px) --- */
 @media (max-width: 768px) {
-  /* Command Strip - Collapsed on mobile */
+  /* Command Strip - Icons only on mobile */
   .command-strip {
     width: 60px;
   }
 
   .menu-label,
-  .strip-subtitle {
+  .strip-subtitle,
+  .menu-section-title {
     display: none;
   }
 
   .strip-title {
-    font-size: 1rem;
+    font-size: var(--text-base);
+  }
+
+  .menu-link {
+    justify-content: center;
+    padding: var(--spacing-3);
+    min-height: 44px;
+  }
+
+  .menu-icon {
+    margin-right: 0;
   }
 
   body {
@@ -902,39 +1144,155 @@ button:disabled {
     padding: var(--spacing-4);
   }
 
-  /* Chart - Shorter height on mobile */
+  /* SSG Chart - Read-only mode on mobile */
   .ssg-chart-wrapper {
     padding: var(--spacing-3);
   }
 
+  .chart-slider-controls {
+    display: none;
+  }
+
+  .chart-trend-toggle {
+    width: 100%;
+    text-align: center;
+    min-height: 44px;
+  }
+
+  .chart-cagr-mobile-summary {
+    display: flex;
+    gap: var(--spacing-6);
+    padding: var(--spacing-3) 0;
+    border-top: var(--border-width) solid rgba(255, 255, 255, 0.1);
+    margin-top: var(--spacing-2);
+  }
+
+  .chart-hint {
+    display: none;
+  }
+
+  .ssg-chart-container {
+    height: 35vh;
+    min-height: 250px;
+    max-height: 400px;
+  }
+
   /* Valuation Panel - Stack grid on mobile */
   .valuation-panel .valuation-grid {
-    grid-template-columns: 1fr !important;
-    gap: var(--spacing-4) !important;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-4);
   }
 
   .valuation-panel .target-results {
-    grid-template-columns: 1fr !important;
-    gap: var(--spacing-3) !important;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-3);
   }
 
-  /* Search container - Adjust padding */
+  /* Search - Full width on mobile */
   .search-container {
     padding: 0 var(--spacing-4);
   }
 
-  /* Modal - Full width on mobile */
+  .search-wrapper {
+    max-width: calc(100vw - 60px - var(--spacing-8));
+  }
+
+  .autocomplete-results {
+    max-width: calc(100vw - 60px - var(--spacing-8));
+    max-height: min(400px, 50vh);
+  }
+
+  .result-item {
+    grid-template-columns: minmax(60px, 80px) 1fr minmax(70px, 100px);
+    padding: var(--spacing-3) var(--spacing-4);
+  }
+
+  /* Modal - Full width + max-height on mobile */
   .modal-content {
     max-width: calc(100vw - var(--spacing-4) * 2);
+    max-height: 90vh;
+    overflow-y: auto;
     margin: 0 var(--spacing-2);
+  }
+
+  /* Quality Dashboard - Scrollable */
+  .quality-dashboard .quality-grid {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .quality-dashboard .trend-cell {
+    min-width: 32px;
+    width: auto;
+  }
+
+  /* Filter Inputs */
+  .filter-input {
+    width: auto;
+    min-width: 80px;
+    max-width: 100%;
+  }
+
+  /* Typography - Reduce heading sizes */
+  .system-header h1,
+  .audit-title-group h1 {
+    font-size: var(--text-xl);
+  }
+
+  .metric-value {
+    font-size: var(--text-lg);
+  }
+
+  /* System Monitor & Audit Log - Mobile */
+  .system-monitor-page,
+  .audit-log-page {
+    padding: var(--spacing-4);
+  }
+
+  .health-indicators-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-table-container {
+    overflow-x: scroll;
+  }
+
+  .system-header,
+  .audit-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-4);
+  }
+
+  .audit-title-group {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+  }
+
+  .audit-actions,
+  .console-nav {
+    flex-wrap: wrap;
   }
 }
 
-/* Tablet responsive */
-@media (min-width: 769px) and (max-width: 1024px) {
-  .analyst-hud-init {
-    width: calc(100vw - 200px - var(--spacing-6) * 2);
-  }
+/* Touch Optimization - Global */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input[type="range"] {
+  touch-action: manipulation;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  width: 24px;
+  height: 24px;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
 }
 
 /* Update menu-link styles for nested A component */
@@ -973,7 +1331,7 @@ button:disabled {
 }
 
 .system-header h1 {
-  font-size: 1.875rem;
+  font-size: var(--text-xl);
   font-weight: bold;
   margin: 0;
   color: var(--text-primary);
@@ -1079,7 +1437,7 @@ button:disabled {
 }
 
 .metric-value {
-  font-size: 1.5rem;
+  font-size: var(--text-xl);
   font-weight: bold;
   font-family: 'JetBrains Mono', monospace;
 }
@@ -1089,7 +1447,7 @@ button:disabled {
 }
 
 .latency-warning {
-  color: #F59E0B; /* Amber-500 */
+  color: var(--warning);
 }
 
 .latency-critical {
@@ -1192,7 +1550,7 @@ button:disabled {
 }
 
 .audit-title-group h1 {
-  font-size: 1.875rem;
+  font-size: var(--text-xl);
   font-weight: bold;
   margin: 0;
   color: var(--text-primary);
@@ -1200,7 +1558,7 @@ button:disabled {
 
 .integrity-badge {
   font-size: var(--text-xs);
-  color: #F59E0B; /* Amber-500 */
+  color: var(--warning);
   border: var(--border-width) solid rgba(245, 158, 11, 0.3);
   padding: var(--spacing-1) var(--spacing-2);
   border-radius: var(--border-radius-sharp);
@@ -1350,7 +1708,7 @@ button:disabled {
 }
 
 .audit-source-user {
-  color: #A78BFA; /* Purple-400 */
+  color: var(--info-purple);
 }
 
 .audit-asset {
@@ -1411,36 +1769,4 @@ button:disabled {
   outline-offset: 2px;
 }
 
-/* Mobile responsive for system pages */
-@media (max-width: 768px) {
-  .system-monitor-page,
-  .audit-log-page {
-    padding: var(--spacing-4);
-  }
-
-  .health-indicators-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .audit-table-container {
-    overflow-x: scroll;
-  }
-
-  .system-header,
-  .audit-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--spacing-4);
-  }
-
-  .audit-title-group {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--spacing-2);
-  }
-
-  .audit-actions,
-  .console-nav {
-    flex-wrap: wrap;
-  }
-}
+/* System page mobile styles consolidated into main mobile breakpoint above */

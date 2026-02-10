@@ -1,6 +1,15 @@
+//! Quality Dashboard component.
+//!
+//! Renders a table of ROE and Profit-on-Sales metrics with year-over-year
+//! trend indicators (arrows + color coding) for each year of historical data.
+
 use leptos::prelude::*;
 use naic_logic::{HistoricalData, calculate_quality_analysis, TrendIndicator};
 
+/// Quality metrics table showing ROE and Profit-on-Sales with trend arrows.
+///
+/// Computes quality analysis from the provided historical data and displays
+/// results newest-first. Empty data shows a placeholder message.
 #[component]
 pub fn QualityDashboard(data: HistoricalData) -> impl IntoView {
     let analysis = move || calculate_quality_analysis(&data);

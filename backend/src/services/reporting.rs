@@ -1,3 +1,9 @@
+//! PDF report generation service.
+//!
+//! Creates professional SSG report PDFs containing an embedded chart image,
+//! quality dashboard table, valuation projections, and analyst notes.
+//! Uses `charming` for server-side chart rendering and `genpdf` for PDF assembly.
+
 use std::io::Cursor;
 use charming::{
     component::{Axis, Legend},
@@ -10,13 +16,20 @@ use genpdf::{elements, fonts, style};
 use naic_logic::AnalysisSnapshot;
 use rust_decimal::prelude::ToPrimitive;
 
+/// Alias for fallible report operations.
 pub type ReportResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+/// Stateless service for generating SSG report exports.
 pub struct ReportingService;
 
 impl ReportingService {
     /// Generates a PDF report. Note: This is a synchronous, CPU-intensive operation.
     /// Should be called within `tokio::task::spawn_blocking`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if chart rendering, SVG-to-PNG conversion, font loading,
+    /// or PDF assembly fails.
     pub fn generate_ssg_report(
         ticker_symbol: &str,
         created_at: chrono::DateTime<chrono::FixedOffset>,
@@ -145,6 +158,7 @@ impl ReportingService {
         Ok(buffer)
     }
 
+    /// Builds an ECharts `Chart` object with Sales, EPS, and Price series.
     fn create_ssg_chart(snapshot: &AnalysisSnapshot) -> Chart {
         let hist = &snapshot.historical_data;
         
@@ -171,6 +185,7 @@ impl ReportingService {
         chart
     }
 
+    /// Converts SVG bytes to a PNG image buffer via `resvg`.
     fn svg_to_png(svg_bytes: &[u8]) -> ReportResult<Vec<u8>> {
         let svg_content = std::str::from_utf8(svg_bytes).map_err(|e| e.to_string())?;
         let opt = resvg::usvg::Options::default();

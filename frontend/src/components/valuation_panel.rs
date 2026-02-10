@@ -1,10 +1,29 @@
+//! Valuation analysis panel with P/E slider controls.
+//!
+//! Displays historical P/E context and lets the analyst adjust future High/Low
+//! P/E estimates via range sliders. Computes projected buy-zone (floor) and
+//! sell-zone (ceiling) target prices from EPS CAGR projections.
+
 use leptos::prelude::*;
 use naic_logic::HistoricalData;
 use rust_decimal::prelude::ToPrimitive;
 
+/// Number of years forward for EPS projection.
 const PROJECTION_YEARS: f64 = 5.0;
+/// Maximum value for the High P/E range slider.
 const PE_SLIDER_MAX: f64 = 100.0;
 
+/// Interactive valuation analysis panel.
+///
+/// Shows 10-year historical P/E averages and current EPS, then lets the analyst
+/// drag sliders to set future P/E estimates. Target buy/sell prices update
+/// reactively based on the chart's EPS CAGR projection.
+///
+/// # Props
+///
+/// * `data` — Historical financial data (for P/E context and current EPS).
+/// * `projected_eps_cagr` — Reactive EPS CAGR from the SSG chart sliders.
+/// * `future_high_pe` / `future_low_pe` — Two-way bound P/E projection signals.
 #[component]
 pub fn ValuationPanel(
     data: HistoricalData,
@@ -55,11 +74,7 @@ pub fn ValuationPanel(
                 </h3>
             </div>
 
-            <div class="valuation-grid" style="
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: var(--spacing-8);
-            ">
+            <div class="valuation-grid">
                 // Historical Context
                 <div class="historical-stats">
                     <h4 style="
@@ -220,12 +235,7 @@ pub fn ValuationPanel(
             </div>
 
             // Target Results
-            <div class="target-results" style="
-                margin-top: var(--spacing-8);
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: var(--spacing-5);
-            ">
+            <div class="target-results">
                 <div class="buy-zone" style="
                     background-color: rgba(16, 185, 129, 0.05);
                     border: var(--border-width) solid rgba(16, 185, 129, 0.2);

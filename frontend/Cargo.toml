@@ -2,8 +2,7 @@
 name = "frontend"
 version = "0.1.0"
 edition = "2024"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Leptos-based CSR frontend for NAIC stock selection guide analysis"
 
 [dependencies]
 leptos = { version = "0.8", features = ["csr"] }

@@ -1,3 +1,8 @@
+//! Home page — main analysis workspace (`/`).
+//!
+//! Coordinates ticker selection, data harvesting, snapshot management, and
+//! file import, then delegates rendering to [`AnalystHUD`] or [`SnapshotHUD`].
+
 use crate::components::search_bar::SearchBar;
 use crate::components::analyst_hud::AnalystHUD;
 use crate::components::snapshot_hud::SnapshotHUD;
@@ -5,7 +10,10 @@ use crate::types::LockedAnalysisModel;
 use leptos::prelude::*;
 use naic_logic::{HistoricalData, TickerInfo, AnalysisSnapshot};
 
-/// Default Home Page
+/// Main analysis page rendered at `/`.
+///
+/// Manages ticker selection state, fetches historical data and locked snapshots,
+/// and renders either the live analysis HUD or a read-only snapshot view.
 #[component]
 pub fn Home() -> impl IntoView {
     let (selected_ticker, set_selected_ticker) = signal(Option::<TickerInfo>::None);
@@ -112,11 +120,10 @@ pub fn Home() -> impl IntoView {
                                 </div>
                             </div>
                             <div class="hud-controls">
-                                <a 
-                                    href="/system" 
-                                    class="system-monitor-link" 
+                                <a
+                                    href="/system"
+                                    class="system-monitor-link"
                                     title="Go to System Monitor"
-                                    style="margin-right: 15px; color: #666; font-size: 10px; text-decoration: none; border: 1px solid #333; padding: 2px 6px; border-radius: 3px;"
                                 >
                                     "SYS_MON"
                                 </a>

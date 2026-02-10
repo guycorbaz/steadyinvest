@@ -1,3 +1,8 @@
+//! System health and monitoring controller.
+//!
+//! Provides endpoints for checking API provider health, listing audit logs,
+//! and exporting audit data as CSV. All routes live under `/api/v1/system`.
+
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::models::audit_logs;

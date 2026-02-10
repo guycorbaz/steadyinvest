@@ -1,3 +1,21 @@
+//! Reusable UI component library.
+//!
+//! ## Layout Components
+//! - [`command_strip`] — Persistent sidebar navigation
+//! - [`footer`]        — Global footer with latency indicator
+//!
+//! ## Analysis Components
+//! - [`search_bar`]         — Ticker search with autocomplete
+//! - [`analyst_hud`]        — Main analysis workspace (chart + panels + data grid)
+//! - [`ssg_chart`]          — Logarithmic SSG chart with draggable trendlines
+//! - [`valuation_panel`]    — P/E slider controls and buy/sell zone display
+//! - [`quality_dashboard`]  — ROE and Profit-on-Sales table with trend indicators
+//! - [`snapshot_hud`]       — Read-only view of a locked analysis snapshot
+//!
+//! ## Modal Dialogs
+//! - [`override_modal`]     — Manual data override entry form
+//! - [`lock_thesis_modal`]  — Thesis lock confirmation dialog
+
 pub mod counter_btn;
 pub mod search_bar;
 pub mod ssg_chart;
