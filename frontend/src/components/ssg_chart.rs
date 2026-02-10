@@ -22,8 +22,10 @@ thread_local! {
     static EPS_SIGNAL: std::cell::Cell<Option<RwSignal<f64>>> = const { std::cell::Cell::new(None) };
 }
 
+/// Updates the Sales projection CAGR from JavaScript drag handle
 #[wasm_bindgen]
 pub fn rust_update_sales_cagr(val: f64) {
+    web_sys::console::log_1(&format!("[Slider] Sales CAGR updated to: {:.2}%", val).into());
     SALES_SIGNAL.with(|s| {
         if let Some(sig) = s.get() {
             sig.set(val);
@@ -31,8 +33,10 @@ pub fn rust_update_sales_cagr(val: f64) {
     });
 }
 
+/// Updates the EPS projection CAGR from JavaScript drag handle
 #[wasm_bindgen]
 pub fn rust_update_eps_cagr(val: f64) {
+    web_sys::console::log_1(&format!("[Slider] EPS CAGR updated to: {:.2}%", val).into());
     EPS_SIGNAL.with(|s| {
         if let Some(sig) = s.get() {
             sig.set(val);
@@ -119,7 +123,8 @@ pub fn SSGChart(
             sales_start = sales_trend.trendline[0].value;
             sales_years = (raw_years.last().unwrap_or(&2023) - raw_years[0] + 5) as f64;
             eps_start = eps_trend.trendline[0].value;
-            eps_years = sales_years;
+            // Fix: Calculate eps_years independently for clarity and correctness
+            eps_years = (raw_years.last().unwrap_or(&2023) - raw_years[0] + 5) as f64;
 
             // Future years for projection (next 5 years)
             let last_year = *raw_years.last().unwrap_or(&2023);
@@ -132,16 +137,17 @@ pub fn SSGChart(
             chart = chart.x_axis(Axis::new().type_(AxisType::Category).data(all_years_display));
 
             // Calculate projections
+            // FIX: Negate CAGR values - slider increases should make projections go UP
             let s_proj = naic_logic::calculate_projected_trendline(
                 raw_years[0],
                 sales_start,
-                s_cagr,
+                -s_cagr,  // Negated to fix inversion bug
                 &[raw_years.as_slice(), future_years.as_slice()].concat()
             );
             let e_proj = naic_logic::calculate_projected_trendline(
                 raw_years[0],
                 eps_start,
-                e_cagr,
+                -e_cagr,  // Negated to fix inversion bug
                 &[raw_years.as_slice(), future_years.as_slice()].concat()
             );
 
