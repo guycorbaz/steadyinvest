@@ -74,7 +74,7 @@ development_status:
 
   epic-6: in-progress
   6-1-investigate-and-fix-cagr-eps-slider-behavior: done
-  6-2-visual-and-graphical-refinements: backlog
+  6-2-visual-and-graphical-refinements: ready-for-dev
   6-3-ux-consistency-pass: backlog
   6-4-responsive-design-improvements: backlog
   6-5-e2e-test-suite-implementation: backlog
