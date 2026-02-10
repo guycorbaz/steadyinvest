@@ -29,94 +29,262 @@ pub fn ValuationPanel(
     let target_low_price = move || future_low_pe.get() * projected_eps();
 
     view! {
-        <div class="valuation-panel" style="background-color: #0F0F12; padding: 20px; border-radius: 8px; margin-top: 30px; border: 1px solid #333; font-family: 'JetBrains Mono', monospace;">
-            <div class="panel-header" style="border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px;">
-                <h3 style="color: #E0E0E0; margin: 0; display: flex; align-items: center; gap: 8px;">
-                    <span style="color: #F1C40F;">"📊"</span> "Valuation Analysis & Projections"
+        <div class="valuation-panel" style="
+            background-color: var(--background);
+            padding: var(--spacing-5);
+            border-radius: var(--border-radius-sharp);
+            margin-top: var(--spacing-8);
+            border: var(--border-width) solid var(--surface);
+        ">
+            <div class="panel-header" style="
+                border-bottom: var(--border-width) solid rgba(255, 255, 255, 0.1);
+                padding-bottom: var(--spacing-3);
+                margin-bottom: var(--spacing-5);
+            ">
+                <h3 style="
+                    color: var(--text-primary);
+                    margin: 0;
+                    display: flex;
+                    align-items: center;
+                    gap: var(--spacing-2);
+                    font-family: 'Inter', sans-serif;
+                    font-size: var(--text-base);
+                    font-weight: 600;
+                ">
+                    <span style="color: var(--price-color);">"📊"</span> "Valuation Analysis & Projections"
                 </h3>
             </div>
 
-            <div class="valuation-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+            <div class="valuation-grid" style="
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: var(--spacing-8);
+            ">
                 // Historical Context
                 <div class="historical-stats">
-                    <h4 style="color: #888; text-transform: uppercase; font-size: 0.8rem; margin-bottom: 15px;">"10-Year Historical Context"</h4>
-                    <div style="display: flex; flex-direction: column; gap: 10px;">
-                        <div style="display: flex; justify-content: space-between; color: #BBB;">
+                    <h4 style="
+                        color: var(--text-secondary);
+                        text-transform: uppercase;
+                        font-size: var(--text-xs);
+                        margin-bottom: var(--spacing-4);
+                        font-family: 'Inter', sans-serif;
+                        font-weight: 600;
+                        letter-spacing: 0.05em;
+                    ">"10-Year Historical Context"</h4>
+                    <div style="
+                        display: flex;
+                        flex-direction: column;
+                        gap: var(--spacing-3);
+                    ">
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            color: var(--text-secondary);
+                            font-family: 'Inter', sans-serif;
+                            font-size: var(--text-sm);
+                        ">
                             <span>"Avg. High P/E"</span>
-                            <span style="color: #E0E0E0; font-weight: bold;">{format!("{:.1}", pe_analysis.avg_high_pe)}</span>
+                            <span style="
+                                color: var(--text-primary);
+                                font-weight: 500;
+                                font-family: 'JetBrains Mono', monospace;
+                            ">{format!("{:.1}", pe_analysis.avg_high_pe)}</span>
                         </div>
-                        <div style="display: flex; justify-content: space-between; color: #BBB;">
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            color: var(--text-secondary);
+                            font-family: 'Inter', sans-serif;
+                            font-size: var(--text-sm);
+                        ">
                             <span>"Avg. Low P/E"</span>
-                            <span style="color: #E0E0E0; font-weight: bold;">{format!("{:.1}", pe_analysis.avg_low_pe)}</span>
+                            <span style="
+                                color: var(--text-primary);
+                                font-weight: 500;
+                                font-family: 'JetBrains Mono', monospace;
+                            ">{format!("{:.1}", pe_analysis.avg_low_pe)}</span>
                         </div>
-                        <div style="display: flex; justify-content: space-between; color: #BBB; padding-top: 5px; border-top: 1px dashed #333;">
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            color: var(--text-secondary);
+                            padding-top: var(--spacing-2);
+                            border-top: var(--border-width) dashed rgba(255, 255, 255, 0.1);
+                            font-family: 'Inter', sans-serif;
+                            font-size: var(--text-sm);
+                        ">
                             <span>"Current EPS (TTM)"</span>
-                            <span style="color: #E0E0E0; font-weight: bold;">{format!("{:.2}", current_eps)}</span>
+                            <span style="
+                                color: var(--text-primary);
+                                font-weight: 500;
+                                font-family: 'JetBrains Mono', monospace;
+                            ">{format!("{:.2}", current_eps)}</span>
                         </div>
-                        <div style="display: flex; justify-content: space-between; color: #BBB;">
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            color: var(--text-secondary);
+                            font-family: 'Inter', sans-serif;
+                            font-size: var(--text-sm);
+                        ">
                             <span>"Projected EPS (5Y)"</span>
-                            <span style="color: #3498DB; font-weight: bold;">{move || format!("{:.2}", projected_eps())}</span>
+                            <span style="
+                                color: var(--eps-color);
+                                font-weight: 500;
+                                font-family: 'JetBrains Mono', monospace;
+                            ">{move || format!("{:.2}", projected_eps())}</span>
                         </div>
                     </div>
                 </div>
 
                 // User Inputs & Projections
                 <div class="projection-controls">
-                    <h4 style="color: #888; text-transform: uppercase; font-size: 0.8rem; margin-bottom: 15px;">"Valuation Floor & Ceiling"</h4>
-                    
-                    <div class="control-group" style="margin-bottom: 15px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <label style="color: #BBB; font-size: 0.9rem;">"Future Avg High P/E"</label>
-                            <span style="color: #F1C40F; font-weight: bold;">{move || format!("{:.1}", future_high_pe.get())}</span>
+                    <h4 style="
+                        color: var(--text-secondary);
+                        text-transform: uppercase;
+                        font-size: var(--text-xs);
+                        margin-bottom: var(--spacing-4);
+                        font-family: 'Inter', sans-serif;
+                        font-weight: 600;
+                        letter-spacing: 0.05em;
+                    ">"Valuation Floor & Ceiling"</h4>
+
+                    <div class="control-group" style="margin-bottom: var(--spacing-4);">
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            margin-bottom: var(--spacing-2);
+                            align-items: center;
+                        ">
+                            <label style="
+                                color: var(--text-secondary);
+                                font-size: var(--text-sm);
+                                font-family: 'Inter', sans-serif;
+                            ">"Future Avg High P/E"</label>
+                            <span style="
+                                color: var(--price-color);
+                                font-weight: 500;
+                                font-family: 'JetBrains Mono', monospace;
+                            ">{move || format!("{:.1}", future_high_pe.get())}</span>
                         </div>
-                        <input 
-                            type="range" min="5" max=PE_SLIDER_MAX step="0.5" 
+                        <input
+                            type="range" min="5" max=PE_SLIDER_MAX step="0.5"
                             prop:value=move || future_high_pe.get()
                             on:input=move |ev| {
                                 if let Ok(val) = event_target_value(&ev).parse::<f64>() {
                                     future_high_pe.set(val);
                                 }
                             }
-                            style="width: 100%; accent-color: #F1C40F;"
+                            style="
+                                width: 100%;
+                                accent-color: var(--price-color);
+                                cursor: grab;
+                            "
                         />
                     </div>
 
                     <div class="control-group">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <label style="color: #BBB; font-size: 0.9rem;">"Future Avg Low P/E"</label>
-                            <span style="color: #2ECC71; font-weight: bold;">{move || format!("{:.1}", future_low_pe.get())}</span>
+                        <div style="
+                            display: flex;
+                            justify-content: space-between;
+                            margin-bottom: var(--spacing-2);
+                            align-items: center;
+                        ">
+                            <label style="
+                                color: var(--text-secondary);
+                                font-size: var(--text-sm);
+                                font-family: 'Inter', sans-serif;
+                            ">"Future Avg Low P/E"</label>
+                            <span style="
+                                color: var(--success);
+                                font-weight: 500;
+                                font-family: 'JetBrains Mono', monospace;
+                            ">{move || format!("{:.1}", future_low_pe.get())}</span>
                         </div>
-                        <input 
-                            type="range" min="5" max="60" step="0.5" 
+                        <input
+                            type="range" min="5" max="60" step="0.5"
                             prop:value=move || future_low_pe.get()
                             on:input=move |ev| {
                                 if let Ok(val) = event_target_value(&ev).parse::<f64>() {
                                     future_low_pe.set(val);
                                 }
                             }
-                            style="width: 100%; accent-color: #2ECC71;"
+                            style="
+                                width: 100%;
+                                accent-color: var(--success);
+                                cursor: grab;
+                            "
                         />
                     </div>
                 </div>
             </div>
 
             // Target Results
-            <div class="target-results" style="margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                <div class="buy-zone" style="background-color: #16261E; border: 1px solid #1B3B2A; padding: 15px; border-radius: 4px; text-align: center;">
-                    <div style="color: #2ECC71; font-size: 0.7rem; text-transform: uppercase; margin-bottom: 5px; font-weight: bold;">"Target Buy Zone (Floor)"</div>
-                    <div style="color: #FFF; font-size: 1.5rem; font-weight: bold;">
+            <div class="target-results" style="
+                margin-top: var(--spacing-8);
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: var(--spacing-5);
+            ">
+                <div class="buy-zone" style="
+                    background-color: rgba(16, 185, 129, 0.05);
+                    border: var(--border-width) solid rgba(16, 185, 129, 0.2);
+                    padding: var(--spacing-4);
+                    border-radius: var(--border-radius-sharp);
+                    text-align: center;
+                ">
+                    <div style="
+                        color: var(--success);
+                        font-size: var(--text-xs);
+                        text-transform: uppercase;
+                        margin-bottom: var(--spacing-2);
+                        font-weight: 600;
+                        font-family: 'Inter', sans-serif;
+                        letter-spacing: 0.05em;
+                    ">"Target Buy Zone (Floor)"</div>
+                    <div style="
+                        color: var(--text-primary);
+                        font-size: var(--text-xl);
+                        font-weight: bold;
+                        font-family: 'JetBrains Mono', monospace;
+                    ">
                         "$" {move || format!("{:.2}", target_low_price())}
                     </div>
                 </div>
-                <div class="sell-zone" style="background-color: #2A1A1A; border: 1px solid #3D1C1C; padding: 15px; border-radius: 4px; text-align: center;">
-                    <div style="color: #E74C3C; font-size: 0.7rem; text-transform: uppercase; margin-bottom: 5px; font-weight: bold;">"Target Sell Zone (Ceiling)"</div>
-                    <div style="color: #FFF; font-size: 1.5rem; font-weight: bold;">
+                <div class="sell-zone" style="
+                    background-color: rgba(239, 68, 68, 0.05);
+                    border: var(--border-width) solid rgba(239, 68, 68, 0.2);
+                    padding: var(--spacing-4);
+                    border-radius: var(--border-radius-sharp);
+                    text-align: center;
+                ">
+                    <div style="
+                        color: var(--danger);
+                        font-size: var(--text-xs);
+                        text-transform: uppercase;
+                        margin-bottom: var(--spacing-2);
+                        font-weight: 600;
+                        font-family: 'Inter', sans-serif;
+                        letter-spacing: 0.05em;
+                    ">"Target Sell Zone (Ceiling)"</div>
+                    <div style="
+                        color: var(--text-primary);
+                        font-size: var(--text-xl);
+                        font-weight: bold;
+                        font-family: 'JetBrains Mono', monospace;
+                    ">
                         "$" {move || format!("{:.2}", target_high_price())}
                     </div>
                 </div>
             </div>
-            
-            <p style="color: #555; font-size: 0.7rem; margin-top: 15px; font-style: italic;">
+
+            <p style="
+                color: var(--text-muted);
+                font-size: var(--text-xs);
+                margin-top: var(--spacing-4);
+                font-style: italic;
+                font-family: 'Inter', sans-serif;
+            ">
                 "Note: Projections are based on the drag-adjusted EPS CAGR from the chart above."
             </p>
         </div>

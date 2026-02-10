@@ -98,11 +98,33 @@ pub fn SSGChart(
         let mut chart = Chart::new()
             .title(Title::new()
                 .text(format!("SSG Analysis: {}", data.ticker))
-                .text_style(charming::element::TextStyle::new().color("#E0E0E0")))
-            .legend(Legend::new().text_style(charming::element::TextStyle::new().color("#B0B0B0")))
+                .text_style(charming::element::TextStyle::new()
+                    .color("#E0E0E0")
+                    .font_family("Inter")
+                    .font_size(16)
+                    .font_weight("600")))
+            .legend(Legend::new()
+                .text_style(charming::element::TextStyle::new()
+                    .color("#B0B0B0")
+                    .font_family("Inter")
+                    .font_size(12)))
             .tooltip(Tooltip::new().trigger(Trigger::Axis))
-            .x_axis(Axis::new().type_(AxisType::Category).data(years.clone()))
-            .y_axis(Axis::new().type_(AxisType::Log).name("Value"));
+            .x_axis(Axis::new()
+                .type_(AxisType::Category)
+                .data(years.clone())
+                .axis_label(charming::element::AxisLabel::new()
+                    .color("#B0B0B0")
+                    .font_size(11)))
+            .y_axis(Axis::new()
+                .type_(AxisType::Log)
+                .name("Value")
+                .name_text_style(charming::element::TextStyle::new()
+                    .color("#B0B0B0")
+                    .font_family("Inter")
+                    .font_size(12))
+                .axis_label(charming::element::AxisLabel::new()
+                    .color("#B0B0B0")
+                    .font_size(11)));
 
         let mut sales_start = 0.0;
         let mut sales_years = 0.0;
@@ -188,7 +210,16 @@ pub fn SSGChart(
         // Use requestAnimationFrame to defer rendering until after DOM update
         let window = web_sys::window().expect("no global window");
         let render_callback = Closure::once(Box::new(move || {
-            let renderer = WasmRenderer::new(1200, 600);
+            // Get actual container width dynamically for responsive chart sizing
+            let container_width = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.get_element_by_id(&cid))
+                .map(|e| e.client_width())
+                .unwrap_or(800) as u32;  // Fallback to minimum width requirement
+
+            // Ensure minimum width and use actual container width
+            let chart_width = container_width.max(800).min(1400);
+            let renderer = WasmRenderer::new(chart_width, 600);
             if let Err(e) = renderer.render(&cid, &chart) {
                 web_sys::console::log_1(&format!("Chart render error: {:?}", e).into());
             }
@@ -208,44 +239,116 @@ pub fn SSGChart(
 
     let cid_for_view = chart_id.clone();
     view! {
-        <div class="ssg-chart-wrapper" style="background-color: #0F0F12; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #333;">
-            <div class="flex justify-between items-center mb-4">
-                <div class="flex gap-4 items-center">
-                    <span class="text-zinc-400 text-sm font-mono">"Projected Sales CAGR"</span>
-                    <input 
-                        type="range" min="-20" max="50" step="0.1" 
+        <div class="ssg-chart-wrapper" style="
+            background-color: var(--background);
+            padding: var(--spacing-5);
+            border-radius: var(--border-radius-sharp);
+            margin-bottom: var(--spacing-8);
+            border: var(--border-width) solid var(--surface);
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            overflow: hidden;
+        ">
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: var(--spacing-4);
+                gap: var(--spacing-4);
+            ">
+                <div style="
+                    display: flex;
+                    gap: var(--spacing-4);
+                    align-items: center;
+                    flex-wrap: wrap;
+                ">
+                    <span style="
+                        color: var(--text-secondary);
+                        font-size: var(--text-sm);
+                        font-family: 'JetBrains Mono', monospace;
+                        min-width: 160px;
+                    ">"Projected Sales CAGR"</span>
+                    <input
+                        type="range" min="-20" max="50" step="0.1"
                         prop:value=move || sales_projection_cagr.get()
                         on:input=move |ev| {
                             if let Ok(val) = event_target_value(&ev).parse::<f64>() {
                                 sales_projection_cagr.set(val);
                             }
                         }
-                        class="w-32 accent-green-500"
+                        style="
+                            width: 128px;
+                            accent-color: var(--sales-color);
+                            cursor: grab;
+                        "
                     />
-                    <span class="text-green-500 font-bold w-12 text-right">{move || format!("{:.1}%", sales_projection_cagr.get())}</span>
-                    
-                    <span class="text-zinc-400 text-sm font-mono ml-4">"Projected EPS CAGR"</span>
-                    <input 
-                        type="range" min="-20" max="50" step="0.1" 
+                    <span style="
+                        color: var(--sales-color);
+                        font-family: 'JetBrains Mono', monospace;
+                        font-weight: bold;
+                        width: 48px;
+                        text-align: right;
+                    ">{move || format!("{:.1}%", sales_projection_cagr.get())}</span>
+
+                    <span style="
+                        color: var(--text-secondary);
+                        font-size: var(--text-sm);
+                        font-family: 'JetBrains Mono', monospace;
+                        margin-left: var(--spacing-4);
+                        min-width: 160px;
+                    ">"Projected EPS CAGR"</span>
+                    <input
+                        type="range" min="-20" max="50" step="0.1"
                         prop:value=move || eps_projection_cagr.get()
                         on:input=move |ev| {
                             if let Ok(val) = event_target_value(&ev).parse::<f64>() {
                                 eps_projection_cagr.set(val);
                             }
                         }
-                        class="w-32 accent-blue-500"
+                        style="
+                            width: 128px;
+                            accent-color: var(--eps-color);
+                            cursor: grab;
+                        "
                     />
-                    <span class="text-blue-500 font-bold w-12 text-right">{move || format!("{:.1}%", eps_projection_cagr.get())}</span>
+                    <span style="
+                        color: var(--eps-color);
+                        font-family: 'JetBrains Mono', monospace;
+                        font-weight: bold;
+                        width: 48px;
+                        text-align: right;
+                    ">{move || format!("{:.1}%", eps_projection_cagr.get())}</span>
                 </div>
-                <button 
+                <button
                     on:click=move |_| show_trends.update(|v| *v = !*v)
-                    class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium rounded border border-zinc-700 transition-colors"
+                    style="
+                        padding: var(--spacing-2) var(--spacing-4);
+                        background: var(--surface);
+                        color: var(--text-secondary);
+                        font-size: var(--text-sm);
+                        font-family: 'Inter', sans-serif;
+                        font-weight: 500;
+                        border-radius: var(--border-radius-sharp);
+                        border: var(--border-width) solid rgba(255, 255, 255, 0.1);
+                        transition: all var(--transition-fast);
+                        cursor: pointer;
+                        white-space: nowrap;
+                    "
+                    onmouseover="this.style.background='rgba(59, 130, 246, 0.1)'; this.style.color='var(--primary)'; this.style.borderColor='var(--primary)';"
+                    onmouseout="this.style.background='var(--surface)'; this.style.color='var(--text-secondary)'; this.style.borderColor='rgba(255, 255, 255, 0.1)';"
                 >
                     {move || if show_trends.get() { "Hide Trends" } else { "Show Trends" }}
                 </button>
             </div>
-            <div id=cid_for_view style="width: 100%; height: 600px;"></div>
-            <p class="text-zinc-500 text-xs mt-2 italic">"Hint: Drag handles on the chart or use sliders for growth projections."</p>
+            <div id=cid_for_view style="width: 100%; height: 600px; max-width: 100%; overflow: hidden;"></div>
+            <p style="
+                color: var(--text-muted);
+                font-size: var(--text-xs);
+                margin-top: var(--spacing-2);
+                font-style: italic;
+                font-family: 'Inter', sans-serif;
+            ">"Hint: Drag handles on the chart or use sliders for growth projections."</p>
         </div>
     }
 }

@@ -29,17 +29,31 @@ window.setupDraggableHandles = function (chartId, salesStartValue, salesYears, e
                     type: 'circle',
                     position: salesPos,
                     shape: { r: 8 },
-                    style: { fill: '#1DB954', stroke: '#fff', lineWidth: 2 },
+                    style: {
+                        fill: '#1DB954',
+                        stroke: '#E0E0E0',
+                        lineWidth: 2
+                    },
+                    emphasis: {
+                        style: {
+                            shadowBlur: 8,
+                            shadowColor: 'rgba(29, 185, 84, 0.5)'
+                        }
+                    },
                     draggable: true,
                     z: 100,
+                    cursor: 'grab',
                     ondrag: function () {
+                        this.cursor = 'grabbing';
                         const dataPos = chart.convertFromPixel({ gridIndex: 0 }, this.position);
                         const newValue = dataPos[1];
                         const cagr = (Math.pow(newValue / salesStartValue, 1 / salesYears) - 1) * 100;
-                        console.log('[Handle] Sales (GREEN) dragged - new value:', newValue.toFixed(2), 'CAGR:', cagr.toFixed(2) + '%');
                         if (window.rust_update_sales_cagr) {
                             window.rust_update_sales_cagr(cagr);
                         }
+                    },
+                    ondragend: function () {
+                        this.cursor = 'grab';
                     }
                 },
                 {
@@ -47,17 +61,31 @@ window.setupDraggableHandles = function (chartId, salesStartValue, salesYears, e
                     type: 'circle',
                     position: epsPos,
                     shape: { r: 8 },
-                    style: { fill: '#3498DB', stroke: '#fff', lineWidth: 2 },
+                    style: {
+                        fill: '#3498DB',
+                        stroke: '#E0E0E0',
+                        lineWidth: 2
+                    },
+                    emphasis: {
+                        style: {
+                            shadowBlur: 8,
+                            shadowColor: 'rgba(52, 152, 219, 0.5)'
+                        }
+                    },
                     draggable: true,
                     z: 100,
+                    cursor: 'grab',
                     ondrag: function () {
+                        this.cursor = 'grabbing';
                         const dataPos = chart.convertFromPixel({ gridIndex: 0 }, this.position);
                         const newValue = dataPos[1];
                         const cagr = (Math.pow(newValue / epsStartValue, 1 / epsYears) - 1) * 100;
-                        console.log('[Handle] EPS (BLUE) dragged - new value:', newValue.toFixed(2), 'CAGR:', cagr.toFixed(2) + '%');
                         if (window.rust_update_eps_cagr) {
                             window.rust_update_eps_cagr(cagr);
                         }
+                    },
+                    ondragend: function () {
+                        this.cursor = 'grab';
                     }
                 }
             ]
