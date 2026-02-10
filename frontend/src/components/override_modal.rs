@@ -26,6 +26,16 @@ pub fn OverrideModal(
     let (error, set_error) = signal(None::<String>);
     let (loading, set_loading) = signal(false);
 
+    // Keyboard navigation: Close modal on Escape key
+    let on_keydown = {
+        let on_close = on_close.clone();
+        move |ev: leptos::ev::KeyboardEvent| {
+            if ev.key() == "Escape" && !loading.get() {
+                on_close.run(());
+            }
+        }
+    };
+
     let save = {
         let ticker = ticker.clone();
         let field = field.clone();
@@ -99,11 +109,11 @@ pub fn OverrideModal(
     };
 
     view! {
-        <div class="modal-backdrop analyst-modal">
+        <div class="modal-backdrop analyst-modal" on:keydown=on_keydown tabindex="-1">
             <div class="modal-content crimson-border">
                 <header>
                     <h3>"Manual Override Request"</h3>
-                    <button class="close-btn" on:click=move |_| on_close.run(())>"×"</button>
+                    <button class="close-btn" on:click=move |_| on_close.run(()) aria-label="Close modal">"×"</button>
                 </header>
                 
                 <div class="modal-body">

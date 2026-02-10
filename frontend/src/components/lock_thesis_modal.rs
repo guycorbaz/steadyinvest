@@ -24,6 +24,16 @@ pub fn LockThesisModal(
     let (error, set_error) = signal(None::<String>);
     let (loading, set_loading) = signal(false);
 
+    // Keyboard navigation: Close modal on Escape key
+    let on_keydown = {
+        let on_close = on_close.clone();
+        move |ev: leptos::ev::KeyboardEvent| {
+            if ev.key() == "Escape" && !loading.get() {
+                on_close.run(());
+            }
+        }
+    };
+
     let lock = {
         let ticker = ticker.clone();
         let historical_data = historical_data.clone();
@@ -72,11 +82,11 @@ pub fn LockThesisModal(
     };
 
     view! {
-        <div class="modal-backdrop analyst-modal">
+        <div class="modal-backdrop analyst-modal" on:keydown=on_keydown tabindex="-1">
             <div class="modal-content standard-border">
                 <header>
                     <h3>"Finalize & Lock Analysis"</h3>
-                    <button class="close-btn" on:click=move |_| on_close.run(())>"×"</button>
+                    <button class="close-btn" on:click=move |_| on_close.run(()) aria-label="Close modal">"×"</button>
                 </header>
                 
                 <div class="modal-body">
