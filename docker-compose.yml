@@ -3,9 +3,15 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=mysql://naic:password@external-host:3306/naic
-      - LOCO_ENV=development
+      - DATABASE_URL=${DATABASE_URL}
+      - LOCO_ENV=${LOCO_ENV}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT}
+      - DB_IDLE_TIMEOUT=${DB_IDLE_TIMEOUT}
+      - DB_MIN_CONNECTIONS=${DB_MIN_CONNECTIONS}
+      - DB_MAX_CONNECTIONS=${DB_MAX_CONNECTIONS}
     ports:
       - "5150:5150"
 
@@ -17,3 +23,4 @@ services:
       - "8080:80"
     depends_on:
       - backend
+

@@ -77,11 +77,14 @@ loco generate app --name naic --db postgres
 
 ## Core Architectural Decisions
 
-### Data Architecture (PostgreSQL + SeaORM)
+### Data Architecture (MariaDB + SeaORM)
 
+**ARCHITECTURAL DECISION UPDATE (Post-Epic 1):** Migrated from PostgreSQL to MariaDB for compatibility with existing infrastructure.
+
+- **Database**: **MariaDB** (changed from PostgreSQL after Epic 1)
 - **Storage Pattern**: **Monolithic "Historicals" Table**. All historical financial data (Sales, EPS, Price) for all exchanges (SMI, DAX, US) will be stored in a flat, high-performance table indexed by `ticker` and `period_date`.
 - **Validation Strategy**: **Strong Type Enforcement**. Leverage Rust's `serde` and `validator` crates at the ingestion boundary to ensure only valid, split-adjusted data enters the monolithic store.
-- **Migration Strategy**: Handled via Loco's built-in migration system using **Sea-Query**.
+- **Migration Strategy**: Handled via Loco's built-in migration system using **Sea-Query** with MySQL compatibility.
 
 ### Frontend Architecture (Leptos / 100% Rust)
 

@@ -3,44 +3,243 @@ use naic_logic::HistoricalData;
 use rust_decimal::prelude::ToPrimitive;
 use charming::{
     component::{Axis, Legend, Title},
-    element::{AxisType, Tooltip, Trigger, LineStyle},
+    element::{AxisType, Tooltip, Trigger, LineStyle, LineStyleType},
     series::Line,
     Chart, WasmRenderer,
 };
 
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+unsafe extern "C" {
+    #[wasm_bindgen(js_namespace = window)]
+    fn setupDraggableHandles(chart_id: String, sales_start: f64, sales_years: f64, eps_start: f64, eps_years: f64);
+}
+
+// Global signals for JS access
+thread_local! {
+    static SALES_SIGNAL: std::cell::Cell<Option<RwSignal<f64>>> = const { std::cell::Cell::new(None) };
+    static EPS_SIGNAL: std::cell::Cell<Option<RwSignal<f64>>> = const { std::cell::Cell::new(None) };
+}
+
+#[wasm_bindgen]
+pub fn rust_update_sales_cagr(val: f64) {
+    SALES_SIGNAL.with(|s| {
+        if let Some(sig) = s.get() {
+            sig.set(val);
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn rust_update_eps_cagr(val: f64) {
+    EPS_SIGNAL.with(|s| {
+        if let Some(sig) = s.get() {
+            sig.set(val);
+        }
+    });
+}
+
+/// The Stock Selection Guide (SSG) Chart component.
+/// 
+/// Renders a logarithmic multi-series line chart (Sales, EPS, Price) with 
+/// optional trendline overlays and CAGR labels.
+/// 
+/// Uses the `charming` library for ECharts-based rendering via WASM.
 #[component]
-pub fn SSGChart(data: HistoricalData) -> impl IntoView {
+pub fn SSGChart(
+    data: HistoricalData,
+    sales_projection_cagr: RwSignal<f64>,
+    eps_projection_cagr: RwSignal<f64>
+) -> impl IntoView {
+    // Unique ID for the chart container to avoid conflicts
+    let chart_id = format!("ssg-chart-{}", data.ticker.to_lowercase());
+    
+    // Reactive signal to toggle the visibility of trendlines and CAGR stats.
+    let show_trends = RwSignal::new(true);
+    
+    // Projection state
+    let is_projecting = RwSignal::new(false);
+
+    // Store signals in thread-local for JS callbacks
+    SALES_SIGNAL.with(|s| s.set(Some(sales_projection_cagr)));
+    EPS_SIGNAL.with(|s| s.set(Some(eps_projection_cagr)));
+
+    let cid_for_effect = chart_id.clone();
     Effect::new(move |_| {
+        // Triggered when trends are toggled, data changes, or projections change.
+        let trends_active = show_trends.get();
+        let s_cagr = sales_projection_cagr.get();
+        let e_cagr = eps_projection_cagr.get();
+        let projecting = is_projecting.get();
+        let cid = cid_for_effect.clone();
+        
         // Transform data for charming
-        let mut years = Vec::new();
-        let mut sales = Vec::new();
-        let mut eps = Vec::new();
-        let mut prices = Vec::new();
+        let mut years = Vec::with_capacity(data.records.len());
+        let mut prices = Vec::with_capacity(data.records.len());
+        
+        let mut raw_years = Vec::with_capacity(data.records.len());
+        let mut sales = Vec::with_capacity(data.records.len());
+        let mut eps = Vec::with_capacity(data.records.len());
 
         for record in &data.records {
             years.push(record.fiscal_year.to_string());
+            raw_years.push(record.fiscal_year);
+            
             sales.push(record.sales.to_f64().unwrap_or(0.0));
             eps.push(record.eps.to_f64().unwrap_or(0.0));
             prices.push(record.price_high.to_f64().unwrap_or(0.0));
         }
 
-            let chart = Chart::new()
-                .title(Title::new().text(format!("SSG Analysis: {}", data.ticker)).text_style(charming::element::TextStyle::new().color("#E0E0E0")))
-                .legend(Legend::new().text_style(charming::element::TextStyle::new().color("#B0B0B0")))
-                .tooltip(Tooltip::new().trigger(Trigger::Axis))
-                .x_axis(Axis::new().type_(AxisType::Category).data(years))
-                .y_axis(Axis::new().type_(AxisType::Log).name("Value"))
-                .series(Line::new().name("Sales").data(sales).smooth(true).line_style(LineStyle::new().color("#1DB954")))
-                .series(Line::new().name("EPS").data(eps).smooth(true).line_style(LineStyle::new().color("#3498DB")))
-                .series(Line::new().name("Price High").data(prices).smooth(true).line_style(LineStyle::new().color("#F1C40F")));
+        let mut chart = Chart::new()
+            .title(Title::new()
+                .text(format!("SSG Analysis: {}", data.ticker))
+                .text_style(charming::element::TextStyle::new().color("#E0E0E0")))
+            .legend(Legend::new().text_style(charming::element::TextStyle::new().color("#B0B0B0")))
+            .tooltip(Tooltip::new().trigger(Trigger::Axis))
+            .x_axis(Axis::new().type_(AxisType::Category).data(years.clone()))
+            .y_axis(Axis::new().type_(AxisType::Log).name("Value"));
 
-            let renderer = WasmRenderer::new(0, 0);
-            renderer.render("ssg-chart-container", &chart).ok();
+        let mut sales_start = 0.0;
+        let mut sales_years = 0.0;
+        let mut eps_start = 0.0;
+        let mut eps_years = 0.0;
+
+        if trends_active {
+            let sales_trend = naic_logic::calculate_growth_analysis(&raw_years, &sales);
+            let eps_trend = naic_logic::calculate_growth_analysis(&raw_years, &eps);
+
+            // Initialize projection signals if not yet set
+            if !projecting {
+                sales_projection_cagr.set(sales_trend.cagr);
+                eps_projection_cagr.set(eps_trend.cagr);
+                is_projecting.set(true);
+            }
+
+            sales_start = sales_trend.trendline[0].value;
+            sales_years = (raw_years.last().unwrap_or(&2023) - raw_years[0] + 5) as f64;
+            eps_start = eps_trend.trendline[0].value;
+            eps_years = sales_years;
+
+            // Future years for projection (next 5 years)
+            let last_year = *raw_years.last().unwrap_or(&2023);
+            let future_years: Vec<i32> = (1..=5).map(|i| last_year + i).collect();
+            let mut all_years_display = years.clone();
+            for y in &future_years {
+                all_years_display.push(y.to_string());
+            }
+            
+            chart = chart.x_axis(Axis::new().type_(AxisType::Category).data(all_years_display));
+
+            // Calculate projections
+            let s_proj = naic_logic::calculate_projected_trendline(
+                raw_years[0],
+                sales_start,
+                s_cagr,
+                &[raw_years.as_slice(), future_years.as_slice()].concat()
+            );
+            let e_proj = naic_logic::calculate_projected_trendline(
+                raw_years[0],
+                eps_start,
+                e_cagr,
+                &[raw_years.as_slice(), future_years.as_slice()].concat()
+            );
+
+            let s_proj_vals: Vec<f64> = s_proj.trendline.iter().map(|p| p.value).collect();
+            let e_proj_vals: Vec<f64> = e_proj.trendline.iter().map(|p| p.value).collect();
+
+            chart = chart
+                .series(Line::new()
+                    .name(format!("Sales (CAGR: {:.1}%)", s_cagr))
+                    .data(sales.clone())
+                    .smooth(true)
+                    .line_style(LineStyle::new().color("#1DB954")))
+                .series(Line::new()
+                    .name("Sales Projection")
+                    .data(s_proj_vals)
+                    .line_style(LineStyle::new().color("#1DB954").width(2).type_(LineStyleType::Dashed)))
+                .series(Line::new()
+                    .name(format!("EPS (CAGR: {:.1}%)", e_cagr))
+                    .data(eps.clone())
+                    .smooth(true)
+                    .line_style(LineStyle::new().color("#3498DB")))
+                .series(Line::new()
+                    .name("EPS Projection")
+                    .data(e_proj_vals)
+                    .line_style(LineStyle::new().color("#3498DB").width(2).type_(LineStyleType::Dashed)));
+        } else {
+            chart = chart
+                .series(Line::new().name("Sales").data(sales).smooth(true).line_style(LineStyle::new().color("#1DB954")))
+                .series(Line::new().name("EPS").data(eps).smooth(true).line_style(LineStyle::new().color("#3498DB")));
+        }
+
+        chart = chart.series(Line::new()
+            .name("Price High")
+            .data(prices)
+            .smooth(true)
+            .line_style(LineStyle::new().color("#F1C40F")));
+
+        // Use requestAnimationFrame to defer rendering until after DOM update
+        let window = web_sys::window().expect("no global window");
+        let render_callback = Closure::once(Box::new(move || {
+            let renderer = WasmRenderer::new(1200, 600);
+            if let Err(e) = renderer.render(&cid, &chart) {
+                web_sys::console::log_1(&format!("Chart render error: {:?}", e).into());
+            }
+
+            if trends_active && projecting {
+                setup_handles_js(cid, sales_start, sales_years, eps_start, eps_years);
+            }
+        }) as Box<dyn FnOnce()>);
+
+        window.request_animation_frame(render_callback.as_ref().unchecked_ref()).ok();
+        render_callback.forget();
     });
 
+    fn setup_handles_js(cid: String, s_start: f64, s_years: f64, e_start: f64, e_years: f64) {
+        setupDraggableHandles(cid, s_start, s_years, e_start, e_years);
+    }
+
+    let cid_for_view = chart_id.clone();
     view! {
         <div class="ssg-chart-wrapper" style="background-color: #0F0F12; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #333;">
-            <div id="ssg-chart-container" style="width: 100%; height: 600px;"></div>
+            <div class="flex justify-between items-center mb-4">
+                <div class="flex gap-4 items-center">
+                    <span class="text-zinc-400 text-sm font-mono">"Projected Sales CAGR"</span>
+                    <input 
+                        type="range" min="-20" max="50" step="0.1" 
+                        prop:value=move || sales_projection_cagr.get()
+                        on:input=move |ev| {
+                            if let Ok(val) = event_target_value(&ev).parse::<f64>() {
+                                sales_projection_cagr.set(val);
+                            }
+                        }
+                        class="w-32 accent-green-500"
+                    />
+                    <span class="text-green-500 font-bold w-12 text-right">{move || format!("{:.1}%", sales_projection_cagr.get())}</span>
+                    
+                    <span class="text-zinc-400 text-sm font-mono ml-4">"Projected EPS CAGR"</span>
+                    <input 
+                        type="range" min="-20" max="50" step="0.1" 
+                        prop:value=move || eps_projection_cagr.get()
+                        on:input=move |ev| {
+                            if let Ok(val) = event_target_value(&ev).parse::<f64>() {
+                                eps_projection_cagr.set(val);
+                            }
+                        }
+                        class="w-32 accent-blue-500"
+                    />
+                    <span class="text-blue-500 font-bold w-12 text-right">{move || format!("{:.1}%", eps_projection_cagr.get())}</span>
+                </div>
+                <button 
+                    on:click=move |_| show_trends.update(|v| *v = !*v)
+                    class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium rounded border border-zinc-700 transition-colors"
+                >
+                    {move || if show_trends.get() { "Hide Trends" } else { "Show Trends" }}
+                </button>
+            </div>
+            <div id=cid_for_view style="width: 100%; height: 600px;"></div>
+            <p class="text-zinc-500 text-xs mt-2 italic">"Hint: Drag handles on the chart or use sliders for growth projections."</p>
         </div>
     }
 }

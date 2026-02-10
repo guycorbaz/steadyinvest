@@ -5,3 +5,8 @@ _bmad-output/
 .env
 .env.local
 **/node_modules/
+
+# Prevent frontend build artifacts from contaminating Docker builds
+frontend/dist/
+frontend/target/
+backend/target/
