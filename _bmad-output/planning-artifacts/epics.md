@@ -73,6 +73,10 @@ FR10: Epic 4 - Export standardized SSG reports (PDF/Image).
 FR11: Epic 4 - Save/share analysis files.
 FR12: Epic 5 - Monitor API health and flag data integrity errors.
 
+### Technical Debt & Quality Coverage
+
+Epic 6: Quality improvements, bug fixes, testing infrastructure, and comprehensive code documentation to ensure production-readiness and maintainability.
+
 ## Epic List
 
 ### Epic 1: The One-Click Engine (Core Data Ingestion)
@@ -327,3 +331,109 @@ So that I can ensure the platform consistently meets the 2-second render perform
 - **When** any page or chart renders
 - **Then** a persistent health indicator in the footer should display the exact render time in milliseconds
 - **And** the indicator should glow Crimson if render time exceeds 500ms (NFR target)
+
+### Epic 6: MVP Refinement & Polish (Quality & Technical Debt)
+
+After Epic 5, the application is a functional MVP with all core features working. Epic 6 addresses critical refinements, bug fixes, and technical debt to ensure production-readiness and maintainability.
+**FRs covered:** Technical debt resolution, quality improvements
+
+#### Story 6.1: Investigate and Fix CAGR/EPS Slider Behavior
+
+As a Value Hunter,
+I want the Sales CAGR and EPS CAGR sliders to control their respective projections correctly,
+So that my growth rate adjustments produce accurate valuation calculations.
+
+**Acceptance Criteria:**
+
+- **Given** the SSG chart is displayed with projection sliders active
+- **When** I move the Sales CAGR slider
+- **Then** only the Sales projection trendline should update (not EPS)
+- **And** the projected Sales CAGR percentage should reflect the slider position
+- **When** I move the EPS CAGR slider
+- **Then** only the EPS projection trendline should update (not Sales)
+- **And** the projected EPS CAGR percentage should reflect the slider position
+- **And** the calculated target prices must accurately reflect the correct projections
+- **And** all signal bindings in `ssg_chart.rs` and `chart_bridge.js` are verified correct
+
+#### Story 6.2: Visual and Graphical Refinements
+
+As a Value Hunter,
+I want the application's visual design to match the "Institutional HUD" aesthetic throughout,
+So that the interface feels professional and polished.
+
+**Acceptance Criteria:**
+
+- **Given** the UX Design Specification defines the "Institutional HUD" aesthetic
+- **When** reviewing all screens and components
+- **Then** chart aesthetics must be visually polished and consistent
+- **And** layout spacing and alignment must be refined across all components
+- **And** color scheme must be consistent with the deep black background (#0F0F12)
+- **And** typography must use correct fonts (JetBrains Mono for data cells)
+- **And** all interactive elements must have appropriate hover and active states
+
+#### Story 6.3: UX Consistency Pass
+
+As a Value Hunter,
+I want a consistent user experience across all features and workflows,
+So that the application feels cohesive and intuitive.
+
+**Acceptance Criteria:**
+
+- **Given** the application has multiple features and panels
+- **When** navigating between different sections
+- **Then** navigation patterns must be consistent (Command Strip behavior)
+- **And** data entry patterns must follow the same interaction model
+- **And** error states and validation messages must use consistent styling and tone
+- **And** keyboard shortcuts must work consistently across all screens
+- **And** loading states and feedback must follow the same visual language
+
+#### Story 6.4: Responsive Design Improvements
+
+As a Value Hunter,
+I want the application to work well on tablet devices for review sessions,
+So that I can reference my analysis away from my desktop workstation.
+
+**Acceptance Criteria:**
+
+- **Given** the UX specification defines "Desktop-first instrument with tablet review mode"
+- **When** accessing the application on a tablet (iPad, Android tablet)
+- **Then** the layout must adapt gracefully without breaking the analyst workflow
+- **And** charts must remain readable and interactive on tablet screens
+- **And** data grids must use horizontal scrolling where necessary to maintain data integrity
+- **And** the Command Strip navigation must adapt to tablet screen sizes
+- **And** touch interactions must work smoothly for all interactive elements
+
+#### Story 6.5: E2E Test Suite Implementation
+
+As a Developer,
+I want comprehensive end-to-end tests covering critical user journeys,
+So that we catch integration issues before they reach users (like the chart rendering bugs in Epic 5).
+
+**Acceptance Criteria:**
+
+- **Given** the application has multiple integrated features
+- **When** implementing E2E tests using Playwright
+- **Then** tests must cover the complete ticker search → data retrieval → chart rendering → analysis workflow
+- **And** tests must verify interactive slider functionality (preventing slider inversion bugs)
+- **And** tests must verify navigation accessibility (preventing unreachable features)
+- **And** tests must validate data override and thesis locking workflows
+- **And** tests must run in CI/CD pipeline on every commit
+- **And** test failures must block deployment to prevent shipping broken features
+
+#### Story 6.6: Comprehensive Rust Documentation Pass
+
+As a Developer,
+I want all Rust code to follow best practices with comprehensive documentation,
+So that the codebase is maintainable and new team members can onboard effectively.
+
+**Acceptance Criteria:**
+
+- **Given** the codebase spans backend, frontend, and logic crate
+- **When** reviewing all Rust modules
+- **Then** all public functions and methods must have doc comments (`///`) explaining purpose, parameters, and return values
+- **And** all structs, enums, and type definitions must be documented with `///` comments
+- **And** complex algorithms and tricky code sections must have inline explanatory comments
+- **And** each module must have module-level documentation (`//!`) explaining its purpose and structure
+- **And** non-trivial functions must include usage examples in doc comments
+- **And** panic conditions and error handling must be explicitly documented
+- **And** documentation must cover: Backend (`backend/src/**`), Frontend (`frontend/src/**`), Logic crate (`crates/naic-logic/**`)
