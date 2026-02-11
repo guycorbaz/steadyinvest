@@ -865,6 +865,28 @@ button:disabled {
   font-weight: 600;
 }
 
+/* Menu Action - Button-style menu item (e.g. Export PDF) */
+.menu-action {
+  background: none;
+  border: none;
+  width: 100%;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  text-align: left;
+}
+
+.menu-action.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.menu-action.disabled:hover {
+  background: none;
+  color: var(--text-secondary);
+  border-left: none;
+  padding-left: var(--spacing-4);
+}
+
 .strip-footer {
   padding: var(--spacing-4);
   border-top: var(--border-width) solid rgba(255, 255, 255, 0.05);
@@ -910,7 +932,7 @@ button:disabled {
 
 .ssg-chart-container {
   width: 100%;
-  min-height: 400px;
+  min-height: 500px;
   height: 50vh;
   max-height: 700px;
   max-width: 100%;
@@ -990,7 +1012,7 @@ button:disabled {
 @media (max-width: 1279px) and (min-width: 1025px) {
   .ssg-chart-container {
     height: 45vh;
-    min-height: 350px;
+    min-height: 420px;
   }
 
   .health-indicators-grid {
@@ -1054,7 +1076,7 @@ button:disabled {
 
   .ssg-chart-container {
     height: 40vh;
-    min-height: 300px;
+    min-height: 360px;
     max-height: 500px;
   }
 

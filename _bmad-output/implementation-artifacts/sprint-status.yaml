@@ -1,4 +1,4 @@
-# generated: 2026-02-10
+# generated: 2026-02-11
 # project: naic
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,13 +33,17 @@
 # - SM typically creates next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
-generated: 2026-02-10
+generated: 2026-02-11
 project: naic
 project_key: NOKEY
 tracking_system: file-system
 story_location: _bmad-output/implementation-artifacts
 
 development_status:
+  # ============================================================
+  # MVP (Epics 1-6) — Delivered
+  # ============================================================
+
   epic-1: done
   1-1-project-initialization-loco-starter: done
   1-2-ticker-search-with-autocomplete: done
@@ -80,3 +84,69 @@ development_status:
   6-5-e2e-test-suite-implementation: done
   6-6-comprehensive-rust-documentation-pass: done
   epic-6-retrospective: done
+
+  # ============================================================
+  # Phase 1: Fix & Foundation (Epics 7-8)
+  # ============================================================
+
+  # Epic 7: Analysis Persistence & MVP Fixes
+  epic-7: in-progress
+  7-1-mvp-fixes-pdf-export-chart-height-legend: review
+  7-2-pre-migration-backup-snapshot-schema: backlog
+  7-3-analysis-snapshot-api: backlog
+  7-4-static-chart-image-capture-at-lock-time: backlog
+  7-5-exchange-rate-service: backlog
+  7-6-library-view-analysis-browsing: backlog
+  7-7-cicd-e2e-pipeline-validation: backlog
+  epic-7-retrospective: optional
+
+  # Epic 8: Analysis Comparison & Thesis Evolution
+  epic-8: backlog
+  8-1-comparison-schema-api: backlog
+  8-2-comparison-view-ranked-grid: backlog
+  8-3-comparison-currency-handling: backlog
+  8-4-thesis-evolution-api: backlog
+  8-5-history-timeline-sidebar-side-by-side-comparison: backlog
+  8-6-responsive-design-e2e-tests-for-comparison-and-history: backlog
+  epic-8-retrospective: optional
+
+  # ============================================================
+  # Phase 2: Portfolio & Watchlist (Epic 9)
+  # ============================================================
+
+  # Epic 9: Portfolio Management, Watchlists & Risk Discipline
+  # Execution strategy: Sprint A (9.1-9.5), Sprint B (9.6-9.10)
+  epic-9: backlog
+  9-1-portfolio-schema-crud-api: backlog
+  9-2-portfolio-configuration: backlog
+  9-3-holdings-management-stop-loss-prompting: backlog
+  9-4-portfolio-composition-exposure-detection: backlog
+  9-5-portfolio-dashboard-active-portfolio-signal: backlog
+  9-6-position-sizing: backlog
+  9-7-wisdom-card-inline-portfolio-context: backlog
+  9-8-watchlist-schema-api: backlog
+  9-9-watchlist-view: backlog
+  9-10-responsive-design-e2e-tests-for-portfolio-and-watchlist: backlog
+  epic-9-retrospective: optional
+
+  # ============================================================
+  # Phase 3: Multi-User (Epic 10)
+  # ============================================================
+
+  # Epic 10: Multi-User Authentication
+  epic-10: backlog
+  10-1-user-registration-password-security: backlog
+  10-2-user-login-session-management: backlog
+  10-3-authentication-middleware-api-protection: backlog
+  10-4-personal-workspace-isolation: backlog
+  10-5-authentication-ui-e2e-tests: backlog
+  epic-10-retrospective: optional
+
+  # ============================================================
+  # Phase 4: Collaboration (Epic 11 — Deferred)
+  # ============================================================
+
+  # Epic 11: Collaboration — explicitly deferred until Phase 3 validated
+  # No stories created at this time
+  epic-11: backlog
+  epic-11-retrospective: optional

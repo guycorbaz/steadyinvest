@@ -25,11 +25,24 @@ use crate::pages::home::Home;
 use crate::pages::system_monitor::SystemMonitor;
 use crate::pages::audit_log::AuditLog;
 
+/// Reactive context for the currently viewed locked analysis ID.
+///
+/// When `Some(id)`, a locked analysis snapshot with the given database ID is
+/// being displayed.  The Command Strip reads this to enable the PDF export
+/// action.  Set to `None` when viewing live analysis or no analysis at all.
+#[derive(Clone, Copy)]
+pub struct ActiveLockedAnalysisId(pub RwSignal<Option<i32>>);
+
 /// Root application component — sets up metadata, the router, and global layout.
 #[component]
 pub fn App() -> impl IntoView {
     // Provides context that manages stylesheets, titles, meta tags, etc.
     provide_meta_context();
+
+    // Provide a shared signal so child components (Home, CommandStrip) can
+    // communicate which locked analysis (if any) is currently displayed.
+    let locked_id = ActiveLockedAnalysisId(RwSignal::new(None));
+    provide_context(locked_id);
 
     view! {
         <Html attr:lang="en" attr:dir="ltr" attr:data-theme="light" />

@@ -7,7 +7,11 @@ RUN cargo build --release -p backend
 
 FROM debian:trixie-slim
 
-RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libssl-dev ca-certificates fonts-dejavu-core && rm -rf /var/lib/apt/lists/* \
+    && cd /usr/share/fonts/truetype/dejavu \
+    && ln -s DejaVuSans.ttf DejaVuSans-Regular.ttf \
+    && ln -s DejaVuSans-Bold.ttf DejaVuSans-BoldItalic.ttf \
+    && ln -s DejaVuSans.ttf DejaVuSans-Italic.ttf
 
 WORKDIR /app
 COPY --from=builder /usr/src/app/target/release/backend-cli /app/backend-cli

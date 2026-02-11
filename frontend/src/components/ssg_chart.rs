@@ -3,7 +3,7 @@ use naic_logic::HistoricalData;
 use rust_decimal::prelude::ToPrimitive;
 use charming::{
     component::{Axis, Legend, Title},
-    element::{AxisType, Tooltip, Trigger, LineStyle, LineStyleType},
+    element::{AxisType, Orient, Tooltip, Trigger, LineStyle, LineStyleType},
     series::Line,
     Chart, WasmRenderer,
 };
@@ -81,7 +81,8 @@ pub fn SSGChart(
         // Transform data for charming
         let mut years = Vec::with_capacity(data.records.len());
         let mut prices = Vec::with_capacity(data.records.len());
-        
+        let mut prices_low = Vec::with_capacity(data.records.len());
+
         let mut raw_years = Vec::with_capacity(data.records.len());
         let mut sales = Vec::with_capacity(data.records.len());
         let mut eps = Vec::with_capacity(data.records.len());
@@ -89,10 +90,11 @@ pub fn SSGChart(
         for record in &data.records {
             years.push(record.fiscal_year.to_string());
             raw_years.push(record.fiscal_year);
-            
+
             sales.push(record.sales.to_f64().unwrap_or(0.0));
             eps.push(record.eps.to_f64().unwrap_or(0.0));
             prices.push(record.price_high.to_f64().unwrap_or(0.0));
+            prices_low.push(record.price_low.to_f64().unwrap_or(0.0));
         }
 
         let mut chart = Chart::new()
@@ -104,6 +106,8 @@ pub fn SSGChart(
                     .font_size(16)
                     .font_weight("600")))
             .legend(Legend::new()
+                .bottom(0)
+                .orient(Orient::Horizontal)
                 .text_style(charming::element::TextStyle::new()
                     .color("#B0B0B0")
                     .font_family("Inter")
@@ -201,11 +205,17 @@ pub fn SSGChart(
                 .series(Line::new().name("EPS").data(eps).smooth(true).line_style(LineStyle::new().color("#3498DB")));
         }
 
-        chart = chart.series(Line::new()
-            .name("Price High")
-            .data(prices)
-            .smooth(true)
-            .line_style(LineStyle::new().color("#F1C40F")));
+        chart = chart
+            .series(Line::new()
+                .name("Price High")
+                .data(prices)
+                .smooth(true)
+                .line_style(LineStyle::new().color("#F1C40F")))
+            .series(Line::new()
+                .name("Price Low")
+                .data(prices_low)
+                .smooth(true)
+                .line_style(LineStyle::new().color("#E67E22")));
 
         // Use requestAnimationFrame to defer rendering until after DOM update
         let window = web_sys::window().expect("no global window");

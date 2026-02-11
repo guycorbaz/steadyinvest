@@ -7,6 +7,7 @@ use crate::components::search_bar::SearchBar;
 use crate::components::analyst_hud::AnalystHUD;
 use crate::components::snapshot_hud::SnapshotHUD;
 use crate::types::LockedAnalysisModel;
+use crate::ActiveLockedAnalysisId;
 use leptos::prelude::*;
 use naic_logic::{HistoricalData, TickerInfo, AnalysisSnapshot};
 
@@ -20,6 +21,18 @@ pub fn Home() -> impl IntoView {
     let (target_currency, set_target_currency) = signal("USD".to_string());
     let (selected_snapshot_id, set_selected_snapshot_id) = signal(Option::<i32>::None);
     let (imported_snapshot, set_imported_snapshot) = signal(Option::<AnalysisSnapshot>::None);
+
+    // Sync the active locked analysis ID to app-level context so the
+    // Command Strip can enable/disable the PDF export action.
+    let locked_ctx = use_context::<ActiveLockedAnalysisId>();
+    Effect::new(move |_| {
+        if let Some(ctx) = locked_ctx {
+            let snap_id = selected_snapshot_id.get();
+            let has_import = imported_snapshot.get().is_some();
+            // Only expose a real DB snapshot ID (imported snapshots use id=0)
+            ctx.0.set(if !has_import { snap_id } else { None });
+        }
+    });
 
     let historicals = LocalResource::new(move || {
         let ticker_info = selected_ticker.get();
