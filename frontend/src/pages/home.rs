@@ -34,6 +34,14 @@ pub fn Home() -> impl IntoView {
         }
     });
 
+    // Clear the locked analysis context when leaving the Home page so the
+    // Command Strip Export PDF button doesn't stay enabled with a stale ID.
+    on_cleanup(move || {
+        if let Some(ctx) = locked_ctx {
+            ctx.0.set(None);
+        }
+    });
+
     let historicals = LocalResource::new(move || {
         let ticker_info = selected_ticker.get();
         let target_cur = target_currency.get();

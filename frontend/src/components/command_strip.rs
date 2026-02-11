@@ -25,10 +25,15 @@ pub fn CommandStrip() -> impl IntoView {
         if let Some(ctx) = locked_ctx {
             if let Some(id) = ctx.0.get() {
                 let url = format!("/api/analyses/export/{}", id);
-                let _ = web_sys::window()
+                if let Err(e) = web_sys::window()
                     .expect("no global window")
                     .location()
-                    .set_href(&url);
+                    .set_href(&url)
+                {
+                    web_sys::console::error_1(
+                        &format!("PDF export navigation failed: {:?}", e).into(),
+                    );
+                }
             }
         }
     };
