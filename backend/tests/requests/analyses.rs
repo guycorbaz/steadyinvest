@@ -1,12 +1,24 @@
 use backend::app::App;
-use loco_rs::testing::prelude::*;
-use backend::models::_entities::{locked_analyses, tickers};
+use loco_rs::prelude::*;
+use loco_rs::testing::prelude::request;
+use backend::models::_entities::{analysis_snapshots, tickers, users};
 use naic_logic::{AnalysisSnapshot, HistoricalData};
 use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 
 #[tokio::test]
 async fn can_lock_and_get_analyses() {
     request::<App, _, _>(|request, ctx| async move {
+        // 0. Create a user (needed for analysis_snapshots FK on user_id)
+        let _user = users::ActiveModel {
+            id: ActiveValue::set(1),
+            pid: ActiveValue::set(uuid::Uuid::new_v4()),
+            email: ActiveValue::set("test@example.com".to_string()),
+            password: ActiveValue::set("hashed".to_string()),
+            api_key: ActiveValue::set("lo-test-key".to_string()),
+            name: ActiveValue::set("Test User".to_string()),
+            ..Default::default()
+        }.insert(&ctx.db).await.unwrap();
+
         // 1. Prepare Ticker
         let _ticker: tickers::Model = tickers::Entity::find()
             .filter(tickers::Column::Ticker.eq("AAPL"))
@@ -39,9 +51,9 @@ async fn can_lock_and_get_analyses() {
         let response = request.get("/api/analyses/AAPL").await;
         response.assert_status_success();
         
-        let list = response.json::<Vec<locked_analyses::Model>>();
+        let list = response.json::<Vec<analysis_snapshots::Model>>();
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].analyst_note, "Bullish on hardware sales");
+        assert_eq!(list[0].notes.as_deref(), Some("Bullish on hardware sales"));
         let analysis_id = list[0].id;
 
         // 4. Test Export

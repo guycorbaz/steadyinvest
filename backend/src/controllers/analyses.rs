@@ -5,7 +5,7 @@
 
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
-use crate::models::{_entities::locked_analyses, tickers};
+use crate::models::{_entities::analysis_snapshots, tickers};
 use naic_logic::AnalysisSnapshot;
 use sea_orm::QueryOrder;
 
@@ -37,7 +37,7 @@ pub async fn lock_analysis(
     }
 
     let ticker_symbol = req.ticker.to_uppercase();
-    
+
     // Find the ticker
     let ticker = tickers::Entity::find()
         .filter(tickers::Column::Ticker.eq(&ticker_symbol))
@@ -45,11 +45,14 @@ pub async fn lock_analysis(
         .await?
         .ok_or_else(|| Error::NotFound)?;
 
-    let active = locked_analyses::ActiveModel {
+    let active = analysis_snapshots::ActiveModel {
+        user_id: ActiveValue::set(1), // default single-user until Phase 3 auth
         ticker_id: ActiveValue::set(ticker.id),
         snapshot_data: ActiveValue::set(serde_json::to_value(req.snapshot).map_err(|e| Error::string(&e.to_string()))?),
-        analyst_note: ActiveValue::set(req.analyst_note),
-        created_at: ActiveValue::set(chrono::Utc::now().into()),
+        thesis_locked: ActiveValue::set(true),
+        chart_image: ActiveValue::set(None), // Story 7.4 adds chart image capture
+        notes: ActiveValue::set(Some(req.analyst_note)),
+        captured_at: ActiveValue::set(chrono::Utc::now().into()),
         ..Default::default()
     };
 
@@ -71,16 +74,17 @@ pub async fn get_analyses(
     Path(ticker_symbol): Path<String>,
 ) -> Result<Response> {
     let ticker_symbol = ticker_symbol.to_uppercase();
-    
+
     let ticker = tickers::Entity::find()
         .filter(tickers::Column::Ticker.eq(&ticker_symbol))
         .one(&ctx.db)
         .await?
         .ok_or_else(|| Error::NotFound)?;
 
-    let analyses = locked_analyses::Entity::find()
-        .filter(locked_analyses::Column::TickerId.eq(ticker.id))
-        .order_by_desc(locked_analyses::Column::CreatedAt)
+    let analyses = analysis_snapshots::Entity::find()
+        .filter(analysis_snapshots::Column::TickerId.eq(ticker.id))
+        .filter(analysis_snapshots::Column::ThesisLocked.eq(true))
+        .order_by_desc(analysis_snapshots::Column::CapturedAt)
         .all(&ctx.db)
         .await?;
 
@@ -103,24 +107,30 @@ pub async fn export_analysis(
     State(ctx): State<AppContext>,
     Path(id): Path<i32>,
 ) -> Result<Response> {
-    let (locked_analysis, ticker) = locked_analyses::Entity::find_by_id(id)
+    let (snapshot_row, ticker) = analysis_snapshots::Entity::find_by_id(id)
         .find_also_related(tickers::Entity)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| Error::NotFound)?;
 
     let ticker = ticker.ok_or_else(|| Error::NotFound)?;
-    let snapshot: AnalysisSnapshot = serde_json::from_value(locked_analysis.snapshot_data)
+
+    // Only locked analyses may be exported (immutability contract)
+    if !snapshot_row.thesis_locked {
+        return Err(Error::NotFound);
+    }
+
+    let snapshot: AnalysisSnapshot = serde_json::from_value(snapshot_row.snapshot_data)
         .map_err(|e| Error::string(&e.to_string()))?;
 
     let ticker_for_pdf = ticker.ticker.clone();
-    let note_for_pdf = locked_analysis.analyst_note.clone();
-    let created_at = locked_analysis.created_at;
+    let note_for_pdf = snapshot_row.notes.clone().unwrap_or_default();
+    let captured_at = snapshot_row.captured_at;
 
     let pdf_bytes = tokio::task::spawn_blocking(move || {
         crate::services::reporting::ReportingService::generate_ssg_report(
             &ticker_for_pdf,
-            created_at,
+            captured_at,
             &note_for_pdf,
             &snapshot,
         )

@@ -92,7 +92,7 @@ development_status:
   # Epic 7: Analysis Persistence & MVP Fixes
   epic-7: in-progress
   7-1-mvp-fixes-pdf-export-chart-height-legend: done
-  7-2-pre-migration-backup-snapshot-schema: backlog
+  7-2-pre-migration-backup-snapshot-schema: done
   7-3-analysis-snapshot-api: backlog
   7-4-static-chart-image-capture-at-lock-time: backlog
   7-5-exchange-rate-service: backlog

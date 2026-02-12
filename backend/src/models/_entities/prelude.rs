@@ -6,5 +6,5 @@ pub use super::historicals::Entity as Historicals;
 pub use super::tickers::Entity as Tickers;
 pub use super::users::Entity as Users;
 pub use super::historicals_overrides::Entity as HistoricalsOverrides;
-pub use super::locked_analyses::Entity as LockedAnalyses;
+pub use super::analysis_snapshots::Entity as AnalysisSnapshots;
 pub use super::provider_rate_limits::Entity as ProviderRateLimits;

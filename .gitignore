@@ -12,6 +12,9 @@ Cargo.lock
 *.swp
 *.swo
 
+# Database backups
+backups/
+
 # OS
 .DS_Store
 Thumbs.db

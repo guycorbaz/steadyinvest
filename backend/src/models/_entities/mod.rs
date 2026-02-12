@@ -8,5 +8,5 @@ pub mod historicals;
 pub mod tickers;
 pub mod users;
 pub mod historicals_overrides;
-pub mod locked_analyses;
+pub mod analysis_snapshots;
 pub mod provider_rate_limits;
