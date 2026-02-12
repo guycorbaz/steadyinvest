@@ -200,9 +200,11 @@ pub fn AnalystHUD(
             {let ticker = ticker.clone(); let data = data.clone(); move || show_lock_modal.get().then(|| {
                 let data = data.clone();
                 let ticker = ticker.clone();
+                let chart_id = format!("ssg-chart-{}", ticker.ticker.to_lowercase());
                 view! {
-                    <LockThesisModal 
+                    <LockThesisModal
                         ticker=ticker.ticker
+                        chart_id=chart_id
                         historical_data=data
                         sales_projection_cagr=sales_projection_cagr.get()
                         eps_projection_cagr=eps_projection_cagr.get()

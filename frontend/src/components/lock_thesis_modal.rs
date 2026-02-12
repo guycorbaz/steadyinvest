@@ -2,18 +2,21 @@
 //!
 //! Presents a summary of the analyst's current projections and requires a
 //! thesis note before creating an immutable analysis snapshot via
-//! `POST /api/analyses/lock`.
+//! `POST /api/v1/snapshots`.
 
+use crate::components::ssg_chart;
 use leptos::prelude::*;
 use naic_logic::{HistoricalData, AnalysisSnapshot};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-/// JSON request body for the lock endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LockRequest {
+/// JSON request body for the Phase 1 snapshot API.
+#[derive(Debug, Clone, Serialize)]
+struct CreateSnapshotPayload {
     ticker: String,
-    snapshot: AnalysisSnapshot,
-    analyst_note: String,
+    snapshot_data: serde_json::Value,
+    thesis_locked: bool,
+    notes: Option<String>,
+    chart_image: Option<String>,
 }
 
 /// Modal dialog to finalize and lock an analysis snapshot.
@@ -23,6 +26,7 @@ struct LockRequest {
 #[component]
 pub fn LockThesisModal(
     ticker: String,
+    chart_id: String,
     historical_data: HistoricalData,
     sales_projection_cagr: f64,
     eps_projection_cagr: f64,
@@ -49,12 +53,19 @@ pub fn LockThesisModal(
 
     let lock = {
         let ticker = ticker.clone();
+        let chart_id = chart_id.clone();
         let historical_data = historical_data.clone();
         move |_| {
             let note_val = note.get().trim().to_string();
             if note_val.is_empty() {
                 set_error.set(Some("An analyst note is required to lock your thesis (AC 2).".to_string()));
                 return;
+            }
+
+            // Capture chart image (non-blocking — None on failure per AC #2)
+            let chart_image = ssg_chart::capture_chart_image(&chart_id);
+            if chart_image.is_none() {
+                log::warn!("Chart image capture failed for {chart_id} — proceeding without image");
             }
 
             let ticker = ticker.clone();
@@ -68,16 +79,21 @@ pub fn LockThesisModal(
                 captured_at: chrono::Utc::now(),
             };
 
+            let snapshot_data = serde_json::to_value(&snapshot)
+                .expect("AnalysisSnapshot serialization must not fail");
+
             leptos::task::spawn_local(async move {
                 set_loading.set(true);
-                let req = LockRequest {
+                let payload = CreateSnapshotPayload {
                     ticker,
-                    snapshot,
-                    analyst_note: note_val,
+                    snapshot_data,
+                    thesis_locked: true,
+                    notes: Some(note_val),
+                    chart_image,
                 };
 
-                let response = gloo_net::http::Request::post("/api/analyses/lock")
-                    .json(&req)
+                let response = gloo_net::http::Request::post("/api/v1/snapshots")
+                    .json(&payload)
                     .unwrap()
                     .send()
                     .await;

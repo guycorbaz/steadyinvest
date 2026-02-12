@@ -5,6 +5,9 @@ use loco_rs::testing::prelude::request;
 use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 use serial_test::serial;
 
+/// A minimal 1x1 red pixel PNG encoded as base64.
+const TINY_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==";
+
 /// Seed a user and a ticker for FK constraints.
 /// Returns the ticker_id for use in snapshot requests.
 async fn seed_user_and_ticker(ctx: &AppContext) -> i32 {
@@ -69,6 +72,9 @@ async fn can_create_snapshot() {
         assert!(!created.thesis_locked);
         assert_eq!(created.notes.as_deref(), Some("Initial draft analysis"));
         assert!(created.deleted_at.is_none());
+        // chart_image is skip_serializing — verify absence via endpoint
+        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        assert_eq!(res.status_code(), 404); // no chart_image supplied → 404
     })
     .await;
 }
@@ -321,6 +327,189 @@ async fn returns_404_for_soft_deleted_snapshot() {
         // GET should return 404
         let res = request.get(&format!("/api/v1/snapshots/{}", created.id)).await;
         assert_eq!(res.status_code(), 404);
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// Chart Image — POST with chart_image stores the decoded bytes
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn can_create_snapshot_with_chart_image() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        let body = serde_json::json!({
+            "ticker_id": ticker_id,
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": true,
+            "chart_image": TINY_PNG_BASE64,
+        });
+
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        res.assert_status_success();
+
+        // chart_image is skip_serializing on Model — verify via /chart-image endpoint
+        let created = res.json::<analysis_snapshots::Model>();
+        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        res.assert_status_success();
+        assert_eq!(res.header("content-type"), "image/png");
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// Chart Image — POST without chart_image keeps NULL (AC #2)
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn can_create_snapshot_without_chart_image() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        let body = serde_json::json!({
+            "ticker_id": ticker_id,
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": false,
+            "chart_image": null,
+        });
+
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        res.assert_status_success();
+
+        // Verify chart-image endpoint returns 404 (no image stored)
+        let created = res.json::<analysis_snapshots::Model>();
+        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        assert_eq!(res.status_code(), 404);
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// Chart Image — GET /chart-image returns raw PNG with correct content-type
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn can_retrieve_chart_image() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        let body = serde_json::json!({
+            "ticker_id": ticker_id,
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": true,
+            "chart_image": TINY_PNG_BASE64,
+        });
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        let created = res.json::<analysis_snapshots::Model>();
+
+        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        res.assert_status_success();
+        // Verify content-type header
+        assert_eq!(res.header("content-type"), "image/png");
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// Chart Image — GET /chart-image returns 404 when no image stored
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn returns_404_for_missing_chart_image() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        let body = serde_json::json!({
+            "ticker_id": ticker_id,
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": false,
+        });
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        let created = res.json::<analysis_snapshots::Model>();
+
+        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        assert_eq!(res.status_code(), 404);
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// Chart Image — POST with oversized chart_image is rejected
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn rejects_oversized_chart_image() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        // Create a base64 string larger than 5 MB.
+        // Note: Axum's default JSON body limit (~2MB) may reject the payload
+        // with 413 before our handler's size check returns 400.
+        // Both responses correctly protect the server from oversized images.
+        let oversized = "A".repeat(5 * 1024 * 1024 + 1);
+        let body = serde_json::json!({
+            "ticker_id": ticker_id,
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": false,
+            "chart_image": oversized,
+        });
+
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        let status = res.status_code();
+        assert!(
+            status == 400 || status == 413,
+            "Expected 400 or 413, got {status}"
+        );
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// Ticker Resolution — POST with ticker symbol resolves to ticker_id
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn can_create_snapshot_with_ticker_symbol() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        // Send ticker symbol instead of ticker_id — backend resolves it
+        let body = serde_json::json!({
+            "ticker": "AAPL",
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": false,
+            "notes": "Created via ticker symbol"
+        });
+
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        res.assert_status_success();
+
+        let created = res.json::<analysis_snapshots::Model>();
+        assert!(created.id > 0);
+        assert_eq!(created.ticker_id, ticker_id);
+        assert_eq!(created.notes.as_deref(), Some("Created via ticker symbol"));
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// Ticker Resolution — POST without ticker_id or ticker returns 400
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn rejects_snapshot_without_ticker_id_or_symbol() {
+    request::<App, _, _>(|request, ctx| async move {
+        let _ticker_id = seed_user_and_ticker(&ctx).await;
+
+        let body = serde_json::json!({
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": false,
+        });
+
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        assert_eq!(res.status_code(), 400);
     })
     .await;
 }

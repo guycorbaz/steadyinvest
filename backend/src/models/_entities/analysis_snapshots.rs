@@ -16,7 +16,11 @@ pub struct Model {
     // SeaORM has no MediumBlob column_type variant, so VarBinary is used as a
     // compatible stand-in for reading/writing Vec<u8>. If regenerating entities
     // with sea-orm-cli, this annotation will need manual restoration.
+    //
+    // skip_serializing: Vec<u8> serializes as a JSON number array ([137, 80, …])
+    // which bloats responses. Use GET /chart-image endpoint for retrieval instead.
     #[sea_orm(column_type = "VarBinary(StringLen::None)", nullable)]
+    #[serde(skip_serializing)]
     pub chart_image: Option<Vec<u8>>,
     #[sea_orm(column_type = "Text", nullable)]
     pub notes: Option<String>,

@@ -14,6 +14,25 @@ use wasm_bindgen::prelude::*;
 unsafe extern "C" {
     #[wasm_bindgen(js_namespace = window)]
     fn setupDraggableHandles(chart_id: String, sales_start: f64, sales_years: f64, eps_start: f64, eps_years: f64);
+
+    #[wasm_bindgen(js_namespace = window)]
+    fn captureChartAsDataURL(chart_id: String) -> Option<String>;
+}
+
+/// Captures the current SSG chart as a base64-encoded PNG string.
+///
+/// Returns `Some(base64_string)` on success or `None` if the chart
+/// element or ECharts instance is unavailable. Non-panicking — all
+/// failures return `None` (AC #2).
+pub fn capture_chart_image(chart_id: &str) -> Option<String> {
+    let data_url = captureChartAsDataURL(chart_id.to_string())?;
+    // Strip the data URL prefix to get raw base64
+    Some(
+        data_url
+            .strip_prefix("data:image/png;base64,")
+            .unwrap_or(&data_url)
+            .to_string(),
+    )
 }
 
 // Global signals for JS access

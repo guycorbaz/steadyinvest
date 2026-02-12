@@ -99,3 +99,23 @@ window.setupDraggableHandles = function (chartId, salesStartValue, salesYears, e
     chart.on('finished', updateHandles);
     window.addEventListener('resize', () => chart.resize());
 };
+
+window.captureChartAsDataURL = function (chartId) {
+    const chartDom = document.getElementById(chartId);
+    if (!chartDom) {
+        console.warn('[captureChartAsDataURL] DOM element not found:', chartId);
+        return null;
+    }
+    let chart = echarts.getInstanceByDom(chartDom);
+    if (!chart) {
+        console.warn('[captureChartAsDataURL] No ECharts instance for:', chartId);
+        return null;
+    }
+    try {
+        const bg = (chart.getOption().backgroundColor) || '#1a1a2e';
+        return chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: bg });
+    } catch (e) {
+        console.warn('[captureChartAsDataURL] Export failed:', e);
+        return null;
+    }
+};
