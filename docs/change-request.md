@@ -7,6 +7,24 @@ This document collect chzange requests recorded by user (Guy). The changes are l
 ## List
 
 
+### Delete icon inactive
+
+The delete icon (small x) of the research ticker field does not work.
+
+
+### Searching companies
+
+As an user, I would like to search ticker both per ticker name and company name.
+
+
+### Deleting snapshots
+
+As an user I would like to remove unused snapshots
+
+
+## NAIC documentation related
+
+
 ### Better investing principle
 
 	* Invest regularly, regardless of the market outlook
@@ -43,6 +61,7 @@ Automate classification by company size. The parameters in the table below shoul
 
 
 ### SSG pdf
+
 SSG pdf is very light. I would like to generate a complete NAIC SSG report with the same look.
 
 

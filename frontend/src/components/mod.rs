@@ -27,3 +27,4 @@ pub mod analyst_hud;
 pub mod snapshot_hud;
 pub mod footer;
 pub mod command_strip;
+pub mod compact_analysis_card;

@@ -9,7 +9,21 @@ use crate::components::snapshot_hud::SnapshotHUD;
 use crate::types::LockedAnalysisModel;
 use crate::ActiveLockedAnalysisId;
 use leptos::prelude::*;
+use leptos_router::hooks::use_location;
 use naic_logic::{HistoricalData, TickerInfo, AnalysisSnapshot};
+use serde::Deserialize;
+
+/// DTO for the raw `GET /api/v1/snapshots/:id` response used by deep linking.
+#[derive(Debug, Clone, Deserialize)]
+struct FullSnapshotResponse {
+    id: i32,
+    ticker_id: i32,
+    snapshot_data: serde_json::Value,
+    #[allow(dead_code)]
+    thesis_locked: bool,
+    notes: Option<String>,
+    captured_at: chrono::DateTime<chrono::Utc>,
+}
 
 /// Main analysis page rendered at `/`.
 ///
@@ -21,6 +35,42 @@ pub fn Home() -> impl IntoView {
     let (target_currency, set_target_currency) = signal("USD".to_string());
     let (selected_snapshot_id, set_selected_snapshot_id) = signal(Option::<i32>::None);
     let (imported_snapshot, set_imported_snapshot) = signal(Option::<AnalysisSnapshot>::None);
+    let navigate_home = leptos_router::hooks::use_navigate();
+
+    // Deep linking: read `?snapshot=ID` from URL for Library card navigation
+    let location = use_location();
+    let deep_link_id = move || {
+        let search = location.search.get();
+        let s = search.strip_prefix('?').unwrap_or(&search);
+        s.split('&').find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            if k == "snapshot" { v.parse::<i32>().ok() } else { None }
+        })
+    };
+
+    let deep_link_snapshot = LocalResource::new(move || {
+        let snap_id = deep_link_id();
+        async move {
+            match snap_id {
+                Some(id) => {
+                    let url = format!("/api/v1/snapshots/{}", id);
+                    let response = gloo_net::http::Request::get(&url)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    if response.ok() {
+                        response
+                            .json::<FullSnapshotResponse>()
+                            .await
+                            .map_err(|e| e.to_string())
+                    } else {
+                        Err(format!("Snapshot not found: {}", response.status()))
+                    }
+                }
+                None => Err("no deep link".to_string()),
+            }
+        }
+    });
 
     // Sync the active locked analysis ID to app-level context so the
     // Command Strip can enable/disable the PDF export action.
@@ -29,8 +79,13 @@ pub fn Home() -> impl IntoView {
         if let Some(ctx) = locked_ctx {
             let snap_id = selected_snapshot_id.get();
             let has_import = imported_snapshot.get().is_some();
+            let deep_id = if selected_ticker.get().is_none() && !has_import {
+                deep_link_id()
+            } else {
+                None
+            };
             // Only expose a real DB snapshot ID (imported snapshots use id=0)
-            ctx.0.set(if !has_import { snap_id } else { None });
+            ctx.0.set(if !has_import { snap_id.or(deep_id) } else { None });
         }
     });
 
@@ -116,17 +171,70 @@ pub fn Home() -> impl IntoView {
                 </div>
             }
         }>
-            <SearchBar 
+            <SearchBar
                 on_select=move |info| {
                     set_selected_ticker.set(Some(info));
                     set_selected_snapshot_id.set(None);
                     set_imported_snapshot.set(None);
-                } 
+                    // Clear ?snapshot= from URL to prevent stale deep link on refresh
+                    navigate_home("/", Default::default());
+                }
                 on_import=move |snapshot| {
                     set_imported_snapshot.set(Some(snapshot));
                     set_selected_ticker.set(None);
                 }
             />
+
+            // Deep-linked snapshot from Library (/?snapshot=ID)
+            {move || {
+                // Skip if user has actively selected a ticker or imported a file
+                if selected_ticker.get().is_some() || imported_snapshot.get().is_some() {
+                    return None;
+                }
+                if deep_link_id().is_none() {
+                    return None;
+                }
+                match deep_link_snapshot.get() {
+                    None => Some(view! {
+                        <div class="loading-overlay">
+                            <div class="pulse"></div>
+                            <div class="status-text">"Loading Snapshot..."</div>
+                        </div>
+                    }.into_any()),
+                    Some(Ok(raw)) => {
+                        let hd = raw.snapshot_data.get("historical_data");
+                        let ticker_sym = hd
+                            .and_then(|h| h.get("ticker"))
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("UNKNOWN")
+                            .to_string();
+                        let currency = hd
+                            .and_then(|h| h.get("currency"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("USD")
+                            .to_string();
+                        let ticker = TickerInfo {
+                            ticker: ticker_sym.clone(),
+                            name: ticker_sym,
+                            exchange: String::new(),
+                            currency,
+                        };
+                        let model = LockedAnalysisModel {
+                            id: raw.id,
+                            ticker_id: raw.ticker_id,
+                            snapshot_data: raw.snapshot_data,
+                            analyst_note: raw.notes.unwrap_or_default(),
+                            created_at: raw.captured_at,
+                        };
+                        Some(view! {
+                            <div class="analyst-hud-init">
+                                <SnapshotHUD ticker=ticker model=model />
+                            </div>
+                        }.into_any())
+                    }
+                    Some(Err(_)) => None,
+                }
+            }}
 
             {move || selected_ticker.get().map(|ticker| {
                 view! {

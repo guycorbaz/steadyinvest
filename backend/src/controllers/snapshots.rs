@@ -45,23 +45,58 @@ pub struct SnapshotQueryParams {
 /// Lightweight summary returned by the list endpoint.
 ///
 /// Excludes `snapshot_data` and `chart_image` to keep payloads small.
+/// Includes ticker symbol (resolved via join) and key metrics extracted
+/// from `snapshot_data` for Compact Analysis Card rendering.
 #[derive(Debug, Serialize)]
 pub struct SnapshotSummary {
     pub id: i32,
     pub ticker_id: i32,
+    pub ticker_symbol: String,
     pub thesis_locked: bool,
     pub notes: Option<String>,
     pub captured_at: chrono::DateTime<chrono::FixedOffset>,
+    pub projected_sales_cagr: Option<f64>,
+    pub projected_eps_cagr: Option<f64>,
+    pub projected_high_pe: Option<f64>,
+    pub projected_low_pe: Option<f64>,
 }
 
-impl From<analysis_snapshots::Model> for SnapshotSummary {
-    fn from(m: analysis_snapshots::Model) -> Self {
+impl SnapshotSummary {
+    /// Build a summary from a snapshot model and its related ticker.
+    fn from_model_and_ticker(
+        m: analysis_snapshots::Model,
+        ticker: Option<tickers::Model>,
+    ) -> Self {
+        let ticker_symbol = ticker
+            .map(|t| t.ticker)
+            .unwrap_or_else(|| format!("ID:{}", m.ticker_id));
+        let projected_sales_cagr = m
+            .snapshot_data
+            .get("projected_sales_cagr")
+            .and_then(|v| v.as_f64());
+        let projected_eps_cagr = m
+            .snapshot_data
+            .get("projected_eps_cagr")
+            .and_then(|v| v.as_f64());
+        let projected_high_pe = m
+            .snapshot_data
+            .get("projected_high_pe")
+            .and_then(|v| v.as_f64());
+        let projected_low_pe = m
+            .snapshot_data
+            .get("projected_low_pe")
+            .and_then(|v| v.as_f64());
         Self {
             id: m.id,
             ticker_id: m.ticker_id,
+            ticker_symbol,
             thesis_locked: m.thesis_locked,
             notes: m.notes,
             captured_at: m.captured_at,
+            projected_sales_cagr,
+            projected_eps_cagr,
+            projected_high_pe,
+            projected_low_pe,
         }
     }
 }
@@ -167,12 +202,16 @@ pub async fn create_snapshot(
 /// Lists snapshots with optional filters, returning summaries only.
 ///
 /// **GET** `/api/v1/snapshots?ticker_id=X&thesis_locked=true`
+///
+/// Joins with `tickers` table to include the ticker symbol in each summary.
+/// Extracts key metrics from `snapshot_data` JSON for Compact Analysis Cards.
 #[debug_handler]
 pub async fn list_snapshots(
     State(ctx): State<AppContext>,
     Query(params): Query<SnapshotQueryParams>,
 ) -> Result<Response> {
     let mut query = analysis_snapshots::Entity::find()
+        .find_also_related(tickers::Entity)
         .filter(analysis_snapshots::Column::DeletedAt.is_null());
 
     if let Some(tid) = params.ticker_id {
@@ -182,12 +221,15 @@ pub async fn list_snapshots(
         query = query.filter(analysis_snapshots::Column::ThesisLocked.eq(locked));
     }
 
-    let snapshots = query
+    let results = query
         .order_by_desc(analysis_snapshots::Column::CapturedAt)
         .all(&ctx.db)
         .await?;
 
-    let summaries: Vec<SnapshotSummary> = snapshots.into_iter().map(Into::into).collect();
+    let summaries: Vec<SnapshotSummary> = results
+        .into_iter()
+        .map(|(snapshot, ticker)| SnapshotSummary::from_model_and_ticker(snapshot, ticker))
+        .collect();
     format::json(summaries)
 }
 

@@ -1792,3 +1792,176 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* System page mobile styles consolidated into main mobile breakpoint above */
+
+/* ===================================================
+   Library Page & Compact Analysis Card Styles
+   ================================================== */
+
+.library-page {
+  padding: var(--spacing-8);
+  background-color: var(--background);
+  min-height: 100vh;
+  color: var(--text-primary);
+}
+
+.library-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  margin: 0 0 var(--spacing-6) 0;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.library-filters {
+  display: flex;
+  gap: var(--spacing-4);
+  margin-bottom: var(--spacing-6);
+  background-color: var(--surface);
+  padding: var(--spacing-4);
+  border: var(--border-width) solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius-sharp);
+  flex-wrap: wrap;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-6);
+}
+
+.library-empty {
+  text-align: center;
+  padding: var(--spacing-8);
+  color: var(--text-muted);
+  font-style: italic;
+
+  .hint {
+    font-size: var(--text-sm);
+    margin-top: var(--spacing-2);
+  }
+}
+
+/* Compact Analysis Card */
+.compact-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: var(--border-width) solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius-sharp);
+  padding: var(--spacing-4);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  font-family: 'Inter', sans-serif;
+  text-align: left;
+  width: 100%;
+  color: var(--text-primary);
+
+  &:hover {
+    border-color: rgba(59, 130, 246, 0.4);
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-1);
+}
+
+.card-ticker {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  font-size: var(--text-base);
+  color: var(--primary);
+}
+
+.lock-badge {
+  font-size: var(--text-sm);
+}
+
+.lock-badge.locked {
+  color: var(--success);
+}
+
+.lock-badge.unlocked {
+  color: var(--text-muted);
+}
+
+.card-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-3);
+  padding-bottom: var(--spacing-3);
+  border-bottom: var(--border-width) solid rgba(255, 255, 255, 0.05);
+}
+
+.card-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.card-metrics .metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-metrics .metric-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.card-metrics .metric-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* Library Responsive - Desktop Standard */
+@media (max-width: 1279px) and (min-width: 1025px) {
+  .library-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Library Responsive - Tablet */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .library-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .library-page {
+    padding: var(--spacing-6);
+  }
+}
+
+/* Library Responsive - Mobile */
+@media (max-width: 768px) {
+  .library-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .library-page {
+    padding: var(--spacing-4);
+  }
+
+  .library-filters {
+    flex-direction: column;
+  }
+
+  .library-title {
+    font-size: var(--text-lg);
+  }
+}

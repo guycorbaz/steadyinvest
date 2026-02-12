@@ -132,6 +132,12 @@ async fn can_list_snapshots_with_filters() {
         assert_eq!(all.len(), 2);
         // Summary should NOT contain snapshot_data
         assert!(all[0].get("snapshot_data").is_none());
+        // Summary MUST contain ticker_symbol and key metrics (Story 7.6)
+        assert_eq!(all[0]["ticker_symbol"].as_str().unwrap(), "AAPL");
+        assert!((all[0]["projected_sales_cagr"].as_f64().unwrap() - 10.5).abs() < 0.01);
+        assert!((all[0]["projected_eps_cagr"].as_f64().unwrap() - 12.0).abs() < 0.01);
+        assert!((all[0]["projected_high_pe"].as_f64().unwrap() - 25.0).abs() < 0.01);
+        assert!((all[0]["projected_low_pe"].as_f64().unwrap() - 15.0).abs() < 0.01);
 
         // Filter by thesis_locked=true — should get 1
         let res = request.get(&format!("/api/v1/snapshots?thesis_locked=true")).await;

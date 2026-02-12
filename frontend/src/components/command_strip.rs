@@ -55,6 +55,15 @@ pub fn CommandStrip() -> impl IntoView {
                     </div>
                 </li>
 
+                <li class="menu-item">
+                    <div class="menu-link">
+                        <A href="/library">
+                            <span class="menu-icon">"📚"</span>
+                            <span class="menu-label">"Library"</span>
+                        </A>
+                    </div>
+                </li>
+
                 <li class="menu-divider"></li>
 
                 <li class="menu-section-title">"Report"</li>
