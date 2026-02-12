@@ -17,4 +17,5 @@ pub mod tickers;
 pub mod overrides;
 pub mod harvest;
 pub mod analyses;
+pub mod snapshots;
 pub mod system;
