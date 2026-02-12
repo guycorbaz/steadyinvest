@@ -58,6 +58,7 @@ impl Hooks for App {
             .add_route(controllers::overrides::routes())
             .add_route(controllers::analyses::routes())
             .add_route(controllers::snapshots::routes())
+            .add_route(controllers::exchange_rates::routes())
             .add_route(controllers::system::routes())
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {

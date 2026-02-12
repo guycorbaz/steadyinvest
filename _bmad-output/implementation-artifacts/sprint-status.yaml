@@ -95,7 +95,7 @@ development_status:
   7-2-pre-migration-backup-snapshot-schema: done
   7-3-analysis-snapshot-api: done
   7-4-static-chart-image-capture-at-lock-time: done
-  7-5-exchange-rate-service: backlog
+  7-5-exchange-rate-service: done
   7-6-library-view-analysis-browsing: backlog
   7-7-cicd-e2e-pipeline-validation: backlog
   epic-7-retrospective: optional
