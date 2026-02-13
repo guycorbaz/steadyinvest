@@ -21,6 +21,9 @@ jobs:
     permissions:
       contents: read
 
+    env:
+      DATABASE_URL: mysql://naic:naic_test@localhost:3306/naic_test
+
     services:
       mariadb:
         image: mariadb:11
@@ -51,8 +54,6 @@ jobs:
 
       - name: Run unit and integration tests
         run: cargo test --workspace --exclude e2e-tests
-        env:
-          DATABASE_URL: mysql://naic:naic_test@localhost:3306/naic_test
 
   e2e:
     name: End-to-End Tests
@@ -61,6 +62,9 @@ jobs:
 
     permissions:
       contents: read
+
+    env:
+      DATABASE_URL: mysql://naic:naic_test@localhost:3306/naic_test
 
     services:
       mariadb:
@@ -86,6 +90,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -94,36 +99,92 @@ jobs:
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
+          install-chromedriver: true
 
       - name: Start ChromeDriver
         run: |
           chromedriver --port=9515 &
           sleep 2
 
-      - name: Install trunk (frontend build tool)
-        run: cargo install trunk
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install trunk
+        run: cargo binstall trunk --no-confirm
 
       - name: Build workspace
         run: cargo build --all
 
-      - name: Start backend server
-        run: |
-          cargo run -p backend &
-          sleep 5
-        env:
-          DATABASE_URL: mysql://naic:naic_test@localhost:3306/naic_test
-
-      - name: Build and serve frontend
+      - name: Build frontend
         run: |
           cd frontend
           trunk build
-          # Serve the built files on port 5173
-          python3 -m http.server 5173 --directory dist &
-          sleep 2
+
+      - name: Start backend server
+        run: |
+          cargo run -p backend > backend.log 2>&1 &
+
+      - name: Wait for backend readiness
+        run: |
+          echo "Waiting for backend to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5150/api/v1/system/health > /dev/null 2>&1; then
+              echo "Backend is ready!"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: Backend failed to start within 60 seconds"
+              cat backend.log
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Start frontend SPA server
+        run: |
+          cd frontend
+          python3 -c "
+          import http.server, functools, pathlib
+          class H(http.server.SimpleHTTPRequestHandler):
+              def do_GET(self):
+                  if not pathlib.Path(self.translate_path(self.path)).exists():
+                      self.path = '/index.html'
+                  super().do_GET()
+          http.server.HTTPServer(('', 5173), functools.partial(H, directory='dist')).serve_forever()
+          " &
+
+      - name: Wait for frontend readiness
+        run: |
+          echo "Waiting for frontend to start..."
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:5173 > /dev/null 2>&1; then
+              echo "Frontend is ready!"
+              break
+            fi
+            if [ "$i" -eq 10 ]; then
+              echo "ERROR: Frontend failed to start within 20 seconds"
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Create screenshots directory
+        run: mkdir -p screenshots
 
       - name: Run E2E tests
-        run: cargo test -p e2e-tests -- --test-threads=1
+        run: cargo test -p e2e-tests -- --test-threads=1 --nocapture
         env:
           HEADLESS: "true"
           BASE_URL: "http://localhost:5173"
           CHROME_DRIVER_URL: "http://localhost:9515"
+
+      - name: Upload failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-debug-artifacts
+          path: |
+            screenshots/
+            backend.log
+          if-no-files-found: ignore
+          retention-days: 7

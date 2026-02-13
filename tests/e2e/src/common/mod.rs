@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use thirtyfour::prelude::*;
 use std::env;
+use std::path::Path;
 use anyhow::Result;
 
 pub struct TestContext {
@@ -24,10 +25,10 @@ impl TestContext {
             .unwrap_or_else(|_| "http://localhost:9515".to_string());
 
         let driver = WebDriver::new(&webdriver_url, caps).await?;
-        
+
         let base_url = env::var("BASE_URL")
             .unwrap_or_else(|_| "http://localhost:5173".to_string());
-            
+
         Ok(Self { driver, base_url })
     }
 
@@ -35,6 +36,25 @@ impl TestContext {
         let url = format!("{}{}", self.base_url, path);
         self.driver.goto(&url).await?;
         Ok(())
+    }
+
+    /// Save a screenshot for CI diagnostic purposes.
+    /// Screenshots are saved to ./screenshots/{test_name}.png.
+    /// Failures are logged but do not propagate — screenshot capture
+    /// must never block test cleanup.
+    pub async fn save_screenshot(&self, test_name: &str) {
+        let dir = Path::new("screenshots");
+        if !dir.exists() {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                eprintln!("[screenshot] Failed to create screenshots dir: {e}");
+                return;
+            }
+        }
+        let path = dir.join(format!("{test_name}.png"));
+        match self.driver.screenshot(&path).await {
+            Ok(_) => eprintln!("[screenshot] Saved: {}", path.display()),
+            Err(e) => eprintln!("[screenshot] Failed to capture {test_name}: {e}"),
+        }
     }
 
     pub async fn cleanup(self) -> Result<()> {
