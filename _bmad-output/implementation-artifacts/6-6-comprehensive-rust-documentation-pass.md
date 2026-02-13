@@ -18,7 +18,7 @@ So that the codebase is maintainable and new team members can onboard effectivel
 2. **Given** structs, enums, and type definitions exist across the project
    - **When** reviewing type documentation
    - **Then** all public structs, enums, and type definitions must be documented with `///` comments
-3. **Given** complex financial algorithms exist in naic-logic
+3. **Given** complex financial algorithms exist in steady-invest-logic
    - **When** reviewing algorithm documentation
    - **Then** complex algorithms and tricky code sections must have inline explanatory comments
 4. **Given** the project has multiple modules
@@ -44,12 +44,12 @@ The project has **69 Rust source files** with only **19% having any doc comments
 |------|-------|-----------|----------|
 | `frontend/src/` | 21 | 7 | 33% |
 | `backend/src/` | 47 | 5 | 11% |
-| `crates/naic-logic/src/` | 1 | 1 (partial) | ~30% |
+| `crates/steady-invest-logic/src/` | 1 | 1 (partial) | ~30% |
 | **Total** | **69** | **13** | **19%** |
 
 **Critical gaps:**
 - **Zero module-level docs** (`//!`) outside generated SeaORM entities
-- **5 public financial calculation functions** in naic-logic completely undocumented
+- **5 public financial calculation functions** in steady-invest-logic completely undocumented
 - **42 backend files** (89%) lack any documentation
 - **14 frontend files** (67%) lack any documentation
 - **All Cargo.toml** files missing description, license, and documentation metadata
@@ -68,12 +68,12 @@ The project has **69 Rust source files** with only **19% having any doc comments
 
 ## Tasks / Subtasks
 
-### Task 1: naic-logic Crate Documentation (AC: #1, #2, #3, #4, #5, #6) [CRITICAL PRIORITY]
+### Task 1: steady-invest-logic Crate Documentation (AC: #1, #2, #3, #4, #5, #6) [CRITICAL PRIORITY]
 
 This is the most important crate — shared business logic used by both backend and frontend.
 **Scope:** 1 file (`lib.rs`, ~634 lines), ~8 structs, ~5 public functions, ~5 impl methods.
 
-- [x] Add `//!` module-level docs to `crates/naic-logic/src/lib.rs`
+- [x] Add `//!` module-level docs to `crates/steady-invest-logic/src/lib.rs`
   - [x] Overview of NAIC SSG methodology and what the crate provides
   - [x] Key types section with links (`[`HistoricalData`]`, `[`AnalysisSnapshot`]`, etc.)
   - [x] Calculation functions overview
@@ -166,7 +166,7 @@ Document all Leptos components and frontend modules. Note: Leptos `#[component]`
 
 ### Task 5: Cargo.toml Metadata & Rustdoc Verification (AC: #7) [MEDIUM PRIORITY]
 
-- [x] Add documentation metadata to `crates/naic-logic/Cargo.toml`:
+- [x] Add documentation metadata to `crates/steady-invest-logic/Cargo.toml`:
   - [x] `description` — added
   - [ ] `license` — not added (no license chosen for project)
   - [ ] `repository` — not added (no public repo URL)
@@ -180,7 +180,7 @@ Document all Leptos components and frontend modules. Note: Leptos `#[component]`
 ### Task 6: Quality Verification [LOW PRIORITY]
 
 - [x] Run `cargo doc --no-deps` to verify complete build — passes clean
-- [x] Spot-check doc quality: `# Arguments`, `# Returns`, `# Examples` present on all naic-logic functions
+- [x] Spot-check doc quality: `# Arguments`, `# Returns`, `# Examples` present on all steady-invest-logic functions
 - [x] Verify no `#![deny(missing_docs)]` regressions — not added per rules
 
 ## Dev Notes
@@ -192,7 +192,7 @@ Document all Leptos components and frontend modules. Note: Leptos `#[component]`
 **Tech Stack:**
 - Backend: Loco 0.16+ (Axum + SeaORM) with MariaDB
 - Frontend: Leptos 0.8 (Rust/WASM) with CSR
-- Shared Logic: `crates/naic-logic` (cross-boundary math consistency)
+- Shared Logic: `crates/steady-invest-logic` (cross-boundary math consistency)
 - Charting: `charming` library (ECharts via WASM)
 - Error Handling: `thiserror` crate
 - Validation: `serde` + `validator` crates
@@ -207,7 +207,7 @@ Document all Leptos components and frontend modules. Note: Leptos `#[component]`
 - SeaORM models: singular `PascalCase`
 
 **Architectural Boundaries (document in module docs):**
-- NO business logic in UI components — all business logic in `crates/naic-logic`
+- NO business logic in UI components — all business logic in `crates/steady-invest-logic`
 - API boundaries restricted to `/api/v1/` with JSON schema enforcement
 - MariaDB is system of record
 
@@ -309,7 +309,7 @@ pub struct AuditService;
 
 ### File Inventory (complete list for reference)
 
-**crates/naic-logic/src/** (1 file, 634 lines):
+**crates/steady-invest-logic/src/** (1 file, 634 lines):
 - `lib.rs` — All business logic (structs, calculations, tests)
 
 **frontend/src/** (21 files):
@@ -365,7 +365,7 @@ pub struct AuditService;
 - [x] `cargo doc --no-deps` builds without errors
 
 **Coverage:**
-- [x] naic-logic: all public functions and structs documented (AC1, AC2, AC3)
+- [x] steady-invest-logic: all public functions and structs documented (AC1, AC2, AC3)
 - [x] Backend: all module roots have `//!` docs (AC4)
 - [x] Backend: all controller endpoints documented (AC1)
 - [x] Backend: all service functions documented (AC1)
@@ -376,7 +376,7 @@ pub struct AuditService;
 
 **Verification:**
 - [x] `cargo doc --no-deps` completes without errors (AC7)
-- [x] Existing tests still pass — naic-logic 9/9 + 1 doctest; backend integration tests require MariaDB (pre-existing)
+- [x] Existing tests still pass — steady-invest-logic 9/9 + 1 doctest; backend integration tests require MariaDB (pre-existing)
 
 ### References
 
@@ -393,18 +393,18 @@ Claude Opus 4.6 (claude-opus-4-6)
 
 ### Debug Log References
 
-- `cargo check -p naic-logic` — passed after Task 1
-- `cargo test -p naic-logic --doc` — 1 doctest passed
+- `cargo check -p steady-invest-logic` — passed after Task 1
+- `cargo test -p steady-invest-logic --doc` — 1 doctest passed
 - `cargo check -p backend` — passed after Tasks 2-3
 - `cargo check -p frontend` — passed after Task 4 (1 pre-existing warning in counter_btn.rs)
-- `cargo doc --no-deps -p naic-logic -p backend` — passed clean (fixed 1 redundant link warning)
-- `cargo test -p naic-logic` — 9 unit tests + 1 doctest all pass
+- `cargo doc --no-deps -p steady-invest-logic -p backend` — passed clean (fixed 1 redundant link warning)
+- `cargo test -p steady-invest-logic` — 9 unit tests + 1 doctest all pass
 - **Code Review Fixes:**
-- `cargo check -p naic-logic` — passed after review fixes
+- `cargo check -p steady-invest-logic` — passed after review fixes
 - `cargo check -p backend` — passed after review fixes
 - `cargo check -p frontend` — passed after review fixes (1 pre-existing warning)
-- `cargo test -p naic-logic --doc` — 4 doctests passed (was 1 before review)
-- `cargo doc --no-deps -p naic-logic -p backend` — passed clean
+- `cargo test -p steady-invest-logic --doc` — 4 doctests passed (was 1 before review)
+- `cargo doc --no-deps -p steady-invest-logic -p backend` — passed clean
 
 ### Completion Notes List
 
@@ -415,11 +415,11 @@ Claude Opus 4.6 (claude-opus-4-6)
 
 ### Change Log
 
-1. **Task 1 — naic-logic docs**: Added 28-line `//!` module overview, documented all 8 structs with field-level `///`, enhanced all 4 public functions with `# Arguments`/`# Returns`/`# Examples`, documented `TrendIndicator` enum with variant docs, enhanced `apply_adjustments` and `apply_normalization` method docs
+1. **Task 1 — steady-invest-logic docs**: Added 28-line `//!` module overview, documented all 8 structs with field-level `///`, enhanced all 4 public functions with `# Arguments`/`# Returns`/`# Examples`, documented `TrendIndicator` enum with variant docs, enhanced `apply_adjustments` and `apply_normalization` method docs
 2. **Task 2 — Backend module-level docs**: Added `//!` docs to all 11 module root files (lib.rs, app.rs, 9 mod.rs files)
 3. **Task 3 — Backend controller & service docs**: Added `//!` module docs and `///` endpoint/function docs to all 6 controllers, 5 services, 8 model wrappers, 1 worker, 2 view DTOs, 1 mailer, 1 middleware
 4. **Task 4 — Frontend docs**: Added `//!` module docs to lib.rs, components/mod.rs, pages/mod.rs; documented all 8 components, 3 pages, types.rs, persistence.rs
-5. **Task 5 — Cargo.toml metadata**: Added `description` to naic-logic, frontend, and backend Cargo.toml files
+5. **Task 5 — Cargo.toml metadata**: Added `description` to steady-invest-logic, frontend, and backend Cargo.toml files
 6. **Task 6 — Quality verification**: `cargo doc --no-deps` clean, fixed 1 redundant link warning in app.rs, all unit tests + doctest pass
 7. **Code Review Fixes** (Reviewer: Claude Opus 4.6):
    - H1: Added `# Examples` doctests to `calculate_pe_ranges`, `calculate_quality_analysis`, `calculate_projected_trendline` (now 4 doctests total)
@@ -431,7 +431,7 @@ Claude Opus 4.6 (claude-opus-4-6)
 
 ### File List
 
-**crates/naic-logic/** (2 files):
+**crates/steady-invest-logic/** (2 files):
 - `src/lib.rs` — Module docs, struct docs, function docs, doctest
 - `Cargo.toml` — Added `description`
 

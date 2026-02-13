@@ -4,7 +4,7 @@
 //! trend indicators (arrows + color coding) for each year of historical data.
 
 use leptos::prelude::*;
-use naic_logic::{HistoricalData, calculate_quality_analysis, TrendIndicator};
+use steady_invest_logic::{HistoricalData, calculate_quality_analysis, TrendIndicator};
 
 /// Quality metrics table showing ROE and Profit-on-Sales with trend arrows.
 ///

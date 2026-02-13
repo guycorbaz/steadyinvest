@@ -1,4 +1,4 @@
-//! # NAIC Frontend
+//! # SteadyInvest Frontend
 //!
 //! Leptos 0.8 CSR (Client-Side Rendered) single-page application for
 //! interactive NAIC Stock Selection Guide analysis.

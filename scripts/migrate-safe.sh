@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# migrate-safe.sh — Pre-migration backup wrapper for naic
+# migrate-safe.sh — Pre-migration backup wrapper for SteadyInvest
 #
 # Creates a timestamped MariaDB backup before running SeaORM migrations.
 # If the backup fails, the migration does NOT proceed.
@@ -57,9 +57,9 @@ mkdir -p "$BACKUP_DIR"
 
 # --- Generate timestamped backup filename ---
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/naic-backup-${TIMESTAMP}.sql"
+BACKUP_FILE="$BACKUP_DIR/steadyinvest-backup-${TIMESTAMP}.sql"
 
-echo "=== naic Safe Migration ==="
+echo "=== SteadyInvest Safe Migration ==="
 echo "Database: $DB_NAME @ $DB_HOST:$DB_PORT"
 echo "Backup target: $BACKUP_FILE"
 echo ""

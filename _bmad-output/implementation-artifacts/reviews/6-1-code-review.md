@@ -349,7 +349,7 @@ const cagr = (Math.pow(newValue / salesStartValue, 1 / salesYears) - 1) * 100;
 
 **Impact:** Future developers might not understand why CAGR is negated at call site.
 
-**Recommendation:** Add documentation to `naic-logic/src/lib.rs`:
+**Recommendation:** Add documentation to `steady-invest-logic/src/lib.rs`:
 
 ```rust
 /// Calculates projected trendline values based on CAGR.

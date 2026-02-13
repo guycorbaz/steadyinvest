@@ -5,11 +5,11 @@ date: 2026-02-03
 author: Guy
 ---
 
-# Product Brief: naic
+# Product Brief: SteadyInvest
 
 ## Executive Summary
 
-**naic** is an open-source investment analysis platform designed to bring the disciplined NAIC (National Association of Investors Corporation) methodology into the modern, global era. By automating the extraction of 10-year historical financial data for international markets (beginning with Swiss and German tickers), **naic** eliminates the manual entry barrier that currently discourages analysts from researching non-US growth stocks. It combines tradition with technology, providing a "One-Click History" experience that empowers individual hobbyists to apply institutional-grade analysis to any company, anywhere.
+**SteadyInvest** is an open-source investment analysis platform designed to bring the disciplined NAIC (National Association of Investors Corporation) methodology into the modern, global era. By automating the extraction of 10-year historical financial data for international markets (beginning with Swiss and German tickers), **SteadyInvest** eliminates the manual entry barrier that currently discourages analysts from researching non-US growth stocks. It combines tradition with technology, providing a "One-Click History" experience that empowers individual hobbyists to apply institutional-grade analysis to any company, anywhere.
 
 ---
 
@@ -58,7 +58,7 @@ An open-source, data-driven application that automates the NAIC SSG workflow for
 
 - **Profile**: Members of local or online investment clubs who share reports and analyze stocks collaboratively.
 
-- **Need**: They benefit from **naic's** ability to generate clear, standardized reports that can be used for group discussions and decision-making.
+- **Need**: They benefit from **SteadyInvest's** ability to generate clear, standardized reports that can be used for group discussions and decision-making.
 
 ### User Journey
 
@@ -66,7 +66,7 @@ An open-source, data-driven application that automates the NAIC SSG workflow for
 - **Onboarding**: The user opens the app and is greeted by a clean "Zen" search bar. No complex setup is required to see the first analysis.
 - **Core Usage**: The user enters a ticker (e.g., `NESN.SW` or `SAP.DE`).
 - **The Success ("Aha!") Moment**: Instantly, a 10-year logarithmic chart appears, populated with sales, earnings, and price history. All the "chores" (splits, currency normalization) are handled. The user's focus shifts immediately from *transcribing* data to *interpreting* the company's growth story.
-- **Long-term Value**: **naic** becomes the primary tool for quarterly watchlist reviews, enabling the user to maintain a much broader and more geographically diverse portfolio with significantly less effort.
+- **Long-term Value**: **SteadyInvest** becomes the primary tool for quarterly watchlist reviews, enabling the user to maintain a much broader and more geographically diverse portfolio with significantly less effort.
 
 ---
 
@@ -81,7 +81,7 @@ An open-source, data-driven application that automates the NAIC SSG workflow for
 
 ### Business Objectives
 
-- **Growth (3-6 Months)**: Establish **naic** as a recognized open-source alternative for international NAIC investors, measured by GitHub repository interest and community engagement.
+- **Growth (3-6 Months)**: Establish **SteadyInvest** as a recognized open-source alternative for international NAIC investors, measured by GitHub repository interest and community engagement.
 - **Strategic Position**: Successfully bridge the gap between US-centric proprietary software and the needs of the European (CH/DE) investment community.
 - **Functional Excellence**: Provide a 100% reliable "One-Click" data pipeline for at least three major international exchanges (SMI, DAX, and a major US exchange).
 

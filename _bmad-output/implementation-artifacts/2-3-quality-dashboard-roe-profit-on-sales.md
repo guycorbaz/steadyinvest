@@ -16,16 +16,16 @@ so that I can verify the company's operational efficiency and management quality
 2. **10-Year Data**: Display 10 fiscal years of ROE (%) and Pre-tax Profit on Sales (%).
 3. **Trend Highlighting**: Visual indicators (heat-mapped or arrows) for year-over-year growth/decline.
 4. **Data Model Extension**: Database schema and data models must support the required underlying fields (Pre-tax Profit, Net Income, Equity).
-5. **Logic Isolation**: Ratio calculations must be implemented in the shared `naic-logic` crate.
+5. **Logic Isolation**: Ratio calculations must be implemented in the shared `steady-invest-logic` crate.
 
 ## Tasks / Subtasks
 
 - [x] **Data Model Extension** (AC: #4)
   - [x] Create migration to add `pretax_income`, `net_income`, and `total_equity` to `historicals` table.
-  - [x] Update `naic-logic` `HistoricalYearlyData` and backend `historicals` model.
+  - [x] Update `steady-invest-logic` `HistoricalYearlyData` and backend `historicals` model.
   - [x] Update `Seed` task to include sample data for these new fields.
 - [x] **Business Logic** (AC: #5)
-  - [x] Implement `calculate_quality_analysis` in `naic-logic` to compute % ratios and YoY trends.
+  - [x] Implement `calculate_quality_analysis` in `steady-invest-logic` to compute % ratios and YoY trends.
   - [x] Add unit tests for ratio accuracy.
 - [x] **UI Implementation** (AC: #1, #2, #3)
   - [x] Create `QualityDashboard` component in `frontend/src/components/`.
@@ -43,7 +43,7 @@ so that I can verify the company's operational efficiency and management quality
 
 ### Project Structure Notes
 
-- Data logic stays in `crates/naic-logic`.
+- Data logic stays in `crates/steady-invest-logic`.
 - Frontend components in `frontend/src/components/`.
 
 ### References
@@ -59,7 +59,7 @@ Antigravity (BMad Edition) - 2026-02-07
 
 ### File List
 
-- [crates/naic-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/naic-logic/src/lib.rs)
+- [crates/steady-invest-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/steady-invest-logic/src/lib.rs)
 - [backend/src/models/_entities/historicals.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/_entities/historicals.rs)
 - [backend/migration/src/m20260207_101051_add_quality_fields_to_historicals.rs](file:///home/gcorbaz/synology/devel/naic/backend/migration/src/m20260207_101051_add_quality_fields_to_historicals.rs)
 - [backend/src/services/harvest.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/services/harvest.rs)

@@ -4,7 +4,7 @@ I have successfully implemented Historical Split and Dividend Adjustment logic, 
 
 ## Changes Made
 
-### 1. Shared Logic (`naic-logic`)
+### 1. Shared Logic (`steady-invest-logic`)
 
 - Added `is_split_adjusted` field to `HistoricalData`.
 - Added `adjustment_factor` to `HistoricalYearlyData`.
@@ -24,7 +24,7 @@ I have successfully implemented Historical Split and Dividend Adjustment logic, 
 
 ### Automated Tests
 
-- **Unit Test**: Verified the split adjustment math in `naic-logic`. A 2:1 split correctly doubled EPS and Prices for historical records.
+- **Unit Test**: Verified the split adjustment math in `steady-invest-logic`. A 2:1 split correctly doubled EPS and Prices for historical records.
 - **Integration Test**: Used `curl` to verify that the backend returns correctly flagged and adjusted JSON.
 
 ### Manual / Browser Verification
@@ -41,7 +41,7 @@ I used a browser subagent to verify the UI behavior:
 
 ````carousel
 ```rust
-// naic-logic adjustment utility
+// steady-invest-logic adjustment utility
 pub fn apply_adjustments(&mut self) {
     let mut adjusted = false;
     for record in &mut self.records {

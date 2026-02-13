@@ -5,7 +5,7 @@
 
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlAnchorElement, Url, Blob, BlobPropertyBag, HtmlInputElement, FileReader};
-use naic_logic::AnalysisSnapshot;
+use steady_invest_logic::AnalysisSnapshot;
 use leptos::prelude::*;
 use leptos::prelude::Callable;
 
@@ -49,7 +49,7 @@ pub fn trigger_download(filename: &str, content: &str) -> Result<(), JsValue> {
 /// Returns an error if JSON serialization or the browser download trigger fails.
 pub fn save_snapshot(snapshot: &AnalysisSnapshot) -> Result<(), String> {
     let json = serde_json::to_string_pretty(snapshot).map_err(|e| e.to_string())?;
-    let filename = format!("naic_analysis_{}_{}.json", 
+    let filename = format!("steadyinvest_analysis_{}_{}.json",
         snapshot.historical_data.ticker, 
         snapshot.captured_at.format("%Y%m%d_%H%M%S")
     );
@@ -58,7 +58,7 @@ pub fn save_snapshot(snapshot: &AnalysisSnapshot) -> Result<(), String> {
     Ok(())
 }
 
-/// Opens a file picker for `.json` / `.naic` files and deserializes the selected file.
+/// Opens a file picker for `.json` / `.sinv` files and deserializes the selected file.
 ///
 /// Calls `on_load` with the parsed [`AnalysisSnapshot`] on success,
 /// or shows a browser alert if the file is corrupt.
@@ -73,7 +73,7 @@ pub fn trigger_import(on_load: Callback<AnalysisSnapshot>) -> Result<(), JsValue
     let input = document.create_element("input")?
         .dyn_into::<HtmlInputElement>()?;
     input.set_type("file");
-    input.set_accept(".json,.naic");
+    input.set_accept(".json,.sinv");
     
     let on_change = Closure::wrap(Box::new(move |ev: web_sys::Event| {
         let input: HtmlInputElement = ev.target().unwrap().dyn_into().unwrap();

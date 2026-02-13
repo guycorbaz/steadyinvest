@@ -21,7 +21,7 @@ so that I can establish a reasonable valuation floor and ceiling.
 ## Tasks / Subtasks
 
 - [x] Core Logic Expansion (AC: 1, 2)
-  - [x] Implement `calculate_pe_ranges` in `naic-logic`.
+  - [x] Implement `calculate_pe_ranges` in `steady-invest-logic`.
   - [x] Add `PeRange` struct to the API payload.
 - [x] Frontend Visualization (AC: 3, 4)
   - [x] Create `ValuationPanel` component in `frontend/src/components/valuation_panel.rs`.
@@ -33,16 +33,16 @@ so that I can establish a reasonable valuation floor and ceiling.
 
 ## Dev Notes
 
-- **Relevant architecture patterns**: Use `naic-logic` for all math. UI should be high-density "Institutional HUD" style.
+- **Relevant architecture patterns**: Use `steady-invest-logic` for all math. UI should be high-density "Institutional HUD" style.
 - **Source tree components to touch**:
-  - `crates/naic-logic/src/lib.rs`: Math for P/E ranges.
+  - `crates/steady-invest-logic/src/lib.rs`: Math for P/E ranges.
   - `frontend/src/components/ssg_chart.rs`: Possible chart overlays.
   - `frontend/src/components/mod.rs`: Export new component.
 - **Testing standards summary**: Verify P/E math against manual calculations for known tickers.
 
 ### Project Structure Notes
 
-- Alignment with unified project structure: Logic in `naic-logic`, components in `frontend/src/components`.
+- Alignment with unified project structure: Logic in `steady-invest-logic`, components in `frontend/src/components`.
 
 ### References
 
@@ -60,14 +60,14 @@ Antigravity
 
 ### Completion Notes List
 
-- Implemented `calculate_pe_analysis` in `naic-logic` with 10-year historical High/Low P/E averages.
+- Implemented `calculate_pe_analysis` in `steady-invest-logic` with 10-year historical High/Low P/E averages.
 - Built the `ValuationPanel` component with interactive P/E sliders and real-time Target Zone calculations.
 - Integrated shared reactive signals between the SSG Chart and the Valuation Panel for immediate feedback on EPS growth changes.
 - Verified mathematical correctness with unit tests in the logic crate.
 
 ### File List
 
-- `crates/naic-logic/src/lib.rs` (Logic Refactor & AC 1/2 fix)
+- `crates/steady-invest-logic/src/lib.rs` (Logic Refactor & AC 1/2 fix)
 - `backend/src/services/harvest.rs` (Backend Orchestration)
 - `backend/migration/src/lib.rs` (Migration Integration)
 - `backend/migration/src/m20260207_101051_add_quality_fields_to_historicals.rs` (New Schema)

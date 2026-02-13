@@ -13,7 +13,7 @@ use charming::{
     Chart,
 };
 use genpdf::{elements, fonts, style};
-use naic_logic::AnalysisSnapshot;
+use steady_invest_logic::AnalysisSnapshot;
 use rust_decimal::prelude::ToPrimitive;
 
 /// Alias for fallible report operations.
@@ -129,7 +129,7 @@ impl ReportingService {
         header_row.push().map_err(|e| format!("Table error: {}", e))?;
 
         let hist = &snapshot.historical_data;
-        let quality = naic_logic::calculate_quality_analysis(hist);
+        let quality = steady_invest_logic::calculate_quality_analysis(hist);
         
         for point in quality.points {
             let mut row = table.row();

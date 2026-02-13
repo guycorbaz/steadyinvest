@@ -8,11 +8,11 @@ inputDocuments:
   - '_bmad-output/implementation-artifacts/epic-6-retro-2026-02-10.md'
 ---
 
-# naic - Epic Breakdown
+# SteadyInvest - Epic Breakdown
 
 ## Overview
 
-This document provides the complete epic and story breakdown for naic, decomposing the requirements from the PRD, UX Design, and Architecture into implementable stories for the post-MVP evolution (Phases 1-4).
+This document provides the complete epic and story breakdown for SteadyInvest, decomposing the requirements from the PRD, UX Design, and Architecture into implementable stories for the post-MVP evolution (Phases 1-4).
 
 **Context:** Epics 1-6 (MVP) are delivered and complete. This document covers Epics 7+ for the post-MVP roadmap.
 
@@ -85,7 +85,7 @@ This document provides the complete epic and story breakdown for naic, decomposi
 - New backend service directory: `backend/src/services/` (snapshot_service, comparison_service, portfolio_service, exposure_service).
 - New frontend state module: `frontend/src/state/` with global signals (Active Portfolio, Currency Preference).
 - API expansion: ~29 new routes across Phases 1-3.
-- Cardinal Rule: all calculation logic in `crates/naic-logic` — never duplicated.
+- Cardinal Rule: all calculation logic in `crates/steady-invest-logic` — never duplicated.
 - Open decision: Static Chart Image Capture — recommended Option A (lock-time browser capture).
 - Open decision: Performance test harness — recommended Option C (timed assertions in integration tests) for API NFRs.
 
@@ -683,9 +683,9 @@ So that I maintain diversification discipline.
 **Then** the over-exposed holding is flagged with `over_exposed: true` and `excess_pct: 5`
 **And** a rebalancing suggestion is included: "Consider reducing [ticker] by [amount] to bring allocation to [target]%"
 
-**Given** the `naic-logic` crate
+**Given** the `steady-invest-logic` crate
 **When** portfolio composition and exposure detection logic is implemented
-**Then** the calculation functions live in `crates/naic-logic` (Cardinal Rule)
+**Then** the calculation functions live in `crates/steady-invest-logic` (Cardinal Rule)
 **And** functions include: `calculate_portfolio_composition()`, `detect_over_exposure()`
 **And** each function has doc examples that serve as doctests
 
@@ -764,9 +764,9 @@ So that I maintain diversification without manual calculations.
 **When** the position sizing endpoint is called
 **Then** the suggested maximum buy is CHF 3,000 (to reach 10%)
 
-**Given** the `naic-logic` crate
+**Given** the `steady-invest-logic` crate
 **When** position sizing logic is implemented
-**Then** the function `calculate_position_size()` lives in `crates/naic-logic` (Cardinal Rule)
+**Then** the function `calculate_position_size()` lives in `crates/steady-invest-logic` (Cardinal Rule)
 **And** includes a doctest with the CHF 100K example from the PRD
 
 **Given** the Position Sizing Calculator component

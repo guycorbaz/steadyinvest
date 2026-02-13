@@ -5,7 +5,7 @@
 //! importing previously saved analysis snapshots.
 
 use leptos::prelude::*;
-use naic_logic::TickerInfo;
+use steady_invest_logic::TickerInfo;
 use gloo_net::http::Request;
 
 /// Ticker search input with autocomplete results.
@@ -21,7 +21,7 @@ pub fn SearchBar<F, G>(
 ) -> impl IntoView
 where
     F: Fn(TickerInfo) + Send + Sync + Clone + 'static,
-    G: Fn(naic_logic::AnalysisSnapshot) + Send + Sync + Clone + 'static,
+    G: Fn(steady_invest_logic::AnalysisSnapshot) + Send + Sync + Clone + 'static,
 {
     let (query, set_query) = signal(String::new());
     let (is_expanded, set_is_expanded) = signal(false);

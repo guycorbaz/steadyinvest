@@ -6,7 +6,7 @@
 
 use crate::components::ssg_chart;
 use leptos::prelude::*;
-use naic_logic::{HistoricalData, AnalysisSnapshot};
+use steady_invest_logic::{HistoricalData, AnalysisSnapshot};
 use serde::Serialize;
 
 /// JSON request body for the Phase 1 snapshot API.

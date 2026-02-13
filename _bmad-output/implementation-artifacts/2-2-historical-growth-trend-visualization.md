@@ -19,7 +19,7 @@ so that I can identify the long-term stability and consistency of the business.
 ## Tasks / Subtasks
 
 - [x] Trendline Calculation Logic <!-- id: 0 -->
-  - [x] Implement linear regression algorithm in `naic-logic` crate.
+  - [x] Implement linear regression algorithm in `steady-invest-logic` crate.
   - [x] Calculate CAGR for 10-year Sales and EPS.
 - [x] UI Component Updates <!-- id: 1 -->
   - [x] Update `SSGChart` to include extra `Line` series for trendlines.
@@ -40,7 +40,7 @@ so that I can identify the long-term stability and consistency of the business.
 
 ### File List
 
-- [crates/naic-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/naic-logic/src/lib.rs): Implemented `calculate_growth_analysis` and logic hardening.
+- [crates/steady-invest-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/steady-invest-logic/src/lib.rs): Implemented `calculate_growth_analysis` and logic hardening.
 - [frontend/src/components/ssg_chart.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/components/ssg_chart.rs): Updated UI with trendlines, CAGR labels, and toggle mode.
 - [_bmad-output/implementation-artifacts/sprint-status.yaml](file:///home/gcorbaz/synology/devel/naic/_bmad-output/implementation-artifacts/sprint-status.yaml): Updated story status.
 
@@ -54,7 +54,7 @@ so that I can identify the long-term stability and consistency of the business.
 ## Dev Notes
 
 - **Log Space Regression**: Remember that linear regression must be performed on the *logarithm* of the values to appear as a straight line on the log chart.
-- **Math Logic**: Centralize regression math in `crates/naic-logic` to follow the project's consistent logic pattern.
+- **Math Logic**: Centralize regression math in `crates/steady-invest-logic` to follow the project's consistent logic pattern.
 - **Library**: `charming` supports additional series for trendlines easily.
 
 ### References

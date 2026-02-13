@@ -6,7 +6,7 @@
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::models::{_entities::analysis_snapshots, tickers};
-use naic_logic::AnalysisSnapshot;
+use steady_invest_logic::AnalysisSnapshot;
 use sea_orm::QueryOrder;
 
 /// Request body for locking (saving) an analysis snapshot.

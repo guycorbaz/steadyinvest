@@ -19,7 +19,7 @@ pub struct SearchParams {
 ///
 /// **GET** `/api/tickers/search?q={query}`
 ///
-/// Returns a JSON array of [`naic_logic::TickerInfo`] matches.
+/// Returns a JSON array of [`steady_invest_logic::TickerInfo`] matches.
 ///
 /// # Errors
 ///
@@ -40,7 +40,7 @@ pub async fn search(
         .all(&ctx.db)
         .await?;
 
-    let results: Vec<naic_logic::TickerInfo> =
+    let results: Vec<steady_invest_logic::TickerInfo> =
         tickers.into_iter().map(|t| t.to_ticker_info()).collect();
 
     format::json(results)

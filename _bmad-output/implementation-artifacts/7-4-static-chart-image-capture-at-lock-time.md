@@ -60,13 +60,13 @@ So that I can view the chart on mobile and include it in PDF exports without re-
 - [x] Task 5: Migrate lock thesis modal to use `/api/v1/snapshots` endpoint (AC: #1)
   - [x] 5.1 In `lock_thesis_modal.rs`, add `chart_id: String` prop to `LockThesisModal` component signature
   - [x] 5.2 Replace `LockRequest` with `CreateSnapshotPayload` struct using `ticker: String` (symbol) instead of `ticker_id: i32` (see Task 6.0 deviation)
-  - [x] 5.3 **DEVIATION:** Instead of `ticker_id: i32` prop, the modal sends `ticker: String` and the backend resolves the ID. This avoids cascading changes to `naic-logic::TickerInfo`, the search API, and the entire frontend component chain.
+  - [x] 5.3 **DEVIATION:** Instead of `ticker_id: i32` prop, the modal sends `ticker: String` and the backend resolves the ID. This avoids cascading changes to `steady-invest-logic::TickerInfo`, the search API, and the entire frontend component chain.
   - [x] 5.4 Lock handler: calls `ssg_chart::capture_chart_image(&chart_id)`, serializes `AnalysisSnapshot` via `serde_json::to_value()`, POSTs to `/api/v1/snapshots`
   - [x] 5.5 Error handling: if `capture_chart_image` returns `None`, proceeds with `chart_image: None` and logs via `log::warn!()` (AC #2)
   - [x] 5.6 Response handling retained from original implementation
 
 - [x] Task 6: Update AnalystHUD to pass chart_id to modal (AC: #1)
-  - [x] 6.0 **INVESTIGATION RESULT:** `ticker_id: i32` is NOT available in the frontend data flow. `TickerInfo` (in `naic-logic`) only has `ticker: String`, `name`, `exchange`, `currency`. Threading `ticker_id` would require modifying `naic-logic` (explicitly listed as "Files NOT to modify"). **Resolution:** Backend `CreateSnapshotRequest` now accepts `ticker: Option<String>` as an alternative to `ticker_id`. The frontend sends ticker symbol, backend resolves to ID.
+  - [x] 6.0 **INVESTIGATION RESULT:** `ticker_id: i32` is NOT available in the frontend data flow. `TickerInfo` (in `steady-invest-logic`) only has `ticker: String`, `name`, `exchange`, `currency`. Threading `ticker_id` would require modifying `steady-invest-logic` (explicitly listed as "Files NOT to modify"). **Resolution:** Backend `CreateSnapshotRequest` now accepts `ticker: Option<String>` as an alternative to `ticker_id`. The frontend sends ticker symbol, backend resolves to ID.
   - [x] 6.1 In `analyst_hud.rs`, pass `chart_id=format!("ssg-chart-{}", ticker.ticker.to_lowercase())` to `LockThesisModal`
   - [x] 6.2 `ticker_id` prop not needed — backend resolves from ticker symbol
   - [x] 6.3 N/A — resolved via backend ticker symbol resolution
@@ -91,7 +91,7 @@ So that I can view the chart on mobile and include it in PDF exports without re-
 
 ### Critical Architecture Constraints
 
-**Cardinal Rule:** All calculation logic lives in `crates/naic-logic`. This story touches the **frontend rendering pipeline** and **backend API** — no calculation logic is involved. No naic-logic changes needed.
+**Cardinal Rule:** All calculation logic lives in `crates/steady-invest-logic`. This story touches the **frontend rendering pipeline** and **backend API** — no calculation logic is involved. No steady-invest-logic changes needed.
 
 **Architecture Decision (Option A — Lock-time browser capture):** This is the resolved architecture decision from the party mode review (2026-02-11). Zero server infrastructure. Image captured client-side via ECharts export API when user locks a thesis. Non-blocking — if capture fails, snapshot saves without image.
 
@@ -269,7 +269,7 @@ Files to MODIFY:
 - `backend/tests/requests/snapshots.rs` — Add 4 new tests for chart image
 
 Files NOT to modify:
-- `crates/naic-logic/` — No calculation logic involved
+- `crates/steady-invest-logic/` — No calculation logic involved
 - `backend/src/controllers/analyses.rs` — Legacy endpoints stay as-is (still functional, just no longer used by lock flow)
 - `backend/src/models/_entities/analysis_snapshots.rs` — Entity already has `chart_image` field (Story 7.2)
 - `backend/migration/` — No schema changes; `chart_image` MEDIUMBLOB column already exists (Story 7.2)
@@ -363,7 +363,7 @@ Claude Opus 4.6
 
 ### Completion Notes List
 
-- **Task 6.0 Investigation:** `ticker_id: i32` is NOT available in the frontend data flow (`TickerInfo` in `naic-logic` has no `id` field). Resolution: modified `CreateSnapshotRequest` to accept `ticker: Option<String>` as an alternative to `ticker_id: Option<i32>`. Backend resolves ticker symbol to DB ID. This avoids modifying `naic-logic` (explicitly in "Files NOT to modify") and eliminates cascading changes across 6+ frontend files.
+- **Task 6.0 Investigation:** `ticker_id: i32` is NOT available in the frontend data flow (`TickerInfo` in `steady-invest-logic` has no `id` field). Resolution: modified `CreateSnapshotRequest` to accept `ticker: Option<String>` as an alternative to `ticker_id: Option<i32>`. Backend resolves ticker symbol to DB ID. This avoids modifying `steady-invest-logic` (explicitly in "Files NOT to modify") and eliminates cascading changes across 6+ frontend files.
 - **Task 3 deviation:** `ticker_id` changed from `i32` to `Option<i32>` to support the new `ticker: Option<String>` alternative. Existing tests continue to work because they send `ticker_id` in JSON which deserializes to `Some(value)`.
 - **Task 5 deviation:** `CreateSnapshotPayload` uses `ticker: String` instead of `ticker_id: i32`. Backend resolves it.
 - **Task 7.5:** Oversized chart image test accepts both 400 (our code) and 413 (Axum body limit) since the framework's default ~2MB JSON body limit rejects the 5MB+ payload before our handler runs.

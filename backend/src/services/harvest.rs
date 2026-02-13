@@ -6,7 +6,7 @@
 
 use loco_rs::prelude::*;
 use crate::models::{historicals, tickers};
-use naic_logic::{HistoricalData, HistoricalYearlyData};
+use steady_invest_logic::{HistoricalData, HistoricalYearlyData};
 use rust_decimal::prelude::*;
 use chrono::Datelike;
 use std::time::Duration;
@@ -88,7 +88,7 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
 
             // Apply overrides (AC 4, 6)
             for ovr in db_overrides.iter().filter(|o| o.fiscal_year == year) {
-                let logic_ovr = naic_logic::ManualOverride {
+                let logic_ovr = steady_invest_logic::ManualOverride {
                     field_name: ovr.field_name.clone(),
                     value: ovr.value,
                     note: ovr.note.clone(),
@@ -129,7 +129,7 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
     data.apply_adjustments();
     
     // 4. Compute P/E Analysis (AC 1, 2)
-    data.pe_range_analysis = Some(naic_logic::calculate_pe_ranges(&data));
+    data.pe_range_analysis = Some(steady_invest_logic::calculate_pe_ranges(&data));
 
     let db = &ctx.db;
     

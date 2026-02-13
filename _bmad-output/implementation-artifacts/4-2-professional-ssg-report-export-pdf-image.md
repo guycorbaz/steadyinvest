@@ -36,7 +36,7 @@ so that I can share standardized reports with the rest of my investment club.
 ## Dev Notes
 
 - **Architecture Boundary**: PDF logic remains in the backend service layer.
-- **Math Consistency**: Uses `crates/naic-logic` for all financial data formatting.
+- **Math Consistency**: Uses `crates/steady-invest-logic` for all financial data formatting.
 - **Charting Engine**: `charming` SVG output rasterized via `resvg` for high-fidelity PDF.
 - **Performance**: Heavy rendering wrapped in `spawn_blocking`.
 

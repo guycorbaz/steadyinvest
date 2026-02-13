@@ -12,7 +12,7 @@ use crate::services::harvest;
 /// **POST** `/api/harvest/{ticker}`
 ///
 /// Validates the ticker format, delegates to [`harvest::run_harvest`], and
-/// returns the assembled [`naic_logic::HistoricalData`] as JSON.
+/// returns the assembled [`steady_invest_logic::HistoricalData`] as JSON.
 ///
 /// # Errors
 ///

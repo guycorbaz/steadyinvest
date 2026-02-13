@@ -257,7 +257,7 @@ All vision elements (SSG automation, One-Click History, investment management pl
 
 **Domain:** fintech
 **Complexity:** High (regulated)
-**Context:** naic is an investment *analysis* platform — it does not process payments, execute trades, or hold custody of funds. This significantly limits which traditional fintech compliance requirements apply.
+**Context:** SteadyInvest is an investment *analysis* platform — it does not process payments, execute trades, or hold custody of funds. This significantly limits which traditional fintech compliance requirements apply.
 
 #### Required Special Sections
 
@@ -278,7 +278,7 @@ All vision elements (SSG automation, One-Click History, investment management pl
 - **Gap:** No explicit audit trail requirement for data modifications or user actions. Consider adding for Phase 3.
 
 **Fraud Prevention:** Not Applicable
-- naic is an analysis and portfolio tracking tool — no financial transactions are processed through the platform. Fraud prevention is not relevant.
+- SteadyInvest is an analysis and portfolio tracking tool — no financial transactions are processed through the platform. Fraud prevention is not relevant.
 
 #### Compliance Matrix
 
@@ -302,7 +302,7 @@ All vision elements (SSG automation, One-Click History, investment management pl
 
 **Severity:** Pass (with informational notes)
 
-**Recommendation:** Domain compliance is appropriate for naic's current scope as an investment analysis tool. The PRD correctly focuses on data accuracy, licensing, and currency handling — the fintech concerns directly relevant to analysis. Two forward-looking gaps should be addressed when Phase 3 (multi-user) planning begins: (1) GDPR/data privacy requirements for EU users, and (2) user action audit logging. Traditional fintech compliance (PCI-DSS, KYC/AML, fraud prevention) is correctly absent since naic doesn't process financial transactions.
+**Recommendation:** Domain compliance is appropriate for SteadyInvest's current scope as an investment analysis tool. The PRD correctly focuses on data accuracy, licensing, and currency handling — the fintech concerns directly relevant to analysis. Two forward-looking gaps should be addressed when Phase 3 (multi-user) planning begins: (1) GDPR/data privacy requirements for EU users, and (2) user action audit logging. Traditional fintech compliance (PCI-DSS, KYC/AML, fraud prevention) is correctly absent since SteadyInvest doesn't process financial transactions.
 
 ### Project-Type Compliance Validation
 

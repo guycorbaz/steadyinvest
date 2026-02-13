@@ -35,7 +35,7 @@ So that my previous work is not lost as the platform evolves.
   - [x] 1.1 Create `scripts/` directory at project root
   - [x] 1.2 Write `migrate-safe.sh` that: (a) creates a timestamped MariaDB dump using `mysqldump`, (b) exits non-zero if dump fails, (c) runs `cargo loco db migrate` only if dump succeeds
   - [x] 1.3 Script reads `DATABASE_URL` from `.env` or environment to extract host, port, user, password, database name
-  - [x] 1.4 Backup file naming: `backups/naic-backup-YYYYMMDD-HHMMSS.sql` (create `backups/` dir if not exists)
+  - [x] 1.4 Backup file naming: `backups/steadyinvest-backup-YYYYMMDD-HHMMSS.sql` (create `backups/` dir if not exists)
   - [x] 1.5 Make script executable (`chmod +x`)
   - [x] 1.6 Add `backups/` to `.gitignore` if not already present
 
@@ -103,7 +103,7 @@ So that my previous work is not lost as the platform evolves.
 
 ### Critical Architecture Constraints
 
-**Cardinal Rule:** All calculation logic lives in `crates/naic-logic`. This story is database schema + migration — no calculation logic involved. No naic-logic changes needed.
+**Cardinal Rule:** All calculation logic lives in `crates/steady-invest-logic`. This story is database schema + migration — no calculation logic involved. No steady-invest-logic changes needed.
 
 **Append-Only Model:** The `analysis_snapshots` table is **append-only** — each save creates a new row, never updates an existing one. This is a deliberate architectural decision for comparison integrity and thesis evolution tracking. The controller MUST enforce this: `POST` creates new rows, no `PUT`/`PATCH` on snapshot content.
 
@@ -142,7 +142,7 @@ No `user_id`, no `thesis_locked`, no `chart_image`. The entire table is "locked"
 File: `backend/src/controllers/analyses.rs`
 
 Three endpoints currently use `locked_analyses`:
-1. **`POST /api/analyses/lock`** — `LockRequest` struct with `ticker`, `snapshot` (AnalysisSnapshot from naic_logic), `analyst_note`. Creates `locked_analyses::ActiveModel`.
+1. **`POST /api/analyses/lock`** — `LockRequest` struct with `ticker`, `snapshot` (AnalysisSnapshot from steady_invest_logic), `analyst_note`. Creates `locked_analyses::ActiveModel`.
 2. **`GET /api/analyses/{ticker}`** — Finds ticker, queries `locked_analyses::Entity` by ticker_id, orders by `created_at` desc.
 3. **`GET /api/analyses/export/{id}`** — `locked_analyses::Entity::find_by_id(id).find_also_related(tickers::Entity)`. Deserializes `snapshot_data` to `AnalysisSnapshot`, passes to `ReportingService::generate_ssg_report()`.
 
@@ -260,7 +260,7 @@ pub enum Relation {
 - `mysqldump` must be available on the system (it is in MariaDB client packages)
 - Use `set -e` for fail-fast behavior
 - Create `backups/` directory if it doesn't exist
-- Backup filename: `backups/naic-backup-$(date +%Y%m%d-%H%M%S).sql`
+- Backup filename: `backups/steadyinvest-backup-$(date +%Y%m%d-%H%M%S).sql`
 - After successful dump, run `cargo loco db migrate`
 - Script should print clear status messages
 
@@ -285,9 +285,9 @@ Files to DELETE:
 - `backend/src/models/locked_analyses.rs` — Old model wrapper
 
 Files NOT to modify:
-- `crates/naic-logic/` — No calculation logic involved
+- `crates/steady-invest-logic/` — No calculation logic involved
 - `frontend/` — Frontend calls HTTP endpoints, not Rust models. API paths unchanged.
-- `backend/src/services/reporting.rs` — Takes `AnalysisSnapshot` from naic_logic, not the DB model. Verify but likely no changes needed.
+- `backend/src/services/reporting.rs` — Takes `AnalysisSnapshot` from steady_invest_logic, not the DB model. Verify but likely no changes needed.
 
 ### References
 

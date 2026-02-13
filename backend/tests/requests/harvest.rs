@@ -9,7 +9,7 @@ async fn can_harvest_ticker() {
         let res = request.post("/api/harvest/AAPL").await;
         assert_eq!(res.status_code(), 200);
 
-        let data: naic_logic::HistoricalData = res.json();
+        let data: steady_invest_logic::HistoricalData = res.json();
         assert_eq!(data.ticker, "AAPL");
         assert_eq!(data.records.len(), 10);
         assert!(data.is_complete);
@@ -24,7 +24,7 @@ async fn verify_split_adjustment_metadata() {
         let res = request.post("/api/harvest/AAPL").await;
         assert_eq!(res.status_code(), 200);
 
-        let data: naic_logic::HistoricalData = res.json();
+        let data: steady_invest_logic::HistoricalData = res.json();
         assert_eq!(data.ticker, "AAPL");
         assert!(data.is_split_adjusted); // AAPL should be split-adjusted in mock
         for record in &data.records {
@@ -43,7 +43,7 @@ async fn verify_no_split_adjustment_for_standard_ticker() {
         let res = request.post("/api/harvest/MSFT").await;
         assert_eq!(res.status_code(), 200);
 
-        let data: naic_logic::HistoricalData = res.json();
+        let data: steady_invest_logic::HistoricalData = res.json();
         assert_eq!(data.ticker, "MSFT");
         assert!(!data.is_split_adjusted); // MSFT should NOT be split-adjusted
         for record in &data.records {
@@ -61,7 +61,7 @@ async fn verify_currency_normalization_metadata() {
         let res = request.post("/api/harvest/NESN.SW").await;
         assert_eq!(res.status_code(), 200);
 
-        let data: naic_logic::HistoricalData = res.json();
+        let data: steady_invest_logic::HistoricalData = res.json();
         assert_eq!(data.ticker, "NESN.SW");
         assert_eq!(data.currency, "CHF");
         
@@ -81,7 +81,7 @@ async fn verify_normalization_math_consistency() {
         let res = request.post("/api/harvest/NESN.SW").await;
         assert_eq!(res.status_code(), 200);
 
-        let mut data: naic_logic::HistoricalData = res.json();
+        let mut data: steady_invest_logic::HistoricalData = res.json();
         
         // Initially no display_currency is set in the response from run_harvest (None)
         // and records are NOT normalized yet in the response, but exchange rates are provided.

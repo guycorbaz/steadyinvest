@@ -98,7 +98,7 @@ So that I can find, review, and manage my analysis history across all tickers.
 
 ### Critical Architecture Constraints
 
-**Cardinal Rule:** All calculation logic lives in `crates/naic-logic`. This story does NOT involve calculation logic — it's a frontend view consuming existing API data. No naic-logic changes needed.
+**Cardinal Rule:** All calculation logic lives in `crates/steady-invest-logic`. This story does NOT involve calculation logic — it's a frontend view consuming existing API data. No steady-invest-logic changes needed.
 
 **Append-Only / Immutability:** The Library view is read-only — no snapshot creation, modification, or deletion. Clicking a card navigates to the Analysis view which handles snapshot viewing.
 
@@ -265,7 +265,7 @@ Follow existing design system tokens from `frontend/public/styles.scss`:
 - Do NOT create `frontend/src/state/` module yet — that's for Phase 2 (Epic 9) global signals (Active Portfolio, Currency Preference)
 - Do NOT add delete functionality to the Library view — Library is browse-only
 - Do NOT load full `snapshot_data` in the list view — it would be a performance disaster for large libraries
-- Do NOT modify `crates/naic-logic/` — no calculation logic in this story
+- Do NOT modify `crates/steady-invest-logic/` — no calculation logic in this story
 - Do NOT modify the existing `exchange.rs` service or `exchange_rate_provider.rs`
 - Do NOT add currency conversion to Compact Cards — Phase 1 displays native currencies only (per UX spec Component Strategy)
 
@@ -288,7 +288,7 @@ Files to MODIFY:
 Files NOT to modify:
 - `backend/src/services/` — No service changes needed
 - `backend/migration/` — No schema changes needed
-- `crates/naic-logic/` — No calculation logic
+- `crates/steady-invest-logic/` — No calculation logic
 - `frontend/src/components/ssg_chart.rs` — No chart changes
 - `frontend/src/components/analyst_hud.rs` — No analysis HUD changes
 - `frontend/src/components/lock_thesis_modal.rs` — No lock flow changes

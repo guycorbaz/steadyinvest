@@ -8,17 +8,17 @@ Status: done
 
 As a Developer,
 I want to initialize the project using the Loco starter template and configure the base environment (Rust, Postgres),
-so that I can begin implementing the naic analysis engine on a production-grade foundation.
+so that I can begin implementing the SteadyInvest analysis engine on a production-grade foundation.
 
 ## Acceptance Criteria
 
-1. **Loco Initializaton**: The project must be initialized using the `loco-cli` with the command `loco generate app --name naic --db postgres`.
+1. **Loco Initializaton**: The project must be initialized using the `loco-cli` with the command `loco generate app --name steadyinvest --db postgres`.
 2. **Postgres Integration**: SeaORM must be configured and connected to a PostgreSQL database as defined in the `docker-compose.yml`.
-3. **Shared Logic Crate**: A dedicated `crates/naic-logic` crate must be initialized to house shared business logic (math for ROE, Splits, etc.).
+3. **Shared Logic Crate**: A dedicated `crates/steady-invest-logic` crate must be initialized to house shared business logic (math for ROE, Splits, etc.).
 4. **Project Structure Alignment**: The project must follow the defined directory structure:
     - `/backend`: Loco API service.
     - `/frontend`: Leptos CSR app.
-    - `/crates/naic-logic`: Shared domain logic.
+    - `/crates/steady-invest-logic`: Shared domain logic.
     - Root `Cargo.toml`: Workspace configuration.
 5. **Build & Start**: The backend must build and start successfully using `cargo loco run` or similar.
 6. **Docker Scaffolding**: Multi-stage Docker builds for both backend and frontend must be present and functional via `docker-compose.yml`.
@@ -27,11 +27,11 @@ so that I can begin implementing the naic analysis engine on a production-grade 
 
 - [x] Initialize Loco backend (AC: 1, 4)
   - [x] Install `loco-cli` if not present.
-  - [x] Run `loco generate app --name naic --db postgres` in a temporary or nested way to move it to `/backend`.
+  - [x] Run `loco generate app --name steadyinvest --db postgres` in a temporary or nested way to move it to `/backend`.
 - [x] Set up Workspace (AC: 4)
-  - [x] Create root `Cargo.toml` with workspace members `["backend", "frontend", "crates/naic-logic"]`.
+  - [x] Create root `Cargo.toml` with workspace members `["backend", "frontend", "crates/steady-invest-logic"]`.
 - [x] Initialize Shared Logic (AC: 3, 4)
-  - [x] Create `crates/naic-logic` with standard `src/lib.rs`.
+  - [x] Create `crates/steady-invest-logic` with standard `src/lib.rs`.
 - [x] Initialize Frontend (AC: 4)
   - [x] Initialize a Leptos CSR project in `/frontend`.
 - [x] Configure Environment & Docker (AC: 2, 6)
@@ -43,7 +43,7 @@ so that I can begin implementing the naic analysis engine on a production-grade 
 - [x] Create project Workspace <!-- id: 0 -->
 - [x] Initialize Loco starter app in `/backend` <!-- id: 1 -->
 - [x] Initialize Leptos CSR starter app in `/frontend` <!-- id: 2 -->
-- [x] Initialize `naic-logic` crate in `/crates` <!-- id: 3 -->
+- [x] Initialize `steady-invest-logic` crate in `/crates` <!-- id: 3 -->
 - [x] Configure root `Cargo.toml` and shared workspace dependencies <!-- id: 4 -->
 - [x] Create initial `docker-compose.yml` and `.env.example` <!-- id: 5 -->
 - [x] Verify full workspace build (backend, frontend, logic) <!-- id: 6 -->
@@ -52,7 +52,7 @@ so that I can begin implementing the naic analysis engine on a production-grade 
 
 - **Architecture Patterns**: Follow the "Convention over Configuration" approach from Loco.
 - **Naming Conventions**: Backend uses `snake_case`, Frontend uses `PascalCase` for components.
-- **Shared Logic**: Do not implement business logic for NAIC in `backend/` or `frontend/` directly; use `crates/naic-logic`.
+- **Shared Logic**: Do not implement business logic for NAIC in `backend/` or `frontend/` directly; use `crates/steady-invest-logic`.
 - **Reference Architecture**: [Architecture Decision Document](file:///home/gcorbaz/synology/devel/naic/_bmad-output/planning-artifacts/architecture.md)
 
 ### Project Structure Notes

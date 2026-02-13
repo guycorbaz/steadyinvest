@@ -16,7 +16,7 @@ so that I can perform accurate side-by-side benchmarking.
 2. **Exchange Rate Integration**: System retrieves historical exchange rates for each of the 10 years in the dataset (Reporting to Display).
 3. **Precise Normalization**: Historical Sales, EPS, and Prices are converted using specific yearly rates, preserving precision (using `rust_decimal`).
 4. **UI Transparency**: The Analyst HUD explicitly shows both the "Reporting Currency" (native) and the "Display Currency" (normalized).
-5. **Shared Logic**: Normalization math is implemented in `naic-logic` to ensure consistency between backend persistence and frontend rendering.
+5. **Shared Logic**: Normalization math is implemented in `steady-invest-logic` to ensure consistency between backend persistence and frontend rendering.
 
 ## Tasks / Subtasks
 
@@ -25,7 +25,7 @@ so that I can perform accurate side-by-side benchmarking.
   - [ ] Implement `ExchangeService` to fetch/simulate historical rates
   - [ ] Update `run_harvest` to include exchange rates in the response
 - [ ] **Shared Domain Logic** (AC: 1, 3, 5)
-  - [ ] Add `exchange_rate` field to `HistoricalYearlyData` in `naic-logic`
+  - [ ] Add `exchange_rate` field to `HistoricalYearlyData` in `steady-invest-logic`
   - [ ] Implement `apply_normalization(target_currency: &str)` in `HistoricalData`
   - [ ] Add unit tests for cross-currency math (e.g., CHF -> USD)
 - [ ] **Frontend Implementation** (AC: 4)
@@ -37,7 +37,7 @@ so that I can perform accurate side-by-side benchmarking.
 
 - **Precision**: Use `rust_decimal` for all currency math. Avoid `f64` to prevent rounding errors in financial data.
 - **Source tree components to touch**:
-  - `crates/naic-logic/src/lib.rs` (Math)
+  - `crates/steady-invest-logic/src/lib.rs` (Math)
   - `backend/src/services/harvest.rs` (Data enrichment)
   - `frontend/src/pages/home.rs` (UI state)
 - **Testing**: Verify that normalized ratios (like ROE) remain consistent if both numerator and denominator are in the same currency (though normalization usually applies to absolute values like Sales/EPS).
@@ -60,14 +60,14 @@ Antigravity (GPT-4o derived)
 
 ### Debug Log References
 
-- Verified `naic-logic` normalization math via unit tests.
+- Verified `steady-invest-logic` normalization math via unit tests.
 - Verified backend persistence via SeaORM entity generation and Sea-Orm-Migration verification.
 - Verified frontend reactivity and UI rendering of normalization badges.
 
 ### Completion Notes List
 
-- Added `exchange_rate` to `HistoricalYearlyData` in `naic-logic`.
-- Implemented `apply_normalization` in `naic-logic` using `rust_decimal` for precise math.
+- Added `exchange_rate` to `HistoricalYearlyData` in `steady-invest-logic`.
+- Implemented `apply_normalization` in `steady-invest-logic` using `rust_decimal` for precise math.
 - Created `exchange_rates` migration and seeded with 10 years of CHF/USD and EUR/USD rates.
 - Implemented `ExchangeService` in backend to serve historical rates.
 - Updated `harvest.rs` to enrich data with exchange rates based on reporting currency.
@@ -76,7 +76,7 @@ Antigravity (GPT-4o derived)
 
 ### File List
 
-- [crates/naic-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/naic-logic/src/lib.rs)
+- [crates/steady-invest-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/steady-invest-logic/src/lib.rs)
 - [backend/migration/src/m20260207_001419_exchange_rates.rs](file:///home/gcorbaz/synology/devel/naic/backend/migration/src/m20260207_001419_exchange_rates.rs)
 - [backend/src/models/_entities/exchange_rates.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/_entities/exchange_rates.rs)
 - [backend/src/models/exchange_rates.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/exchange_rates.rs)

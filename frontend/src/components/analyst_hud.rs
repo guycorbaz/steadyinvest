@@ -11,7 +11,7 @@ use crate::components::valuation_panel::ValuationPanel;
 use crate::components::override_modal::OverrideModal;
 use crate::components::lock_thesis_modal::LockThesisModal;
 use leptos::prelude::*;
-use naic_logic::{HistoricalData, TickerInfo};
+use steady_invest_logic::{HistoricalData, TickerInfo};
 
 /// Multi-panel analysis workspace for live data.
 ///
@@ -72,7 +72,7 @@ pub fn AnalystHUD(
                         on:click={
                             let data = data.clone();
                             move |_| {
-                                let snapshot = naic_logic::AnalysisSnapshot {
+                                let snapshot = steady_invest_logic::AnalysisSnapshot {
                                     historical_data: data.clone(),
                                     projected_sales_cagr: sales_projection_cagr.get(),
                                     projected_eps_cagr: eps_projection_cagr.get(),

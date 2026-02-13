@@ -44,7 +44,7 @@ so that I can identify systemic data quality issues or faulty provider feeds.
 
 - Backend: `backend/src/controllers/audit.rs`, `backend/src/models/audit_logs.rs`
 - Frontend: `frontend/src/pages/audit_log.rs`
-- Shared logic: `crates/naic-logic/src/lib.rs` (shared event types)
+- Shared logic: `crates/steady-invest-logic/src/lib.rs` (shared event types)
 
 ### References
 

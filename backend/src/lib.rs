@@ -1,6 +1,6 @@
-//! # NAIC Backend
+//! # SteadyInvest Backend
 //!
-//! Loco-based REST API backend for the NAIC Stock Selection Guide application.
+//! Loco-based REST API backend for the SteadyInvest (NAIC SSG) application.
 //!
 //! ## Module Layout
 //!

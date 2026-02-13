@@ -1,6 +1,6 @@
-# NAIC E2E Test Framework (Rust + ThirtyFour)
+# SteadyInvest E2E Test Framework (Rust + ThirtyFour)
 
-This directory contains the End-to-End (E2E) testing suite for the **naic** project, built using [ThirtyFour](https://github.com/stevepryde/thirtyfour), a Selenium-driven WebDriver client for Rust.
+This directory contains the End-to-End (E2E) testing suite for the **SteadyInvest** project, built using [ThirtyFour](https://github.com/stevepryde/thirtyfour), a Selenium-driven WebDriver client for Rust.
 
 ## Prerequisites
 

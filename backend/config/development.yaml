@@ -63,7 +63,7 @@ mailer:
 # Database Configuration
 database:
   # Database connection URI
-  uri: {{ get_env(name="DATABASE_URL", default="mysql://naic:password@127.0.0.1:3306/naic") }}
+  uri: {{ get_env(name="DATABASE_URL", default="mysql://steadyinvest:password@127.0.0.1:3306/steadyinvest") }}
   # When enabled, the sql query will be logged.
   enable_logging: false
   # Set the timeout duration when acquiring a connection.

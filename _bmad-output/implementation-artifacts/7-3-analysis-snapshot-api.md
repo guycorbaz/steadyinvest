@@ -122,7 +122,7 @@ So that my analyses persist in the database and are retrievable at any time.
 
 ### Critical Architecture Constraints
 
-**Cardinal Rule:** All calculation logic lives in `crates/naic-logic`. This story is API CRUD — no calculation logic involved. No naic-logic changes needed.
+**Cardinal Rule:** All calculation logic lives in `crates/steady-invest-logic`. This story is API CRUD — no calculation logic involved. No steady-invest-logic changes needed.
 
 **Append-Only Model:** The `analysis_snapshots` table is **append-only** — each save creates a new row, never updates an existing one. This is a deliberate architectural decision for comparison integrity and thesis evolution tracking. The controller MUST enforce this:
 - `POST` creates new rows only
@@ -344,7 +344,7 @@ Files to MODIFY:
 - `backend/tests/requests/mod.rs` — Add snapshots test module
 
 Files NOT to modify:
-- `crates/naic-logic/` — No calculation logic involved
+- `crates/steady-invest-logic/` — No calculation logic involved
 - `frontend/` — Frontend will integrate in a later story
 - `backend/src/controllers/analyses.rs` — Legacy endpoints stay as-is
 - `backend/src/services/reporting.rs` — PDF export stays on legacy endpoint
@@ -361,7 +361,7 @@ Files NOT to modify:
 - [Source: backend/src/controllers/tickers.rs — Query params pattern]
 - [Source: backend/src/models/_entities/analysis_snapshots.rs — Current entity structure]
 - [Source: backend/migration/src/m20260212_000001_analysis_snapshots.rs — Migration pattern]
-- [Source: crates/naic-logic/src/lib.rs — AnalysisSnapshot struct definition]
+- [Source: crates/steady-invest-logic/src/lib.rs — AnalysisSnapshot struct definition]
 
 ### Previous Story Learnings (from Story 7.2)
 

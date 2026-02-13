@@ -15,9 +15,9 @@ impl ActiveModelBehavior for ActiveModel {
 
 
 impl Model {
-    /// Converts the database model to the shared [`naic_logic::TickerInfo`] DTO.
-    pub fn to_ticker_info(&self) -> naic_logic::TickerInfo {
-        naic_logic::TickerInfo {
+    /// Converts the database model to the shared [`steady_invest_logic::TickerInfo`] DTO.
+    pub fn to_ticker_info(&self) -> steady_invest_logic::TickerInfo {
+        steady_invest_logic::TickerInfo {
             ticker: self.ticker.clone(),
             name: self.name.clone(),
             exchange: self.exchange.clone(),

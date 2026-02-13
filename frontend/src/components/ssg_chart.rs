@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use naic_logic::HistoricalData;
+use steady_invest_logic::HistoricalData;
 use rust_decimal::prelude::ToPrimitive;
 use charming::{
     component::{Axis, Legend, Title},
@@ -155,8 +155,8 @@ pub fn SSGChart(
         let mut eps_years = 0.0;
 
         if trends_active {
-            let sales_trend = naic_logic::calculate_growth_analysis(&raw_years, &sales);
-            let eps_trend = naic_logic::calculate_growth_analysis(&raw_years, &eps);
+            let sales_trend = steady_invest_logic::calculate_growth_analysis(&raw_years, &sales);
+            let eps_trend = steady_invest_logic::calculate_growth_analysis(&raw_years, &eps);
 
             // Initialize projection signals if not yet set
             if !projecting {
@@ -183,13 +183,13 @@ pub fn SSGChart(
 
             // Calculate projections
             // FIX: Negate CAGR values - slider increases should make projections go UP
-            let s_proj = naic_logic::calculate_projected_trendline(
+            let s_proj = steady_invest_logic::calculate_projected_trendline(
                 raw_years[0],
                 sales_start,
                 -s_cagr,  // Negated to fix inversion bug
                 &[raw_years.as_slice(), future_years.as_slice()].concat()
             );
-            let e_proj = naic_logic::calculate_projected_trendline(
+            let e_proj = steady_invest_logic::calculate_projected_trendline(
                 raw_years[0],
                 eps_start,
                 -e_cagr,  // Negated to fix inversion bug

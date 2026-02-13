@@ -25,7 +25,7 @@ so that I remain the final arbiter of data accuracy.
 - [ ] **Database & Models**
   - [x] Create `historicals_overrides` table migration <!-- id: 100 -->
   - [x] Implement `HistoricalOverride` model in backend <!-- id: 101 -->
-  - [x] Add `overrides` field to `HistoricalYearlyData` in `naic-logic` <!-- id: 102 -->
+  - [x] Add `overrides` field to `HistoricalYearlyData` in `steady-invest-logic` <!-- id: 102 -->
 - [ ] **Backend Service & API**
   - [x] Update `run_harvest` service to fetch and apply overrides <!-- id: 200 -->
   - [x] Create `POST /api/overrides` and `DELETE /api/overrides` endpoints <!-- id: 201 -->
@@ -44,7 +44,7 @@ so that I remain the final arbiter of data accuracy.
 - [historicals.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/_entities/historicals.rs)
 - [tickers.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/_entities/tickers.rs)
 - [users.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/_entities/users.rs)
-- [lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/naic-logic/src/lib.rs)
+- [lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/steady-invest-logic/src/lib.rs)
 - [harvest.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/services/harvest.rs)
 - [overrides.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/controllers/overrides.rs)
 - [mod.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/controllers/mod.rs)
@@ -59,7 +59,7 @@ so that I remain the final arbiter of data accuracy.
 
 ## Dev Notes
 
-- **Logic Shared**: Business logic for applying overrides lives in `crates/naic-logic` to ensure consistency.
+- **Logic Shared**: Business logic for applying overrides lives in `crates/steady-invest-logic` to ensure consistency.
 - **WASM Signals**: Use Leptos signals to trigger cascading recalculations across `SSGChart`, `ValuationPanel`, and `QualityDashboard`.
 - **Aesthetic**: Use **Institutional HUD** theme with **Crimson** accents for integrity warnings/overrides.
 
@@ -67,7 +67,7 @@ so that I remain the final arbiter of data accuracy.
 
 - New model: `backend/src/models/historicals_overrides.rs`.
 - New controller: `backend/src/controllers/overrides.rs`.
-- Logic update: `crates/naic-logic/src/lib.rs`.
+- Logic update: `crates/steady-invest-logic/src/lib.rs`.
 
 ### References
 

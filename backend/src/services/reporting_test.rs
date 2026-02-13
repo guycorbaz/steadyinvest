@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::services::reporting::ReportingService;
-    use naic_logic::{AnalysisSnapshot, HistoricalData, HistoricalYearlyData};
+    use steady_invest_logic::{AnalysisSnapshot, HistoricalData, HistoricalYearlyData};
     use rust_decimal::Decimal;
     use chrono::Utc;
 

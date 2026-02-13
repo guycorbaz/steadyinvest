@@ -1,7 +1,7 @@
 ---
 stepsCompleted: [1, 2]
 inputDocuments: []
-session_topic: 'Central topic, features and UI Design for NAIC application'
+session_topic: 'Central topic, features and UI Design for SteadyInvest application'
 session_goals: 'Generate a wide range of innovative ideas for the application'
 selected_approach: 'ai-recommended'
 techniques_used: ['Mind Mapping', 'What If Scenarios', 'Persona Journey']
@@ -16,17 +16,17 @@ context_file: ''
 
 ## Session Overview
 
-**Topic:** Central topic, features and UI Design for NAIC application
+**Topic:** Central topic, features and UI Design for SteadyInvest application
 **Goals:** Generate a wide range of innovative ideas for the application
 
 ### Session Setup
 
-We are focusing on exploring the core purpose (Central topic), functional requirements (features), and visual/interactive experience (UI Design) of the NAIC investment management application. The primary outcome is a vast collection of creative ideas to inform later design and development stages.
+We are focusing on exploring the core purpose (Central topic), functional requirements (features), and visual/interactive experience (UI Design) of the SteadyInvest investment management application. The primary outcome is a vast collection of creative ideas to inform later design and development stages.
 
 ## Technique Selection
 
 **Approach:** AI-Recommended Techniques
-**Analysis Context:** Central topic, features and UI Design for NAIC application.
+**Analysis Context:** Central topic, features and UI Design for SteadyInvest application.
 
 **Recommended Techniques:**
 

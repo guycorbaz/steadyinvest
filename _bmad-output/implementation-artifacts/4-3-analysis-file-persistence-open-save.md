@@ -10,14 +10,14 @@ so that I can build a long-term library of stock research.
 
 ## Acceptance Criteria
 
-1. **Portable Export**: [x] The system must allow downloading the current analysis (active or locked) as a portable `.json` or `.naic` file.
+1. **Portable Export**: [x] The system must allow downloading the current analysis (active or locked) as a portable `.json` or `.sinv` file.
 2. **Context Persistence**: [x] The exported file must include:
     - All historical data (sales, EPS, prices).
     - All manual overrides and audit trails.
     - All projection parameters (CAGRs, valuation targets).
     - Analyst notes.
 3. **High-Fidelity Restore**: [x] The "Open File" function must perfectly restore the application state from the selected file.
-4. **Offline Compatibility**: [x] Merging or opening a file should work even without a live backend connection for calculations (using `naic-logic` WASM signals).
+4. **Offline Compatibility**: [x] Merging or opening a file should work even without a live backend connection for calculations (using `steady-invest-logic` WASM signals).
 5. **UI Integration**: [x] Clear "Save" and "Open" actions in the main navigation or Command Strip.
 
 ## Tasks / Subtasks
@@ -37,13 +37,13 @@ so that I can build a long-term library of stock research.
 ## Dev Notes
 
 - **Architecture Boundary**: Persistence logic is client-side focused for a "local-first" feel.
-- **Data Format**: Standardize on the `naic_logic::AnalysisSnapshot` struct for JSON parity.
-- **Math Consistency**: Use `crates/naic-logic` to validate imported data before hydration.
+- **Data Format**: Standardize on the `steady_invest_logic::AnalysisSnapshot` struct for JSON parity.
+- **Math Consistency**: Use `crates/steady-invest-logic` to validate imported data before hydration.
 - **Conflict Handling**: Opening a file should overwrite the current *active* analysis session after a confirmation prompt.
 
 ### Project Structure Notes
 
-- [crate/naic-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/naic-logic/src/lib.rs) - Reference for snapshot serialization.
+- [crate/steady-invest-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/steady-invest-logic/src/lib.rs) - Reference for snapshot serialization.
 - [frontend/src/components/snapshot_hud.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/components/snapshot_hud.rs) - Reference for rendering existing snapshots.
 
 ### References
@@ -69,7 +69,7 @@ Antigravity
 
 ### File List
 
-- [crates/naic-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/naic-logic/src/lib.rs)
+- [crates/steady-invest-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/steady-invest-logic/src/lib.rs)
 - [frontend/Cargo.toml](file:///home/gcorbaz/synology/devel/naic/frontend/Cargo.toml)
 - [frontend/src/persistence.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/persistence.rs)
 - [frontend/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/lib.rs)

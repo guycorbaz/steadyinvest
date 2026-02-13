@@ -8,7 +8,7 @@ use crate::components::ssg_chart::SSGChart;
 use crate::components::quality_dashboard::QualityDashboard;
 use crate::components::valuation_panel::ValuationPanel;
 use leptos::prelude::*;
-use naic_logic::TickerInfo;
+use steady_invest_logic::TickerInfo;
 use crate::types::LockedAnalysisModel;
 
 /// Read-only view of a locked analysis snapshot.

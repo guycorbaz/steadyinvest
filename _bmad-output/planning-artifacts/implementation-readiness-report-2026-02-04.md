@@ -1,6 +1,6 @@
 ---
 stepsCompleted: [step-01-document-discovery]
-project_name: naic
+project_name: steadyinvest
 date: 2026-02-04
 files_included:
   - prd.md
@@ -12,7 +12,7 @@ files_included:
 # Implementation Readiness Assessment Report
 
 **Date:** 2026-02-04
-**Project:** naic
+**Project:** SteadyInvest
 
 ## 1. Document Inventory
 
@@ -46,7 +46,7 @@ The following documents have been discovered and inventoried for this assessment
 
 - **UX ↔ PRD**: Perfectly aligned. The "Automated Analysis Cycle" in the UX spec directly implements the "One-Click History" value proposition from the PRD. User journeys (Markus, Elena, David) are consistently addressed across both documents.
 - **UX ↔ Architecture**: Perfectly aligned. The choice of Leptos (Rust/WASM) and the "Institutional HUD" design system supports the high-density data requirements and the < 2s performance target (NFR1/NFR2). The use of `charming` for charting is compatible with the "Kinetic Charting" interaction model.
-- **Architecture Support**: The shared logic crate (`naic-logic`) architected for math consistency fully supports the "Data Integrity" principle emphasized in the UX design.
+- **Architecture Support**: The shared logic crate (`steady-invest-logic`) architected for math consistency fully supports the "Data Integrity" principle emphasized in the UX design.
 
 ### Warnings
 

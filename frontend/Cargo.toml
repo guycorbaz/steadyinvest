@@ -2,7 +2,7 @@
 name = "frontend"
 version = "0.1.0"
 edition = "2024"
-description = "Leptos-based CSR frontend for NAIC stock selection guide analysis"
+description = "Leptos-based CSR frontend for SteadyInvest stock selection guide analysis"
 
 [dependencies]
 leptos = { version = "0.8", features = ["csr"] }
@@ -11,7 +11,7 @@ leptos_router = { version = "0.8" }
 console_log = "1"
 log = "0.4"
 console_error_panic_hook = "0.1"
-naic-logic = { version = "0.1.0", path = "../crates/naic-logic" }
+steady-invest-logic = { version = "0.1.0", path = "../crates/steady-invest-logic" }
 gloo-net = "0.6.0"
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1"

@@ -106,7 +106,7 @@ After Epic 5 retrospective and bug fixes, the application is now fully functiona
   - Include usage examples for non-trivial functions
   - Document panic conditions and error handling
   - **Rationale:** Follow Rust best practices for maintainability and onboarding
-  - **Scope:** Backend (`backend/src/**`), Frontend (`frontend/src/**`), Logic crate (`crates/naic-logic/**`)
+  - **Scope:** Backend (`backend/src/**`), Frontend (`frontend/src/**`), Logic crate (`crates/steady-invest-logic/**`)
 
 **Testing:**
 - [ ] E2E test suite (Action Item 3 from retrospective)

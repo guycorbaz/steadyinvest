@@ -460,7 +460,7 @@ The projection formula is: `start_value * (1.0 + cagr/100.0)^n`
 **Changes:**
 ```rust
 // BEFORE (Bug - slider increases made projections go down):
-let s_proj = naic_logic::calculate_projected_trendline(
+let s_proj = steady_invest_logic::calculate_projected_trendline(
     raw_years[0],
     sales_start,
     s_cagr,  // Positive CAGR caused downward projection
@@ -468,7 +468,7 @@ let s_proj = naic_logic::calculate_projected_trendline(
 );
 
 // AFTER (Fix - negated CAGR to correct direction):
-let s_proj = naic_logic::calculate_projected_trendline(
+let s_proj = steady_invest_logic::calculate_projected_trendline(
     raw_years[0],
     sales_start,
     -s_cagr,  // Negated to fix inversion bug

@@ -21,7 +21,7 @@ so that I can avoid the manual "data entry tax."
 - [x] Create `historicals` database migration (AC: 3)
   - [x] Define table with `ticker`, `fiscal_year`, `sales`, `eps`, `price_high`, `price_low`, and `currency`.
   - [x] Add unique constraint on `(ticker, fiscal_year)`.
-- [x] Implement `HistoricalData` shared model in `crates/naic-logic` (AC: 3, 5)
+- [x] Implement `HistoricalData` shared model in `crates/steady-invest-logic` (AC: 3, 5)
   - [x] Create struct with mandatory fields and an `is_complete` flag for integrity alerts.
 - [x] Create Backend `Harvest` Controller and Service (AC: 3, 4)
   - [x] Implement `controllers/harvest.rs` to trigger data fetching.
@@ -37,13 +37,13 @@ so that I can avoid the manual "data entry tax."
 
 - **Architecture Compliance**: Ingestion logic must live in `backend/src/controllers/harvest.rs` and background tasks if necessary [Source: architecture.md#L170].
 - **Naming Pattern**: Database table `historicals`, Model `Historical` [Source: architecture.md#L113].
-- **Shared Logic**: All math and data structures for normalization must be in `crates/naic-logic` [Source: architecture.md#L119].
+- **Shared Logic**: All math and data structures for normalization must be in `crates/steady-invest-logic` [Source: architecture.md#L119].
 
 ### Project Structure Notes
 
 - New controller at `backend/src/controllers/harvest.rs`.
 - New migration at `backend/migration/src/m..._historicals.rs`.
-- Shared model update in `crates/naic-logic/src/lib.rs`.
+- Shared model update in `crates/steady-invest-logic/src/lib.rs`.
 
 ### References
 
@@ -63,7 +63,7 @@ Antigravity (BMad Edition)
 - [x] Story created
 - [x] Sprint status updated
 - [x] Database migration implemented and applied
-- [x] Shared data models defined in `naic-logic`
+- [x] Shared data models defined in `steady-invest-logic`
 - [x] Harvest controller and service implemented (mocked retrieval for MVP reliability)
 - [x] Frontend integrated with `Suspense` and high-contrast loading states
 - [x] E2E test for historical retrieval added

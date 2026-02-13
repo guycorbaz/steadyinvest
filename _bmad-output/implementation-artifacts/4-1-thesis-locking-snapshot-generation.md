@@ -21,7 +21,7 @@ so that I have a permanent record of my investment thesis at a specific point in
 - [x] **Database & Models**
   - [x] Create `locked_analyses` table migration
   - [x] Implement `LockedAnalysis` SeaORM model in backend
-- [x] **Shared Logic (naic-logic)**
+- [x] **Shared Logic (steady-invest-logic)**
   - [x] Implement `AnalysisSnapshot` struct and serialization
 - [x] **Backend Service & API**
   - [x] Create `POST /api/analyses/lock` endpoint
@@ -39,7 +39,7 @@ so that I have a permanent record of my investment thesis at a specific point in
 - [backend/src/models/_entities/locked_analyses.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/_entities/locked_analyses.rs)
 - [backend/src/models/locked_analyses.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/locked_analyses.rs)
 - [backend/src/controllers/analyses.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/controllers/analyses.rs)
-- [crates/naic-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/naic-logic/src/lib.rs)
+- [crates/steady-invest-logic/src/lib.rs](file:///home/gcorbaz/synology/devel/naic/crates/steady-invest-logic/src/lib.rs)
 - [frontend/src/types.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/types.rs)
 - [frontend/src/components/lock_thesis_modal.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/components/lock_thesis_modal.rs)
 - [frontend/src/components/analyst_hud.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/components/analyst_hud.rs)

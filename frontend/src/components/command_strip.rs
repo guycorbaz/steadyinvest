@@ -41,7 +41,7 @@ pub fn CommandStrip() -> impl IntoView {
     view! {
         <nav class="command-strip">
             <div class="strip-header">
-                <h1 class="strip-title">"NAIC"</h1>
+                <h1 class="strip-title">"SteadyInvest"</h1>
                 <span class="strip-subtitle">"Stock Analysis"</span>
             </div>
 

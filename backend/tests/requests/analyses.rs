@@ -2,7 +2,7 @@ use backend::app::App;
 use loco_rs::prelude::*;
 use loco_rs::testing::prelude::request;
 use backend::models::_entities::{analysis_snapshots, tickers, users};
-use naic_logic::{AnalysisSnapshot, HistoricalData};
+use steady_invest_logic::{AnalysisSnapshot, HistoricalData};
 use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 
 #[tokio::test]

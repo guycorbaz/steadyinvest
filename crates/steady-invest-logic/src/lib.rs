@@ -269,7 +269,7 @@ pub struct AnalysisSnapshot {
 /// # Examples
 ///
 /// ```
-/// use naic_logic::{HistoricalData, HistoricalYearlyData, calculate_pe_ranges};
+/// use steady_invest_logic::{HistoricalData, HistoricalYearlyData, calculate_pe_ranges};
 /// use rust_decimal::Decimal;
 ///
 /// let data = HistoricalData {
@@ -357,7 +357,7 @@ pub fn calculate_pe_ranges(data: &HistoricalData) -> PeRangeAnalysis {
 /// # Examples
 ///
 /// ```
-/// use naic_logic::{HistoricalData, HistoricalYearlyData, calculate_quality_analysis};
+/// use steady_invest_logic::{HistoricalData, HistoricalYearlyData, calculate_quality_analysis};
 /// use rust_decimal::Decimal;
 ///
 /// let data = HistoricalData {
@@ -454,7 +454,7 @@ pub fn calculate_quality_analysis(data: &HistoricalData) -> QualityAnalysis {
 /// # Examples
 ///
 /// ```
-/// use naic_logic::calculate_growth_analysis;
+/// use steady_invest_logic::calculate_growth_analysis;
 ///
 /// let years  = vec![2020, 2021, 2022, 2023];
 /// let values = vec![100.0, 110.0, 121.0, 133.1];
@@ -542,7 +542,7 @@ pub fn calculate_growth_analysis(years: &[i32], values: &[f64]) -> TrendAnalysis
 /// # Examples
 ///
 /// ```
-/// use naic_logic::calculate_projected_trendline;
+/// use steady_invest_logic::calculate_projected_trendline;
 ///
 /// let result = calculate_projected_trendline(2023, 100.0, 10.0, &[2024, 2025]);
 /// assert!((result.trendline[0].value - 110.0).abs() < 0.01);

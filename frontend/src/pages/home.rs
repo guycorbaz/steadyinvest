@@ -10,7 +10,7 @@ use crate::types::LockedAnalysisModel;
 use crate::ActiveLockedAnalysisId;
 use leptos::prelude::*;
 use leptos_router::hooks::use_location;
-use naic_logic::{HistoricalData, TickerInfo, AnalysisSnapshot};
+use steady_invest_logic::{HistoricalData, TickerInfo, AnalysisSnapshot};
 use serde::Deserialize;
 
 /// DTO for the raw `GET /api/v1/snapshots/:id` response used by deep linking.

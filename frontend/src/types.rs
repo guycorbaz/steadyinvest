@@ -4,7 +4,7 @@
 //! client side (compiled to WASM).
 
 use serde::{Deserialize, Serialize};
-use naic_logic::AnalysisSnapshot;
+use steady_invest_logic::AnalysisSnapshot;
 use chrono::{DateTime, Utc};
 
 /// Client-side representation of a locked analysis record from the backend.

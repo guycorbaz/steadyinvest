@@ -18,7 +18,7 @@ editHistory:
     changes: 'Post-MVP evolution: expanded vision from SSG analysis tool to investment management platform with portfolio management, risk discipline, watchlists, DB persistence, and multi-user roadmap. Aligned with Epic 6 retrospective product vision. Added multi-stock comparison (FR4.3) with user-selectable base currency per party mode validation discussion.'
 ---
 
-# Product Requirements Document: naic
+# Product Requirements Document: SteadyInvest
 
 **Author:** Guy
 **Date:** 2026-02-03
@@ -27,7 +27,7 @@ editHistory:
 
 ## Executive Summary
 
-**naic** is an open-source investment analysis and portfolio management platform built on the NAIC Stock Selection Guide (SSG) methodology. The platform automates the labor-intensive SSG process for European and US markets, and evolves beyond analysis into a complete investment decision framework.
+**SteadyInvest** is an open-source investment analysis and portfolio management platform built on the NAIC Stock Selection Guide (SSG) methodology. The platform automates the labor-intensive SSG process for European and US markets, and evolves beyond analysis into a complete investment decision framework.
 
 The platform addresses three moments in the investment lifecycle:
 
@@ -35,7 +35,7 @@ The platform addresses three moments in the investment lifecycle:
 2. **Buy Smart** — Position sizing tells you *how much* to buy; stop loss reminders tell you *how to protect it*.
 3. **Stay Balanced** — Exposure checks tell you *when to rebalance* your portfolio.
 
-The MVP (Epics 1-6) delivers automated "One-Click History" for Swiss (SMI), German (DAX), and US markets with web-native logarithmic charting, quality dashboards, projection manipulation, thesis locking, PDF export, and system monitoring. The post-MVP roadmap extends **naic** from an analysis tool into a practical investment management platform with database-persisted analyses, portfolio tracking with risk discipline, watchlists, and multi-user support.
+The MVP (Epics 1-6) delivers automated "One-Click History" for Swiss (SMI), German (DAX), and US markets with web-native logarithmic charting, quality dashboards, projection manipulation, thesis locking, PDF export, and system monitoring. The post-MVP roadmap extends **SteadyInvest** from an analysis tool into a practical investment management platform with database-persisted analyses, portfolio tracking with risk discipline, watchlists, and multi-user support.
 
 ## Success Criteria
 
@@ -53,7 +53,7 @@ The MVP (Epics 1-6) delivers automated "One-Click History" for Swiss (SMI), Germ
 
 ### Business & Technical Success
 
-- **Strategic Position**: Established as the premier open-source tool for international (CH/DE) NAIC investors within 6 months.
+- **Strategic Position**: Established as the premier open-source tool for international (CH/DE) NAIC SSG investors within 6 months.
 - **Data Parity**: Automated data matches official reports for 95% of mid/large-cap tickers.
 - **System Performance**: "One-Click" 10-year data population completes in under 5 seconds.
 - **Ticker Coverage**: Expand beyond initial test tickers to cover major indices (SMI, DAX, S&P 500) with reliable data retrieval.
@@ -110,11 +110,11 @@ The following features from the original product brief are not planned for any c
 
 ### Journey 1: Markus, the Swiss Value Hunter (Primary — MVP)
 
-Markus avoids the 2-hour manual entry chore for Swiss stocks. He uses **naic** to instantly generate a 10-year chart for `NESN.SW`, benchmarks it against a German peer, and prepares a clear recommendation for his investment club in 15 minutes.
+Markus avoids the 2-hour manual entry chore for Swiss stocks. He uses **SteadyInvest** to instantly generate a 10-year chart for `NESN.SW`, benchmarks it against a German peer, and prepares a clear recommendation for his investment club in 15 minutes.
 
 ### Journey 2: Elena, the Club Moderator (Secondary — MVP)
 
-Elena uses **naic** to standardize reports across her investment club. By providing identical, data-accurate charts to all members, she shifts club discussions from data verification to business quality.
+Elena uses **SteadyInvest** to standardize reports across her investment club. By providing identical, data-accurate charts to all members, she shifts club discussions from data verification to business quality.
 
 ### Journey 3: David, the Data Steward (Admin — MVP)
 
@@ -122,7 +122,7 @@ David monitors API health. When a German provider updates their schema, he recei
 
 ### Journey 4: Markus Reviews His Portfolio (Post-MVP)
 
-After analyzing a new stock with the SSG, Markus checks his portfolio dashboard. **naic** shows his current holdings, flags that his tech sector exposure is at 38% (above his 30% threshold), and suggests he should limit his new purchase to CHF 2,000 to stay within his diversification rules. He sets a trailing stop loss reminder and adds the stock to his watchlist for a better entry price.
+After analyzing a new stock with the SSG, Markus checks his portfolio dashboard. **SteadyInvest** shows his current holdings, flags that his tech sector exposure is at 38% (above his 30% threshold), and suggests he should limit his new purchase to CHF 2,000 to stay within his diversification rules. He sets a trailing stop loss reminder and adds the stock to his watchlist for a better entry price.
 
 ### Journey 5: Markus Tracks His Thesis Evolution (Post-MVP)
 

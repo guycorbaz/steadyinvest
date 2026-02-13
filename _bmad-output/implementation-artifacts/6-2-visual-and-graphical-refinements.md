@@ -24,7 +24,7 @@ So that the interface feels professional and polished.
 
 ### Current State
 
-After completing Epics 1-5, the naic application is functionally complete with all core features working:
+After completing Epics 1-5, the SteadyInvest application is functionally complete with all core features working:
 - ✅ Ticker search and data retrieval
 - ✅ Logarithmic SSG chart rendering
 - ✅ Quality dashboard (ROE, Profit on Sales)

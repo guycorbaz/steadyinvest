@@ -7,7 +7,7 @@ revisionHistory:
     driver: 'PRD revised with Three Moments framework, portfolio management, multi-stock comparison, watchlists'
 ---
 
-# UX Design Specification naic
+# UX Design Specification SteadyInvest
 
 **Author:** Guy
 **Date:** 2026-02-04
@@ -19,7 +19,7 @@ revisionHistory:
 
 ### Project Vision
 
-**naic** is an open-source investment analysis and portfolio management platform built on the NAIC Stock Selection Guide (SSG) methodology. The platform addresses three moments in the investment lifecycle:
+**SteadyInvest** is an open-source investment analysis and portfolio management platform built on the NAIC Stock Selection Guide (SSG) methodology. The platform addresses three moments in the investment lifecycle:
 
 1. **Analyze** — The SSG chart tells you *what* to buy and at *what price* (delivered in MVP).
 2. **Buy Smart** — Position sizing tells you *how much* to buy; stop loss reminders tell you *how to protect it*.
@@ -54,10 +54,10 @@ The MVP delivers automated "One-Click History" for Swiss, German, and US markets
 
 ### Defining Experience
 
-The defining experience of **naic** spans two phases of the investment lifecycle, delivered as a web-native SPA built with Rust (Leptos) for high-performance WASM charting — desktop-first for deep analytical work, with a mobile "review mode" that displays CAGR values as read-only text and portfolio summaries as simplified cards.
+The defining experience of **SteadyInvest** spans two phases of the investment lifecycle, delivered as a web-native SPA built with Rust (Leptos) for high-performance WASM charting — desktop-first for deep analytical work, with a mobile "review mode" that displays CAGR values as read-only text and portfolio summaries as simplified cards.
 
 * **Instant Clarity (MVP)**: Entering a ticker transforms the interface from a minimalist search to a high-density institutional workbench in under 2 seconds. The analyst shifts from transcription to interpretation — the "Aha!" moment that eliminates 2 hours of manual entry.
-* **Disciplined Conviction (Post-MVP)**: After analysis, the platform ensures the investor acts with confidence by surfacing portfolio math at the moment of decision. Markets are full of tools that help you buy. **naic** helps you buy *the right amount* — and occasionally helps you *not* buy too much. This is the strategic differentiator.
+* **Disciplined Conviction (Post-MVP)**: After analysis, the platform ensures the investor acts with confidence by surfacing portfolio math at the moment of decision. Markets are full of tools that help you buy. **SteadyInvest** helps you buy *the right amount* — and occasionally helps you *not* buy too much. This is the strategic differentiator.
 
 ### User Mental Model
 
@@ -533,7 +533,7 @@ We leverage the **Custom Design System** foundation (Vanilla CSS + Leptos Compon
 
 ### Responsive Strategy
 
-**naic** follows a **"Desktop-First Instrument"** strategy. The SSG methodology requires high-density information and simultaneous visualization of charts and ratio tables. The experience is optimized for desktop users, with progressive simplification for smaller screens.
+**SteadyInvest** follows a **"Desktop-First Instrument"** strategy. The SSG methodology requires high-density information and simultaneous visualization of charts and ratio tables. The experience is optimized for desktop users, with progressive simplification for smaller screens.
 
 * **Desktop**: Full "Institutional HUD" with persistent Command Strip, multi-column ratio tablets, History Timeline Sidebar, and all five core views fully functional.
 * **Tablet**: Command Strip collapses into a bottom navigation bar. Financial grids hide non-critical metrics. History Timeline Sidebar renders as a collapsible panel instead of a persistent sidebar. Portfolio Dashboard uses a simplified single-column layout.
@@ -586,7 +586,7 @@ The design system targets **WCAG 2.1 Level AA** compliance, with contrast ratios
 
 ## Conclusion
 
-The **naic** UX Design Specification provides a robust "Institutional Zen" foundation for evolving from an automated investment analysis instrument into a complete investment management platform. From the MVP's "Instant Clarity" search-to-chart leap through the post-MVP's "Disciplined Conviction" portfolio management framework, every design decision — the 4px precision grid, the progressive density inline context, the Wisdom Card advisory pattern, the five-destination Command Strip — serves the Three Moments: Analyze, Buy Smart, Stay Balanced.
+The **SteadyInvest** UX Design Specification provides a robust "Institutional Zen" foundation for evolving from an automated investment analysis instrument into a complete investment management platform. From the MVP's "Instant Clarity" search-to-chart leap through the post-MVP's "Disciplined Conviction" portfolio management framework, every design decision — the 4px precision grid, the progressive density inline context, the Wisdom Card advisory pattern, the five-destination Command Strip — serves the Three Moments: Analyze, Buy Smart, Stay Balanced.
 
 ---
 **Original Workflow Completed:** 2026-02-04

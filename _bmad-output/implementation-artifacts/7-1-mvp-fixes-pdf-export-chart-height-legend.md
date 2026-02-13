@@ -70,7 +70,7 @@ So that I can use all MVP features without gaps and read the chart more easily.
 
 ### Critical Architecture Constraints
 
-**Cardinal Rule:** All calculation logic lives in `crates/naic-logic`. This story is purely UI/CSS — no calculation logic involved. No naic-logic changes needed.
+**Cardinal Rule:** All calculation logic lives in `crates/steady-invest-logic`. This story is purely UI/CSS — no calculation logic involved. No steady-invest-logic changes needed.
 
 **Charting Library:** `charming` 0.3 with `wasm` feature. The charming crate provides Rust bindings to ECharts. Legend positioning uses ECharts' Legend component API. Key imports are already in `ssg_chart.rs`:
 ```rust
@@ -182,7 +182,7 @@ Files to modify (estimated):
 - `frontend/src/lib.rs` — May need `provide_context` at App level for the locked analysis signal
 
 Files NOT to modify:
-- `crates/naic-logic/` — No calculation logic involved.
+- `crates/steady-invest-logic/` — No calculation logic involved.
 - `frontend/src/pages/` — No new pages needed.
 
 > **Note:** `backend/Dockerfile` was modified to fix a pre-existing bug (missing fonts for PDF generation in Docker). This was not part of the original story scope but was discovered during AC #1 integration testing.

@@ -22,16 +22,16 @@ jobs:
       contents: read
 
     env:
-      DATABASE_URL: mysql://naic:naic_test@localhost:3306/naic_test
+      DATABASE_URL: mysql://steadyinvest:steadyinvest_test@localhost:3306/steadyinvest_test
 
     services:
       mariadb:
         image: mariadb:11
         env:
           MARIADB_ROOT_PASSWORD: test
-          MARIADB_DATABASE: naic_test
-          MARIADB_USER: naic
-          MARIADB_PASSWORD: naic_test
+          MARIADB_DATABASE: steadyinvest_test
+          MARIADB_USER: steadyinvest
+          MARIADB_PASSWORD: steadyinvest_test
         ports:
           - "3306:3306"
         options: >-
@@ -64,16 +64,16 @@ jobs:
       contents: read
 
     env:
-      DATABASE_URL: mysql://naic:naic_test@localhost:3306/naic_test
+      DATABASE_URL: mysql://steadyinvest:steadyinvest_test@localhost:3306/steadyinvest_test
 
     services:
       mariadb:
         image: mariadb:11
         env:
           MARIADB_ROOT_PASSWORD: test
-          MARIADB_DATABASE: naic_test
-          MARIADB_USER: naic
-          MARIADB_PASSWORD: naic_test
+          MARIADB_DATABASE: steadyinvest_test
+          MARIADB_USER: steadyinvest
+          MARIADB_PASSWORD: steadyinvest_test
         ports:
           - "3306:3306"
         options: >-

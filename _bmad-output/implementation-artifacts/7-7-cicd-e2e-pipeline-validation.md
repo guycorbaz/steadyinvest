@@ -97,7 +97,7 @@ Tasks 1, 3, and 7 are **pass/fail gates** — if any of these fail, zero E2E tes
 
 ### Critical Architecture Constraints
 
-**Cardinal Rule:** All calculation logic lives in `crates/naic-logic`. This story does NOT involve calculation logic — it's infrastructure/CI. No naic-logic changes needed.
+**Cardinal Rule:** All calculation logic lives in `crates/steady-invest-logic`. This story does NOT involve calculation logic — it's infrastructure/CI. No steady-invest-logic changes needed.
 
 **No Feature Code Changes:** This story is purely about CI/CD pipeline validation. No application code should be changed (unless a small fix is needed to make tests pass in CI, like environment-specific configuration).
 
@@ -164,21 +164,21 @@ When tests fail in CI, there's no way to diagnose without local reproduction. Ne
 `browser-actions/setup-chrome@v1` installs Chrome stable but the matching ChromeDriver setup needs verification. Version mismatch = all E2E tests fail with session creation error.
 
 **Issue 7 — Database configuration for CI:**
-The backend's `config/development.yaml` has `database.uri: mysql://naic:password@127.0.0.1:3306/naic` which doesn't match the CI service container credentials (`naic:naic_test@localhost:3306/naic_test`). The `DATABASE_URL` env var must override this. Verify Loco 0.16 respects `DATABASE_URL` over config file.
+The backend's `config/development.yaml` has `database.uri: mysql://steadyinvest:password@127.0.0.1:3306/steadyinvest` which doesn't match the CI service container credentials (`steadyinvest:steadyinvest_test@localhost:3306/steadyinvest_test`). The `DATABASE_URL` env var must override this. Verify Loco 0.16 respects `DATABASE_URL` over config file.
 
 ### Backend Configuration Files
 
 **`backend/config/development.yaml`** (default for `cargo run`):
 ```yaml
 database:
-  uri: mysql://naic:password@127.0.0.1:3306/naic
+  uri: mysql://steadyinvest:password@127.0.0.1:3306/steadyinvest
   auto_migrate: true
 ```
 
 **`backend/config/test.yaml`** (used when `LOCO_ENV=test`):
 ```yaml
 database:
-  uri: mysql://naic:1000cpsvqrE$@192.168.1.5:3306/naic_test
+  uri: mysql://steadyinvest:1000cpsvqrE$@192.168.1.5:3306/steadyinvest_test
   dangerously_truncate: true
   dangerously_recreate: true
 ```
@@ -217,7 +217,7 @@ ab453f0 feat: complete Story 7.1 — PDF export, chart height & legend
 
 ### What NOT To Do
 
-- Do NOT modify application source code (backend controllers, frontend components, naic-logic)
+- Do NOT modify application source code (backend controllers, frontend components, steady-invest-logic)
 - Do NOT change database schemas or migrations
 - Do NOT modify individual E2E test assertions or flows — only `common/mod.rs` test infrastructure for CI diagnostics is in scope
 - Do NOT add new E2E tests — this story is about validating the pipeline, not adding test coverage
@@ -235,7 +235,7 @@ Files to MODIFY:
 Files NOT to modify:
 - `backend/src/` — No application code changes
 - `frontend/src/` — No frontend code changes
-- `crates/naic-logic/` — No calculation logic
+- `crates/steady-invest-logic/` — No calculation logic
 - `tests/e2e/src/lib.rs`, `epic3_tests.rs`, `epic4_tests.rs`, `epic5_tests.rs`, `epic6_tests.rs` — No test logic changes
 - `backend/config/development.yaml` — Don't change local dev config
 - `backend/config/test.yaml` — Don't change unit test config

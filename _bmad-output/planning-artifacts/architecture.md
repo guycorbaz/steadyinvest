@@ -54,7 +54,7 @@ Architecture must support six core capability clusters, aligned to PRD phases:
 | 2 | API Service (Loco) | Delivered | REST endpoints, server functions |
 | 3 | Data Engine (harvest pipeline) | Delivered | Batch historical population |
 | 4 | Database (MariaDB + SeaORM) | Delivered | Schema evolves per phase |
-| 5 | Shared Logic Crate (`naic-logic`) | Delivered | See Architectural Differentiators below |
+| 5 | Shared Logic Crate (`steady-invest-logic`) | Delivered | See Architectural Differentiators below |
 | 6 | Exchange Rate Service | Partial | Model and migration exist |
 | 7 | Admin Monitor | Delivered | Health, latency, audit |
 | 8 | **Static Chart Image Capture** | **OPEN** | See below |
@@ -69,13 +69,13 @@ This is separate from the PDF export UI fix (already built, needs routing only).
 
 ### Architectural Differentiators
 
-The shared logic crate (`crates/naic-logic`) is naic's structural competitive advantage. Identical NAIC calculation math — ROE, profit-on-sales, split adjustments, CAGR projections — compiles to both native Rust (server-side validation) and WASM (client-side instant projections). This means:
+The shared logic crate (`crates/steady-invest-logic`) is SteadyInvest's structural competitive advantage. Identical NAIC calculation math — ROE, profit-on-sales, split adjustments, CAGR projections — compiles to both native Rust (server-side validation) and WASM (client-side instant projections). This means:
 
 - **Auditability**: The math an investor sees in the browser is *literally the same compiled code* the server uses for persistence and comparison. No divergence possible.
 - **Offline capability**: Client-side calculations work without a server round-trip, enabling the "kinetic charting" instant-feedback experience.
 - **Open-source trust**: Any user can audit the single source of truth for all financial calculations.
 
-This "single-crate, dual-target" pattern is a deliberate architectural choice, not a convenience. It must be preserved as the codebase evolves — any new calculation logic belongs in `naic-logic`, never duplicated between frontend and backend.
+This "single-crate, dual-target" pattern is a deliberate architectural choice, not a convenience. It must be preserved as the codebase evolves — any new calculation logic belongs in `steady-invest-logic`, never duplicated between frontend and backend.
 
 ### Technical Constraints & Dependencies
 
@@ -99,7 +99,7 @@ This "single-crate, dual-target" pattern is a deliberate architectural choice, n
 
 ### Primary Technology Domain
 
-**Full-Stack Rust Application** with high productivity focus for 'naic' investment analysis and portfolio management platform.
+**Full-Stack Rust Application** with high productivity focus for 'steadyinvest' investment analysis and portfolio management platform.
 
 ### Starter Options Considered
 
@@ -110,7 +110,7 @@ This "single-crate, dual-target" pattern is a deliberate architectural choice, n
 ### Selected Starter: Loco
 
 **Rationale for Selection:**
-Loco provides a structured "productivity suite" that mirrors the Ruby on Rails philosophy but in Rust. For 'naic', this accelerates the implementation of complex multi-currency logic, automated data harvesting, and database-persisted analyses by providing built-in ORM management (SeaORM), migrations, and a production-grade CLI. The convention-over-configuration approach proved its value across 6 epics of MVP development.
+Loco provides a structured "productivity suite" that mirrors the Ruby on Rails philosophy but in Rust. For 'steadyinvest', this accelerates the implementation of complex multi-currency logic, automated data harvesting, and database-persisted analyses by providing built-in ORM management (SeaORM), migrations, and a production-grade CLI. The convention-over-configuration approach proved its value across 6 epics of MVP development.
 
 **Pinned Versions (as of 2026-02-10, from workspace `Cargo.toml`):**
 
@@ -123,7 +123,7 @@ Loco provides a structured "productivity suite" that mirrors the Ruby on Rails p
 
 ### Loco Capabilities vs. Custom Extensions
 
-**What Loco provides (used in naic):**
+**What Loco provides (used in SteadyInvest):**
 
 - MVC structure (Controllers, Models, Views)
 - SeaORM migrations via Sea-Query with MySQL compatibility
@@ -137,12 +137,12 @@ Loco provides a structured "productivity suite" that mirrors the Ruby on Rails p
 - Background worker job queue (harvest pipeline uses controller/async pattern instead)
 - Mailer system
 
-**What naic extends beyond Loco (Phase 1-3):**
+**What SteadyInvest extends beyond Loco (Phase 1-3):**
 
-- **Authentication** (Phase 3): Loco has basic JWT support; naic will need session management, user registration, and personal workspaces.
+- **Authentication** (Phase 3): Loco has basic JWT support; SteadyInvest will need session management, user registration, and personal workspaces.
 - **Exchange Rate Service** (Phase 1): Custom service layer integrating with external rate providers — no Loco equivalent.
 - **Static Chart Capture** (Phase 1): Client-side canvas export at thesis lock time — entirely custom.
-- **Portfolio Calculation Engine** (Phase 2): Lives in `crates/naic-logic`, not in Loco's service layer. Risk rules, position sizing, exposure detection are domain logic, not framework concerns.
+- **Portfolio Calculation Engine** (Phase 2): Lives in `crates/steady-invest-logic`, not in Loco's service layer. Risk rules, position sizing, exposure detection are domain logic, not framework concerns.
 
 ## Core Architectural Decisions
 
@@ -215,7 +215,7 @@ The "latest" snapshot for a ticker is simply the most recent `captured_at` row. 
 
 ### Security & Authentication
 
-- **Phase 1-2 — Single-User System**: Designed for the individual analyst running 'naic' on a local network or personal server. No authentication required. Default `user_id = 1` used in all database operations.
+- **Phase 1-2 — Single-User System**: Designed for the individual analyst running 'steadyinvest' on a local network or personal server. No authentication required. Default `user_id = 1` used in all database operations.
 - **Phase 3 — Multi-User**: Loco's JWT support extended with:
   - User registration and password hashing (bcrypt/argon2)
   - Session management (JWT tokens with configurable expiry)
@@ -252,12 +252,12 @@ The "latest" snapshot for a ticker is simply the most recent `captured_at` row. 
 ### Infrastructure & Deployment
 
 - **Deployment Pattern**: **Containerized (Docker)**. Multi-stage Docker build: Rust compilation (static binary) + Leptos WASM bundle, served alongside MariaDB via `docker-compose`.
-- **Container Composition**: `docker-compose.yml` orchestrates `naic-backend`, `naic-frontend`, and `mariadb` services.
+- **Container Composition**: `docker-compose.yml` orchestrates `steadyinvest-backend`, `steadyinvest-frontend`, and `mariadb` services.
 - **Environment Configuration**: `.env` file with database credentials, API keys, and configurable parameters. `.env.example` maintained as template.
 
 ## Implementation Patterns & Consistency Rules
 
-> **CARDINAL RULE:** All calculation logic — ROE, profit-on-sales, split adjustments, CAGR projections, position sizing, exposure detection — lives in `crates/naic-logic`. Never duplicated between frontend and backend. This is a trust and auditability guarantee, not a convenience. See Architectural Differentiators.
+> **CARDINAL RULE:** All calculation logic — ROE, profit-on-sales, split adjustments, CAGR projections, position sizing, exposure detection — lives in `crates/steady-invest-logic`. Never duplicated between frontend and backend. This is a trust and auditability guarantee, not a convenience. See Architectural Differentiators.
 
 ### Naming Patterns
 
@@ -273,12 +273,12 @@ The "latest" snapshot for a ticker is simply the most recent `captured_at` row. 
 ### Structure Patterns
 
 - **Frontend/Backend Separation**: Clear directory separation: `/frontend` (Leptos CSR app) and `/backend` (Loco API service).
-- **Domain Logic (naic-logic crate)**: Business logic for NAIC calculations lives in `/crates/naic-logic`. Compiles to both native Rust and WASM. Currently a single `lib.rs` file; may evolve to multi-module structure (e.g., `calculations.rs`, `types.rs`, `portfolio.rs`) as Phase 2 adds position sizing and exposure logic. See Cardinal Rule above.
+- **Domain Logic (steady-invest-logic crate)**: Business logic for NAIC calculations lives in `/crates/steady-invest-logic`. Compiles to both native Rust and WASM. Currently a single `lib.rs` file; may evolve to multi-module structure (e.g., `calculations.rs`, `types.rs`, `portfolio.rs`) as Phase 2 adds position sizing and exposure logic. See Cardinal Rule above.
 - **Model vs. Service boundary**: **Models** handle database access (SeaORM entities, queries, relations). **Services** handle business logic that orchestrates across models or calls external APIs (e.g., fetching exchange rates from external provider, composing PDF reports). `backend/src/services/` is a new directory to create in Phase 1.
 - **Global State**: Application-level Leptos signals defined in `frontend/src/state/` (new module, to be created). Component-local signals remain inline.
 - **Tests**:
   - **Unit tests**: Co-located with source files (`#[cfg(test)]` modules).
-  - **Doctests**: Public functions in `naic-logic` include `///` doc examples that double as doctests (established practice from Epic 6, Story 6.6).
+  - **Doctests**: Public functions in `steady-invest-logic` include `///` doc examples that double as doctests (established practice from Epic 6, Story 6.6).
   - **Backend API tests**: In `backend/tests/` — one test file per controller (e.g., `snapshots_test.rs`). Cover happy path + validation error + not-found per route.
   - **E2E tests**: In top-level `tests/` directory. Browser-based tests via the existing E2E framework.
 
@@ -287,7 +287,7 @@ The "latest" snapshot for a ticker is simply the most recent `captured_at` row. 
 - **API Response**: Standardized JSON wrapper: `{ "status": "success", "data": ... }` or `{ "status": "error", "message": ... }`.
 - **Error Handling**: Use the `thiserror` crate for defining domain-specific errors. Centralized error mapping in Loco middleware.
 - **Date/Time**: ISO 8601 strings for all API exchanges; stored as UTC in MariaDB.
-- **Currency Codes**: ISO 4217 three-letter codes (e.g., `CHF`, `EUR`, `USD`). Represented as a validated newtype `CurrencyCode(String)` in Rust (defined in `naic-logic` for shared use). Validation enforces 3 uppercase ASCII letters at API boundary on deserialization. Stored as `VARCHAR(3)` in database.
+- **Currency Codes**: ISO 4217 three-letter codes (e.g., `CHF`, `EUR`, `USD`). Represented as a validated newtype `CurrencyCode(String)` in Rust (defined in `steady-invest-logic` for shared use). Validation enforces 3 uppercase ASCII letters at API boundary on deserialization. Stored as `VARCHAR(3)` in database.
 - **Snapshot Data**: Serialized as JSON (`serde_json::Value`) in `snapshot_data` columns. Schema validated at the application layer, not database level.
 
 ### Process Patterns
@@ -303,7 +303,7 @@ The "latest" snapshot for a ticker is simply the most recent `captured_at` row. 
 ### Complete Project Directory Structure
 
 ```text
-naic/
+steadyinvest/
 ├── Cargo.toml                  # Workspace configuration
 ├── docker-compose.yml          # Orchestrates backend, frontend, MariaDB
 ├── .env.example                # Template for DB credentials and API keys
@@ -314,7 +314,7 @@ naic/
 ├── scripts/                    # Helper scripts
 │   └── migrate-safe.sh         # (To create) Pre-migration backup wrapper
 ├── crates/
-│   └── naic-logic/             # SHARED: NAIC calculations (ROE, CAGR, splits, position sizing)
+│   └── steady-invest-logic/     # SHARED: NAIC calculations (ROE, CAGR, splits, position sizing)
 │       └── src/lib.rs          # Single file today; may split to modules in Phase 2
 ├── backend/                    # LOCO API SERVICE
 │   ├── src/
@@ -362,7 +362,7 @@ naic/
 ### Architectural Boundaries
 
 - **API Boundaries**: All backend endpoints under `/api/v1/`. Strict JSON schema enforcement via Loco models and service layer validation.
-- **Component Boundaries**: Shared calculation logic isolated in `crates/naic-logic` (Cardinal Rule). No business logic in pure UI components — components consume signals and render, services compute.
+- **Component Boundaries**: Shared calculation logic isolated in `crates/steady-invest-logic` (Cardinal Rule). No business logic in pure UI components — components consume signals and render, services compute.
 - **Data Boundaries**: MariaDB as the system of record. Browser-based file persistence (`persistence.rs`) retained as secondary export option alongside server persistence — useful for offline sharing with club members.
 - **Service Boundaries**: Controllers handle HTTP concerns (routing, request parsing, response formatting). Services handle business logic. Models handle data access. No direct database calls from controllers — always through models or services.
 
@@ -374,7 +374,7 @@ naic/
 |------------|----------|
 | "One-Click" Ingestion | `backend/src/services/harvest.rs` + `backend/src/controllers/harvest.rs` |
 | Logarithmic SSG Charts | `frontend/src/components/ssg_chart.rs` |
-| Multi-currency/ROE Logic | `crates/naic-logic/src/lib.rs` |
+| Multi-currency/ROE Logic | `crates/steady-invest-logic/src/lib.rs` |
 | Data Integrity Audit | `backend/src/services/audit_service.rs` + `backend/src/models/audit_logs.rs` |
 | PDF Export | `backend/src/services/reporting.rs` |
 | API Health Monitoring | `backend/src/services/provider_health.rs` + `frontend/src/pages/system_monitor.rs` |
@@ -387,7 +387,7 @@ naic/
 | Thesis Evolution (FR4.2) | `backend/src/controllers/snapshots.rs` (history endpoint) |
 | Multi-Ticker Comparison (FR4.3) | `backend/src/controllers/comparisons.rs` + `backend/src/services/comparison_service.rs` |
 | Exchange Rate Conversion | `backend/src/services/exchange.rs` (exists) + `backend/src/controllers/exchange_rates.rs` |
-| Portfolio Management (FR5.1-5.5) | `backend/src/controllers/portfolios.rs` + `backend/src/services/portfolio_service.rs` + `crates/naic-logic` (calculations) |
+| Portfolio Management (FR5.1-5.5) | `backend/src/controllers/portfolios.rs` + `backend/src/services/portfolio_service.rs` + `crates/steady-invest-logic` (calculations) |
 | Stop Loss Prompt (FR5.6) | `frontend/src/components/` (holding creation form UX) |
 | Watchlists (FR6.1-6.2) | `backend/src/controllers/watchlist.rs` + `frontend/src/pages/watchlist.rs` |
 | Authentication (FR7.1-7.2) | `backend/src/controllers/auth.rs` (exists) + `backend/src/middlewares/` |
@@ -397,7 +397,7 @@ naic/
 ### Coherence Validation
 
 - **Decision Compatibility**: Rust 1.8x, Loco 0.16, Leptos 0.8, SeaORM 1.1, and `charming` 0.3 verified as compatible across 6 epics of MVP development. No version conflicts anticipated for post-MVP additions.
-- **Pattern Consistency**: The append-only snapshot model, service layer boundary, and Cardinal Rule (naic-logic exclusivity) form a coherent set of patterns. Each reinforces the others — snapshots preserve calculation results from naic-logic, services orchestrate without duplicating logic, controllers stay thin.
+- **Pattern Consistency**: The append-only snapshot model, service layer boundary, and Cardinal Rule (steady-invest-logic exclusivity) form a coherent set of patterns. Each reinforces the others — snapshots preserve calculation results from steady-invest-logic, services orchestrate without duplicating logic, controllers stay thin.
 - **Schema Coherence**: All new tables include `user_id` from Phase 1; Phase 3 authentication adds middleware enforcement without schema changes. Version-based snapshots serve both comparison integrity and thesis evolution (FR4.2) with a single design pattern.
 - **UX-Architecture Alignment**: Five Core Views map to explicit routes and page components. Global signals (active portfolio, currency preference) bridge the UX progressive density pattern to Leptos reactive architecture. View-to-component mapping is complete.
 - **Cross-Section Consistency**: 6 capability clusters (Project Context) → elaborated in Core Decisions → mapped to file locations in Structure. Cardinal Rule referenced in Architectural Differentiators, Implementation Patterns, and Component Boundaries. Append-only model in Core Decisions and Process Patterns. No contradictions found.
@@ -410,7 +410,7 @@ naic/
 | FR2 (Analysis & Visualization) | Delivered (MVP) | Complete |
 | FR3 (Reporting & Operations) | Delivered; PDF UI routing fix needed | Complete (minor fix) |
 | FR4 (Analysis Persistence) | Schema, API endpoints, service layer defined | Ready |
-| FR5 (Portfolio Management) | Schema, API endpoints, naic-logic extension, UX components defined | Ready |
+| FR5 (Portfolio Management) | Schema, API endpoints, steady-invest-logic extension, UX components defined | Ready |
 | FR6 (Watchlist) | Schema, API endpoints, page component defined | Ready |
 | FR7 (Multi-User) | user_id columns, auth controller exists, middleware pattern defined | Ready |
 
@@ -430,7 +430,7 @@ naic/
 | Decision | Options | Recommended | Resolve By |
 |----------|---------|-------------|------------|
 | Static Chart Image Capture | A: Lock-time browser capture, B: Headless rendering, C: Rust pipeline | Option A | Phase 1 story planning |
-| naic-logic module structure | Single lib.rs vs. multi-module | Defer until Phase 2 complexity demands it | Phase 2 |
+| steady-invest-logic module structure | Single lib.rs vs. multi-module | Defer until Phase 2 complexity demands it | Phase 2 |
 | Snapshot retention policy | Time-based archival vs. unlimited retention | Defer until usage patterns observed | Phase 2 |
 | On-demand price refresh | Last-known historical vs. fresh daily close | Last-known historical (Phase 1); evaluate in Phase 2 | Phase 2 |
 | Performance test harness | A: Extend existing E2E framework, B: `criterion` benchmark suite, C: Timed assertions in integration tests | Option C for API NFRs; Option A for frontend NFRs | Phase 1 story planning |
@@ -459,7 +459,7 @@ naic/
   - Version-based snapshots elegantly solve comparison integrity and thesis evolution
   - Existing infrastructure (services, exchange rates, analyses controller) provides foundation for Phase 1
 - **Key Risks**:
-  - `naic-logic` crate is a single 30K-line file — will need modularization as Phase 2 adds portfolio calculations
+  - `steady-invest-logic` crate is a single 30K-line file — will need modularization as Phase 2 adds portfolio calculations
   - Test count needs to ~5x from current 23 E2E tests to cover new API surface
   - Static chart capture and performance test harness decisions must be resolved before first Phase 1 story
   - `locked_analyses` → `analysis_snapshots` data migration involves column mapping and data transformation (`analysis_data` → `snapshot_data`, `locked_at` → `captured_at`, default `user_id = 1`). Low severity but non-zero risk — a botched migration could lose existing locked analyses. Mitigated by pre-migration backup.

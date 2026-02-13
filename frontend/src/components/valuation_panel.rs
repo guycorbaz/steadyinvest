@@ -5,7 +5,7 @@
 //! sell-zone (ceiling) target prices from EPS CAGR projections.
 
 use leptos::prelude::*;
-use naic_logic::HistoricalData;
+use steady_invest_logic::HistoricalData;
 use rust_decimal::prelude::ToPrimitive;
 
 /// Number of years forward for EPS projection.

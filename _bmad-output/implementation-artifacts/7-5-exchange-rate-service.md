@@ -100,7 +100,7 @@ So that cross-currency monetary values can be displayed accurately in future com
 
 ### Critical Architecture Constraints
 
-**Cardinal Rule:** All calculation logic lives in `crates/naic-logic`. This story does NOT involve calculation logic — it's an external data service integration. No naic-logic changes needed.
+**Cardinal Rule:** All calculation logic lives in `crates/steady-invest-logic`. This story does NOT involve calculation logic — it's an external data service integration. No steady-invest-logic changes needed.
 
 **Append-Only / Immutability:** Not applicable to exchange rates — they are mutable cached data, not analysis snapshots.
 
@@ -261,7 +261,7 @@ Files NOT to modify:
 - `backend/src/services/exchange.rs` — Existing historical rate service (harvest pipeline)
 - `backend/src/models/_entities/exchange_rates.rs` — Existing entity (yearly historical rates)
 - `backend/migration/` — No schema changes needed
-- `crates/naic-logic/` — No calculation logic involved
+- `crates/steady-invest-logic/` — No calculation logic involved
 - `frontend/` — No frontend changes (this is a backend-only foundation story)
 
 ### Previous Story Learnings (from Stories 7.3 and 7.4)

@@ -42,7 +42,7 @@ so that I can preemptively fix connection issues or provider downtime.
 
 - Backend: `backend/src/controllers/system_controller.rs`
 - Frontend: `frontend/src/pages/system_monitor.rs`, `frontend/src/components/health_indicator.rs`
-- Logic: `crates/naic-logic/src/lib.rs` (if any shared status types are needed)
+- Logic: `crates/steady-invest-logic/src/lib.rs` (if any shared status types are needed)
 
 ### References
 

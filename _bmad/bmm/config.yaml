@@ -3,7 +3,7 @@
 # Version: 6.0.0-Beta.8
 # Date: 2026-02-10T09:12:40.601Z
 
-project_name: naic
+project_name: steadyinvest
 user_skill_level: intermediate
 planning_artifacts: "{project-root}/_bmad-output/planning-artifacts"
 implementation_artifacts: "{project-root}/_bmad-output/implementation-artifacts"
