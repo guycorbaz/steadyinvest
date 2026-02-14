@@ -121,7 +121,7 @@ async fn test_sales_cagr_slider_controls_sales_projection() -> Result<()> {
 
     // Record initial Sales CAGR display
     let slider_rows = ctx.driver.find_all(By::ClassName("chart-slider-row")).await?;
-    let initial_text = slider_rows[0].text().await?;
+    let _initial_text = slider_rows[0].text().await?;
 
     // Set slider to a known value
     set_slider_value(&ctx.driver, &sliders[0], 25.0).await?;
@@ -350,7 +350,7 @@ async fn test_keyboard_navigation_basics() -> Result<()> {
         vec![],
     ).await?.json().as_str().unwrap_or("").to_string();
 
-    search_input.send_keys(Key::Tab).await?;
+    search_input.send_keys(Key::Tab.to_string()).await?;
 
     let next_active: String = ctx.driver.execute(
         "return document.activeElement.className;",
@@ -396,7 +396,7 @@ async fn test_override_modal_keyboard_dismiss() -> Result<()> {
 
     // Press Escape to dismiss
     ctx.driver.action_chain()
-        .send_keys(Key::Escape)
+        .send_keys(Key::Escape.to_string())
         .perform().await?;
 
     // Poll until modal disappears (deterministic wait instead of arbitrary sleep)
@@ -445,7 +445,7 @@ async fn test_thesis_lock_modal_keyboard_dismiss() -> Result<()> {
 
     // Press Escape to dismiss
     ctx.driver.action_chain()
-        .send_keys(Key::Escape)
+        .send_keys(Key::Escape.to_string())
         .perform().await?;
 
     // Poll until modal disappears (deterministic wait instead of arbitrary sleep)

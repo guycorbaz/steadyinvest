@@ -1,7 +1,11 @@
 mod common;
+#[cfg(test)]
 mod epic3_tests;
+#[cfg(test)]
 mod epic4_tests;
+#[cfg(test)]
 mod epic5_tests;
+#[cfg(test)]
 mod epic6_tests;
 
 #[cfg(test)]
@@ -129,5 +133,3 @@ mod search_tests {
         Ok(())
     }
 }
-
-fn main() {}
