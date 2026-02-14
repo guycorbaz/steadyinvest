@@ -122,7 +122,7 @@ jobs:
 
       - name: Start backend server
         run: |
-          cargo run -p backend > backend.log 2>&1 &
+          cargo run -p backend -- start -e test > backend.log 2>&1 &
 
       - name: Wait for backend readiness
         run: |
