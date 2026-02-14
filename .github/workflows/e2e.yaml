@@ -112,8 +112,8 @@ jobs:
       - name: Install trunk
         run: cargo binstall trunk --no-confirm
 
-      - name: Build workspace
-        run: cargo build --all
+      - name: Build backend
+        run: cargo build -p backend
 
       - name: Build frontend
         run: |
@@ -173,10 +173,6 @@ jobs:
 
       - name: Run E2E tests
         run: cargo test -p e2e-tests -- --test-threads=1 --nocapture
-        env:
-          HEADLESS: "true"
-          BASE_URL: "http://localhost:5173"
-          CHROME_DRIVER_URL: "http://localhost:9515"
 
       - name: Upload failure artifacts
         if: always()

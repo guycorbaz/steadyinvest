@@ -93,6 +93,14 @@ Tasks 1, 3, and 7 are **pass/fail gates** — if any of these fail, zero E2E tes
   - [ ] 9.4 Confirm failure output has sufficient detail for diagnosis (screenshots uploaded, backend.log available)
   - [x] 9.5 Confirm `cargo check` (full workspace) passes locally after changes
 
+### Review Follow-ups (AI)
+- [ ] [AI-Review][HIGH] H1: Tasks 8.2-8.5 and 9.1-9.4 incomplete — pipeline not yet pushed/validated in GitHub Actions. Must push and verify all 23 E2E + 57 unit tests pass in CI before marking story done.
+- [x] [AI-Review][HIGH] H2: `save_screenshot()` was dead code — fixed by auto-capturing in `cleanup()` when HEADLESS=true. Note: screenshots only captured for tests that reach cleanup; assertion panics before cleanup won't produce screenshots.
+- [x] [AI-Review][HIGH] H3: Dev Agent Record was empty — populated with file list and review notes.
+- [x] [AI-Review][MEDIUM] M1: `cargo build --all` wasted CI time building frontend for native target — changed to `cargo build -p backend`.
+- [x] [AI-Review][MEDIUM] M2: Redundant step-level env vars on E2E test step — removed (workflow-level vars sufficient).
+- [ ] [AI-Review][MEDIUM] M3: Git commit 346464d says "complete Story 7.7" but story has 9 unchecked subtasks — commit message is misleading. No fix possible without amend.
+
 ## Dev Notes
 
 ### Critical Architecture Constraints
@@ -274,10 +282,26 @@ Files NOT to create:
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.6 (Implementation) + Claude Opus 4.6 (Code Review)
 
 ### Debug Log References
 
+- Code review performed 2026-02-14: 3 HIGH, 3 MEDIUM, 2 LOW findings
+- 4 issues fixed automatically (H2, H3, M1, M2)
+- 2 issues deferred (H1 requires CI push, M3 commit message already committed)
+- 2 LOW issues noted but not fixed (L1 chromedriver sleep, L2 pre-existing warnings)
+
 ### Completion Notes List
 
+- Tasks 1-7: All CI/CD workflow fixes implemented and verified locally
+- Task 6 (screenshots): Enhanced during code review — `cleanup()` now auto-captures screenshots in CI mode using thread name as test identifier
+- Tasks 8-9: Pipeline validation NOT yet performed — requires push to GitHub and CI run
+- Code review: `cargo build --all` optimized to `cargo build -p backend` to save ~2-5 min CI time
+- Code review: Removed redundant step-level env vars (workflow-level vars already set)
+
 ### File List
+
+| File | Action | Description |
+|------|--------|-------------|
+| `.github/workflows/e2e.yaml` | Modified | Fixed 7 CI issues: WASM target, trunk binstall, SPA server, health check, DATABASE_URL, ChromeDriver, artifacts. Code review: optimized build step, removed redundant env vars. |
+| `tests/e2e/src/common/mod.rs` | Modified | Added `save_screenshot()` method + auto-capture in `cleanup()` when HEADLESS=true |

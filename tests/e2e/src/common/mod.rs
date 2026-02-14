@@ -58,6 +58,15 @@ impl TestContext {
     }
 
     pub async fn cleanup(self) -> Result<()> {
+        // In CI (headless), capture a screenshot before quitting for diagnostics.
+        // Uses the Rust test thread name to derive the test function name.
+        if env::var("HEADLESS").unwrap_or_default() == "true" {
+            let test_name = std::thread::current()
+                .name()
+                .unwrap_or("unknown")
+                .to_string();
+            self.save_screenshot(&test_name).await;
+        }
         self.driver.quit().await?;
         Ok(())
     }
