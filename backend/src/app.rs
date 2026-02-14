@@ -75,13 +75,32 @@ impl Hooks for App {
         Ok(())
     }
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
-        db::seed::<users::ActiveModel>(&ctx.db, &base.join("users.yaml").display().to_string())
-            .await?;
-        db::seed::<crate::models::historicals::ActiveModel>(
+        // Loco's db::seed() inserts data successfully but then calls
+        // reset_autoincrement which is unimplemented for MySQL/MariaDB.
+        // Since the inserts complete before the auto-increment reset,
+        // we catch that specific error and let the seed succeed.
+        if let Err(e) = db::seed::<users::ActiveModel>(
+            &ctx.db,
+            &base.join("users.yaml").display().to_string(),
+        )
+        .await
+        {
+            if !e.to_string().contains("Unsupported database backend") {
+                return Err(e);
+            }
+        }
+
+        if let Err(e) = db::seed::<crate::models::_entities::historicals::ActiveModel>(
             &ctx.db,
             &base.join("historicals.yaml").display().to_string(),
         )
-        .await?;
+        .await
+        {
+            if !e.to_string().contains("Unsupported database backend") {
+                return Err(e);
+            }
+        }
+
         Ok(())
     }
 }

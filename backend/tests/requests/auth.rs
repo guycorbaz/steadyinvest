@@ -17,6 +17,15 @@ macro_rules! configure_insta {
     };
 }
 
+/// Extends `cleanup_user_model()` with a DATEZ → DATE normalization so that
+/// snapshot assertions work identically on both SQLite (no TZ suffix) and
+/// MySQL/MariaDB (TZ suffix triggers `DATEZ` replacement).
+fn cleanup_user_model_compat() -> Vec<(&'static str, &'static str)> {
+    let mut f = cleanup_user_model();
+    f.push(("DATEZ", "DATE"));
+    f
+}
+
 #[tokio::test]
 #[serial]
 async fn can_register() {
@@ -39,7 +48,7 @@ async fn can_register() {
         let saved_user = users::Model::find_by_email(&ctx.db, email).await;
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => cleanup_user_model_compat()
         }, {
             assert_debug_snapshot!(saved_user);
         });
@@ -113,7 +122,7 @@ async fn can_login_with_verify(#[case] test_name: &str, #[case] password: &str) 
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => cleanup_user_model_compat()
         }, {
             assert_debug_snapshot!(test_name, (response.status_code(), response.text()));
         });
@@ -184,7 +193,7 @@ async fn can_login_without_verify() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => cleanup_user_model_compat()
         }, {
             assert_debug_snapshot!(login_response.text());
         });
@@ -304,7 +313,7 @@ async fn can_get_current_user() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => cleanup_user_model_compat()
         }, {
             assert_debug_snapshot!((response.status_code(), response.text()));
         });
@@ -360,7 +369,7 @@ async fn can_auth_with_magic_link() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => cleanup_user_model_compat()
         }, {
             assert_debug_snapshot!(magic_link_response.text());
         });
@@ -449,7 +458,7 @@ async fn can_resend_verification_email() {
             .expect("User should exist");
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => cleanup_user_model_compat()
         }, {
             assert_debug_snapshot!("resend_verification_user", user);
         });

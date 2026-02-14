@@ -3,9 +3,10 @@ use loco_rs::prelude::*;
 use loco_rs::testing::prelude::request;
 use backend::models::_entities::{analysis_snapshots, tickers, users};
 use steady_invest_logic::{AnalysisSnapshot, HistoricalData};
-use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
+use serial_test::serial;
 
 #[tokio::test]
+#[serial]
 async fn can_lock_and_get_analyses() {
     request::<App, _, _>(|request, ctx| async move {
         // 0. Create a user (needed for analysis_snapshots FK on user_id)
@@ -19,13 +20,14 @@ async fn can_lock_and_get_analyses() {
             ..Default::default()
         }.insert(&ctx.db).await.unwrap();
 
-        // 1. Prepare Ticker
-        let _ticker: tickers::Model = tickers::Entity::find()
-            .filter(tickers::Column::Ticker.eq("AAPL"))
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
+        // 1. Create Ticker (fresh DB has no seeded tickers)
+        let _ticker = tickers::ActiveModel {
+            ticker: ActiveValue::set("AAPL".to_string()),
+            name: ActiveValue::set("Apple Inc.".to_string()),
+            exchange: ActiveValue::set("NASDAQ".to_string()),
+            currency: ActiveValue::set("USD".to_string()),
+            ..Default::default()
+        }.insert(&ctx.db).await.unwrap();
 
         let snapshot = AnalysisSnapshot {
             historical_data: HistoricalData::default(),

@@ -17,6 +17,15 @@ macro_rules! configure_insta {
     };
 }
 
+/// Extends `cleanup_user_model()` with a DATEZ → DATE normalization so that
+/// snapshot assertions work identically on both SQLite (no TZ suffix) and
+/// MySQL/MariaDB (TZ suffix triggers `DATEZ` replacement).
+fn cleanup_user_model_compat() -> Vec<(&'static str, &'static str)> {
+    let mut f = cleanup_user_model();
+    f.push(("DATEZ", "DATE"));
+    f
+}
+
 #[tokio::test]
 #[serial]
 async fn test_can_validate_model() {
@@ -55,7 +64,7 @@ async fn can_create_with_password() {
     let res = Model::create_with_password(&boot.app_context.db, &params).await;
 
     insta::with_settings!({
-        filters => cleanup_user_model()
+        filters => cleanup_user_model_compat()
     }, {
         assert_debug_snapshot!(res);
     });
@@ -101,8 +110,12 @@ async fn can_find_by_email() {
     let non_existing_user_results =
         Model::find_by_email(&boot.app_context.db, "un@existing-email.com").await;
 
-    assert_debug_snapshot!(existing_user);
-    assert_debug_snapshot!(non_existing_user_results);
+    insta::with_settings!({
+        filters => cleanup_user_model_compat()
+    }, {
+        assert_debug_snapshot!(existing_user);
+        assert_debug_snapshot!(non_existing_user_results);
+    });
 }
 
 #[tokio::test]
@@ -122,8 +135,12 @@ async fn can_find_by_pid() {
     let non_existing_user_results =
         Model::find_by_pid(&boot.app_context.db, "23232323-2323-2323-2323-232323232323").await;
 
-    assert_debug_snapshot!(existing_user);
-    assert_debug_snapshot!(non_existing_user_results);
+    insta::with_settings!({
+        filters => cleanup_user_model_compat()
+    }, {
+        assert_debug_snapshot!(existing_user);
+        assert_debug_snapshot!(non_existing_user_results);
+    });
 }
 
 #[tokio::test]
