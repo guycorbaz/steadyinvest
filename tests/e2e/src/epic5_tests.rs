@@ -3,11 +3,17 @@ mod tests {
     use crate::common::TestContext;
     use thirtyfour::prelude::*;
     use anyhow::Result;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_system_monitor_dashboard() -> Result<()> {
         let ctx: TestContext = TestContext::new().await?;
         ctx.navigate("/system-monitor").await?;
+
+        // Wait for page-specific element (WASM needs time to load and render on full page nav)
+        let _page = ctx.driver.query(By::ClassName("system-monitor-page"))
+            .wait(Duration::from_secs(15), Duration::from_millis(500))
+            .first().await?;
 
         // 1. Verify "SYSTEM MONITOR" header
         let header: WebElement = ctx.driver.query(By::Tag("h1")).first().await?;
@@ -35,6 +41,11 @@ mod tests {
     async fn test_audit_log_page() -> Result<()> {
         let ctx: TestContext = TestContext::new().await?;
         ctx.navigate("/audit-log").await?;
+
+        // Wait for page-specific element (WASM needs time to load and render on full page nav)
+        let _page = ctx.driver.query(By::ClassName("audit-log-page"))
+            .wait(Duration::from_secs(15), Duration::from_millis(500))
+            .first().await?;
 
         // 1. Verify Header
         let header: WebElement = ctx.driver.query(By::Tag("h1")).first().await?;
