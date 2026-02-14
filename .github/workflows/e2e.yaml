@@ -121,8 +121,9 @@ jobs:
           trunk build
 
       - name: Start backend server
+        working-directory: backend
         run: |
-          cargo run -p backend -- start -e test > backend.log 2>&1 &
+          cargo run -p backend -- start -e test > ../backend.log 2>&1 &
 
       - name: Wait for backend readiness
         run: |
