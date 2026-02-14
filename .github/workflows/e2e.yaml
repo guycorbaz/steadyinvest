@@ -95,11 +95,23 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Setup Chrome and ChromeDriver
+      - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
-          install-chromedriver: true
+
+      - name: Install matching ChromeDriver
+        run: |
+          CHROME_MAJOR=$(google-chrome --version | grep -oP '\d+' | head -1)
+          echo "Chrome major version: $CHROME_MAJOR"
+          DRIVER_VERSION=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/latest-versions-per-milestone.json" \
+            | jq -r ".milestones.\"$CHROME_MAJOR\".version")
+          echo "ChromeDriver version: $DRIVER_VERSION"
+          curl -sL "https://storage.googleapis.com/chrome-for-testing-public/$DRIVER_VERSION/linux64/chromedriver-linux64.zip" -o /tmp/cd.zip
+          unzip -o /tmp/cd.zip -d /tmp/
+          sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/
+          sudo chmod +x /usr/local/bin/chromedriver
+          chromedriver --version
 
       - name: Start ChromeDriver
         run: |
