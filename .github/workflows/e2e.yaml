@@ -153,18 +153,9 @@ jobs:
             sleep 2
           done
 
-      - name: Start frontend SPA server
+      - name: Start frontend SPA server (with API proxy)
         run: |
-          cd frontend
-          python3 -c "
-          import http.server, functools, pathlib
-          class H(http.server.SimpleHTTPRequestHandler):
-              def do_GET(self):
-                  if not pathlib.Path(self.translate_path(self.path)).exists():
-                      self.path = '/index.html'
-                  super().do_GET()
-          http.server.HTTPServer(('', 5173), functools.partial(H, directory='dist')).serve_forever()
-          " &
+          python3 tests/e2e/serve_frontend.py frontend/dist 5173 &
 
       - name: Wait for frontend readiness
         run: |
