@@ -105,7 +105,7 @@ mod search_tests {
         // Verify split-badge exists (AC 4)
         let badge = data_ready.find(By::ClassName("split-badge")).await?;
         assert!(badge.is_displayed().await?);
-        assert_eq!(badge.text().await?, "Split-Adjusted");
+        assert_eq!(badge.text().await?, "SPLIT-ADJUSTED");
         
         ctx.cleanup().await?;
         Ok(())

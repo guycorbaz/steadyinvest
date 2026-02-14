@@ -22,9 +22,11 @@ async fn test_thesis_locking_flow() -> Result<()> {
     let lock_btn = ctx.driver.find(By::XPath("//button[contains(text(), 'Lock Thesis')]")).await?;
     lock_btn.click().await?;
 
-    // 4. Fill Modal
-    let modal = ctx.driver.query(By::ClassName("modal-content")).first().await?;
-    assert!(modal.is_displayed().await?);
+    // 4. Fill Modal (wait for it to become visible — CSS transitions may delay display)
+    let modal = ctx.driver.query(By::ClassName("modal-content"))
+        .wait(std::time::Duration::from_secs(5), std::time::Duration::from_millis(500))
+        .and_displayed()
+        .first().await?;
 
     let note_area = modal.find(By::Tag("textarea")).await?;
     note_area.send_keys("E2E Institutional Thesis - Quality Compounder").await?;
