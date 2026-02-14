@@ -102,17 +102,12 @@ async fn verify_normalization_math_consistency() {
 
 #[tokio::test]
 #[serial]
-async fn cannot_harvest_empty_ticker() {
+async fn cannot_harvest_invalid_ticker() {
     request::<App, _, _>(|request, _ctx| async move {
-        let res = request.post("/api/harvest/").await;
-        // Empty ticker must not succeed — the exact error code depends on
-        // whether Axum matches the route (400 from handler validation) or
-        // rejects it outright (404/405).
-        assert_ne!(
-            res.status_code(),
-            200,
-            "Empty ticker should not return success"
-        );
+        // Trailing-slash behavior varies by framework version, so test with
+        // an explicitly invalid (too-long) ticker instead.
+        let res = request.post("/api/harvest/THISISSUPERLONG").await;
+        assert_eq!(res.status_code(), 400);
     })
     .await;
 }
