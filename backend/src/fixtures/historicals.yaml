@@ -1,4 +1,5 @@
-- ticker: AAPL
+- id: 1
+  ticker: AAPL
   fiscal_year: 2021
   sales: "365817.0000"
   eps: "5.6100"
@@ -10,7 +11,8 @@
   net_income: "94680.0000"
   pretax_income: "109207.0000"
   total_equity: "63090.0000"
-- ticker: AAPL
+- id: 2
+  ticker: AAPL
   fiscal_year: 2020
   sales: "274515.0000"
   eps: "3.2800"

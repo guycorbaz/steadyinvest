@@ -72,7 +72,7 @@ async fn test_harvest_anomaly_logging() {
         let found = logs.iter().any(|l| 
             l["ticker"] == "ANOMALY" && 
             l["event_type"] == "Anomaly" &&
-            l["field"] == "Integrity"
+            l["field_name"] == "Integrity"
         );
         assert!(found, "Expected anomaly log for ANOMALY ticker not found");
     })
