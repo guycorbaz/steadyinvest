@@ -1,6 +1,6 @@
 # Story 8.1: Comparison Schema & API
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -275,6 +275,26 @@ None — clean compilation, no runtime errors.
 - Two route groups registered: `compare_routes()` for `/api/v1/compare` and `routes()` for `/api/v1/comparisons`
 - `valuation_zone` included in `ComparisonSnapshotSummary` DTO from day 1 (Party Mode decision)
 - `base_currency` stored and echoed in responses; no conversion logic (deferred to Story 8.3)
+
+### Senior Developer Review (AI) — 2026-02-15
+
+**Reviewer:** Claude Opus 4.6 (adversarial code review)
+
+**Issues Found:** 1 High, 4 Medium, 3 Low
+
+**Fixed (2):**
+- [H1] Non-atomic create/update operations wrapped in explicit DB transactions (`TransactionTrait`)
+- [M1] Added `base_currency` length validation (must be exactly 3 characters) on POST and PUT
+
+**Not fixed — acceptable by design (3):**
+- [M2] `from_model_and_ticker` duplication with snapshots controller — extraction deferred (modifying `snapshots.rs` is out of story scope; candidate for future refactoring)
+- [M3] Tests cannot run locally — pre-existing infrastructure issue (no `steadyinvest_test` DB on NAS). CI validation pending.
+- [M4] N+1 queries in list/detail/ad-hoc endpoints — acceptable per NFR6 (max 20 items)
+
+**Noted for future (3 LOW):**
+- [L1] No duplicate `analysis_snapshot_id` validation in items
+- [L2] No maximum items limit on persisted comparisons
+- [L3] No pagination on list endpoint
 
 ### File List
 

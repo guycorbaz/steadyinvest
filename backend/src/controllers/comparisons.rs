@@ -10,7 +10,7 @@
 //! **Currency**: `base_currency` is stored but no conversion is performed (Story 8.3).
 
 use loco_rs::prelude::*;
-use sea_orm::{IntoActiveModel, PaginatorTrait, QueryOrder};
+use sea_orm::{IntoActiveModel, PaginatorTrait, QueryOrder, TransactionTrait};
 use serde::{Deserialize, Serialize};
 
 use crate::models::_entities::{
@@ -226,6 +226,11 @@ pub async fn create_comparison_set(
         return unprocessable_entity("Name must not be empty");
     }
 
+    // Validate base_currency is exactly 3 characters
+    if req.base_currency.len() != 3 {
+        return unprocessable_entity("base_currency must be exactly 3 characters");
+    }
+
     // Validate all snapshot IDs exist and are not deleted
     for item in &req.items {
         let snapshot = analysis_snapshots::Entity::find_by_id(item.analysis_snapshot_id)
@@ -240,6 +245,9 @@ pub async fn create_comparison_set(
         }
     }
 
+    // Transaction: create set + items atomically
+    let txn = ctx.db.begin().await?;
+
     let now: chrono::DateTime<chrono::FixedOffset> = chrono::Utc::now().into();
     let set = comparison_sets::ActiveModel {
         user_id: ActiveValue::set(1),
@@ -249,7 +257,7 @@ pub async fn create_comparison_set(
         updated_at: ActiveValue::set(now),
         ..Default::default()
     };
-    let set = set.insert(&ctx.db).await?;
+    let set = set.insert(&txn).await?;
 
     for item in &req.items {
         let active = comparison_set_items::ActiveModel {
@@ -258,10 +266,12 @@ pub async fn create_comparison_set(
             sort_order: ActiveValue::set(item.sort_order),
             ..Default::default()
         };
-        active.insert(&ctx.db).await?;
+        active.insert(&txn).await?;
     }
 
-    // Return full detail response
+    txn.commit().await?;
+
+    // Return full detail response (reads committed data)
     let detail = build_set_detail(&ctx, set).await?;
     format::json(detail)
 }
@@ -339,6 +349,11 @@ pub async fn update_comparison_set(
         return unprocessable_entity("Name must not be empty");
     }
 
+    // Validate base_currency is exactly 3 characters
+    if req.base_currency.len() != 3 {
+        return unprocessable_entity("base_currency must be exactly 3 characters");
+    }
+
     // Validate all snapshot IDs exist and are not deleted
     for item in &req.items {
         let snapshot = analysis_snapshots::Entity::find_by_id(item.analysis_snapshot_id)
@@ -353,17 +368,19 @@ pub async fn update_comparison_set(
         }
     }
 
-    // Update set fields
+    // Transaction: update set + replace items atomically
+    let txn = ctx.db.begin().await?;
+
     let mut active = set.into_active_model();
     active.name = ActiveValue::set(req.name);
     active.base_currency = ActiveValue::set(req.base_currency);
     active.updated_at = ActiveValue::set(chrono::Utc::now().into());
-    let set = active.update(&ctx.db).await?;
+    let set = active.update(&txn).await?;
 
     // Replace items: delete existing, insert new
     comparison_set_items::Entity::delete_many()
         .filter(comparison_set_items::Column::ComparisonSetId.eq(set.id))
-        .exec(&ctx.db)
+        .exec(&txn)
         .await?;
 
     for item in &req.items {
@@ -373,9 +390,12 @@ pub async fn update_comparison_set(
             sort_order: ActiveValue::set(item.sort_order),
             ..Default::default()
         };
-        active.insert(&ctx.db).await?;
+        active.insert(&txn).await?;
     }
 
+    txn.commit().await?;
+
+    // Return full detail response (reads committed data)
     let detail = build_set_detail(&ctx, set).await?;
     format::json(detail)
 }
