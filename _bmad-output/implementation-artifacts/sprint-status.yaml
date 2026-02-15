@@ -90,14 +90,14 @@ development_status:
   # ============================================================
 
   # Epic 7: Analysis Persistence & MVP Fixes
-  epic-7: in-progress
+  epic-7: done
   7-1-mvp-fixes-pdf-export-chart-height-legend: done
   7-2-pre-migration-backup-snapshot-schema: done
   7-3-analysis-snapshot-api: done
   7-4-static-chart-image-capture-at-lock-time: done
   7-5-exchange-rate-service: done
   7-6-library-view-analysis-browsing: done
-  7-7-cicd-e2e-pipeline-validation: in-progress
+  7-7-cicd-e2e-pipeline-validation: done
   epic-7-retrospective: optional
 
   # Epic 8: Analysis Comparison & Thesis Evolution
