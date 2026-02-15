@@ -15,8 +15,8 @@ mod tests {
             .wait(Duration::from_secs(15), Duration::from_millis(500))
             .first().await?;
 
-        // 1. Verify "SYSTEM MONITOR" header
-        let header: WebElement = ctx.driver.query(By::Tag("h1")).first().await?;
+        // 1. Verify "SYSTEM MONITOR" header (scoped to page container to avoid picking up other h1 elements)
+        let header: WebElement = _page.find(By::Tag("h1")).await?;
         assert!(header.text().await?.contains("SYSTEM"));
         
         // 2. Verify health indicator panels
@@ -47,8 +47,8 @@ mod tests {
             .wait(Duration::from_secs(15), Duration::from_millis(500))
             .first().await?;
 
-        // 1. Verify Header
-        let header: WebElement = ctx.driver.query(By::Tag("h1")).first().await?;
+        // 1. Verify Header (scoped to page container to avoid picking up other h1 elements)
+        let header: WebElement = _page.find(By::Tag("h1")).await?;
         assert!(header.text().await?.contains("AUDIT"));
         
         // 2. Verify high-density grid existence

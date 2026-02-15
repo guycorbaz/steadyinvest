@@ -56,7 +56,7 @@ async fn test_complete_analyst_workflow() -> Result<()> {
 
     // 3. Select result, verify HUD expands
     result_item.click().await?;
-    let hud = ctx.driver.query(By::ClassName("analyst-hud-init"))
+    let _hud = ctx.driver.query(By::ClassName("analyst-hud-init"))
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .and_displayed()
         .first().await?;
@@ -294,7 +294,7 @@ async fn test_direct_url_navigation() -> Result<()> {
     let _page = ctx.driver.query(By::ClassName("system-monitor-page"))
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .first().await?;
-    let sys_header = ctx.driver.query(By::Tag("h1")).first().await?;
+    let sys_header = _page.find(By::Tag("h1")).await?;
     assert!(sys_header.text().await?.contains("SYSTEM"), "Direct /system-monitor navigation should work");
 
     // Direct navigate to /audit-log
@@ -302,7 +302,7 @@ async fn test_direct_url_navigation() -> Result<()> {
     let _page = ctx.driver.query(By::ClassName("audit-log-page"))
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .first().await?;
-    let audit_header = ctx.driver.query(By::Tag("h1")).first().await?;
+    let audit_header = _page.find(By::Tag("h1")).await?;
     assert!(audit_header.text().await?.contains("AUDIT"), "Direct /audit-log navigation should work");
 
     // Direct navigate to /
