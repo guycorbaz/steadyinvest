@@ -122,7 +122,9 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install trunk
-        run: cargo binstall trunk --no-confirm
+        run: |
+          cargo binstall trunk --no-confirm || cargo install trunk
+          trunk --version
 
       - name: Build backend
         run: cargo build -p backend
