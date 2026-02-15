@@ -123,7 +123,7 @@ jobs:
 
       - name: Install trunk
         run: |
-          cargo binstall trunk --no-confirm || cargo install trunk
+          cargo binstall trunk --no-confirm --force
           trunk --version
 
       - name: Build backend
