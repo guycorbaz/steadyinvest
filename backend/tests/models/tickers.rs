@@ -16,7 +16,8 @@ async fn test_model() {
     configure_insta!();
 
     let boot = boot_test::<App>().await.unwrap();
-    seed::<App>(&boot.app_context).await.unwrap();
+    // Loco boot already calls App::seed() — no need to seed again.
+    let _ctx = &boot.app_context;
 
     // query your model, e.g.:
     //

@@ -326,7 +326,7 @@ async fn can_get_current_user() {
 async fn can_auth_with_magic_link() {
     configure_insta!();
     request::<App, _, _>(|request, ctx| async move {
-        seed::<App>(&ctx).await.unwrap();
+        // Loco boot already calls App::seed() — user1@example.com exists from fixtures.
 
         let payload = serde_json::json!({
             "email": "user1@example.com",
@@ -400,8 +400,8 @@ async fn can_reject_invalid_email() {
 #[serial]
 async fn can_reject_invalid_magic_link_token() {
     configure_insta!();
-    request::<App, _, _>(|request, ctx| async move {
-        seed::<App>(&ctx).await.unwrap();
+    request::<App, _, _>(|request, _ctx| async move {
+        // Loco boot already calls App::seed() — no need to seed again.
 
         let magic_link_response = request.get("/api/auth/magic-link/invalid-token").await;
         assert_eq!(

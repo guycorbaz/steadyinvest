@@ -1,5 +1,4 @@
 use backend::app::App;
-use loco_rs::prelude::*;
 use loco_rs::testing::prelude::request;
 use backend::models::_entities::{analysis_snapshots, tickers, users};
 use steady_invest_logic::{AnalysisSnapshot, HistoricalData};
@@ -10,16 +9,12 @@ use serial_test::serial;
 #[serial]
 async fn can_lock_and_get_analyses() {
     request::<App, _, _>(|request, ctx| async move {
-        // 0. Create a user (needed for analysis_snapshots FK on user_id)
-        let _user = users::ActiveModel {
-            id: ActiveValue::set(1),
-            pid: ActiveValue::set(uuid::Uuid::new_v4()),
-            email: ActiveValue::set("test@example.com".to_string()),
-            password: ActiveValue::set("hashed".to_string()),
-            api_key: ActiveValue::set("lo-test-key".to_string()),
-            name: ActiveValue::set("Test User".to_string()),
-            ..Default::default()
-        }.insert(&ctx.db).await.unwrap();
+        // 0. Verify user exists (seeded by Loco boot from fixtures/users.yaml)
+        let _user = users::Entity::find_by_id(1)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("User id=1 should exist from fixture seed");
 
         // 1. AAPL is seeded by the tickers migration
         let _ticker: tickers::Model = tickers::Entity::find()

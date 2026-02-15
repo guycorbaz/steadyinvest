@@ -8,23 +8,19 @@ use serial_test::serial;
 /// A minimal 1x1 red pixel PNG encoded as base64.
 const TINY_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==";
 
-/// Seed a user and a ticker for FK constraints.
+/// Ensure a user and ticker exist for FK constraints.
 /// Returns the ticker_id for use in snapshot requests.
+/// Note: Loco boot already seeds users from fixtures, so we query the
+/// existing user rather than inserting (which would cause a duplicate key error).
 async fn seed_user_and_ticker(ctx: &AppContext) -> i32 {
-    let _user = users::ActiveModel {
-        id: ActiveValue::set(1),
-        pid: ActiveValue::set(uuid::Uuid::new_v4()),
-        email: ActiveValue::set("test@example.com".to_string()),
-        password: ActiveValue::set("hashed".to_string()),
-        api_key: ActiveValue::set("lo-test-key".to_string()),
-        name: ActiveValue::set("Test User".to_string()),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await
-    .unwrap();
+    // User id=1 is already seeded by Loco boot from fixtures/users.yaml
+    let _user = users::Entity::find_by_id(1)
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .expect("User id=1 should exist from fixture seed");
 
-    // Find existing AAPL ticker (seeded via historicals fixture)
+    // Find existing AAPL ticker (seeded via tickers migration)
     let ticker: tickers::Model = tickers::Entity::find()
         .filter(tickers::Column::Ticker.eq("AAPL"))
         .one(&ctx.db)
