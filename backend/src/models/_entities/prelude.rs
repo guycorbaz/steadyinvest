@@ -8,3 +8,5 @@ pub use super::users::Entity as Users;
 pub use super::historicals_overrides::Entity as HistoricalsOverrides;
 pub use super::analysis_snapshots::Entity as AnalysisSnapshots;
 pub use super::provider_rate_limits::Entity as ProviderRateLimits;
+pub use super::comparison_sets::Entity as ComparisonSets;
+pub use super::comparison_set_items::Entity as ComparisonSetItems;

@@ -12,6 +12,7 @@
 //! - [`snapshots`]       — Analysis snapshot CRUD (append-only, immutable)
 //! - [`exchange_rates`]  — Current EUR/CHF/USD exchange rates
 //! - [`auth`]            — User authentication (register, login, verify)
+//! - [`comparisons`]     — Ad-hoc compare and persisted comparison sets
 //! - [`system`]          — System health and provider status
 
 pub mod auth;
@@ -21,4 +22,5 @@ pub mod harvest;
 pub mod analyses;
 pub mod snapshots;
 pub mod exchange_rates;
+pub mod comparisons;
 pub mod system;

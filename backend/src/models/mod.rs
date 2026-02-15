@@ -21,3 +21,5 @@ pub mod exchange_rates;
 pub mod historicals_overrides;
 pub mod analysis_snapshots;
 pub mod provider_rate_limits;
+pub mod comparison_sets;
+pub mod comparison_set_items;
