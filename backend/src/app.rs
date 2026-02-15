@@ -75,6 +75,12 @@ impl Hooks for App {
         Ok(())
     }
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
+        // When dangerously_recreate is enabled, Loco runs all migrations
+        // (which seeds a default user id=1) then early-returns without
+        // truncating.  Clear the migration-seeded user so fixture inserts
+        // don't hit a duplicate-key error.
+        truncate_table(&ctx.db, users::Entity).await?;
+
         // Loco's db::seed() inserts data successfully but then calls
         // reset_autoincrement which is unimplemented for MySQL/MariaDB.
         // Since the inserts complete before the auto-increment reset,
