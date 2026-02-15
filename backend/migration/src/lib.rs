@@ -14,6 +14,7 @@ mod m20260208_114000_provider_rate_limits;
 mod m20260208_120000_audit_logs;
 mod m20260212_000001_analysis_snapshots;
 mod m20260212_000002_add_snapshot_deleted_at;
+mod m20260215_000001_seed_default_user;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -32,6 +33,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260208_120000_audit_logs::Migration),
             Box::new(m20260212_000001_analysis_snapshots::Migration),
             Box::new(m20260212_000002_add_snapshot_deleted_at::Migration),
+            Box::new(m20260215_000001_seed_default_user::Migration),
             // inject-above (do not remove this comment)
         ]
     }

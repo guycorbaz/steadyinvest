@@ -98,7 +98,7 @@ development_status:
   7-5-exchange-rate-service: done
   7-6-library-view-analysis-browsing: done
   7-7-cicd-e2e-pipeline-validation: done
-  epic-7-retrospective: optional
+  epic-7-retrospective: done
 
   # Epic 8: Analysis Comparison & Thesis Evolution
   epic-8: backlog
