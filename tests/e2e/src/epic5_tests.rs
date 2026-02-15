@@ -51,16 +51,16 @@ mod tests {
         let header: WebElement = _page.find(By::Tag("h1")).await?;
         assert!(header.text().await?.contains("AUDIT"));
         
-        // 2. Verify high-density grid existence
-        let grid: WebElement = ctx.driver.query(By::ClassName("audit-grid")).first().await?;
-        assert!(grid.is_displayed().await?);
-        
-        // 3. Verify labels in the grid (at least one row header)
-        let ticker_label: WebElement = ctx.driver.query(By::XPath("//span[contains(text(), 'Ticker')]")).first().await?;
-        assert!(ticker_label.is_displayed().await?);
+        // 2. Verify audit table existence
+        let table: WebElement = ctx.driver.query(By::ClassName("audit-table")).first().await?;
+        assert!(table.is_displayed().await?);
 
-        // 4. Verify Export CSV button
-        let export_btn: WebElement = ctx.driver.query(By::XPath("//button[contains(text(), 'Export CSV')]")).first().await?;
+        // 3. Verify column headers in the table
+        let field_header: WebElement = ctx.driver.query(By::XPath("//th[contains(text(), 'Field')]")).first().await?;
+        assert!(field_header.is_displayed().await?);
+
+        // 4. Verify Export CSV link
+        let export_btn: WebElement = ctx.driver.query(By::ClassName("audit-export-btn")).first().await?;
         assert!(export_btn.is_displayed().await?);
         
         ctx.cleanup().await?;
