@@ -296,6 +296,7 @@ pub async fn list_comparison_sets(State(ctx): State<AppContext>) -> Result<Respo
     let sets = comparison_sets::Entity::find()
         .filter(comparison_sets::Column::UserId.eq(1))
         .order_by_desc(comparison_sets::Column::CreatedAt)
+        .order_by_desc(comparison_sets::Column::Id)
         .all(&ctx.db)
         .await?;
 
