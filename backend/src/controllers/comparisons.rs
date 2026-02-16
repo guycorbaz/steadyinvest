@@ -13,10 +13,10 @@
 use loco_rs::prelude::*;
 use sea_orm::{IntoActiveModel, PaginatorTrait, QueryOrder, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use steady_invest_logic::{
-    compute_upside_downside_from_snapshot, extract_snapshot_prices, AnalysisSnapshot,
-};
 
+use steady_invest_logic::is_valid_currency_code;
+
+use super::snapshot_metrics::{extract_monetary_fields, extract_projection_metrics};
 use crate::models::_entities::{
     analysis_snapshots, comparison_set_items, comparison_sets, tickers,
 };
@@ -80,45 +80,6 @@ pub struct ComparisonSnapshotSummary {
     pub target_low_price: Option<f64>,
 }
 
-/// Extract monetary and derived fields from snapshot JSON data.
-///
-/// Deserializes into [`AnalysisSnapshot`] and extracts native currency,
-/// current price, target prices, and upside/downside ratio.
-struct SnapshotMonetaryFields {
-    native_currency: Option<String>,
-    current_price: Option<f64>,
-    target_high_price: Option<f64>,
-    target_low_price: Option<f64>,
-    upside_downside_ratio: Option<f64>,
-}
-
-fn extract_monetary_fields(snapshot_data: &serde_json::Value) -> SnapshotMonetaryFields {
-    let snapshot: Option<AnalysisSnapshot> =
-        serde_json::from_value(snapshot_data.clone()).ok();
-
-    let Some(snapshot) = snapshot else {
-        return SnapshotMonetaryFields {
-            native_currency: None,
-            current_price: None,
-            target_high_price: None,
-            target_low_price: None,
-            upside_downside_ratio: None,
-        };
-    };
-
-    let native_currency = Some(snapshot.historical_data.currency.clone());
-    let prices = extract_snapshot_prices(&snapshot);
-    let upside_downside_ratio = compute_upside_downside_from_snapshot(&snapshot);
-
-    SnapshotMonetaryFields {
-        native_currency,
-        current_price: prices.current_price,
-        target_high_price: prices.target_high_price,
-        target_low_price: prices.target_low_price,
-        upside_downside_ratio,
-    }
-}
-
 impl ComparisonSnapshotSummary {
     /// Build from a snapshot model and its related ticker.
     fn from_model_and_ticker(
@@ -129,6 +90,7 @@ impl ComparisonSnapshotSummary {
             .map(|t| t.ticker)
             .unwrap_or_else(|| format!("ID:{}", m.ticker_id));
 
+        let proj = extract_projection_metrics(&m.snapshot_data);
         let monetary = extract_monetary_fields(&m.snapshot_data);
 
         Self {
@@ -138,22 +100,10 @@ impl ComparisonSnapshotSummary {
             thesis_locked: m.thesis_locked,
             notes: m.notes,
             captured_at: m.captured_at,
-            projected_sales_cagr: m
-                .snapshot_data
-                .get("projected_sales_cagr")
-                .and_then(|v| v.as_f64()),
-            projected_eps_cagr: m
-                .snapshot_data
-                .get("projected_eps_cagr")
-                .and_then(|v| v.as_f64()),
-            projected_high_pe: m
-                .snapshot_data
-                .get("projected_high_pe")
-                .and_then(|v| v.as_f64()),
-            projected_low_pe: m
-                .snapshot_data
-                .get("projected_low_pe")
-                .and_then(|v| v.as_f64()),
+            projected_sales_cagr: proj.projected_sales_cagr,
+            projected_eps_cagr: proj.projected_eps_cagr,
+            projected_high_pe: proj.projected_high_pe,
+            projected_low_pe: proj.projected_low_pe,
             valuation_zone: m
                 .snapshot_data
                 .get("valuation_zone")
@@ -282,9 +232,9 @@ pub async fn create_comparison_set(
         return unprocessable_entity("Name must not be empty");
     }
 
-    // Validate base_currency is exactly 3 characters
-    if req.base_currency.len() != 3 {
-        return unprocessable_entity("base_currency must be exactly 3 characters");
+    // Validate base_currency is a valid ISO 4217 code (3 uppercase ASCII letters)
+    if !is_valid_currency_code(&req.base_currency) {
+        return unprocessable_entity("base_currency must be a valid ISO 4217 code (3 uppercase letters)");
     }
 
     // Validate all snapshot IDs exist and are not deleted
@@ -406,9 +356,9 @@ pub async fn update_comparison_set(
         return unprocessable_entity("Name must not be empty");
     }
 
-    // Validate base_currency is exactly 3 characters
-    if req.base_currency.len() != 3 {
-        return unprocessable_entity("base_currency must be exactly 3 characters");
+    // Validate base_currency is a valid ISO 4217 code (3 uppercase ASCII letters)
+    if !is_valid_currency_code(&req.base_currency) {
+        return unprocessable_entity("base_currency must be a valid ISO 4217 code (3 uppercase letters)");
     }
 
     // Validate all snapshot IDs exist and are not deleted

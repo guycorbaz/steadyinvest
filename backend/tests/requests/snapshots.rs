@@ -2,7 +2,7 @@ use backend::app::App;
 use backend::models::_entities::{analysis_snapshots, tickers, users};
 use loco_rs::prelude::*;
 use loco_rs::testing::prelude::request;
-use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
+use sea_orm::{ActiveValue, EntityTrait, QueryFilter, ColumnTrait};
 use serial_test::serial;
 
 /// A minimal 1x1 red pixel PNG encoded as base64.
@@ -41,6 +41,33 @@ fn sample_snapshot_data() -> serde_json::Value {
         "analyst_note": "",
         "captured_at": "2026-01-01T00:00:00Z"
     })
+}
+
+/// Build snapshot_data with specific metric values for history delta testing.
+fn snapshot_data_with_metrics(
+    sales_cagr: Option<f64>,
+    eps_cagr: Option<f64>,
+    high_pe: Option<f64>,
+    low_pe: Option<f64>,
+) -> serde_json::Value {
+    let mut data = serde_json::json!({
+        "historical_data": { "ticker": "AAPL", "currency": "USD", "records": [], "is_complete": false, "is_split_adjusted": false },
+        "analyst_note": "",
+        "captured_at": "2026-01-01T00:00:00Z"
+    });
+    if let Some(v) = sales_cagr {
+        data["projected_sales_cagr"] = serde_json::json!(v);
+    }
+    if let Some(v) = eps_cagr {
+        data["projected_eps_cagr"] = serde_json::json!(v);
+    }
+    if let Some(v) = high_pe {
+        data["projected_high_pe"] = serde_json::json!(v);
+    }
+    if let Some(v) = low_pe {
+        data["projected_low_pe"] = serde_json::json!(v);
+    }
+    data
 }
 
 // -----------------------------------------------------------------------
@@ -512,6 +539,413 @@ async fn rejects_snapshot_without_ticker_id_or_symbol() {
 
         let res = request.post("/api/v1/snapshots").json(&body).await;
         assert_eq!(res.status_code(), 400);
+    })
+    .await;
+}
+
+// =======================================================================
+// History endpoint — GET /api/v1/snapshots/:id/history (Story 8.4)
+// =======================================================================
+
+// -----------------------------------------------------------------------
+// 4.1 — Multiple snapshots returned in captured_at ASC order
+//        Inserts with explicit captured_at in non-chronological order
+//        to genuinely test ORDER BY captured_at ASC.
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn can_get_history_for_ticker_with_multiple_snapshots() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        // Insert 3 snapshots directly via SeaORM with explicit captured_at
+        // timestamps in NON-chronological insertion order:
+        //   Insert order: Sept (2nd), June (1st), Dec (3rd)
+        //   Expected ASC: June, Sept, Dec
+        let sept = analysis_snapshots::ActiveModel {
+            user_id: ActiveValue::set(1),
+            ticker_id: ActiveValue::set(ticker_id),
+            snapshot_data: ActiveValue::set(
+                snapshot_data_with_metrics(Some(8.0), Some(10.0), Some(22.0), Some(14.0)),
+            ),
+            thesis_locked: ActiveValue::set(true),
+            notes: ActiveValue::set(Some("Sept review".to_string())),
+            captured_at: ActiveValue::set(
+                chrono::DateTime::parse_from_rfc3339("2025-09-15T10:00:00+00:00").unwrap(),
+            ),
+            deleted_at: ActiveValue::set(None),
+            ..Default::default()
+        };
+        let sept_model = sept.insert(&ctx.db).await.unwrap();
+
+        let june = analysis_snapshots::ActiveModel {
+            user_id: ActiveValue::set(1),
+            ticker_id: ActiveValue::set(ticker_id),
+            snapshot_data: ActiveValue::set(
+                snapshot_data_with_metrics(Some(6.0), Some(8.5), Some(25.0), Some(15.0)),
+            ),
+            thesis_locked: ActiveValue::set(true),
+            notes: ActiveValue::set(Some("June review".to_string())),
+            captured_at: ActiveValue::set(
+                chrono::DateTime::parse_from_rfc3339("2025-06-15T10:00:00+00:00").unwrap(),
+            ),
+            deleted_at: ActiveValue::set(None),
+            ..Default::default()
+        };
+        let june_model = june.insert(&ctx.db).await.unwrap();
+
+        let dec = analysis_snapshots::ActiveModel {
+            user_id: ActiveValue::set(1),
+            ticker_id: ActiveValue::set(ticker_id),
+            snapshot_data: ActiveValue::set(
+                snapshot_data_with_metrics(Some(4.5), Some(6.0), Some(20.0), Some(12.0)),
+            ),
+            thesis_locked: ActiveValue::set(false),
+            notes: ActiveValue::set(Some("Dec review".to_string())),
+            captured_at: ActiveValue::set(
+                chrono::DateTime::parse_from_rfc3339("2025-12-15T10:00:00+00:00").unwrap(),
+            ),
+            deleted_at: ActiveValue::set(None),
+            ..Default::default()
+        };
+        let dec_model = dec.insert(&ctx.db).await.unwrap();
+
+        // Request history using the middle snapshot (sept) as anchor
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/history", sept_model.id))
+            .await;
+        res.assert_status_success();
+        let history: serde_json::Value = res.json();
+
+        // Verify ticker info
+        assert_eq!(history["ticker_id"], ticker_id);
+        assert_eq!(history["ticker_symbol"], "AAPL");
+
+        // Verify all 3 snapshots returned in captured_at ASC order
+        // (June < Sept < Dec) despite insertion order (Sept, June, Dec)
+        let snapshots = history["snapshots"].as_array().unwrap();
+        assert_eq!(snapshots.len(), 3);
+
+        assert_eq!(snapshots[0]["id"], june_model.id);
+        assert_eq!(snapshots[0]["notes"], "June review");
+        assert_eq!(snapshots[1]["id"], sept_model.id);
+        assert_eq!(snapshots[1]["notes"], "Sept review");
+        assert_eq!(snapshots[2]["id"], dec_model.id);
+        assert_eq!(snapshots[2]["notes"], "Dec review");
+
+        // Verify metrics extracted correctly on first entry (June)
+        assert!((snapshots[0]["projected_sales_cagr"].as_f64().unwrap() - 6.0).abs() < 0.01);
+        assert!((snapshots[0]["projected_eps_cagr"].as_f64().unwrap() - 8.5).abs() < 0.01);
+        assert!((snapshots[0]["projected_high_pe"].as_f64().unwrap() - 25.0).abs() < 0.01);
+        assert!((snapshots[0]["projected_low_pe"].as_f64().unwrap() - 15.0).abs() < 0.01);
+        assert_eq!(snapshots[0]["thesis_locked"], true);
+
+        // Verify captured_at fields present
+        assert!(snapshots[0]["captured_at"].as_str().is_some());
+
+        // (M3) Verify N-1 = 2 deltas for 3 snapshots with correct pairings
+        let deltas = history["metric_deltas"].as_array().unwrap();
+        assert_eq!(deltas.len(), 2);
+
+        // Delta 0: June → Sept
+        assert_eq!(deltas[0]["from_snapshot_id"], june_model.id);
+        assert_eq!(deltas[0]["to_snapshot_id"], sept_model.id);
+        // sales_cagr: 8.0 - 6.0 = 2.0
+        assert!((deltas[0]["sales_cagr_delta"].as_f64().unwrap() - 2.0).abs() < 0.01);
+        // eps_cagr: 10.0 - 8.5 = 1.5
+        assert!((deltas[0]["eps_cagr_delta"].as_f64().unwrap() - 1.5).abs() < 0.01);
+
+        // Delta 1: Sept → Dec
+        assert_eq!(deltas[1]["from_snapshot_id"], sept_model.id);
+        assert_eq!(deltas[1]["to_snapshot_id"], dec_model.id);
+        // sales_cagr: 4.5 - 8.0 = -3.5
+        assert!((deltas[1]["sales_cagr_delta"].as_f64().unwrap() - (-3.5)).abs() < 0.01);
+        // eps_cagr: 6.0 - 10.0 = -4.0
+        assert!((deltas[1]["eps_cagr_delta"].as_f64().unwrap() - (-4.0)).abs() < 0.01);
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// 4.2 — Single snapshot returns single-item array (no error)
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn history_returns_single_item_for_one_snapshot() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        let body = serde_json::json!({
+            "ticker_id": ticker_id,
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": false,
+            "notes": "Only snapshot"
+        });
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        res.assert_status_success();
+        let created = res.json::<analysis_snapshots::Model>();
+
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/history", created.id))
+            .await;
+        res.assert_status_success();
+        let history: serde_json::Value = res.json();
+
+        let snapshots = history["snapshots"].as_array().unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0]["id"], created.id);
+
+        // metric_deltas should be empty for single snapshot
+        let deltas = history["metric_deltas"].as_array().unwrap();
+        assert!(deltas.is_empty());
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// 4.3 — Metric deltas computed correctly (including None handling)
+//        Uses direct SeaORM inserts with explicit captured_at timestamps.
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn history_returns_metric_deltas() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        // Snapshot A: all metrics present (June)
+        let snap_a = analysis_snapshots::ActiveModel {
+            user_id: ActiveValue::set(1),
+            ticker_id: ActiveValue::set(ticker_id),
+            snapshot_data: ActiveValue::set(
+                snapshot_data_with_metrics(Some(6.0), Some(8.5), Some(25.0), Some(15.0)),
+            ),
+            thesis_locked: ActiveValue::set(true),
+            notes: ActiveValue::set(Some("Snapshot A".to_string())),
+            captured_at: ActiveValue::set(
+                chrono::DateTime::parse_from_rfc3339("2025-06-15T10:00:00+00:00").unwrap(),
+            ),
+            deleted_at: ActiveValue::set(None),
+            ..Default::default()
+        };
+        let model_a = snap_a.insert(&ctx.db).await.unwrap();
+
+        // Snapshot B: sales_cagr missing (None), other metrics changed (Sept)
+        let snap_b = analysis_snapshots::ActiveModel {
+            user_id: ActiveValue::set(1),
+            ticker_id: ActiveValue::set(ticker_id),
+            snapshot_data: ActiveValue::set(
+                snapshot_data_with_metrics(None, Some(6.0), Some(22.0), Some(14.0)),
+            ),
+            thesis_locked: ActiveValue::set(true),
+            notes: ActiveValue::set(Some("Snapshot B".to_string())),
+            captured_at: ActiveValue::set(
+                chrono::DateTime::parse_from_rfc3339("2025-09-15T10:00:00+00:00").unwrap(),
+            ),
+            deleted_at: ActiveValue::set(None),
+            ..Default::default()
+        };
+        let model_b = snap_b.insert(&ctx.db).await.unwrap();
+
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/history", model_a.id))
+            .await;
+        res.assert_status_success();
+        let history: serde_json::Value = res.json();
+
+        let deltas = history["metric_deltas"].as_array().unwrap();
+        assert_eq!(deltas.len(), 1);
+
+        let delta = &deltas[0];
+        assert_eq!(delta["from_snapshot_id"], model_a.id);
+        assert_eq!(delta["to_snapshot_id"], model_b.id);
+
+        // sales_cagr_delta should be null (None in B, Some in A)
+        assert!(delta["sales_cagr_delta"].is_null());
+
+        // eps_cagr_delta: 6.0 - 8.5 = -2.5
+        assert!((delta["eps_cagr_delta"].as_f64().unwrap() - (-2.5)).abs() < 0.01);
+
+        // high_pe_delta: 22.0 - 25.0 = -3.0
+        assert!((delta["high_pe_delta"].as_f64().unwrap() - (-3.0)).abs() < 0.01);
+
+        // low_pe_delta: 14.0 - 15.0 = -1.0
+        assert!((delta["low_pe_delta"].as_f64().unwrap() - (-1.0)).abs() < 0.01);
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// 4.4 — Non-existent snapshot returns 404
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn history_returns_404_for_nonexistent_snapshot() {
+    request::<App, _, _>(|request, ctx| async move {
+        let _ticker_id = seed_user_and_ticker(&ctx).await;
+
+        let res = request.get("/api/v1/snapshots/99999/history").await;
+        assert_eq!(res.status_code(), 404);
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// 4.5 — Soft-deleted snapshots excluded from history
+//        Uses direct SeaORM inserts with explicit captured_at timestamps.
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn history_excludes_soft_deleted_snapshots() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        // Snapshot 1: will be soft-deleted (June)
+        let snap1 = analysis_snapshots::ActiveModel {
+            user_id: ActiveValue::set(1),
+            ticker_id: ActiveValue::set(ticker_id),
+            snapshot_data: ActiveValue::set(sample_snapshot_data()),
+            thesis_locked: ActiveValue::set(false),
+            notes: ActiveValue::set(Some("Will be deleted".to_string())),
+            captured_at: ActiveValue::set(
+                chrono::DateTime::parse_from_rfc3339("2025-06-15T10:00:00+00:00").unwrap(),
+            ),
+            deleted_at: ActiveValue::set(None),
+            ..Default::default()
+        };
+        let model1 = snap1.insert(&ctx.db).await.unwrap();
+
+        // Snapshot 2: kept (Sept)
+        let snap2 = analysis_snapshots::ActiveModel {
+            user_id: ActiveValue::set(1),
+            ticker_id: ActiveValue::set(ticker_id),
+            snapshot_data: ActiveValue::set(sample_snapshot_data()),
+            thesis_locked: ActiveValue::set(true),
+            notes: ActiveValue::set(Some("Kept".to_string())),
+            captured_at: ActiveValue::set(
+                chrono::DateTime::parse_from_rfc3339("2025-09-15T10:00:00+00:00").unwrap(),
+            ),
+            deleted_at: ActiveValue::set(None),
+            ..Default::default()
+        };
+        let model2 = snap2.insert(&ctx.db).await.unwrap();
+
+        // Soft-delete first snapshot via API
+        let res = request
+            .delete(&format!("/api/v1/snapshots/{}", model1.id))
+            .await;
+        res.assert_status_success();
+
+        // History via kept snapshot should only show the kept one
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/history", model2.id))
+            .await;
+        res.assert_status_success();
+        let history: serde_json::Value = res.json();
+
+        let snapshots = history["snapshots"].as_array().unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0]["id"], model2.id);
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// 4.6 — Monetary fields present in history entries with actual values
+//        Uses snapshot data with a real historical record so
+//        extract_snapshot_prices returns non-null prices.
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn history_includes_monetary_fields() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        // Snapshot with a real record: fiscal_year=2025, price_high=150, eps=5.0
+        // projected_eps_cagr=10%, projected_high_pe=25, projected_low_pe=15
+        // Expected: current_price=150, target_high=25*5*(1.1)^5, target_low=15*5*(1.1)^5
+        let rich_data = serde_json::json!({
+            "historical_data": {
+                "ticker": "AAPL",
+                "currency": "USD",
+                "records": [{
+                    "fiscal_year": 2025,
+                    "sales": 100000,
+                    "eps": 5.0,
+                    "price_high": 150.0,
+                    "price_low": 120.0,
+                    "adjustment_factor": 1.0
+                }],
+                "is_complete": true,
+                "is_split_adjusted": true
+            },
+            "projected_sales_cagr": 10.5,
+            "projected_eps_cagr": 10.0,
+            "projected_high_pe": 25.0,
+            "projected_low_pe": 15.0,
+            "analyst_note": "",
+            "captured_at": "2026-01-01T00:00:00Z"
+        });
+
+        let body = serde_json::json!({
+            "ticker_id": ticker_id,
+            "snapshot_data": rich_data,
+            "thesis_locked": true,
+            "notes": "Monetary test"
+        });
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        res.assert_status_success();
+        let created = res.json::<analysis_snapshots::Model>();
+
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/history", created.id))
+            .await;
+        res.assert_status_success();
+        let history: serde_json::Value = res.json();
+
+        let entry = &history["snapshots"][0];
+        // native_currency from historical_data.currency
+        assert_eq!(entry["native_currency"], "USD");
+        // current_price = price_high of latest record = 150.0
+        assert!((entry["current_price"].as_f64().unwrap() - 150.0).abs() < 0.01);
+        // target prices should be non-null (projected from eps * (1+cagr)^5 * PE)
+        assert!(entry["target_high_price"].as_f64().unwrap() > 0.0);
+        assert!(entry["target_low_price"].as_f64().unwrap() > 0.0);
+        // target_high > target_low (high_pe > low_pe)
+        assert!(entry["target_high_price"].as_f64().unwrap() > entry["target_low_price"].as_f64().unwrap());
+        // upside_downside_ratio should be computed
+        assert!(entry["upside_downside_ratio"].as_f64().is_some());
+    })
+    .await;
+}
+
+// -----------------------------------------------------------------------
+// 4.7 — Soft-deleted anchor snapshot returns 404
+// -----------------------------------------------------------------------
+#[tokio::test]
+#[serial]
+async fn history_returns_404_for_deleted_anchor_snapshot() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        let body = serde_json::json!({
+            "ticker_id": ticker_id,
+            "snapshot_data": sample_snapshot_data(),
+            "thesis_locked": false,
+            "notes": "Will be deleted"
+        });
+        let res = request.post("/api/v1/snapshots").json(&body).await;
+        let created = res.json::<analysis_snapshots::Model>();
+
+        // Soft-delete the snapshot
+        request
+            .delete(&format!("/api/v1/snapshots/{}", created.id))
+            .await;
+
+        // History via deleted anchor should return 404
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/history", created.id))
+            .await;
+        assert_eq!(res.status_code(), 404);
     })
     .await;
 }

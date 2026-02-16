@@ -11,6 +11,7 @@ use loco_rs::prelude::*;
 use sea_orm::{IntoActiveModel, QueryOrder};
 use serde::{Deserialize, Serialize};
 
+use super::snapshot_metrics::{extract_monetary_fields, extract_projection_metrics};
 use crate::models::_entities::{analysis_snapshots, tickers};
 
 /// Maximum base64-encoded chart image size (5 MB).
@@ -70,22 +71,7 @@ impl SnapshotSummary {
         let ticker_symbol = ticker
             .map(|t| t.ticker)
             .unwrap_or_else(|| format!("ID:{}", m.ticker_id));
-        let projected_sales_cagr = m
-            .snapshot_data
-            .get("projected_sales_cagr")
-            .and_then(|v| v.as_f64());
-        let projected_eps_cagr = m
-            .snapshot_data
-            .get("projected_eps_cagr")
-            .and_then(|v| v.as_f64());
-        let projected_high_pe = m
-            .snapshot_data
-            .get("projected_high_pe")
-            .and_then(|v| v.as_f64());
-        let projected_low_pe = m
-            .snapshot_data
-            .get("projected_low_pe")
-            .and_then(|v| v.as_f64());
+        let proj = extract_projection_metrics(&m.snapshot_data);
         Self {
             id: m.id,
             ticker_id: m.ticker_id,
@@ -93,11 +79,119 @@ impl SnapshotSummary {
             thesis_locked: m.thesis_locked,
             notes: m.notes,
             captured_at: m.captured_at,
-            projected_sales_cagr,
-            projected_eps_cagr,
-            projected_high_pe,
-            projected_low_pe,
+            projected_sales_cagr: proj.projected_sales_cagr,
+            projected_eps_cagr: proj.projected_eps_cagr,
+            projected_high_pe: proj.projected_high_pe,
+            projected_low_pe: proj.projected_low_pe,
         }
+    }
+}
+
+/// A single snapshot entry in the thesis evolution history timeline.
+///
+/// Includes key metrics and monetary fields sufficient for frontend comparison
+/// cards without additional API calls.
+#[derive(Debug, Serialize)]
+pub struct HistoryEntry {
+    pub id: i32,
+    pub captured_at: chrono::DateTime<chrono::FixedOffset>,
+    pub thesis_locked: bool,
+    pub notes: Option<String>,
+    pub projected_sales_cagr: Option<f64>,
+    pub projected_eps_cagr: Option<f64>,
+    pub projected_high_pe: Option<f64>,
+    pub projected_low_pe: Option<f64>,
+    pub current_price: Option<f64>,
+    pub target_high_price: Option<f64>,
+    pub target_low_price: Option<f64>,
+    pub native_currency: Option<String>,
+    pub upside_downside_ratio: Option<f64>,
+}
+
+/// Metric changes between two consecutive snapshots in the history timeline.
+///
+/// Delta values are `None` when either the source or target metric is `None`.
+#[derive(Debug, Serialize)]
+pub struct MetricDelta {
+    pub from_snapshot_id: i32,
+    pub to_snapshot_id: i32,
+    pub sales_cagr_delta: Option<f64>,
+    pub eps_cagr_delta: Option<f64>,
+    pub high_pe_delta: Option<f64>,
+    pub low_pe_delta: Option<f64>,
+    pub price_delta: Option<f64>,
+    pub upside_downside_delta: Option<f64>,
+}
+
+/// Response for the thesis evolution history endpoint.
+///
+/// Contains all snapshots for a given ticker ordered by `captured_at` ascending,
+/// plus pre-computed metric deltas between consecutive snapshots.
+#[derive(Debug, Serialize)]
+pub struct HistoryResponse {
+    pub ticker_id: i32,
+    pub ticker_symbol: String,
+    pub snapshots: Vec<HistoryEntry>,
+    pub metric_deltas: Vec<MetricDelta>,
+}
+
+impl HistoryEntry {
+    /// Build a history entry from a snapshot model.
+    fn from_model(m: &analysis_snapshots::Model) -> Self {
+        let proj = extract_projection_metrics(&m.snapshot_data);
+        let monetary = extract_monetary_fields(&m.snapshot_data);
+
+        Self {
+            id: m.id,
+            captured_at: m.captured_at,
+            thesis_locked: m.thesis_locked,
+            notes: m.notes.clone(),
+            projected_sales_cagr: proj.projected_sales_cagr,
+            projected_eps_cagr: proj.projected_eps_cagr,
+            projected_high_pe: proj.projected_high_pe,
+            projected_low_pe: proj.projected_low_pe,
+            current_price: monetary.current_price,
+            target_high_price: monetary.target_high_price,
+            target_low_price: monetary.target_low_price,
+            native_currency: monetary.native_currency,
+            upside_downside_ratio: monetary.upside_downside_ratio,
+        }
+    }
+}
+
+/// Compute metric deltas between consecutive history entries.
+///
+/// Returns N-1 deltas for N entries. If either value in a pair is `None`,
+/// the delta for that metric is `None`.
+fn compute_metric_deltas(entries: &[HistoryEntry]) -> Vec<MetricDelta> {
+    entries
+        .windows(2)
+        .map(|pair| {
+            let prev = &pair[0];
+            let curr = &pair[1];
+            MetricDelta {
+                from_snapshot_id: prev.id,
+                to_snapshot_id: curr.id,
+                sales_cagr_delta: option_delta(prev.projected_sales_cagr, curr.projected_sales_cagr),
+                eps_cagr_delta: option_delta(prev.projected_eps_cagr, curr.projected_eps_cagr),
+                high_pe_delta: option_delta(prev.projected_high_pe, curr.projected_high_pe),
+                low_pe_delta: option_delta(prev.projected_low_pe, curr.projected_low_pe),
+                price_delta: option_delta(prev.current_price, curr.current_price),
+                upside_downside_delta: option_delta(
+                    prev.upside_downside_ratio,
+                    curr.upside_downside_ratio,
+                ),
+            }
+        })
+        .collect()
+}
+
+/// Compute the difference between two optional values.
+/// Returns `None` if either value is `None`.
+fn option_delta(prev: Option<f64>, curr: Option<f64>) -> Option<f64> {
+    match (prev, curr) {
+        (Some(p), Some(c)) => Some(c - p),
+        _ => None,
     }
 }
 
@@ -328,6 +422,53 @@ pub async fn update_snapshot(
     forbidden("Snapshots are append-only and cannot be modified. Create a new snapshot instead.")
 }
 
+/// Returns the thesis evolution history for a given snapshot's ticker.
+///
+/// **GET** `/api/v1/snapshots/:id/history`
+///
+/// Looks up the anchor snapshot by `:id`, then returns all non-deleted
+/// snapshots for the same `ticker_id` + `user_id` ordered by `captured_at`
+/// ascending. Includes pre-computed metric deltas between consecutive entries.
+#[debug_handler]
+pub async fn get_snapshot_history(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i32>,
+) -> Result<Response> {
+    // Look up anchor snapshot with ticker join (must exist and not be soft-deleted)
+    let (anchor, ticker) = analysis_snapshots::Entity::find_by_id(id)
+        .find_also_related(tickers::Entity)
+        .filter(analysis_snapshots::Column::DeletedAt.is_null())
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| Error::NotFound)?;
+
+    let ticker_id = anchor.ticker_id;
+    let user_id = anchor.user_id;
+    let ticker_symbol = ticker
+        .map(|t| t.ticker)
+        .unwrap_or_else(|| format!("ID:{}", ticker_id));
+
+    // Query all non-deleted snapshots for this ticker+user, ordered ASC
+    let snapshots = analysis_snapshots::Entity::find()
+        .filter(analysis_snapshots::Column::TickerId.eq(ticker_id))
+        .filter(analysis_snapshots::Column::UserId.eq(user_id))
+        .filter(analysis_snapshots::Column::DeletedAt.is_null())
+        .order_by_asc(analysis_snapshots::Column::CapturedAt)
+        .order_by_asc(analysis_snapshots::Column::Id)
+        .all(&ctx.db)
+        .await?;
+
+    let entries: Vec<HistoryEntry> = snapshots.iter().map(HistoryEntry::from_model).collect();
+    let metric_deltas = compute_metric_deltas(&entries);
+
+    format::json(HistoryResponse {
+        ticker_id,
+        ticker_symbol,
+        snapshots: entries,
+        metric_deltas,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -339,6 +480,7 @@ pub fn routes() -> Routes {
         .add("/", post(create_snapshot))
         .add("/", get(list_snapshots))
         .add("/{id}", get(get_snapshot))
+        .add("/{id}/history", get(get_snapshot_history))
         .add("/{id}/chart-image", get(get_snapshot_chart_image))
         .add("/{id}", delete(delete_snapshot))
         .add("/{id}", put(update_snapshot))

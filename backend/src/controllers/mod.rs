@@ -23,4 +23,5 @@ pub mod analyses;
 pub mod snapshots;
 pub mod exchange_rates;
 pub mod comparisons;
+pub mod snapshot_metrics;
 pub mod system;
