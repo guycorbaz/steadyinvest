@@ -138,6 +138,10 @@ pub fn Library() -> impl IntoView {
                                             projected_low_pe: s.projected_low_pe,
                                             valuation_zone: None,
                                             upside_downside_ratio: None,
+                                            current_price: None,
+                                            target_high_price: None,
+                                            target_low_price: None,
+                                            display_currency: None,
                                         };
                                         let is_selected = {
                                             let sel = selected;

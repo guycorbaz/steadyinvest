@@ -487,32 +487,119 @@ pub fn calculate_upside_downside_ratio(
     Some(upside / downside)
 }
 
+/// Extracted monetary prices from an analysis snapshot.
+///
+/// Used by both backend and frontend to obtain current/target prices without
+/// duplicating the extraction logic (Cardinal Rule).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SnapshotPrices {
+    /// Current price (latest fiscal year's high price).
+    pub current_price: Option<f64>,
+    /// Target high price (projected_high_pe × projected 5-year EPS).
+    pub target_high_price: Option<f64>,
+    /// Target low price (projected_low_pe × projected 5-year EPS).
+    pub target_low_price: Option<f64>,
+}
+
+/// Extracts current and projected target prices from an [`AnalysisSnapshot`].
+///
+/// Uses the latest historical record's high price as "current price" and
+/// projects 5-year EPS growth to compute target high/low prices.
+/// Returns all `None` if no records exist or EPS/price are non-positive.
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::{AnalysisSnapshot, HistoricalData, HistoricalYearlyData, extract_snapshot_prices};
+/// use rust_decimal::Decimal;
+///
+/// let snapshot = AnalysisSnapshot {
+///     historical_data: HistoricalData {
+///         records: vec![HistoricalYearlyData {
+///             fiscal_year: 2023, eps: Decimal::from(10),
+///             price_high: Decimal::from(50), ..Default::default()
+///         }],
+///         ..Default::default()
+///     },
+///     projected_eps_cagr: 10.0,
+///     projected_high_pe: 20.0,
+///     projected_low_pe: 10.0,
+///     ..Default::default()
+/// };
+/// let prices = extract_snapshot_prices(&snapshot);
+/// assert!((prices.current_price.unwrap() - 50.0).abs() < 0.01);
+/// assert!(prices.target_high_price.unwrap() > 0.0);
+/// ```
+pub fn extract_snapshot_prices(snapshot: &AnalysisSnapshot) -> SnapshotPrices {
+    use rust_decimal::prelude::ToPrimitive;
+
+    let latest = match snapshot
+        .historical_data
+        .records
+        .iter()
+        .max_by_key(|r| r.fiscal_year)
+    {
+        Some(r) => r,
+        None => return SnapshotPrices::default(),
+    };
+
+    let current_price = latest.price_high.to_f64();
+    let current_eps = latest.eps.to_f64();
+
+    let (target_high, target_low) = match (current_eps, current_price) {
+        (Some(eps), Some(price)) if eps > 0.0 && price > 0.0 => {
+            let projected_eps_5yr =
+                eps * (1.0 + snapshot.projected_eps_cagr / 100.0).powf(5.0);
+            (
+                Some(snapshot.projected_high_pe * projected_eps_5yr),
+                Some(snapshot.projected_low_pe * projected_eps_5yr),
+            )
+        }
+        _ => (None, None),
+    };
+
+    SnapshotPrices {
+        current_price,
+        target_high_price: target_high,
+        target_low_price: target_low,
+    }
+}
+
 /// Computes the NAIC upside/downside ratio directly from an [`AnalysisSnapshot`].
 ///
-/// Extracts the latest historical record (by fiscal year), uses its EPS and
-/// high price as "current" values, projects 5-year EPS using the snapshot's
-/// `projected_eps_cagr`, and computes target high/low prices from projected P/E
-/// ratios. Delegates the final ratio to [`calculate_upside_downside_ratio`].
+/// Delegates price extraction to [`extract_snapshot_prices`] and the final
+/// ratio to [`calculate_upside_downside_ratio`].
 ///
 /// Returns `None` if historical records are empty, EPS/price are non-positive,
 /// or the current price is at or below the projected low target.
 pub fn compute_upside_downside_from_snapshot(snapshot: &AnalysisSnapshot) -> Option<f64> {
-    use rust_decimal::prelude::ToPrimitive;
+    let prices = extract_snapshot_prices(snapshot);
+    let current = prices.current_price.filter(|&p| p > 0.0)?;
+    let high = prices.target_high_price?;
+    let low = prices.target_low_price?;
+    calculate_upside_downside_ratio(current, high, low)
+}
 
-    let latest = snapshot
-        .historical_data
-        .records
-        .iter()
-        .max_by_key(|r| r.fiscal_year)?;
-    let current_eps = latest.eps.to_f64()?;
-    let current_price = latest.price_high.to_f64()?;
-    if current_eps <= 0.0 || current_price <= 0.0 {
-        return None;
-    }
-    let projected_eps_5yr = current_eps * (1.0 + snapshot.projected_eps_cagr / 100.0).powf(5.0);
-    let target_high = snapshot.projected_high_pe * projected_eps_5yr;
-    let target_low = snapshot.projected_low_pe * projected_eps_5yr;
-    calculate_upside_downside_ratio(current_price, target_high, target_low)
+/// Converts a monetary value from one currency to another using the given rate.
+///
+/// This is the single source of truth for currency conversion (Cardinal Rule).
+/// The rate should be a directional rate from source to target currency
+/// (e.g., CHF→USD = 1.15 means 1 CHF = 1.15 USD).
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::convert_monetary_value;
+///
+/// // Convert 100 CHF to USD at rate 1.15
+/// let usd = convert_monetary_value(100.0, 1.15);
+/// assert!((usd - 115.0).abs() < 1e-10);
+///
+/// // Same currency (rate = 1.0) returns unchanged value
+/// assert!((convert_monetary_value(42.0, 1.0) - 42.0).abs() < 1e-10);
+/// ```
+pub fn convert_monetary_value(amount: f64, rate: f64) -> f64 {
+    amount * rate
 }
 
 /// Computes CAGR and a best-fit linear regression trendline for a series of values.
@@ -902,6 +989,66 @@ mod tests {
         // Current price below low target → None
         let ratio = calculate_upside_downside_ratio(30.0, 100.0, 35.0);
         assert!(ratio.is_none());
+    }
+
+    #[test]
+    fn test_extract_snapshot_prices() {
+        let snapshot = AnalysisSnapshot {
+            historical_data: HistoricalData {
+                records: vec![HistoricalYearlyData {
+                    fiscal_year: 2023,
+                    eps: Decimal::from(10),
+                    price_high: Decimal::from(50),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            projected_eps_cagr: 10.0,
+            projected_high_pe: 20.0,
+            projected_low_pe: 10.0,
+            ..Default::default()
+        };
+        let prices = extract_snapshot_prices(&snapshot);
+        assert!((prices.current_price.unwrap() - 50.0).abs() < 0.01);
+        // projected_eps_5yr = 10 * 1.1^5 ≈ 16.1051
+        // target_high = 20 * 16.1051 ≈ 322.10
+        // target_low = 10 * 16.1051 ≈ 161.05
+        assert!((prices.target_high_price.unwrap() - 322.10).abs() < 0.1);
+        assert!((prices.target_low_price.unwrap() - 161.05).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_extract_snapshot_prices_empty_records() {
+        let snapshot = AnalysisSnapshot::default();
+        let prices = extract_snapshot_prices(&snapshot);
+        assert!(prices.current_price.is_none());
+        assert!(prices.target_high_price.is_none());
+        assert!(prices.target_low_price.is_none());
+    }
+
+    #[test]
+    fn test_convert_monetary_value_basic() {
+        // CHF→USD at 1.15
+        let usd = convert_monetary_value(100.0, 1.15);
+        assert!((usd - 115.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_convert_monetary_value_same_currency() {
+        // Rate = 1.0 means same currency — no change
+        assert!((convert_monetary_value(42.0, 1.0) - 42.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_convert_monetary_value_zero_rate() {
+        assert!((convert_monetary_value(100.0, 0.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_convert_monetary_value_negative_amount() {
+        // Negative amounts are valid (losses)
+        let result = convert_monetary_value(-50.0, 1.15);
+        assert!((result - (-57.5)).abs() < 1e-10);
     }
 
     #[test]

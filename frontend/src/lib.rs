@@ -18,6 +18,7 @@ mod components;
 use crate::components::footer::Footer;
 use crate::components::command_strip::CommandStrip;
 mod pages;
+pub mod state;
 pub mod types;
 pub mod persistence;
 
@@ -40,6 +41,9 @@ pub struct ActiveLockedAnalysisId(pub RwSignal<Option<i32>>);
 pub fn App() -> impl IntoView {
     // Provides context that manages stylesheets, titles, meta tags, etc.
     provide_meta_context();
+
+    // Provide global state signals (currency preference, etc.)
+    state::provide_global_state();
 
     // Provide a shared signal so child components (Home, CommandStrip) can
     // communicate which locked analysis (if any) is currently displayed.

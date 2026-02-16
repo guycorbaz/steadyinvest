@@ -7,12 +7,15 @@
 //! **Version pinning**: saved comparison items reference specific snapshot IDs.
 //! Re-analyzing a stock creates a new snapshot; existing comparisons are unaffected.
 //!
-//! **Currency**: `base_currency` is stored but no conversion is performed (Story 8.3).
+//! **Currency**: `base_currency` is stored. Monetary values are returned in their
+//! native currency; client-side conversion uses `/api/v1/exchange-rates` (Story 8.3).
 
 use loco_rs::prelude::*;
 use sea_orm::{IntoActiveModel, PaginatorTrait, QueryOrder, TransactionTrait};
 use serde::{Deserialize, Serialize};
-use steady_invest_logic::{compute_upside_downside_from_snapshot, AnalysisSnapshot};
+use steady_invest_logic::{
+    compute_upside_downside_from_snapshot, extract_snapshot_prices, AnalysisSnapshot,
+};
 
 use crate::models::_entities::{
     analysis_snapshots, comparison_set_items, comparison_sets, tickers,
@@ -71,15 +74,49 @@ pub struct ComparisonSnapshotSummary {
     pub projected_low_pe: Option<f64>,
     pub valuation_zone: Option<String>,
     pub upside_downside_ratio: Option<f64>,
+    pub native_currency: Option<String>,
+    pub current_price: Option<f64>,
+    pub target_high_price: Option<f64>,
+    pub target_low_price: Option<f64>,
 }
 
-/// Compute the NAIC upside/downside ratio from snapshot JSON data.
+/// Extract monetary and derived fields from snapshot JSON data.
 ///
-/// Deserializes into [`AnalysisSnapshot`] and delegates to the shared
-/// [`compute_upside_downside_from_snapshot`] in `steady-invest-logic`.
-fn compute_upside_downside(snapshot_data: &serde_json::Value) -> Option<f64> {
-    let snapshot: AnalysisSnapshot = serde_json::from_value(snapshot_data.clone()).ok()?;
-    compute_upside_downside_from_snapshot(&snapshot)
+/// Deserializes into [`AnalysisSnapshot`] and extracts native currency,
+/// current price, target prices, and upside/downside ratio.
+struct SnapshotMonetaryFields {
+    native_currency: Option<String>,
+    current_price: Option<f64>,
+    target_high_price: Option<f64>,
+    target_low_price: Option<f64>,
+    upside_downside_ratio: Option<f64>,
+}
+
+fn extract_monetary_fields(snapshot_data: &serde_json::Value) -> SnapshotMonetaryFields {
+    let snapshot: Option<AnalysisSnapshot> =
+        serde_json::from_value(snapshot_data.clone()).ok();
+
+    let Some(snapshot) = snapshot else {
+        return SnapshotMonetaryFields {
+            native_currency: None,
+            current_price: None,
+            target_high_price: None,
+            target_low_price: None,
+            upside_downside_ratio: None,
+        };
+    };
+
+    let native_currency = Some(snapshot.historical_data.currency.clone());
+    let prices = extract_snapshot_prices(&snapshot);
+    let upside_downside_ratio = compute_upside_downside_from_snapshot(&snapshot);
+
+    SnapshotMonetaryFields {
+        native_currency,
+        current_price: prices.current_price,
+        target_high_price: prices.target_high_price,
+        target_low_price: prices.target_low_price,
+        upside_downside_ratio,
+    }
 }
 
 impl ComparisonSnapshotSummary {
@@ -91,6 +128,9 @@ impl ComparisonSnapshotSummary {
         let ticker_symbol = ticker
             .map(|t| t.ticker)
             .unwrap_or_else(|| format!("ID:{}", m.ticker_id));
+
+        let monetary = extract_monetary_fields(&m.snapshot_data);
+
         Self {
             id: m.id,
             ticker_id: m.ticker_id,
@@ -119,7 +159,11 @@ impl ComparisonSnapshotSummary {
                 .get("valuation_zone")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_owned()),
-            upside_downside_ratio: compute_upside_downside(&m.snapshot_data),
+            upside_downside_ratio: monetary.upside_downside_ratio,
+            native_currency: monetary.native_currency,
+            current_price: monetary.current_price,
+            target_high_price: monetary.target_high_price,
+            target_low_price: monetary.target_low_price,
         }
     }
 }

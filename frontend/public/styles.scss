@@ -2279,6 +2279,67 @@ input[type="range"]::-moz-range-thumb {
   padding: var(--spacing-2) var(--spacing-3);
 }
 
+/* Currency dropdown */
+.currency-select {
+  background: var(--surface);
+  border: var(--border-width) solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-xs);
+  border-radius: var(--border-radius-sharp);
+  cursor: pointer;
+  min-width: 70px;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+  margin-left: auto;
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+  }
+
+  &:focus {
+    border-color: var(--primary);
+    outline: none;
+  }
+}
+
+/* Currency indicator */
+.currency-indicator {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--spacing-2);
+  letter-spacing: 0.03em;
+}
+
+/* Exchange rate unavailable notice */
+.rate-notice {
+  background: rgba(245, 158, 11, 0.1);
+  border: var(--border-width) solid rgba(245, 158, 11, 0.3);
+  color: rgba(245, 158, 11, 0.9);
+  padding: var(--spacing-3) var(--spacing-4);
+  font-family: 'Inter', sans-serif;
+  font-size: var(--text-sm);
+  border-radius: var(--border-radius-sharp);
+  margin-bottom: var(--spacing-4);
+}
+
+/* Monetary value rows in compact cards */
+.metric-price-row {
+  border-top: var(--border-width) solid rgba(255, 255, 255, 0.05);
+  padding-top: var(--spacing-1);
+}
+
+.metric-price {
+  color: var(--primary) !important;
+}
+
+.metric-target {
+  color: var(--text-secondary) !important;
+  font-size: var(--text-xs) !important;
+}
+
 /* Sort controls */
 .comparison-controls {
   margin-bottom: var(--spacing-6);

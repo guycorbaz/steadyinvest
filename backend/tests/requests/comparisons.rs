@@ -147,6 +147,11 @@ async fn ad_hoc_compare_returns_latest_snapshots() {
         assert!((snapshots[0]["projected_sales_cagr"].as_f64().unwrap() - 8.0).abs() < 0.01);
         assert!((snapshots[0]["projected_eps_cagr"].as_f64().unwrap() - 9.5).abs() < 0.01);
         assert_eq!(snapshots[0]["valuation_zone"], "overvalued");
+        // Monetary fields: empty records → prices null, but native_currency present
+        assert_eq!(snapshots[0]["native_currency"], "USD");
+        assert!(snapshots[0]["current_price"].is_null());
+        assert!(snapshots[0]["target_high_price"].is_null());
+        assert!(snapshots[0]["target_low_price"].is_null());
     })
     .await;
 }
@@ -223,6 +228,22 @@ async fn ad_hoc_compare_returns_upside_downside_ratio() {
         // Ratio = (120.789-50)/(50-40.263) ≈ 7.27
         assert!(ratio > 7.0 && ratio < 8.0,
             "Expected ratio ~7.27, got {}", ratio);
+
+        // Verify monetary fields from sample_snapshot_data_with_records
+        assert_eq!(snapshots[0]["native_currency"], "USD");
+        let current_price = snapshots[0]["current_price"].as_f64()
+            .expect("current_price should be present");
+        assert!((current_price - 50.0).abs() < 0.01, "Expected price ~50.0, got {}", current_price);
+
+        let target_high = snapshots[0]["target_high_price"].as_f64()
+            .expect("target_high_price should be present");
+        assert!(target_high > 120.0 && target_high < 121.0,
+            "Expected target_high ~120.789, got {}", target_high);
+
+        let target_low = snapshots[0]["target_low_price"].as_f64()
+            .expect("target_low_price should be present");
+        assert!(target_low > 40.0 && target_low < 41.0,
+            "Expected target_low ~40.263, got {}", target_low);
     })
     .await;
 }
@@ -258,6 +279,9 @@ async fn can_create_comparison_set() {
         assert_eq!(items[0]["snapshot"]["id"], snap_id);
         assert_eq!(items[0]["snapshot"]["ticker_symbol"], "AAPL");
         assert_eq!(items[0]["snapshot"]["valuation_zone"], "undervalued");
+        // Monetary fields: empty records → prices null, native_currency present
+        assert_eq!(items[0]["snapshot"]["native_currency"], "USD");
+        assert!(items[0]["snapshot"]["current_price"].is_null());
     })
     .await;
 }

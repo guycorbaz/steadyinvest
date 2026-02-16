@@ -7,14 +7,22 @@
 //! - `?id=5`              — saved comparison set
 //!
 //! Default sort: upside/downside ratio descending (NAIC 3-to-1 rule).
+//!
+//! Currency handling (Story 8.3): monetary values (current price, target
+//! high/low) arrive in their native currency. The page fetches exchange rates
+//! once on load and applies client-side conversion via `steady-invest-logic`.
 
 use crate::components::compact_analysis_card::{CompactAnalysisCard, CompactCardData};
+use crate::state::use_currency_preference;
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_location;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use steady_invest_logic::{compute_upside_downside_from_snapshot, AnalysisSnapshot};
+use steady_invest_logic::{
+    compute_upside_downside_from_snapshot, convert_monetary_value, extract_snapshot_prices,
+    AnalysisSnapshot,
+};
 
 // ---------------------------------------------------------------------------
 // DTOs — matching backend API responses
@@ -51,6 +59,10 @@ struct ComparisonSnapshotSummary {
     projected_low_pe: Option<f64>,
     valuation_zone: Option<String>,
     upside_downside_ratio: Option<f64>,
+    native_currency: Option<String>,
+    current_price: Option<f64>,
+    target_high_price: Option<f64>,
+    target_low_price: Option<f64>,
 }
 
 /// Ad-hoc compare response from `GET /api/v1/compare`.
@@ -77,7 +89,6 @@ struct ComparisonSetDetail {
     #[allow(dead_code)]
     id: i32,
     name: String,
-    #[allow(dead_code)]
     base_currency: String,
     #[allow(dead_code)]
     created_at: String,
@@ -113,6 +124,24 @@ struct ComparisonSetSummary {
     created_at: String,
 }
 
+/// A single exchange rate pair from `GET /api/v1/exchange-rates`.
+#[derive(Debug, Clone, Deserialize)]
+struct ExchangeRatePair {
+    from_currency: String,
+    to_currency: String,
+    rate: f64,
+}
+
+/// Exchange rate response from `GET /api/v1/exchange-rates`.
+#[derive(Debug, Clone, Deserialize)]
+struct ExchangeRateResponse {
+    rates: Vec<ExchangeRatePair>,
+    #[allow(dead_code)]
+    rates_as_of: String,
+    #[allow(dead_code)]
+    stale: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Internal unified entry type
 // ---------------------------------------------------------------------------
@@ -130,6 +159,10 @@ struct ComparisonEntry {
     projected_low_pe: Option<f64>,
     valuation_zone: Option<String>,
     upside_downside_ratio: Option<f64>,
+    native_currency: Option<String>,
+    current_price: Option<f64>,
+    target_high_price: Option<f64>,
+    target_low_price: Option<f64>,
 }
 
 impl From<ComparisonSnapshotSummary> for ComparisonEntry {
@@ -145,6 +178,10 @@ impl From<ComparisonSnapshotSummary> for ComparisonEntry {
             projected_low_pe: s.projected_low_pe,
             valuation_zone: s.valuation_zone,
             upside_downside_ratio: s.upside_downside_ratio,
+            native_currency: s.native_currency,
+            current_price: s.current_price,
+            target_high_price: s.target_high_price,
+            target_low_price: s.target_low_price,
         }
     }
 }
@@ -155,62 +192,97 @@ fn entry_from_full_snapshot(resp: SnapshotFullResponse) -> ComparisonEntry {
     let snapshot: Option<AnalysisSnapshot> =
         serde_json::from_value(resp.snapshot_data.clone()).ok();
 
-    let (ticker_symbol, sales_cagr, eps_cagr, high_pe, low_pe, zone, ud_ratio) =
-        if let Some(ref snap) = snapshot {
-            let sym = snap.historical_data.ticker.clone();
-            let zone = resp
+    if let Some(ref snap) = snapshot {
+        let zone = resp
+            .snapshot_data
+            .get("valuation_zone")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned());
+
+        let ud = compute_upside_downside_from_snapshot(snap);
+        let prices = extract_snapshot_prices(snap);
+
+        ComparisonEntry {
+            id: resp.id,
+            ticker_symbol: snap.historical_data.ticker.clone(),
+            captured_at: resp.captured_at.chars().take(10).collect(),
+            thesis_locked: resp.thesis_locked,
+            projected_sales_cagr: Some(snap.projected_sales_cagr),
+            projected_eps_cagr: Some(snap.projected_eps_cagr),
+            projected_high_pe: Some(snap.projected_high_pe),
+            projected_low_pe: Some(snap.projected_low_pe),
+            valuation_zone: zone,
+            upside_downside_ratio: ud,
+            native_currency: Some(snap.historical_data.currency.clone()),
+            current_price: prices.current_price,
+            target_high_price: prices.target_high_price,
+            target_low_price: prices.target_low_price,
+        }
+    } else {
+        ComparisonEntry {
+            id: resp.id,
+            ticker_symbol: format!("Ticker:{}", resp.ticker_id),
+            captured_at: resp.captured_at.chars().take(10).collect(),
+            thesis_locked: resp.thesis_locked,
+            projected_sales_cagr: resp
                 .snapshot_data
-                .get("valuation_zone")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_owned());
-
-            // Compute upside/downside ratio via shared logic (Cardinal Rule)
-            let ud = compute_upside_downside_from_snapshot(snap);
-
-            (
-                sym,
-                Some(snap.projected_sales_cagr),
-                Some(snap.projected_eps_cagr),
-                Some(snap.projected_high_pe),
-                Some(snap.projected_low_pe),
-                zone,
-                ud,
-            )
-        } else {
-            (
-                format!("Ticker:{}", resp.ticker_id),
-                resp.snapshot_data
-                    .get("projected_sales_cagr")
-                    .and_then(|v| v.as_f64()),
-                resp.snapshot_data
-                    .get("projected_eps_cagr")
-                    .and_then(|v| v.as_f64()),
-                resp.snapshot_data
-                    .get("projected_high_pe")
-                    .and_then(|v| v.as_f64()),
-                resp.snapshot_data
-                    .get("projected_low_pe")
-                    .and_then(|v| v.as_f64()),
-                None,
-                None,
-            )
-        };
-
-    ComparisonEntry {
-        id: resp.id,
-        ticker_symbol,
-        captured_at: resp.captured_at.chars().take(10).collect(),
-        thesis_locked: resp.thesis_locked,
-        projected_sales_cagr: sales_cagr,
-        projected_eps_cagr: eps_cagr,
-        projected_high_pe: high_pe,
-        projected_low_pe: low_pe,
-        valuation_zone: zone,
-        upside_downside_ratio: ud_ratio,
+                .get("projected_sales_cagr")
+                .and_then(|v| v.as_f64()),
+            projected_eps_cagr: resp
+                .snapshot_data
+                .get("projected_eps_cagr")
+                .and_then(|v| v.as_f64()),
+            projected_high_pe: resp
+                .snapshot_data
+                .get("projected_high_pe")
+                .and_then(|v| v.as_f64()),
+            projected_low_pe: resp
+                .snapshot_data
+                .get("projected_low_pe")
+                .and_then(|v| v.as_f64()),
+            valuation_zone: None,
+            upside_downside_ratio: None,
+            native_currency: None,
+            current_price: None,
+            target_high_price: None,
+            target_low_price: None,
+        }
     }
 }
 
-// Client-side U/D ratio delegates to steady-invest-logic (Cardinal Rule).
+// ---------------------------------------------------------------------------
+// Exchange rate helpers
+// ---------------------------------------------------------------------------
+
+/// Look up a directional exchange rate from the fetched rate list.
+fn find_rate(rates: &[ExchangeRatePair], from: &str, to: &str) -> Option<f64> {
+    rates
+        .iter()
+        .find(|r| r.from_currency == from && r.to_currency == to)
+        .map(|r| r.rate)
+}
+
+/// Convert a monetary value from `native` to `target` currency using rates.
+/// Falls back to the native value when rates are unavailable (AC#5).
+fn convert_price(
+    value: Option<f64>,
+    native: Option<&str>,
+    target: &str,
+    rates: Option<&[ExchangeRatePair]>,
+) -> Option<f64> {
+    let val = value?;
+    let nat = native?;
+    if nat == target {
+        return Some(val);
+    }
+    let Some(rate_list) = rates else {
+        return Some(val);
+    };
+    let Some(rate) = find_rate(rate_list, nat, target) else {
+        return Some(val);
+    };
+    Some(convert_monetary_value(val, rate))
+}
 
 // ---------------------------------------------------------------------------
 // Sorting
@@ -303,9 +375,15 @@ fn parse_query(search: &str) -> (Vec<i32>, Vec<i32>, Option<i32>) {
 // Data fetching
 // ---------------------------------------------------------------------------
 
-async fn fetch_comparison_data(
-    search: &str,
-) -> Result<(Vec<ComparisonEntry>, Option<String>), String> {
+/// Fetched comparison data: entries, optional set name, optional saved base currency.
+#[derive(Clone)]
+struct FetchedData {
+    entries: Vec<ComparisonEntry>,
+    set_name: Option<String>,
+    saved_base_currency: Option<String>,
+}
+
+async fn fetch_comparison_data(search: &str) -> Result<FetchedData, String> {
     let (snapshot_ids, ticker_ids, set_id) = parse_query(search);
 
     // Path 3: saved comparison set
@@ -319,13 +397,15 @@ async fn fetch_comparison_data(
             return Err(format!("Failed to load comparison set: {}", resp.status()));
         }
         let detail: ComparisonSetDetail = resp.json().await.map_err(|e| e.to_string())?;
-        let name = Some(detail.name);
-        let entries = detail
-            .items
-            .into_iter()
-            .map(|item| ComparisonEntry::from(item.snapshot))
-            .collect();
-        return Ok((entries, name));
+        return Ok(FetchedData {
+            entries: detail
+                .items
+                .into_iter()
+                .map(|item| ComparisonEntry::from(item.snapshot))
+                .collect(),
+            set_name: Some(detail.name),
+            saved_base_currency: Some(detail.base_currency),
+        });
     }
 
     // Path 1: explicit snapshot IDs (from Library "Compare Selected")
@@ -338,12 +418,17 @@ async fn fetch_comparison_data(
                 .await
                 .map_err(|e| e.to_string())?;
             if resp.ok() {
-                let full: SnapshotFullResponse = resp.json().await.map_err(|e| e.to_string())?;
+                let full: SnapshotFullResponse =
+                    resp.json().await.map_err(|e| e.to_string())?;
                 entries.push(entry_from_full_snapshot(full));
             }
             // Silently skip 404s (deleted snapshots)
         }
-        return Ok((entries, None));
+        return Ok(FetchedData {
+            entries,
+            set_name: None,
+            saved_base_currency: None,
+        });
     }
 
     // Path 2: ticker IDs (ad-hoc latest)
@@ -362,12 +447,35 @@ async fn fetch_comparison_data(
             return Err(format!("Failed to compare tickers: {}", resp.status()));
         }
         let body: AdHocCompareResponse = resp.json().await.map_err(|e| e.to_string())?;
-        let entries = body.snapshots.into_iter().map(ComparisonEntry::from).collect();
-        return Ok((entries, None));
+        return Ok(FetchedData {
+            entries: body
+                .snapshots
+                .into_iter()
+                .map(ComparisonEntry::from)
+                .collect(),
+            set_name: None,
+            saved_base_currency: None,
+        });
     }
 
     // No params — empty state
-    Ok((Vec::new(), None))
+    Ok(FetchedData {
+        entries: Vec::new(),
+        set_name: None,
+        saved_base_currency: None,
+    })
+}
+
+/// Fetch exchange rates from the backend. Returns None on error/503.
+async fn fetch_exchange_rates() -> Option<ExchangeRateResponse> {
+    let resp = gloo_net::http::Request::get("/api/v1/exchange-rates")
+        .send()
+        .await
+        .ok()?;
+    if !resp.ok() {
+        return None;
+    }
+    resp.json().await.ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +498,13 @@ pub fn Comparison() -> impl IntoView {
     // Populated when entries render, so it works for all three entry paths.
     let resolved_ids = RwSignal::new(Vec::<i32>::new());
 
+    // Currency: per-session override initialized from global preference.
+    let global_currency = use_currency_preference();
+    let active_currency = RwSignal::new(global_currency.get_untracked());
+
+    // Exchange rates — fetched once on page load.
+    let rates_resource = LocalResource::new(move || async move { fetch_exchange_rates().await });
+
     // Load saved comparisons
     let saved_sets = LocalResource::new(move || async move {
         let resp = gloo_net::http::Request::get("/api/v1/comparisons")
@@ -408,6 +523,15 @@ pub fn Comparison() -> impl IntoView {
     let data = LocalResource::new(move || {
         let search = location.search.get();
         async move { fetch_comparison_data(&search).await }
+    });
+
+    // When data loads from a saved set, initialize active_currency from it.
+    Effect::new(move || {
+        if let Some(Ok(fetched)) = data.get() {
+            if let Some(ref currency) = fetched.saved_base_currency {
+                active_currency.set(currency.clone());
+            }
+        }
     });
 
     let navigate = leptos_router::hooks::use_navigate();
@@ -441,7 +565,7 @@ pub fn Comparison() -> impl IntoView {
         <div class="comparison-page">
             <h1 class="comparison-title">"Comparison"</h1>
 
-            // Save/Load toolbar
+            // Save/Load/Currency toolbar
             <div class="comparison-toolbar">
                 <button
                     class="toolbar-btn"
@@ -477,6 +601,18 @@ pub fn Comparison() -> impl IntoView {
                         }
                     })
                 }}
+
+                // Currency dropdown (per-session override)
+                <select
+                    class="currency-select"
+                    on:change=move |ev| {
+                        active_currency.set(event_target_value(&ev));
+                    }
+                >
+                    <option value="CHF" selected=move || active_currency.get() == "CHF">"CHF"</option>
+                    <option value="EUR" selected=move || active_currency.get() == "EUR">"EUR"</option>
+                    <option value="USD" selected=move || active_currency.get() == "USD">"USD"</option>
+                </select>
             </div>
 
             // Save form (inline, shown when Save clicked)
@@ -495,9 +631,10 @@ pub fn Comparison() -> impl IntoView {
                             set_save_feedback.set(Some("No analyses to save".to_string()));
                             return;
                         }
+                        let currency = active_currency.get();
                         let req = CreateComparisonRequest {
                             name,
-                            base_currency: "USD".to_string(),
+                            base_currency: currency,
                             items: entry_ids.iter().enumerate().map(|(i, id)| {
                                 CreateComparisonItem {
                                     analysis_snapshot_id: *id,
@@ -563,7 +700,9 @@ pub fn Comparison() -> impl IntoView {
                 {move || {
                     data.get().map(|result| {
                         match result {
-                            Ok((entries, set_name)) => {
+                            Ok(fetched) => {
+                                let entries = fetched.entries;
+                                let set_name = fetched.set_name;
                                 if entries.is_empty() {
                                     // Empty state
                                     return view! {
@@ -590,6 +729,17 @@ pub fn Comparison() -> impl IntoView {
 
                                 // Update resolved IDs for save flow (works for all 3 paths)
                                 resolved_ids.set(sorted.iter().map(|e| e.id).collect());
+
+                                // Currency conversion context
+                                let currency = active_currency.get();
+                                let rate_list: Option<Vec<ExchangeRatePair>> = rates_resource
+                                    .get()
+                                    .and_then(|opt| opt)
+                                    .map(|er| er.rates);
+                                let rates_available = rate_list.is_some();
+                                let has_mixed_currencies = sorted.iter().any(|e| {
+                                    e.native_currency.as_deref().is_some_and(|nc| nc != currency.as_str())
+                                });
 
                                 // Sort headers (desktop)
                                 let sort_headers = {
@@ -650,8 +800,34 @@ pub fn Comparison() -> impl IntoView {
                                     }
                                 };
 
-                                // Render cards
+                                // Fallback notice when rates unavailable but mixed currencies present
+                                let rate_notice = if !rates_available && has_mixed_currencies {
+                                    Some(view! {
+                                        <div class="rate-notice">
+                                            "Exchange rates unavailable \u{2014} values shown in original currencies"
+                                        </div>
+                                    })
+                                } else {
+                                    None
+                                };
+
+                                // Currency indicator
+                                let currency_label = if has_mixed_currencies || sorted.iter().any(|e| e.current_price.is_some()) {
+                                    let c = currency.clone();
+                                    Some(view! {
+                                        <div class="currency-indicator">
+                                            {format!("\u{00B7} Values in {}", c)}
+                                        </div>
+                                    })
+                                } else {
+                                    None
+                                };
+
+                                // Render cards with currency conversion
                                 let cards = sorted.iter().map(|entry| {
+                                    let rates_slice = rate_list.as_deref();
+                                    let native = entry.native_currency.as_deref();
+
                                     let data = CompactCardData {
                                         id: entry.id,
                                         ticker_symbol: entry.ticker_symbol.clone(),
@@ -663,6 +839,10 @@ pub fn Comparison() -> impl IntoView {
                                         projected_low_pe: entry.projected_low_pe,
                                         valuation_zone: entry.valuation_zone.clone(),
                                         upside_downside_ratio: entry.upside_downside_ratio,
+                                        current_price: convert_price(entry.current_price, native, &currency, rates_slice),
+                                        target_high_price: convert_price(entry.target_high_price, native, &currency, rates_slice),
+                                        target_low_price: convert_price(entry.target_low_price, native, &currency, rates_slice),
+                                        display_currency: Some(currency.clone()),
                                     };
                                     view! {
                                         <CompactAnalysisCard
@@ -674,6 +854,8 @@ pub fn Comparison() -> impl IntoView {
 
                                 view! {
                                     {name_view}
+                                    {rate_notice}
+                                    {currency_label}
                                     <div class="comparison-controls">
                                         {sort_headers}
                                         {mobile_sort}

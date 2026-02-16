@@ -18,11 +18,15 @@ pub struct CompactCardData {
     pub projected_low_pe: Option<f64>,
     pub valuation_zone: Option<String>,
     pub upside_downside_ratio: Option<f64>,
+    pub current_price: Option<f64>,
+    pub target_high_price: Option<f64>,
+    pub target_low_price: Option<f64>,
+    pub display_currency: Option<String>,
 }
 
 /// Renders a compact summary card for a single analysis snapshot.
 ///
-/// Used in the Library grid and (future) Comparison view.
+/// Used in the Library grid and Comparison view.
 /// Click triggers `on_click` with the snapshot ID for navigation.
 #[component]
 pub fn CompactAnalysisCard(
@@ -40,14 +44,14 @@ pub fn CompactAnalysisCard(
     let sales_cagr = data
         .projected_sales_cagr
         .map(|v| format!("{:.1}%", v))
-        .unwrap_or_else(|| "—".to_string());
+        .unwrap_or_else(|| "\u{2014}".to_string());
     let eps_cagr = data
         .projected_eps_cagr
         .map(|v| format!("{:.1}%", v))
-        .unwrap_or_else(|| "—".to_string());
+        .unwrap_or_else(|| "\u{2014}".to_string());
     let pe_range = match (data.projected_low_pe, data.projected_high_pe) {
-        (Some(lo), Some(hi)) => format!("{:.1} — {:.1}", lo, hi),
-        _ => "—".to_string(),
+        (Some(lo), Some(hi)) => format!("{:.1} \u{2014} {:.1}", lo, hi),
+        _ => "\u{2014}".to_string(),
     };
 
     // Valuation zone: colored dot + text
@@ -62,7 +66,7 @@ pub fn CompactAnalysisCard(
                 ("zone-dot zone-hold", "Hold")
             }
         }
-        None => ("zone-dot zone-none", "—"),
+        None => ("zone-dot zone-none", "\u{2014}"),
     };
 
     // Upside/downside ratio: color-coded per NAIC 3:1 rule
@@ -70,8 +74,23 @@ pub fn CompactAnalysisCard(
         Some(r) if r >= 3.0 => ("ud-ratio ud-strong", format!("{:.1}", r)),
         Some(r) if r >= 1.0 => ("ud-ratio ud-marginal", format!("{:.1}", r)),
         Some(r) => ("ud-ratio ud-poor", format!("{:.1}", r)),
-        None => ("ud-ratio ud-none", "—".to_string()),
+        None => ("ud-ratio ud-none", "\u{2014}".to_string()),
     };
+
+    // Monetary values: current price + target range
+    let currency_prefix = data
+        .display_currency
+        .as_deref()
+        .unwrap_or("");
+    let price_text = data
+        .current_price
+        .map(|p| format!("{} {:.2}", currency_prefix, p))
+        .unwrap_or_else(|| "\u{2014}".to_string());
+    let target_range = match (data.target_low_price, data.target_high_price) {
+        (Some(lo), Some(hi)) => format!("{:.0} \u{2014} {:.0}", lo, hi),
+        _ => "\u{2014}".to_string(),
+    };
+    let has_prices = data.current_price.is_some();
 
     let aria = format!("Open analysis for {}", data.ticker_symbol);
 
@@ -110,6 +129,20 @@ pub fn CompactAnalysisCard(
                     <span class="metric-label">"U/D"</span>
                     <span class=ud_class>{ud_text}</span>
                 </div>
+                {if has_prices {
+                    view! {
+                        <div class="metric-row metric-price-row">
+                            <span class="metric-label">"Price"</span>
+                            <span class="metric-value metric-price">{price_text}</span>
+                        </div>
+                        <div class="metric-row metric-price-row">
+                            <span class="metric-label">"Target"</span>
+                            <span class="metric-value metric-target">{target_range}</span>
+                        </div>
+                    }.into_any()
+                } else {
+                    view! {}.into_any()
+                }}
             </div>
         </button>
     }
