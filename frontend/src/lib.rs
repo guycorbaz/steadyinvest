@@ -25,6 +25,7 @@ use crate::pages::home::Home;
 use crate::pages::system_monitor::SystemMonitor;
 use crate::pages::audit_log::AuditLog;
 use crate::pages::library::Library;
+use crate::pages::comparison::Comparison;
 
 /// Reactive context for the currently viewed locked analysis ID.
 ///
@@ -60,6 +61,7 @@ pub fn App() -> impl IntoView {
             <Routes fallback=|| view! { NotFound }>
                 <Route path=path!("/") view=Home />
                 <Route path=path!("/library") view=Library />
+                <Route path=path!("/compare") view=Comparison />
                 <Route path=path!("/system-monitor") view=SystemMonitor />
                 <Route path=path!("/audit-log") view=AuditLog />
             </Routes>

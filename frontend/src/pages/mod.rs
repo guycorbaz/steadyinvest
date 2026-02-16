@@ -10,3 +10,4 @@ pub mod not_found;
 pub mod audit_log;
 pub mod system_monitor;
 pub mod library;
+pub mod comparison;

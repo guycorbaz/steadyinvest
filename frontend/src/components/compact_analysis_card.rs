@@ -16,6 +16,8 @@ pub struct CompactCardData {
     pub projected_eps_cagr: Option<f64>,
     pub projected_high_pe: Option<f64>,
     pub projected_low_pe: Option<f64>,
+    pub valuation_zone: Option<String>,
+    pub upside_downside_ratio: Option<f64>,
 }
 
 /// Renders a compact summary card for a single analysis snapshot.
@@ -48,6 +50,29 @@ pub fn CompactAnalysisCard(
         _ => "—".to_string(),
     };
 
+    // Valuation zone: colored dot + text
+    let (zone_class, zone_text) = match data.valuation_zone.as_deref() {
+        Some(z) => {
+            let lower = z.to_lowercase();
+            if lower.contains("under") || lower == "buy" {
+                ("zone-dot zone-buy", "Buy")
+            } else if lower.contains("over") || lower == "sell" {
+                ("zone-dot zone-sell", "Sell")
+            } else {
+                ("zone-dot zone-hold", "Hold")
+            }
+        }
+        None => ("zone-dot zone-none", "—"),
+    };
+
+    // Upside/downside ratio: color-coded per NAIC 3:1 rule
+    let (ud_class, ud_text) = match data.upside_downside_ratio {
+        Some(r) if r >= 3.0 => ("ud-ratio ud-strong", format!("{:.1}", r)),
+        Some(r) if r >= 1.0 => ("ud-ratio ud-marginal", format!("{:.1}", r)),
+        Some(r) => ("ud-ratio ud-poor", format!("{:.1}", r)),
+        None => ("ud-ratio ud-none", "—".to_string()),
+    };
+
     let aria = format!("Open analysis for {}", data.ticker_symbol);
 
     view! {
@@ -73,6 +98,17 @@ pub fn CompactAnalysisCard(
                 <div class="metric-row">
                     <span class="metric-label">"PE Range"</span>
                     <span class="metric-value">{pe_range}</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">"Zone"</span>
+                    <span class="metric-value">
+                        <span class=zone_class></span>
+                        {zone_text}
+                    </span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">"U/D"</span>
+                    <span class=ud_class>{ud_text}</span>
                 </div>
             </div>
         </button>

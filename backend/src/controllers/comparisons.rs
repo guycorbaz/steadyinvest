@@ -12,6 +12,7 @@
 use loco_rs::prelude::*;
 use sea_orm::{IntoActiveModel, PaginatorTrait, QueryOrder, TransactionTrait};
 use serde::{Deserialize, Serialize};
+use steady_invest_logic::{compute_upside_downside_from_snapshot, AnalysisSnapshot};
 
 use crate::models::_entities::{
     analysis_snapshots, comparison_set_items, comparison_sets, tickers,
@@ -69,6 +70,16 @@ pub struct ComparisonSnapshotSummary {
     pub projected_high_pe: Option<f64>,
     pub projected_low_pe: Option<f64>,
     pub valuation_zone: Option<String>,
+    pub upside_downside_ratio: Option<f64>,
+}
+
+/// Compute the NAIC upside/downside ratio from snapshot JSON data.
+///
+/// Deserializes into [`AnalysisSnapshot`] and delegates to the shared
+/// [`compute_upside_downside_from_snapshot`] in `steady-invest-logic`.
+fn compute_upside_downside(snapshot_data: &serde_json::Value) -> Option<f64> {
+    let snapshot: AnalysisSnapshot = serde_json::from_value(snapshot_data.clone()).ok()?;
+    compute_upside_downside_from_snapshot(&snapshot)
 }
 
 impl ComparisonSnapshotSummary {
@@ -108,6 +119,7 @@ impl ComparisonSnapshotSummary {
                 .get("valuation_zone")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_owned()),
+            upside_downside_ratio: compute_upside_downside(&m.snapshot_data),
         }
     }
 }

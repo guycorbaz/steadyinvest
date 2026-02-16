@@ -3,9 +3,13 @@
 //! Fetches snapshot summaries from the API, displays them as a responsive
 //! grid of Compact Analysis Cards, and provides client-side filtering by
 //! ticker symbol and locked/unlocked status.
+//!
+//! Supports a "Compare Selected" flow: users select multiple cards via
+//! checkboxes, then navigate to the Comparison view with those snapshot IDs.
 
 use crate::components::compact_analysis_card::{CompactAnalysisCard, CompactCardData};
 use leptos::prelude::*;
+use leptos_router::components::A;
 use serde::Deserialize;
 
 /// DTO matching the enhanced `SnapshotSummary` from the backend.
@@ -30,6 +34,9 @@ struct SnapshotSummary {
 pub fn Library() -> impl IntoView {
     let (ticker_filter, set_ticker_filter) = signal(String::new());
     let (lock_filter, set_lock_filter) = signal("all".to_string());
+
+    // Compare Selected: track (id, ticker_symbol) of selected cards
+    let selected = RwSignal::new(Vec::<(i32, String)>::new());
 
     let snapshots = LocalResource::new(move || async move {
         let response = gloo_net::http::Request::get("/api/v1/snapshots")
@@ -118,6 +125,8 @@ pub fn Library() -> impl IntoView {
                                     }.into_any()
                                 } else {
                                     let cards = filtered.iter().map(|s| {
+                                        let card_id = s.id;
+                                        let ticker_sym = s.ticker_symbol.clone();
                                         let data = CompactCardData {
                                             id: s.id,
                                             ticker_symbol: s.ticker_symbol.clone(),
@@ -127,12 +136,40 @@ pub fn Library() -> impl IntoView {
                                             projected_eps_cagr: s.projected_eps_cagr,
                                             projected_high_pe: s.projected_high_pe,
                                             projected_low_pe: s.projected_low_pe,
+                                            valuation_zone: None,
+                                            upside_downside_ratio: None,
+                                        };
+                                        let is_selected = {
+                                            let sel = selected;
+                                            move || sel.get().iter().any(|(id, _)| *id == card_id)
+                                        };
+                                        let toggle_select = {
+                                            let sym = ticker_sym.clone();
+                                            move |_ev: leptos::ev::Event| {
+                                                selected.update(|v| {
+                                                    if let Some(pos) = v.iter().position(|(id, _)| *id == card_id) {
+                                                        v.remove(pos);
+                                                    } else {
+                                                        v.push((card_id, sym.clone()));
+                                                    }
+                                                });
+                                            }
                                         };
                                         view! {
-                                            <CompactAnalysisCard
-                                                data=data
-                                                on_click=on_card_click
-                                            />
+                                            <div class="library-card-wrapper">
+                                                <label class="compare-checkbox" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
+                                                    <input
+                                                        type="checkbox"
+                                                        prop:checked=is_selected
+                                                        on:change=toggle_select
+                                                    />
+                                                    <span class="compare-checkbox-label">"Compare"</span>
+                                                </label>
+                                                <CompactAnalysisCard
+                                                    data=data
+                                                    on_click=on_card_click
+                                                />
+                                            </div>
                                         }
                                     }).collect_view();
 
@@ -154,6 +191,39 @@ pub fn Library() -> impl IntoView {
                     })
                 }}
             </Suspense>
+
+            // Floating action bar for Compare Selected
+            {move || {
+                let sel = selected.get();
+                let count = sel.len();
+                if count >= 2 {
+                    let ids_str = sel.iter()
+                        .map(|(id, _)| id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let symbols = sel.iter()
+                        .map(|(_, s)| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let href = format!("/compare?snapshot_ids={}", ids_str);
+                    view! {
+                        <div class="compare-selection-bar">
+                            <span class="compare-selection-info">{symbols}</span>
+                            <A href=href attr:class="compare-btn">
+                                {format!("Compare ({}) \u{2192}", count)}
+                            </A>
+                        </div>
+                    }.into_any()
+                } else if count == 1 {
+                    view! {
+                        <div class="compare-selection-bar compare-selection-bar--hint">
+                            <span class="compare-selection-info">"Select one more to compare"</span>
+                        </div>
+                    }.into_any()
+                } else {
+                    view! {}.into_any()
+                }
+            }}
         </div>
     }
 }

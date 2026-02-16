@@ -2,8 +2,10 @@ use backend::app::App;
 use backend::models::_entities::{analysis_snapshots, tickers, users};
 use loco_rs::prelude::*;
 use loco_rs::testing::prelude::request;
+use rust_decimal::Decimal;
 use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 use serial_test::serial;
+use steady_invest_logic::{AnalysisSnapshot, HistoricalData, HistoricalYearlyData};
 
 /// Ensure a user and ticker exist for FK constraints.
 /// Returns the ticker_id for use in snapshot requests.
@@ -61,6 +63,58 @@ async fn create_snapshot(request: &loco_rs::TestServer, ticker_id: i32, data: se
     let res = request.post("/api/v1/snapshots").json(&body).await;
     res.assert_status_success();
     res.json::<analysis_snapshots::Model>().id
+}
+
+/// Snapshot data with actual historical records so upside/downside ratio can be computed.
+///
+/// Setup: EPS=10, price_high=150, projected_eps_cagr=12%, projected_high_pe=25, projected_low_pe=15
+/// Projected EPS 5yr = 10 * (1.12)^5 = 17.6234
+/// Target high = 25 * 17.6234 = 440.585
+/// Target low  = 15 * 17.6234 = 264.351
+/// Upside = 440.585 - 150 = 290.585
+/// Downside = 150 - 264.351 = -114.351 → negative → ratio = None
+///
+/// To get a valid ratio, use lower projections. Let's use:
+/// EPS=10, price_high=50, projected_eps_cagr=10%, projected_high_pe=20, projected_low_pe=5
+/// Projected EPS 5yr = 10 * (1.10)^5 = 16.1051
+/// Target high = 20 * 16.1051 = 322.102
+/// Target low  = 5 * 16.1051 = 80.5255
+/// Upside = 322.102 - 50 = 272.102
+/// Downside = 50 - 80.5255 = -30.5255 → negative → ratio = None
+///
+/// Ok, let me use a scenario where current price is clearly between targets:
+/// EPS=5, price_high=50, projected_eps_cagr=10%, projected_high_pe=15, projected_low_pe=5
+/// Projected EPS 5yr = 5 * (1.10)^5 = 8.0526
+/// Target high = 15 * 8.0526 = 120.789
+/// Target low  = 5 * 8.0526 = 40.263
+/// Upside = 120.789 - 50 = 70.789
+/// Downside = 50 - 40.263 = 9.737
+/// Ratio = 70.789 / 9.737 ≈ 7.27
+fn sample_snapshot_data_with_records() -> serde_json::Value {
+    let snapshot = AnalysisSnapshot {
+        historical_data: HistoricalData {
+            ticker: "AAPL".to_string(),
+            currency: "USD".to_string(),
+            records: vec![HistoricalYearlyData {
+                fiscal_year: 2025,
+                sales: Decimal::from(100000),
+                eps: Decimal::from(5),
+                price_high: Decimal::from(50),
+                price_low: Decimal::from(30),
+                adjustment_factor: Decimal::ONE,
+                ..Default::default()
+            }],
+            is_complete: true,
+            ..Default::default()
+        },
+        projected_sales_cagr: 8.0,
+        projected_eps_cagr: 10.0,
+        projected_high_pe: 15.0,
+        projected_low_pe: 5.0,
+        analyst_note: "Test with records".to_string(),
+        captured_at: chrono::Utc::now(),
+    };
+    serde_json::to_value(&snapshot).unwrap()
 }
 
 // -----------------------------------------------------------------------
@@ -130,6 +184,45 @@ async fn ad_hoc_compare_nonexistent_ticker_is_skipped() {
         // Only the existing ticker is returned; 99999 is silently skipped
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0]["ticker_id"], ticker_id);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn ad_hoc_compare_returns_upside_downside_ratio() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ticker_id = seed_user_and_ticker(&ctx).await;
+
+        // Snapshot with empty records → ratio should be null
+        create_snapshot(&request, ticker_id, sample_snapshot_data()).await;
+        let res = request
+            .get(&format!("/api/v1/compare?ticker_ids={}", ticker_id))
+            .await;
+        res.assert_status_success();
+        let body: serde_json::Value = res.json();
+        let snapshots = body["snapshots"].as_array().unwrap();
+        assert!(snapshots[0]["upside_downside_ratio"].is_null(),
+            "Expected null ratio for empty records");
+
+        // Now create snapshot with records — ratio should be computed
+        let snap_id = create_snapshot(&request, ticker_id, sample_snapshot_data_with_records()).await;
+        let res = request
+            .get(&format!("/api/v1/compare?ticker_ids={}", ticker_id))
+            .await;
+        res.assert_status_success();
+        let body: serde_json::Value = res.json();
+        let snapshots = body["snapshots"].as_array().unwrap();
+        assert_eq!(snapshots[0]["id"], snap_id, "Should return latest snapshot");
+        let ratio = snapshots[0]["upside_downside_ratio"].as_f64()
+            .expect("upside_downside_ratio should be present");
+        // EPS=5, price=50, eps_cagr=10%, high_pe=15, low_pe=5
+        // Proj EPS 5yr = 5 * 1.10^5 ≈ 8.0526
+        // Target high = 15 * 8.0526 ≈ 120.789
+        // Target low = 5 * 8.0526 ≈ 40.263
+        // Ratio = (120.789-50)/(50-40.263) ≈ 7.27
+        assert!(ratio > 7.0 && ratio < 8.0,
+            "Expected ratio ~7.27, got {}", ratio);
     })
     .await;
 }

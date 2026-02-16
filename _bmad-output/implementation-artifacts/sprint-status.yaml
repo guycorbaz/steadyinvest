@@ -103,7 +103,7 @@ development_status:
   # Epic 8: Analysis Comparison & Thesis Evolution
   epic-8: in-progress
   8-1-comparison-schema-api: done
-  8-2-comparison-view-ranked-grid: backlog
+  8-2-comparison-view-ranked-grid: done
   8-3-comparison-currency-handling: backlog
   8-4-thesis-evolution-api: backlog
   8-5-history-timeline-sidebar-side-by-side-comparison: backlog

@@ -434,6 +434,87 @@ pub fn calculate_quality_analysis(data: &HistoricalData) -> QualityAnalysis {
     QualityAnalysis { points }
 }
 
+/// Calculates the NAIC upside/downside ratio for investment decision-making.
+///
+/// The ratio measures how much potential gain (upside) exists relative to
+/// potential loss (downside) based on projected target prices. NAIC recommends
+/// investing only in companies where this ratio is **at least 3:1**.
+///
+/// # Formula
+///
+/// ```text
+/// upside   = projected_high_price - current_price
+/// downside = current_price - projected_low_price
+/// ratio    = upside / downside
+/// ```
+///
+/// # Arguments
+///
+/// * `current_price` — The current market price (or latest high price from historical data).
+/// * `projected_high_price` — The target high price (projected_high_pe × projected_eps_5yr).
+/// * `projected_low_price` — The target low price (projected_low_pe × projected_eps_5yr).
+///
+/// # Returns
+///
+/// `Some(ratio)` if the downside is positive (current price above the low target),
+/// or `None` if the downside is zero or negative (current price at or below the
+/// low target, meaning there is no measurable downside risk).
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::calculate_upside_downside_ratio;
+///
+/// // NAIC example: stock at $50, target high $100, target low $35
+/// // Upside = $50, Downside = $15, Ratio = 3.33 (meets 3:1 rule)
+/// let ratio = calculate_upside_downside_ratio(50.0, 100.0, 35.0);
+/// assert!((ratio.unwrap() - 3.333).abs() < 0.01);
+///
+/// // Current price at or below low target → no measurable downside
+/// let ratio = calculate_upside_downside_ratio(30.0, 100.0, 35.0);
+/// assert!(ratio.is_none());
+/// ```
+pub fn calculate_upside_downside_ratio(
+    current_price: f64,
+    projected_high_price: f64,
+    projected_low_price: f64,
+) -> Option<f64> {
+    let downside = current_price - projected_low_price;
+    if downside <= 0.0 {
+        return None;
+    }
+    let upside = projected_high_price - current_price;
+    Some(upside / downside)
+}
+
+/// Computes the NAIC upside/downside ratio directly from an [`AnalysisSnapshot`].
+///
+/// Extracts the latest historical record (by fiscal year), uses its EPS and
+/// high price as "current" values, projects 5-year EPS using the snapshot's
+/// `projected_eps_cagr`, and computes target high/low prices from projected P/E
+/// ratios. Delegates the final ratio to [`calculate_upside_downside_ratio`].
+///
+/// Returns `None` if historical records are empty, EPS/price are non-positive,
+/// or the current price is at or below the projected low target.
+pub fn compute_upside_downside_from_snapshot(snapshot: &AnalysisSnapshot) -> Option<f64> {
+    use rust_decimal::prelude::ToPrimitive;
+
+    let latest = snapshot
+        .historical_data
+        .records
+        .iter()
+        .max_by_key(|r| r.fiscal_year)?;
+    let current_eps = latest.eps.to_f64()?;
+    let current_price = latest.price_high.to_f64()?;
+    if current_eps <= 0.0 || current_price <= 0.0 {
+        return None;
+    }
+    let projected_eps_5yr = current_eps * (1.0 + snapshot.projected_eps_cagr / 100.0).powf(5.0);
+    let target_high = snapshot.projected_high_pe * projected_eps_5yr;
+    let target_low = snapshot.projected_low_pe * projected_eps_5yr;
+    calculate_upside_downside_ratio(current_price, target_high, target_low)
+}
+
 /// Computes CAGR and a best-fit linear regression trendline for a series of values.
 ///
 /// Regression is performed in log-space (`ln(y) = mx + b`) to produce a straight
@@ -794,6 +875,33 @@ mod tests {
         
         // Avg of 12..21 = (12+21)/2 = 16.5
         assert!((analysis.avg_high_pe - 16.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_upside_downside_ratio_meets_naic_rule() {
+        // Stock at $50, target high $100, target low $35
+        // Upside = $50, Downside = $15 → Ratio = 3.33
+        let ratio = calculate_upside_downside_ratio(50.0, 100.0, 35.0);
+        assert!((ratio.unwrap() - 3.333).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_upside_downside_ratio_below_threshold() {
+        // Stock at $80, target high $100, target low $60
+        // Upside = $20, Downside = $20 → Ratio = 1.0
+        let ratio = calculate_upside_downside_ratio(80.0, 100.0, 60.0);
+        assert!((ratio.unwrap() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_upside_downside_ratio_no_downside() {
+        // Current price at low target → None
+        let ratio = calculate_upside_downside_ratio(35.0, 100.0, 35.0);
+        assert!(ratio.is_none());
+
+        // Current price below low target → None
+        let ratio = calculate_upside_downside_ratio(30.0, 100.0, 35.0);
+        assert!(ratio.is_none());
     }
 
     #[test]
