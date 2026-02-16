@@ -1,6 +1,6 @@
 # Story 8.3: Comparison Currency Handling
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -324,16 +324,28 @@ Claude Opus 4.6
 - **M3 (readability)**: Resolved by H2 — 11-element tuple eliminated; `entry_from_full_snapshot` uses if/else with `extract_snapshot_prices()`.
 - **Tests**: 18 unit tests + 7 doctests pass in `steady-invest-logic` (added `test_extract_snapshot_prices` and `test_extract_snapshot_prices_empty_records`).
 
+### Code Review #2 Fixes Applied (2026-02-16)
+
+Reviewer: Claude Opus 4.6 (adversarial code review)
+
+**Findings: 1 HIGH, 2 MEDIUM, 2 LOW**
+
+- **H1 (AC#5 violation — display_currency bug)**: When exchange rates unavailable and mixed currencies, card `display_currency` was hardcoded to active currency even though values were in native currency. Fixed: per-entry `display_currency` now falls back to `native_currency` when rates unavailable. Also fixed contradictory currency indicator — now hidden when rates unavailable and mixed currencies (rate-notice banner handles that case).
+- **M1 (Architecture deviation — no CurrencyCode validation)**: Architecture prescribes validated currency codes. Backend only checked `len() == 3`. Fixed: Added `is_valid_currency_code()` to `steady-invest-logic` (3 uppercase ASCII letters). Backend create/update handlers now use it. Added unit test + doctest (19 unit + 8 doctests pass).
+- **M2 (Backend DTO split extraction)**: Projection metrics read from raw JSON while monetary fields use full deserialization. Noted as accepted tech debt — Story 8-4 has since formalized this into `snapshot_metrics.rs` shared module. The pattern is consistent and stable.
+- **L1 (Target range lacks currency prefix)**: Noted, not fixed — acceptable UX tradeoff for card space.
+- **L2 (Frontend convert_price() untested)**: Noted — core conversion tested in shared crate; wrapper logic simple.
+
 ### File List
 
-- `backend/src/controllers/comparisons.rs` — Added `SnapshotMonetaryFields`, `extract_monetary_fields()` (uses shared `extract_snapshot_prices`), 4 new fields on `ComparisonSnapshotSummary`
+- `backend/src/controllers/comparisons.rs` — Added `SnapshotMonetaryFields`, `extract_monetary_fields()` (uses shared `extract_snapshot_prices`), 4 new fields on `ComparisonSnapshotSummary`. CR#2: Added `is_valid_currency_code` import, upgraded base_currency validation.
 - `backend/tests/requests/comparisons.rs` — Added monetary field assertions to 3 tests
-- `crates/steady-invest-logic/src/lib.rs` — Added `SnapshotPrices`, `extract_snapshot_prices()`, `convert_monetary_value()`, refactored `compute_upside_downside_from_snapshot()` + tests (18 unit + 7 doctests)
+- `crates/steady-invest-logic/src/lib.rs` — Added `SnapshotPrices`, `extract_snapshot_prices()`, `convert_monetary_value()`, refactored `compute_upside_downside_from_snapshot()` + tests. CR#2: Added `is_valid_currency_code()` + test + doctest (19 unit + 8 doctests).
 - `frontend/src/state/mod.rs` — NEW: Global signals module with `CurrencyPreference` newtype wrapper
 - `frontend/src/lib.rs` — Added `state` module, `provide_global_state()` call
-- `frontend/src/pages/comparison.rs` — Exchange rate DTOs, fetch, currency dropdown, conversion (with fallback), save flow fix, uses `extract_snapshot_prices`
+- `frontend/src/pages/comparison.rs` — Exchange rate DTOs, fetch, currency dropdown, conversion (with fallback), save flow fix, uses `extract_snapshot_prices`. CR#2: Per-entry `display_currency` fallback to native when rates unavailable. Currency indicator hidden when rates unavailable + mixed currencies.
 - `frontend/src/components/compact_analysis_card.rs` — Added `current_price`, `target_high_price`, `target_low_price`, `display_currency` fields + price rendering
 - `frontend/src/pages/library.rs` — Updated `CompactCardData` construction with new fields (None)
 - `frontend/public/styles.scss` — Currency select, indicator, rate notice, price row styles
 - `_bmad-output/implementation-artifacts/8-3-comparison-currency-handling.md` — Task completion, dev record, code review fixes
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — Status: review
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — Status: done

@@ -580,6 +580,25 @@ pub fn compute_upside_downside_from_snapshot(snapshot: &AnalysisSnapshot) -> Opt
     calculate_upside_downside_ratio(current, high, low)
 }
 
+/// Validates that a string is a valid ISO 4217 currency code (3 uppercase ASCII letters).
+///
+/// Used at API boundaries to enforce currency format per architecture spec.
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::is_valid_currency_code;
+///
+/// assert!(is_valid_currency_code("CHF"));
+/// assert!(is_valid_currency_code("USD"));
+/// assert!(!is_valid_currency_code("us"));     // too short + lowercase
+/// assert!(!is_valid_currency_code("USDX"));   // too long
+/// assert!(!is_valid_currency_code("123"));     // digits, not letters
+/// ```
+pub fn is_valid_currency_code(code: &str) -> bool {
+    code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase())
+}
+
 /// Converts a monetary value from one currency to another using the given rate.
 ///
 /// This is the single source of truth for currency conversion (Cardinal Rule).
@@ -1049,6 +1068,19 @@ mod tests {
         // Negative amounts are valid (losses)
         let result = convert_monetary_value(-50.0, 1.15);
         assert!((result - (-57.5)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_is_valid_currency_code() {
+        assert!(is_valid_currency_code("CHF"));
+        assert!(is_valid_currency_code("USD"));
+        assert!(is_valid_currency_code("EUR"));
+        assert!(!is_valid_currency_code("us"));      // too short + lowercase
+        assert!(!is_valid_currency_code("usd"));     // lowercase
+        assert!(!is_valid_currency_code("USDX"));    // too long
+        assert!(!is_valid_currency_code("123"));     // digits
+        assert!(!is_valid_currency_code(""));        // empty
+        assert!(!is_valid_currency_code("U D"));     // contains space
     }
 
     #[test]

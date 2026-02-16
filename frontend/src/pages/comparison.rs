@@ -811,8 +811,10 @@ pub fn Comparison() -> impl IntoView {
                                     None
                                 };
 
-                                // Currency indicator
-                                let currency_label = if has_mixed_currencies || sorted.iter().any(|e| e.current_price.is_some()) {
+                                // Currency indicator — only show when all values are
+                                // actually in the target currency (converted or same native)
+                                let has_prices = sorted.iter().any(|e| e.current_price.is_some());
+                                let currency_label = if has_prices && (rates_available || !has_mixed_currencies) {
                                     let c = currency.clone();
                                     Some(view! {
                                         <div class="currency-indicator">
@@ -828,6 +830,14 @@ pub fn Comparison() -> impl IntoView {
                                     let rates_slice = rate_list.as_deref();
                                     let native = entry.native_currency.as_deref();
 
+                                    // AC#5: when rates unavailable and currency differs,
+                                    // show native currency prefix instead of target
+                                    let entry_display_currency = if rates_available || native == Some(currency.as_str()) {
+                                        Some(currency.clone())
+                                    } else {
+                                        entry.native_currency.clone()
+                                    };
+
                                     let data = CompactCardData {
                                         id: entry.id,
                                         ticker_symbol: entry.ticker_symbol.clone(),
@@ -842,7 +852,7 @@ pub fn Comparison() -> impl IntoView {
                                         current_price: convert_price(entry.current_price, native, &currency, rates_slice),
                                         target_high_price: convert_price(entry.target_high_price, native, &currency, rates_slice),
                                         target_low_price: convert_price(entry.target_low_price, native, &currency, rates_slice),
-                                        display_currency: Some(currency.clone()),
+                                        display_currency: entry_display_currency,
                                     };
                                     view! {
                                         <CompactAnalysisCard
