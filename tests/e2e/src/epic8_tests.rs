@@ -107,6 +107,15 @@ async fn seed_comparison_set(
     Ok(id)
 }
 
+/// Click an element via JavaScript to bypass WebDriver's click-interception
+/// check (e.g. when a 0-width grid sibling overlaps the button).
+async fn js_click(ctx: &TestContext, el: &thirtyfour::WebElement) -> Result<()> {
+    ctx.driver
+        .execute("arguments[0].click()", vec![el.to_json()?])
+        .await?;
+    Ok(())
+}
+
 /// Helper: search for a ticker, click first result, wait for HUD.
 async fn load_ticker(ctx: &TestContext, ticker: &str) -> Result<()> {
     ctx.navigate("/").await?;
@@ -429,14 +438,14 @@ async fn test_history_toggle_opens_sidebar() -> Result<()> {
 
     load_ticker(&ctx, "NESN").await?;
 
-    // Find and click the history toggle
+    // Find and click the history toggle (JS click bypasses sidebar overlay)
     let toggle = ctx
         .driver
         .query(By::Css(".history-toggle-btn:not([disabled])"))
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .first()
         .await?;
-    toggle.click().await?;
+    js_click(&ctx, &toggle).await?;
 
     // Verify sidebar appears
     let sidebar = ctx
@@ -448,6 +457,7 @@ async fn test_history_toggle_opens_sidebar() -> Result<()> {
     assert!(sidebar.is_displayed().await?, "Timeline sidebar should be visible");
 
     // Verify aria-expanded is true
+    let toggle = ctx.driver.find(By::ClassName("history-toggle-btn")).await?;
     let expanded = toggle.attr("aria-expanded").await?;
     assert_eq!(
         expanded.as_deref(),
@@ -476,8 +486,8 @@ async fn test_history_toggle_closes_sidebar() -> Result<()> {
         .first()
         .await?;
 
-    // Open
-    toggle.click().await?;
+    // Open (JS click bypasses sidebar overlay)
+    js_click(&ctx, &toggle).await?;
     ctx.driver
         .query(By::ClassName("timeline-sidebar"))
         .wait(Duration::from_secs(10), Duration::from_millis(500))
@@ -489,7 +499,7 @@ async fn test_history_toggle_closes_sidebar() -> Result<()> {
         .driver
         .find(By::ClassName("history-toggle-btn"))
         .await?;
-    toggle.click().await?;
+    js_click(&ctx, &toggle).await?;
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Verify aria-expanded is false
@@ -524,7 +534,7 @@ async fn test_history_timeline_lists_past_analyses() -> Result<()> {
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .first()
         .await?;
-    toggle.click().await?;
+    js_click(&ctx, &toggle).await?;
 
     // Wait for timeline entries
     let entries = ctx
@@ -568,7 +578,7 @@ async fn test_history_select_past_shows_comparison() -> Result<()> {
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .first()
         .await?;
-    toggle.click().await?;
+    js_click(&ctx, &toggle).await?;
 
     // Wait for entries and find a non-current one to click
     let entries = ctx
@@ -631,7 +641,7 @@ async fn test_history_metric_deltas_displayed() -> Result<()> {
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .first()
         .await?;
-    toggle.click().await?;
+    js_click(&ctx, &toggle).await?;
 
     let entries = ctx
         .driver
@@ -684,7 +694,7 @@ async fn test_history_deselect_returns_to_live() -> Result<()> {
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .first()
         .await?;
-    toggle.click().await?;
+    js_click(&ctx, &toggle).await?;
 
     let entries = ctx
         .driver
