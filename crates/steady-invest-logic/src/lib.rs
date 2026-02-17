@@ -84,6 +84,7 @@ pub struct HistoricalYearlyData {
     /// Rate to convert native currency to user's display currency.
     pub exchange_rate: Option<rust_decimal::Decimal>,
     /// List of manual overrides for this year.
+    #[serde(default)]
     pub overrides: Vec<ManualOverride>,
 }
 
