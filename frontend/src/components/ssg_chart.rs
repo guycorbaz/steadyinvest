@@ -3,8 +3,9 @@ use steady_invest_logic::HistoricalData;
 use rust_decimal::prelude::ToPrimitive;
 use charming::{
     component::{Axis, Legend, Title},
-    element::{AxisType, Orient, Tooltip, Trigger, LineStyle, LineStyleType},
-    series::Line,
+    datatype::DataPointItem,
+    element::{AxisType, ItemStyle, Orient, Tooltip, Trigger, LineStyle, LineStyleType},
+    series::{Candlestick, Line},
     Chart, WasmRenderer,
 };
 
@@ -13,7 +14,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 unsafe extern "C" {
     #[wasm_bindgen(js_namespace = window)]
-    fn setupDraggableHandles(chart_id: String, sales_start: f64, sales_years: f64, eps_start: f64, eps_years: f64);
+    fn setupDraggableHandles(chart_id: String, sales_start: f64, sales_years: f64, eps_start: f64, eps_years: f64, ptp_start: f64, ptp_years: f64);
 
     #[wasm_bindgen(js_namespace = window)]
     fn captureChartAsDataURL(chart_id: String) -> Option<String>;
@@ -39,6 +40,7 @@ pub fn capture_chart_image(chart_id: &str) -> Option<String> {
 thread_local! {
     static SALES_SIGNAL: std::cell::Cell<Option<RwSignal<f64>>> = const { std::cell::Cell::new(None) };
     static EPS_SIGNAL: std::cell::Cell<Option<RwSignal<f64>>> = const { std::cell::Cell::new(None) };
+    static PTP_SIGNAL: std::cell::Cell<Option<RwSignal<f64>>> = const { std::cell::Cell::new(None) };
 }
 
 /// Updates the Sales projection CAGR from JavaScript drag handle
@@ -63,6 +65,17 @@ pub fn rust_update_eps_cagr(val: f64) {
     });
 }
 
+/// Updates the Pre-Tax Profit projection CAGR from JavaScript drag handle
+#[wasm_bindgen]
+pub fn rust_update_ptp_cagr(val: f64) {
+    web_sys::console::log_1(&format!("[Slider] PTP CAGR updated to: {:.2}%", val).into());
+    PTP_SIGNAL.with(|s| {
+        if let Some(sig) = s.get() {
+            sig.set(val);
+        }
+    });
+}
+
 /// The Stock Selection Guide (SSG) Chart component.
 /// 
 /// Renders a logarithmic multi-series line chart (Sales, EPS, Price) with 
@@ -73,20 +86,22 @@ pub fn rust_update_eps_cagr(val: f64) {
 pub fn SSGChart(
     data: HistoricalData,
     sales_projection_cagr: RwSignal<f64>,
-    eps_projection_cagr: RwSignal<f64>
+    eps_projection_cagr: RwSignal<f64>,
+    ptp_projection_cagr: RwSignal<f64>,
 ) -> impl IntoView {
     // Unique ID for the chart container to avoid conflicts
     let chart_id = format!("ssg-chart-{}", data.ticker.to_lowercase());
-    
+
     // Reactive signal to toggle the visibility of trendlines and CAGR stats.
     let show_trends = RwSignal::new(true);
-    
+
     // Projection state
     let is_projecting = RwSignal::new(false);
 
     // Store signals in thread-local for JS callbacks
     SALES_SIGNAL.with(|s| s.set(Some(sales_projection_cagr)));
     EPS_SIGNAL.with(|s| s.set(Some(eps_projection_cagr)));
+    PTP_SIGNAL.with(|s| s.set(Some(ptp_projection_cagr)));
 
     let cid_for_effect = chart_id.clone();
     Effect::new(move |_| {
@@ -94,9 +109,10 @@ pub fn SSGChart(
         let trends_active = show_trends.get();
         let s_cagr = sales_projection_cagr.get();
         let e_cagr = eps_projection_cagr.get();
+        let p_cagr = ptp_projection_cagr.get();
         let projecting = is_projecting.get();
         let cid = cid_for_effect.clone();
-        
+
         // Transform data for charming
         let mut years = Vec::with_capacity(data.records.len());
         let mut prices = Vec::with_capacity(data.records.len());
@@ -105,6 +121,7 @@ pub fn SSGChart(
         let mut raw_years = Vec::with_capacity(data.records.len());
         let mut sales = Vec::with_capacity(data.records.len());
         let mut eps = Vec::with_capacity(data.records.len());
+        let mut ptp = Vec::with_capacity(data.records.len());
 
         for record in &data.records {
             years.push(record.fiscal_year.to_string());
@@ -114,11 +131,19 @@ pub fn SSGChart(
             eps.push(record.eps.to_f64().unwrap_or(0.0));
             prices.push(record.price_high.to_f64().unwrap_or(0.0));
             prices_low.push(record.price_low.to_f64().unwrap_or(0.0));
+
+            // Pre-Tax Profit: use NAN for missing values to avoid log(0) on log-scale Y axis
+            if let Some(ptp_val) = record.pretax_income {
+                let v = ptp_val.to_f64().unwrap_or(0.0);
+                ptp.push(if v > 0.0 { v } else { f64::NAN });
+            } else {
+                ptp.push(f64::NAN);
+            }
         }
 
         let mut chart = Chart::new()
             .title(Title::new()
-                .text(format!("SSG Analysis: {}", data.ticker))
+                .text(format!("Stock Selection Guide: {}", data.ticker))
                 .text_style(charming::element::TextStyle::new()
                     .color("#E0E0E0")
                     .font_family("Inter")
@@ -150,91 +175,196 @@ pub fn SSGChart(
                     .font_size(11)));
 
         let mut sales_start = 0.0;
-        let mut sales_years = 0.0;
+        let mut sales_years_f = 0.0;
         let mut eps_start = 0.0;
-        let mut eps_years = 0.0;
+        let mut eps_years_f = 0.0;
+        let mut ptp_start = 0.0;
+        let mut ptp_years_f = 0.0;
 
         if trends_active {
             let sales_trend = steady_invest_logic::calculate_growth_analysis(&raw_years, &sales);
             let eps_trend = steady_invest_logic::calculate_growth_analysis(&raw_years, &eps);
 
+            // PTP trendline: filter out zero/None years for regression
+            let ptp_valid_vals: Vec<f64> = ptp.iter()
+                .zip(raw_years.iter())
+                .filter(|&(&v, _)| v > 0.0)
+                .map(|(&v, _)| v)
+                .collect();
+            let ptp_valid_years: Vec<i32> = ptp.iter()
+                .zip(raw_years.iter())
+                .filter(|&(&v, _)| v > 0.0)
+                .map(|(_, &y)| y)
+                .collect();
+            let ptp_trend = steady_invest_logic::calculate_growth_analysis(&ptp_valid_years, &ptp_valid_vals);
+
             // Initialize projection signals if not yet set
             if !projecting {
                 sales_projection_cagr.set(sales_trend.cagr);
                 eps_projection_cagr.set(eps_trend.cagr);
+                ptp_projection_cagr.set(ptp_trend.cagr);
                 is_projecting.set(true);
             }
 
-            sales_start = sales_trend.trendline[0].value;
-            sales_years = (raw_years.last().unwrap_or(&2023) - raw_years[0] + 5) as f64;
-            eps_start = eps_trend.trendline[0].value;
-            // Fix: Calculate eps_years independently for clarity and correctness
-            eps_years = (raw_years.last().unwrap_or(&2023) - raw_years[0] + 5) as f64;
-
-            // Future years for projection (next 5 years)
+            let hist_len = raw_years.len();
+            if hist_len == 0 {
+                return; // No records — skip trendline/projection rendering
+            }
             let last_year = *raw_years.last().unwrap_or(&2023);
             let future_years: Vec<i32> = (1..=5).map(|i| last_year + i).collect();
             let mut all_years_display = years.clone();
             for y in &future_years {
                 all_years_display.push(y.to_string());
             }
-            
+
             chart = chart.x_axis(Axis::new().type_(AxisType::Category).data(all_years_display));
 
-            // Calculate projections
-            // FIX: Negate CAGR values - slider increases should make projections go UP
+            // Historical trendline values
+            let sales_trend_vals: Vec<f64> = sales_trend.trendline.iter().map(|p| p.value).collect();
+            let eps_trend_vals: Vec<f64> = eps_trend.trendline.iter().map(|p| p.value).collect();
+
+            // Anchor projection from LAST historical trendline point (chronological order)
+            let sales_last_trend = sales_trend_vals.last().copied().unwrap_or(0.0);
+            let eps_last_trend = eps_trend_vals.last().copied().unwrap_or(0.0);
+
+            // JS bridge: projection period = 5 years, start = last trendline value
+            sales_start = sales_last_trend;
+            sales_years_f = 5.0;
+            eps_start = eps_last_trend;
+            eps_years_f = 5.0;
+
+            // Trendline series: historical values + NaN padding for future years
+            let mut sales_trendline_data = sales_trend_vals.clone();
+            let mut eps_trendline_data = eps_trend_vals.clone();
+            for _ in 0..5 {
+                sales_trendline_data.push(f64::NAN);
+                eps_trendline_data.push(f64::NAN);
+            }
+
+            // Projection: no negation needed — data is chronological, positive CAGR = growth
             let s_proj = steady_invest_logic::calculate_projected_trendline(
-                raw_years[0],
-                sales_start,
-                -s_cagr,  // Negated to fix inversion bug
-                &[raw_years.as_slice(), future_years.as_slice()].concat()
+                last_year, sales_last_trend, s_cagr, &future_years
             );
             let e_proj = steady_invest_logic::calculate_projected_trendline(
-                raw_years[0],
-                eps_start,
-                -e_cagr,  // Negated to fix inversion bug
-                &[raw_years.as_slice(), future_years.as_slice()].concat()
+                last_year, eps_last_trend, e_cagr, &future_years
             );
 
-            let s_proj_vals: Vec<f64> = s_proj.trendline.iter().map(|p| p.value).collect();
-            let e_proj_vals: Vec<f64> = e_proj.trendline.iter().map(|p| p.value).collect();
+            // Projection series: NaN for historical years (except last for continuity)
+            let mut s_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
+            s_proj_data.push(sales_last_trend); // Connection point at last historical year
+            for p in &s_proj.trendline {
+                s_proj_data.push(p.value);
+            }
+            let mut e_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
+            e_proj_data.push(eps_last_trend);
+            for p in &e_proj.trendline {
+                e_proj_data.push(p.value);
+            }
+
+            // PTP trendline and projection
+            // Map PTP trendline values back to the full year range (NaN where PTP was zero/missing)
+            let mut ptp_trendline_data: Vec<f64> = Vec::with_capacity(hist_len + 5);
+            let mut ptp_trend_idx = 0;
+            for (i, &v) in ptp.iter().enumerate() {
+                if v > 0.0 && ptp_trend_idx < ptp_trend.trendline.len() {
+                    ptp_trendline_data.push(ptp_trend.trendline[ptp_trend_idx].value);
+                    ptp_trend_idx += 1;
+                } else {
+                    // Interpolate from the trendline at this year's position if possible
+                    let _ = i; // Use NaN for missing PTP years
+                    ptp_trendline_data.push(f64::NAN);
+                }
+            }
+            let ptp_last_trend = if !ptp_trend.trendline.is_empty() {
+                ptp_trend.trendline.last().unwrap().value
+            } else {
+                0.0
+            };
+            ptp_start = ptp_last_trend;
+            ptp_years_f = 5.0;
+
+            for _ in 0..5 {
+                ptp_trendline_data.push(f64::NAN);
+            }
+
+            // Guard: skip PTP projection if anchor is non-positive (avoids log(0) on chart)
+            let p_proj = steady_invest_logic::calculate_projected_trendline(
+                last_year, ptp_last_trend, p_cagr, &future_years
+            );
+            let mut p_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
+            p_proj_data.push(if ptp_last_trend > 0.0 { ptp_last_trend } else { f64::NAN });
+            for p in &p_proj.trendline {
+                p_proj_data.push(p.value);
+            }
 
             chart = chart
+                // Sales data line
                 .series(Line::new()
-                    .name(format!("Sales (CAGR: {:.1}%)", s_cagr))
+                    .name(format!("Sales Growth: {:.1}%", s_cagr))
                     .data(sales.clone())
                     .smooth(true)
                     .line_style(LineStyle::new().color("#1DB954")))
+                // Sales historical trendline (dotted overlay)
                 .series(Line::new()
-                    .name("Sales Projection")
-                    .data(s_proj_vals)
+                    .name("Sales Trend")
+                    .data(sales_trendline_data)
+                    .line_style(LineStyle::new().color("#1DB954").width(1).type_(LineStyleType::Dotted)))
+                // Sales projection (dashed, starts at last historical year)
+                .series(Line::new()
+                    .name("Sales Est. Growth")
+                    .data(s_proj_data)
                     .line_style(LineStyle::new().color("#1DB954").width(2).type_(LineStyleType::Dashed)))
+                // EPS data line
                 .series(Line::new()
-                    .name(format!("EPS (CAGR: {:.1}%)", e_cagr))
+                    .name(format!("EPS Growth: {:.1}%", e_cagr))
                     .data(eps.clone())
                     .smooth(true)
                     .line_style(LineStyle::new().color("#3498DB")))
+                // EPS historical trendline
                 .series(Line::new()
-                    .name("EPS Projection")
-                    .data(e_proj_vals)
-                    .line_style(LineStyle::new().color("#3498DB").width(2).type_(LineStyleType::Dashed)));
+                    .name("EPS Trend")
+                    .data(eps_trendline_data)
+                    .line_style(LineStyle::new().color("#3498DB").width(1).type_(LineStyleType::Dotted)))
+                // EPS projection
+                .series(Line::new()
+                    .name("EPS Est. Growth")
+                    .data(e_proj_data)
+                    .line_style(LineStyle::new().color("#3498DB").width(2).type_(LineStyleType::Dashed)))
+                // Pre-Tax Profit data line (red/magenta per NAIC)
+                .series(Line::new()
+                    .name(format!("Pre-Tax Profit Growth: {:.1}%", p_cagr))
+                    .data(ptp.clone())
+                    .smooth(true)
+                    .line_style(LineStyle::new().color("#E74C3C")))
+                // PTP historical trendline
+                .series(Line::new()
+                    .name("PTP Trend")
+                    .data(ptp_trendline_data)
+                    .line_style(LineStyle::new().color("#E74C3C").width(1).type_(LineStyleType::Dotted)))
+                // PTP projection
+                .series(Line::new()
+                    .name("PTP Est. Growth")
+                    .data(p_proj_data)
+                    .line_style(LineStyle::new().color("#E74C3C").width(2).type_(LineStyleType::Dashed)));
         } else {
             chart = chart
                 .series(Line::new().name("Sales").data(sales).smooth(true).line_style(LineStyle::new().color("#1DB954")))
-                .series(Line::new().name("EPS").data(eps).smooth(true).line_style(LineStyle::new().color("#3498DB")));
+                .series(Line::new().name("EPS").data(eps).smooth(true).line_style(LineStyle::new().color("#3498DB")))
+                .series(Line::new().name("Pre-Tax Profit").data(ptp.clone()).smooth(true).line_style(LineStyle::new().color("#E74C3C")));
         }
 
-        chart = chart
-            .series(Line::new()
-                .name("Price High")
-                .data(prices)
-                .smooth(true)
-                .line_style(LineStyle::new().color("#F1C40F")))
-            .series(Line::new()
-                .name("Price Low")
-                .data(prices_low)
-                .smooth(true)
-                .line_style(LineStyle::new().color("#E67E22")));
+        // Price range bars: vertical wick from price_low to price_high (NAIC Figure 2.1)
+        // Candlestick data format: [open, close, low, high]
+        // Set open = close = price_low to collapse body, leaving only the wick
+        let candle_data: Vec<DataPointItem> = prices.iter().zip(prices_low.iter())
+            .map(|(&high, &low)| {
+                DataPointItem::new(vec![low, low, low, high])
+                    .item_style(ItemStyle::new()
+                        .color("#B0B0B0")
+                        .border_color("#B0B0B0"))
+            })
+            .collect();
+        chart = chart.series(Candlestick::new().name("Stock Price").data(candle_data));
 
         // Use requestAnimationFrame to defer rendering until after DOM update
         let window = web_sys::window().expect("no global window");
@@ -255,7 +385,7 @@ pub fn SSGChart(
             }
 
             if trends_active && projecting {
-                setup_handles_js(cid, sales_start, sales_years, eps_start, eps_years);
+                setup_handles_js(cid, sales_start, sales_years_f, eps_start, eps_years_f, ptp_start, ptp_years_f);
             }
         }) as Box<dyn FnOnce()>);
 
@@ -263,8 +393,8 @@ pub fn SSGChart(
         render_callback.forget();
     });
 
-    fn setup_handles_js(cid: String, s_start: f64, s_years: f64, e_start: f64, e_years: f64) {
-        setupDraggableHandles(cid, s_start, s_years, e_start, e_years);
+    fn setup_handles_js(cid: String, s_start: f64, s_years: f64, e_start: f64, e_years: f64, p_start: f64, p_years: f64) {
+        setupDraggableHandles(cid, s_start, s_years, e_start, e_years, p_start, p_years);
     }
 
     let cid_for_view = chart_id.clone();
@@ -288,7 +418,7 @@ pub fn SSGChart(
                             font-size: var(--text-sm);
                             font-family: 'JetBrains Mono', monospace;
                             min-width: 160px;
-                        ">"Projected Sales CAGR"</span>
+                        ">"Estimated Sales Growth Rate"</span>
                         <input
                             type="range" min="-20" max="50" step="0.1"
                             prop:value=move || sales_projection_cagr.get()
@@ -317,7 +447,7 @@ pub fn SSGChart(
                             font-size: var(--text-sm);
                             font-family: 'JetBrains Mono', monospace;
                             min-width: 160px;
-                        ">"Projected EPS CAGR"</span>
+                        ">"Estimated EPS Growth Rate"</span>
                         <input
                             type="range" min="-20" max="50" step="0.1"
                             prop:value=move || eps_projection_cagr.get()
@@ -339,6 +469,35 @@ pub fn SSGChart(
                             width: 48px;
                             text-align: right;
                         ">{move || format!("{:.1}%", eps_projection_cagr.get())}</span>
+                    </div>
+                    <div class="chart-slider-row">
+                        <span style="
+                            color: var(--text-secondary);
+                            font-size: var(--text-sm);
+                            font-family: 'JetBrains Mono', monospace;
+                            min-width: 160px;
+                        ">"Estimated Pre-Tax Profit Growth Rate"</span>
+                        <input
+                            type="range" min="-20" max="50" step="0.1"
+                            prop:value=move || ptp_projection_cagr.get()
+                            on:input=move |ev| {
+                                if let Ok(val) = event_target_value(&ev).parse::<f64>() {
+                                    ptp_projection_cagr.set(val);
+                                }
+                            }
+                            class="ssg-chart-slider"
+                            style="
+                                accent-color: #E74C3C;
+                                cursor: grab;
+                            "
+                        />
+                        <span style="
+                            color: #E74C3C;
+                            font-family: 'JetBrains Mono', monospace;
+                            font-weight: bold;
+                            width: 48px;
+                            text-align: right;
+                        ">{move || format!("{:.1}%", ptp_projection_cagr.get())}</span>
                     </div>
                 </div>
                 <button
@@ -366,15 +525,21 @@ pub fn SSGChart(
             <div id=cid_for_view class="ssg-chart-container"></div>
             <div class="chart-cagr-mobile-summary">
                 <div class="cagr-mobile-item">
-                    <span class="cagr-mobile-label">"Sales CAGR"</span>
+                    <span class="cagr-mobile-label">"Sales Growth"</span>
                     <span class="cagr-mobile-value" style="color: var(--sales-color);">
                         {move || format!("{:.1}%", sales_projection_cagr.get())}
                     </span>
                 </div>
                 <div class="cagr-mobile-item">
-                    <span class="cagr-mobile-label">"EPS CAGR"</span>
+                    <span class="cagr-mobile-label">"EPS Growth"</span>
                     <span class="cagr-mobile-value" style="color: var(--eps-color);">
                         {move || format!("{:.1}%", eps_projection_cagr.get())}
+                    </span>
+                </div>
+                <div class="cagr-mobile-item">
+                    <span class="cagr-mobile-label">"PTP Growth"</span>
+                    <span class="cagr-mobile-value" style="color: #E74C3C;">
+                        {move || format!("{:.1}%", ptp_projection_cagr.get())}
                     </span>
                 </div>
             </div>

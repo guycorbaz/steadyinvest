@@ -30,6 +30,7 @@ pub fn LockThesisModal(
     historical_data: HistoricalData,
     sales_projection_cagr: f64,
     eps_projection_cagr: f64,
+    ptp_projection_cagr: f64,
     future_high_pe: f64,
     future_low_pe: f64,
     on_close: Callback<()>,
@@ -73,6 +74,7 @@ pub fn LockThesisModal(
                 historical_data: historical_data.clone(),
                 projected_sales_cagr: sales_projection_cagr,
                 projected_eps_cagr: eps_projection_cagr,
+                projected_ptp_cagr: ptp_projection_cagr,
                 projected_high_pe: future_high_pe,
                 projected_low_pe: future_low_pe,
                 analyst_note: note_val.clone(),
@@ -131,6 +133,10 @@ pub fn LockThesisModal(
                         <div class="summary-item">
                             <span class="label">"EPS Growth"</span>
                             <span class="value">{format!("{:.1}%", eps_projection_cagr)}</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="label">"PTP Growth"</span>
+                            <span class="value">{format!("{:.1}%", ptp_projection_cagr)}</span>
                         </div>
                         <div class="summary-item">
                             <span class="label">"Target P/E"</span>

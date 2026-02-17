@@ -414,6 +414,108 @@ button:disabled {
 }
 
 /* Quality Dashboard - ROE & Profit on Sales */
+/* Fundamental Company Data table (NAIC Section 1, transposed layout) */
+.fundamental-data-table {
+  margin-top: var(--spacing-6);
+  padding: var(--spacing-5);
+  background-color: var(--background);
+  border-radius: var(--border-radius-sharp);
+
+  .header-flex {
+    margin-bottom: var(--spacing-4);
+
+    h4 {
+      font-size: var(--text-sm);
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin: 0;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+    }
+  }
+
+  .table-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+
+    th {
+      text-align: right;
+      font-size: var(--text-xs);
+      color: var(--text-secondary);
+      padding: var(--spacing-2) var(--spacing-3);
+      border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+      font-weight: 500;
+    }
+
+    td {
+      text-align: right;
+      padding: var(--spacing-3) var(--spacing-3);
+      border-bottom: var(--border-width) solid rgba(255, 255, 255, 0.03);
+      font-size: var(--text-sm);
+    }
+
+    .metric-col,
+    .metric-label {
+      text-align: left;
+      font-weight: 600;
+      color: var(--text-secondary);
+      font-family: 'Inter', sans-serif;
+      font-size: var(--text-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      position: sticky;
+      left: 0;
+      background-color: var(--background);
+      min-width: 130px;
+      padding-right: var(--spacing-4);
+    }
+
+    .value-cell {
+      font-weight: 500;
+      color: var(--text-primary);
+      cursor: pointer;
+
+      &:hover {
+        background-color: rgba(59, 130, 246, 0.05);
+      }
+    }
+
+    .overridden-cell {
+      background-color: rgba(251, 191, 36, 0.08);
+    }
+
+    .summary-col {
+      font-weight: 600;
+      border-left: 2px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .forecast-col {
+      color: var(--primary);
+    }
+
+    .estimate-col {
+      color: var(--success);
+    }
+  }
+
+  &.read-only .value-cell {
+    cursor: default;
+
+    &:hover {
+      background-color: transparent;
+    }
+  }
+}
+
+/* Evaluate Management table (NAIC Section 2, transposed layout) */
 .quality-dashboard {
   margin-top: var(--spacing-8);
   padding-top: var(--spacing-8);
@@ -444,33 +546,50 @@ button:disabled {
     letter-spacing: 0.1em;
   }
 
+  .table-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .quality-grid {
     width: 100%;
     border-collapse: collapse;
     margin-top: var(--spacing-4);
     font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
 
     th {
-      text-align: left;
+      text-align: right;
       font-size: var(--text-xs);
       color: var(--text-secondary);
       text-transform: uppercase;
-      padding: var(--spacing-2);
+      padding: var(--spacing-2) var(--spacing-3);
       border-bottom: 2px solid rgba(255, 255, 255, 0.1);
       font-weight: 500;
       letter-spacing: 0.05em;
     }
 
     td {
-      padding: var(--spacing-3) var(--spacing-2);
+      text-align: right;
+      padding: var(--spacing-3) var(--spacing-3);
       border-bottom: var(--border-width) solid rgba(255, 255, 255, 0.03);
       font-size: var(--text-sm);
     }
 
-    .year-cell {
-      color: var(--text-primary);
-      font-weight: 500;
-      font-family: 'JetBrains Mono', monospace;
+    .metric-col,
+    .metric-label {
+      text-align: left;
+      font-weight: 600;
+      color: var(--text-secondary);
+      font-family: 'Inter', sans-serif;
+      font-size: var(--text-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      position: sticky;
+      left: 0;
+      background-color: var(--background);
+      min-width: 180px;
+      padding-right: var(--spacing-4);
     }
 
     .value-cell {
@@ -479,9 +598,18 @@ button:disabled {
       font-family: 'JetBrains Mono', monospace;
     }
 
+    .na-cell {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .summary-col {
+      font-weight: 600;
+      border-left: 2px solid rgba(255, 255, 255, 0.1);
+    }
+
     .trend-cell {
       font-size: var(--text-lg);
-      width: 40px;
       text-align: center;
     }
 
@@ -1094,12 +1222,13 @@ button:disabled {
     grid-template-columns: minmax(60px, 80px) 1fr minmax(70px, 100px);
   }
 
-  /* Data Grids */
-  .quality-dashboard .quality-grid {
+  /* Data Grids — transposed tables scroll horizontally */
+  .fundamental-data-table .table-scroll-wrapper,
+  .quality-dashboard .table-scroll-wrapper {
     overflow-x: auto;
   }
 
-  .quality-dashboard .trend-cell {
+  .quality-dashboard .quality-grid .trend-cell {
     min-width: 32px;
     width: auto;
   }
@@ -1237,13 +1366,14 @@ button:disabled {
     margin: 0 var(--spacing-2);
   }
 
-  /* Quality Dashboard - Scrollable */
-  .quality-dashboard .quality-grid {
+  /* Transposed data tables — scrollable on mobile */
+  .fundamental-data-table .table-scroll-wrapper,
+  .quality-dashboard .table-scroll-wrapper {
     display: block;
     overflow-x: auto;
   }
 
-  .quality-dashboard .trend-cell {
+  .quality-dashboard .quality-grid .trend-cell {
     min-width: 32px;
     width: auto;
   }

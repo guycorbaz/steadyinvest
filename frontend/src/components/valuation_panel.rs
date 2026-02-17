@@ -5,11 +5,9 @@
 //! sell-zone (ceiling) target prices from EPS CAGR projections.
 
 use leptos::prelude::*;
-use steady_invest_logic::HistoricalData;
+use steady_invest_logic::{HistoricalData, project_forward};
 use rust_decimal::prelude::ToPrimitive;
 
-/// Number of years forward for EPS projection.
-const PROJECTION_YEARS: f64 = 5.0;
 /// Maximum value for the High P/E range slider.
 const PE_SLIDER_MAX: f64 = 100.0;
 
@@ -40,7 +38,7 @@ pub fn ValuationPanel(
     // Calculate Projected EPS
     let projected_eps = move || {
         let cagr = projected_eps_cagr.get();
-        current_eps * (1.0 + cagr / 100.0).powf(PROJECTION_YEARS)
+        project_forward(current_eps, cagr, 5)
     };
 
     // Calculate Target Zones
@@ -70,7 +68,7 @@ pub fn ValuationPanel(
                     font-size: var(--text-base);
                     font-weight: 600;
                 ">
-                    <span style="color: var(--price-color);">"📊"</span> "Valuation Analysis & Projections"
+                    <span style="color: var(--price-color);">"📊"</span> "Price-Earnings History & Valuation"
                 </h3>
             </div>
 
@@ -85,7 +83,7 @@ pub fn ValuationPanel(
                         font-family: 'Inter', sans-serif;
                         font-weight: 600;
                         letter-spacing: 0.05em;
-                    ">"10-Year Historical Context"</h4>
+                    ">"5-Year P/E History"</h4>
                     <div style="
                         display: flex;
                         flex-direction: column;
@@ -175,7 +173,7 @@ pub fn ValuationPanel(
                                 color: var(--text-secondary);
                                 font-size: var(--text-sm);
                                 font-family: 'Inter', sans-serif;
-                            ">"Future Avg High P/E"</label>
+                            ">"Estimated Average High P/E"</label>
                             <span style="
                                 color: var(--price-color);
                                 font-weight: 500;
@@ -209,7 +207,7 @@ pub fn ValuationPanel(
                                 color: var(--text-secondary);
                                 font-size: var(--text-sm);
                                 font-family: 'Inter', sans-serif;
-                            ">"Future Avg Low P/E"</label>
+                            ">"Estimated Average Low P/E"</label>
                             <span style="
                                 color: var(--success);
                                 font-weight: 500;
@@ -251,7 +249,7 @@ pub fn ValuationPanel(
                         font-weight: 600;
                         font-family: 'Inter', sans-serif;
                         letter-spacing: 0.05em;
-                    ">"Target Buy Zone (Floor)"</div>
+                    ">"Forecast Low Price (Buy Zone)"</div>
                     <div style="
                         color: var(--text-primary);
                         font-size: var(--text-xl);
@@ -276,7 +274,7 @@ pub fn ValuationPanel(
                         font-weight: 600;
                         font-family: 'Inter', sans-serif;
                         letter-spacing: 0.05em;
-                    ">"Target Sell Zone (Ceiling)"</div>
+                    ">"Forecast High Price (Sell Zone)"</div>
                     <div style="
                         color: var(--text-primary);
                         font-size: var(--text-xl);

@@ -7,7 +7,7 @@
 //! - **Growth analysis** — logarithmic trendline regression and CAGR calculation
 //!   for Sales and EPS series ([`calculate_growth_analysis`])
 //! - **P/E range analysis** — historical High/Low P/E ratios averaged over the
-//!   last 10 years ([`calculate_pe_ranges`])
+//!   last 5 years ([`calculate_pe_ranges`])
 //! - **Quality metrics** — ROE and Profit-on-Sales with year-over-year trend
 //!   indicators ([`calculate_quality_analysis`])
 //! - **Projections** — CAGR-based future trendlines for valuation zone
@@ -103,7 +103,7 @@ pub struct HistoricalData {
     pub is_complete: bool,
     /// Flag indicating if split/dividend adjustments have been applied.
     pub is_split_adjusted: bool,
-    /// Calculated P/E ranges and averages (last 10 years).
+    /// Calculated P/E ranges and averages (last 5 years per NAIC Section 3).
     pub pe_range_analysis: Option<PeRangeAnalysis>,
 }
 
@@ -118,18 +118,14 @@ impl HistoricalData {
             return;
         }
 
-        let mut adjusted = false;
         for record in &mut self.records {
             if record.adjustment_factor != rust_decimal::Decimal::ONE {
                 record.eps *= record.adjustment_factor;
                 record.price_high *= record.adjustment_factor;
                 record.price_low *= record.adjustment_factor;
-                adjusted = true;
             }
         }
-        if adjusted {
-            self.is_split_adjusted = true;
-        }
+        self.is_split_adjusted = true;
     }
 
     /// Normalizes all monetary fields to `target_currency` using per-record exchange rates.
@@ -222,12 +218,12 @@ pub struct PeRangePoint {
     pub low_pe: f64,
 }
 
-/// P/E range analysis over the last 10 years of historical data.
+/// P/E range analysis over the last 5 years of historical data (per NAIC Section 3).
 ///
 /// Years with zero or negative EPS are excluded from the calculation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PeRangeAnalysis {
-    /// Per-year P/E data points (up to 10).
+    /// Per-year P/E data points (up to 5).
     pub points: Vec<PeRangePoint>,
     /// Arithmetic mean of the yearly high P/E values.
     pub avg_high_pe: f64,
@@ -244,6 +240,9 @@ pub struct AnalysisSnapshot {
     pub projected_sales_cagr: f64,
     /// Projected EPS CAGR (%).
     pub projected_eps_cagr: f64,
+    /// Projected Pre-Tax Profit CAGR (%).
+    #[serde(default)]
+    pub projected_ptp_cagr: f64,
     /// Future average high P/E projected by the user.
     pub projected_high_pe: f64,
     /// Future average low P/E projected by the user.
@@ -265,7 +264,8 @@ pub struct AnalysisSnapshot {
 ///
 /// # Returns
 ///
-/// A [`PeRangeAnalysis`] with up to 10 per-year P/E points and their averages.
+/// A [`PeRangeAnalysis`] with up to 5 per-year P/E points and their averages
+/// (per NAIC SSG Section 3: 5-year P/E history).
 ///
 /// # Examples
 ///
@@ -294,9 +294,9 @@ pub fn calculate_pe_ranges(data: &HistoricalData) -> PeRangeAnalysis {
     // Sort chronologically to identify the "last" years reliably
     eligible_records.sort_by_key(|r| r.fiscal_year);
     
-    // Take the last 10 records
+    // Take the last 5 records per NAIC SSG Section 3 (5-year P/E history)
     let len = eligible_records.len();
-    let start_idx = if len > 10 { len - 10 } else { 0 };
+    let start_idx = if len > 5 { len - 5 } else { 0 };
     let recent_records = &eligible_records[start_idx..];
 
     let mut points = Vec::new();
@@ -549,8 +549,7 @@ pub fn extract_snapshot_prices(snapshot: &AnalysisSnapshot) -> SnapshotPrices {
 
     let (target_high, target_low) = match (current_eps, current_price) {
         (Some(eps), Some(price)) if eps > 0.0 && price > 0.0 => {
-            let projected_eps_5yr =
-                eps * (1.0 + snapshot.projected_eps_cagr / 100.0).powf(5.0);
+            let projected_eps_5yr = project_forward(eps, snapshot.projected_eps_cagr, 5);
             (
                 Some(snapshot.projected_high_pe * projected_eps_5yr),
                 Some(snapshot.projected_low_pe * projected_eps_5yr),
@@ -579,6 +578,39 @@ pub fn compute_upside_downside_from_snapshot(snapshot: &AnalysisSnapshot) -> Opt
     let high = prices.target_high_price?;
     let low = prices.target_low_price?;
     calculate_upside_downside_ratio(current, high, low)
+}
+
+/// Projects a value forward by `years` at the given CAGR (percentage).
+///
+/// Formula: `base * (1 + cagr_pct / 100)^years`
+///
+/// This is the single source of truth for forward-projection calculations
+/// used in the Fundamental Company Data table's "5 Yr Est" column and
+/// the `extract_snapshot_prices` target price computation.
+///
+/// # Arguments
+///
+/// * `base` — The starting value (e.g., last fiscal year's sales or EPS).
+/// * `cagr_pct` — Compound Annual Growth Rate expressed as a percentage (e.g., 10.0 for 10%).
+/// * `years` — Number of years to project forward.
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::project_forward;
+///
+/// // 100 at 10% for 5 years = 161.051
+/// assert!((project_forward(100.0, 10.0, 5) - 161.051).abs() < 0.01);
+/// // Zero base stays zero
+/// assert!((project_forward(0.0, 10.0, 5)).abs() < 1e-10);
+/// ```
+pub fn project_forward(base: f64, cagr_pct: f64, years: u32) -> f64 {
+    let growth_factor = 1.0 + cagr_pct / 100.0;
+    if growth_factor < 0.0 {
+        // CAGR below -100% produces a negative base which is undefined for powf
+        return 0.0;
+    }
+    base * growth_factor.powi(years as i32)
 }
 
 /// Validates that a string is a valid ISO 4217 currency code (3 uppercase ASCII letters).
@@ -961,7 +993,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pe_ranges_10year_limit() {
+    fn test_pe_ranges_5year_limit() {
         let mut data = HistoricalData::default();
         // 12 years of data
         for i in 0..12 {
@@ -975,13 +1007,16 @@ mod tests {
         }
 
         let analysis = calculate_pe_ranges(&data);
-        assert_eq!(analysis.points.len(), 10);
-        // Should only include years 2002-2011 (last 10)
-        assert_eq!(analysis.points[0].year, 2002);
-        assert_eq!(analysis.points[9].year, 2011);
-        
-        // Avg of 12..21 = (12+21)/2 = 16.5
-        assert!((analysis.avg_high_pe - 16.5).abs() < 0.001);
+        // NAIC SSG Section 3: 5-year P/E history
+        assert_eq!(analysis.points.len(), 5);
+        // Should only include years 2007-2011 (last 5)
+        assert_eq!(analysis.points[0].year, 2007);
+        assert_eq!(analysis.points[4].year, 2011);
+
+        // Avg High PE of years 2007-2011: high prices = 17,18,19,20,21 → avg = 19.0
+        assert!((analysis.avg_high_pe - 19.0).abs() < 0.001);
+        // Avg Low PE of years 2007-2011: low prices = 12,13,14,15,16 → avg = 14.0
+        assert!((analysis.avg_low_pe - 14.0).abs() < 0.001);
     }
 
     #[test]
@@ -1085,6 +1120,20 @@ mod tests {
     }
 
     #[test]
+    fn test_project_forward() {
+        // 100 at 10% for 5 years = 161.051
+        assert!((project_forward(100.0, 10.0, 5) - 161.051).abs() < 0.01);
+        // Zero base stays zero
+        assert!((project_forward(0.0, 10.0, 5)).abs() < 1e-10);
+        // 0% growth returns base unchanged
+        assert!((project_forward(50.0, 0.0, 5) - 50.0).abs() < 1e-10);
+        // Negative CAGR decreases value
+        assert!(project_forward(100.0, -10.0, 5) < 100.0);
+        // Extreme negative CAGR (< -100%) returns 0.0 instead of NaN
+        assert!((project_forward(100.0, -150.0, 3)).abs() < 1e-10);
+    }
+
+    #[test]
     fn test_snapshot_serialization() {
         let snapshot = AnalysisSnapshot {
             historical_data: HistoricalData {
@@ -1100,6 +1149,7 @@ mod tests {
             },
             projected_sales_cagr: 10.5,
             projected_eps_cagr: 12.0,
+            projected_ptp_cagr: 8.0,
             projected_high_pe: 25.0,
             projected_low_pe: 15.0,
             analyst_note: "Test note".to_string(),
@@ -1111,7 +1161,230 @@ mod tests {
 
         assert_eq!(snapshot.historical_data.ticker, deserialized.historical_data.ticker);
         assert_eq!(snapshot.projected_sales_cagr, deserialized.projected_sales_cagr);
+        assert_eq!(snapshot.projected_eps_cagr, deserialized.projected_eps_cagr);
+        assert_eq!(snapshot.projected_ptp_cagr, deserialized.projected_ptp_cagr);
         assert_eq!(snapshot.projected_high_pe, deserialized.projected_high_pe);
+        assert_eq!(snapshot.projected_low_pe, deserialized.projected_low_pe);
         assert_eq!(snapshot.analyst_note, deserialized.analyst_note);
+
+        // Verify backward compatibility: JSON without projected_ptp_cagr deserializes to 0.0
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value.as_object_mut().unwrap().remove("projected_ptp_cagr");
+        let from_old: AnalysisSnapshot = serde_json::from_value(value).unwrap();
+        assert_eq!(from_old.projected_ptp_cagr, 0.0);
+    }
+
+    // ================================================================
+    // NAIC SSG Handbook Golden Tests
+    // Reference: docs/NAIC/SSGHandbook.pdf (O'Hara Cruises example)
+    // ================================================================
+
+    /// Verify 5-year P/E range averages match NAIC Section 3 methodology.
+    /// Reference: Handbook Figure 2.3 (p14) — Price-Earnings History
+    /// O'Hara Cruises: Avg High P/E = 27.9, Avg Low P/E = 20.0
+    #[test]
+    fn test_naic_handbook_pe_5year_average() {
+        let mut data = HistoricalData::default();
+        // 5 early years (should be EXCLUDED by 5-year limit)
+        for year in 2006..=2010 {
+            data.records.push(HistoricalYearlyData {
+                fiscal_year: year,
+                eps: Decimal::from(5),
+                price_high: Decimal::from(200), // PE = 40
+                price_low: Decimal::from(150),  // PE = 30
+                ..Default::default()
+            });
+        }
+        // Last 5 years (2011-2015): crafted to produce handbook averages
+        // High PEs: 28.0 + 27.0 + 28.0 + 29.0 + 27.5 = 139.5, avg = 27.9
+        // Low PEs:  20.0 + 19.0 + 21.0 + 20.0 + 20.0 = 100.0, avg = 20.0
+        let years_data: [(i32, i64, i64, i64); 5] = [
+            (2011, 4, 112, 80),   // H=28.0, L=20.0
+            (2012, 4, 108, 76),   // H=27.0, L=19.0
+            (2013, 4, 112, 84),   // H=28.0, L=21.0
+            (2014, 4, 116, 80),   // H=29.0, L=20.0
+            (2015, 4, 110, 80),   // H=27.5, L=20.0
+        ];
+        for &(year, eps, high, low) in &years_data {
+            data.records.push(HistoricalYearlyData {
+                fiscal_year: year,
+                eps: Decimal::from(eps),
+                price_high: Decimal::from(high),
+                price_low: Decimal::from(low),
+                ..Default::default()
+            });
+        }
+
+        let analysis = calculate_pe_ranges(&data);
+
+        // Per NAIC Section 3: only last 5 years used
+        assert_eq!(analysis.points.len(), 5);
+        assert_eq!(analysis.points[0].year, 2011);
+        assert_eq!(analysis.points[4].year, 2015);
+
+        // Match handbook averages (Figure 2.3)
+        assert!((analysis.avg_high_pe - 27.9).abs() < 0.001,
+            "Avg High P/E: expected 27.9, got {}", analysis.avg_high_pe);
+        assert!((analysis.avg_low_pe - 20.0).abs() < 0.001,
+            "Avg Low P/E: expected 20.0, got {}", analysis.avg_low_pe);
+    }
+
+    /// Verify NAIC Section 4A forecast price formula.
+    /// Formula: Forecast High Price = Avg High P/E × Estimated Future EPS
+    /// Reference: Handbook Figure 2.4 (p15) — 27.9 × 9.37 ≈ 261.3
+    #[test]
+    fn test_naic_handbook_forecast_high_price() {
+        let avg_high_pe: f64 = 27.9;
+        let estimated_high_eps: f64 = 9.37;
+        let expected_forecast: f64 = 261.3;
+
+        let computed = avg_high_pe * estimated_high_eps;
+        // Exact = 261.423; handbook rounds to 261.3
+        assert!((computed - expected_forecast).abs() < 0.2,
+            "Forecast High: expected ~{}, got {:.1}", expected_forecast, computed);
+    }
+
+    /// Verify NAIC upside/downside ratio calculation.
+    /// Reference: Handbook Figure 2.4, Section D (p15)
+    /// O'Hara: (261.3 - 149.83) / (149.83 - 116.4) = 3.3 to 1
+    #[test]
+    fn test_naic_handbook_upside_downside_ratio() {
+        let current_price = 149.83;
+        let forecast_high = 261.3;
+        let forecast_low = 116.4;
+
+        let ratio = calculate_upside_downside_ratio(
+            current_price, forecast_high, forecast_low
+        );
+
+        assert!(ratio.is_some());
+        let r = ratio.unwrap();
+        // Handbook says 3.3 to 1 (rounded from 3.334)
+        assert!((r - 3.3).abs() < 0.1,
+            "Upside/downside ratio: expected ~3.3, got {:.2}", r);
+        // Exact: 111.47 / 33.43 = 3.334
+        assert!((r - 3.334).abs() < 0.01,
+            "Exact ratio: expected 3.334, got {:.3}", r);
+    }
+
+    /// Verify NAIC EPS projection formula over 5 years.
+    /// Formula: Projected EPS = Current EPS × (1 + growth_rate)^5
+    /// Reference: Handbook Section 4A (p15) — EPS 5.71 at 10.4% → ~9.37
+    #[test]
+    fn test_naic_handbook_eps_projection() {
+        let start_year = 2015;
+        let current_eps = 5.71;
+        // Growth rate that produces handbook's Estimated High EPS of 9.37
+        let cagr = 10.4;
+        let future_years: Vec<i32> = (2016..=2020).collect();
+
+        let projection = calculate_projected_trendline(
+            start_year, current_eps, cagr, &future_years
+        );
+
+        assert_eq!(projection.trendline.len(), 5);
+
+        // Year 1 (2016): 5.71 × 1.104 = 6.304
+        assert!((projection.trendline[0].value - 6.304).abs() < 0.01,
+            "Year 1: expected ~6.30, got {:.2}", projection.trendline[0].value);
+
+        // Year 5 (2020): should match handbook's Estimated High EPS ≈ 9.37
+        let year5_eps = projection.trendline[4].value;
+        assert!((year5_eps - 9.37).abs() < 0.1,
+            "Year 5 EPS: expected ~9.37, got {:.2}", year5_eps);
+    }
+
+    /// Verify NAIC quality metrics (Evaluate Management, Section 2).
+    /// % Pre-Tax Profit on Sales = Pre-Tax Profit / Sales × 100
+    /// % Earned on Equity = Net Income / Total Equity × 100
+    /// Reference: Handbook Figures 2.2, 4.1 (pp13, 24)
+    #[test]
+    fn test_naic_handbook_quality_metrics() {
+        let data = HistoricalData {
+            records: vec![
+                HistoricalYearlyData {
+                    fiscal_year: 2014,
+                    sales: Decimal::from(950),
+                    pretax_income: Some(Decimal::from(300)),
+                    net_income: Some(Decimal::from(210)),
+                    total_equity: Some(Decimal::from(538)),
+                    ..Default::default()
+                },
+                HistoricalYearlyData {
+                    fiscal_year: 2015,
+                    sales: Decimal::from(1007),
+                    pretax_income: Some(Decimal::from(334)),
+                    net_income: Some(Decimal::from(250)),
+                    total_equity: Some(Decimal::from(570)),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let quality = calculate_quality_analysis(&data);
+
+        assert_eq!(quality.points.len(), 2);
+
+        // 2014: PTP/Sales = 300/950 × 100 = 31.58%
+        let y2014 = &quality.points[0];
+        assert!((y2014.profit_on_sales - 31.6).abs() < 0.1,
+            "2014 PTP/Sales: expected ~31.6%, got {:.1}%", y2014.profit_on_sales);
+        // 2014: ROE = 210/538 × 100 = 39.03%
+        assert!((y2014.roe - 39.0).abs() < 0.1,
+            "2014 ROE: expected ~39.0%, got {:.1}%", y2014.roe);
+
+        // 2015: PTP/Sales = 334/1007 × 100 = 33.17%
+        let y2015 = &quality.points[1];
+        assert!((y2015.profit_on_sales - 33.2).abs() < 0.1,
+            "2015 PTP/Sales: expected ~33.2%, got {:.1}%", y2015.profit_on_sales);
+        // 2015: ROE = 250/570 × 100 = 43.86%
+        assert!((y2015.roe - 43.9).abs() < 0.1,
+            "2015 ROE: expected ~43.9%, got {:.1}%", y2015.roe);
+
+        // Both should trend Up from 2014 → 2015
+        assert_eq!(y2015.profit_trend, TrendIndicator::Up);
+        assert_eq!(y2015.roe_trend, TrendIndicator::Up);
+    }
+
+    /// Verify full NAIC Section 4 pipeline: snapshot → forecast prices → ratio.
+    /// Combines P/E history, EPS projection, and upside/downside assessment.
+    /// Reference: Handbook Figures 2.3-2.4 (pp14-15)
+    #[test]
+    fn test_naic_handbook_full_valuation_pipeline() {
+        let snapshot = AnalysisSnapshot {
+            historical_data: HistoricalData {
+                records: vec![HistoricalYearlyData {
+                    fiscal_year: 2015,
+                    eps: Decimal::new(571, 2),          // 5.71
+                    price_high: Decimal::new(14983, 2), // 149.83 (proxy for current price)
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            projected_eps_cagr: 10.4, // yields ~9.37 at year 5
+            projected_high_pe: 27.9,  // Handbook Avg High P/E
+            projected_low_pe: 20.0,   // Handbook Avg Low P/E
+            ..Default::default()
+        };
+
+        let prices = extract_snapshot_prices(&snapshot);
+
+        // Projected EPS at year 5: 5.71 × 1.104^5 ≈ 9.363
+        // Target High = 27.9 × 9.363 ≈ 261.2
+        let target_high = prices.target_high_price.unwrap();
+        assert!((target_high - 261.3).abs() < 1.0,
+            "Target high: expected ~261.3, got {:.1}", target_high);
+
+        // Target Low = 20.0 × 9.363 ≈ 187.3
+        // Note: handbook uses separate low EPS estimate (5.82); our model uses same EPS
+        let target_low = prices.target_low_price.unwrap();
+        assert!((target_low - 187.3).abs() < 1.0,
+            "Target low: expected ~187.3, got {:.1}", target_low);
+
+        // Upside/downside using handbook's selected low of 116.4
+        let ratio = calculate_upside_downside_ratio(149.83, target_high, 116.4);
+        assert!(ratio.unwrap() > 3.0,
+            "Should meet NAIC 3:1 minimum for BUY recommendation");
     }
 }

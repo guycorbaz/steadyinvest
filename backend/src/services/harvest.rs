@@ -112,9 +112,13 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
         yearly_records
     };
 
-    let records = timeout(Duration::from_secs(4), fetch_future)
+    let mut records = timeout(Duration::from_secs(4), fetch_future)
         .await
         .map_err(|_| Error::string("Data retrieval timed out (NFR 4)"))?;
+
+    // Sort records chronologically (oldest first) so all downstream consumers
+    // — chart rendering, PDF export, growth analysis — receive ordered data.
+    records.sort_by_key(|r| r.fiscal_year);
 
     // 3. Apply Adjustments (AC 3)
     let mut data = HistoricalData {
