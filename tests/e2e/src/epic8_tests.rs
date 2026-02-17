@@ -165,7 +165,7 @@ async fn test_comparison_direct_url_with_ticker_ids() -> Result<()> {
     let client = reqwest::Client::new();
 
     // Seed snapshots for two different tickers
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN", "compare-url-test-1", "CHF", 8.0, 10.0).await?;
+    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "compare-url-test-1", "CHF", 8.0, 10.0).await?;
     let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "compare-url-test-2", "USD", 12.0, 15.0).await?;
 
     ctx.navigate(&format!(
@@ -192,7 +192,7 @@ async fn test_comparison_card_metrics_displayed() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s, nesn_id) = seed_snapshot(&client, "NESN", "card-metrics-test", "CHF", 7.5, 11.0).await?;
+    let (_s, nesn_id) = seed_snapshot(&client, "NESN.SW", "card-metrics-test", "CHF", 7.5, 11.0).await?;
 
     ctx.navigate(&format!("/compare?ticker_ids={}", nesn_id))
         .await?;
@@ -234,7 +234,7 @@ async fn test_comparison_sorting_by_column() -> Result<()> {
     let client = reqwest::Client::new();
 
     // Seed 3 snapshots with different metrics for sortable differentiation
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN", "sort-test-1", "CHF", 5.0, 7.0).await?;
+    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "sort-test-1", "CHF", 5.0, 7.0).await?;
     let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "sort-test-2", "USD", 15.0, 20.0).await?;
     let (_s3, msft_id) = seed_snapshot(&client, "MSFT", "sort-test-3", "USD", 10.0, 12.0).await?;
 
@@ -303,7 +303,7 @@ async fn test_comparison_save_set() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN", "save-set-test-1", "CHF", 8.0, 10.0).await?;
+    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "save-set-test-1", "CHF", 8.0, 10.0).await?;
     let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "save-set-test-2", "USD", 12.0, 15.0).await?;
 
     ctx.navigate(&format!(
@@ -346,7 +346,7 @@ async fn test_comparison_save_set() -> Result<()> {
     );
 
     // Also verify we can load a pre-saved comparison set via API seed
-    let (s1, _) = seed_snapshot(&client, "NESN", "save-set-load-1", "CHF", 6.0, 8.0).await?;
+    let (s1, _) = seed_snapshot(&client, "NESN.SW", "save-set-load-1", "CHF", 6.0, 8.0).await?;
     let (s2, _) = seed_snapshot(&client, "AAPL", "save-set-load-2", "USD", 10.0, 14.0).await?;
     let set_id = seed_comparison_set(&client, "API Seeded Set", "CHF", &[s1, s2]).await?;
     ctx.navigate(&format!("/compare?id={}", set_id)).await?;
@@ -372,7 +372,7 @@ async fn test_comparison_card_click_navigates_to_analysis() -> Result<()> {
     let client = reqwest::Client::new();
 
     let (_snap_id, nesn_id) =
-        seed_snapshot(&client, "NESN", "card-click-nav-test", "CHF", 8.0, 10.0).await?;
+        seed_snapshot(&client, "NESN.SW", "card-click-nav-test", "CHF", 8.0, 10.0).await?;
 
     ctx.navigate(&format!("/compare?ticker_ids={}", nesn_id))
         .await?;
@@ -415,8 +415,8 @@ async fn test_history_toggle_opens_sidebar() -> Result<()> {
     let client = reqwest::Client::new();
 
     // Seed 2 snapshots for NESN to enable history
-    let _s1 = seed_snapshot(&client, "NESN", "history-open-test-1", "CHF", 6.0, 8.0).await?;
-    let _s2 = seed_snapshot(&client, "NESN", "history-open-test-2", "CHF", 7.0, 9.0).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "history-open-test-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(&client, "NESN.SW", "history-open-test-2", "CHF", 7.0, 9.0).await?;
 
     load_ticker(&ctx, "NESN").await?;
 
@@ -455,8 +455,8 @@ async fn test_history_toggle_closes_sidebar() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let _s1 = seed_snapshot(&client, "NESN", "history-close-test-1", "CHF", 6.0, 8.0).await?;
-    let _s2 = seed_snapshot(&client, "NESN", "history-close-test-2", "CHF", 7.0, 9.0).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "history-close-test-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(&client, "NESN.SW", "history-close-test-2", "CHF", 7.0, 9.0).await?;
 
     load_ticker(&ctx, "NESN").await?;
 
@@ -504,8 +504,8 @@ async fn test_history_timeline_lists_past_analyses() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let _s1 = seed_snapshot(&client, "NESN", "history-list-test-1", "CHF", 6.0, 8.0).await?;
-    let _s2 = seed_snapshot(&client, "NESN", "history-list-test-2", "CHF", 7.0, 9.0).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "history-list-test-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(&client, "NESN.SW", "history-list-test-2", "CHF", 7.0, 9.0).await?;
 
     load_ticker(&ctx, "NESN").await?;
 
@@ -548,8 +548,8 @@ async fn test_history_select_past_shows_comparison() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let _s1 = seed_snapshot(&client, "NESN", "history-select-test-1", "CHF", 6.0, 8.0).await?;
-    let _s2 = seed_snapshot(&client, "NESN", "history-select-test-2", "CHF", 7.5, 9.5).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "history-select-test-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(&client, "NESN.SW", "history-select-test-2", "CHF", 7.5, 9.5).await?;
 
     load_ticker(&ctx, "NESN").await?;
 
@@ -611,8 +611,8 @@ async fn test_history_metric_deltas_displayed() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let _s1 = seed_snapshot(&client, "NESN", "delta-test-1", "CHF", 6.0, 8.0).await?;
-    let _s2 = seed_snapshot(&client, "NESN", "delta-test-2", "CHF", 9.0, 12.0).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "delta-test-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(&client, "NESN.SW", "delta-test-2", "CHF", 9.0, 12.0).await?;
 
     load_ticker(&ctx, "NESN").await?;
 
@@ -664,8 +664,8 @@ async fn test_history_deselect_returns_to_live() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let _s1 = seed_snapshot(&client, "NESN", "deselect-test-1", "CHF", 6.0, 8.0).await?;
-    let _s2 = seed_snapshot(&client, "NESN", "deselect-test-2", "CHF", 7.0, 9.0).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "deselect-test-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(&client, "NESN.SW", "deselect-test-2", "CHF", 7.0, 9.0).await?;
 
     load_ticker(&ctx, "NESN").await?;
 
@@ -769,7 +769,7 @@ async fn test_comparison_currency_switch_updates_prices() -> Result<()> {
     let client = reqwest::Client::new();
 
     // Seed snapshots with different currencies
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN", "currency-switch-1", "CHF", 8.0, 10.0).await?;
+    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "currency-switch-1", "CHF", 8.0, 10.0).await?;
     let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "currency-switch-2", "USD", 12.0, 15.0).await?;
 
     ctx.navigate(&format!(
@@ -860,7 +860,7 @@ async fn test_comparison_currency_indicator_label() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN", "currency-label-1", "CHF", 8.0, 10.0).await?;
+    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "currency-label-1", "CHF", 8.0, 10.0).await?;
     let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "currency-label-2", "USD", 12.0, 15.0).await?;
 
     ctx.navigate(&format!(
@@ -907,7 +907,7 @@ async fn test_comparison_desktop_shows_sort_headers() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s, nesn_id) = seed_snapshot(&client, "NESN", "resp-desktop-test", "CHF", 8.0, 10.0).await?;
+    let (_s, nesn_id) = seed_snapshot(&client, "NESN.SW", "resp-desktop-test", "CHF", 8.0, 10.0).await?;
 
     ctx.set_viewport(DESKTOP_WIDE.0, DESKTOP_WIDE.1).await?;
     ctx.navigate(&format!("/compare?ticker_ids={}", nesn_id))
@@ -955,7 +955,7 @@ async fn test_comparison_mobile_shows_dropdown_sort() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s, nesn_id) = seed_snapshot(&client, "NESN", "resp-mobile-sort-test", "CHF", 8.0, 10.0).await?;
+    let (_s, nesn_id) = seed_snapshot(&client, "NESN.SW", "resp-mobile-sort-test", "CHF", 8.0, 10.0).await?;
 
     ctx.set_viewport(MOBILE.0, MOBILE.1).await?;
     ctx.navigate(&format!("/compare?ticker_ids={}", nesn_id))
@@ -1000,7 +1000,7 @@ async fn test_comparison_mobile_single_column_cards() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN", "resp-mobile-col-1", "CHF", 8.0, 10.0).await?;
+    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "resp-mobile-col-1", "CHF", 8.0, 10.0).await?;
     let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "resp-mobile-col-2", "USD", 12.0, 15.0).await?;
 
     ctx.set_viewport(MOBILE.0, MOBILE.1).await?;
@@ -1056,8 +1056,8 @@ async fn test_history_tablet_overlay_sidebar() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let _s1 = seed_snapshot(&client, "NESN", "resp-tablet-sidebar-1", "CHF", 6.0, 8.0).await?;
-    let _s2 = seed_snapshot(&client, "NESN", "resp-tablet-sidebar-2", "CHF", 7.0, 9.0).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "resp-tablet-sidebar-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(&client, "NESN.SW", "resp-tablet-sidebar-2", "CHF", 7.0, 9.0).await?;
 
     ctx.set_viewport(TABLET.0, TABLET.1).await?;
     load_ticker(&ctx, "NESN").await?;
@@ -1103,8 +1103,8 @@ async fn test_history_mobile_full_overlay() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let _s1 = seed_snapshot(&client, "NESN", "resp-mobile-overlay-1", "CHF", 6.0, 8.0).await?;
-    let _s2 = seed_snapshot(&client, "NESN", "resp-mobile-overlay-2", "CHF", 7.0, 9.0).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "resp-mobile-overlay-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(&client, "NESN.SW", "resp-mobile-overlay-2", "CHF", 7.0, 9.0).await?;
 
     ctx.set_viewport(MOBILE.0, MOBILE.1).await?;
     load_ticker(&ctx, "NESN").await?;
@@ -1151,9 +1151,9 @@ async fn test_history_mobile_no_delta_column() -> Result<()> {
     let client = reqwest::Client::new();
 
     let _s1 =
-        seed_snapshot(&client, "NESN", "resp-mobile-nodelta-1", "CHF", 6.0, 8.0).await?;
+        seed_snapshot(&client, "NESN.SW", "resp-mobile-nodelta-1", "CHF", 6.0, 8.0).await?;
     let _s2 =
-        seed_snapshot(&client, "NESN", "resp-mobile-nodelta-2", "CHF", 9.0, 12.0).await?;
+        seed_snapshot(&client, "NESN.SW", "resp-mobile-nodelta-2", "CHF", 9.0, 12.0).await?;
 
     ctx.set_viewport(MOBILE.0, MOBILE.1).await?;
     load_ticker(&ctx, "NESN").await?;
