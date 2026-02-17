@@ -4,6 +4,12 @@ use std::env;
 use std::path::Path;
 use anyhow::Result;
 
+// Viewport constants for responsive testing.
+pub const DESKTOP_WIDE: (u32, u32) = (1440, 900);
+pub const DESKTOP_STD: (u32, u32) = (1100, 900);
+pub const TABLET: (u32, u32) = (900, 1024);
+pub const MOBILE: (u32, u32) = (375, 812);
+
 pub struct TestContext {
     pub driver: WebDriver,
     pub base_url: String,
@@ -55,6 +61,21 @@ impl TestContext {
             Ok(_) => eprintln!("[screenshot] Saved: {}", path.display()),
             Err(e) => eprintln!("[screenshot] Failed to capture {test_name}: {e}"),
         }
+    }
+
+    /// Resize the browser window to simulate a specific viewport.
+    /// Uses `set_window_rect` which sets the outer window size.
+    /// In headless mode the viewport closely matches the requested size.
+    pub async fn set_viewport(&self, width: u32, height: u32) -> Result<()> {
+        self.driver.set_window_rect(0, 0, width, height).await?;
+        // Allow CSS media queries to recalculate after resize.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        Ok(())
+    }
+
+    /// Restore the browser window to the default desktop-wide size.
+    pub async fn reset_viewport(&self) -> Result<()> {
+        self.set_viewport(DESKTOP_WIDE.0, DESKTOP_WIDE.1).await
     }
 
     pub async fn cleanup(self) -> Result<()> {

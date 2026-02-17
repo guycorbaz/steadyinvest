@@ -7,6 +7,8 @@ mod epic4_tests;
 mod epic5_tests;
 #[cfg(test)]
 mod epic6_tests;
+#[cfg(test)]
+mod epic8_tests;
 
 #[cfg(test)]
 mod search_tests {

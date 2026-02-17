@@ -107,7 +107,7 @@ development_status:
   8-3-comparison-currency-handling: done
   8-4-thesis-evolution-api: done
   8-5-history-timeline-sidebar-side-by-side-comparison: done
-  8-6-responsive-design-e2e-tests-for-comparison-and-history: backlog
+  8-6-responsive-design-e2e-tests-for-comparison-and-history: done
   epic-8-retrospective: optional
 
   # ============================================================
