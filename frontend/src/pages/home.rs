@@ -178,7 +178,7 @@ pub fn Home() -> impl IntoView {
             let anchor_id = match snap_list {
                 Some(Ok(ref list)) if !list.is_empty() => list
                     .iter()
-                    .max_by_key(|s| s.created_at)
+                    .max_by_key(|s| s.captured_at)
                     .map(|s| s.id),
                 _ => None,
             };
@@ -256,7 +256,7 @@ pub fn Home() -> impl IntoView {
         match snapshots.get() {
             Some(Ok(ref list)) if !list.is_empty() => list
                 .iter()
-                .max_by_key(|s| s.created_at)
+                .max_by_key(|s| s.captured_at)
                 .map(|s| s.id),
             _ => None,
         }
@@ -353,8 +353,8 @@ pub fn Home() -> impl IntoView {
                             id: raw.id,
                             ticker_id: raw.ticker_id,
                             snapshot_data: raw.snapshot_data,
-                            analyst_note: raw.notes.unwrap_or_default(),
-                            created_at: raw.captured_at,
+                            notes: raw.notes,
+                            captured_at: raw.captured_at,
                         };
                         Some(view! {
                             <div class="analyst-hud-init">
@@ -444,8 +444,8 @@ pub fn Home() -> impl IntoView {
                                             id: 0,
                                             ticker_id: 0,
                                             snapshot_data: serde_json::to_value(snapshot.clone()).unwrap(),
-                                            analyst_note: snapshot.analyst_note.clone(),
-                                            created_at: snapshot.captured_at,
+                                            notes: Some(snapshot.analyst_note.clone()),
+                                            captured_at: snapshot.captured_at,
                                         };
                                         let ticker = TickerInfo {
                                             ticker: ticker_name.clone(),

@@ -42,7 +42,7 @@ pub fn SnapshotHUD(
                     <h2>"Historical Snapshot: " {ticker.name.clone()}</h2>
                 </div>
                 <div class="snapshot-meta">
-                    "Captured on: " {model.created_at.format("%Y-%m-%d %H:%M").to_string()}
+                    "Captured on: " {model.captured_at.format("%Y-%m-%d %H:%M").to_string()}
                 </div>
                 <div class="header-actions">
                     <button 
@@ -78,7 +78,7 @@ pub fn SnapshotHUD(
             <div class="analyst-note-box standard-border">
                 <h4>"Analyst Note"</h4>
                 <div class="note-content">
-                    {model.analyst_note.clone()}
+                    {model.notes.clone().unwrap_or_default()}
                 </div>
             </div>
 

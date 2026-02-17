@@ -8,6 +8,9 @@ use steady_invest_logic::AnalysisSnapshot;
 use chrono::{DateTime, Utc};
 
 /// Client-side representation of a locked analysis record from the backend.
+///
+/// Field names match the `analysis_snapshots` SeaORM entity so that
+/// `GET /api/analyses/{ticker}` responses deserialize correctly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockedAnalysisModel {
     /// Database row ID.
@@ -16,10 +19,10 @@ pub struct LockedAnalysisModel {
     pub ticker_id: i32,
     /// Raw JSON containing the serialized [`AnalysisSnapshot`].
     pub snapshot_data: serde_json::Value,
-    /// Analyst's thesis note captured at lock time.
-    pub analyst_note: String,
+    /// Analyst's thesis note captured at lock time (nullable in DB).
+    pub notes: Option<String>,
     /// Timestamp when the analysis was locked.
-    pub created_at: DateTime<Utc>,
+    pub captured_at: DateTime<Utc>,
 }
 
 impl LockedAnalysisModel {
