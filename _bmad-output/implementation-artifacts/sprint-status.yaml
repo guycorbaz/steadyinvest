@@ -112,8 +112,8 @@ development_status:
 
   # Epic 8b: SSG Methodology Alignment (inserted before Epic 9)
   # Audit SSG chart against NAIC Handbook, fix deviations, add golden tests
-  epic-8b: backlog
-  8b-1-ssg-handbook-audit-and-chart-fixes: backlog
+  epic-8b: in-progress
+  8b-1-ssg-handbook-audit-and-chart-fixes: ready-for-dev
   epic-8b-retrospective: optional
 
   # ============================================================
