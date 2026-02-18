@@ -191,7 +191,7 @@ The frontend chart (`ssg_chart.rs`) iterates records as-received, pushing years 
   - [x] 10.5 Data is chronological from harvest.rs sort-at-source — verified chart uses data as-received
 
 - [x] Task 11: Verify and build (all ACs)
-  - [x] 11.1 Run `cargo test` in `steady-invest-logic` — all 33 tests pass (25 unit + 8 doc)
+  - [x] 11.1 Run `cargo test` in `steady-invest-logic` — all 35 tests pass (26 unit + 9 doc)
   - [x] 11.2 Run `cargo build` for backend — clean
   - [x] 11.3 Run `trunk build` for frontend — clean
   - [x] 11.4 Docker verification deferred to Guy's walkthrough
@@ -443,6 +443,11 @@ Claude Opus 4.6
   - M5: `lock_thesis_modal.rs` — Added PTP Growth to summary pill
   - M6: `reporting.rs` — Sales/EPS now use NAN for non-positive values on log axis
   - M7: `lib.rs` — Fixed `apply_adjustments()` idempotency (always set `is_split_adjusted = true`)
+- Code review #3 found 1 HIGH, 3 MEDIUM, 3 LOW issues. All HIGH and MEDIUM fixed:
+  - H1: `lib.rs` — Fixed last remaining stale "10" → "5" in `calculate_pe_ranges` docstring (line 257)
+  - M1: `chart_bridge.js` — Fixed resize listener stacking via `chart.__ssgResizeListener` cleanup
+  - M2: `reporting.rs` — Aligned PDF chart series names with frontend (dynamic CAGR labels, auto-legend)
+  - M3: Story file — Corrected test count from 33 to 35 (26 unit + 9 doc)
 
 ### File List
 

@@ -159,21 +159,41 @@ pub fn Library() -> impl IntoView {
                                                 });
                                             }
                                         };
+                                        {
+                                        let is_locked = s.thesis_locked;
+                                        let export_url = format!("/api/analyses/export/{}", s.id);
                                         view! {
                                             <div class="library-card-wrapper">
-                                                <label class="compare-checkbox" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
-                                                    <input
-                                                        type="checkbox"
-                                                        prop:checked=is_selected
-                                                        on:change=toggle_select
-                                                    />
-                                                    <span class="compare-checkbox-label">"Compare"</span>
-                                                </label>
+                                                <div class="library-card-actions" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
+                                                    <label class="compare-checkbox">
+                                                        <input
+                                                            type="checkbox"
+                                                            prop:checked=is_selected
+                                                            on:change=toggle_select
+                                                        />
+                                                        <span class="compare-checkbox-label">"Compare"</span>
+                                                    </label>
+                                                    {if is_locked {
+                                                        let url = export_url.clone();
+                                                        view! {
+                                                            <a
+                                                                href=url
+                                                                class="library-export-btn"
+                                                                title="Export as PDF"
+                                                            >
+                                                                "Export PDF"
+                                                            </a>
+                                                        }.into_any()
+                                                    } else {
+                                                        view! {}.into_any()
+                                                    }}
+                                                </div>
                                                 <CompactAnalysisCard
                                                     data=data
                                                     on_click=on_card_click
                                                 />
                                             </div>
+                                        }
                                         }
                                     }).collect_view();
 

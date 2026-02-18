@@ -138,7 +138,53 @@ window.setupDraggableHandles = function (chartId, salesStartValue, salesYears, e
     }
     chart.__ssgHandleListener = updateHandles;
     chart.on('finished', updateHandles);
-    window.addEventListener('resize', () => chart.resize());
+
+    // Remove prior resize listener to prevent stacking on repeated calls
+    if (chart.__ssgResizeListener) {
+        window.removeEventListener('resize', chart.__ssgResizeListener);
+    }
+    chart.__ssgResizeListener = () => chart.resize();
+    window.addEventListener('resize', chart.__ssgResizeListener);
+};
+
+/**
+ * Adds NAIC-style vertical price bars (low→high) to the SSG chart.
+ * Called from Rust after WasmRenderer.render() because charming's RawString
+ * doesn't work through serde_wasm_bindgen (Custom series renderItem needs
+ * a real JS function, not a string).
+ *
+ * @param {string} chartId - DOM element id of the chart container
+ * @param {string} priceDataJson - JSON array of [low, high] pairs per year
+ */
+window.addPriceBars = function (chartId, priceDataJson) {
+    const chartDom = document.getElementById(chartId);
+    if (!chartDom) return;
+    const chart = echarts.getInstanceByDom(chartDom);
+    if (!chart) return;
+
+    const priceData = JSON.parse(priceDataJson);
+    const data = priceData.map((d, i) => [i, d[0], d[1]]);
+
+    // Append the custom series via setOption merge mode.
+    // Use a sparse array so existing series (indices 0..N-1) are untouched.
+    const opt = chart.getOption();
+    const existingCount = (opt.series || []).length;
+    const sparse = new Array(existingCount + 1);
+    sparse[existingCount] = {
+        type: 'custom',
+        name: 'Stock Price',
+        renderItem: function (params, api) {
+            var low = api.coord([api.value(0), api.value(1)]);
+            var high = api.coord([api.value(0), api.value(2)]);
+            return {
+                type: 'line',
+                shape: { x1: low[0], y1: low[1], x2: high[0], y2: high[1] },
+                style: { stroke: '#B0B0B0', lineWidth: 2 }
+            };
+        },
+        data: data
+    };
+    chart.setOption({ series: sparse });
 };
 
 window.captureChartAsDataURL = function (chartId) {

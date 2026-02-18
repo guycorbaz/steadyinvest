@@ -22,6 +22,7 @@ pub fn AnalystHUD(
     ticker: TickerInfo,
     data: HistoricalData,
     on_refetch: Callback<()>,
+    on_locked: Callback<i32>,
 ) -> impl IntoView {
     // Shared projection signals for cross-component reactivity (AC 5)
     let sales_projection_cagr = RwSignal::new(0.0);
@@ -286,9 +287,10 @@ pub fn AnalystHUD(
                         future_high_pe=future_high_pe.get()
                         future_low_pe=future_low_pe.get()
                         on_close=Callback::new(move |_| set_show_lock_modal.set(false))
-                        on_locked=Callback::new(move |_| {
+                        on_locked=Callback::new(move |id: i32| {
                             set_show_lock_modal.set(false);
                             on_refetch.run(());
+                            on_locked.run(id);
                         })
                     />
                 }

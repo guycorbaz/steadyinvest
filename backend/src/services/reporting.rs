@@ -7,10 +7,10 @@
 use std::io::Cursor;
 use charming::{
     component::{Axis, Legend},
-    datatype::DataPointItem,
-    element::{AxisType, ItemStyle, LineStyle, LineStyleType, Tooltip, Trigger},
+    datatype::CompositeValue,
+    element::{AxisType, LineStyle, LineStyleType, Tooltip, Trigger},
     renderer::ImageRenderer,
-    series::{Candlestick, Line},
+    series::{Custom, Line},
     Chart,
 };
 use genpdf::{elements, fonts, style};
@@ -38,9 +38,10 @@ impl ReportingService {
         snapshot: &AnalysisSnapshot,
     ) -> ReportResult<Vec<u8>> {
         // 1. Generate Chart SVG via charming (SSR)
+        // Render at 1600x600 for print quality; DPI is set below to fill page width.
         let chart = Self::create_ssg_chart(snapshot);
-        let mut renderer = ImageRenderer::new(800, 600);
-        
+        let mut renderer = ImageRenderer::new(1600, 600);
+
         let svg_content = renderer.render(&chart)
             .map_err(|e| format!("Charming error: {:?}", e))?;
 
@@ -96,11 +97,15 @@ impl ReportingService {
         
         doc.push(elements::Break::new(1.0));
 
-        // Embed Chart
+        // Embed Chart — scale to fill page content width
+        // A4 = 210mm, margins = 10mm each side → 190mm content width.
+        // DPI = pixel_width * 25.4 / target_mm
+        let chart_dpi = 1600.0 * 25.4 / 190.0; // ≈ 213.7
         let cursor = Cursor::new(png_data);
         // Bubble up image errors instead of silent string in PDF
         let img = elements::Image::from_reader(cursor)
             .map_err(|e| format!("Failed to load PNG into PDF: {}", e))?
+            .with_dpi(chart_dpi)
             .with_alignment(genpdf::Alignment::Center);
         doc.push(img);
 
@@ -206,12 +211,7 @@ impl ReportingService {
 
         let mut chart = Chart::new()
             .tooltip(Tooltip::new().trigger(Trigger::Axis))
-            .legend(Legend::new().data(vec![
-                "Sales", "Sales Trend", "Sales Est.",
-                "EPS", "EPS Trend", "EPS Est.",
-                "Pre-Tax Profit", "PTP Trend", "PTP Est.",
-                "Stock Price",
-            ]))
+            .legend(Legend::new())
             .x_axis(Axis::new().type_(AxisType::Category).data(all_years))
             .y_axis(Axis::new().type_(AxisType::Log));
 
@@ -219,12 +219,13 @@ impl ReportingService {
         let sales_trend_vals: Vec<f64> = sales_trend.trendline.iter().map(|p| p.value).collect();
         let eps_trend_vals: Vec<f64> = eps_trend.trendline.iter().map(|p| p.value).collect();
 
-        let sales_last_trend = sales_trend_vals.last().copied().unwrap_or(0.0);
-        let eps_last_trend = eps_trend_vals.last().copied().unwrap_or(0.0);
-
         let mut sales_tl = sales_trend_vals.clone();
         let mut eps_tl = eps_trend_vals.clone();
         for _ in 0..5 { sales_tl.push(f64::NAN); eps_tl.push(f64::NAN); }
+
+        // Last actual data values (projection anchors to the solid data line)
+        let sales_last_actual = sales_data.last().copied().unwrap_or(0.0);
+        let eps_last_actual = eps_data.last().copied().unwrap_or(0.0);
 
         // PTP trendline mapped to full year range
         let mut ptp_tl: Vec<f64> = Vec::with_capacity(hist_len + 5);
@@ -237,64 +238,83 @@ impl ReportingService {
                 ptp_tl.push(f64::NAN);
             }
         }
-        let ptp_last_trend = if !ptp_trend.trendline.is_empty() {
-            ptp_trend.trendline.last().unwrap().value
-        } else { 0.0 };
+        let ptp_last_actual = ptp_data.iter().rev()
+            .find(|v| v.is_finite() && **v > 0.0)
+            .copied()
+            .unwrap_or(0.0);
         for _ in 0..5 { ptp_tl.push(f64::NAN); }
 
-        // Projections
-        let s_proj = calculate_projected_trendline(last_year, sales_last_trend, snapshot.projected_sales_cagr, &future_years);
-        let e_proj = calculate_projected_trendline(last_year, eps_last_trend, snapshot.projected_eps_cagr, &future_years);
-        let p_proj = calculate_projected_trendline(last_year, ptp_last_trend, snapshot.projected_ptp_cagr, &future_years);
+        // Projections anchored from last actual data points
+        let s_proj = calculate_projected_trendline(last_year, sales_last_actual, snapshot.projected_sales_cagr, &future_years);
+        let e_proj = calculate_projected_trendline(last_year, eps_last_actual, snapshot.projected_eps_cagr, &future_years);
+        let p_proj = calculate_projected_trendline(last_year, ptp_last_actual, snapshot.projected_ptp_cagr, &future_years);
 
         let mut s_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
-        s_proj_data.push(sales_last_trend);
+        s_proj_data.push(sales_last_actual);
         for p in &s_proj.trendline { s_proj_data.push(p.value); }
 
         let mut e_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
-        e_proj_data.push(eps_last_trend);
+        e_proj_data.push(eps_last_actual);
         for p in &e_proj.trendline { e_proj_data.push(p.value); }
 
         let mut p_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
-        // Guard: use NAN when PTP anchor is non-positive to avoid log(0) on chart
-        p_proj_data.push(if ptp_last_trend > 0.0 { ptp_last_trend } else { f64::NAN });
+        p_proj_data.push(if ptp_last_actual > 0.0 { ptp_last_actual } else { f64::NAN });
         for p in &p_proj.trendline { p_proj_data.push(p.value); }
 
-        // Sales series
+        // Sales series (names match frontend ssg_chart.rs for consistency)
         chart = chart
-            .series(Line::new().name("Sales").data(sales_data).smooth(true)
+            .series(Line::new().name(format!("Sales Growth: {:.1}%", sales_trend.cagr)).data(sales_data).smooth(true)
                 .line_style(LineStyle::new().color("#1DB954")))
             .series(Line::new().name("Sales Trend").data(sales_tl)
                 .line_style(LineStyle::new().color("#1DB954").width(1).type_(LineStyleType::Dotted)))
-            .series(Line::new().name("Sales Est.").data(s_proj_data)
+            .series(Line::new().name("Sales Est. Growth").data(s_proj_data)
                 .line_style(LineStyle::new().color("#1DB954").width(2).type_(LineStyleType::Dashed)));
 
         // EPS series
         chart = chart
-            .series(Line::new().name("EPS").data(eps_data).smooth(true)
+            .series(Line::new().name(format!("EPS Growth: {:.1}%", eps_trend.cagr)).data(eps_data).smooth(true)
                 .line_style(LineStyle::new().color("#3498DB")))
             .series(Line::new().name("EPS Trend").data(eps_tl)
                 .line_style(LineStyle::new().color("#3498DB").width(1).type_(LineStyleType::Dotted)))
-            .series(Line::new().name("EPS Est.").data(e_proj_data)
+            .series(Line::new().name("EPS Est. Growth").data(e_proj_data)
                 .line_style(LineStyle::new().color("#3498DB").width(2).type_(LineStyleType::Dashed)));
 
         // PTP series
         chart = chart
-            .series(Line::new().name("Pre-Tax Profit").data(ptp_data).smooth(true)
+            .series(Line::new().name(format!("Pre-Tax Profit Growth: {:.1}%", ptp_trend.cagr)).data(ptp_data).smooth(true)
                 .line_style(LineStyle::new().color("#E74C3C")))
             .series(Line::new().name("PTP Trend").data(ptp_tl)
                 .line_style(LineStyle::new().color("#E74C3C").width(1).type_(LineStyleType::Dotted)))
-            .series(Line::new().name("PTP Est.").data(p_proj_data)
+            .series(Line::new().name("PTP Est. Growth").data(p_proj_data)
                 .line_style(LineStyle::new().color("#E74C3C").width(2).type_(LineStyleType::Dashed)));
 
-        // Price bars: candlestick with collapsed body (wick only)
-        let candle_data: Vec<DataPointItem> = high_price.iter().zip(low_price.iter())
-            .map(|(&high, &low)| {
-                DataPointItem::new(vec![low, low, low, high])
-                    .item_style(ItemStyle::new().color("#333333").border_color("#333333"))
+        // Price range bars: thin vertical lines from price_low to price_high (NAIC Figure 2.1)
+        let price_bar_data: Vec<Vec<CompositeValue>> = high_price.iter().zip(low_price.iter())
+            .enumerate()
+            .map(|(i, (&high, &low))| {
+                vec![
+                    CompositeValue::from(i as i32),
+                    CompositeValue::from(low),
+                    CompositeValue::from(high),
+                ]
             })
             .collect();
-        chart = chart.series(Candlestick::new().name("Stock Price").data(candle_data));
+        chart = chart.series(
+            Custom::new()
+                .name("Stock Price")
+                .render_item(
+                    "function(params, api) { \
+                        var low = api.coord([api.value(0), api.value(1)]); \
+                        var high = api.coord([api.value(0), api.value(2)]); \
+                        return { \
+                            type: 'line', \
+                            shape: { x1: low[0], y1: low[1], x2: high[0], y2: high[1] }, \
+                            style: { stroke: '#333333', lineWidth: 2 } \
+                        }; \
+                    }".to_string()
+                )
+                .data(price_bar_data)
+        );
 
         chart
     }

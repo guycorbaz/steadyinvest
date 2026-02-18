@@ -3,9 +3,8 @@ use steady_invest_logic::HistoricalData;
 use rust_decimal::prelude::ToPrimitive;
 use charming::{
     component::{Axis, Legend, Title},
-    datatype::DataPointItem,
-    element::{AxisType, ItemStyle, Orient, Tooltip, Trigger, LineStyle, LineStyleType},
-    series::{Candlestick, Line},
+    element::{AxisType, Orient, Tooltip, Trigger, LineStyle, LineStyleType},
+    series::Line,
     Chart, WasmRenderer,
 };
 
@@ -18,6 +17,9 @@ unsafe extern "C" {
 
     #[wasm_bindgen(js_namespace = window)]
     fn captureChartAsDataURL(chart_id: String) -> Option<String>;
+
+    #[wasm_bindgen(js_namespace = window)]
+    fn addPriceBars(chart_id: String, price_data_json: String);
 }
 
 /// Captures the current SSG chart as a base64-encoded PNG string.
@@ -157,12 +159,6 @@ pub fn SSGChart(
                     .font_family("Inter")
                     .font_size(12)))
             .tooltip(Tooltip::new().trigger(Trigger::Axis))
-            .x_axis(Axis::new()
-                .type_(AxisType::Category)
-                .data(years.clone())
-                .axis_label(charming::element::AxisLabel::new()
-                    .color("#B0B0B0")
-                    .font_size(11)))
             .y_axis(Axis::new()
                 .type_(AxisType::Log)
                 .name("Value")
@@ -180,6 +176,33 @@ pub fn SSGChart(
         let mut eps_years_f = 0.0;
         let mut ptp_start = 0.0;
         let mut ptp_years_f = 0.0;
+
+        // Compute dimensions shared by both branches
+        let hist_len = raw_years.len();
+        if hist_len == 0 {
+            return; // No records — skip rendering
+        }
+        let last_year = *raw_years.last().unwrap_or(&2023);
+        let future_years: Vec<i32> = (1..=5).map(|i| last_year + i).collect();
+
+        // Set x-axis once: extend with future years when trends are active
+        {
+            let x_data = if trends_active {
+                let mut all = years.clone();
+                for y in &future_years {
+                    all.push(y.to_string());
+                }
+                all
+            } else {
+                years.clone()
+            };
+            chart = chart.x_axis(Axis::new()
+                .type_(AxisType::Category)
+                .data(x_data)
+                .axis_label(charming::element::AxisLabel::new()
+                    .color("#B0B0B0")
+                    .font_size(11)));
+        }
 
         if trends_active {
             let sales_trend = steady_invest_logic::calculate_growth_analysis(&raw_years, &sales);
@@ -206,31 +229,18 @@ pub fn SSGChart(
                 is_projecting.set(true);
             }
 
-            let hist_len = raw_years.len();
-            if hist_len == 0 {
-                return; // No records — skip trendline/projection rendering
-            }
-            let last_year = *raw_years.last().unwrap_or(&2023);
-            let future_years: Vec<i32> = (1..=5).map(|i| last_year + i).collect();
-            let mut all_years_display = years.clone();
-            for y in &future_years {
-                all_years_display.push(y.to_string());
-            }
-
-            chart = chart.x_axis(Axis::new().type_(AxisType::Category).data(all_years_display));
-
             // Historical trendline values
             let sales_trend_vals: Vec<f64> = sales_trend.trendline.iter().map(|p| p.value).collect();
             let eps_trend_vals: Vec<f64> = eps_trend.trendline.iter().map(|p| p.value).collect();
 
-            // Anchor projection from LAST historical trendline point (chronological order)
-            let sales_last_trend = sales_trend_vals.last().copied().unwrap_or(0.0);
-            let eps_last_trend = eps_trend_vals.last().copied().unwrap_or(0.0);
+            // Last actual data values (projection starts from the solid data line)
+            let sales_last_actual = sales.last().copied().unwrap_or(0.0);
+            let eps_last_actual = eps.last().copied().unwrap_or(0.0);
 
-            // JS bridge: projection period = 5 years, start = last trendline value
-            sales_start = sales_last_trend;
+            // JS bridge: projection period = 5 years, start = last actual value
+            sales_start = sales_last_actual;
             sales_years_f = 5.0;
-            eps_start = eps_last_trend;
+            eps_start = eps_last_actual;
             eps_years_f = 5.0;
 
             // Trendline series: historical values + NaN padding for future years
@@ -241,22 +251,22 @@ pub fn SSGChart(
                 eps_trendline_data.push(f64::NAN);
             }
 
-            // Projection: no negation needed — data is chronological, positive CAGR = growth
+            // Projection anchored from last actual data point (connects to solid line)
             let s_proj = steady_invest_logic::calculate_projected_trendline(
-                last_year, sales_last_trend, s_cagr, &future_years
+                last_year, sales_last_actual, s_cagr, &future_years
             );
             let e_proj = steady_invest_logic::calculate_projected_trendline(
-                last_year, eps_last_trend, e_cagr, &future_years
+                last_year, eps_last_actual, e_cagr, &future_years
             );
 
             // Projection series: NaN for historical years (except last for continuity)
             let mut s_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
-            s_proj_data.push(sales_last_trend); // Connection point at last historical year
+            s_proj_data.push(sales_last_actual); // Connection point at last actual data point
             for p in &s_proj.trendline {
                 s_proj_data.push(p.value);
             }
             let mut e_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
-            e_proj_data.push(eps_last_trend);
+            e_proj_data.push(eps_last_actual);
             for p in &e_proj.trendline {
                 e_proj_data.push(p.value);
             }
@@ -275,24 +285,24 @@ pub fn SSGChart(
                     ptp_trendline_data.push(f64::NAN);
                 }
             }
-            let ptp_last_trend = if !ptp_trend.trendline.is_empty() {
-                ptp_trend.trendline.last().unwrap().value
-            } else {
-                0.0
-            };
-            ptp_start = ptp_last_trend;
+            // Last actual PTP value (last finite positive value in the series)
+            let ptp_last_actual = ptp.iter().rev()
+                .find(|v| v.is_finite() && **v > 0.0)
+                .copied()
+                .unwrap_or(0.0);
+            ptp_start = ptp_last_actual;
             ptp_years_f = 5.0;
 
             for _ in 0..5 {
                 ptp_trendline_data.push(f64::NAN);
             }
 
-            // Guard: skip PTP projection if anchor is non-positive (avoids log(0) on chart)
+            // Projection anchored from last actual PTP data point
             let p_proj = steady_invest_logic::calculate_projected_trendline(
-                last_year, ptp_last_trend, p_cagr, &future_years
+                last_year, ptp_last_actual, p_cagr, &future_years
             );
             let mut p_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
-            p_proj_data.push(if ptp_last_trend > 0.0 { ptp_last_trend } else { f64::NAN });
+            p_proj_data.push(if ptp_last_actual > 0.0 { ptp_last_actual } else { f64::NAN });
             for p in &p_proj.trendline {
                 p_proj_data.push(p.value);
             }
@@ -353,18 +363,15 @@ pub fn SSGChart(
                 .series(Line::new().name("Pre-Tax Profit").data(ptp.clone()).smooth(true).line_style(LineStyle::new().color("#E74C3C")));
         }
 
-        // Price range bars: vertical wick from price_low to price_high (NAIC Figure 2.1)
-        // Candlestick data format: [open, close, low, high]
-        // Set open = close = price_low to collapse body, leaving only the wick
-        let candle_data: Vec<DataPointItem> = prices.iter().zip(prices_low.iter())
-            .map(|(&high, &low)| {
-                DataPointItem::new(vec![low, low, low, high])
-                    .item_style(ItemStyle::new()
-                        .color("#B0B0B0")
-                        .border_color("#B0B0B0"))
-            })
-            .collect();
-        chart = chart.series(Candlestick::new().name("Stock Price").data(candle_data));
+        // Price range bars are added via chart_bridge.js (addPriceBars) after
+        // WasmRenderer renders, because charming's RawString (needed for Custom
+        // series renderItem) doesn't work through serde_wasm_bindgen.
+        let price_json = format!("[{}]",
+            prices.iter().zip(prices_low.iter())
+                .map(|(&high, &low)| format!("[{},{}]", low, high))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
 
         // Use requestAnimationFrame to defer rendering until after DOM update
         let window = web_sys::window().expect("no global window");
@@ -383,6 +390,9 @@ pub fn SSGChart(
             if let Err(e) = renderer.render(&cid, &chart) {
                 web_sys::console::log_1(&format!("Chart render error: {:?}", e).into());
             }
+
+            // Add price bars via JS bridge (Custom series renderItem needs real JS function)
+            addPriceBars(cid.clone(), price_json);
 
             if trends_active && projecting {
                 setup_handles_js(cid, sales_start, sales_years_f, eps_start, eps_years_f, ptp_start, ptp_years_f);

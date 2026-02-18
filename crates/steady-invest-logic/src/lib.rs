@@ -255,7 +255,7 @@ pub struct AnalysisSnapshot {
 
 /// Computes historical High/Low P/E ratios and their averages.
 ///
-/// Strictly limited to the **last 10 completed years** of data. Years with
+/// Strictly limited to the **last 5 completed years** of data. Years with
 /// zero or negative EPS are skipped (they produce meaningless P/E ratios).
 ///
 /// # Arguments

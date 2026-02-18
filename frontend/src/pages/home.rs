@@ -495,6 +495,10 @@ pub fn Home() -> impl IntoView {
                                                             historicals.refetch();
                                                             snapshots.refetch();
                                                         })
+                                                        on_locked=Callback::new(move |id: i32| {
+                                                            snapshots.refetch();
+                                                            set_selected_snapshot_id.set(Some(id));
+                                                        })
                                                     />
                                                 }.into_any()
                                             }

@@ -7,7 +7,7 @@
 use crate::components::ssg_chart;
 use leptos::prelude::*;
 use steady_invest_logic::{HistoricalData, AnalysisSnapshot};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// JSON request body for the Phase 1 snapshot API.
 #[derive(Debug, Clone, Serialize)]
@@ -34,7 +34,7 @@ pub fn LockThesisModal(
     future_high_pe: f64,
     future_low_pe: f64,
     on_close: Callback<()>,
-    on_locked: Callback<()>,
+    on_locked: Callback<i32>,
 ) -> impl IntoView {
     let (note, set_note) = signal(String::new());
     let (error, set_error) = signal(None::<String>);
@@ -100,9 +100,16 @@ pub fn LockThesisModal(
                     .send()
                     .await;
 
+                #[derive(Deserialize)]
+                struct SnapshotResponse { id: i32 }
+
                 match response {
                     Ok(res) if res.ok() => {
-                        on_locked.run(());
+                        // Parse the new snapshot ID from the response
+                        let snap_id = res.json::<SnapshotResponse>().await
+                            .map(|r| r.id)
+                            .unwrap_or(0);
+                        on_locked.run(snap_id);
                         on_close.run(());
                     }
                     _ => set_error.set(Some("Failed to lock thesis on server.".to_string())),

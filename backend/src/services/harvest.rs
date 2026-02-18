@@ -74,15 +74,15 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
 
             let mut record = HistoricalYearlyData {
                 fiscal_year: year,
-                sales: Decimal::from(1000 + i * 123),
-                eps: Decimal::from_f32(1.5 * i as f32).unwrap_or_default().round_dp(2),
-                price_high: Decimal::from(150 + i * 15),
-                price_low: Decimal::from(100 + i * 8),
+                sales: Decimal::from(1000 + (11 - i) * 123),
+                eps: Decimal::from_f32(1.5 * (11 - i) as f32).unwrap_or_default().round_dp(2),
+                price_high: Decimal::from(150 + (11 - i) * 15),
+                price_low: Decimal::from(100 + (11 - i) * 8),
                 adjustment_factor: factor,
                 exchange_rate,
-                net_income: Some(Decimal::from(100 + i * 10)),
-                pretax_income: Some(Decimal::from(120 + i * 12)),
-                total_equity: Some(Decimal::from(1000 + i * 50)),
+                net_income: Some(Decimal::from(100 + (11 - i) * 10)),
+                pretax_income: Some(Decimal::from(120 + (11 - i) * 12)),
+                total_equity: Some(Decimal::from(1000 + (11 - i) * 50)),
                 overrides: vec![],
             };
 
