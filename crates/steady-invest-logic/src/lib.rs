@@ -123,9 +123,9 @@ impl HistoricalData {
                 record.eps *= record.adjustment_factor;
                 record.price_high *= record.adjustment_factor;
                 record.price_low *= record.adjustment_factor;
+                self.is_split_adjusted = true;
             }
         }
-        self.is_split_adjusted = true;
     }
 
     /// Normalizes all monetary fields to `target_currency` using per-record exchange rates.

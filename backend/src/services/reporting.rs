@@ -338,19 +338,19 @@ impl ReportingService {
             &future_years,
         );
 
-        let mut s_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
+        let mut s_proj_data: Vec<f64> = vec![f64::NAN; hist_len.saturating_sub(1)];
         s_proj_data.push(sales_last_actual);
         for p in &s_proj.trendline {
             s_proj_data.push(p.value);
         }
 
-        let mut e_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
+        let mut e_proj_data: Vec<f64> = vec![f64::NAN; hist_len.saturating_sub(1)];
         e_proj_data.push(eps_last_actual);
         for p in &e_proj.trendline {
             e_proj_data.push(p.value);
         }
 
-        let mut p_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
+        let mut p_proj_data: Vec<f64> = vec![f64::NAN; hist_len.saturating_sub(1)];
         p_proj_data.push(if ptp_last_actual > 0.0 {
             ptp_last_actual
         } else {
