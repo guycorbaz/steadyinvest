@@ -15,13 +15,13 @@
 //! - [`comparisons`]     — Ad-hoc compare and persisted comparison sets
 //! - [`system`]          — System health and provider status
 
-pub mod auth;
-pub mod tickers;
-pub mod overrides;
-pub mod harvest;
 pub mod analyses;
-pub mod snapshots;
-pub mod exchange_rates;
+pub mod auth;
 pub mod comparisons;
+pub mod exchange_rates;
+pub mod harvest;
+pub mod overrides;
 pub mod snapshot_metrics;
+pub mod snapshots;
 pub mod system;
+pub mod tickers;

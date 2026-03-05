@@ -3,11 +3,11 @@
 //! Endpoints for saving analysis snapshots, listing past analyses per ticker,
 //! and exporting locked analyses as PDF reports.
 
-use loco_rs::prelude::*;
-use serde::{Deserialize, Serialize};
 use crate::models::{_entities::analysis_snapshots, tickers};
-use steady_invest_logic::AnalysisSnapshot;
+use loco_rs::prelude::*;
 use sea_orm::QueryOrder;
+use serde::{Deserialize, Serialize};
+use steady_invest_logic::AnalysisSnapshot;
 
 /// Request body for locking (saving) an analysis snapshot.
 #[derive(Debug, Deserialize, Serialize)]
@@ -48,7 +48,9 @@ pub async fn lock_analysis(
     let active = analysis_snapshots::ActiveModel {
         user_id: ActiveValue::set(1), // default single-user until Phase 3 auth
         ticker_id: ActiveValue::set(ticker.id),
-        snapshot_data: ActiveValue::set(serde_json::to_value(req.snapshot).map_err(|e| Error::string(&e.to_string()))?),
+        snapshot_data: ActiveValue::set(
+            serde_json::to_value(req.snapshot).map_err(|e| Error::string(&e.to_string()))?,
+        ),
         thesis_locked: ActiveValue::set(true),
         chart_image: ActiveValue::set(None), // Story 7.4 adds chart image capture
         notes: ActiveValue::set(Some(req.analyst_note)),
@@ -134,12 +136,17 @@ pub async fn export_analysis(
             &note_for_pdf,
             &snapshot,
         )
-    }).await.map_err(|e| Error::string(&format!("Blocking task error: {}", e)))?
-      .map_err(|e| Error::string(&e.to_string()))?;
+    })
+    .await
+    .map_err(|e| Error::string(&format!("Blocking task error: {}", e)))?
+    .map_err(|e| Error::string(&e.to_string()))?;
 
     Response::builder()
         .header("Content-Type", "application/pdf")
-        .header("Content-Disposition", format!("attachment; filename=\"ssg_report_{}.pdf\"", ticker.ticker))
+        .header(
+            "Content-Disposition",
+            format!("attachment; filename=\"ssg_report_{}.pdf\"", ticker.ticker),
+        )
         .body(pdf_bytes.into())
         .map_err(|e| Error::string(&e.to_string()))
 }

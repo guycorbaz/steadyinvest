@@ -125,19 +125,11 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
         // Drop items first (FK dependency)
-        m.drop_table(
-            Table::drop()
-                .table(ComparisonSetItems::Table)
-                .to_owned(),
-        )
-        .await?;
+        m.drop_table(Table::drop().table(ComparisonSetItems::Table).to_owned())
+            .await?;
 
-        m.drop_table(
-            Table::drop()
-                .table(ComparisonSets::Table)
-                .to_owned(),
-        )
-        .await?;
+        m.drop_table(Table::drop().table(ComparisonSets::Table).to_owned())
+            .await?;
 
         Ok(())
     }

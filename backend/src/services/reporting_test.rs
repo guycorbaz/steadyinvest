@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::services::reporting::ReportingService;
-    use steady_invest_logic::{AnalysisSnapshot, HistoricalData, HistoricalYearlyData};
-    use rust_decimal::Decimal;
     use chrono::Utc;
+    use rust_decimal::Decimal;
+    use steady_invest_logic::{AnalysisSnapshot, HistoricalData, HistoricalYearlyData};
 
     #[tokio::test]
     async fn test_generate_ssg_report_bytes() {
@@ -32,6 +32,7 @@ mod tests {
             historical_data: hist,
             projected_sales_cagr: 10.0,
             projected_eps_cagr: 12.0,
+            projected_ptp_cagr: 11.0,
             projected_high_pe: 15.0,
             projected_low_pe: 10.0,
             analyst_note: "Great long term value.".to_string(),
@@ -51,7 +52,7 @@ mod tests {
             Ok(pdf_bytes) => {
                 assert!(!pdf_bytes.is_empty());
                 assert!(pdf_bytes.starts_with(b"%PDF-"));
-            },
+            }
             Err(e) => {
                 println!("Report generation skipped/failed: {}", e);
                 // We don't fail the test if fonts are missing, but we log it.

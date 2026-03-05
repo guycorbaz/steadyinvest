@@ -1,23 +1,31 @@
 #[cfg(test)]
 mod epic3_tests {
     use super::super::common::TestContext;
-    use thirtyfour::prelude::*;
     use anyhow::Result;
+    use thirtyfour::prelude::*;
 
     #[tokio::test]
     #[ignore = "double-click modal trigger unreliable in headless Chrome"]
     async fn test_manual_override_flow() -> Result<()> {
         let ctx = TestContext::new().await?;
         ctx.navigate("/").await?;
-        
+
         let search_input = ctx.driver.find(By::ClassName("zen-search-input")).await?;
         search_input.send_keys("AAPL").await?;
-        
-        let result_item = ctx.driver.query(By::ClassName("result-item")).first().await?;
+
+        let result_item = ctx
+            .driver
+            .query(By::ClassName("result-item"))
+            .first()
+            .await?;
         result_item.click().await?;
-        
+
         // Wait for data table
-        let data_ready = ctx.driver.query(By::ClassName("data-ready")).first().await?;
+        let data_ready = ctx
+            .driver
+            .query(By::ClassName("data-ready"))
+            .first()
+            .await?;
         assert!(data_ready.is_displayed().await?);
 
         // Find a Sales cell (second column of first data row)
@@ -25,13 +33,17 @@ mod epic3_tests {
         let tbody = table.find(By::Tag("tbody")).await?;
         let rows = tbody.find_all(By::Tag("tr")).await?;
         let cells = rows[0].find_all(By::Tag("td")).await?;
-        
+
         // Use action chain for double click
         let actions = ctx.driver.action_chain();
         actions.double_click_element(&cells[1]).perform().await?;
 
         // Verify Modal appears
-        let modal = ctx.driver.query(By::ClassName("modal-content")).first().await?;
+        let modal = ctx
+            .driver
+            .query(By::ClassName("modal-content"))
+            .first()
+            .await?;
         assert!(modal.is_displayed().await?);
 
         // Fill override value and note
@@ -48,7 +60,11 @@ mod epic3_tests {
 
         // Wait for modal to close and cell to update
         // (The cell should now have 'overridden-cell' class)
-        let overridden_cell = ctx.driver.query(By::ClassName("overridden-cell")).first().await?;
+        let overridden_cell = ctx
+            .driver
+            .query(By::ClassName("overridden-cell"))
+            .first()
+            .await?;
         assert!(overridden_cell.is_displayed().await?);
         assert!(overridden_cell.text().await?.contains("500.5"));
 
@@ -65,15 +81,23 @@ mod epic3_tests {
     async fn test_kinetic_chart_dragging() -> Result<()> {
         let ctx = TestContext::new().await?;
         ctx.navigate("/").await?;
-        
+
         let search_input = ctx.driver.find(By::ClassName("zen-search-input")).await?;
         search_input.send_keys("MSFT").await?;
-        
-        let result_item = ctx.driver.query(By::ClassName("result-item")).first().await?;
+
+        let result_item = ctx
+            .driver
+            .query(By::ClassName("result-item"))
+            .first()
+            .await?;
         result_item.click().await?;
-        
+
         // Wait for chart
-        let chart_wrapper = ctx.driver.query(By::ClassName("ssg-chart-wrapper")).first().await?;
+        let chart_wrapper = ctx
+            .driver
+            .query(By::ClassName("ssg-chart-wrapper"))
+            .first()
+            .await?;
         assert!(chart_wrapper.is_displayed().await?);
 
         // Get initial Sales CAGR value
@@ -92,7 +116,7 @@ mod epic3_tests {
         // Instead, we interact with the canvas at an offset.
         // Sales handle is typically at the right edge.
         let chart_div = chart_wrapper.find(By::Tag("div")).await?; // The ECharts container
-        
+
         // Drag from right edge slightly up/down
         let actions = ctx.driver.action_chain();
         actions
@@ -116,7 +140,7 @@ mod epic3_tests {
                 break;
             }
         }
-        
+
         assert_ne!(initial_cagr, final_cagr);
 
         ctx.cleanup().await?;

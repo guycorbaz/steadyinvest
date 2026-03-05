@@ -1,4 +1,4 @@
-# generated: 2026-02-15
+# generated: 2026-02-19
 # project: steadyinvest
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 # - SM typically creates next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
-generated: 2026-02-15
+generated: 2026-02-19
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -112,16 +112,37 @@ development_status:
 
   # Epic 8b: SSG Methodology Alignment (inserted before Epic 9)
   # Audit SSG chart against NAIC Handbook, fix deviations, add golden tests
-  epic-8b: in-progress
+  epic-8b: done
   8b-1-ssg-handbook-audit-and-chart-fixes: done
-  epic-8b-retrospective: optional
+  epic-8b-retrospective: done
+
+  # Epic 8d: Infrastructure Hardening (inserted before Epic 8c)
+  # CI fix, dev environment, logic crate modularization, regression guards
+  epic-8d: in-progress
+  8d-1-ci-fix-and-dev-environment: in-progress
+  8d-2-logic-crate-modularization: ready-for-dev
+  8d-3-regression-guards-and-knowledge-transfer: ready-for-dev
+  epic-8d-retrospective: optional
+
+  # Epic 8c: NAIC SSG Methodology Completion (inserted before Epic 9)
+  # Complete NAIC analytical framework: dividend/yield, structured tests,
+  # comparison guide alignment, NAIC visual presentation
+  epic-8c: backlog
+  8c-1-data-model-expansion-dividend-harvest: backlog
+  8c-2-dividend-yield-payout-ratio-total-return: backlog
+  8c-3-five-tier-pe-breakdown-price-zone-ranges: backlog
+  8c-4a-naic-section-structure-pe-history-table: backlog
+  8c-4b-section-4-5-derivation-layouts: backlog
+  8c-5-structured-management-safety-tests: backlog
+  8c-6-enriched-stock-comparison-guide-grid: backlog
+  epic-8c-retrospective: optional
 
   # ============================================================
   # Phase 2: Portfolio & Watchlist (Epic 9)
   # ============================================================
 
   # Epic 9: Portfolio Management, Watchlists & Risk Discipline
-  # Execution strategy: Sprint A (9.1-9.5), Sprint B (9.6-9.10)
+  # Execution strategy: Sprint A (9.1-9.5), Sprint B (9.6-9.10), Sprint C (9.11-9.12)
   epic-9: backlog
   9-1-portfolio-schema-crud-api: backlog
   9-2-portfolio-configuration: backlog
@@ -133,6 +154,8 @@ development_status:
   9-8-watchlist-schema-api: backlog
   9-9-watchlist-view: backlog
   9-10-responsive-design-e2e-tests-for-portfolio-and-watchlist: backlog
+  9-11-pe-guide-lines-buy-sell-thresholds: backlog
+  9-12-quarterly-pe-tracking-price-pe-chart: backlog
   epic-9-retrospective: optional
 
   # ============================================================

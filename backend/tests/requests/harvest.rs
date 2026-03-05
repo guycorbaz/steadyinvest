@@ -64,11 +64,14 @@ async fn verify_currency_normalization_metadata() {
         let data: steady_invest_logic::HistoricalData = res.json();
         assert_eq!(data.ticker, "NESN.SW");
         assert_eq!(data.currency, "CHF");
-        
+
         // Reporting is CHF, Display is USD (default in run_harvest)
         // Check that records have exchange rates
         for record in &data.records {
-            assert!(record.exchange_rate.is_some(), "Exchange rate should be present for foreign ticker");
+            assert!(
+                record.exchange_rate.is_some(),
+                "Exchange rate should be present for foreign ticker"
+            );
         }
     })
     .await;
@@ -82,17 +85,19 @@ async fn verify_normalization_math_consistency() {
         assert_eq!(res.status_code(), 200);
 
         let mut data: steady_invest_logic::HistoricalData = res.json();
-        
+
         // Initially no display_currency is set in the response from run_harvest (None)
         // and records are NOT normalized yet in the response, but exchange rates are provided.
         let original_sales = data.records[0].sales;
-        let rate = data.records[0].exchange_rate.expect("Exchange rate missing for foreign ticker");
-        
+        let rate = data.records[0]
+            .exchange_rate
+            .expect("Exchange rate missing for foreign ticker");
+
         data.apply_normalization("USD");
-        
+
         assert_eq!(data.display_currency, Some("USD".to_string()));
         let normalized_sales = data.records[0].sales;
-        
+
         // Exactness check using rust_decimal
         assert!(normalized_sales != original_sales);
         assert_eq!(normalized_sales, (original_sales * rate).round_dp(2));

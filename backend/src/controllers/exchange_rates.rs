@@ -4,8 +4,8 @@
 //! caching and database fallback. Public endpoint — no authentication
 //! required (per architecture Story 10.3 AC).
 
-use loco_rs::prelude::*;
 use crate::services::exchange_rate_provider;
+use loco_rs::prelude::*;
 
 /// Returns current exchange rates for EUR, CHF, and USD pairs.
 ///
@@ -14,13 +14,11 @@ use crate::services::exchange_rate_provider;
 /// Response includes a `stale` flag and `rates_as_of` timestamp.
 /// Returns 503 only when no data source is available.
 #[debug_handler]
-pub async fn get_exchange_rates(
-    State(ctx): State<AppContext>,
-) -> Result<Response> {
+pub async fn get_exchange_rates(State(ctx): State<AppContext>) -> Result<Response> {
     match exchange_rate_provider::get_rates(&ctx.db).await {
         Ok(response) => {
-            let json = serde_json::to_string(&response)
-                .map_err(|e| Error::string(&e.to_string()))?;
+            let json =
+                serde_json::to_string(&response).map_err(|e| Error::string(&e.to_string()))?;
             Ok(Response::builder()
                 .status(axum::http::StatusCode::OK)
                 .header("Content-Type", "application/json")

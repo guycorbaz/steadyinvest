@@ -4,23 +4,20 @@
 //! as the live Analyst HUD, but with all controls disabled and projections frozen.
 //! Includes "Save to File" and "Export PDF" actions.
 
-use crate::components::ssg_chart::SSGChart;
 use crate::components::quality_dashboard::QualityDashboard;
+use crate::components::ssg_chart::SSGChart;
 use crate::components::valuation_panel::ValuationPanel;
+use crate::types::LockedAnalysisModel;
 use leptos::prelude::*;
 use rust_decimal::prelude::ToPrimitive;
 use steady_invest_logic::{TickerInfo, calculate_growth_analysis, project_forward};
-use crate::types::LockedAnalysisModel;
 
 /// Read-only view of a locked analysis snapshot (NAIC Figure 2.1 layout).
 ///
 /// Layout: SSGChart → Fundamental Company Data → Evaluate Management → ValuationPanel.
 /// All projections are frozen from the snapshot data.
 #[component]
-pub fn SnapshotHUD(
-    ticker: TickerInfo,
-    model: LockedAnalysisModel,
-) -> impl IntoView {
+pub fn SnapshotHUD(ticker: TickerInfo, model: LockedAnalysisModel) -> impl IntoView {
     let snapshot = model.snapshot();
     let data = snapshot.historical_data;
 
@@ -33,14 +30,27 @@ pub fn SnapshotHUD(
 
     // Precompute historical growth CAGRs for Fundamental Company Data table
     let raw_years: Vec<i32> = data.records.iter().map(|r| r.fiscal_year).collect();
-    let sales_vals: Vec<f64> = data.records.iter().map(|r| r.sales.to_f64().unwrap_or(0.0)).collect();
-    let eps_vals: Vec<f64> = data.records.iter().map(|r| r.eps.to_f64().unwrap_or(0.0)).collect();
+    let sales_vals: Vec<f64> = data
+        .records
+        .iter()
+        .map(|r| r.sales.to_f64().unwrap_or(0.0))
+        .collect();
+    let eps_vals: Vec<f64> = data
+        .records
+        .iter()
+        .map(|r| r.eps.to_f64().unwrap_or(0.0))
+        .collect();
 
     let sales_growth = calculate_growth_analysis(&raw_years, &sales_vals);
     let eps_growth = calculate_growth_analysis(&raw_years, &eps_vals);
 
-    let ptp_valid: Vec<(i32, f64)> = data.records.iter()
-        .filter_map(|r| r.pretax_income.map(|v| (r.fiscal_year, v.to_f64().unwrap_or(0.0))))
+    let ptp_valid: Vec<(i32, f64)> = data
+        .records
+        .iter()
+        .filter_map(|r| {
+            r.pretax_income
+                .map(|v| (r.fiscal_year, v.to_f64().unwrap_or(0.0)))
+        })
         .filter(|(_, v)| *v > 0.0)
         .collect();
     let ptp_years_vec: Vec<i32> = ptp_valid.iter().map(|(y, _)| *y).collect();
@@ -49,7 +59,9 @@ pub fn SnapshotHUD(
 
     let last_sales = sales_vals.last().copied().unwrap_or(0.0);
     let last_eps = eps_vals.last().copied().unwrap_or(0.0);
-    let last_ptp = data.records.last()
+    let last_ptp = data
+        .records
+        .last()
         .and_then(|r| r.pretax_income)
         .map(|v| v.to_f64().unwrap_or(0.0))
         .unwrap_or(0.0);

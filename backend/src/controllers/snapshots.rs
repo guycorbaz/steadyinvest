@@ -64,10 +64,7 @@ pub struct SnapshotSummary {
 
 impl SnapshotSummary {
     /// Build a summary from a snapshot model and its related ticker.
-    fn from_model_and_ticker(
-        m: analysis_snapshots::Model,
-        ticker: Option<tickers::Model>,
-    ) -> Self {
+    fn from_model_and_ticker(m: analysis_snapshots::Model, ticker: Option<tickers::Model>) -> Self {
         let ticker_symbol = ticker
             .map(|t| t.ticker)
             .unwrap_or_else(|| format!("ID:{}", m.ticker_id));
@@ -172,7 +169,10 @@ fn compute_metric_deltas(entries: &[HistoryEntry]) -> Vec<MetricDelta> {
             MetricDelta {
                 from_snapshot_id: prev.id,
                 to_snapshot_id: curr.id,
-                sales_cagr_delta: option_delta(prev.projected_sales_cagr, curr.projected_sales_cagr),
+                sales_cagr_delta: option_delta(
+                    prev.projected_sales_cagr,
+                    curr.projected_sales_cagr,
+                ),
                 eps_cagr_delta: option_delta(prev.projected_eps_cagr, curr.projected_eps_cagr),
                 high_pe_delta: option_delta(prev.projected_high_pe, curr.projected_high_pe),
                 low_pe_delta: option_delta(prev.projected_low_pe, curr.projected_low_pe),
@@ -201,15 +201,11 @@ fn option_delta(prev: Option<f64>, curr: Option<f64>) -> Option<f64> {
 
 /// Build a 403 Forbidden JSON response.
 fn forbidden(message: &str) -> Result<Response> {
-    Ok(Response::builder()
+    Response::builder()
         .status(axum::http::StatusCode::FORBIDDEN)
         .header("Content-Type", "application/json")
-        .body(
-            serde_json::json!({ "error": message })
-                .to_string()
-                .into(),
-        )
-        .map_err(|e| Error::string(&e.to_string()))?)
+        .body(serde_json::json!({ "error": message }).to_string().into())
+        .map_err(|e| Error::string(&e.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -218,15 +214,11 @@ fn forbidden(message: &str) -> Result<Response> {
 
 /// Build a 400 Bad Request JSON response.
 fn bad_request(message: &str) -> Result<Response> {
-    Ok(Response::builder()
+    Response::builder()
         .status(axum::http::StatusCode::BAD_REQUEST)
         .header("Content-Type", "application/json")
-        .body(
-            serde_json::json!({ "error": message })
-                .to_string()
-                .into(),
-        )
-        .map_err(|e| Error::string(&e.to_string()))?)
+        .body(serde_json::json!({ "error": message }).to_string().into())
+        .map_err(|e| Error::string(&e.to_string()))
 }
 
 /// Creates a new analysis snapshot (append-only).
@@ -331,10 +323,7 @@ pub async fn list_snapshots(
 ///
 /// **GET** `/api/v1/snapshots/:id`
 #[debug_handler]
-pub async fn get_snapshot(
-    State(ctx): State<AppContext>,
-    Path(id): Path<i32>,
-) -> Result<Response> {
+pub async fn get_snapshot(State(ctx): State<AppContext>, Path(id): Path<i32>) -> Result<Response> {
     let snapshot = analysis_snapshots::Entity::find_by_id(id)
         .filter(analysis_snapshots::Column::DeletedAt.is_null())
         .one(&ctx.db)

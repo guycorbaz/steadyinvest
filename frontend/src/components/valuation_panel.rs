@@ -5,8 +5,8 @@
 //! sell-zone (ceiling) target prices from EPS CAGR projections.
 
 use leptos::prelude::*;
-use steady_invest_logic::{HistoricalData, project_forward};
 use rust_decimal::prelude::ToPrimitive;
+use steady_invest_logic::{HistoricalData, project_forward};
 
 /// Maximum value for the High P/E range slider.
 const PE_SLIDER_MAX: f64 = 100.0;
@@ -30,10 +30,12 @@ pub fn ValuationPanel(
     future_low_pe: RwSignal<f64>,
 ) -> impl IntoView {
     let pe_analysis = data.pe_range_analysis.clone().unwrap_or_default();
-    
+
     // Calculate current TTM EPS (latest record)
     let latest_record = data.records.iter().max_by_key(|r| r.fiscal_year);
-    let current_eps = latest_record.map(|r| r.eps.to_f64().unwrap_or(0.0)).unwrap_or(0.0);
+    let current_eps = latest_record
+        .map(|r| r.eps.to_f64().unwrap_or(0.0))
+        .unwrap_or(0.0);
 
     // Calculate Projected EPS
     let projected_eps = move || {

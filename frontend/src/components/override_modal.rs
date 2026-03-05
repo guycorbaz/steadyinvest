@@ -57,9 +57,11 @@ pub fn OverrideModal(
             let ticker = ticker.clone();
             let field = field.clone();
             let note_val = note.get().trim().to_string();
-            
+
             if note_val.is_empty() {
-                set_error.set(Some("Audit note is required to explain this adjustment (AC 3).".to_string()));
+                set_error.set(Some(
+                    "Audit note is required to explain this adjustment (AC 3).".to_string(),
+                ));
                 return;
             }
 
@@ -86,10 +88,13 @@ pub fn OverrideModal(
                                 on_save.run(());
                                 on_close.run(());
                             }
-                            _ => set_error.set(Some("Failed to save override to server.".to_string())),
+                            _ => set_error
+                                .set(Some("Failed to save override to server.".to_string())),
                         }
                     }
-                    Err(_) => set_error.set(Some("Please enter a valid numeric value.".to_string())),
+                    Err(_) => {
+                        set_error.set(Some("Please enter a valid numeric value.".to_string()))
+                    }
                 }
                 set_loading.set(false);
             });
@@ -105,9 +110,7 @@ pub fn OverrideModal(
             leptos::task::spawn_local(async move {
                 set_loading.set(true);
                 let url = format!("/api/overrides/{}/{}/{}", ticker, year, field);
-                let response = gloo_net::http::Request::delete(&url)
-                    .send()
-                    .await;
+                let response = gloo_net::http::Request::delete(&url).send().await;
 
                 match response {
                     Ok(res) if res.ok() => {
@@ -128,7 +131,7 @@ pub fn OverrideModal(
                     <h3 id="override-modal-title">"Manual Override Request"</h3>
                     <button class="close-btn" on:click=move |_| on_close.run(()) aria-label="Close modal">"×"</button>
                 </header>
-                
+
                 <div class="modal-body">
                     <div class="field-meta">
                         <span class="label">"Ticker:"</span> <span>{ticker.clone()}</span>
@@ -149,8 +152,8 @@ pub fn OverrideModal(
 
                     <div class="input-group">
                         <label>"Audit Note (Required per AC 3)"</label>
-                        <textarea 
-                            prop:value=note 
+                        <textarea
+                            prop:value=note
                             on:input=move |ev| set_note.set(event_target_value(&ev))
                             placeholder="Explain why this adjustment is necessary..."
                         ></textarea>

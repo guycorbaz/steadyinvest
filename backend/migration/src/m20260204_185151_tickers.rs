@@ -23,7 +23,8 @@ impl MigrationTrait for Migration {
 
         // Seed data
         let db = m.get_connection();
-        db.execute_unprepared("
+        db.execute_unprepared(
+            "
             INSERT INTO tickers (ticker, name, exchange, currency) VALUES
             ('NESN.SW', 'Nestle', 'SMI', 'CHF'),
             ('ROG.SW', 'Roche', 'SMI', 'CHF'),
@@ -33,7 +34,9 @@ impl MigrationTrait for Migration {
             ('MSFT', 'Microsoft', 'NASDAQ', 'USD'),
             ('GOOGL', 'Alphabet', 'NASDAQ', 'USD'),
             ('AMZN', 'Amazon', 'NASDAQ', 'USD');
-        ").await?;
+        ",
+        )
+        .await?;
 
         Ok(())
     }

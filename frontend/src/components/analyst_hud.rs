@@ -4,11 +4,11 @@
 //! Fundamental Company Data table, Evaluate Management dashboard, and valuation
 //! panel into a single cohesive workspace per NAIC Figure 2.1 layout.
 
-use crate::components::ssg_chart::SSGChart;
-use crate::components::quality_dashboard::QualityDashboard;
-use crate::components::valuation_panel::ValuationPanel;
-use crate::components::override_modal::OverrideModal;
 use crate::components::lock_thesis_modal::LockThesisModal;
+use crate::components::override_modal::OverrideModal;
+use crate::components::quality_dashboard::QualityDashboard;
+use crate::components::ssg_chart::SSGChart;
+use crate::components::valuation_panel::ValuationPanel;
 use leptos::prelude::*;
 use rust_decimal::prelude::ToPrimitive;
 use steady_invest_logic::{HistoricalData, TickerInfo, calculate_growth_analysis, project_forward};
@@ -55,15 +55,28 @@ pub fn AnalystHUD(
 
     // Precompute historical growth CAGRs for Fundamental Company Data table
     let raw_years: Vec<i32> = data.records.iter().map(|r| r.fiscal_year).collect();
-    let sales_vals: Vec<f64> = data.records.iter().map(|r| r.sales.to_f64().unwrap_or(0.0)).collect();
-    let eps_vals: Vec<f64> = data.records.iter().map(|r| r.eps.to_f64().unwrap_or(0.0)).collect();
+    let sales_vals: Vec<f64> = data
+        .records
+        .iter()
+        .map(|r| r.sales.to_f64().unwrap_or(0.0))
+        .collect();
+    let eps_vals: Vec<f64> = data
+        .records
+        .iter()
+        .map(|r| r.eps.to_f64().unwrap_or(0.0))
+        .collect();
 
     let sales_growth = calculate_growth_analysis(&raw_years, &sales_vals);
     let eps_growth = calculate_growth_analysis(&raw_years, &eps_vals);
 
     // PTP growth: only include years with positive pretax_income
-    let ptp_valid: Vec<(i32, f64)> = data.records.iter()
-        .filter_map(|r| r.pretax_income.map(|v| (r.fiscal_year, v.to_f64().unwrap_or(0.0))))
+    let ptp_valid: Vec<(i32, f64)> = data
+        .records
+        .iter()
+        .filter_map(|r| {
+            r.pretax_income
+                .map(|v| (r.fiscal_year, v.to_f64().unwrap_or(0.0)))
+        })
         .filter(|(_, v)| *v > 0.0)
         .collect();
     let ptp_years_vec: Vec<i32> = ptp_valid.iter().map(|(y, _)| *y).collect();
@@ -73,7 +86,9 @@ pub fn AnalystHUD(
     // Last values for 5-year estimates
     let last_sales = sales_vals.last().copied().unwrap_or(0.0);
     let last_eps = eps_vals.last().copied().unwrap_or(0.0);
-    let last_ptp = data.records.last()
+    let last_ptp = data
+        .records
+        .last()
         .and_then(|r| r.pretax_income)
         .map(|v| v.to_f64().unwrap_or(0.0))
         .unwrap_or(0.0);

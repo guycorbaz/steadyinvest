@@ -5,7 +5,7 @@
 //! columns = fiscal years + 5 Yr Avg + Trend indicator.
 
 use leptos::prelude::*;
-use steady_invest_logic::{HistoricalData, calculate_quality_analysis, TrendIndicator};
+use steady_invest_logic::{HistoricalData, TrendIndicator, calculate_quality_analysis};
 
 /// Transposed management quality table per NAIC Section 2.
 ///
@@ -18,7 +18,10 @@ pub fn QualityDashboard(data: HistoricalData) -> impl IntoView {
 
     // Precompute all values before the view macro
     let year_headers: Vec<i32> = pts.iter().map(|p| p.year).collect();
-    let profit_values: Vec<String> = pts.iter().map(|p| format!("{:.1}%", p.profit_on_sales)).collect();
+    let profit_values: Vec<String> = pts
+        .iter()
+        .map(|p| format!("{:.1}%", p.profit_on_sales))
+        .collect();
     let roe_values: Vec<String> = pts.iter().map(|p| format!("{:.1}%", p.roe)).collect();
     let num_years = year_headers.len();
 
@@ -33,7 +36,8 @@ pub fn QualityDashboard(data: HistoricalData) -> impl IntoView {
     };
 
     // Overall trend from the most recent data point
-    let (profit_trend_class, profit_arrow) = pts.last()
+    let (profit_trend_class, profit_arrow) = pts
+        .last()
         .map(|p| match p.profit_trend {
             TrendIndicator::Up => ("trend-up", "↑"),
             TrendIndicator::Down => ("trend-down", "↓"),
@@ -41,7 +45,8 @@ pub fn QualityDashboard(data: HistoricalData) -> impl IntoView {
         })
         .unwrap_or(("trend-stable", "→"));
 
-    let (roe_trend_class, roe_arrow) = pts.last()
+    let (roe_trend_class, roe_arrow) = pts
+        .last()
         .map(|p| match p.roe_trend {
             TrendIndicator::Up => ("trend-up", "↑"),
             TrendIndicator::Down => ("trend-down", "↓"),

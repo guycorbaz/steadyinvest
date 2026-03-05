@@ -3,9 +3,9 @@
 //! Contains DTOs that mirror backend response shapes but are used only on the
 //! client side (compiled to WASM).
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use steady_invest_logic::AnalysisSnapshot;
-use chrono::{DateTime, Utc};
 
 /// Client-side representation of a locked analysis record from the backend.
 ///

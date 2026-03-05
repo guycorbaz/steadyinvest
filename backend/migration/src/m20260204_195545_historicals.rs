@@ -52,4 +52,3 @@ enum Historicals {
     PriceLow,
     Currency,
 }
-

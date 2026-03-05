@@ -12,10 +12,10 @@
 //! - [`reporting`]               — Generates PDF/image SSG report exports
 
 pub mod audit_service;
-pub mod harvest;
 pub mod exchange;
 pub mod exchange_rate_provider;
-pub mod reporting;
+pub mod harvest;
 pub mod provider_health;
+pub mod reporting;
 #[cfg(test)]
 mod reporting_test;

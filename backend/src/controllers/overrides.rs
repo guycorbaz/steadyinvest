@@ -3,9 +3,9 @@
 //! Provides CRUD endpoints for analyst overrides of historical financial data.
 //! An audit note is required on every override to maintain a review trail.
 
+use crate::models::historicals_overrides;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
-use crate::models::historicals_overrides;
 
 /// Request body for creating or updating a manual data override.
 #[derive(Debug, Deserialize, Serialize)]
@@ -36,11 +36,16 @@ pub async fn save_override(
     State(ctx): State<AppContext>,
     Json(req): Json<OverrideRequest>,
 ) -> Result<Response> {
-    if req.note.as_ref().map(|n| n.trim().is_empty()).unwrap_or(true) {
+    if req
+        .note
+        .as_ref()
+        .map(|n| n.trim().is_empty())
+        .unwrap_or(true)
+    {
         return Err(Error::string("Audit note is required (AC 3)"));
     }
     let ticker = req.ticker.to_uppercase();
-    
+
     // Find existing or create new
     let existing = historicals_overrides::Entity::find()
         .filter(historicals_overrides::Column::Ticker.eq(&ticker))
@@ -85,7 +90,7 @@ pub async fn delete_override(
     Path((ticker, year, field)): Path<(String, i32, String)>,
 ) -> Result<Response> {
     let ticker = ticker.to_uppercase();
-    
+
     let existing = historicals_overrides::Entity::find()
         .filter(historicals_overrides::Column::Ticker.eq(&ticker))
         .filter(historicals_overrides::Column::FiscalYear.eq(year))

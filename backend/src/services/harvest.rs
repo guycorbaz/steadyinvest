@@ -4,12 +4,12 @@
 //! fetch yearly records, apply manual overrides, adjust for splits, compute
 //! P/E ranges, and persist to the database.
 
-use loco_rs::prelude::*;
 use crate::models::{historicals, tickers};
-use steady_invest_logic::{HistoricalData, HistoricalYearlyData};
-use rust_decimal::prelude::*;
 use chrono::Datelike;
+use loco_rs::prelude::*;
+use rust_decimal::prelude::*;
 use std::time::Duration;
+use steady_invest_logic::{HistoricalData, HistoricalYearlyData};
 use tokio::time::timeout;
 
 /// Executes the complete data harvest pipeline for a single ticker.
@@ -75,7 +75,9 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
             let mut record = HistoricalYearlyData {
                 fiscal_year: year,
                 sales: Decimal::from(1000 + (11 - i) * 123),
-                eps: Decimal::from_f32(1.5 * (11 - i) as f32).unwrap_or_default().round_dp(2),
+                eps: Decimal::from_f32(1.5 * (11 - i) as f32)
+                    .unwrap_or_default()
+                    .round_dp(2),
                 price_high: Decimal::from(150 + (11 - i) * 15),
                 price_low: Decimal::from(100 + (11 - i) * 8),
                 adjustment_factor: factor,
@@ -93,7 +95,7 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
                     value: ovr.value,
                     note: ovr.note.clone(),
                 };
-                
+
                 match ovr.field_name.as_str() {
                     "sales" => record.sales = ovr.value,
                     "eps" => record.eps = ovr.value,
@@ -131,12 +133,12 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
         pe_range_analysis: None,
     };
     data.apply_adjustments();
-    
+
     // 4. Compute P/E Analysis (AC 1, 2)
     data.pe_range_analysis = Some(steady_invest_logic::calculate_pe_ranges(&data));
 
     let db = &ctx.db;
-    
+
     // 4. Persist to DB
     for rec in &data.records {
         let active_model = historicals::ActiveModel {
@@ -154,13 +156,13 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
             total_equity: ActiveValue::set(rec.total_equity),
             ..Default::default()
         };
-        
+
         let existing = historicals::Entity::find()
             .filter(historicals::Column::Ticker.eq(ticker))
             .filter(historicals::Column::FiscalYear.eq(rec.fiscal_year))
             .one(db)
             .await?;
-            
+
         if existing.is_none() {
             active_model.insert(db).await?;
         }
@@ -174,8 +176,9 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
             &ticker_info.exchange,
             "Integrity",
             "Simulated data integrity gap detected",
-        ).await;
+        )
+        .await;
     }
-    
+
     Ok(data)
 }

@@ -1,3 +1,13 @@
+#![allow(
+    dead_code,
+    clippy::clone_on_copy,
+    clippy::collapsible_if,
+    clippy::manual_clamp,
+    clippy::needless_question_mark,
+    clippy::question_mark,
+    clippy::unit_arg,
+    clippy::unused_unit
+)]
 //! # SteadyInvest Frontend
 //!
 //! Leptos 0.8 CSR (Client-Side Rendered) single-page application for
@@ -15,18 +25,18 @@ use leptos_meta::*;
 use leptos_router::{components::*, path};
 
 mod components;
-use crate::components::footer::Footer;
 use crate::components::command_strip::CommandStrip;
+use crate::components::footer::Footer;
 mod pages;
+pub mod persistence;
 pub mod state;
 pub mod types;
-pub mod persistence;
 
-use crate::pages::home::Home;
-use crate::pages::system_monitor::SystemMonitor;
 use crate::pages::audit_log::AuditLog;
-use crate::pages::library::Library;
 use crate::pages::comparison::Comparison;
+use crate::pages::home::Home;
+use crate::pages::library::Library;
+use crate::pages::system_monitor::SystemMonitor;
 
 /// Reactive context for the currently viewed locked analysis ID.
 ///

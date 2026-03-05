@@ -173,12 +173,8 @@ impl MigrationTrait for Migration {
         .await?;
 
         // Drop analysis_snapshots
-        m.drop_table(
-            Table::drop()
-                .table(AnalysisSnapshots::Table)
-                .to_owned(),
-        )
-        .await?;
+        m.drop_table(Table::drop().table(AnalysisSnapshots::Table).to_owned())
+            .await?;
 
         Ok(())
     }

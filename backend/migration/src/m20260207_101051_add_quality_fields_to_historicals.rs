@@ -10,9 +10,21 @@ impl MigrationTrait for Migration {
         m.alter_table(
             Table::alter()
                 .table(Alias::new("historicals"))
-                .add_column(ColumnDef::new(Alias::new("net_income")).decimal_len(19, 4).null())
-                .add_column(ColumnDef::new(Alias::new("pretax_income")).decimal_len(19, 4).null())
-                .add_column(ColumnDef::new(Alias::new("total_equity")).decimal_len(19, 4).null())
+                .add_column(
+                    ColumnDef::new(Alias::new("net_income"))
+                        .decimal_len(19, 4)
+                        .null(),
+                )
+                .add_column(
+                    ColumnDef::new(Alias::new("pretax_income"))
+                        .decimal_len(19, 4)
+                        .null(),
+                )
+                .add_column(
+                    ColumnDef::new(Alias::new("total_equity"))
+                        .decimal_len(19, 4)
+                        .null(),
+                )
                 .to_owned(),
         )
         .await?;

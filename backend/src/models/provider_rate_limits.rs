@@ -1,7 +1,7 @@
 //! Provider rate-limit model — tracks API quota consumption per provider.
 
-use loco_rs::prelude::*;
 pub use super::_entities::provider_rate_limits::{ActiveModel, Entity, Model};
+use loco_rs::prelude::*;
 
 impl Model {
     /// Finds a provider rate-limit record by provider name.
@@ -28,10 +28,12 @@ impl Model {
         };
         active_model.quota_consumed = Set(consumed);
         active_model.last_updated = Set(chrono::Utc::now().naive_utc());
-        
+
         let saved = active_model.save(db).await?;
         // Use sea_orm::TryIntoModel
         use sea_orm::TryIntoModel;
-        Ok(saved.try_into_model().map_err(|_| DbErr::Custom("Failed to convert ActiveModel to Model".to_string()))?)
+        saved
+            .try_into_model()
+            .map_err(|_| DbErr::Custom("Failed to convert ActiveModel to Model".to_string()))
     }
 }

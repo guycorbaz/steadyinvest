@@ -1,5 +1,7 @@
 use backend::app::App;
-use backend::services::exchange_rate_provider::{self, CachedRates, ExchangeRatePair, ExchangeRateResponse};
+use backend::services::exchange_rate_provider::{
+    self, CachedRates, ExchangeRatePair, ExchangeRateResponse,
+};
 use chrono::Utc;
 use loco_rs::testing::prelude::request;
 use rust_decimal::Decimal;
@@ -18,18 +20,42 @@ fn restore_provider_url() {
 
 /// Builds a `CachedRates` with realistic EUR/CHF/USD pairs, marked as fresh.
 fn fresh_cached_rates() -> CachedRates {
-    let eur_chf = Decimal::new(9400, 4);  // 0.9400
+    let eur_chf = Decimal::new(9400, 4); // 0.9400
     let eur_usd = Decimal::new(10800, 4); // 1.0800
     let one = Decimal::ONE;
 
     CachedRates {
         rates: vec![
-            ExchangeRatePair { from_currency: "EUR".into(), to_currency: "CHF".into(), rate: eur_chf },
-            ExchangeRatePair { from_currency: "EUR".into(), to_currency: "USD".into(), rate: eur_usd },
-            ExchangeRatePair { from_currency: "CHF".into(), to_currency: "EUR".into(), rate: one / eur_chf },
-            ExchangeRatePair { from_currency: "USD".into(), to_currency: "EUR".into(), rate: one / eur_usd },
-            ExchangeRatePair { from_currency: "CHF".into(), to_currency: "USD".into(), rate: eur_usd / eur_chf },
-            ExchangeRatePair { from_currency: "USD".into(), to_currency: "CHF".into(), rate: eur_chf / eur_usd },
+            ExchangeRatePair {
+                from_currency: "EUR".into(),
+                to_currency: "CHF".into(),
+                rate: eur_chf,
+            },
+            ExchangeRatePair {
+                from_currency: "EUR".into(),
+                to_currency: "USD".into(),
+                rate: eur_usd,
+            },
+            ExchangeRatePair {
+                from_currency: "CHF".into(),
+                to_currency: "EUR".into(),
+                rate: one / eur_chf,
+            },
+            ExchangeRatePair {
+                from_currency: "USD".into(),
+                to_currency: "EUR".into(),
+                rate: one / eur_usd,
+            },
+            ExchangeRatePair {
+                from_currency: "CHF".into(),
+                to_currency: "USD".into(),
+                rate: eur_usd / eur_chf,
+            },
+            ExchangeRatePair {
+                from_currency: "USD".into(),
+                to_currency: "CHF".into(),
+                rate: eur_chf / eur_usd,
+            },
         ],
         fetched_at: Utc::now(),
         rate_date: "2026-02-12".to_string(),
@@ -78,15 +104,19 @@ async fn exchange_rates_returns_required_pairs() {
 
         // Verify all expected currency pairs exist
         let expected_pairs = [
-            ("EUR", "CHF"), ("EUR", "USD"),
-            ("CHF", "EUR"), ("USD", "EUR"),
-            ("CHF", "USD"), ("USD", "CHF"),
+            ("EUR", "CHF"),
+            ("EUR", "USD"),
+            ("CHF", "EUR"),
+            ("USD", "EUR"),
+            ("CHF", "USD"),
+            ("USD", "CHF"),
         ];
 
         for (from, to) in &expected_pairs {
-            let found = body.rates.iter().any(|r| {
-                r.from_currency == *from && r.to_currency == *to
-            });
+            let found = body
+                .rates
+                .iter()
+                .any(|r| r.from_currency == *from && r.to_currency == *to);
             assert!(found, "Missing pair: {from}→{to}");
         }
 
@@ -95,7 +125,9 @@ async fn exchange_rates_returns_required_pairs() {
             assert!(
                 pair.rate > Decimal::ZERO,
                 "Rate for {}→{} should be positive, got {}",
-                pair.from_currency, pair.to_currency, pair.rate,
+                pair.from_currency,
+                pair.to_currency,
+                pair.rate,
             );
         }
 
@@ -119,19 +151,30 @@ async fn exchange_rates_falls_back_to_db_rates() {
 
         let body: ExchangeRateResponse = res.json();
         assert!(body.stale, "DB fallback should be stale");
-        assert_eq!(body.rates.len(), 6, "Should have 6 directional pairs from DB");
+        assert_eq!(
+            body.rates.len(),
+            6,
+            "Should have 6 directional pairs from DB"
+        );
 
         // rates_as_of should be a fiscal year string (e.g., "2025")
-        let year: i32 = body.rates_as_of.parse()
+        let year: i32 = body
+            .rates_as_of
+            .parse()
             .expect("DB fallback rates_as_of should be a fiscal year");
-        assert!(year >= 2016 && year <= 2030, "Year should be reasonable: {year}");
+        assert!(
+            year >= 2016 && year <= 2030,
+            "Year should be reasonable: {year}"
+        );
 
         // Verify rates are positive
         for pair in &body.rates {
             assert!(
                 pair.rate > Decimal::ZERO,
                 "DB fallback rate for {}→{} should be positive, got {}",
-                pair.from_currency, pair.to_currency, pair.rate,
+                pair.from_currency,
+                pair.to_currency,
+                pair.rate,
             );
         }
 
@@ -151,8 +194,8 @@ async fn exchange_rates_returns_503_when_no_data() {
         exchange_rate_provider::clear_cache().await;
 
         // Delete all exchange rates from the DB so there's no fallback
-        use sea_orm::EntityTrait;
         use backend::models::_entities::exchange_rates;
+        use sea_orm::EntityTrait;
         exchange_rates::Entity::delete_many()
             .exec(&ctx.db)
             .await
@@ -160,11 +203,18 @@ async fn exchange_rates_returns_503_when_no_data() {
 
         // With empty cache + empty DB + unreachable provider → must get 503
         let res = _request.get("/api/v1/exchange-rates").await;
-        assert_eq!(res.status_code(), 503, "Should return 503 when all sources fail");
+        assert_eq!(
+            res.status_code(),
+            503,
+            "Should return 503 when all sources fail"
+        );
 
         let body: serde_json::Value = res.json();
         assert!(
-            body["error"].as_str().unwrap().contains("temporarily unavailable"),
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("temporarily unavailable"),
             "503 body should contain unavailable message, got: {body}",
         );
 

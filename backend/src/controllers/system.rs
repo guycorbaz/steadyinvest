@@ -3,10 +3,10 @@
 //! Provides endpoints for checking API provider health, listing audit logs,
 //! and exporting audit data as CSV. All routes live under `/api/v1/system`.
 
-use loco_rs::prelude::*;
-use serde::{Deserialize, Serialize};
 use crate::models::audit_logs;
 use crate::services::provider_health;
+use loco_rs::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// API response DTO for audit log records.
 #[derive(Serialize, Deserialize)]
@@ -39,41 +39,45 @@ impl From<audit_logs::Model> for AuditResponse {
 }
 
 /// System health and monitoring controller.
-/// 
-/// This controller provides endpoints for monitoring API health, 
+///
+/// This controller provides endpoints for monitoring API health,
 /// listing audit logs, and exporting data for administrative review.
-/// 
+///
 /// All endpoints are restricted to local subnets via security middleware.
-pub async fn health(
-    State(ctx): State<AppContext>,
-) -> Result<Response> {
+pub async fn health(State(ctx): State<AppContext>) -> Result<Response> {
     let health_data = provider_health::check_providers(&ctx.db).await;
     format::json(health_data)
 }
 
 /// List data integrity audit logs.
-/// 
+///
 /// Returns a list of the 100 most recent anomalies and manual overrides.
-pub async fn list_audit_logs(
-    State(ctx): State<AppContext>,
-) -> Result<Response> {
+pub async fn list_audit_logs(State(ctx): State<AppContext>) -> Result<Response> {
     let logs = audit_logs::Model::find_recent(&ctx.db, 100).await?;
     let response: Vec<AuditResponse> = logs.into_iter().map(AuditResponse::from).collect();
     format::json(response)
 }
 
 /// Export audit logs as CSV.
-/// 
+///
 /// Generates a standardized CSV export of the 5000 most recent audit events.
-pub async fn export_audit_logs(
-    State(ctx): State<AppContext>,
-) -> Result<Response> {
+pub async fn export_audit_logs(State(ctx): State<AppContext>) -> Result<Response> {
     let logs = audit_logs::Model::find_recent(&ctx.db, 5000).await?;
-    
+
     let mut wtr = csv::Writer::from_writer(Vec::new());
-    wtr.write_record(&["ID", "Ticker", "Exchange", "Field", "Old", "New", "Event", "Source", "Timestamp"])
-        .map_err(|e| Error::BadRequest(e.to_string()))?;
-        
+    wtr.write_record([
+        "ID",
+        "Ticker",
+        "Exchange",
+        "Field",
+        "Old",
+        "New",
+        "Event",
+        "Source",
+        "Timestamp",
+    ])
+    .map_err(|e| Error::BadRequest(e.to_string()))?;
+
     for log in logs {
         wtr.write_record(&[
             log.id.to_string(),
@@ -85,14 +89,20 @@ pub async fn export_audit_logs(
             log.event_type,
             log.source,
             log.created_at.to_string(),
-        ]).map_err(|e| Error::BadRequest(e.to_string()))?;
+        ])
+        .map_err(|e| Error::BadRequest(e.to_string()))?;
     }
-    
-    let csv_data = wtr.into_inner().map_err(|e| Error::BadRequest(e.to_string()))? ;
-    
+
+    let csv_data = wtr
+        .into_inner()
+        .map_err(|e| Error::BadRequest(e.to_string()))?;
+
     Response::builder()
         .header("Content-Type", "text/csv")
-        .header("Content-Disposition", "attachment; filename=\"audit_logs.csv\"")
+        .header(
+            "Content-Disposition",
+            "attachment; filename=\"audit_logs.csv\"",
+        )
         .body(axum::body::Body::from(csv_data))
         .map_err(|e| Error::BadRequest(e.to_string()))
 }

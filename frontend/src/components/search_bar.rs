@@ -4,9 +4,9 @@
 //! (minimum 2 characters). Also includes an "Open from file" button for
 //! importing previously saved analysis snapshots.
 
+use gloo_net::http::Request;
 use leptos::prelude::*;
 use steady_invest_logic::TickerInfo;
-use gloo_net::http::Request;
 
 /// Ticker search input with autocomplete results.
 ///
@@ -15,10 +15,7 @@ use gloo_net::http::Request;
 /// * `on_select` — Called with the chosen [`TickerInfo`] when a result is clicked.
 /// * `on_import` — Called with a deserialized snapshot when a file is imported.
 #[component]
-pub fn SearchBar<F, G>(
-    on_select: F,
-    on_import: G,
-) -> impl IntoView
+pub fn SearchBar<F, G>(on_select: F, on_import: G) -> impl IntoView
 where
     F: Fn(TickerInfo) + Send + Sync + Clone + 'static,
     G: Fn(steady_invest_logic::AnalysisSnapshot) + Send + Sync + Clone + 'static,
@@ -65,8 +62,8 @@ where
                     }.into_any()
                 } else {
                     view! {
-                        <button 
-                            class="open-analysis-btn" 
+                        <button
+                            class="open-analysis-btn"
                             title="Open Analysis from File"
                             on:click={
                                 let on_import = on_import.clone();

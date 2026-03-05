@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 /// URL-encodes a string for use in query parameters.
 fn encode_uri(s: &str) -> String {
-    js_sys::encode_uri_component(s).as_string().unwrap_or_default()
+    js_sys::encode_uri_component(s)
+        .as_string()
+        .unwrap_or_default()
 }
 
 /// A single audit log entry as returned by the backend API.

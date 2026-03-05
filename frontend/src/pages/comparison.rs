@@ -20,8 +20,8 @@ use leptos_router::hooks::use_location;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use steady_invest_logic::{
-    compute_upside_downside_from_snapshot, convert_monetary_value, extract_snapshot_prices,
-    AnalysisSnapshot,
+    AnalysisSnapshot, compute_upside_downside_from_snapshot, convert_monetary_value,
+    extract_snapshot_prices,
 };
 
 // ---------------------------------------------------------------------------
@@ -309,21 +309,16 @@ fn sort_entries(entries: &mut [ComparisonEntry], col: &SortColumn, ascending: bo
             SortColumn::EpsCagr => cmp_opt_f64(a.projected_eps_cagr, b.projected_eps_cagr),
             SortColumn::HighPe => cmp_opt_f64(a.projected_high_pe, b.projected_high_pe),
             SortColumn::LowPe => cmp_opt_f64(a.projected_low_pe, b.projected_low_pe),
-            SortColumn::ValuationZone => {
-                a.valuation_zone
-                    .as_deref()
-                    .unwrap_or("")
-                    .cmp(b.valuation_zone.as_deref().unwrap_or(""))
-            }
+            SortColumn::ValuationZone => a
+                .valuation_zone
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.valuation_zone.as_deref().unwrap_or("")),
             SortColumn::UpsideDownside => {
                 cmp_opt_f64(a.upside_downside_ratio, b.upside_downside_ratio)
             }
         };
-        if ascending {
-            cmp
-        } else {
-            cmp.reverse()
-        }
+        if ascending { cmp } else { cmp.reverse() }
     });
 }
 
@@ -418,8 +413,7 @@ async fn fetch_comparison_data(search: &str) -> Result<FetchedData, String> {
                 .await
                 .map_err(|e| e.to_string())?;
             if resp.ok() {
-                let full: SnapshotFullResponse =
-                    resp.json().await.map_err(|e| e.to_string())?;
+                let full: SnapshotFullResponse = resp.json().await.map_err(|e| e.to_string())?;
                 entries.push(entry_from_full_snapshot(full));
             }
             // Silently skip 404s (deleted snapshots)

@@ -4,21 +4,18 @@
 //! (RFC 1918) IPv4 addresses.
 
 use axum::{
+    extract::ConnectInfo,
     middleware::Next,
     response::{IntoResponse, Response},
-    extract::ConnectInfo,
 };
 use std::net::SocketAddr;
 
 /// Middleware to restrict access to local subnets.
-/// 
-/// This middleware extracts the connection info and verifies that the 
+///
+/// This middleware extracts the connection info and verifies that the
 /// incoming IP address is either a loopback address or a private local address.
 /// If access is denied, it returns a 401 Unauthorized response.
-pub async fn auth_local_ip(
-    req: axum::extract::Request,
-    next: Next,
-) -> Response {
+pub async fn auth_local_ip(req: axum::extract::Request, next: Next) -> Response {
     // Look up ConnectInfo in extensions manually to avoid extractor failures in tests
     if let Some(ConnectInfo(addr)) = req.extensions().get::<ConnectInfo<SocketAddr>>() {
         let ip = addr.ip();
@@ -29,10 +26,11 @@ pub async fn auth_local_ip(
                     "error": "unauthorized",
                     "description": "Access restricted to local subnets"
                 })),
-            ).into_response();
+            )
+                .into_response();
         }
     }
-    
+
     next.run(req).await
 }
 

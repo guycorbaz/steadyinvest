@@ -3,8 +3,8 @@
 //! Wraps the `historicals` entity for storing per-ticker, per-year financial
 //! records (sales, EPS, price high/low, income, equity).
 
-use sea_orm::entity::prelude::*;
 pub use super::_entities::historicals::{self, ActiveModel, Column, Entity, Model};
+use sea_orm::entity::prelude::*;
 /// Type alias for the historicals entity.
 pub type Historicals = Entity;
 

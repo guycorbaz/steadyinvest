@@ -29,12 +29,13 @@ pub struct CompactCardData {
 /// Used in the Library grid and Comparison view.
 /// Click triggers `on_click` with the snapshot ID for navigation.
 #[component]
-pub fn CompactAnalysisCard(
-    data: CompactCardData,
-    on_click: Callback<i32>,
-) -> impl IntoView {
+pub fn CompactAnalysisCard(data: CompactCardData, on_click: Callback<i32>) -> impl IntoView {
     let id = data.id;
-    let lock_icon = if data.thesis_locked { "\u{1f512}" } else { "\u{1f513}" };
+    let lock_icon = if data.thesis_locked {
+        "\u{1f512}"
+    } else {
+        "\u{1f513}"
+    };
     let lock_class = if data.thesis_locked {
         "lock-badge locked"
     } else {
@@ -78,10 +79,7 @@ pub fn CompactAnalysisCard(
     };
 
     // Monetary values: current price + target range
-    let currency_prefix = data
-        .display_currency
-        .as_deref()
-        .unwrap_or("");
+    let currency_prefix = data.display_currency.as_deref().unwrap_or("");
     let price_text = data
         .current_price
         .map(|p| format!("{} {:.2}", currency_prefix, p))

@@ -33,7 +33,8 @@ impl MigrationTrait for Migration {
 
         // Seed some historical data for testing
         let db = m.get_connection();
-        db.execute_unprepared("
+        db.execute_unprepared(
+            "
             INSERT INTO exchange_rates (from_currency, to_currency, fiscal_year, rate) VALUES
             ('CHF', 'USD', 2025, 1.15), ('CHF', 'USD', 2024, 1.12), ('CHF', 'USD', 2023, 1.10),
             ('CHF', 'USD', 2022, 1.05), ('CHF', 'USD', 2021, 1.09), ('CHF', 'USD', 2020, 1.07),
@@ -43,7 +44,9 @@ impl MigrationTrait for Migration {
             ('EUR', 'USD', 2022, 1.05), ('EUR', 'USD', 2021, 1.18), ('EUR', 'USD', 2020, 1.14),
             ('EUR', 'USD', 2019, 1.12), ('EUR', 'USD', 2018, 1.18), ('EUR', 'USD', 2017, 1.13),
             ('EUR', 'USD', 2016, 1.11);
-        ").await?;
+        ",
+        )
+        .await?;
 
         Ok(())
     }
@@ -63,4 +66,3 @@ enum ExchangeRates {
     FiscalYear,
     Rate,
 }
-

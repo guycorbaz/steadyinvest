@@ -27,8 +27,8 @@
 //! Financial values use [`rust_decimal::Decimal`] for precision; intermediate
 //! math (trendlines, CAGR) uses `f64` where acceptable.
 
-use serde::{Deserialize, Serialize};
 use rust_decimal::prelude::ToPrimitive;
+use serde::{Deserialize, Serialize};
 
 /// Basic identity information for a security ticker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -144,9 +144,15 @@ impl HistoricalData {
                 record.eps *= rate;
                 record.price_high *= rate;
                 record.price_low *= rate;
-                if let Some(ref mut val) = record.net_income { *val *= rate; }
-                if let Some(ref mut val) = record.pretax_income { *val *= rate; }
-                if let Some(ref mut val) = record.total_equity { *val *= rate; }
+                if let Some(ref mut val) = record.net_income {
+                    *val *= rate;
+                }
+                if let Some(ref mut val) = record.pretax_income {
+                    *val *= rate;
+                }
+                if let Some(ref mut val) = record.total_equity {
+                    *val *= rate;
+                }
             }
         }
         self.display_currency = Some(target_currency.to_string());
@@ -290,13 +296,13 @@ pub struct AnalysisSnapshot {
 /// ```
 pub fn calculate_pe_ranges(data: &HistoricalData) -> PeRangeAnalysis {
     let mut eligible_records = data.records.clone();
-    
+
     // Sort chronologically to identify the "last" years reliably
     eligible_records.sort_by_key(|r| r.fiscal_year);
-    
+
     // Take the last 5 records per NAIC SSG Section 3 (5-year P/E history)
     let len = eligible_records.len();
-    let start_idx = if len > 5 { len - 5 } else { 0 };
+    let start_idx = len.saturating_sub(5);
     let recent_records = &eligible_records[start_idx..];
 
     let mut points = Vec::new();
@@ -389,7 +395,9 @@ pub fn calculate_quality_analysis(data: &HistoricalData) -> QualityAnalysis {
     for record in sorted_records {
         let roe = if let (Some(net), Some(equity)) = (record.net_income, record.total_equity) {
             if !equity.is_zero() {
-                (net / equity * rust_decimal::Decimal::from(100)).to_f64().unwrap_or(0.0)
+                (net / equity * rust_decimal::Decimal::from(100))
+                    .to_f64()
+                    .unwrap_or(0.0)
             } else {
                 0.0
             }
@@ -399,7 +407,9 @@ pub fn calculate_quality_analysis(data: &HistoricalData) -> QualityAnalysis {
 
         let profit_on_sales = if !record.sales.is_zero() {
             if let Some(pretax) = record.pretax_income {
-                (pretax / record.sales * rust_decimal::Decimal::from(100)).to_f64().unwrap_or(0.0)
+                (pretax / record.sales * rust_decimal::Decimal::from(100))
+                    .to_f64()
+                    .unwrap_or(0.0)
             } else {
                 0.0
             }
@@ -691,7 +701,7 @@ pub fn calculate_growth_analysis(years: &[i32], values: &[f64]) -> TrendAnalysis
     let n = (years.len() - 1) as f64;
     let start_val = values[0];
     let end_val = *values.last().unwrap();
-    
+
     let cagr = if start_val > 0.0 && end_val > 0.0 {
         ((end_val / start_val).powf(1.0 / n) - 1.0) * 100.0
     } else {
@@ -721,7 +731,10 @@ pub fn calculate_growth_analysis(years: &[i32], values: &[f64]) -> TrendAnalysis
     }
 
     if n_pts < 2.0 {
-        return TrendAnalysis { cagr, trendline: Vec::new() };
+        return TrendAnalysis {
+            cagr,
+            trendline: Vec::new(),
+        };
     }
 
     let denominator = n_pts * sum_xx - sum_x * sum_x;
@@ -729,12 +742,13 @@ pub fn calculate_growth_analysis(years: &[i32], values: &[f64]) -> TrendAnalysis
         let m = (n_pts * sum_xy - sum_x * sum_y) / denominator;
         let b = (sum_y - m * sum_x) / n_pts;
 
-        years.iter().map(|&year| {
-            TrendPoint {
+        years
+            .iter()
+            .map(|&year| TrendPoint {
                 year,
                 value: (m * year as f64 + b).exp(),
-            }
-        }).collect()
+            })
+            .collect()
     } else {
         Vec::new()
     };
@@ -803,21 +817,19 @@ mod tests {
             display_currency: None,
             is_complete: true,
             is_split_adjusted: true,
-            records: vec![
-                HistoricalYearlyData {
-                    fiscal_year: 2021,
-                    sales: Decimal::from(100),
-                    eps: Decimal::from(10),
-                    price_high: Decimal::from(1000),
-                    price_low: Decimal::from(800),
-                    adjustment_factor: Decimal::ONE,
-                    exchange_rate: Some(Decimal::new(11, 1)), // 1.1
-                    net_income: None,
-                    pretax_income: None,
-                    total_equity: None,
-                    overrides: vec![],
-                },
-            ],
+            records: vec![HistoricalYearlyData {
+                fiscal_year: 2021,
+                sales: Decimal::from(100),
+                eps: Decimal::from(10),
+                price_high: Decimal::from(1000),
+                price_low: Decimal::from(800),
+                adjustment_factor: Decimal::ONE,
+                exchange_rate: Some(Decimal::new(11, 1)), // 1.1
+                net_income: None,
+                pretax_income: None,
+                total_equity: None,
+                overrides: vec![],
+            }],
             pe_range_analysis: None,
         };
 
@@ -1111,12 +1123,12 @@ mod tests {
         assert!(is_valid_currency_code("CHF"));
         assert!(is_valid_currency_code("USD"));
         assert!(is_valid_currency_code("EUR"));
-        assert!(!is_valid_currency_code("us"));      // too short + lowercase
-        assert!(!is_valid_currency_code("usd"));     // lowercase
-        assert!(!is_valid_currency_code("USDX"));    // too long
-        assert!(!is_valid_currency_code("123"));     // digits
-        assert!(!is_valid_currency_code(""));        // empty
-        assert!(!is_valid_currency_code("U D"));     // contains space
+        assert!(!is_valid_currency_code("us")); // too short + lowercase
+        assert!(!is_valid_currency_code("usd")); // lowercase
+        assert!(!is_valid_currency_code("USDX")); // too long
+        assert!(!is_valid_currency_code("123")); // digits
+        assert!(!is_valid_currency_code("")); // empty
+        assert!(!is_valid_currency_code("U D")); // contains space
     }
 
     #[test]
@@ -1159,8 +1171,14 @@ mod tests {
         let json = serde_json::to_string(&snapshot).unwrap();
         let deserialized: AnalysisSnapshot = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(snapshot.historical_data.ticker, deserialized.historical_data.ticker);
-        assert_eq!(snapshot.projected_sales_cagr, deserialized.projected_sales_cagr);
+        assert_eq!(
+            snapshot.historical_data.ticker,
+            deserialized.historical_data.ticker
+        );
+        assert_eq!(
+            snapshot.projected_sales_cagr,
+            deserialized.projected_sales_cagr
+        );
         assert_eq!(snapshot.projected_eps_cagr, deserialized.projected_eps_cagr);
         assert_eq!(snapshot.projected_ptp_cagr, deserialized.projected_ptp_cagr);
         assert_eq!(snapshot.projected_high_pe, deserialized.projected_high_pe);
@@ -1199,11 +1217,11 @@ mod tests {
         // High PEs: 28.0 + 27.0 + 28.0 + 29.0 + 27.5 = 139.5, avg = 27.9
         // Low PEs:  20.0 + 19.0 + 21.0 + 20.0 + 20.0 = 100.0, avg = 20.0
         let years_data: [(i32, i64, i64, i64); 5] = [
-            (2011, 4, 112, 80),   // H=28.0, L=20.0
-            (2012, 4, 108, 76),   // H=27.0, L=19.0
-            (2013, 4, 112, 84),   // H=28.0, L=21.0
-            (2014, 4, 116, 80),   // H=29.0, L=20.0
-            (2015, 4, 110, 80),   // H=27.5, L=20.0
+            (2011, 4, 112, 80), // H=28.0, L=20.0
+            (2012, 4, 108, 76), // H=27.0, L=19.0
+            (2013, 4, 112, 84), // H=28.0, L=21.0
+            (2014, 4, 116, 80), // H=29.0, L=20.0
+            (2015, 4, 110, 80), // H=27.5, L=20.0
         ];
         for &(year, eps, high, low) in &years_data {
             data.records.push(HistoricalYearlyData {
@@ -1223,10 +1241,16 @@ mod tests {
         assert_eq!(analysis.points[4].year, 2015);
 
         // Match handbook averages (Figure 2.3)
-        assert!((analysis.avg_high_pe - 27.9).abs() < 0.001,
-            "Avg High P/E: expected 27.9, got {}", analysis.avg_high_pe);
-        assert!((analysis.avg_low_pe - 20.0).abs() < 0.001,
-            "Avg Low P/E: expected 20.0, got {}", analysis.avg_low_pe);
+        assert!(
+            (analysis.avg_high_pe - 27.9).abs() < 0.001,
+            "Avg High P/E: expected 27.9, got {}",
+            analysis.avg_high_pe
+        );
+        assert!(
+            (analysis.avg_low_pe - 20.0).abs() < 0.001,
+            "Avg Low P/E: expected 20.0, got {}",
+            analysis.avg_low_pe
+        );
     }
 
     /// Verify NAIC Section 4A forecast price formula.
@@ -1240,8 +1264,12 @@ mod tests {
 
         let computed = avg_high_pe * estimated_high_eps;
         // Exact = 261.423; handbook rounds to 261.3
-        assert!((computed - expected_forecast).abs() < 0.2,
-            "Forecast High: expected ~{}, got {:.1}", expected_forecast, computed);
+        assert!(
+            (computed - expected_forecast).abs() < 0.2,
+            "Forecast High: expected ~{}, got {:.1}",
+            expected_forecast,
+            computed
+        );
     }
 
     /// Verify NAIC upside/downside ratio calculation.
@@ -1253,18 +1281,22 @@ mod tests {
         let forecast_high = 261.3;
         let forecast_low = 116.4;
 
-        let ratio = calculate_upside_downside_ratio(
-            current_price, forecast_high, forecast_low
-        );
+        let ratio = calculate_upside_downside_ratio(current_price, forecast_high, forecast_low);
 
         assert!(ratio.is_some());
         let r = ratio.unwrap();
         // Handbook says 3.3 to 1 (rounded from 3.334)
-        assert!((r - 3.3).abs() < 0.1,
-            "Upside/downside ratio: expected ~3.3, got {:.2}", r);
+        assert!(
+            (r - 3.3).abs() < 0.1,
+            "Upside/downside ratio: expected ~3.3, got {:.2}",
+            r
+        );
         // Exact: 111.47 / 33.43 = 3.334
-        assert!((r - 3.334).abs() < 0.01,
-            "Exact ratio: expected 3.334, got {:.3}", r);
+        assert!(
+            (r - 3.334).abs() < 0.01,
+            "Exact ratio: expected 3.334, got {:.3}",
+            r
+        );
     }
 
     /// Verify NAIC EPS projection formula over 5 years.
@@ -1278,20 +1310,25 @@ mod tests {
         let cagr = 10.4;
         let future_years: Vec<i32> = (2016..=2020).collect();
 
-        let projection = calculate_projected_trendline(
-            start_year, current_eps, cagr, &future_years
-        );
+        let projection =
+            calculate_projected_trendline(start_year, current_eps, cagr, &future_years);
 
         assert_eq!(projection.trendline.len(), 5);
 
         // Year 1 (2016): 5.71 × 1.104 = 6.304
-        assert!((projection.trendline[0].value - 6.304).abs() < 0.01,
-            "Year 1: expected ~6.30, got {:.2}", projection.trendline[0].value);
+        assert!(
+            (projection.trendline[0].value - 6.304).abs() < 0.01,
+            "Year 1: expected ~6.30, got {:.2}",
+            projection.trendline[0].value
+        );
 
         // Year 5 (2020): should match handbook's Estimated High EPS ≈ 9.37
         let year5_eps = projection.trendline[4].value;
-        assert!((year5_eps - 9.37).abs() < 0.1,
-            "Year 5 EPS: expected ~9.37, got {:.2}", year5_eps);
+        assert!(
+            (year5_eps - 9.37).abs() < 0.1,
+            "Year 5 EPS: expected ~9.37, got {:.2}",
+            year5_eps
+        );
     }
 
     /// Verify NAIC quality metrics (Evaluate Management, Section 2).
@@ -1328,19 +1365,31 @@ mod tests {
 
         // 2014: PTP/Sales = 300/950 × 100 = 31.58%
         let y2014 = &quality.points[0];
-        assert!((y2014.profit_on_sales - 31.6).abs() < 0.1,
-            "2014 PTP/Sales: expected ~31.6%, got {:.1}%", y2014.profit_on_sales);
+        assert!(
+            (y2014.profit_on_sales - 31.6).abs() < 0.1,
+            "2014 PTP/Sales: expected ~31.6%, got {:.1}%",
+            y2014.profit_on_sales
+        );
         // 2014: ROE = 210/538 × 100 = 39.03%
-        assert!((y2014.roe - 39.0).abs() < 0.1,
-            "2014 ROE: expected ~39.0%, got {:.1}%", y2014.roe);
+        assert!(
+            (y2014.roe - 39.0).abs() < 0.1,
+            "2014 ROE: expected ~39.0%, got {:.1}%",
+            y2014.roe
+        );
 
         // 2015: PTP/Sales = 334/1007 × 100 = 33.17%
         let y2015 = &quality.points[1];
-        assert!((y2015.profit_on_sales - 33.2).abs() < 0.1,
-            "2015 PTP/Sales: expected ~33.2%, got {:.1}%", y2015.profit_on_sales);
+        assert!(
+            (y2015.profit_on_sales - 33.2).abs() < 0.1,
+            "2015 PTP/Sales: expected ~33.2%, got {:.1}%",
+            y2015.profit_on_sales
+        );
         // 2015: ROE = 250/570 × 100 = 43.86%
-        assert!((y2015.roe - 43.9).abs() < 0.1,
-            "2015 ROE: expected ~43.9%, got {:.1}%", y2015.roe);
+        assert!(
+            (y2015.roe - 43.9).abs() < 0.1,
+            "2015 ROE: expected ~43.9%, got {:.1}%",
+            y2015.roe
+        );
 
         // Both should trend Up from 2014 → 2015
         assert_eq!(y2015.profit_trend, TrendIndicator::Up);
@@ -1373,18 +1422,26 @@ mod tests {
         // Projected EPS at year 5: 5.71 × 1.104^5 ≈ 9.363
         // Target High = 27.9 × 9.363 ≈ 261.2
         let target_high = prices.target_high_price.unwrap();
-        assert!((target_high - 261.3).abs() < 1.0,
-            "Target high: expected ~261.3, got {:.1}", target_high);
+        assert!(
+            (target_high - 261.3).abs() < 1.0,
+            "Target high: expected ~261.3, got {:.1}",
+            target_high
+        );
 
         // Target Low = 20.0 × 9.363 ≈ 187.3
         // Note: handbook uses separate low EPS estimate (5.82); our model uses same EPS
         let target_low = prices.target_low_price.unwrap();
-        assert!((target_low - 187.3).abs() < 1.0,
-            "Target low: expected ~187.3, got {:.1}", target_low);
+        assert!(
+            (target_low - 187.3).abs() < 1.0,
+            "Target low: expected ~187.3, got {:.1}",
+            target_low
+        );
 
         // Upside/downside using handbook's selected low of 116.4
         let ratio = calculate_upside_downside_ratio(149.83, target_high, 116.4);
-        assert!(ratio.unwrap() > 3.0,
-            "Should meet NAIC 3:1 minimum for BUY recommendation");
+        assert!(
+            ratio.unwrap() > 3.0,
+            "Should meet NAIC 3:1 minimum for BUY recommendation"
+        );
     }
 }

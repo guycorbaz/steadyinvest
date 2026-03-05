@@ -117,6 +117,12 @@ This document provides the complete epic and story breakdown for SteadyInvest, d
 
 | FR | Epic | Description |
 |----|------|-------------|
+| FR2.7 | 8c | Dividend yield, payout, total return |
+| FR2.8 | 8c | Structured management & safety tests |
+| FR2.9 | 8c | 5-tier P/E and price zone ranges |
+| FR2.10 | 8c | Guided analysis summary |
+| FR2.11 | 8c | NAIC section structure & visual fidelity |
+| FR4.3 expand | 8c | Enriched comparison guide grid |
 | FR3.1 fix | 7 | PDF export UI routing fix |
 | FR4.1 | 7 | Analysis persistence to database |
 | FR4.2 | 8 | Thesis evolution / history comparison |
@@ -134,7 +140,7 @@ This document provides the complete epic and story breakdown for SteadyInvest, d
 | FR7.2 | 10 | Personal workspaces |
 | FR7.3 | 11 | Shared analyses (deferred) |
 
-**Coverage: 15/15 new FRs mapped + 1 MVP fix (FR3.1). 0 orphans.**
+**Coverage: 20/20 new FRs mapped + 1 MVP fix (FR3.1) + 1 FR expansion (FR4.3). 0 orphans.**
 
 ## Epic List
 
@@ -566,11 +572,228 @@ So that regressions are caught automatically.
 
 ---
 
+## Epic 8c: NAIC SSG Methodology Completion
+
+Complete the NAIC analytical framework beyond the SSG chart by implementing dividend/yield calculations, structured decision tests, the full Stock Comparison Guide metrics, and NAIC-standard visual presentation with step-by-step derivations. Designed to serve non-professional investors through guided assessment aligned with the BetterInvesting educational philosophy.
+
+**FRs covered:** FR2.7, FR2.8, FR2.9, FR2.10, FR2.11, FR4.3 (expansion)
+**Depends on:** Epic 8b (completed)
+**Prerequisite for:** Epic 9 (total return and enriched comparison data inform portfolio decisions)
+
+### Story 8c.1: Data Model Expansion & Dividend Harvest
+
+As an **analyst**,
+I want dividend and shares outstanding data available for my analyses,
+So that I can compute yield, payout ratio, and total return per the NAIC methodology.
+
+**Acceptance Criteria:**
+
+**Given** the `HistoricalYearlyData` struct in `steady-invest-logic`
+**When** the data model is expanded
+**Then** it includes `dividend_per_share` (Option<f64>) and `shares_outstanding` (Option<f64>) as optional fields
+**And** existing data without dividends continues to work without modification
+
+**Given** the harvest service retrieves historical data for a ticker
+**When** the data provider supports dividend and shares outstanding fields
+**Then** the harvest pipeline populates `dividend_per_share` and `shares_outstanding` for each year
+
+**Given** the data provider does not supply dividend data for a ticker
+**When** the analyst views the analysis
+**Then** a data gap indicator is displayed for dividend-related fields
+**And** the analyst can manually enter dividend data per FR2.3 (manual override system)
+
+**Given** the data model changes
+**When** golden tests are run
+**Then** all existing tests continue to pass
+**And** new tests validate the optional field behavior
+
+### Story 8c.2: Dividend Yield, Payout Ratio & 5-Year Total Return
+
+As an **analyst**,
+I want the system to calculate dividend yield, payout ratio, and combined total return,
+So that I can evaluate the complete 5-year potential of a stock per NAIC SSG Section 5.
+
+**Acceptance Criteria:**
+
+**Given** a stock with dividend data available
+**When** the analysis is computed
+**Then** the system calculates and displays: Current Dividend Yield (5A), Average Yield Over Next 5 Years (5B), and Combined Estimated Annual Return (5C) per NAIC SSG Section 5
+
+**Given** the `steady-invest-logic` crate
+**When** dividend calculations are implemented
+**Then** the following functions exist: `calculate_dividend_yield()`, `calculate_payout_ratio()`, `calculate_total_return_simple()`, `calculate_total_return_compound()`
+**And** results are expressed as both simple and compound annual rates
+**And** all functions follow the Cardinal Rule (logic crate only)
+
+**Given** the P/E History table (Section 3)
+**When** dividend data is available
+**Then** columns F (Dividend Per Share), G (% Payout), and H (% High Yield) are populated
+
+**Given** golden test data from the NAIC Handbook
+**When** tests are run
+**Then** calculated values match the Handbook examples within acceptable tolerance
+
+### Story 8c.3: 5-Tier P/E Breakdown & Price Zone Ranges
+
+As an **analyst**,
+I want to see the full P/E range breakdown and explicit buy/maybe/sell price zones,
+So that I can evaluate price history and identify entry/exit points per the NAIC methodology.
+
+**Acceptance Criteria:**
+
+**Given** 5 years of historical P/E data
+**When** the P/E breakdown is computed
+**Then** the system displays 5 tiers: Highest, Average High, Average, Average Low, Lowest P/E from the last 5 years
+
+**Given** the `steady-invest-logic` crate
+**When** P/E breakdown is implemented
+**Then** `calculate_pe_breakdown_5tier()` returns all 5 tiers
+**And** `calculate_price_zones()` returns Buy/Maybe/Sell dollar ranges derived from SSG Section 4C zoning methodology
+
+**Given** the price zones are calculated
+**When** displayed in the valuation panel
+**Then** three explicit price ranges are shown: Buy zone, Maybe zone, and Sell zone
+**And** the current price position relative to zones is indicated
+
+**Given** golden test data
+**When** tests are run
+**Then** calculated values match NAIC methodology expectations
+
+### Story 8c.4a: NAIC Section Structure & P/E History Table
+
+As an **analyst**,
+I want the SSG analysis presented in the canonical NAIC 5-section layout,
+So that I can navigate the interface using my existing NAIC knowledge.
+
+**Acceptance Criteria:**
+
+**Given** the SSG analysis view
+**When** the valuation panel is restructured
+**Then** it follows the NAIC 5-section structure: Section 1 (Visual Analysis), Section 2 (Evaluating Management), Section 3 (Price-Earnings History), Section 4 (Evaluating Risk and Reward), Section 5 (5-Year Potential)
+**And** each section has a numbered header matching the NAIC form layout
+
+**Given** Section 3 (Price-Earnings History)
+**When** rendered with available data
+**Then** it displays an 8-column table: A (High Price), B (Low Price), C (EPS), D (P/E High), E (P/E Low), F (Dividend Per Share), G (% Payout), H (% High Yield)
+**And** TOTAL and AVERAGE rows are computed
+**And** an Average P/E Ratio summary is displayed
+
+**Given** the NAIC form color language
+**When** section headers are styled
+**Then** subtle 3px left-border accents are applied via CSS custom properties: `--accent-ssg: #2E7D32` (green), `--accent-comparison: #C62828` (red), `--accent-portfolio: #1565C0` (blue), `--accent-checklist: #F9A825` (gold)
+
+**Given** the restructured layout
+**When** rendered at all four breakpoints (desktop wide, desktop standard, tablet, mobile)
+**Then** all elements render correctly without layout breakage or overflow
+
+### Story 8c.4b: Section 4-5 Derivation Layouts
+
+As an **analyst**,
+I want to see step-by-step calculation derivations for risk/reward and total return,
+So that I understand exactly how forecast prices and returns are computed.
+
+**Acceptance Criteria:**
+
+**Given** Section 4 (Evaluating Risk and Reward)
+**When** derivation layouts are displayed
+**Then** the "show your work" chain is visible: "Avg. High P/E (X) × Est. High EPS ($Y) = Forecast High Price ($Z)" — for both high and low sides
+
+**Given** Section 4C (Price Zone Display)
+**When** zones are rendered
+**Then** computed Buy/Maybe/Sell ranges are displayed with a current price position indicator
+
+**Given** Section 4D (Upside-Downside Ratio)
+**When** the derivation is displayed
+**Then** the full calculation is shown with intermediate values
+
+**Given** Section 4E (Price Target)
+**When** rendered
+**Then** the % appreciation target is displayed with derivation
+
+**Given** Section 5 (5-Year Total Return)
+**When** the derivation is displayed
+**Then** the full chain is shown: Current Yield + Average Yield + Price Appreciation = Combined Return (simple → compound conversion)
+
+**Given** intermediate values from the logic crate
+**When** surfaced in the UI
+**Then** no new computations are performed in the frontend — all values come from `steady-invest-logic`
+
+### Story 8c.5: Structured Management & Safety Tests
+
+As an **analyst**,
+I want structured pass/fail tests and a guided analysis summary,
+So that I can make disciplined investment decisions using the NAIC framework.
+
+**Acceptance Criteria:**
+
+**Given** the `steady-invest-logic` crate
+**When** management tests are implemented
+**Then** `evaluate_management_tests()` returns a `SuggestedAssessment` (Pass, Fail, Borderline) for each of three tests: I (Driving Force — sales expansion rate), II (Earned on Sales — profit margin trend), III (Earned on Equity — vs. 10% benchmark)
+
+**Given** the `steady-invest-logic` crate
+**When** safety tests are implemented
+**Then** `evaluate_safety_tests()` returns a `SuggestedAssessment` for each of three tests: I (Probability of Getting Out Even — has stock traded at current price in past 5 years?), II (Upside-Downside >= 3:1), III (100% appreciation possible in 5 years?)
+
+**Given** test results are displayed
+**When** the analyst reviews them
+**Then** plain-language explanations are shown via `generate_guided_narrative()` (template-driven, no LLM) with NAIC benchmark references
+**And** the analyst can override any conclusion (stored in snapshot_data JSON)
+
+**Given** the guided analysis summary
+**When** displayed
+**Then** four Checklist-style decisions are presented: sales growth adequate?, earnings growth adequate?, future growth meets objective?, price acceptable?
+**And** each decision includes contextual explanation and NAIC benchmark comparison
+
+**Given** the guided assessment section
+**When** styled
+**Then** it uses the gold (`--accent-checklist`) NAIC color accent
+
+### Story 8c.6: Enriched Stock Comparison Guide Grid
+
+As an **analyst**,
+I want the comparison view to match the NAIC Stock Comparison Guide layout,
+So that I can compare stocks using the full NAIC methodology.
+
+**Acceptance Criteria:**
+
+**Given** the comparison view at `/compare`
+**When** analyses are loaded for comparison
+**Then** a new comparison table component displays data organized into four row groups matching the NAIC form: Growth Comparisons (rows 1-4), Management Comparisons (rows 5-7), Price Comparisons (rows 8-23), Other Comparisons (rows 24-30)
+
+**Given** the enriched comparison grid
+**When** metrics are displayed
+**Then** all metrics from 8c.2 (yield, payout), 8c.3 (P/E breakdown, zones), and 8c.5 (test results) are included
+**And** date of source material and exchange (where traded) appear in Other Comparisons
+**And** rows without data source show graceful "N/A" indicators
+
+**Given** the backend `ComparisonSnapshotSummary` struct
+**When** enriched with additional metrics
+**Then** no new API endpoints are required — existing comparison endpoints return expanded data
+
+**Given** the comparison section headers
+**When** styled
+**Then** the red (`--accent-comparison`) NAIC color accent is applied
+
+**Given** the existing compact_analysis_card component
+**When** the comparison view is restructured
+**Then** compact_analysis_card remains for the Library view (unchanged)
+**And** the new comparison table component is used only in the `/compare` view
+
+**Given** the PDF report
+**When** comparison data is exported
+**Then** the enriched metrics are included in the comparison section
+
+**Given** the enriched comparison view
+**When** rendered at all four breakpoints (desktop wide, desktop standard, tablet, mobile)
+**Then** all elements render correctly without layout breakage or overflow
+
+---
+
 ## Epic 9: Portfolio Management, Watchlists & Risk Discipline
 
 Users can track portfolios with holdings, receive position sizing guidance and exposure alerts, set stop loss reminders, and monitor a watchlist of stocks of interest. Complete "Buy Smart + Stay Balanced" experience.
 
-**Execution strategy:** Two-sprint internal split — Sprint A (9.1-9.5 portfolio foundation), Sprint B (9.6-9.10 risk discipline + watchlist).
+**Execution strategy:** Three-sprint internal split — Sprint A (9.1-9.5 portfolio foundation), Sprint B (9.6-9.10 risk discipline + watchlist), Sprint C (9.11-9.12 NAIC portfolio monitoring).
 
 ### Story 9.1: Portfolio Schema & CRUD API
 
@@ -918,6 +1141,59 @@ So that the complete Phase 2 experience is regression-tested.
 **Then** desktop: full interactive dashboard with all controls
 **And** tablet: simplified single-column layout, all controls available
 **And** mobile: read-only cards for portfolio, simple list for watchlist, no write operations
+
+### Story 9.11: P/E Guide Lines & Buy/Sell Thresholds
+
+As an **investor** monitoring my portfolio holdings,
+I want rolling P/E guide lines computed from historical averages,
+So that I have objective buy/sell thresholds for ongoing monitoring.
+
+**Acceptance Criteria:**
+
+**Given** a portfolio holding with historical P/E data
+**When** P/E guide lines are computed per NAIC Portfolio Management Guide Section 1
+**Then** Low P/E Guide Line = average of (sum of avg High + Low P/E) / 2 for previous 5 years
+**And** High P/E Guide Line = Low P/E Guide Line × 1.5
+**And** per year: "Consider Buying Below" = Low P/E Guide Line × current EPS
+**And** per year: "Consider Selling Above" = High P/E Guide Line × current EPS
+
+**Given** the `steady-invest-logic` crate
+**When** P/E guide line calculations are implemented
+**Then** the calculation functions live in `crates/steady-invest-logic` (Cardinal Rule)
+**And** functions include doctests with examples from the NAIC PMG
+
+**Given** the Portfolio Dashboard (Story 9.5)
+**When** holdings are displayed
+**Then** per-holding P/E guide line thresholds are shown as monitoring values
+**And** guide lines update as new quarterly earnings data becomes available
+
+**Given** the NAIC PMG color language
+**When** P/E guide lines are styled
+**Then** the blue (`--accent-portfolio`) NAIC color accent is applied per FR2.11
+
+### Story 9.12: Quarterly P/E Tracking & Price-P/E Chart
+
+As an **investor** performing quarterly portfolio reviews,
+I want to track quarterly earnings, price, and P/E ratio over time,
+So that I can monitor valuation trends at each review period.
+
+**Acceptance Criteria:**
+
+**Given** NAIC Portfolio Management Guide Sections 3-4
+**When** quarterly tracking is implemented
+**Then** Section 3 displays a table tracking per quarter: 3-month EPS, trailing 4Q total earnings, price at review date, P/E ratio at review date (supports up to 3 review dates per row)
+
+**Given** NAIC Portfolio Management Guide Section 4
+**When** the price-P/E chart is implemented
+**Then** a dual-axis monthly chart plots market price (solid line) and P/E ratio (dashed line) over 5 years
+
+**Given** the Portfolio Dashboard (Story 9.5)
+**When** a holding is selected for detail view
+**Then** quarterly P/E tracking table and price-P/E chart are available as per-holding monitoring tools
+
+**Given** the NAIC PMG color language
+**When** portfolio monitoring components are styled
+**Then** the blue (`--accent-portfolio`) NAIC color accent is applied per FR2.11
 
 ---
 

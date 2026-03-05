@@ -18,9 +18,24 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(ProviderRateLimits::Name).string().not_null().unique_key())
-                    .col(ColumnDef::new(ProviderRateLimits::QuotaConsumed).integer().not_null().default(0))
-                    .col(ColumnDef::new(ProviderRateLimits::LastUpdated).timestamp().not_null().default(Expr::current_timestamp()))
+                    .col(
+                        ColumnDef::new(ProviderRateLimits::Name)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ProviderRateLimits::QuotaConsumed)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .col(
+                        ColumnDef::new(ProviderRateLimits::LastUpdated)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
                     .to_owned(),
             )
             .await

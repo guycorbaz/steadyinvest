@@ -11,7 +11,7 @@ use leptos_router::hooks::use_location;
 pub fn Footer() -> impl IntoView {
     let location = use_location();
     let (latency, set_latency) = signal(0.0);
-    
+
     // Track location changes to simulate "navigation/render" latency
     // In a real app, we'd hook into the Router's transition start/end,
     // but for now, we'll measure the time since the last "navigation start" entry
@@ -19,31 +19,31 @@ pub fn Footer() -> impl IntoView {
     //
     // Better yet, let's measure a "ping" to the health endpoint as a proxy for System Latency.
     // Or simpler: Use `window.performance` to get the latest navigation timing on mount/update.
-    
+
     Effect::new(move |_| {
         let _ = location.pathname.get(); // Depend on location to trigger on navigation
-        
+
         // Measure real network latency / system health response time
         if let Some(window) = web_sys::window() {
-             if let Some(perf) = window.performance() {
-                 let start_time = perf.now();
-                 
-                 wasm_bindgen_futures::spawn_local(async move {
-                     // Ping the system health endpoint
-                     // We use a HEAD request or simple GET to minimize payload
-                     let _ = gloo_net::http::Request::get("/api/v1/system/health")
+            if let Some(perf) = window.performance() {
+                let start_time = perf.now();
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    // Ping the system health endpoint
+                    // We use a HEAD request or simple GET to minimize payload
+                    let _ = gloo_net::http::Request::get("/api/v1/system/health")
                         .send()
                         .await; // We don't care about the result payload for latency, just the round-trip
-                     
-                     if let Some(window) = web_sys::window() {
+
+                    if let Some(window) = web_sys::window() {
                         if let Some(perf) = window.performance() {
                             let end_time = perf.now();
                             let duration = end_time - start_time;
                             set_latency.set(duration);
                         }
-                     }
-                 });
-             }
+                    }
+                });
+            }
         }
     });
 
@@ -55,10 +55,10 @@ pub fn Footer() -> impl IntoView {
                 <span class="opacity-50">"SYSTEM MARKETS"</span>
                 <span class="text-[#00FF00]">"ONLINE"</span>
             </div>
-            
+
             <div class="flex items-center gap-2">
                 <span class="opacity-50">"LATENCY"</span>
-                <span 
+                <span
                     class=move || if is_slow() { "text-[#DC143C] font-bold" } else { "text-[#E5E5E5]" }
                 >
                     {move || format!("{:.0}ms", latency.get())}

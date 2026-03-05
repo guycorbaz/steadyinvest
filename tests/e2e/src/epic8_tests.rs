@@ -174,14 +174,13 @@ async fn test_comparison_direct_url_with_ticker_ids() -> Result<()> {
     let client = reqwest::Client::new();
 
     // Seed snapshots for two different tickers
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "compare-url-test-1", "CHF", 8.0, 10.0).await?;
-    let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "compare-url-test-2", "USD", 12.0, 15.0).await?;
+    let (_s1, nesn_id) =
+        seed_snapshot(&client, "NESN.SW", "compare-url-test-1", "CHF", 8.0, 10.0).await?;
+    let (_s2, aapl_id) =
+        seed_snapshot(&client, "AAPL", "compare-url-test-2", "USD", 12.0, 15.0).await?;
 
-    ctx.navigate(&format!(
-        "/compare?ticker_ids={},{}",
-        nesn_id, aapl_id
-    ))
-    .await?;
+    ctx.navigate(&format!("/compare?ticker_ids={},{}", nesn_id, aapl_id))
+        .await?;
 
     // Wait for cards to render
     let cards = ctx
@@ -201,7 +200,8 @@ async fn test_comparison_card_metrics_displayed() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s, nesn_id) = seed_snapshot(&client, "NESN.SW", "card-metrics-test", "CHF", 7.5, 11.0).await?;
+    let (_s, nesn_id) =
+        seed_snapshot(&client, "NESN.SW", "card-metrics-test", "CHF", 7.5, 11.0).await?;
 
     ctx.navigate(&format!("/compare?ticker_ids={}", nesn_id))
         .await?;
@@ -261,10 +261,7 @@ async fn test_comparison_sorting_by_column() -> Result<()> {
         .await?;
 
     // Find sort headers and click one
-    let sort_headers = ctx
-        .driver
-        .find_all(By::ClassName("sort-header"))
-        .await?;
+    let sort_headers = ctx.driver.find_all(By::ClassName("sort-header")).await?;
     assert!(
         !sort_headers.is_empty(),
         "Should have sortable column headers"
@@ -312,14 +309,13 @@ async fn test_comparison_save_set() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "save-set-test-1", "CHF", 8.0, 10.0).await?;
-    let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "save-set-test-2", "USD", 12.0, 15.0).await?;
+    let (_s1, nesn_id) =
+        seed_snapshot(&client, "NESN.SW", "save-set-test-1", "CHF", 8.0, 10.0).await?;
+    let (_s2, aapl_id) =
+        seed_snapshot(&client, "AAPL", "save-set-test-2", "USD", 12.0, 15.0).await?;
 
-    ctx.navigate(&format!(
-        "/compare?ticker_ids={},{}",
-        nesn_id, aapl_id
-    ))
-    .await?;
+    ctx.navigate(&format!("/compare?ticker_ids={},{}", nesn_id, aapl_id))
+        .await?;
 
     // Wait for cards to load
     ctx.driver
@@ -454,7 +450,10 @@ async fn test_history_toggle_opens_sidebar() -> Result<()> {
         .wait(Duration::from_secs(10), Duration::from_millis(500))
         .first()
         .await?;
-    assert!(sidebar.is_displayed().await?, "Timeline sidebar should be visible");
+    assert!(
+        sidebar.is_displayed().await?,
+        "Timeline sidebar should be visible"
+    );
 
     // Verify aria-expanded is true
     let toggle = ctx.driver.find(By::ClassName("history-toggle-btn")).await?;
@@ -495,18 +494,12 @@ async fn test_history_toggle_closes_sidebar() -> Result<()> {
         .await?;
 
     // Close
-    let toggle = ctx
-        .driver
-        .find(By::ClassName("history-toggle-btn"))
-        .await?;
+    let toggle = ctx.driver.find(By::ClassName("history-toggle-btn")).await?;
     js_click(&ctx, &toggle).await?;
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Verify aria-expanded is false
-    let toggle = ctx
-        .driver
-        .find(By::ClassName("history-toggle-btn"))
-        .await?;
+    let toggle = ctx.driver.find(By::ClassName("history-toggle-btn")).await?;
     let expanded = toggle.attr("aria-expanded").await?;
     assert_eq!(
         expanded.as_deref(),
@@ -666,7 +659,10 @@ async fn test_history_metric_deltas_displayed() -> Result<()> {
         .wait(Duration::from_secs(10), Duration::from_millis(500))
         .first()
         .await?;
-    assert!(deltas.is_displayed().await?, "Delta column should be visible");
+    assert!(
+        deltas.is_displayed().await?,
+        "Delta column should be visible"
+    );
 
     let delta_indicators = deltas.find_all(By::ClassName("delta")).await?;
     assert!(
@@ -789,14 +785,13 @@ async fn test_comparison_currency_switch_updates_prices() -> Result<()> {
     let client = reqwest::Client::new();
 
     // Seed snapshots with different currencies
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "currency-switch-1", "CHF", 8.0, 10.0).await?;
-    let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "currency-switch-2", "USD", 12.0, 15.0).await?;
+    let (_s1, nesn_id) =
+        seed_snapshot(&client, "NESN.SW", "currency-switch-1", "CHF", 8.0, 10.0).await?;
+    let (_s2, aapl_id) =
+        seed_snapshot(&client, "AAPL", "currency-switch-2", "USD", 12.0, 15.0).await?;
 
-    ctx.navigate(&format!(
-        "/compare?ticker_ids={},{}",
-        nesn_id, aapl_id
-    ))
-    .await?;
+    ctx.navigate(&format!("/compare?ticker_ids={},{}", nesn_id, aapl_id))
+        .await?;
 
     ctx.driver
         .query(By::ClassName("compact-card"))
@@ -815,10 +810,7 @@ async fn test_comparison_currency_switch_updates_prices() -> Result<()> {
     };
 
     // Find currency selector and change currency
-    let selects = ctx
-        .driver
-        .find_all(By::Css("select"))
-        .await?;
+    let selects = ctx.driver.find_all(By::Css("select")).await?;
 
     // Find the currency <select> (look for one with 3-letter uppercase options)
     let mut currency_changed = false;
@@ -880,14 +872,13 @@ async fn test_comparison_currency_indicator_label() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "currency-label-1", "CHF", 8.0, 10.0).await?;
-    let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "currency-label-2", "USD", 12.0, 15.0).await?;
+    let (_s1, nesn_id) =
+        seed_snapshot(&client, "NESN.SW", "currency-label-1", "CHF", 8.0, 10.0).await?;
+    let (_s2, aapl_id) =
+        seed_snapshot(&client, "AAPL", "currency-label-2", "USD", 12.0, 15.0).await?;
 
-    ctx.navigate(&format!(
-        "/compare?ticker_ids={},{}",
-        nesn_id, aapl_id
-    ))
-    .await?;
+    ctx.navigate(&format!("/compare?ticker_ids={},{}", nesn_id, aapl_id))
+        .await?;
 
     ctx.driver
         .query(By::ClassName("compact-card"))
@@ -932,7 +923,8 @@ async fn test_comparison_desktop_shows_sort_headers() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s, nesn_id) = seed_snapshot(&client, "NESN.SW", "resp-desktop-test", "CHF", 8.0, 10.0).await?;
+    let (_s, nesn_id) =
+        seed_snapshot(&client, "NESN.SW", "resp-desktop-test", "CHF", 8.0, 10.0).await?;
 
     ctx.set_viewport(DESKTOP_WIDE.0, DESKTOP_WIDE.1).await?;
     ctx.navigate(&format!("/compare?ticker_ids={}", nesn_id))
@@ -980,7 +972,15 @@ async fn test_comparison_mobile_shows_dropdown_sort() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s, nesn_id) = seed_snapshot(&client, "NESN.SW", "resp-mobile-sort-test", "CHF", 8.0, 10.0).await?;
+    let (_s, nesn_id) = seed_snapshot(
+        &client,
+        "NESN.SW",
+        "resp-mobile-sort-test",
+        "CHF",
+        8.0,
+        10.0,
+    )
+    .await?;
 
     ctx.set_viewport(MOBILE.0, MOBILE.1).await?;
     ctx.navigate(&format!("/compare?ticker_ids={}", nesn_id))
@@ -1025,15 +1025,14 @@ async fn test_comparison_mobile_single_column_cards() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let (_s1, nesn_id) = seed_snapshot(&client, "NESN.SW", "resp-mobile-col-1", "CHF", 8.0, 10.0).await?;
-    let (_s2, aapl_id) = seed_snapshot(&client, "AAPL", "resp-mobile-col-2", "USD", 12.0, 15.0).await?;
+    let (_s1, nesn_id) =
+        seed_snapshot(&client, "NESN.SW", "resp-mobile-col-1", "CHF", 8.0, 10.0).await?;
+    let (_s2, aapl_id) =
+        seed_snapshot(&client, "AAPL", "resp-mobile-col-2", "USD", 12.0, 15.0).await?;
 
     ctx.set_viewport(MOBILE.0, MOBILE.1).await?;
-    ctx.navigate(&format!(
-        "/compare?ticker_ids={},{}",
-        nesn_id, aapl_id
-    ))
-    .await?;
+    ctx.navigate(&format!("/compare?ticker_ids={},{}", nesn_id, aapl_id))
+        .await?;
 
     let cards = ctx
         .driver
@@ -1178,10 +1177,16 @@ async fn test_history_mobile_no_delta_column() -> Result<()> {
     let ctx = TestContext::new().await?;
     let client = reqwest::Client::new();
 
-    let _s1 =
-        seed_snapshot(&client, "NESN.SW", "resp-mobile-nodelta-1", "CHF", 6.0, 8.0).await?;
-    let _s2 =
-        seed_snapshot(&client, "NESN.SW", "resp-mobile-nodelta-2", "CHF", 9.0, 12.0).await?;
+    let _s1 = seed_snapshot(&client, "NESN.SW", "resp-mobile-nodelta-1", "CHF", 6.0, 8.0).await?;
+    let _s2 = seed_snapshot(
+        &client,
+        "NESN.SW",
+        "resp-mobile-nodelta-2",
+        "CHF",
+        9.0,
+        12.0,
+    )
+    .await?;
 
     ctx.set_viewport(MOBILE.0, MOBILE.1).await?;
     load_ticker(&ctx, "NESN").await?;

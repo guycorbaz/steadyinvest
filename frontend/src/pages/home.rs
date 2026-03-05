@@ -7,17 +7,19 @@
 //! Layout uses a CSS Grid with named regions (`status`, `chart`, `sidebar`, `hud`)
 //! per Architecture spec. The `status` region is reserved for Epic 9 (portfolio signals).
 
-use crate::components::history_timeline::{HistoryResponse, HistoryTimeline, MetricDelta, TimelineEntry};
-use crate::components::search_bar::SearchBar;
+use crate::ActiveLockedAnalysisId;
 use crate::components::analyst_hud::AnalystHUD;
+use crate::components::history_timeline::{
+    HistoryResponse, HistoryTimeline, MetricDelta, TimelineEntry,
+};
+use crate::components::search_bar::SearchBar;
 use crate::components::snapshot_comparison::SnapshotComparison;
 use crate::components::snapshot_hud::SnapshotHUD;
 use crate::types::LockedAnalysisModel;
-use crate::ActiveLockedAnalysisId;
 use leptos::prelude::*;
 use leptos_router::hooks::use_location;
-use steady_invest_logic::{HistoricalData, TickerInfo, AnalysisSnapshot};
 use serde::Deserialize;
+use steady_invest_logic::{AnalysisSnapshot, HistoricalData, TickerInfo};
 
 /// DTO for the raw `GET /api/v1/snapshots/:id` response used by deep linking.
 #[derive(Debug, Clone, Deserialize)]
@@ -56,7 +58,11 @@ pub fn Home() -> impl IntoView {
         let s = search.strip_prefix('?').unwrap_or(&search);
         s.split('&').find_map(|pair| {
             let (k, v) = pair.split_once('=')?;
-            if k == "snapshot" { v.parse::<i32>().ok() } else { None }
+            if k == "snapshot" {
+                v.parse::<i32>().ok()
+            } else {
+                None
+            }
         })
     };
 
@@ -97,7 +103,11 @@ pub fn Home() -> impl IntoView {
                 None
             };
             // Only expose a real DB snapshot ID (imported snapshots use id=0)
-            ctx.0.set(if !has_import { snap_id.or(deep_id) } else { None });
+            ctx.0.set(if !has_import {
+                snap_id.or(deep_id)
+            } else {
+                None
+            });
         }
     });
 
@@ -127,7 +137,10 @@ pub fn Home() -> impl IntoView {
                         .map_err(|e| e.to_string())?;
 
                     if !data.is_complete {
-                        return Err("Integrity Alert: Data population incomplete for this ticker.".to_string());
+                        return Err(
+                            "Integrity Alert: Data population incomplete for this ticker."
+                                .to_string(),
+                        );
                     }
 
                     if data.currency != target_cur {
@@ -155,7 +168,10 @@ pub fn Home() -> impl IntoView {
                     .map_err(|e| e.to_string())?;
 
                 if response.ok() {
-                    response.json::<Vec<LockedAnalysisModel>>().await.map_err(|e| e.to_string())
+                    response
+                        .json::<Vec<LockedAnalysisModel>>()
+                        .await
+                        .map_err(|e| e.to_string())
                 } else {
                     Ok(vec![])
                 }
@@ -176,10 +192,9 @@ pub fn Home() -> impl IntoView {
             }
             // Find anchor snapshot ID from existing snapshots list
             let anchor_id = match snap_list {
-                Some(Ok(ref list)) if !list.is_empty() => list
-                    .iter()
-                    .max_by_key(|s| s.captured_at)
-                    .map(|s| s.id),
+                Some(Ok(ref list)) if !list.is_empty() => {
+                    list.iter().max_by_key(|s| s.captured_at).map(|s| s.id)
+                }
                 _ => None,
             };
             let Some(id) = anchor_id else {
@@ -220,9 +235,7 @@ pub fn Home() -> impl IntoView {
     });
 
     // Determine if History toggle should be enabled (at least 1 snapshot exists)
-    let has_snapshots = move || {
-        matches!(snapshots.get(), Some(Ok(ref list)) if !list.is_empty())
-    };
+    let has_snapshots = move || matches!(snapshots.get(), Some(Ok(ref list)) if !list.is_empty());
 
     // Toggle history sidebar with focus management
     let toggle_history = move |_| {
@@ -254,10 +267,9 @@ pub fn Home() -> impl IntoView {
     // Get current snapshot ID (the most recent one, for highlighting in timeline)
     let current_snapshot_id_for_timeline = move || -> Option<i32> {
         match snapshots.get() {
-            Some(Ok(ref list)) if !list.is_empty() => list
-                .iter()
-                .max_by_key(|s| s.captured_at)
-                .map(|s| s.id),
+            Some(Ok(ref list)) if !list.is_empty() => {
+                list.iter().max_by_key(|s| s.captured_at).map(|s| s.id)
+            }
             _ => None,
         }
     };
@@ -269,7 +281,10 @@ pub fn Home() -> impl IntoView {
     // of the consecutive-delta API contract (Story 8.4).
     let find_delta = move |past_id: i32| -> Option<MetricDelta> {
         let data = history_data.get()?;
-        data.metric_deltas.iter().find(|d| d.from_snapshot_id == past_id).cloned()
+        data.metric_deltas
+            .iter()
+            .find(|d| d.from_snapshot_id == past_id)
+            .cloned()
     };
 
     // Find a timeline entry by ID

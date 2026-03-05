@@ -15,11 +15,7 @@ use leptos_router::components::A;
 pub fn CommandStrip() -> impl IntoView {
     let locked_ctx = use_context::<ActiveLockedAnalysisId>();
 
-    let has_locked = move || {
-        locked_ctx
-            .map(|ctx| ctx.0.get().is_some())
-            .unwrap_or(false)
-    };
+    let has_locked = move || locked_ctx.map(|ctx| ctx.0.get().is_some()).unwrap_or(false);
 
     let on_export = move |_| {
         if let Some(ctx) = locked_ctx {

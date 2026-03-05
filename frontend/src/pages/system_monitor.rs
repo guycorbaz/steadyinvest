@@ -26,7 +26,10 @@ pub struct ProviderHealth {
 #[component]
 pub fn SystemMonitor() -> impl IntoView {
     let health_resource = LocalResource::new(move || async move {
-        match gloo_net::http::Request::get("/api/v1/system/health").send().await {
+        match gloo_net::http::Request::get("/api/v1/system/health")
+            .send()
+            .await
+        {
             Ok(resp) if resp.ok() => resp.json::<Vec<ProviderHealth>>().await.unwrap_or_default(),
             Ok(resp) => {
                 leptos::logging::error!("Health API failed with status: {}", resp.status());

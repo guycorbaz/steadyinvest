@@ -1,7 +1,7 @@
 //! Audit log model — query helpers for the audit trail.
 
-use loco_rs::prelude::*;
 pub use super::_entities::audit_logs::{ActiveModel, Entity, Model};
+use loco_rs::prelude::*;
 use sea_orm::{QueryOrder, QuerySelect};
 
 impl Model {

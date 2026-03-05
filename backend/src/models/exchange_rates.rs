@@ -1,7 +1,7 @@
 //! Exchange rate model — cached currency conversion rates per fiscal year.
 
-use sea_orm::entity::prelude::*;
 pub use super::_entities::exchange_rates::{ActiveModel, Column, Entity, Model};
+use sea_orm::entity::prelude::*;
 /// Type alias for the exchange_rates entity.
 pub type ExchangeRates = Entity;
 

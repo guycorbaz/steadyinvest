@@ -6,8 +6,8 @@
 
 use crate::components::ssg_chart;
 use leptos::prelude::*;
-use steady_invest_logic::{HistoricalData, AnalysisSnapshot};
 use serde::{Deserialize, Serialize};
+use steady_invest_logic::{AnalysisSnapshot, HistoricalData};
 
 /// JSON request body for the Phase 1 snapshot API.
 #[derive(Debug, Clone, Serialize)]
@@ -59,7 +59,9 @@ pub fn LockThesisModal(
         move |_| {
             let note_val = note.get().trim().to_string();
             if note_val.is_empty() {
-                set_error.set(Some("An analyst note is required to lock your thesis (AC 2).".to_string()));
+                set_error.set(Some(
+                    "An analyst note is required to lock your thesis (AC 2).".to_string(),
+                ));
                 return;
             }
 
@@ -101,12 +103,16 @@ pub fn LockThesisModal(
                     .await;
 
                 #[derive(Deserialize)]
-                struct SnapshotResponse { id: i32 }
+                struct SnapshotResponse {
+                    id: i32,
+                }
 
                 match response {
                     Ok(res) if res.ok() => {
                         // Parse the new snapshot ID from the response
-                        let snap_id = res.json::<SnapshotResponse>().await
+                        let snap_id = res
+                            .json::<SnapshotResponse>()
+                            .await
                             .map(|r| r.id)
                             .unwrap_or(0);
                         on_locked.run(snap_id);
@@ -126,7 +132,7 @@ pub fn LockThesisModal(
                     <h3 id="lock-thesis-modal-title">"Finalize & Lock Analysis"</h3>
                     <button class="close-btn" on:click=move |_| on_close.run(()) aria-label="Close modal">"×"</button>
                 </header>
-                
+
                 <div class="modal-body">
                     <p class="modal-intro">
                         "Locking this analysis creates a permanent, immutable snapshot of your projections and historical data. You will be able to retrieve this record later to verify your thesis."

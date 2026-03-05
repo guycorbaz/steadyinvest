@@ -61,12 +61,8 @@ fn delta_view(delta: Option<f64>, is_pct: bool) -> impl IntoView {
             };
             view! { <span class="delta delta-down">{text}</span> }.into_any()
         }
-        Some(_) => {
-            view! { <span class="delta delta-flat">"\u{2014}"</span> }.into_any()
-        }
-        None => {
-            view! { <span class="delta delta-na">"\u{2014}"</span> }.into_any()
-        }
+        Some(_) => view! { <span class="delta delta-flat">"\u{2014}"</span> }.into_any(),
+        None => view! { <span class="delta delta-na">"\u{2014}"</span> }.into_any(),
     }
 }
 

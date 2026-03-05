@@ -2,7 +2,7 @@ use backend::app::App;
 use backend::models::_entities::{analysis_snapshots, tickers, users};
 use loco_rs::prelude::*;
 use loco_rs::testing::prelude::request;
-use sea_orm::{ActiveValue, EntityTrait, QueryFilter, ColumnTrait};
+use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
 use serial_test::serial;
 
 /// A minimal 1x1 red pixel PNG encoded as base64.
@@ -96,7 +96,9 @@ async fn can_create_snapshot() {
         assert_eq!(created.notes.as_deref(), Some("Initial draft analysis"));
         assert!(created.deleted_at.is_none());
         // chart_image is skip_serializing — verify absence via endpoint
-        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/chart-image", created.id))
+            .await;
         assert_eq!(res.status_code(), 404); // no chart_image supplied → 404
     })
     .await;
@@ -145,8 +147,16 @@ async fn can_list_snapshots_with_filters() {
             "thesis_locked": true,
             "notes": "Locked thesis"
         });
-        request.post("/api/v1/snapshots").json(&unlocked).await.assert_status_success();
-        request.post("/api/v1/snapshots").json(&locked).await.assert_status_success();
+        request
+            .post("/api/v1/snapshots")
+            .json(&unlocked)
+            .await
+            .assert_status_success();
+        request
+            .post("/api/v1/snapshots")
+            .json(&locked)
+            .await
+            .assert_status_success();
 
         // List all — should get 2
         let res = request.get("/api/v1/snapshots").await;
@@ -163,14 +173,18 @@ async fn can_list_snapshots_with_filters() {
         assert!((all[0]["projected_low_pe"].as_f64().unwrap() - 15.0).abs() < 0.01);
 
         // Filter by thesis_locked=true — should get 1
-        let res = request.get(&format!("/api/v1/snapshots?thesis_locked=true")).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots?thesis_locked=true"))
+            .await;
         res.assert_status_success();
         let locked_only: Vec<serde_json::Value> = res.json();
         assert_eq!(locked_only.len(), 1);
         assert_eq!(locked_only[0]["notes"], "Locked thesis");
 
         // Filter by ticker_id
-        let res = request.get(&format!("/api/v1/snapshots?ticker_id={}", ticker_id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots?ticker_id={}", ticker_id))
+            .await;
         res.assert_status_success();
         let by_ticker: Vec<serde_json::Value> = res.json();
         assert_eq!(by_ticker.len(), 2);
@@ -197,7 +211,9 @@ async fn can_get_full_snapshot() {
         res.assert_status_success();
         let created = res.json::<analysis_snapshots::Model>();
 
-        let res = request.get(&format!("/api/v1/snapshots/{}", created.id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}", created.id))
+            .await;
         res.assert_status_success();
         let full = res.json::<analysis_snapshots::Model>();
         assert_eq!(full.id, created.id);
@@ -225,7 +241,9 @@ async fn can_soft_delete_unlocked_snapshot() {
         let created = res.json::<analysis_snapshots::Model>();
 
         // DELETE should succeed
-        let res = request.delete(&format!("/api/v1/snapshots/{}", created.id)).await;
+        let res = request
+            .delete(&format!("/api/v1/snapshots/{}", created.id))
+            .await;
         res.assert_status_success();
         let del: serde_json::Value = res.json();
         assert_eq!(del["status"], "deleted");
@@ -236,7 +254,9 @@ async fn can_soft_delete_unlocked_snapshot() {
         assert_eq!(all.len(), 0);
 
         // Verify: deleted snapshot returns 404 on get
-        let res = request.get(&format!("/api/v1/snapshots/{}", created.id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}", created.id))
+            .await;
         assert_eq!(res.status_code(), 404);
     })
     .await;
@@ -260,7 +280,9 @@ async fn cannot_delete_locked_snapshot() {
         let res = request.post("/api/v1/snapshots").json(&body).await;
         let created = res.json::<analysis_snapshots::Model>();
 
-        let res = request.delete(&format!("/api/v1/snapshots/{}", created.id)).await;
+        let res = request
+            .delete(&format!("/api/v1/snapshots/{}", created.id))
+            .await;
         assert_eq!(res.status_code(), 403);
         let body: serde_json::Value = res.json();
         assert_eq!(body["error"], "Locked analyses cannot be deleted");
@@ -285,7 +307,10 @@ async fn cannot_modify_locked_snapshot() {
         let res = request.post("/api/v1/snapshots").json(&body).await;
         let created = res.json::<analysis_snapshots::Model>();
 
-        let res = request.put(&format!("/api/v1/snapshots/{}", created.id)).json(&serde_json::json!({})).await;
+        let res = request
+            .put(&format!("/api/v1/snapshots/{}", created.id))
+            .json(&serde_json::json!({}))
+            .await;
         assert_eq!(res.status_code(), 403);
         let body: serde_json::Value = res.json();
         assert_eq!(body["error"], "Locked analyses cannot be modified");
@@ -310,10 +335,16 @@ async fn cannot_modify_unlocked_snapshot() {
         let res = request.post("/api/v1/snapshots").json(&body).await;
         let created = res.json::<analysis_snapshots::Model>();
 
-        let res = request.put(&format!("/api/v1/snapshots/{}", created.id)).json(&serde_json::json!({})).await;
+        let res = request
+            .put(&format!("/api/v1/snapshots/{}", created.id))
+            .json(&serde_json::json!({}))
+            .await;
         assert_eq!(res.status_code(), 403);
         let body: serde_json::Value = res.json();
-        assert_eq!(body["error"], "Snapshots are append-only and cannot be modified. Create a new snapshot instead.");
+        assert_eq!(
+            body["error"],
+            "Snapshots are append-only and cannot be modified. Create a new snapshot instead."
+        );
     })
     .await;
 }
@@ -351,10 +382,14 @@ async fn returns_404_for_soft_deleted_snapshot() {
         let created = res.json::<analysis_snapshots::Model>();
 
         // Soft-delete
-        request.delete(&format!("/api/v1/snapshots/{}", created.id)).await;
+        request
+            .delete(&format!("/api/v1/snapshots/{}", created.id))
+            .await;
 
         // GET should return 404
-        let res = request.get(&format!("/api/v1/snapshots/{}", created.id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}", created.id))
+            .await;
         assert_eq!(res.status_code(), 404);
     })
     .await;
@@ -381,7 +416,9 @@ async fn can_create_snapshot_with_chart_image() {
 
         // chart_image is skip_serializing on Model — verify via /chart-image endpoint
         let created = res.json::<analysis_snapshots::Model>();
-        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/chart-image", created.id))
+            .await;
         res.assert_status_success();
         assert_eq!(res.header("content-type"), "image/png");
     })
@@ -409,7 +446,9 @@ async fn can_create_snapshot_without_chart_image() {
 
         // Verify chart-image endpoint returns 404 (no image stored)
         let created = res.json::<analysis_snapshots::Model>();
-        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/chart-image", created.id))
+            .await;
         assert_eq!(res.status_code(), 404);
     })
     .await;
@@ -433,7 +472,9 @@ async fn can_retrieve_chart_image() {
         let res = request.post("/api/v1/snapshots").json(&body).await;
         let created = res.json::<analysis_snapshots::Model>();
 
-        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/chart-image", created.id))
+            .await;
         res.assert_status_success();
         // Verify content-type header
         assert_eq!(res.header("content-type"), "image/png");
@@ -458,7 +499,9 @@ async fn returns_404_for_missing_chart_image() {
         let res = request.post("/api/v1/snapshots").json(&body).await;
         let created = res.json::<analysis_snapshots::Model>();
 
-        let res = request.get(&format!("/api/v1/snapshots/{}/chart-image", created.id)).await;
+        let res = request
+            .get(&format!("/api/v1/snapshots/{}/chart-image", created.id))
+            .await;
         assert_eq!(res.status_code(), 404);
     })
     .await;
@@ -565,9 +608,12 @@ async fn can_get_history_for_ticker_with_multiple_snapshots() {
         let sept = analysis_snapshots::ActiveModel {
             user_id: ActiveValue::set(1),
             ticker_id: ActiveValue::set(ticker_id),
-            snapshot_data: ActiveValue::set(
-                snapshot_data_with_metrics(Some(8.0), Some(10.0), Some(22.0), Some(14.0)),
-            ),
+            snapshot_data: ActiveValue::set(snapshot_data_with_metrics(
+                Some(8.0),
+                Some(10.0),
+                Some(22.0),
+                Some(14.0),
+            )),
             thesis_locked: ActiveValue::set(true),
             notes: ActiveValue::set(Some("Sept review".to_string())),
             captured_at: ActiveValue::set(
@@ -581,9 +627,12 @@ async fn can_get_history_for_ticker_with_multiple_snapshots() {
         let june = analysis_snapshots::ActiveModel {
             user_id: ActiveValue::set(1),
             ticker_id: ActiveValue::set(ticker_id),
-            snapshot_data: ActiveValue::set(
-                snapshot_data_with_metrics(Some(6.0), Some(8.5), Some(25.0), Some(15.0)),
-            ),
+            snapshot_data: ActiveValue::set(snapshot_data_with_metrics(
+                Some(6.0),
+                Some(8.5),
+                Some(25.0),
+                Some(15.0),
+            )),
             thesis_locked: ActiveValue::set(true),
             notes: ActiveValue::set(Some("June review".to_string())),
             captured_at: ActiveValue::set(
@@ -597,9 +646,12 @@ async fn can_get_history_for_ticker_with_multiple_snapshots() {
         let dec = analysis_snapshots::ActiveModel {
             user_id: ActiveValue::set(1),
             ticker_id: ActiveValue::set(ticker_id),
-            snapshot_data: ActiveValue::set(
-                snapshot_data_with_metrics(Some(4.5), Some(6.0), Some(20.0), Some(12.0)),
-            ),
+            snapshot_data: ActiveValue::set(snapshot_data_with_metrics(
+                Some(4.5),
+                Some(6.0),
+                Some(20.0),
+                Some(12.0),
+            )),
             thesis_locked: ActiveValue::set(false),
             notes: ActiveValue::set(Some("Dec review".to_string())),
             captured_at: ActiveValue::set(
@@ -716,9 +768,12 @@ async fn history_returns_metric_deltas() {
         let snap_a = analysis_snapshots::ActiveModel {
             user_id: ActiveValue::set(1),
             ticker_id: ActiveValue::set(ticker_id),
-            snapshot_data: ActiveValue::set(
-                snapshot_data_with_metrics(Some(6.0), Some(8.5), Some(25.0), Some(15.0)),
-            ),
+            snapshot_data: ActiveValue::set(snapshot_data_with_metrics(
+                Some(6.0),
+                Some(8.5),
+                Some(25.0),
+                Some(15.0),
+            )),
             thesis_locked: ActiveValue::set(true),
             notes: ActiveValue::set(Some("Snapshot A".to_string())),
             captured_at: ActiveValue::set(
@@ -733,9 +788,12 @@ async fn history_returns_metric_deltas() {
         let snap_b = analysis_snapshots::ActiveModel {
             user_id: ActiveValue::set(1),
             ticker_id: ActiveValue::set(ticker_id),
-            snapshot_data: ActiveValue::set(
-                snapshot_data_with_metrics(None, Some(6.0), Some(22.0), Some(14.0)),
-            ),
+            snapshot_data: ActiveValue::set(snapshot_data_with_metrics(
+                None,
+                Some(6.0),
+                Some(22.0),
+                Some(14.0),
+            )),
             thesis_locked: ActiveValue::set(true),
             notes: ActiveValue::set(Some("Snapshot B".to_string())),
             captured_at: ActiveValue::set(
@@ -911,7 +969,10 @@ async fn history_includes_monetary_fields() {
         assert!(entry["target_high_price"].as_f64().unwrap() > 0.0);
         assert!(entry["target_low_price"].as_f64().unwrap() > 0.0);
         // target_high > target_low (high_pe > low_pe)
-        assert!(entry["target_high_price"].as_f64().unwrap() > entry["target_low_price"].as_f64().unwrap());
+        assert!(
+            entry["target_high_price"].as_f64().unwrap()
+                > entry["target_low_price"].as_f64().unwrap()
+        );
         // upside_downside_ratio should be computed
         assert!(entry["upside_downside_ratio"].as_f64().is_some());
     })

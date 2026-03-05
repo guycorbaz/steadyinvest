@@ -83,13 +83,11 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("HTTP client build must succeed")
 });
 
-static RATE_CACHE: LazyLock<RwLock<Option<CachedRates>>> =
-    LazyLock::new(|| RwLock::new(None));
+static RATE_CACHE: LazyLock<RwLock<Option<CachedRates>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Returns the Frankfurter API URL, overridable via env var for testing.
 fn frankfurter_url() -> String {
-    std::env::var("EXCHANGE_RATE_PROVIDER_URL")
-        .unwrap_or_else(|_| FRANKFURTER_URL.to_string())
+    std::env::var("EXCHANGE_RATE_PROVIDER_URL").unwrap_or_else(|_| FRANKFURTER_URL.to_string())
 }
 
 fn cache_ttl() -> chrono::Duration {
@@ -174,9 +172,13 @@ async fn fetch_from_frankfurter() -> Result<CachedRates> {
             Error::string(&format!("Frankfurter parse error: {e}"))
         })?;
 
-    let eur_chf_f64 = resp.rates.get("CHF")
+    let eur_chf_f64 = resp
+        .rates
+        .get("CHF")
         .ok_or_else(|| Error::string("CHF rate missing from Frankfurter response"))?;
-    let eur_usd_f64 = resp.rates.get("USD")
+    let eur_usd_f64 = resp
+        .rates
+        .get("USD")
         .ok_or_else(|| Error::string("USD rate missing from Frankfurter response"))?;
 
     let eur_chf = Decimal::from_f64_retain(*eur_chf_f64)
@@ -318,7 +320,9 @@ pub async fn get_rates(db: &DatabaseConnection) -> Result<ExchangeRateResponse> 
                 Ok(response)
             } else {
                 // Step 5: Nothing available
-                Err(Error::string("Exchange rate data is temporarily unavailable"))
+                Err(Error::string(
+                    "Exchange rate data is temporarily unavailable",
+                ))
             }
         }
     }

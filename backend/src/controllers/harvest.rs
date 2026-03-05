@@ -3,9 +3,9 @@
 //! Exposes `POST /api/harvest/{ticker}` to trigger a 10-year historical data
 //! fetch, split adjustment, and P/E analysis for the given ticker.
 
-use loco_rs::prelude::*;
-use axum::extract::Path;
 use crate::services::harvest;
+use axum::extract::Path;
+use loco_rs::prelude::*;
 
 /// Triggers a full 10-year data harvest for the given ticker symbol.
 ///
@@ -27,7 +27,7 @@ pub async fn harvest_ticker(
         return Err(Error::BadRequest("Invalid ticker format".to_string()));
     }
     let ticker = ticker.to_uppercase();
-    
+
     let data = harvest::run_harvest(&ctx, &ticker).await?;
     format::json(data)
 }

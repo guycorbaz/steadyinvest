@@ -82,10 +82,7 @@ pub struct ComparisonSnapshotSummary {
 
 impl ComparisonSnapshotSummary {
     /// Build from a snapshot model and its related ticker.
-    fn from_model_and_ticker(
-        m: analysis_snapshots::Model,
-        ticker: Option<tickers::Model>,
-    ) -> Self {
+    fn from_model_and_ticker(m: analysis_snapshots::Model, ticker: Option<tickers::Model>) -> Self {
         let ticker_symbol = ticker
             .map(|t| t.ticker)
             .unwrap_or_else(|| format!("ID:{}", m.ticker_id));
@@ -160,15 +157,11 @@ pub struct ComparisonSetItemDetail {
 
 /// Build a 422 Unprocessable Entity JSON response.
 fn unprocessable_entity(message: &str) -> Result<Response> {
-    Ok(Response::builder()
+    Response::builder()
         .status(axum::http::StatusCode::UNPROCESSABLE_ENTITY)
         .header("Content-Type", "application/json")
-        .body(
-            serde_json::json!({ "error": message })
-                .to_string()
-                .into(),
-        )
-        .map_err(|e| Error::string(&e.to_string()))?)
+        .body(serde_json::json!({ "error": message }).to_string().into())
+        .map_err(|e| Error::string(&e.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +227,9 @@ pub async fn create_comparison_set(
 
     // Validate base_currency is a valid ISO 4217 code (3 uppercase ASCII letters)
     if !is_valid_currency_code(&req.base_currency) {
-        return unprocessable_entity("base_currency must be a valid ISO 4217 code (3 uppercase letters)");
+        return unprocessable_entity(
+            "base_currency must be a valid ISO 4217 code (3 uppercase letters)",
+        );
     }
 
     // Validate all snapshot IDs exist and are not deleted
@@ -358,7 +353,9 @@ pub async fn update_comparison_set(
 
     // Validate base_currency is a valid ISO 4217 code (3 uppercase ASCII letters)
     if !is_valid_currency_code(&req.base_currency) {
-        return unprocessable_entity("base_currency must be a valid ISO 4217 code (3 uppercase letters)");
+        return unprocessable_entity(
+            "base_currency must be a valid ISO 4217 code (3 uppercase letters)",
+        );
     }
 
     // Validate all snapshot IDs exist and are not deleted
@@ -448,18 +445,16 @@ async fn build_set_detail(
 
     let mut item_details = Vec::with_capacity(items.len());
     for item in items {
-        let (snapshot, ticker) = analysis_snapshots::Entity::find_by_id(
-            item.analysis_snapshot_id,
-        )
-        .find_also_related(tickers::Entity)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| {
-            Error::string(&format!(
-                "Referenced snapshot {} not found",
-                item.analysis_snapshot_id
-            ))
-        })?;
+        let (snapshot, ticker) = analysis_snapshots::Entity::find_by_id(item.analysis_snapshot_id)
+            .find_also_related(tickers::Entity)
+            .one(&ctx.db)
+            .await?
+            .ok_or_else(|| {
+                Error::string(&format!(
+                    "Referenced snapshot {} not found",
+                    item.analysis_snapshot_id
+                ))
+            })?;
 
         item_details.push(ComparisonSetItemDetail {
             id: item.id,

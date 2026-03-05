@@ -49,8 +49,7 @@ pub struct MonetaryFields {
 
 /// Extract monetary fields by deserializing snapshot data via `steady-invest-logic`.
 pub fn extract_monetary_fields(snapshot_data: &serde_json::Value) -> MonetaryFields {
-    let snapshot: Option<AnalysisSnapshot> =
-        serde_json::from_value(snapshot_data.clone()).ok();
+    let snapshot: Option<AnalysisSnapshot> = serde_json::from_value(snapshot_data.clone()).ok();
 
     let Some(snapshot) = snapshot else {
         return MonetaryFields {

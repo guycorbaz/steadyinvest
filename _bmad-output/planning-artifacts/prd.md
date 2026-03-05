@@ -8,8 +8,10 @@ classification:
   complexity: high
   projectContext: evolution
 workflowType: 'prd'
-lastEdited: '2026-02-11'
+lastEdited: '2026-02-19'
 editHistory:
+  - date: '2026-02-19'
+    changes: 'Sprint Change Proposal (NAIC Methodology Completion): Added FR2.7-2.11 (dividend yield, structured tests, P/E breakdown, guided assessment, NAIC section structure). Expanded FR4.3 for NAIC Stock Comparison Guide alignment. Updated FR Coverage Map.'
   - date: '2026-02-11'
     changes: 'Validation report improvements: added Journey 5 (thesis evolution — closes traceability gaps for FR3.4, FR4.2, Analysis Comparison criterion), added measurement methods to all NFRs, reclassified NFR4 as FR1.5 (behavioral → functional), removed implementation leakage from FR7.1 (bcrypt/argon2) and NFR1 (SPA), renumbered NFRs 4-6.'
   - date: '2026-02-11'
@@ -22,7 +24,7 @@ editHistory:
 
 **Author:** Guy
 **Date:** 2026-02-03
-**Last Edited:** 2026-02-11
+**Last Edited:** 2026-02-19
 **Status:** Draft (Revised — Post-MVP Evolution)
 
 ## Executive Summary
@@ -185,6 +187,11 @@ It's quarterly review time. Markus pulls up his `NESN.SW` analysis from Q3 and o
 - **FR2.4**: System renders logarithmic trends for Sales, Earnings, and Price.
 - **FR2.5**: System generates trend line projections and "Quality Dashboards."
 - **FR2.6**: Users can interactively manipulate projection trend lines (drag Sales/EPS CAGR); valuation metrics update in real time.
+- **FR2.7**: System calculates dividend yield (most recent fiscal year's total dividend per share / current price), payout ratio (dividend / EPS), and combined 5-year total return estimate (price appreciation potential + average dividend yield) per NAIC SSG Section 5 methodology. Results are expressed as both simple and compound annual rates. When dividend data is unavailable from the provider, the system accepts manual dividend input per FR2.3 and displays a data gap indicator.
+- **FR2.8**: System evaluates structured NAIC decision criteria with guided assessment: Three Management Tests (Driving Force via sales expansion, Earned on Sales via profit margin trend, Earned on Equity vs. 10% benchmark) and Three Safety Tests of Price (probability of getting out even, upside-downside ratio >= 3:1, 100% appreciation possible in 5 years) with computed pass/fail suggestions, plain-language explanations referencing NAIC benchmarks, and analyst-overridable conclusions. The system presents each test as a guided question (matching the NAIC Report methodology) rather than just a score.
+- **FR2.9**: System displays 5-tier P/E breakdown (Highest, Average High, Average, Average Low, Lowest from last 5 years) and three price zone dollar ranges (Buy zone, Maybe zone, Sell zone) derived from NAIC SSG Section 4C zoning methodology.
+- **FR2.10**: System provides a guided analysis summary (inspired by the NAIC Stock Checklist conclusion format) presenting four key investment decisions — sales growth adequacy, earnings growth adequacy, future growth potential, and price acceptability — with contextual explanations and NAIC benchmark comparisons, enabling non-professional investors to reach informed conclusions. Draws on results from FR2.8 structured tests where applicable.
+- **FR2.11**: System presents SSG analysis in the canonical NAIC 5-section structure (Visual Analysis, Evaluating Management, Price-Earnings History, Evaluating Risk and Reward, 5-Year Potential) with section numbering, NAIC-standard column layouts, step-by-step calculation derivations, and subtle visual accents echoing the NAIC form color language (green for SSG, red for comparison, blue for portfolio, gold for guided assessment) — enabling NAIC-trained investors to navigate the interface with zero cognitive switching cost.
 
 ### FR#3: Reporting & Operations
 
@@ -197,7 +204,7 @@ It's quarterly review time. Markus pulls up his `NESN.SW` analysis from Q3 and o
 
 - **FR4.1**: System stores completed analyses in the database with ticker, date, and snapshot data, enabling retrieval and comparison.
 - **FR4.2**: Users can retrieve past analyses for the same ticker and compare thesis evolution across time (e.g., side-by-side metric deltas between quarterly reviews).
-- **FR4.3**: Users can compare projected performance metrics across multiple tickers (not limited to two) in a compact summary view, enabling ranking and selection decisions. Percentage-based metrics (CAGRs, P/E, ROE) display without currency conversion; monetary values convert to a user-selectable base currency using current exchange rates.
+- **FR4.3**: Users can compare projected performance metrics across multiple tickers (not limited to two) in a view aligned with the NAIC Stock Comparison Guide, organized into four row groups (Growth Comparisons, Management Comparisons, Price Comparisons, Other Comparisons) enabling ranking and selection decisions. Comparison metrics include: growth rates (historical/projected Sales and EPS), management quality (profit margin, ROE, trends), price analysis (5-tier P/E breakdown, price zone ranges, upside-downside ratio), and yield metrics (current yield, combined estimated yield, payout ratio). Other comparisons include date of source material and exchange. Percentage-based metrics display without currency conversion; monetary values convert to a user-selectable base currency using current exchange rates.
 
 ### FR#5: Portfolio Management (Phase 2)
 

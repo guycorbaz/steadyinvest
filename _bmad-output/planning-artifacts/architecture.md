@@ -6,6 +6,10 @@ status: 'complete'
 completedAt: '2026-02-04'
 revisionStarted: '2026-02-10'
 revisionScope: 'Post-MVP evolution — Phase 1-4 architecture expansion'
+lastRevised: '2026-02-19'
+revisionHistory:
+  - date: '2026-02-19'
+    scope: 'Sprint Change Proposal (NAIC Methodology Completion): Added HistoricalYearlyData expansion, logic crate additions (FR2.7-2.11), NAIC color accents, FR coverage updates'
 inputDocuments:
   - '_bmad-output/planning-artifacts/prd.md'
   - '_bmad-output/planning-artifacts/ux-design-specification.md'
@@ -168,6 +172,8 @@ All new tables include a `user_id` column (FK to `users`) from day one. Until Ph
 | `portfolio_holdings` | 2 | Stock positions | `portfolio_id`, `ticker_id`, `quantity`, `purchase_price`, `purchase_date`, `stop_loss_pct` |
 | `watchlist_items` | 2 | Stocks of interest | `user_id`, `ticker_id`, `target_buy_price`, `notes`, `analysis_snapshot_id` (nullable FK to specific version) |
 
+**`HistoricalYearlyData` Expansion (Epic 8c):** The shared logic crate's `HistoricalYearlyData` struct gains two optional fields: `dividend_per_share` (Option<f64>) and `shares_outstanding` (Option<f64>). These are non-breaking additions — existing data without dividend information continues to work without modification. The harvest pipeline is extended to populate these fields when the data provider supports them; manual override via FR2.3 provides a fallback.
+
 **`analysis_snapshots` vs. existing `locked_analyses`:** The existing `locked_analyses` table stores locked thesis snapshots (immutable). The new `analysis_snapshots` table stores both locked and unlocked snapshots. Rather than renaming and altering `locked_analyses` in-place (5 migration operations), create a clean new `analysis_snapshots` table with a one-time data migration script that copies existing locked analyses into the new table (with `thesis_locked = true`, `user_id = 1`), then drops the old table. **Column mapping:** `analysis_data` → `snapshot_data`, `locked_at` → `captured_at`. Document this mapping in the migration script comments.
 
 **Version-based snapshot model:** The `analysis_snapshots` table is **append-only** — each save creates a new row, never updates an existing one. This design simultaneously solves two problems:
@@ -258,6 +264,16 @@ The "latest" snapshot for a ticker is simply the most recent `captured_at` row. 
 ## Implementation Patterns & Consistency Rules
 
 > **CARDINAL RULE:** All calculation logic — ROE, profit-on-sales, split adjustments, CAGR projections, position sizing, exposure detection — lives in `crates/steady-invest-logic`. Never duplicated between frontend and backend. This is a trust and auditability guarantee, not a convenience. See Architectural Differentiators.
+
+### NAIC Methodology Expansion (Epic 8c)
+
+The following additions to `steady-invest-logic` follow the Cardinal Rule:
+
+- **~9 new functions**: `calculate_dividend_yield()`, `calculate_payout_ratio()`, `calculate_total_return_simple()`, `calculate_total_return_compound()`, `calculate_pe_breakdown_5tier()`, `calculate_price_zones()`, `evaluate_management_tests()`, `evaluate_safety_tests()`, `generate_guided_narrative()`
+- **New types**: `SuggestedAssessment` enum (Pass, Fail, Borderline) for structured management/safety tests; `PeBreakdown5Tier` struct; `PriceZones` struct
+- **Narrative templates**: Plain-language guided assessment templates live in `steady-invest-logic` (shared between frontend display and PDF export). Template-driven, no LLM dependency.
+- **NAIC color accents**: CSS custom properties `--accent-ssg: #2E7D32` (green), `--accent-comparison: #C62828` (red), `--accent-portfolio: #1565C0` (blue), `--accent-checklist: #F9A825` (gold). Applied as subtle 3px left-border on section headers. Defined in `frontend/public/index.css`.
+- **No new API endpoints**: Existing comparison endpoints return expanded `ComparisonSnapshotSummary` data. All new logic is in the shared crate.
 
 ### Naming Patterns
 
@@ -407,9 +423,10 @@ steadyinvest/
 | FR Group | Architectural Coverage | Status |
 |----------|----------------------|--------|
 | FR1 (Search & Population) | Delivered (MVP) | Complete |
-| FR2 (Analysis & Visualization) | Delivered (MVP) | Complete |
+| FR2.1-2.6 (Analysis & Visualization) | Delivered (MVP) | Complete |
+| FR2.7-2.11 (NAIC Methodology) | steady-invest-logic expansion, HistoricalYearlyData optional fields, NAIC section restructure, guided narratives | Ready (Epic 8c) |
 | FR3 (Reporting & Operations) | Delivered; PDF UI routing fix needed | Complete (minor fix) |
-| FR4 (Analysis Persistence) | Schema, API endpoints, service layer defined | Ready |
+| FR4 (Analysis Persistence) | Schema, API endpoints, service layer defined; FR4.3 expanded for NAIC Comparison Guide | Ready |
 | FR5 (Portfolio Management) | Schema, API endpoints, steady-invest-logic extension, UX components defined | Ready |
 | FR6 (Watchlist) | Schema, API endpoints, page component defined | Ready |
 | FR7 (Multi-User) | user_id columns, auth controller exists, middleware pattern defined | Ready |

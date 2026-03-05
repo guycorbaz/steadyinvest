@@ -4,11 +4,11 @@
 //! manual override events to the audit log. All audit records are immutable
 //! once written.
 
-use loco_rs::prelude::*;
 use crate::models::audit_logs;
+use loco_rs::prelude::*;
 
 /// Service for recording and managing system audit events.
-/// 
+///
 /// This service handles all data integrity alerts and manual user overrides,
 /// ensuring a persistent audit trail for financial analysis.
 pub struct AuditService;
@@ -25,16 +25,7 @@ impl AuditService {
         event_type: &str,
         source: &str,
     ) -> Result<audit_logs::Model, DbErr> {
-        audit_logs::Model::create(
-            db,
-            ticker,
-            exchange,
-            field,
-            old,
-            new,
-            event_type,
-            source,
-        ).await
+        audit_logs::Model::create(db, ticker, exchange, field, old, new, event_type, source).await
     }
 
     /// Records a system-detected anomaly in financial data.
@@ -54,7 +45,8 @@ impl AuditService {
             Some(message.to_string()),
             "Anomaly",
             "System",
-        ).await
+        )
+        .await
     }
 
     /// Records a manual data override performed by a user.
@@ -66,15 +58,6 @@ impl AuditService {
         old: Option<String>,
         new: Option<String>,
     ) -> Result<audit_logs::Model, DbErr> {
-        Self::log_event(
-            db,
-            ticker,
-            exchange,
-            field,
-            old,
-            new,
-            "Override",
-            "User",
-        ).await
+        Self::log_event(db, ticker, exchange, field, old, new, "Override", "User").await
     }
 }

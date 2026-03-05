@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err, clippy::too_many_arguments)]
 //! # SteadyInvest Backend
 //!
 //! Loco-based REST API backend for the SteadyInvest (NAIC SSG) application.
@@ -19,9 +20,9 @@ pub mod controllers;
 pub mod data;
 pub mod initializers;
 pub mod mailers;
+pub mod middlewares;
 pub mod models;
+pub mod services;
 pub mod tasks;
 pub mod views;
 pub mod workers;
-pub mod services;
-pub mod middlewares;

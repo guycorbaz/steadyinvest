@@ -4,7 +4,6 @@
 //! quality dashboard table, valuation projections, and analyst notes.
 //! Uses `charming` for server-side chart rendering and `genpdf` for PDF assembly.
 
-use std::io::Cursor;
 use charming::{
     component::{Axis, Legend},
     datatype::CompositeValue,
@@ -14,8 +13,11 @@ use charming::{
     Chart,
 };
 use genpdf::{elements, fonts, style};
-use steady_invest_logic::{AnalysisSnapshot, calculate_growth_analysis, calculate_projected_trendline};
 use rust_decimal::prelude::ToPrimitive;
+use std::io::Cursor;
+use steady_invest_logic::{
+    calculate_growth_analysis, calculate_projected_trendline, AnalysisSnapshot,
+};
 
 /// Alias for fallible report operations.
 pub type ReportResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -42,7 +44,8 @@ impl ReportingService {
         let chart = Self::create_ssg_chart(snapshot);
         let mut renderer = ImageRenderer::new(1600, 600);
 
-        let svg_content = renderer.render(&chart)
+        let svg_content = renderer
+            .render(&chart)
             .map_err(|e| format!("Charming error: {:?}", e))?;
 
         // 2. Render SVG to PNG via resvg (for embedding in PDF)
@@ -55,7 +58,7 @@ impl ReportingService {
             "/usr/share/fonts/truetype/liberation",
             "/usr/local/share/fonts", // macOS fallback attempt
         ];
-        
+
         let mut font_family = None;
         for dir in font_dirs {
             if std::path::Path::new(dir).exists() {
@@ -75,7 +78,7 @@ impl ReportingService {
             tracing::error!(msg);
             msg
         })?;
-        
+
         let mut doc = genpdf::Document::new(font_family);
         doc.set_title(format!("SSG Report: {}", ticker_symbol));
 
@@ -87,14 +90,14 @@ impl ReportingService {
         let header_style = style::Style::new().bold().with_font_size(18);
         doc.push(elements::StyledElement::new(
             elements::Text::new(format!("Stock Selection Guide: {}", ticker_symbol)),
-            header_style
+            header_style,
         ));
-        
+
         doc.push(elements::StyledElement::new(
             elements::Text::new(format!("Analysis Date: {}", created_at.format("%Y-%m-%d"))),
-            style::Style::new().with_font_size(10)
+            style::Style::new().with_font_size(10),
         ));
-        
+
         doc.push(elements::Break::new(1.0));
 
         // Embed Chart — scale to fill page content width
@@ -113,7 +116,7 @@ impl ReportingService {
         doc.push(elements::Break::new(1.0));
         doc.push(elements::StyledElement::new(
             elements::Text::new("Analyst Note:"),
-            style::Style::new().bold()
+            style::Style::new().bold(),
         ));
         doc.push(elements::Paragraph::new(analyst_note));
 
@@ -121,27 +124,41 @@ impl ReportingService {
         doc.push(elements::Break::new(1.5));
         doc.push(elements::StyledElement::new(
             elements::Text::new("Evaluate Management"),
-            style::Style::new().bold().with_font_size(14)
+            style::Style::new().bold().with_font_size(14),
         ));
-        
+
         let mut table = elements::TableLayout::new(vec![1, 1, 1]);
         table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-        
+
         let table_header_style = style::Style::new().bold();
         let mut header_row = table.row();
-        header_row.push_element(elements::StyledElement::new(elements::Paragraph::new("Year"), table_header_style));
-        header_row.push_element(elements::StyledElement::new(elements::Paragraph::new("% Earned on Equity"), table_header_style));
-        header_row.push_element(elements::StyledElement::new(elements::Paragraph::new("% Pre-Tax Profit on Sales"), table_header_style));
-        header_row.push().map_err(|e| format!("Table error: {}", e))?;
+        header_row.push_element(elements::StyledElement::new(
+            elements::Paragraph::new("Year"),
+            table_header_style,
+        ));
+        header_row.push_element(elements::StyledElement::new(
+            elements::Paragraph::new("% Earned on Equity"),
+            table_header_style,
+        ));
+        header_row.push_element(elements::StyledElement::new(
+            elements::Paragraph::new("% Pre-Tax Profit on Sales"),
+            table_header_style,
+        ));
+        header_row
+            .push()
+            .map_err(|e| format!("Table error: {}", e))?;
 
         let hist = &snapshot.historical_data;
         let quality = steady_invest_logic::calculate_quality_analysis(hist);
-        
+
         for point in quality.points {
             let mut row = table.row();
             row.push_element(elements::Paragraph::new(point.year.to_string()));
             row.push_element(elements::Paragraph::new(format!("{:.1}", point.roe)));
-            row.push_element(elements::Paragraph::new(format!("{:.1}", point.profit_on_sales)));
+            row.push_element(elements::Paragraph::new(format!(
+                "{:.1}",
+                point.profit_on_sales
+            )));
             row.push().map_err(|e| format!("Table error: {}", e))?;
         }
         doc.push(table);
@@ -150,16 +167,29 @@ impl ReportingService {
         doc.push(elements::Break::new(1.5));
         doc.push(elements::StyledElement::new(
             elements::Text::new("Price-Earnings History & Valuation"),
-            style::Style::new().bold().with_font_size(14)
+            style::Style::new().bold().with_font_size(14),
         ));
-        
-        doc.push(elements::Text::new(format!("Estimated Sales Growth Rate: {:.1}%", snapshot.projected_sales_cagr)));
-        doc.push(elements::Text::new(format!("Estimated EPS Growth Rate: {:.1}%", snapshot.projected_eps_cagr)));
-        doc.push(elements::Text::new(format!("Estimated Average High P/E: {:.1}", snapshot.projected_high_pe)));
-        doc.push(elements::Text::new(format!("Estimated Average Low P/E: {:.1}", snapshot.projected_low_pe)));
+
+        doc.push(elements::Text::new(format!(
+            "Estimated Sales Growth Rate: {:.1}%",
+            snapshot.projected_sales_cagr
+        )));
+        doc.push(elements::Text::new(format!(
+            "Estimated EPS Growth Rate: {:.1}%",
+            snapshot.projected_eps_cagr
+        )));
+        doc.push(elements::Text::new(format!(
+            "Estimated Average High P/E: {:.1}",
+            snapshot.projected_high_pe
+        )));
+        doc.push(elements::Text::new(format!(
+            "Estimated Average Low P/E: {:.1}",
+            snapshot.projected_low_pe
+        )));
 
         let mut buffer = Vec::new();
-        doc.render(&mut buffer).map_err(|e| format!("PDF render error: {}", e))?;
+        doc.render(&mut buffer)
+            .map_err(|e| format!("PDF render error: {}", e))?;
 
         Ok(buffer)
     }
@@ -172,27 +202,64 @@ impl ReportingService {
 
         let raw_years: Vec<i32> = hist.records.iter().map(|r| r.fiscal_year).collect();
         // Use NAN for non-positive values on the log-scale Y axis (log(0) is undefined)
-        let sales_data: Vec<f64> = hist.records.iter().map(|r| {
-            let v = r.sales.to_f64().unwrap_or(0.0);
-            if v > 0.0 { v } else { f64::NAN }
-        }).collect();
-        let eps_data: Vec<f64> = hist.records.iter().map(|r| {
-            let v = r.eps.to_f64().unwrap_or(0.0);
-            if v > 0.0 { v } else { f64::NAN }
-        }).collect();
-        let ptp_data: Vec<f64> = hist.records.iter().map(|r| {
-            r.pretax_income
-                .map(|v| { let f = v.to_f64().unwrap_or(0.0); if f > 0.0 { f } else { f64::NAN } })
-                .unwrap_or(f64::NAN)
-        }).collect();
-        let high_price: Vec<f64> = hist.records.iter().map(|r| r.price_high.to_f64().unwrap_or(0.0)).collect();
-        let low_price: Vec<f64> = hist.records.iter().map(|r| r.price_low.to_f64().unwrap_or(0.0)).collect();
+        let sales_data: Vec<f64> = hist
+            .records
+            .iter()
+            .map(|r| {
+                let v = r.sales.to_f64().unwrap_or(0.0);
+                if v > 0.0 {
+                    v
+                } else {
+                    f64::NAN
+                }
+            })
+            .collect();
+        let eps_data: Vec<f64> = hist
+            .records
+            .iter()
+            .map(|r| {
+                let v = r.eps.to_f64().unwrap_or(0.0);
+                if v > 0.0 {
+                    v
+                } else {
+                    f64::NAN
+                }
+            })
+            .collect();
+        let ptp_data: Vec<f64> = hist
+            .records
+            .iter()
+            .map(|r| {
+                r.pretax_income
+                    .map(|v| {
+                        let f = v.to_f64().unwrap_or(0.0);
+                        if f > 0.0 {
+                            f
+                        } else {
+                            f64::NAN
+                        }
+                    })
+                    .unwrap_or(f64::NAN)
+            })
+            .collect();
+        let high_price: Vec<f64> = hist
+            .records
+            .iter()
+            .map(|r| r.price_high.to_f64().unwrap_or(0.0))
+            .collect();
+        let low_price: Vec<f64> = hist
+            .records
+            .iter()
+            .map(|r| r.price_low.to_f64().unwrap_or(0.0))
+            .collect();
 
         // Compute trendlines
         let sales_trend = calculate_growth_analysis(&raw_years, &sales_data);
         let eps_trend = calculate_growth_analysis(&raw_years, &eps_data);
 
-        let ptp_valid: Vec<(i32, f64)> = ptp_data.iter().zip(raw_years.iter())
+        let ptp_valid: Vec<(i32, f64)> = ptp_data
+            .iter()
+            .zip(raw_years.iter())
             .filter(|(&v, _)| v > 0.0)
             .map(|(&v, &y)| (y, v))
             .collect();
@@ -221,7 +288,10 @@ impl ReportingService {
 
         let mut sales_tl = sales_trend_vals.clone();
         let mut eps_tl = eps_trend_vals.clone();
-        for _ in 0..5 { sales_tl.push(f64::NAN); eps_tl.push(f64::NAN); }
+        for _ in 0..5 {
+            sales_tl.push(f64::NAN);
+            eps_tl.push(f64::NAN);
+        }
 
         // Last actual data values (projection anchors to the solid data line)
         let sales_last_actual = sales_data.last().copied().unwrap_or(0.0);
@@ -238,58 +308,149 @@ impl ReportingService {
                 ptp_tl.push(f64::NAN);
             }
         }
-        let ptp_last_actual = ptp_data.iter().rev()
+        let ptp_last_actual = ptp_data
+            .iter()
+            .rev()
             .find(|v| v.is_finite() && **v > 0.0)
             .copied()
             .unwrap_or(0.0);
-        for _ in 0..5 { ptp_tl.push(f64::NAN); }
+        for _ in 0..5 {
+            ptp_tl.push(f64::NAN);
+        }
 
         // Projections anchored from last actual data points
-        let s_proj = calculate_projected_trendline(last_year, sales_last_actual, snapshot.projected_sales_cagr, &future_years);
-        let e_proj = calculate_projected_trendline(last_year, eps_last_actual, snapshot.projected_eps_cagr, &future_years);
-        let p_proj = calculate_projected_trendline(last_year, ptp_last_actual, snapshot.projected_ptp_cagr, &future_years);
+        let s_proj = calculate_projected_trendline(
+            last_year,
+            sales_last_actual,
+            snapshot.projected_sales_cagr,
+            &future_years,
+        );
+        let e_proj = calculate_projected_trendline(
+            last_year,
+            eps_last_actual,
+            snapshot.projected_eps_cagr,
+            &future_years,
+        );
+        let p_proj = calculate_projected_trendline(
+            last_year,
+            ptp_last_actual,
+            snapshot.projected_ptp_cagr,
+            &future_years,
+        );
 
         let mut s_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
         s_proj_data.push(sales_last_actual);
-        for p in &s_proj.trendline { s_proj_data.push(p.value); }
+        for p in &s_proj.trendline {
+            s_proj_data.push(p.value);
+        }
 
         let mut e_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
         e_proj_data.push(eps_last_actual);
-        for p in &e_proj.trendline { e_proj_data.push(p.value); }
+        for p in &e_proj.trendline {
+            e_proj_data.push(p.value);
+        }
 
         let mut p_proj_data: Vec<f64> = vec![f64::NAN; hist_len - 1];
-        p_proj_data.push(if ptp_last_actual > 0.0 { ptp_last_actual } else { f64::NAN });
-        for p in &p_proj.trendline { p_proj_data.push(p.value); }
+        p_proj_data.push(if ptp_last_actual > 0.0 {
+            ptp_last_actual
+        } else {
+            f64::NAN
+        });
+        for p in &p_proj.trendline {
+            p_proj_data.push(p.value);
+        }
 
         // Sales series (names match frontend ssg_chart.rs for consistency)
         chart = chart
-            .series(Line::new().name(format!("Sales Growth: {:.1}%", sales_trend.cagr)).data(sales_data).smooth(true)
-                .line_style(LineStyle::new().color("#1DB954")))
-            .series(Line::new().name("Sales Trend").data(sales_tl)
-                .line_style(LineStyle::new().color("#1DB954").width(1).type_(LineStyleType::Dotted)))
-            .series(Line::new().name("Sales Est. Growth").data(s_proj_data)
-                .line_style(LineStyle::new().color("#1DB954").width(2).type_(LineStyleType::Dashed)));
+            .series(
+                Line::new()
+                    .name(format!("Sales Growth: {:.1}%", sales_trend.cagr))
+                    .data(sales_data)
+                    .smooth(true)
+                    .line_style(LineStyle::new().color("#1DB954")),
+            )
+            .series(
+                Line::new().name("Sales Trend").data(sales_tl).line_style(
+                    LineStyle::new()
+                        .color("#1DB954")
+                        .width(1)
+                        .type_(LineStyleType::Dotted),
+                ),
+            )
+            .series(
+                Line::new()
+                    .name("Sales Est. Growth")
+                    .data(s_proj_data)
+                    .line_style(
+                        LineStyle::new()
+                            .color("#1DB954")
+                            .width(2)
+                            .type_(LineStyleType::Dashed),
+                    ),
+            );
 
         // EPS series
         chart = chart
-            .series(Line::new().name(format!("EPS Growth: {:.1}%", eps_trend.cagr)).data(eps_data).smooth(true)
-                .line_style(LineStyle::new().color("#3498DB")))
-            .series(Line::new().name("EPS Trend").data(eps_tl)
-                .line_style(LineStyle::new().color("#3498DB").width(1).type_(LineStyleType::Dotted)))
-            .series(Line::new().name("EPS Est. Growth").data(e_proj_data)
-                .line_style(LineStyle::new().color("#3498DB").width(2).type_(LineStyleType::Dashed)));
+            .series(
+                Line::new()
+                    .name(format!("EPS Growth: {:.1}%", eps_trend.cagr))
+                    .data(eps_data)
+                    .smooth(true)
+                    .line_style(LineStyle::new().color("#3498DB")),
+            )
+            .series(
+                Line::new().name("EPS Trend").data(eps_tl).line_style(
+                    LineStyle::new()
+                        .color("#3498DB")
+                        .width(1)
+                        .type_(LineStyleType::Dotted),
+                ),
+            )
+            .series(
+                Line::new()
+                    .name("EPS Est. Growth")
+                    .data(e_proj_data)
+                    .line_style(
+                        LineStyle::new()
+                            .color("#3498DB")
+                            .width(2)
+                            .type_(LineStyleType::Dashed),
+                    ),
+            );
 
         // PTP series
         chart = chart
-            .series(Line::new().name(format!("Pre-Tax Profit Growth: {:.1}%", ptp_trend.cagr)).data(ptp_data).smooth(true)
-                .line_style(LineStyle::new().color("#E74C3C")))
-            .series(Line::new().name("PTP Trend").data(ptp_tl)
-                .line_style(LineStyle::new().color("#E74C3C").width(1).type_(LineStyleType::Dotted)))
-            .series(Line::new().name("PTP Est. Growth").data(p_proj_data)
-                .line_style(LineStyle::new().color("#E74C3C").width(2).type_(LineStyleType::Dashed)));
+            .series(
+                Line::new()
+                    .name(format!("Pre-Tax Profit Growth: {:.1}%", ptp_trend.cagr))
+                    .data(ptp_data)
+                    .smooth(true)
+                    .line_style(LineStyle::new().color("#E74C3C")),
+            )
+            .series(
+                Line::new().name("PTP Trend").data(ptp_tl).line_style(
+                    LineStyle::new()
+                        .color("#E74C3C")
+                        .width(1)
+                        .type_(LineStyleType::Dotted),
+                ),
+            )
+            .series(
+                Line::new()
+                    .name("PTP Est. Growth")
+                    .data(p_proj_data)
+                    .line_style(
+                        LineStyle::new()
+                            .color("#E74C3C")
+                            .width(2)
+                            .type_(LineStyleType::Dashed),
+                    ),
+            );
 
         // Price range bars: thin vertical lines from price_low to price_high (NAIC Figure 2.1)
-        let price_bar_data: Vec<Vec<CompositeValue>> = high_price.iter().zip(low_price.iter())
+        let price_bar_data: Vec<Vec<CompositeValue>> = high_price
+            .iter()
+            .zip(low_price.iter())
             .enumerate()
             .map(|(i, (&high, &low))| {
                 vec![
@@ -311,9 +472,10 @@ impl ReportingService {
                             shape: { x1: low[0], y1: low[1], x2: high[0], y2: high[1] }, \
                             style: { stroke: '#333333', lineWidth: 2 } \
                         }; \
-                    }".to_string()
+                    }"
+                    .to_string(),
                 )
-                .data(price_bar_data)
+                .data(price_bar_data),
         );
 
         chart
@@ -325,21 +487,28 @@ impl ReportingService {
         let opt = resvg::usvg::Options::default();
         let mut fontdb = resvg::usvg::fontdb::Database::new();
         fontdb.load_system_fonts();
-        
-        let tree = resvg::usvg::Tree::from_str(svg_content, &opt, &fontdb).map_err(|e| e.to_string())?;
-        
+
+        let tree =
+            resvg::usvg::Tree::from_str(svg_content, &opt, &fontdb).map_err(|e| e.to_string())?;
+
         let pixmap_size = tree.size().to_int_size();
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height()).ok_or("Failed to create pixmap")?;
-        
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height())
+            .ok_or("Failed to create pixmap")?;
+
         // Fill with white background (AC 4: Institutional Aesthetic)
         pixmap.fill(resvg::tiny_skia::Color::WHITE);
-        
-        resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
-        
-        // genpdf/printpdf doesn't support alpha channel. 
+
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::default(),
+            &mut pixmap.as_mut(),
+        );
+
+        // genpdf/printpdf doesn't support alpha channel.
         // We convert RGBA to RGB by stripping the alpha.
         // Since we filled with white, the transparency is now flattened onto white.
-        let mut img_buffer: image::RgbImage = image::ImageBuffer::new(pixmap.width(), pixmap.height());
+        let mut img_buffer: image::RgbImage =
+            image::ImageBuffer::new(pixmap.width(), pixmap.height());
         for (x, y, pixel) in img_buffer.enumerate_pixels_mut() {
             if let Some(p) = pixmap.pixel(x, y) {
                 // tiny-skia pixels are premultiplied, but since we have a white background,
@@ -350,8 +519,10 @@ impl ReportingService {
         }
 
         let mut png_data = Cursor::new(Vec::new());
-        img_buffer.write_to(&mut png_data, image::ImageFormat::Png).map_err(|e| e.to_string())?;
-        
+        img_buffer
+            .write_to(&mut png_data, image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+
         Ok(png_data.into_inner())
     }
 }

@@ -3,7 +3,7 @@ use backend::models::_entities::{analysis_snapshots, tickers, users};
 use loco_rs::prelude::*;
 use loco_rs::testing::prelude::request;
 use rust_decimal::Decimal;
-use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serial_test::serial;
 use steady_invest_logic::{AnalysisSnapshot, HistoricalData, HistoricalYearlyData};
 
@@ -53,7 +53,11 @@ fn sample_snapshot_data_2() -> serde_json::Value {
 }
 
 /// Create a snapshot via the API and return its id.
-async fn create_snapshot(request: &loco_rs::TestServer, ticker_id: i32, data: serde_json::Value) -> i32 {
+async fn create_snapshot(
+    request: &loco_rs::TestServer,
+    ticker_id: i32,
+    data: serde_json::Value,
+) -> i32 {
     let body = serde_json::json!({
         "ticker_id": ticker_id,
         "snapshot_data": data,
@@ -109,6 +113,7 @@ fn sample_snapshot_data_with_records() -> serde_json::Value {
         },
         projected_sales_cagr: 8.0,
         projected_eps_cagr: 10.0,
+        projected_ptp_cagr: 9.0,
         projected_high_pe: 15.0,
         projected_low_pe: 5.0,
         analyst_note: "Test with records".to_string(),
@@ -132,7 +137,10 @@ async fn ad_hoc_compare_returns_latest_snapshots() {
         let latest_id = create_snapshot(&request, ticker_id, sample_snapshot_data_2()).await;
 
         let res = request
-            .get(&format!("/api/v1/compare?ticker_ids={}&base_currency=CHF", ticker_id))
+            .get(&format!(
+                "/api/v1/compare?ticker_ids={}&base_currency=CHF",
+                ticker_id
+            ))
             .await;
         res.assert_status_success();
 
@@ -207,11 +215,14 @@ async fn ad_hoc_compare_returns_upside_downside_ratio() {
         res.assert_status_success();
         let body: serde_json::Value = res.json();
         let snapshots = body["snapshots"].as_array().unwrap();
-        assert!(snapshots[0]["upside_downside_ratio"].is_null(),
-            "Expected null ratio for empty records");
+        assert!(
+            snapshots[0]["upside_downside_ratio"].is_null(),
+            "Expected null ratio for empty records"
+        );
 
         // Now create snapshot with records — ratio should be computed
-        let snap_id = create_snapshot(&request, ticker_id, sample_snapshot_data_with_records()).await;
+        let snap_id =
+            create_snapshot(&request, ticker_id, sample_snapshot_data_with_records()).await;
         let res = request
             .get(&format!("/api/v1/compare?ticker_ids={}", ticker_id))
             .await;
@@ -219,31 +230,48 @@ async fn ad_hoc_compare_returns_upside_downside_ratio() {
         let body: serde_json::Value = res.json();
         let snapshots = body["snapshots"].as_array().unwrap();
         assert_eq!(snapshots[0]["id"], snap_id, "Should return latest snapshot");
-        let ratio = snapshots[0]["upside_downside_ratio"].as_f64()
+        let ratio = snapshots[0]["upside_downside_ratio"]
+            .as_f64()
             .expect("upside_downside_ratio should be present");
         // EPS=5, price=50, eps_cagr=10%, high_pe=15, low_pe=5
         // Proj EPS 5yr = 5 * 1.10^5 ≈ 8.0526
         // Target high = 15 * 8.0526 ≈ 120.789
         // Target low = 5 * 8.0526 ≈ 40.263
         // Ratio = (120.789-50)/(50-40.263) ≈ 7.27
-        assert!(ratio > 7.0 && ratio < 8.0,
-            "Expected ratio ~7.27, got {}", ratio);
+        assert!(
+            ratio > 7.0 && ratio < 8.0,
+            "Expected ratio ~7.27, got {}",
+            ratio
+        );
 
         // Verify monetary fields from sample_snapshot_data_with_records
         assert_eq!(snapshots[0]["native_currency"], "USD");
-        let current_price = snapshots[0]["current_price"].as_f64()
+        let current_price = snapshots[0]["current_price"]
+            .as_f64()
             .expect("current_price should be present");
-        assert!((current_price - 50.0).abs() < 0.01, "Expected price ~50.0, got {}", current_price);
+        assert!(
+            (current_price - 50.0).abs() < 0.01,
+            "Expected price ~50.0, got {}",
+            current_price
+        );
 
-        let target_high = snapshots[0]["target_high_price"].as_f64()
+        let target_high = snapshots[0]["target_high_price"]
+            .as_f64()
             .expect("target_high_price should be present");
-        assert!(target_high > 120.0 && target_high < 121.0,
-            "Expected target_high ~120.789, got {}", target_high);
+        assert!(
+            target_high > 120.0 && target_high < 121.0,
+            "Expected target_high ~120.789, got {}",
+            target_high
+        );
 
-        let target_low = snapshots[0]["target_low_price"].as_f64()
+        let target_low = snapshots[0]["target_low_price"]
+            .as_f64()
             .expect("target_low_price should be present");
-        assert!(target_low > 40.0 && target_low < 41.0,
-            "Expected target_low ~40.263, got {}", target_low);
+        assert!(
+            target_low > 40.0 && target_low < 41.0,
+            "Expected target_low ~40.263, got {}",
+            target_low
+        );
     })
     .await;
 }
@@ -383,7 +411,11 @@ async fn can_list_comparison_sets() {
                     { "analysis_snapshot_id": snap_id, "sort_order": 1 }
                 ]
             });
-            request.post("/api/v1/comparisons").json(&body).await.assert_status_success();
+            request
+                .post("/api/v1/comparisons")
+                .json(&body)
+                .await
+                .assert_status_success();
         }
 
         let res = request.get("/api/v1/comparisons").await;
@@ -422,7 +454,9 @@ async fn can_get_comparison_set_detail() {
         let created: serde_json::Value = res.json();
         let set_id = created["id"].as_i64().unwrap();
 
-        let res = request.get(&format!("/api/v1/comparisons/{}", set_id)).await;
+        let res = request
+            .get(&format!("/api/v1/comparisons/{}", set_id))
+            .await;
         res.assert_status_success();
 
         let detail: serde_json::Value = res.json();
@@ -435,7 +469,14 @@ async fn can_get_comparison_set_detail() {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["snapshot"]["id"], snap_id);
         assert_eq!(items[0]["snapshot"]["ticker_symbol"], "AAPL");
-        assert!((items[0]["snapshot"]["projected_sales_cagr"].as_f64().unwrap() - 10.5).abs() < 0.01);
+        assert!(
+            (items[0]["snapshot"]["projected_sales_cagr"]
+                .as_f64()
+                .unwrap()
+                - 10.5)
+                .abs()
+                < 0.01
+        );
     })
     .await;
 }
@@ -513,10 +554,7 @@ async fn update_nonexistent_comparison_set_returns_404() {
             "base_currency": "USD",
             "items": []
         });
-        let res = request
-            .put("/api/v1/comparisons/99999")
-            .json(&update)
-            .await;
+        let res = request.put("/api/v1/comparisons/99999").json(&update).await;
         assert_eq!(res.status_code(), 404);
     })
     .await;
@@ -618,7 +656,14 @@ async fn version_pinning_preserves_original_snapshot() {
         // Still references the original snapshot, not the new one
         assert_eq!(items[0]["snapshot"]["id"], snap1);
         // Verify original metrics (from sample_snapshot_data, not sample_snapshot_data_2)
-        assert!((items[0]["snapshot"]["projected_sales_cagr"].as_f64().unwrap() - 10.5).abs() < 0.01);
+        assert!(
+            (items[0]["snapshot"]["projected_sales_cagr"]
+                .as_f64()
+                .unwrap()
+                - 10.5)
+                .abs()
+                < 0.01
+        );
     })
     .await;
 }

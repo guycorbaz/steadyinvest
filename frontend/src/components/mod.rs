@@ -21,17 +21,17 @@
 //! - [`override_modal`]     — Manual data override entry form
 //! - [`lock_thesis_modal`]  — Thesis lock confirmation dialog
 
-pub mod counter_btn;
-pub mod search_bar;
-pub mod ssg_chart;
-pub mod quality_dashboard;
-pub mod valuation_panel;
-pub mod override_modal;
-pub mod lock_thesis_modal;
 pub mod analyst_hud;
-pub mod snapshot_hud;
-pub mod footer;
 pub mod command_strip;
 pub mod compact_analysis_card;
+pub mod counter_btn;
+pub mod footer;
 pub mod history_timeline;
+pub mod lock_thesis_modal;
+pub mod override_modal;
+pub mod quality_dashboard;
+pub mod search_bar;
 pub mod snapshot_comparison;
+pub mod snapshot_hud;
+pub mod ssg_chart;
+pub mod valuation_panel;

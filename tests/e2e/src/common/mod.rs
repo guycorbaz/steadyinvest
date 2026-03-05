@@ -1,8 +1,8 @@
 #![allow(dead_code)]
-use thirtyfour::prelude::*;
+use anyhow::Result;
 use std::env;
 use std::path::Path;
-use anyhow::Result;
+use thirtyfour::prelude::*;
 
 // Viewport constants for responsive testing.
 pub const DESKTOP_WIDE: (u32, u32) = (1440, 900);
@@ -27,13 +27,12 @@ impl TestContext {
             caps.add_chrome_arg("--disable-dev-shm-usage")?;
         }
         // Use CHROME_DRIVER_URL from env or default to localhost:9515
-        let webdriver_url = env::var("CHROME_DRIVER_URL")
-            .unwrap_or_else(|_| "http://localhost:9515".to_string());
+        let webdriver_url =
+            env::var("CHROME_DRIVER_URL").unwrap_or_else(|_| "http://localhost:9515".to_string());
 
         let driver = WebDriver::new(&webdriver_url, caps).await?;
 
-        let base_url = env::var("BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:5173".to_string());
+        let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
 
         Ok(Self { driver, base_url })
     }

@@ -13,7 +13,6 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-
 impl Model {
     /// Converts the database model to the shared [`steady_invest_logic::TickerInfo`] DTO.
     pub fn to_ticker_info(&self) -> steady_invest_logic::TickerInfo {

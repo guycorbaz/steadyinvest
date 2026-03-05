@@ -1,8 +1,8 @@
 use backend::app::App;
-use loco_rs::testing::prelude::*;
-use serial_test::serial;
-use sea_orm::{ActiveModelTrait, ActiveValue};
 use backend::models::tickers;
+use loco_rs::testing::prelude::*;
+use sea_orm::{ActiveModelTrait, ActiveValue};
+use serial_test::serial;
 
 #[tokio::test]
 #[serial]
@@ -15,7 +15,9 @@ async fn can_list_audit_logs() {
             "NASDAQ",
             "Price",
             "Sudden 10% drop detected",
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         backend::services::audit_service::AuditService::log_override(
             &ctx.db,
@@ -24,7 +26,9 @@ async fn can_list_audit_logs() {
             "MarketCap",
             Some("2.5T".to_string()),
             Some("2.6T".to_string()),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let res = request.get("/api/v1/system/audit-logs").await;
         assert_eq!(res.status_code(), 200);
@@ -32,13 +36,17 @@ async fn can_list_audit_logs() {
         let body: serde_json::Value = serde_json::from_str(&res.text()).unwrap();
         assert!(body.is_array());
         let logs = body.as_array().unwrap();
-        
+
         // We expect at least the 2 seeded logs
         assert!(logs.len() >= 2);
 
         // Check both entries exist (order may vary with same-second timestamps)
-        let has_msft = logs.iter().any(|l| l["ticker"] == "MSFT" && l["event_type"] == "Override");
-        let has_aapl = logs.iter().any(|l| l["ticker"] == "AAPL" && l["event_type"] == "Anomaly");
+        let has_msft = logs
+            .iter()
+            .any(|l| l["ticker"] == "MSFT" && l["event_type"] == "Override");
+        let has_aapl = logs
+            .iter()
+            .any(|l| l["ticker"] == "AAPL" && l["event_type"] == "Anomaly");
         assert!(has_msft, "Expected MSFT override log");
         assert!(has_aapl, "Expected AAPL anomaly log");
     })
@@ -57,7 +65,10 @@ async fn test_harvest_anomaly_logging() {
             exchange: ActiveValue::set("NASDAQ".to_string()),
             currency: ActiveValue::set("USD".to_string()),
             ..Default::default()
-        }.insert(&ctx.db).await.unwrap();
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
 
         // 2. Run harvest (This triggers the anomaly logging)
         let res = request.post(&format!("/api/harvest/{}", ticker)).await;
@@ -68,12 +79,12 @@ async fn test_harvest_anomaly_logging() {
         assert_eq!(res.status_code(), 200);
         let body: serde_json::Value = serde_json::from_str(&res.text()).unwrap();
         let logs = body.as_array().expect("Audit logs should be an array");
-        
-        let found = logs.iter().any(|l| 
-            l["ticker"] == "ANOMALY" && 
-            l["event_type"] == "Anomaly" &&
-            l["field_name"] == "Integrity"
-        );
+
+        let found = logs.iter().any(|l| {
+            l["ticker"] == "ANOMALY"
+                && l["event_type"] == "Anomaly"
+                && l["field_name"] == "Integrity"
+        });
         assert!(found, "Expected anomaly log for ANOMALY ticker not found");
     })
     .await;
