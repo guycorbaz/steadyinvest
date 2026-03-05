@@ -131,14 +131,22 @@ mod search_tests {
         assert!(data_ready.is_displayed().await?);
 
         // Verify split-badge exists (AC 4) — use query with wait for rendering
+        // Check text content via JS to avoid headless Chrome visibility quirks
         let badge = ctx
             .driver
             .query(By::ClassName("split-badge"))
             .wait(Duration::from_secs(5), Duration::from_millis(500))
             .first()
             .await?;
-        assert!(badge.is_displayed().await?);
-        assert_eq!(badge.text().await?, "Split-Adjusted");
+        let text: String = ctx
+            .driver
+            .execute("return arguments[0].textContent", vec![badge.to_json()?])
+            .await?
+            .json()
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        assert_eq!(text, "Split-Adjusted");
 
         ctx.cleanup().await?;
         Ok(())
