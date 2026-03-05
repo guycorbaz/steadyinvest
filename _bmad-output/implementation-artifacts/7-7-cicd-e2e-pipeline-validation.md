@@ -186,7 +186,7 @@ database:
 **`backend/config/test.yaml`** (used when `LOCO_ENV=test`):
 ```yaml
 database:
-  uri: mysql://steadyinvest:1000cpsvqrE$@192.168.1.5:3306/steadyinvest_test
+  uri: mysql://steadyinvest:***REDACTED***@192.168.1.5:3306/steadyinvest_test
   dangerously_truncate: true
   dangerously_recreate: true
 ```

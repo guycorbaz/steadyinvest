@@ -112,7 +112,9 @@ impl HistoricalData {
     ///
     /// Multiplies `eps`, `price_high`, and `price_low` by each record's
     /// `adjustment_factor`. Records with a factor of `1` are left unchanged.
-    /// This method is idempotent — calling it again after adjustment is a no-op.
+    /// Sets `is_split_adjusted = true` only when at least one record has a
+    /// non-unity factor; for tickers without splits the flag stays `false`
+    /// (no "Split-Adjusted" badge in UI) and subsequent calls re-scan harmlessly.
     pub fn apply_adjustments(&mut self) {
         if self.is_split_adjusted {
             return;

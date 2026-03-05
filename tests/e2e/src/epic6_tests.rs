@@ -210,6 +210,7 @@ async fn test_eps_cagr_slider_controls_eps_projection() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "slider JS injection does not reliably trigger Leptos 0.8 reactive updates in headless Chrome — assertions pass vacuously"]
 async fn test_sliders_independent_no_cross_contamination() -> Result<()> {
     let ctx = TestContext::new().await?;
     load_ticker(&ctx, "MSFT").await?;
