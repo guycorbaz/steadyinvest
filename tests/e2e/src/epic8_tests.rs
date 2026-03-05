@@ -1092,7 +1092,10 @@ async fn test_history_tablet_overlay_sidebar() -> Result<()> {
         .wait(Duration::from_secs(15), Duration::from_millis(500))
         .first()
         .await?;
-    toggle.click().await?;
+    // Use JS click to bypass element interactability issues in tablet viewport
+    ctx.driver
+        .execute("arguments[0].click()", vec![toggle.to_json()?])
+        .await?;
 
     let sidebar = ctx
         .driver

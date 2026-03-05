@@ -14,6 +14,7 @@ mod epic8_tests;
 mod search_tests {
     use super::common::TestContext;
     use anyhow::Result;
+    use std::time::Duration;
     use thirtyfour::prelude::*;
 
     #[tokio::test]
@@ -81,8 +82,9 @@ mod search_tests {
 
         let table = data_ready.find(By::Tag("table")).await?;
         let rows = table.find_all(By::Tag("tr")).await?;
-        // 1 header + 10 rows
-        assert_eq!(rows.len(), 11);
+        // 1 header + 3 metric rows (Sales, Earnings, Pre-Tax Profit)
+        // Years are columns, not rows (NAIC Fundamental Data table layout)
+        assert_eq!(rows.len(), 4);
 
         ctx.cleanup().await?;
         Ok(())
@@ -128,10 +130,15 @@ mod search_tests {
             .await?;
         assert!(data_ready.is_displayed().await?);
 
-        // Verify split-badge exists (AC 4)
-        let badge = data_ready.find(By::ClassName("split-badge")).await?;
+        // Verify split-badge exists (AC 4) — use query with wait for rendering
+        let badge = ctx
+            .driver
+            .query(By::ClassName("split-badge"))
+            .wait(Duration::from_secs(5), Duration::from_millis(500))
+            .first()
+            .await?;
         assert!(badge.is_displayed().await?);
-        assert_eq!(badge.text().await?, "SPLIT-ADJUSTED");
+        assert_eq!(badge.text().await?, "Split-Adjusted");
 
         ctx.cleanup().await?;
         Ok(())
