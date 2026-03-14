@@ -105,6 +105,31 @@ async fn verify_normalization_math_consistency() {
     .await;
 }
 
+/// Regression guard (Story 8d.3 AC 1): harvest response records must be
+/// sorted by fiscal_year ascending (oldest to newest). The SSG chart and
+/// calculate_growth_analysis() depend on chronological ordering.
+#[tokio::test]
+#[serial]
+async fn harvest_returns_records_in_chronological_order() {
+    request::<App, _, _>(|request, _ctx| async move {
+        let res = request.post("/api/harvest/AAPL").await;
+        assert_eq!(res.status_code(), 200);
+
+        let data: steady_invest_logic::HistoricalData = res.json();
+        assert!(data.records.len() >= 2, "Need at least 2 records to verify ordering");
+
+        for window in data.records.windows(2) {
+            assert!(
+                window[0].fiscal_year < window[1].fiscal_year,
+                "Records not in chronological order: year {} should be before {}",
+                window[0].fiscal_year,
+                window[1].fiscal_year
+            );
+        }
+    })
+    .await;
+}
+
 #[tokio::test]
 #[serial]
 async fn cannot_harvest_invalid_ticker() {

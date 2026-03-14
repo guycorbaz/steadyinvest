@@ -352,6 +352,12 @@ pub fn calculate_growth_analysis(years: &[i32], values: &[f64]) -> TrendAnalysis
         return TrendAnalysis::default();
     }
 
+    // Defensive sort: ensure chronological order (matching calculate_pe_ranges pattern)
+    let mut pairs: Vec<(i32, f64)> = years.iter().copied().zip(values.iter().copied()).collect();
+    pairs.sort_by_key(|&(y, _)| y);
+    let years: Vec<i32> = pairs.iter().map(|&(y, _)| y).collect();
+    let values: Vec<f64> = pairs.iter().map(|&(_, v)| v).collect();
+
     // 1. CAGR Calculation
     // (End / Start) ^ (1/n) - 1
     let n = (years.len() - 1) as f64;
@@ -804,5 +810,230 @@ mod tests {
 
         assert_eq!(y2015.profit_trend, TrendIndicator::Up);
         assert_eq!(y2015.roe_trend, TrendIndicator::Up);
+    }
+
+    // ================================================================
+    // NAIC Handbook Golden Tests
+    // ================================================================
+
+    /// Full NAIC handbook valuation pipeline: extract_snapshot_prices →
+    /// calculate_upside_downside_ratio with O'Hara Cruises data.
+    /// Restored during 8d.2 code review (was accidentally dropped in modularization).
+    #[test]
+    fn test_naic_handbook_full_valuation_pipeline() {
+        let snapshot = AnalysisSnapshot {
+            historical_data: HistoricalData {
+                records: vec![HistoricalYearlyData {
+                    fiscal_year: 2015,
+                    eps: Decimal::new(571, 2),          // 5.71
+                    price_high: Decimal::new(14983, 2), // 149.83 (proxy for current price)
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            projected_eps_cagr: 10.4, // yields ~9.37 at year 5
+            projected_high_pe: 27.9,  // Handbook Avg High P/E
+            projected_low_pe: 20.0,   // Handbook Avg Low P/E
+            ..Default::default()
+        };
+
+        let prices = extract_snapshot_prices(&snapshot);
+
+        // Projected EPS at year 5: 5.71 × 1.104^5 ≈ 9.363
+        // Target High = 27.9 × 9.363 ≈ 261.2
+        let target_high = prices.target_high_price.unwrap();
+        assert!(
+            (target_high - 261.3).abs() < 1.0,
+            "Target high: expected ~261.3, got {:.1}",
+            target_high
+        );
+
+        // Target Low = 20.0 × 9.363 ≈ 187.3
+        // Note: handbook uses separate low EPS estimate (5.82); our model uses same EPS
+        let target_low = prices.target_low_price.unwrap();
+        assert!(
+            (target_low - 187.3).abs() < 1.0,
+            "Target low: expected ~187.3, got {:.1}",
+            target_low
+        );
+
+        // Upside/downside using handbook's selected low of 116.4
+        let ratio = calculate_upside_downside_ratio(149.83, target_high, 116.4);
+        assert!(
+            ratio.unwrap() > 3.0,
+            "Should meet NAIC 3:1 minimum for BUY recommendation"
+        );
+    }
+
+    // ================================================================
+    // Regression Guards (Story 8d.3)
+    // ================================================================
+
+    /// Verify that sorted and unsorted inputs produce identical CAGRs
+    /// after the defensive sort added in AC 2.
+    #[test]
+    fn test_growth_analysis_unsorted_input() {
+        let sorted_years = vec![2019, 2020, 2021, 2022, 2023];
+        let sorted_values = vec![100.0, 110.0, 121.0, 133.1, 146.41];
+
+        // Reverse order (newest first — how harvest generates before sorting)
+        let unsorted_years = vec![2023, 2022, 2021, 2020, 2019];
+        let unsorted_values = vec![146.41, 133.1, 121.0, 110.0, 100.0];
+
+        let sorted_result = calculate_growth_analysis(&sorted_years, &sorted_values);
+        let unsorted_result = calculate_growth_analysis(&unsorted_years, &unsorted_values);
+
+        // Both must produce identical CAGR (~10%)
+        assert!(
+            (sorted_result.cagr - unsorted_result.cagr).abs() < 0.001,
+            "CAGR mismatch: sorted={:.3}, unsorted={:.3}",
+            sorted_result.cagr,
+            unsorted_result.cagr
+        );
+        assert!((sorted_result.cagr - 10.0).abs() < 0.001);
+
+        // Trendline points must match (same years, same values)
+        assert_eq!(sorted_result.trendline.len(), unsorted_result.trendline.len());
+        for (s, u) in sorted_result.trendline.iter().zip(unsorted_result.trendline.iter()) {
+            assert_eq!(s.year, u.year);
+            assert!((s.value - u.value).abs() < 0.001);
+        }
+    }
+
+    /// End-to-end chart data pipeline test (AC 3): harvest → adjustments →
+    /// growth analysis → extract_snapshot_prices → chart-ready data.
+    #[test]
+    fn test_chart_data_pipeline_end_to_end() {
+        use crate::projections::project_forward;
+
+        // Create 10-year dataset with ~10% CAGR
+        let mut data = HistoricalData {
+            ticker: "TEST".to_string(),
+            currency: "USD".to_string(),
+            ..Default::default()
+        };
+        let base_sales = 100.0;
+        let base_eps = 5.0;
+        for i in 0..10 {
+            let factor = (1.1_f64).powi(i);
+            data.records.push(HistoricalYearlyData {
+                fiscal_year: 2014 + i as i32,
+                sales: Decimal::from_f64_retain(base_sales * factor)
+                    .unwrap()
+                    .round_dp(2),
+                eps: Decimal::from_f64_retain(base_eps * factor)
+                    .unwrap()
+                    .round_dp(2),
+                price_high: Decimal::from_f64_retain(base_eps * factor * 20.0)
+                    .unwrap()
+                    .round_dp(2),
+                price_low: Decimal::from_f64_retain(base_eps * factor * 12.0)
+                    .unwrap()
+                    .round_dp(2),
+                ..Default::default()
+            });
+        }
+
+        // 1. Chronological order → positive CAGR
+        let sales_values: Vec<f64> = data
+            .records
+            .iter()
+            .map(|r| r.sales.to_f64().unwrap())
+            .collect();
+        let years: Vec<i32> = data.records.iter().map(|r| r.fiscal_year).collect();
+        let growth = calculate_growth_analysis(&years, &sales_values);
+        assert!(
+            (growth.cagr - 10.0).abs() < 0.5,
+            "Expected ~10% CAGR, got {:.2}%",
+            growth.cagr
+        );
+
+        // 2. Reversed input produces same CAGR (defensive sort)
+        let rev_years: Vec<i32> = years.iter().copied().rev().collect();
+        let rev_values: Vec<f64> = sales_values.iter().copied().rev().collect();
+        let rev_growth = calculate_growth_analysis(&rev_years, &rev_values);
+        assert!(
+            (growth.cagr - rev_growth.cagr).abs() < 0.001,
+            "Reversed input CAGR mismatch: {:.3} vs {:.3}",
+            growth.cagr,
+            rev_growth.cagr
+        );
+
+        // 3. project_forward produces correct 5-year projection
+        let latest_eps = data.records.last().unwrap().eps.to_f64().unwrap();
+        let projected_eps_5yr = project_forward(latest_eps, 10.0, 5);
+        let expected_5yr = latest_eps * (1.1_f64).powi(5);
+        assert!(
+            (projected_eps_5yr - expected_5yr).abs() < 0.01,
+            "project_forward mismatch: {:.2} vs expected {:.2}",
+            projected_eps_5yr,
+            expected_5yr
+        );
+
+        // 4. extract_snapshot_prices produces correct target prices
+        let snapshot = AnalysisSnapshot {
+            historical_data: data,
+            projected_eps_cagr: 10.0,
+            projected_sales_cagr: 10.0,
+            projected_high_pe: 20.0,
+            projected_low_pe: 12.0,
+            ..Default::default()
+        };
+        let prices = extract_snapshot_prices(&snapshot);
+        assert!(prices.current_price.is_some());
+        assert!(prices.target_high_price.is_some());
+        assert!(prices.target_low_price.is_some());
+
+        let target_high = prices.target_high_price.unwrap();
+        let target_low = prices.target_low_price.unwrap();
+        // target_high = 20.0 * projected_eps_5yr
+        assert!(
+            (target_high - 20.0 * projected_eps_5yr).abs() < 0.1,
+            "Target high: {:.2}, expected {:.2}",
+            target_high,
+            20.0 * projected_eps_5yr
+        );
+        assert!(
+            (target_low - 12.0 * projected_eps_5yr).abs() < 0.1,
+            "Target low: {:.2}, expected {:.2}",
+            target_low,
+            12.0 * projected_eps_5yr
+        );
+    }
+
+    /// Golden test: NAIC Handbook O'Hara Cruises EPS growth analysis.
+    /// Reuses the known EPS=5.71 at CAGR=10.4% from the handbook.
+    #[test]
+    fn test_naic_handbook_eps_growth_pipeline() {
+        use crate::projections::project_forward;
+
+        // O'Hara Cruises EPS data: 10 years of ~10.4% growth from 2.18 to 5.71
+        let years = vec![2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015];
+        let eps_values = vec![2.18, 2.40, 2.66, 2.93, 3.23, 3.57, 3.94, 4.35, 5.17, 5.71];
+
+        let growth = calculate_growth_analysis(&years, &eps_values);
+
+        // CAGR should be ~10.1-11.3% (handbook states 10.4%)
+        assert!(
+            growth.cagr > 9.0 && growth.cagr < 12.0,
+            "CAGR out of range: {:.1}%",
+            growth.cagr
+        );
+
+        // 5-year projection at handbook CAGR: 5.71 * 1.104^5 ≈ 9.37
+        let projected_eps = project_forward(5.71, 10.4, 5);
+        assert!(
+            (projected_eps - 9.37).abs() < 0.1,
+            "Projected EPS: expected ~9.37, got {:.2}",
+            projected_eps
+        );
+
+        // Forecast high price: 27.9 (avg high PE) × 9.37 = 261.3
+        let forecast_high = 27.9 * projected_eps;
+        assert!(
+            (forecast_high - 261.3).abs() < 1.0,
+            "Forecast high: expected ~261.3, got {:.1}",
+            forecast_high
+        );
     }
 }

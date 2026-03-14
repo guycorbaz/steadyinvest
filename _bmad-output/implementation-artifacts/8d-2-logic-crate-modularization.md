@@ -1,6 +1,6 @@
 # Story 8d.2: Logic Crate Modularization
 
-Status: review
+Status: done
 
 ## Story
 
@@ -104,7 +104,7 @@ src/
 - [x] Task 7: Move tests to module files (AC: 3)
   - [x] 7.1: Move unit tests to their respective module's `#[cfg(test)] mod tests` block
   - [x] 7.2: Move NAIC golden tests — kept together in `calculations.rs`
-  - [x] 7.3: Run `cargo test -p steady-invest-logic` — all 34 tests pass (25 unit + 9 doc)
+  - [x] 7.3: Run `cargo test -p steady-invest-logic` — all 35 tests pass (26 unit + 9 doc)
 
 - [x] Task 8: Verify downstream compilation (AC: 5)
   - [x] 8.1: `cargo build --workspace` — passes
@@ -124,7 +124,7 @@ src/
 ### Current Crate Structure (pre-modularization)
 
 ```
-src/lib.rs (1,391 lines)
+src/lib.rs (1,399 lines)
 ├── Lines 1-33:    Imports (serde, rust_decimal, chrono)
 ├── Lines 34-254:  Type definitions (13 structs, 1 enum)
 │   ├── TickerInfo (34-44)
@@ -242,7 +242,8 @@ Claude Opus 4.6 (create-story workflow) → Claude Opus 4.6 (dev-story workflow)
 - SnapshotPrices struct (line 495) is physically separated from the other types — placed between calculation functions. Must be moved to `types.rs` during modularization.
 - `HistoricalData::apply_adjustments` and `apply_normalization` are impl methods — they need access to the struct's private fields. If all fields are `pub`, they can live in a separate module. Verify field visibility before splitting.
 - No changes to `Cargo.toml` needed — dependencies remain the same.
-- **Implementation (2026-03-14):** Modularization complete. Actual test count: 25 unit + 9 doc = 34 (story overcounted by 1). All fields are `pub`, so `adjustments.rs` impl works via `use crate::types::HistoricalData`. The `log_linear_regression` helper was inlined in `calculate_growth_analysis` (it was the regression math block, not a separate fn). Private helpers `calculate_trend_direction` and `pe_from_price_eps` were also inlined in their callers during the original implementation — the dev notes line references were stale. All 5 modules created per AC 4. `lib.rs` at 39 lines (under 50 limit). No downstream changes needed. `cargo clippy`, `cargo build --workspace`, and WASM build all pass clean.
+- **Implementation (2026-03-14):** Modularization complete. All 26 unit + 9 doc = 35 tests preserved and passing. All fields are `pub`, so `adjustments.rs` impl works via `use crate::types::HistoricalData`. The `log_linear_regression` helper was inlined in `calculate_growth_analysis` (it was the regression math block, not a separate fn). Private helpers `calculate_trend_direction` and `pe_from_price_eps` were also inlined in their callers during the original implementation — the dev notes line references were stale. All 5 modules created per AC 4. `lib.rs` at 39 lines (under 50 limit). No downstream changes needed. `cargo clippy`, `cargo build --workspace`, and WASM build all pass clean.
+- **Code Review Fix (2026-03-14):** Restored dropped golden test `test_naic_handbook_full_valuation_pipeline` to `calculations.rs` — was accidentally omitted during modularization.
 
 ### Implementation Plan
 
@@ -259,4 +260,5 @@ Pure structural refactoring: split monolithic `lib.rs` (1,399 lines) into 5 focu
 
 ### Change Log
 
-- 2026-03-14: Split monolithic lib.rs into 5 modules (types, calculations, projections, currency, adjustments). All 34 tests pass. No API changes. lib.rs reduced from 1,399 to 39 lines.
+- 2026-03-14: Split monolithic lib.rs into 5 modules (types, calculations, projections, currency, adjustments). All 35 tests pass. No API changes. lib.rs reduced from 1,399 to 39 lines.
+- 2026-03-14: Code review fix — restored dropped `test_naic_handbook_full_valuation_pipeline` golden test.
