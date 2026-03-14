@@ -77,3 +77,10 @@ Antigravity
 - [frontend/src/components/search_bar.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/components/search_bar.rs)
 - [frontend/src/components/analyst_hud.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/components/analyst_hud.rs)
 - [frontend/src/components/snapshot_hud.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/components/snapshot_hud.rs)
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Implement toast/notification system for save success/failure feedback
+- [ ] [AI-Review][HIGH] Add confirmation prompt before overwriting active session on file import [frontend/src/pages/home.rs:325-329]
+- [ ] [AI-Review][MEDIUM] Implement .sinv export format (currently only .json) [frontend/src/persistence.rs:53-56]
+- [ ] [AI-Review][MEDIUM] Fix memory leaks from Closure::forget() in persistence.rs [frontend/src/persistence.rs:100,107]

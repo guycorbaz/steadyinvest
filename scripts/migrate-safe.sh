@@ -67,11 +67,10 @@ echo ""
 # --- Step 1: Create backup ---
 echo "[1/2] Creating database backup..."
 DUMP_ERR=$(mktemp)
-if mysqldump \
+if MYSQL_PWD="$DB_PASS" mysqldump \
     --host="$DB_HOST" \
     --port="$DB_PORT" \
     --user="$DB_USER" \
-    --password="$DB_PASS" \
     --single-transaction \
     --routines \
     --triggers \

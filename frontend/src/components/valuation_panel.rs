@@ -258,7 +258,7 @@ pub fn ValuationPanel(
                         font-weight: bold;
                         font-family: 'JetBrains Mono', monospace;
                     ">
-                        "$" {move || format!("{:.2}", target_low_price())}
+                        {move || format!("{:.2}", target_low_price())}
                     </div>
                 </div>
                 <div class="sell-zone" style="
@@ -283,7 +283,7 @@ pub fn ValuationPanel(
                         font-weight: bold;
                         font-family: 'JetBrains Mono', monospace;
                     ">
-                        "$" {move || format!("{:.2}", target_high_price())}
+                        {move || format!("{:.2}", target_high_price())}
                     </div>
                 </div>
             </div>

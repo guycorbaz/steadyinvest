@@ -436,3 +436,8 @@ None — all tasks compiled and tests passed on first attempt.
 - `backend/src/controllers/mod.rs` — Added `pub mod snapshots`
 - `backend/src/app.rs` — Registered snapshot routes
 - `backend/tests/requests/mod.rs` — Added `mod snapshots`
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][MEDIUM] Move snapshot_metrics extraction logic to steady-invest-logic (Cardinal Rule) [backend/src/controllers/snapshot_metrics.rs]
+- [ ] [AI-Review][MEDIUM] Update story ACs to reflect actual SnapshotSummary fields and additional endpoints

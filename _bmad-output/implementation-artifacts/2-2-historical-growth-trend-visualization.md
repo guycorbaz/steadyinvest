@@ -61,3 +61,8 @@ so that I can identify the long-term stability and consistency of the business.
 
 - [Epics: Story 2.2 Requirements](file:///home/gcorbaz/synology/devel/naic/_bmad-output/planning-artifacts/epics.md#L169-181)
 - [Architecture: Domain Logic](file:///home/gcorbaz/synology/devel/naic/_bmad-output/planning-artifacts/architecture.md#L45)
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Consider regression-based CAGR instead of raw first/last values — outlier sensitivity [crates/steady-invest-logic/src/calculations.rs:356-365]
+- [ ] [AI-Review][MEDIUM] Center x-values in regression to avoid catastrophic cancellation [crates/steady-invest-logic/src/calculations.rs:375-410]

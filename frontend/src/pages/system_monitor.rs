@@ -73,7 +73,7 @@ pub fn SystemMonitor() -> impl IntoView {
                 <p class="console-line success">"> Monitoring primary feeds (CH, DE, US)..."</p>
                 <p class="console-line success">"> All systems nominal."</p>
                 <div class="console-nav">
-                    <a href="/audit" class="console-link">"> System Audit Log"</a>
+                    <a href="/audit-log" class="console-link">"> System Audit Log"</a>
                     <a href="/" class="console-link">"<- Return to Terminal"</a>
                 </div>
             </div>

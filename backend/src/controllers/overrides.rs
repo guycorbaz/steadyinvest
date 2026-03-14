@@ -36,6 +36,24 @@ pub async fn save_override(
     State(ctx): State<AppContext>,
     Json(req): Json<OverrideRequest>,
 ) -> Result<Response> {
+    // Whitelist of valid override field names
+    const VALID_FIELDS: &[&str] = &[
+        "sales",
+        "eps",
+        "price_high",
+        "price_low",
+        "net_income",
+        "pretax_income",
+        "total_equity",
+    ];
+    if !VALID_FIELDS.contains(&req.field_name.as_str()) {
+        return Err(Error::BadRequest(format!(
+            "Invalid field_name '{}'. Must be one of: {}",
+            req.field_name,
+            VALID_FIELDS.join(", ")
+        )));
+    }
+
     if req
         .note
         .as_ref()

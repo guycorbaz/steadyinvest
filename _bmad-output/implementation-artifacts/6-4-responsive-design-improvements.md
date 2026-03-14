@@ -469,3 +469,9 @@ Claude Opus 4.6
 - `frontend/src/components/valuation_panel.rs` — Removed inline grid-template-columns from .valuation-grid and .target-results
 - `frontend/src/pages/home.rs` — Removed inline styles from system monitor link, replaced with CSS class
 - `frontend/public/styles.scss` — Added SSG Chart component styles, Valuation Panel grid styles (from inline), system-monitor-link class, comprehensive responsive breakpoints (Desktop Standard 1024-1279px, Tablet 768-1024px, Mobile <768px), global touch optimization, CSS variables for --warning and --info-purple, replaced hardcoded font sizes with variables, consolidated duplicate mobile breakpoints
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Remove remaining inline styles from ssg_chart.rs (15 inline style= attributes) [frontend/src/components/ssg_chart.rs:546-690]
+- [ ] [AI-Review][HIGH] Remove remaining inline styles from valuation_panel.rs (31 inline style= attributes) [frontend/src/components/valuation_panel.rs:51-291]
+- [ ] [AI-Review][MEDIUM] Extract hardcoded #E74C3C to CSS variable --ptp-color [frontend/src/components/ssg_chart.rs]

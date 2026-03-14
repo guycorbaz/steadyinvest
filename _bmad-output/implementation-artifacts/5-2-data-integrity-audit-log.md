@@ -77,3 +77,9 @@ Antigravity
 - [frontend/src/pages/audit_log.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/pages/audit_log.rs)
 - [backend/tests/requests/audit.rs](file:///home/gcorbaz/synology/devel/naic/backend/tests/requests/audit.rs)
 - [backend/tests/requests/system.rs](file:///home/gcorbaz/synology/devel/naic/backend/tests/requests/system.rs)
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][CRITICAL] Wire AuditService into overrides controller for manual override logging [backend/src/controllers/overrides.rs]
+- [ ] [AI-Review][CRITICAL] Implement backend query parameter filtering (ticker, event_type, date range) [backend/src/controllers/system.rs:55-58]
+- [ ] [AI-Review][HIGH] Add date range filter to frontend UI [frontend/src/pages/audit_log.rs]

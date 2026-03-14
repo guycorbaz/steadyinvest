@@ -67,3 +67,9 @@ Antigravity (BMad Edition) - 2026-02-07
 - [frontend/src/components/mod.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/components/mod.rs)
 - [frontend/src/pages/home.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/pages/home.rs)
 - [frontend/public/styles.scss](file:///home/gcorbaz/synology/devel/naic/frontend/public/styles.scss)
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Implement per-cell heat-mapping for year-over-year trend (AC3) [frontend/src/components/quality_dashboard.rs:85-98]
+- [ ] [AI-Review][HIGH] Add debt-to-capital data model and migration — currently hardcoded N/A [frontend/src/components/quality_dashboard.rs:99-106]
+- [ ] [AI-Review][MEDIUM] Distinguish missing data (None) from genuine 0.0 in quality metrics [crates/steady-invest-logic/src/calculations.rs:140-162]

@@ -73,3 +73,8 @@ Antigravity (BMad Edition)
 - [historicals.rs](file:///home/gcorbaz/synology/devel/naic/backend/src/models/_entities/historicals.rs)
 - [home.rs](file:///home/gcorbaz/synology/devel/naic/frontend/src/pages/home.rs)
 - [lib.rs](file:///home/gcorbaz/synology/devel/naic/tests/e2e/src/lib.rs)
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Replace hardcoded AAPL split detection with real data source [backend/src/services/harvest.rs:50-53]
+- [ ] [AI-Review][HIGH] Implement dividend adjustment logic (completely absent despite story title) [crates/steady-invest-logic/src/adjustments.rs]

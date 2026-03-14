@@ -462,3 +462,9 @@ Claude Opus 4.6 (claude-opus-4-6)
 | `tests/e2e/src/common/mod.rs` | MODIFIED | Added headless Chrome support (`HEADLESS` env var) |
 | `.github/workflows/e2e.yaml` | NEW | GitHub Actions E2E test workflow |
 | `tests/e2e/README.md` | MODIFIED | Updated documentation (26 tests, CI instructions) |
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][CRITICAL] Un-ignore 8 E2E tests or document why they are permanently skipped [tests/e2e/src/epic6_tests.rs]
+- [ ] [AI-Review][HIGH] Replace XPath selectors with CSS class selectors [tests/e2e/src/epic6_tests.rs:583,647,663]
+- [ ] [AI-Review][HIGH] Fix thesis lock persistence test to actually verify persistence [tests/e2e/src/epic6_tests.rs:632]

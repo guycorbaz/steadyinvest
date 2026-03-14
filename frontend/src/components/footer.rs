@@ -1,5 +1,34 @@
 use leptos::prelude::*;
 use leptos_router::hooks::use_location;
+use serde::Deserialize;
+
+/// Health status record matching the backend ProviderHealth DTO.
+#[derive(Deserialize, Clone)]
+struct ProviderHealth {
+    #[allow(dead_code)]
+    name: String,
+    status: String,
+    #[allow(dead_code)]
+    latency_ms: u64,
+    #[allow(dead_code)]
+    rate_limit_percent: u32,
+}
+
+/// Derive an overall status label from individual provider statuses.
+fn overall_status(providers: &[ProviderHealth]) -> &'static str {
+    if providers.is_empty() {
+        return "OFFLINE";
+    }
+    let all_online = providers.iter().all(|p| p.status == "Online");
+    let any_online = providers.iter().any(|p| p.status == "Online");
+    if all_online {
+        "ONLINE"
+    } else if any_online {
+        "DEGRADED"
+    } else {
+        "OFFLINE"
+    }
+}
 
 /// Persistent global footer component with latency visualization.
 ///
@@ -11,36 +40,39 @@ use leptos_router::hooks::use_location;
 pub fn Footer() -> impl IntoView {
     let location = use_location();
     let (latency, set_latency) = signal(0.0);
-
-    // Track location changes to simulate "navigation/render" latency
-    // In a real app, we'd hook into the Router's transition start/end,
-    // but for now, we'll measure the time since the last "navigation start" entry
-    // if available, or just fallback to a mock/ping.
-    //
-    // Better yet, let's measure a "ping" to the health endpoint as a proxy for System Latency.
-    // Or simpler: Use `window.performance` to get the latest navigation timing on mount/update.
+    let (status_text, set_status_text) = signal("OFFLINE".to_string());
 
     Effect::new(move |_| {
         let _ = location.pathname.get(); // Depend on location to trigger on navigation
 
-        // Measure real network latency / system health response time
+        // Measure real network latency and parse health response
         if let Some(window) = web_sys::window() {
             if let Some(perf) = window.performance() {
                 let start_time = perf.now();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    // Ping the system health endpoint
-                    // We use a HEAD request or simple GET to minimize payload
-                    let _ = gloo_net::http::Request::get("/api/v1/system/health")
+                    let result = gloo_net::http::Request::get("/api/v1/system/health")
                         .send()
-                        .await; // We don't care about the result payload for latency, just the round-trip
+                        .await;
 
+                    // Measure latency regardless of parse outcome
                     if let Some(window) = web_sys::window() {
                         if let Some(perf) = window.performance() {
                             let end_time = perf.now();
-                            let duration = end_time - start_time;
-                            set_latency.set(duration);
+                            set_latency.set(end_time - start_time);
                         }
+                    }
+
+                    match result {
+                        Ok(resp) if resp.ok() => {
+                            match resp.json::<Vec<ProviderHealth>>().await {
+                                Ok(providers) => {
+                                    set_status_text.set(overall_status(&providers).to_string());
+                                }
+                                Err(_) => set_status_text.set("ERROR".to_string()),
+                            }
+                        }
+                        _ => set_status_text.set("OFFLINE".to_string()),
                     }
                 });
             }
@@ -53,7 +85,15 @@ pub fn Footer() -> impl IntoView {
         <footer class="fixed bottom-0 w-full bg-[#0F0F12] text-[#8F8F8F] font-mono text-xs py-1 px-4 border-t border-[#2A2A2A] flex justify-between items-center z-50">
             <div class="flex items-center gap-4">
                 <span class="opacity-50">"SYSTEM MARKETS"</span>
-                <span class="text-[#00FF00]">"ONLINE"</span>
+                <span class=move || {
+                    match status_text.get().as_str() {
+                        "ONLINE" => "text-[#00FF00]",
+                        "DEGRADED" => "text-[#FFA500]",
+                        _ => "text-[#DC143C]",
+                    }.to_string()
+                }>
+                    {move || status_text.get()}
+                </span>
             </div>
 
             <div class="flex items-center gap-2">

@@ -3,8 +3,10 @@
 //! Provides endpoints for checking API provider health, listing audit logs,
 //! and exporting audit data as CSV. All routes live under `/api/v1/system`.
 
+use crate::middlewares::auth_ip::auth_local_ip;
 use crate::models::audit_logs;
 use crate::services::provider_health;
+use axum::middleware;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -113,4 +115,5 @@ pub fn routes() -> Routes {
         .add("/health", get(health))
         .add("/audit-logs", get(list_audit_logs))
         .add("/audit-logs/export", get(export_audit_logs))
+        .layer(middleware::from_fn(auth_local_ip))
 }

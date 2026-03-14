@@ -868,9 +868,13 @@ button:disabled {
    ================================================== */
 .overridden-cell {
   background: rgba(239, 68, 68, 0.05);
-  color: var(--danger) !important;
   cursor: help;
   position: relative;
+}
+
+.fundamental-data-table .overridden-cell,
+.quality-dashboard .overridden-cell {
+  color: var(--danger);
 }
 
 .override-mark {
@@ -2461,13 +2465,13 @@ input[type="range"]::-moz-range-thumb {
   padding-top: var(--spacing-1);
 }
 
-.metric-price {
-  color: var(--primary) !important;
+.card-metrics .metric-price {
+  color: var(--primary);
 }
 
-.metric-target {
-  color: var(--text-secondary) !important;
-  font-size: var(--text-xs) !important;
+.card-metrics .metric-target {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
 
 /* Sort controls */

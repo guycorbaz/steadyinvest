@@ -19,6 +19,7 @@ pub struct AuditEntry {
     /// Database row ID.
     pub id: i32,
     /// Timestamp string (ISO 8601).
+    #[serde(rename = "timestamp")]
     pub created_at: String,
     /// Ticker symbol of the affected security.
     pub ticker: String,
@@ -192,7 +193,7 @@ pub fn AuditLog() -> impl IntoView {
             </div>
 
             <div class="audit-footer">
-                <a href="/system" class="audit-back-link">"<- Back to System Monitor"</a>
+                <a href="/system-monitor" class="audit-back-link">"<- Back to System Monitor"</a>
             </div>
         </div>
     }

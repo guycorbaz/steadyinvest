@@ -54,3 +54,8 @@ so that I have a permanent record of my investment thesis at a specific point in
 - Refactored `Home.rs` to extract `AnalystHUD` and added snapshot discovery/switching.
 - Implemented `SnapshotHUD` for read-only visualization of locked theses (AC 4).
 - Added request-level tests for the locking flow.
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Remove dead analyses.rs controller or consolidate with snapshots.rs [backend/src/controllers/analyses.rs]
+- [ ] [AI-Review][MEDIUM] Update story to reflect schema evolution (locked_analyses → analysis_snapshots)

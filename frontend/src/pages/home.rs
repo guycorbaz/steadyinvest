@@ -407,7 +407,7 @@ pub fn Home() -> impl IntoView {
                                 </div>
                                 <div class="hud-controls">
                                     <a
-                                        href="/system"
+                                        href="/system-monitor"
                                         class="system-monitor-link"
                                         title="Go to System Monitor"
                                     >

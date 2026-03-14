@@ -36,6 +36,9 @@ pub fn is_valid_currency_code(code: &str) -> bool {
 /// assert!((convert_monetary_value(42.0, 1.0) - 42.0).abs() < 1e-10);
 /// ```
 pub fn convert_monetary_value(amount: f64, rate: f64) -> f64 {
+    if !rate.is_finite() || rate <= 0.0 {
+        return amount;
+    }
     amount * rate
 }
 
@@ -58,7 +61,26 @@ mod tests {
 
     #[test]
     fn test_convert_monetary_value_zero_rate() {
-        assert!((convert_monetary_value(100.0, 0.0)).abs() < 1e-10);
+        // Zero rate is invalid — returns original amount unchanged
+        assert!((convert_monetary_value(100.0, 0.0) - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_convert_monetary_value_negative_rate() {
+        // Negative rate is invalid — returns original amount unchanged
+        assert!((convert_monetary_value(100.0, -1.5) - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_convert_monetary_value_nan_rate() {
+        // NaN rate is invalid — returns original amount unchanged
+        assert!((convert_monetary_value(100.0, f64::NAN) - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_convert_monetary_value_inf_rate() {
+        // Infinite rate is invalid — returns original amount unchanged
+        assert!((convert_monetary_value(100.0, f64::INFINITY) - 100.0).abs() < 1e-10);
     }
 
     #[test]

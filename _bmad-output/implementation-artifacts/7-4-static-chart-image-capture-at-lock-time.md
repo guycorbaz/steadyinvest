@@ -386,3 +386,8 @@ Claude Opus 4.6
 - `backend/src/models/_entities/analysis_snapshots.rs` — Added `#[serde(skip_serializing)]` to `chart_image` field
 - `backend/tests/requests/snapshots.rs` — Added 7 new tests (5 chart image + 2 ticker resolution) + updated verifications
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — Story status updates
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][MEDIUM] Fix chart background color mismatch in capture (#1a1a2e fallback vs #0F0F12 design) [frontend/public/chart_bridge.js:202]
+- [ ] [AI-Review][MEDIUM] Replace .unwrap() with match in lock_thesis_modal.rs async flow [frontend/src/components/lock_thesis_modal.rs:101]

@@ -240,8 +240,9 @@ pub async fn create_snapshot(
             id
         }
         (None, Some(symbol)) => {
+            let normalized = symbol.to_uppercase();
             let t = tickers::Entity::find()
-                .filter(tickers::Column::Ticker.eq(symbol.as_str()))
+                .filter(tickers::Column::Ticker.eq(normalized.as_str()))
                 .one(&ctx.db)
                 .await?
                 .ok_or_else(|| Error::NotFound)?;

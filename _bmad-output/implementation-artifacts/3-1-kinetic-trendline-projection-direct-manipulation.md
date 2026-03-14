@@ -75,3 +75,9 @@ Antigravity (Step 3.1 Creation)
 - `frontend/public/chart_bridge.js`
 - `frontend/index.html`
 - `frontend/Cargo.toml`
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Cardinal Rule violation — move CAGR calculation from chart_bridge.js to steady-invest-logic [frontend/public/chart_bridge.js:48,80,118]
+- [ ] [AI-Review][MEDIUM] Fix memory leak — Closure::forget() called on every reactive Effect trigger [frontend/src/components/ssg_chart.rs:529]
+- [ ] [AI-Review][LOW] Add NaN guard for drag-handle positions at/below zero [frontend/public/chart_bridge.js]

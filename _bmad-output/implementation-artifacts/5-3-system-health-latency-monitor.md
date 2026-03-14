@@ -84,3 +84,8 @@ Antigravity
 - frontend/src/components/mod.rs
 - frontend/src/lib.rs
 - frontend/Cargo.toml
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Check all AC boxes or revert status — currently all unchecked with status "done"
+- [ ] [AI-Review][MEDIUM] Trigger latency measurement on data updates, not just route changes [frontend/src/components/footer.rs:23]

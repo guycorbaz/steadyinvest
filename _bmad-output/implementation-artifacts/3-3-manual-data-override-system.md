@@ -86,3 +86,9 @@ Antigravity (Claude 3.5 Sonnet equivalent)
 ### Completion Notes List
 
 ### File List
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][HIGH] Add authentication/authorization to override endpoints [backend/src/controllers/overrides.rs]
+- [ ] [AI-Review][HIGH] Add created_at/updated_at timestamps to historicals_overrides table [backend/migration/src/m20260207_181500_historicals_overrides.rs]
+- [ ] [AI-Review][MEDIUM] Extend double-click override to Pre-Tax Profit cells (currently Sales/EPS only) [frontend/src/components/analyst_hud.rs]

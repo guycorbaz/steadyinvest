@@ -67,3 +67,9 @@ Antigravity (BMad Edition)
 - [x] Harvest controller and service implemented (mocked retrieval for MVP reliability)
 - [x] Frontend integrated with `Suspense` and high-contrast loading states
 - [x] E2E test for historical retrieval added
+
+## Review Follow-ups (AI) — 2026-03-14
+
+- [ ] [AI-Review][CRITICAL] Replace mocked harvest data with real Yahoo Finance API integration [backend/src/services/harvest.rs:56-113]
+- [ ] [AI-Review][HIGH] Implement real data completeness detection — `is_complete` is always true [backend/src/services/harvest.rs:131]
+- [ ] [AI-Review][MEDIUM] Add upsert logic for re-harvest — currently silently skips existing records [backend/src/services/harvest.rs:160-168]
