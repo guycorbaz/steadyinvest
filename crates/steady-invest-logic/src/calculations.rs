@@ -418,6 +418,218 @@ pub fn calculate_growth_analysis(years: &[i32], values: &[f64]) -> TrendAnalysis
     TrendAnalysis { cagr, trendline }
 }
 
+/// Calculates current dividend yield as a percentage.
+///
+/// # Formula
+///
+/// `(dividend_per_share / price) × 100`
+///
+/// # Returns
+///
+/// `None` if `price` is zero or negative. A negative `dividend_per_share`
+/// produces a negative yield (callers should validate upstream if needed).
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::calculate_dividend_yield;
+///
+/// let yield_pct = calculate_dividend_yield(1.25, 100.0);
+/// assert!((yield_pct.unwrap() - 1.25).abs() < 0.001);
+///
+/// // Zero price returns None
+/// assert!(calculate_dividend_yield(1.25, 0.0).is_none());
+/// ```
+pub fn calculate_dividend_yield(dividend_per_share: f64, price: f64) -> Option<f64> {
+    if price <= 0.0 {
+        return None;
+    }
+    Some(dividend_per_share / price * 100.0)
+}
+
+/// Calculates payout ratio as a percentage.
+///
+/// # Formula
+///
+/// `(dividend_per_share / eps) × 100`
+///
+/// # Returns
+///
+/// `None` if `eps` is zero or negative.
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::calculate_payout_ratio;
+///
+/// let ratio = calculate_payout_ratio(1.25, 5.0);
+/// assert!((ratio.unwrap() - 25.0).abs() < 0.001);
+///
+/// // Zero EPS returns None
+/// assert!(calculate_payout_ratio(1.25, 0.0).is_none());
+/// ```
+pub fn calculate_payout_ratio(dividend_per_share: f64, eps: f64) -> Option<f64> {
+    if eps <= 0.0 {
+        return None;
+    }
+    Some(dividend_per_share / eps * 100.0)
+}
+
+/// Calculates combined estimated annual return using simple addition.
+///
+/// Per NAIC SSG Section 5C: price appreciation CAGR + average dividend yield.
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::calculate_total_return_simple;
+///
+/// let total = calculate_total_return_simple(10.0, 2.5);
+/// assert!((total - 12.5).abs() < 0.001);
+/// ```
+pub fn calculate_total_return_simple(price_appreciation_cagr: f64, avg_yield: f64) -> f64 {
+    price_appreciation_cagr + avg_yield
+}
+
+/// Calculates combined estimated annual return using compound (geometric) formula.
+///
+/// # Formula
+///
+/// `((1 + cagr/100) × (1 + yield/100) - 1) × 100`
+///
+/// This is the mathematically correct way to combine two independent return sources.
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::calculate_total_return_compound;
+///
+/// let total = calculate_total_return_compound(10.0, 2.5);
+/// assert!((total - 12.75).abs() < 0.001);
+/// ```
+pub fn calculate_total_return_compound(price_appreciation_cagr: f64, avg_yield: f64) -> f64 {
+    ((1.0 + price_appreciation_cagr / 100.0) * (1.0 + avg_yield / 100.0) - 1.0) * 100.0
+}
+
+/// Computes per-year dividend metrics for the NAIC SSG Section 3 P/E History table.
+///
+/// For each historical record, calculates Column F (Dividend Per Share),
+/// Column G (% Payout), and Column H (% High Yield). Records without
+/// dividend data produce `DividendMetrics` with `None` for all computed fields.
+///
+/// Results are sorted chronologically (oldest first), following the sort-at-source pattern.
+///
+/// # Arguments
+///
+/// * `data` — Historical financial data; uses `dividend_per_share`, `eps`,
+///   and `price_high` from each record.
+///
+/// # Returns
+///
+/// A `Vec<DividendMetrics>` with one entry per historical record, sorted
+/// oldest-to-newest. Years without dividend data have all `Option` fields set
+/// to `None`.
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::{HistoricalData, HistoricalYearlyData, calculate_dividend_metrics};
+/// use rust_decimal::Decimal;
+///
+/// let data = HistoricalData {
+///     records: vec![HistoricalYearlyData {
+///         fiscal_year: 2023,
+///         eps: Decimal::from(5),
+///         price_high: Decimal::from(100),
+///         dividend_per_share: Some(Decimal::new(125, 2)), // 1.25
+///         ..Default::default()
+///     }],
+///     ..Default::default()
+/// };
+/// let metrics = calculate_dividend_metrics(&data);
+/// assert_eq!(metrics.len(), 1);
+/// assert!((metrics[0].payout_ratio.unwrap() - 25.0).abs() < 0.01);
+/// assert!((metrics[0].high_yield.unwrap() - 1.25).abs() < 0.01);
+/// ```
+pub fn calculate_dividend_metrics(data: &HistoricalData) -> Vec<DividendMetrics> {
+    let mut sorted_records = data.records.clone();
+    sorted_records.sort_by_key(|r| r.fiscal_year);
+
+    sorted_records
+        .iter()
+        .map(|record| {
+            let dps = record
+                .dividend_per_share
+                .and_then(|d| d.to_f64());
+
+            match dps {
+                Some(dps_val) => {
+                    let eps = record.eps.to_f64().unwrap_or(0.0);
+                    let high = record.price_high.to_f64().unwrap_or(0.0);
+
+                    DividendMetrics {
+                        year: record.fiscal_year,
+                        dividend_per_share: Some(dps_val),
+                        payout_ratio: calculate_payout_ratio(dps_val, eps),
+                        high_yield: calculate_dividend_yield(dps_val, high),
+                    }
+                }
+                None => DividendMetrics {
+                    year: record.fiscal_year,
+                    dividend_per_share: None,
+                    payout_ratio: None,
+                    high_yield: None,
+                },
+            }
+        })
+        .collect()
+}
+
+/// Computes the NAIC SSG Section 5B "Average Yield Over Next 5 Years".
+///
+/// Takes the last 5 years of [`DividendMetrics`] (matching the 5-year window
+/// used by [`calculate_pe_ranges`]) and averages their `high_yield` values.
+/// Years without yield data are excluded from the average.
+///
+/// # Arguments
+///
+/// * `metrics` — Chronologically sorted dividend metrics (as returned by
+///   [`calculate_dividend_metrics`]).
+///
+/// # Returns
+///
+/// `Some(average_yield)` as a percentage if at least one of the last 5 years
+/// has yield data, or `None` if no yield data is available.
+///
+/// # Examples
+///
+/// ```
+/// use steady_invest_logic::{DividendMetrics, calculate_average_yield_5year};
+///
+/// let metrics = vec![
+///     DividendMetrics { year: 2019, high_yield: Some(1.0), ..Default::default() },
+///     DividendMetrics { year: 2020, high_yield: Some(1.2), ..Default::default() },
+///     DividendMetrics { year: 2021, high_yield: Some(1.1), ..Default::default() },
+///     DividendMetrics { year: 2022, high_yield: Some(0.9), ..Default::default() },
+///     DividendMetrics { year: 2023, high_yield: Some(1.3), ..Default::default() },
+/// ];
+/// let avg = calculate_average_yield_5year(&metrics).unwrap();
+/// assert!((avg - 1.1).abs() < 0.001);
+/// ```
+pub fn calculate_average_yield_5year(metrics: &[DividendMetrics]) -> Option<f64> {
+    let len = metrics.len();
+    let start = len.saturating_sub(5);
+    let recent = &metrics[start..];
+
+    let yields: Vec<f64> = recent.iter().filter_map(|m| m.high_yield).collect();
+
+    if yields.is_empty() {
+        return None;
+    }
+
+    Some(yields.iter().sum::<f64>() / yields.len() as f64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1035,5 +1247,199 @@ mod tests {
             "Forecast high: expected ~261.3, got {:.1}",
             forecast_high
         );
+    }
+
+    // ================================================================
+    // Dividend Calculation Tests (Story 8c.2)
+    // ================================================================
+
+    #[test]
+    fn test_dividend_yield_basic() {
+        let result = calculate_dividend_yield(1.25, 100.0);
+        assert!((result.unwrap() - 1.25).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_dividend_yield_none_for_zero_price() {
+        assert!(calculate_dividend_yield(1.25, 0.0).is_none());
+        assert!(calculate_dividend_yield(1.25, -10.0).is_none());
+    }
+
+    #[test]
+    fn test_payout_ratio_basic() {
+        let result = calculate_payout_ratio(1.25, 5.0);
+        assert!((result.unwrap() - 25.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_payout_ratio_none_for_zero_eps() {
+        assert!(calculate_payout_ratio(1.25, 0.0).is_none());
+        assert!(calculate_payout_ratio(1.25, -5.0).is_none());
+    }
+
+    #[test]
+    fn test_total_return_simple() {
+        let result = calculate_total_return_simple(10.0, 2.5);
+        assert!((result - 12.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_total_return_compound() {
+        // (1.10 × 1.025 - 1) × 100 = 12.75
+        let result = calculate_total_return_compound(10.0, 2.5);
+        assert!((result - 12.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_dividend_metrics_with_mixed_data() {
+        let data = HistoricalData {
+            records: vec![
+                // Year with dividend data
+                HistoricalYearlyData {
+                    fiscal_year: 2022,
+                    eps: Decimal::from(5),
+                    price_high: Decimal::from(100),
+                    dividend_per_share: Some(Decimal::new(125, 2)), // 1.25
+                    ..Default::default()
+                },
+                // Year without dividend data
+                HistoricalYearlyData {
+                    fiscal_year: 2023,
+                    eps: Decimal::from(6),
+                    price_high: Decimal::from(120),
+                    dividend_per_share: None,
+                    ..Default::default()
+                },
+                // Year with dividend but zero EPS (edge case)
+                HistoricalYearlyData {
+                    fiscal_year: 2021,
+                    eps: Decimal::from(0),
+                    price_high: Decimal::from(80),
+                    dividend_per_share: Some(Decimal::new(50, 2)), // 0.50
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let metrics = calculate_dividend_metrics(&data);
+
+        // Sorted chronologically
+        assert_eq!(metrics.len(), 3);
+        assert_eq!(metrics[0].year, 2021);
+        assert_eq!(metrics[1].year, 2022);
+        assert_eq!(metrics[2].year, 2023);
+
+        // 2021: dividend=0.50, eps=0 → payout=None, high_yield=0.50/80*100=0.625%
+        assert!((metrics[0].dividend_per_share.unwrap() - 0.50).abs() < 0.001);
+        assert!(metrics[0].payout_ratio.is_none()); // eps=0
+        assert!((metrics[0].high_yield.unwrap() - 0.625).abs() < 0.001);
+
+        // 2022: dividend=1.25, eps=5, price_high=100
+        assert!((metrics[1].dividend_per_share.unwrap() - 1.25).abs() < 0.001);
+        assert!((metrics[1].payout_ratio.unwrap() - 25.0).abs() < 0.001);
+        assert!((metrics[1].high_yield.unwrap() - 1.25).abs() < 0.001);
+
+        // 2023: no dividend → all None
+        assert!(metrics[2].dividend_per_share.is_none());
+        assert!(metrics[2].payout_ratio.is_none());
+        assert!(metrics[2].high_yield.is_none());
+    }
+
+    /// Golden test: NAIC Handbook dividend yield and payout calculations.
+    /// O'Hara Cruises: $0.84 DPS, $5.71 EPS, current price $149.83,
+    /// year high $165.00 (distinct from current price to validate 5A vs Column H).
+    #[test]
+    fn test_naic_handbook_dividend_yield() {
+        // 5A: Current Dividend Yield = DPS / Current Price × 100
+        // O'Hara current price = $149.83
+        let current_yield = calculate_dividend_yield(0.84, 149.83);
+        assert!(
+            (current_yield.unwrap() - 0.56).abs() < 0.1,
+            "NAIC 5A current yield: expected ~0.56%, got {:.2}%",
+            current_yield.unwrap()
+        );
+
+        // Column H: % High Yield = DPS / Price High × 100
+        // O'Hara year high = $165.00 (distinct from current price)
+        let high_yield = calculate_dividend_yield(0.84, 165.0);
+        assert!(
+            (high_yield.unwrap() - 0.509).abs() < 0.1,
+            "NAIC Column H high yield: expected ~0.51%, got {:.2}%",
+            high_yield.unwrap()
+        );
+
+        // Verify current yield > high yield (current price < year high)
+        assert!(
+            current_yield.unwrap() > high_yield.unwrap(),
+            "Current yield should exceed high yield when current price < year high"
+        );
+
+        // Column G: Payout ratio = $0.84 / $5.71 EPS = 14.7%
+        let payout = calculate_payout_ratio(0.84, 5.71);
+        assert!(
+            (payout.unwrap() - 14.7).abs() < 0.1,
+            "NAIC Column G payout: expected ~14.7%, got {:.1}%",
+            payout.unwrap()
+        );
+
+        // 5C: Total return compound: 10.4% appreciation + 0.56% yield
+        let total = calculate_total_return_compound(10.4, 0.56);
+        assert!(
+            (total - 11.02).abs() < 0.1,
+            "NAIC 5C total return: expected ~11.02%, got {:.2}%",
+            total
+        );
+    }
+
+    #[test]
+    fn test_average_yield_5year_basic() {
+        let metrics = vec![
+            DividendMetrics { year: 2017, high_yield: Some(2.0), ..Default::default() },
+            DividendMetrics { year: 2018, high_yield: Some(1.8), ..Default::default() },
+            DividendMetrics { year: 2019, high_yield: Some(1.0), ..Default::default() },
+            DividendMetrics { year: 2020, high_yield: Some(1.2), ..Default::default() },
+            DividendMetrics { year: 2021, high_yield: Some(1.1), ..Default::default() },
+            DividendMetrics { year: 2022, high_yield: Some(0.9), ..Default::default() },
+            DividendMetrics { year: 2023, high_yield: Some(1.3), ..Default::default() },
+        ];
+
+        // Should use only last 5 years (2019-2023): avg = (1.0+1.2+1.1+0.9+1.3)/5 = 1.1
+        let avg = calculate_average_yield_5year(&metrics).unwrap();
+        assert!(
+            (avg - 1.1).abs() < 0.001,
+            "5B avg yield: expected 1.1%, got {:.3}%",
+            avg
+        );
+    }
+
+    #[test]
+    fn test_average_yield_5year_with_none_values() {
+        let metrics = vec![
+            DividendMetrics { year: 2019, high_yield: Some(1.0), ..Default::default() },
+            DividendMetrics { year: 2020, high_yield: None, ..Default::default() },
+            DividendMetrics { year: 2021, high_yield: Some(1.2), ..Default::default() },
+            DividendMetrics { year: 2022, high_yield: None, ..Default::default() },
+            DividendMetrics { year: 2023, high_yield: Some(0.9), ..Default::default() },
+        ];
+
+        // Only 3 of 5 years have data: avg = (1.0+1.2+0.9)/3 ≈ 1.033
+        let avg = calculate_average_yield_5year(&metrics).unwrap();
+        assert!(
+            (avg - 1.033).abs() < 0.01,
+            "5B avg yield with gaps: expected ~1.033%, got {:.3}%",
+            avg
+        );
+    }
+
+    #[test]
+    fn test_average_yield_5year_no_data() {
+        let metrics = vec![
+            DividendMetrics { year: 2023, high_yield: None, ..Default::default() },
+        ];
+        assert!(calculate_average_yield_5year(&metrics).is_none());
+
+        // Empty input
+        assert!(calculate_average_yield_5year(&[]).is_none());
     }
 }

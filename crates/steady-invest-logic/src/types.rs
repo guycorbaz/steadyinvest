@@ -159,6 +159,22 @@ pub struct PeRangeAnalysis {
     pub avg_low_pe: f64,
 }
 
+/// Per-year dividend metrics for NAIC SSG Section 3 P/E History table.
+///
+/// Corresponds to columns F (Dividend Per Share), G (% Payout),
+/// and H (% High Yield) in the P/E History table.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct DividendMetrics {
+    /// Fiscal year of the data point.
+    pub year: i32,
+    /// Annual dividend per share (Column F).
+    pub dividend_per_share: Option<f64>,
+    /// Payout ratio as percentage: (DPS / EPS) × 100 (Column G).
+    pub payout_ratio: Option<f64>,
+    /// High yield as percentage: (DPS / Price High) × 100 (Column H).
+    pub high_yield: Option<f64>,
+}
+
 /// A complete snapshot of an analysis at a point in time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AnalysisSnapshot {

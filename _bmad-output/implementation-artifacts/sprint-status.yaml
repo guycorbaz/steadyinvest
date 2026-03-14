@@ -118,7 +118,7 @@ development_status:
 
   # Epic 8d: Infrastructure Hardening (inserted before Epic 8c)
   # CI fix, dev environment, logic crate modularization, regression guards
-  epic-8d: in-progress
+  epic-8d: done
   8d-1-ci-fix-and-dev-environment: done
   8d-2-logic-crate-modularization: done
   8d-3-regression-guards-and-knowledge-transfer: done
@@ -129,7 +129,7 @@ development_status:
   # comparison guide alignment, NAIC visual presentation
   epic-8c: in-progress
   8c-1-data-model-expansion-dividend-harvest: done
-  8c-2-dividend-yield-payout-ratio-total-return: backlog
+  8c-2-dividend-yield-payout-ratio-total-return: done
   8c-3-five-tier-pe-breakdown-price-zone-ranges: backlog
   8c-4a-naic-section-structure-pe-history-table: backlog
   8c-4b-section-4-5-derivation-layouts: backlog
