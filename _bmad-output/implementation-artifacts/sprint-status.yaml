@@ -120,7 +120,7 @@ development_status:
   # CI fix, dev environment, logic crate modularization, regression guards
   epic-8d: in-progress
   8d-1-ci-fix-and-dev-environment: done
-  8d-2-logic-crate-modularization: ready-for-dev
+  8d-2-logic-crate-modularization: review
   8d-3-regression-guards-and-knowledge-transfer: ready-for-dev
   epic-8d-retrospective: optional
 

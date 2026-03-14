@@ -1,6 +1,6 @@
 # Story 8d.2: Logic Crate Modularization
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -75,42 +75,42 @@ src/
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create module files and move types (AC: 1, 4)
-  - [ ] 1.1: Create `types.rs` — move all 13 public types with their derives, doc comments, and `impl Default` blocks
-  - [ ] 1.2: Add necessary `use` imports in `types.rs` (`serde`, `rust_decimal`, `chrono`)
-  - [ ] 1.3: Verify types compile independently: `cargo check -p steady-invest-logic`
+- [x] Task 1: Create module files and move types (AC: 1, 4)
+  - [x] 1.1: Create `types.rs` — move all 13 public types with their derives, doc comments, and `impl Default` blocks
+  - [x] 1.2: Add necessary `use` imports in `types.rs` (`serde`, `rust_decimal`, `chrono`)
+  - [x] 1.3: Verify types compile independently: `cargo check -p steady-invest-logic`
 
-- [ ] Task 2: Move calculation functions (AC: 1, 4)
-  - [ ] 2.1: Create `calculations.rs` — move `calculate_pe_ranges`, `calculate_quality_analysis`, `calculate_growth_analysis`, `calculate_upside_downside_ratio`, `compute_upside_downside_from_snapshot`, `extract_snapshot_prices`
-  - [ ] 2.2: Add `use crate::types::*;` import in `calculations.rs`
-  - [ ] 2.3: Move helper functions that are only used by calculation functions (e.g., `log_linear_regression` at line 257)
+- [x] Task 2: Move calculation functions (AC: 1, 4)
+  - [x] 2.1: Create `calculations.rs` — move `calculate_pe_ranges`, `calculate_quality_analysis`, `calculate_growth_analysis`, `calculate_upside_downside_ratio`, `compute_upside_downside_from_snapshot`, `extract_snapshot_prices`
+  - [x] 2.2: Add `use crate::types::*;` import in `calculations.rs`
+  - [x] 2.3: Move helper functions that are only used by calculation functions (e.g., `log_linear_regression` at line 257)
 
-- [ ] Task 3: Move projection functions (AC: 1, 4)
-  - [ ] 3.1: Create `projections.rs` — move `project_forward`, `calculate_projected_trendline`
-  - [ ] 3.2: Add necessary type imports
+- [x] Task 3: Move projection functions (AC: 1, 4)
+  - [x] 3.1: Create `projections.rs` — move `project_forward`, `calculate_projected_trendline`
+  - [x] 3.2: Add necessary type imports
 
-- [ ] Task 4: Move currency functions (AC: 1, 4)
-  - [ ] 4.1: Create `currency.rs` — move `is_valid_currency_code`, `convert_monetary_value`
+- [x] Task 4: Move currency functions (AC: 1, 4)
+  - [x] 4.1: Create `currency.rs` — move `is_valid_currency_code`, `convert_monetary_value`
 
-- [ ] Task 5: Move adjustment impl methods (AC: 1, 4)
-  - [ ] 5.1: Create `adjustments.rs` — move `HistoricalData::apply_adjustments`, `HistoricalData::apply_normalization`
-  - [ ] 5.2: Add `use crate::types::*;` import
+- [x] Task 5: Move adjustment impl methods (AC: 1, 4)
+  - [x] 5.1: Create `adjustments.rs` — move `HistoricalData::apply_adjustments`, `HistoricalData::apply_normalization`
+  - [x] 5.2: Add `use crate::types::*;` import
 
-- [ ] Task 6: Update `lib.rs` with re-exports (AC: 1, 2)
-  - [ ] 6.1: Replace all type/function definitions with `mod` declarations and `pub use` re-exports
-  - [ ] 6.2: Verify `lib.rs` is under 50 lines
-  - [ ] 6.3: Ensure `use steady_invest_logic::*` resolves all items
+- [x] Task 6: Update `lib.rs` with re-exports (AC: 1, 2)
+  - [x] 6.1: Replace all type/function definitions with `mod` declarations and `pub use` re-exports
+  - [x] 6.2: Verify `lib.rs` is under 50 lines (39 lines)
+  - [x] 6.3: Ensure `use steady_invest_logic::*` resolves all items
 
-- [ ] Task 7: Move tests to module files (AC: 3)
-  - [ ] 7.1: Move unit tests to their respective module's `#[cfg(test)] mod tests` block
-  - [ ] 7.2: Move NAIC golden tests — keep together in `calculations.rs` or create a dedicated `tests/` integration test file
-  - [ ] 7.3: Run `cargo test -p steady-invest-logic` — all 35 tests must pass
+- [x] Task 7: Move tests to module files (AC: 3)
+  - [x] 7.1: Move unit tests to their respective module's `#[cfg(test)] mod tests` block
+  - [x] 7.2: Move NAIC golden tests — kept together in `calculations.rs`
+  - [x] 7.3: Run `cargo test -p steady-invest-logic` — all 34 tests pass (25 unit + 9 doc)
 
-- [ ] Task 8: Verify downstream compilation (AC: 5)
-  - [ ] 8.1: `cargo build --workspace`
-  - [ ] 8.2: `cargo build -p frontend --target wasm32-unknown-unknown`
-  - [ ] 8.3: `cargo clippy --workspace`
-  - [ ] 8.4: `cargo test --workspace --exclude e2e-tests` (full workspace test suite)
+- [x] Task 8: Verify downstream compilation (AC: 5)
+  - [x] 8.1: `cargo build --workspace` — passes
+  - [x] 8.2: `cargo build -p frontend --target wasm32-unknown-unknown` — passes
+  - [x] 8.3: `cargo clippy --workspace` — passes, no new warnings
+  - [x] 8.4: `cargo test --workspace --exclude e2e-tests` — steady-invest-logic and frontend pass; backend failures are pre-existing (MariaDB not running)
 
 ## Dev Notes
 
@@ -233,7 +233,7 @@ This confirms the module structure will scale well for 8c's additions.
 
 ### Agent Model Used
 
-Claude Opus 4.6 (create-story workflow)
+Claude Opus 4.6 (create-story workflow) → Claude Opus 4.6 (dev-story workflow)
 
 ### Completion Notes List
 
@@ -242,7 +242,21 @@ Claude Opus 4.6 (create-story workflow)
 - SnapshotPrices struct (line 495) is physically separated from the other types — placed between calculation functions. Must be moved to `types.rs` during modularization.
 - `HistoricalData::apply_adjustments` and `apply_normalization` are impl methods — they need access to the struct's private fields. If all fields are `pub`, they can live in a separate module. Verify field visibility before splitting.
 - No changes to `Cargo.toml` needed — dependencies remain the same.
+- **Implementation (2026-03-14):** Modularization complete. Actual test count: 25 unit + 9 doc = 34 (story overcounted by 1). All fields are `pub`, so `adjustments.rs` impl works via `use crate::types::HistoricalData`. The `log_linear_regression` helper was inlined in `calculate_growth_analysis` (it was the regression math block, not a separate fn). Private helpers `calculate_trend_direction` and `pe_from_price_eps` were also inlined in their callers during the original implementation — the dev notes line references were stale. All 5 modules created per AC 4. `lib.rs` at 39 lines (under 50 limit). No downstream changes needed. `cargo clippy`, `cargo build --workspace`, and WASM build all pass clean.
+
+### Implementation Plan
+
+Pure structural refactoring: split monolithic `lib.rs` (1,399 lines) into 5 focused modules. No logic changes, no API changes, no new dependencies. Re-exports via `pub use` preserve the exact same public API surface.
 
 ### File List
 
-(To be populated by dev agent during implementation)
+- crates/steady-invest-logic/src/lib.rs (modified — replaced 1,399 lines with 39-line module hub)
+- crates/steady-invest-logic/src/types.rs (new — 13 public types + SnapshotPrices)
+- crates/steady-invest-logic/src/calculations.rs (new — 6 public functions + private helpers + golden tests)
+- crates/steady-invest-logic/src/projections.rs (new — project_forward, calculate_projected_trendline)
+- crates/steady-invest-logic/src/currency.rs (new — is_valid_currency_code, convert_monetary_value)
+- crates/steady-invest-logic/src/adjustments.rs (new — HistoricalData impl methods)
+
+### Change Log
+
+- 2026-03-14: Split monolithic lib.rs into 5 modules (types, calculations, projections, currency, adjustments). All 34 tests pass. No API changes. lib.rs reduced from 1,399 to 39 lines.
