@@ -16,6 +16,7 @@ mod m20260212_000001_analysis_snapshots;
 mod m20260212_000002_add_snapshot_deleted_at;
 mod m20260215_000001_seed_default_user;
 mod m20260216_000001_comparison_sets;
+mod m20260314_000001_add_dividend_fields_to_historicals;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -36,6 +37,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260212_000002_add_snapshot_deleted_at::Migration),
             Box::new(m20260215_000001_seed_default_user::Migration),
             Box::new(m20260216_000001_comparison_sets::Migration),
+            Box::new(m20260314_000001_add_dividend_fields_to_historicals::Migration),
             // inject-above (do not remove this comment)
         ]
     }

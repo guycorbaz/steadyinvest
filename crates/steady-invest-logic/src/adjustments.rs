@@ -1,10 +1,12 @@
 use crate::types::HistoricalData;
 
 impl HistoricalData {
-    /// Applies split and dividend adjustments to EPS and price fields.
+    /// Applies split and dividend adjustments to per-share and share-count fields.
     ///
-    /// Multiplies `eps`, `price_high`, and `price_low` by each record's
-    /// `adjustment_factor`. Records with a factor of `1` are left unchanged.
+    /// Multiplies `eps`, `price_high`, `price_low`, and `dividend_per_share`
+    /// by each record's `adjustment_factor`, and also multiplies
+    /// `shares_outstanding` so pre-split share counts are comparable to
+    /// post-split values. Records with a factor of `1` are left unchanged.
     /// Sets `is_split_adjusted = true` only when at least one record has a
     /// non-unity factor; for tickers without splits the flag stays `false`
     /// (no "Split-Adjusted" badge in UI) and subsequent calls re-scan harmlessly.
@@ -18,6 +20,12 @@ impl HistoricalData {
                 record.eps *= record.adjustment_factor;
                 record.price_high *= record.adjustment_factor;
                 record.price_low *= record.adjustment_factor;
+                if let Some(ref mut val) = record.dividend_per_share {
+                    *val *= record.adjustment_factor;
+                }
+                if let Some(ref mut val) = record.shares_outstanding {
+                    *val *= record.adjustment_factor;
+                }
                 self.is_split_adjusted = true;
             }
         }
@@ -26,8 +34,10 @@ impl HistoricalData {
     /// Normalizes all monetary fields to `target_currency` using per-record exchange rates.
     ///
     /// Converts `sales`, `eps`, `price_high`, `price_low`, `net_income`,
-    /// `pretax_income`, and `total_equity`. Records without an `exchange_rate`
-    /// are left unchanged. This method is idempotent for the same target currency.
+    /// `pretax_income`, `total_equity`, and `dividend_per_share`. Records
+    /// without an `exchange_rate` are left unchanged. `shares_outstanding`
+    /// is not converted (it is a count, not a monetary value). This method
+    /// is idempotent for the same target currency.
     pub fn apply_normalization(&mut self, target_currency: &str) {
         if self.display_currency.as_deref() == Some(target_currency) {
             return;
@@ -46,6 +56,9 @@ impl HistoricalData {
                     *val *= rate;
                 }
                 if let Some(ref mut val) = record.total_equity {
+                    *val *= rate;
+                }
+                if let Some(ref mut val) = record.dividend_per_share {
                     *val *= rate;
                 }
             }
@@ -78,6 +91,8 @@ mod tests {
                 net_income: None,
                 pretax_income: None,
                 total_equity: None,
+                dividend_per_share: None,
+                shares_outstanding: None,
                 overrides: vec![],
             }],
             pe_range_analysis: None,
@@ -130,5 +145,78 @@ mod tests {
         assert_eq!(data.records[1].eps, Decimal::from(10));
         assert_eq!(data.records[1].price_high, Decimal::from(100));
         assert_eq!(data.records[1].price_low, Decimal::from(80));
+    }
+
+    #[test]
+    fn test_normalization_converts_dividend_per_share() {
+        let mut data = HistoricalData {
+            ticker: "NESN.SW".to_string(),
+            currency: "CHF".to_string(),
+            records: vec![HistoricalYearlyData {
+                fiscal_year: 2021,
+                exchange_rate: Some(Decimal::new(11, 1)), // 1.1
+                dividend_per_share: Some(Decimal::from(3)),
+                shares_outstanding: Some(Decimal::from(500_000)),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        data.apply_normalization("USD");
+
+        // DPS should be converted: 3 * 1.1 = 3.3
+        assert_eq!(
+            data.records[0].dividend_per_share,
+            Some(Decimal::new(33, 1))
+        );
+        // Shares outstanding is a count — must NOT be converted
+        assert_eq!(
+            data.records[0].shares_outstanding,
+            Some(Decimal::from(500_000))
+        );
+    }
+
+    #[test]
+    fn test_split_adjustment_handles_dividend_and_shares() {
+        let mut data = HistoricalData {
+            ticker: "AAPL".to_string(),
+            currency: "USD".to_string(),
+            is_split_adjusted: false,
+            records: vec![
+                HistoricalYearlyData {
+                    fiscal_year: 2021,
+                    eps: Decimal::from(10),
+                    adjustment_factor: Decimal::ONE,
+                    dividend_per_share: Some(Decimal::from(2)),
+                    shares_outstanding: Some(Decimal::from(1_000_000)),
+                    ..Default::default()
+                },
+                HistoricalYearlyData {
+                    fiscal_year: 2019,
+                    eps: Decimal::from(5),
+                    adjustment_factor: Decimal::from(4), // 4:1 split
+                    dividend_per_share: Some(Decimal::from(8)),
+                    shares_outstanding: Some(Decimal::from(250_000)),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        data.apply_adjustments();
+
+        assert!(data.is_split_adjusted);
+        // Post-split record (factor=1) unchanged
+        assert_eq!(data.records[0].dividend_per_share, Some(Decimal::from(2)));
+        assert_eq!(
+            data.records[0].shares_outstanding,
+            Some(Decimal::from(1_000_000))
+        );
+        // Pre-split record: DPS 8 * 4 = 32, shares 250k * 4 = 1M
+        assert_eq!(data.records[1].dividend_per_share, Some(Decimal::from(32)));
+        assert_eq!(
+            data.records[1].shares_outstanding,
+            Some(Decimal::from(1_000_000))
+        );
     }
 }

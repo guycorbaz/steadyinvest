@@ -28,6 +28,10 @@ pub struct Model {
     pub pretax_income: Option<Decimal>,
     #[sea_orm(column_type = "Decimal(Some((19, 4)))", nullable)]
     pub total_equity: Option<Decimal>,
+    #[sea_orm(column_type = "Decimal(Some((19, 4)))", nullable)]
+    pub dividend_per_share: Option<Decimal>,
+    #[sea_orm(column_type = "Decimal(Some((19, 4)))", nullable)]
+    pub shares_outstanding: Option<Decimal>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

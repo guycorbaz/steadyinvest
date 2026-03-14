@@ -46,6 +46,8 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
 
     let fetch_future = async move {
         let mut yearly_records = Vec::new();
+        // Not all tickers pay dividends; simulate realistic mix
+        let pays_dividends = matches!(ticker_for_fetch.as_str(), "AAPL" | "MSFT" | "NESN.SW");
         // Simulate a 4:1 split for AAPL in 2020 for verification (AC 2)
         let split_factor = if ticker_for_fetch == "AAPL" {
             Decimal::from(4)
@@ -85,6 +87,16 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
                 net_income: Some(Decimal::from(100 + (11 - i) * 10)),
                 pretax_income: Some(Decimal::from(120 + (11 - i) * 12)),
                 total_equity: Some(Decimal::from(1000 + (11 - i) * 50)),
+                dividend_per_share: if pays_dividends {
+                    Some(
+                        Decimal::from_f32(0.5 + (11 - i) as f32 * 0.1)
+                            .unwrap_or_default()
+                            .round_dp(2),
+                    )
+                } else {
+                    None
+                },
+                shares_outstanding: Some(Decimal::from(1_000_000 + (11 - i) as i64 * 50_000)),
                 overrides: vec![],
             };
 
@@ -104,6 +116,8 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
                     "net_income" => record.net_income = Some(ovr.value),
                     "pretax_income" => record.pretax_income = Some(ovr.value),
                     "total_equity" => record.total_equity = Some(ovr.value),
+                    "dividend_per_share" => record.dividend_per_share = Some(ovr.value),
+                    "shares_outstanding" => record.shares_outstanding = Some(ovr.value),
                     _ => {}
                 }
                 record.overrides.push(logic_ovr);
@@ -154,6 +168,8 @@ pub async fn run_harvest(ctx: &AppContext, ticker: &str) -> Result<HistoricalDat
             net_income: ActiveValue::set(rec.net_income),
             pretax_income: ActiveValue::set(rec.pretax_income),
             total_equity: ActiveValue::set(rec.total_equity),
+            dividend_per_share: ActiveValue::set(rec.dividend_per_share),
+            shares_outstanding: ActiveValue::set(rec.shares_outstanding),
             ..Default::default()
         };
 

@@ -53,6 +53,10 @@ pub struct HistoricalYearlyData {
     pub adjustment_factor: rust_decimal::Decimal,
     /// Rate to convert native currency to user's display currency.
     pub exchange_rate: Option<rust_decimal::Decimal>,
+    /// Annual dividend per share (used for NAIC yield and payout ratio calculations).
+    pub dividend_per_share: Option<rust_decimal::Decimal>,
+    /// Total shares outstanding (used for NAIC total return and per-share metrics).
+    pub shares_outstanding: Option<rust_decimal::Decimal>,
     /// List of manual overrides for this year.
     #[serde(default)]
     pub overrides: Vec<ManualOverride>,
@@ -189,4 +193,65 @@ pub struct SnapshotPrices {
     pub target_high_price: Option<f64>,
     /// Target low price (projected_low_pe × projected 5-year EPS).
     pub target_low_price: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_historical_yearly_data_defaults_dividend_fields() {
+        let data = HistoricalYearlyData::default();
+        assert_eq!(data.dividend_per_share, None);
+        assert_eq!(data.shares_outstanding, None);
+    }
+
+    #[test]
+    fn test_deserialization_without_dividend_fields() {
+        // Legacy JSON without dividend fields should deserialize with None values
+        let json = r#"{
+            "fiscal_year": 2023,
+            "sales": "1000",
+            "eps": "5.50",
+            "price_high": "200",
+            "price_low": "150",
+            "net_income": "100",
+            "pretax_income": "120",
+            "total_equity": "1000",
+            "adjustment_factor": "1",
+            "exchange_rate": null,
+            "overrides": []
+        }"#;
+        let data: HistoricalYearlyData = serde_json::from_str(json).unwrap();
+        assert_eq!(data.fiscal_year, 2023);
+        assert_eq!(data.dividend_per_share, None);
+        assert_eq!(data.shares_outstanding, None);
+    }
+
+    #[test]
+    fn test_serialization_with_dividend_data() {
+        let data = HistoricalYearlyData {
+            fiscal_year: 2023,
+            sales: rust_decimal::Decimal::from(1000),
+            eps: rust_decimal::Decimal::new(550, 2),
+            price_high: rust_decimal::Decimal::from(200),
+            price_low: rust_decimal::Decimal::from(150),
+            dividend_per_share: Some(rust_decimal::Decimal::new(125, 2)), // 1.25
+            shares_outstanding: Some(rust_decimal::Decimal::from(1_000_000)),
+            ..Default::default()
+        };
+
+        // Round-trip: serialize then deserialize
+        let json = serde_json::to_string(&data).unwrap();
+        let roundtrip: HistoricalYearlyData = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            roundtrip.dividend_per_share,
+            Some(rust_decimal::Decimal::new(125, 2))
+        );
+        assert_eq!(
+            roundtrip.shares_outstanding,
+            Some(rust_decimal::Decimal::from(1_000_000))
+        );
+        assert_eq!(roundtrip, data);
+    }
 }

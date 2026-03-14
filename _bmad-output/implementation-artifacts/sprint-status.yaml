@@ -120,15 +120,15 @@ development_status:
   # CI fix, dev environment, logic crate modularization, regression guards
   epic-8d: in-progress
   8d-1-ci-fix-and-dev-environment: done
-  8d-2-logic-crate-modularization: review
-  8d-3-regression-guards-and-knowledge-transfer: ready-for-dev
+  8d-2-logic-crate-modularization: done
+  8d-3-regression-guards-and-knowledge-transfer: done
   epic-8d-retrospective: optional
 
   # Epic 8c: NAIC SSG Methodology Completion (inserted before Epic 9)
   # Complete NAIC analytical framework: dividend/yield, structured tests,
   # comparison guide alignment, NAIC visual presentation
-  epic-8c: backlog
-  8c-1-data-model-expansion-dividend-harvest: backlog
+  epic-8c: in-progress
+  8c-1-data-model-expansion-dividend-harvest: done
   8c-2-dividend-yield-payout-ratio-total-return: backlog
   8c-3-five-tier-pe-breakdown-price-zone-ranges: backlog
   8c-4a-naic-section-structure-pe-history-table: backlog
