@@ -1,0 +1,54 @@
+# ── Rust / Cargo ──────────────────────────────────────────────
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+# Cargo.lock IS committed (this is an application → reproducible builds)
+
+# ── Journal databases & SQLite sidecars (never commit user data) ─
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ── Secrets / local config (keys live in the OS keychain, never here) ─
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+config.local.*
+
+# ── App-local config / backups / exports (runtime, not source) ───
+/backups/
+/exports/
+
+# ── OS / editor noise ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ── Build / report output ────────────────────────────────────────
+/dist/
+*.log
+
+# ── TEMP: legacy OLD-PROJECT artifacts (web/Leptos stack, Feb–May 2026) ──
+# Re-synced by Synology Drive; excluded from the fresh repo history.
+# REMOVE this block once the Synology source is cleaned.
+_bmad-output/implementation-artifacts/
+_bmad-output/test-artifacts/
+_bmad-output/brainstorming/
+_bmad-output/_archive/
+_bmad-output/planning-artifacts/epics.md
+_bmad-output/planning-artifacts/prd-validation-report.md
+_bmad-output/planning-artifacts/product-brief-naic-2026-02-03.md
+_bmad-output/planning-artifacts/implementation-readiness-report-2026-02-*.md
+_bmad-output/planning-artifacts/sprint-change-proposal-2026-02-*.md
+_bmad-output/planning-artifacts/research/domain-naic-betterinvesting-methodology-research-2026-02-03.md
+_bmad-output/planning-artifacts/research/technical-market-data-apis-research-2026-02-03.md

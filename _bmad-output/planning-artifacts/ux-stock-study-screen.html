@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>steadyinvest — Écran Étude d'action (direction retenue)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E0F12; --surface:#16181D; --surface-alt:#1C1F26; --sep:#2A2E37; --grid:#39404d;
+    --text-hi:#ECEEF2; --text-mid:#B8BDC7; --text-lo:#8A8F98;
+    --buy:#009E73; --hold:#E69F00; --sell:#D55E00;
+    --buy-fill:rgba(0,158,115,.36); --hold-fill:rgba(240,180,58,.34); --sell-fill:rgba(184,75,0,.40);
+    --ui:'Inter',system-ui,sans-serif; --num:'IBM Plex Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text-hi);font-family:var(--ui);font-size:13px;line-height:1.4;font-feature-settings:"tnum" 1;-webkit-font-smoothing:antialiased}
+
+  /* app shell */
+  .app{display:grid;grid-template-columns:64px 1fr;height:100vh}
+  .nav{background:#101217;border-right:1px solid var(--grid);display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 0}
+  .nav .logo{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,#1d2630,#11151b);border:1px solid var(--grid);margin-bottom:10px}
+  .nav .ico{width:42px;height:42px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-lo);font-size:18px;cursor:pointer}
+  .nav .ico.on{background:var(--surface-alt);color:var(--text-hi)}
+  .main{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+  .apptop{display:flex;align-items:center;gap:14px;padding:9px 16px;border-bottom:1px solid var(--grid);background:var(--surface)}
+  .apptop .tname{font-weight:600}
+  .apptop .ticker{color:var(--text-lo);font-family:var(--num)}
+  .regime{margin-left:auto;display:flex;border:1px solid var(--grid);border-radius:999px;overflow:hidden;font-size:12px}
+  .regime button{padding:5px 14px;color:var(--text-lo);background:transparent;border:0;cursor:pointer;font-family:var(--ui)}
+  .regime button.on{background:var(--surface-alt);color:var(--text-hi)}
+  .lnk{color:var(--text-lo);font-size:12px;background:none;border:0;cursor:pointer;text-decoration:underline}
+  .scroll{flex:1;overflow:auto}
+
+  /* sticky verdict bar */
+  .verdictbar{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:16px;padding:8px 16px;background:rgba(14,15,18,.96);border-bottom:1px solid var(--grid);backdrop-filter:blur(4px);flex-wrap:wrap}
+  .verdict{display:inline-flex;align-items:center;gap:9px;padding:6px 12px;border-radius:8px;font-weight:600;letter-spacing:.5px;background:var(--buy-fill);border:1.5px solid var(--buy);color:#bfeede}
+  .verdict .ud{font-family:var(--num);font-weight:500;color:var(--text-mid)}
+  .verdictbar .m{color:var(--text-mid);font-size:12px}
+  .verdictbar .m b{font-family:var(--num);color:var(--text-hi);font-weight:500}
+
+  .sheet{max-width:960px;margin:0 auto;padding:0 0 60px}
+
+  /* form header (non collapsible) */
+  .head{display:grid;grid-template-columns:1.1fr 1.4fr;border-bottom:2px solid var(--grid)}
+  .head .brand{padding:14px 16px;border-right:1px solid var(--grid);display:flex;flex-direction:column;justify-content:center}
+  .head .brand .t1{font-weight:700;font-size:22px;letter-spacing:.5px;line-height:1.05}
+  .head .brand .t2{color:var(--text-lo);font-size:11px;margin-top:6px}
+  .head .meta{padding:10px 14px;display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;align-content:start}
+  .fld{display:flex;gap:6px;align-items:baseline;border-bottom:1px solid var(--sep);padding:3px 0;font-size:12px}
+  .fld b{color:var(--text-lo);font-weight:400;white-space:nowrap}
+  .fld span{color:var(--text-hi);font-family:var(--num);flex:1}
+  .cap{grid-column:1 / -1;margin-top:6px;border:1px solid var(--grid)}
+  .cap .caph{background:var(--surface-alt);padding:2px 8px;font-size:11px;color:var(--text-lo);border-bottom:1px solid var(--grid)}
+  .cap table{width:100%;border-collapse:collapse;font-size:11px}
+  .cap td{border:1px solid var(--sep);padding:3px 8px}
+  .cap td b{color:var(--text-lo);font-weight:400}
+  .cap td .n{font-family:var(--num);color:var(--text-hi)}
+
+  /* collapsible sections */
+  details.sec{border-bottom:1px solid var(--grid)}
+  summary.sech{display:flex;align-items:center;gap:8px;padding:6px 14px;background:linear-gradient(var(--surface-alt),var(--surface));cursor:pointer;list-style:none;user-select:none}
+  summary.sech::-webkit-details-marker{display:none}
+  details[open] summary.sech{border-bottom:1px solid var(--grid)}
+  .chev{color:var(--text-lo);font-size:11px;display:inline-block;transition:transform .15s}
+  details[open] .chev{transform:rotate(90deg)}
+  .sech .n{font-weight:700;font-size:16px;color:var(--text-hi)}
+  .sech h3{margin:0;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--text-hi)}
+  .fold-sum{margin-left:auto;color:var(--text-lo);font-size:11px;font-family:var(--num);display:none}
+  details:not([open]) .fold-sum{display:inline}
+  .secbody{padding:12px 14px}
+
+  /* §1 graph */
+  .g1{display:flex;gap:0}
+  .yaxis{width:38px;position:relative;font-family:var(--num);font-size:11px;color:var(--text-mid)}
+  .yaxis span{position:absolute;right:4px;transform:translateY(-50%)}
+  .plot{flex:1;position:relative;border-left:1px solid var(--grid);border-bottom:1px solid var(--grid);height:340px;background:repeating-linear-gradient(to right,transparent 0 calc(10% - 1px),var(--sep) calc(10% - 1px) 10%)}
+  .plot svg{position:absolute;inset:0;width:100%;height:100%}
+  .qinset{position:absolute;left:10px;top:10px;background:rgba(14,15,18,.86);border:1px solid var(--grid);border-radius:4px;padding:8px 10px;font-size:11px;color:var(--text-mid);z-index:3}
+  .qinset table{border-collapse:collapse}.qinset td,.qinset th{padding:2px 7px;font-size:11px}
+  .qinset .num{font-family:var(--num);color:var(--text-hi);text-align:right}
+  .rlabels{width:34px;position:relative;font-size:10px;color:var(--text-mid);font-family:var(--num)}
+  .rlabels span{position:absolute;left:2px;transform:translateY(-50%)}
+  .xaxis{display:flex;margin-left:34px;margin-right:30px}
+  .xaxis span{flex:1;text-align:center;font-family:var(--num);font-size:11px;color:var(--text-mid);padding-top:3px}
+  .growth4{display:grid;grid-template-columns:1fr 1fr;gap:5px 24px;margin-top:10px;font-size:13px}
+  .growth4 .g{display:flex;justify-content:space-between;border-bottom:1px solid var(--sep);padding:2px 0;color:var(--text-mid)}
+  .growth4 .g b{font-family:var(--num);color:var(--text-hi);font-weight:500}
+
+  /* faithful grid */
+  table.grid{width:100%;border-collapse:collapse;font-size:12px}
+  table.grid th,table.grid td{border:1px solid var(--grid);padding:4px 7px;text-align:right;white-space:nowrap}
+  table.grid thead th{background:var(--surface-alt);color:var(--text-lo);font-weight:500;font-size:11px;vertical-align:bottom}
+  table.grid td.lbl,table.grid th.lbl{text-align:left;color:var(--text-mid)}
+  table.grid td.v{font-family:var(--num);color:var(--text-mid)}
+  table.grid tr.tot td{background:rgba(255,255,255,.05);color:var(--text-hi)}
+  table.grid tr.tot td.v{color:var(--text-hi);font-weight:600}
+  .Lbox{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1px solid var(--text-lo);border-radius:2px;color:var(--text-hi);font-weight:700;font-size:10px;margin-right:5px}
+  .fx{display:block;font-size:9px;color:var(--text-lo);font-family:var(--num);font-weight:400}
+  .present-line{display:flex;gap:22px;flex-wrap:wrap;padding:0 0 10px;font-size:12px;color:var(--text-mid)}
+  .present-line b{font-family:var(--num);color:var(--text-hi);font-weight:600}
+
+  /* §4 / §5 calc rows */
+  .calc{display:grid;grid-template-columns:1fr;gap:5px}
+  .crow{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--text-mid);flex-wrap:wrap;border-bottom:1px solid var(--sep);padding:3px 0}
+  .crow .k{color:var(--text-lo)}
+  .crow .res{margin-left:auto;font-family:var(--num);color:var(--text-hi);font-weight:600;border:1px solid var(--grid);padding:1px 8px;border-radius:3px;min-width:64px;text-align:right}
+  .crow .op{font-family:var(--num);color:var(--text-lo)}
+  .sublabel{font-size:10px;color:var(--text-lo)}
+  .two{display:grid;grid-template-columns:1.25fr .75fr;gap:14px}
+  .zone-rows{border:1px solid var(--grid);border-radius:4px;overflow:hidden;margin-top:6px}
+  .zone-rows .zr{display:flex;justify-content:space-between;padding:4px 9px;font-size:11px;font-weight:600;letter-spacing:.3px}
+  .zr.s{background:var(--sell-fill);border-bottom:2px solid var(--sell);color:#f1c6aa}
+  .zr.h{background:var(--hold-fill);border-bottom:2px solid var(--buy);color:#ecd6a3}
+  .zr.b{background:var(--buy-fill);color:#bfeede}
+  .zr .rng{font-family:var(--num);color:var(--text-hi)}
+  .zonebar{position:relative;width:74px;border:1px solid var(--grid);border-radius:4px;overflow:hidden;display:flex;flex-direction:column;min-height:148px}
+  .zonebar .seg{flex:1;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;letter-spacing:.6px}
+  .zb-sell{background:var(--sell-fill);border-bottom:2px solid var(--sell);color:#f1c6aa}
+  .zb-hold{background:var(--hold-fill);border-bottom:2px solid var(--buy);color:#ecd6a3}
+  .zb-buy{background:var(--buy-fill);color:#bfeede}
+  .zb-tick{position:absolute;right:4px;font-size:10px;color:var(--text-lo);font-family:var(--num);transform:translateY(-50%)}
+  .zaxis{position:relative;width:34px;font-family:var(--num);font-size:11px;color:var(--text-mid)}
+  .zaxis span{position:absolute;left:0;transform:translateY(-50%);white-space:nowrap}
+  .zaxis span::before{content:"– ";color:var(--text-lo)}
+  .zb-now{position:absolute;left:0;right:0;border-top:2px solid var(--text-hi);display:flex;align-items:center}
+  .zb-now span{background:var(--bg);color:var(--text-hi);font-family:var(--num);font-size:10px;padding:1px 5px;border:1px solid var(--text-hi);border-radius:3px;transform:translateY(-50%);margin-left:6px}
+
+  @media print{ details.sec:not([open]) .secbody{display:block} .apptop,.nav{display:none} .verdictbar{position:static} }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="nav">
+    <div class="logo"></div>
+    <div class="ico on" title="Études">▤</div>
+    <div class="ico" title="Watchlist">★</div>
+    <div class="ico" title="Portefeuille">▦</div>
+    <div class="ico" title="Réglages" style="margin-top:auto">⚙</div>
+  </nav>
+  <div class="main">
+    <div class="apptop">
+      <span class="tname">Geberit AG</span><span class="ticker">GEBN · CHF</span>
+      <div class="regime"><button id="bSaisie" onclick="setRegime('saisie')">Saisie</button><button id="bContempl" class="on" onclick="setRegime('contempl')">Contemplation</button></div>
+      <button class="lnk" onclick="allOpen(true)">Tout déplier</button>
+      <button class="lnk" onclick="allOpen(false)">Tout replier</button>
+    </div>
+    <div class="scroll">
+      <div class="sheet">
+
+        <div class="verdictbar">
+          <span class="verdict">ACHAT <span class="ud">H/B 3.4:1</span></span>
+          <span class="m">Prix présent <b>192.40</b></span>
+          <span class="m">Rdt projeté <b>15.8%/an</b></span>
+          <span class="m">Appréciation <b>+92%</b></span>
+          <span class="m">Capital à risque <b>CHF 0</b></span>
+        </div>
+
+        <div class="head">
+          <div class="brand"><div class="t1">Stock Selection<br>Guide</div><div class="t2">steadyinvest · étude d'action</div></div>
+          <div class="meta">
+            <div class="fld"><b>Société</b><span>Geberit AG</span></div><div class="fld"><b>Date</b><span>2026-06-07</span></div>
+            <div class="fld"><b>Établi par</b><span>Guy</span></div><div class="fld"><b>Source données</b><span>EODHD</span></div>
+            <div class="fld"><b>Place cotation</b><span>SIX · GEBN</span></div><div class="fld"><b>Produit principal</b><span>Sanitaire</span></div>
+            <div class="cap">
+              <div class="caph">Capitalisation — montants en circulation</div>
+              <table>
+                <tr><td><b>Privilégiées</b> <span class="n">—</span></td><td><b>% Initiés</b> <span class="n">3.1</span></td><td><b>% Institutions</b> <span class="n">72</span></td></tr>
+                <tr><td><b>Ordinaires</b> <span class="n">32.1 M</span></td><td><b>% / Cap. tot.</b> <span class="n">13</span></td><td><b>% Dil. potentielle</b> <span class="n">0.4</span></td></tr>
+                <tr><td><b>Dette</b> <span class="n">560 M</span></td><td colspan="2"><b>Dette / Cap. total</b> <span class="n">15 %</span></td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <details class="sec" data-sec="1" open>
+          <summary class="sech"><span class="chev">▸</span><span class="n">1</span><h3>Analyse visuelle des ventes, bénéfices &amp; prix</h3><span class="fold-sum">Croissance BPA est. 8.0% · ventes 7.0%</span></summary>
+          <div class="secbody">
+            <div class="g1">
+              <div class="yaxis" style="height:340px"><span style="top:0%">200</span><span style="top:13.1%">100</span><span style="top:19.8%">70</span><span style="top:26.2%">50</span><span style="top:35.8%">30</span><span style="top:43.5%">20</span><span style="top:56.5%">10</span><span style="top:63.3%">7</span><span style="top:69.6%">5</span><span style="top:73.8%">4</span><span style="top:79.3%">3</span><span style="top:86.9%">2</span><span style="top:100%">1</span></div>
+              <div class="plot">
+                <div class="qinset"><strong>Chiffres trimestriels récents</strong>
+                  <table><thead><tr><th></th><th>Ventes</th><th>BPA</th></tr></thead>
+                  <tbody><tr><td>Dernier trim.</td><td class="num">842</td><td class="num">3.40</td></tr><tr><td>Il y a 1 an</td><td class="num">810</td><td class="num">3.10</td></tr><tr><td>% variation</td><td class="num">+4.0</td><td class="num">+9.7</td></tr></tbody></table>
+                </div>
+                <svg viewBox="0 0 600 340" preserveAspectRatio="none">
+                  <g stroke="var(--sep)" stroke-width="1"><line x1="0" y1="0" x2="600" y2="0"/><line x1="0" y1="44.5" x2="600" y2="44.5"/><line x1="0" y1="121.7" x2="600" y2="121.7"/><line x1="0" y1="192" x2="600" y2="192"/><line x1="0" y1="236.5" x2="600" y2="236.5"/><line x1="0" y1="295.5" x2="600" y2="295.5"/></g>
+                  <g stroke="var(--text-lo)" stroke-width="1" opacity=".30"><line x1="4" y1="336" x2="596" y2="250"/><line x1="4" y1="336" x2="596" y2="205"/><line x1="4" y1="336" x2="596" y2="165"/><line x1="4" y1="336" x2="596" y2="128"/><line x1="4" y1="336" x2="596" y2="92"/><line x1="4" y1="336" x2="596" y2="58"/></g>
+                  <polyline points="20,250 150,232 300,212 440,188" fill="none" stroke="var(--text-mid)" stroke-width="2"/>
+                  <polyline points="440,188 540,168 596,156" fill="none" stroke="var(--text-mid)" stroke-width="2" stroke-dasharray="6 4"/>
+                  <polyline points="20,272 150,255 300,228 440,206" fill="none" stroke="var(--text-hi)" stroke-width="2.5"/>
+                  <polyline points="440,206 540,150 596,118" fill="none" stroke="var(--text-hi)" stroke-width="2.5" stroke-dasharray="7 4"/>
+                  <circle cx="596" cy="118" r="6" fill="var(--bg)" stroke="var(--text-hi)" stroke-width="2.5"/>
+                  <polyline points="20,262 150,236 300,224 440,196 520,182" fill="none" stroke="var(--text-lo)" stroke-width="1.5" stroke-dasharray="2 3"/>
+                </svg>
+              </div>
+              <div class="rlabels" style="height:340px"><span style="top:14.7%">30%</span><span style="top:28%">25%</span><span style="top:39.7%">20%</span><span style="top:50.6%">15%</span><span style="top:60.3%">10%</span><span style="top:73.5%">5%</span></div>
+            </div>
+            <div class="xaxis"><span>2016</span><span>2017</span><span>2018</span><span>2019</span><span>2020</span><span>2021</span><span>2022</span><span>2023</span><span>2024</span><span>2025</span></div>
+            <div class="growth4">
+              <div class="g"><span>(1) Croissance ventes historique</span><b>4.8 %</b></div><div class="g"><span>(3) Croissance BPA historique</span><b>6.1 %</b></div>
+              <div class="g"><span>(2) Croissance ventes estimée</span><b>7.0 %</b></div><div class="g"><span>(4) Croissance BPA estimée</span><b>8.0 %</b></div>
+            </div>
+          </div>
+        </details>
+
+        <details class="sec" data-sec="2" open>
+          <summary class="sech"><span class="chev">▸</span><span class="n">2</span><h3>Évaluation de la gestion</h3><span class="fold-sum">Marge 24.3% ↓ · ROE 27.9% ↓</span></summary>
+          <div class="secbody" style="padding:0">
+            <table class="grid">
+              <thead><tr><th class="lbl"></th><th>2021</th><th>2022</th><th>2023</th><th>2024</th><th>2025</th><th>Moy. 5 ans</th><th>Tendance</th></tr></thead>
+              <tbody>
+                <tr><td class="lbl"><span class="Lbox">A</span>% Bénéf. avant impôt / ventes <span class="fx">Bén. av. impôt ÷ ventes</span></td><td class="v">28.1</td><td class="v">24.6</td><td class="v">22.3</td><td class="v">23.0</td><td class="v">23.4</td><td class="v">24.3</td><td class="v">↓ baisse</td></tr>
+                <tr><td class="lbl"><span class="Lbox">B</span>% Rentabilité des capitaux <span class="fx">BPA ÷ valeur comptable/action</span></td><td class="v">31.0</td><td class="v">28.4</td><td class="v">25.9</td><td class="v">26.5</td><td class="v">28.0</td><td class="v">27.9</td><td class="v">↓ baisse</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="sec" data-sec="3" open>
+          <summary class="sech"><span class="chev">▸</span><span class="n">3</span><h3>Historique cours / bénéfices — indicateur du futur</h3><span class="fold-sum">PER moy 14.5 · courant 14.7</span></summary>
+          <div class="secbody">
+            <div class="present-line"><span>Prix présent <b>192.40</b></span><span>Plus haut cette année <b>221</b></span><span>Plus bas cette année <b>171</b></span></div>
+            <table class="grid">
+              <thead>
+                <tr><th rowspan="2" class="lbl">Année</th><th colspan="2">Prix</th><th rowspan="2"><span class="Lbox">C</span>BPA</th><th colspan="2">Ratio cours / bénéfice</th><th rowspan="2"><span class="Lbox">F</span>Div./action</th><th rowspan="2"><span class="Lbox">G</span>% Distrib.<span class="fx">F÷C×100</span></th><th rowspan="2"><span class="Lbox">H</span>% Rdt haut<span class="fx">F÷B×100</span></th></tr>
+                <tr><th><span class="Lbox">A</span>Haut</th><th><span class="Lbox">B</span>Bas</th><th><span class="Lbox">D</span>Haut<span class="fx">A÷C</span></th><th><span class="Lbox">E</span>Bas<span class="fx">B÷C</span></th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="lbl">1 · 2021</td><td class="v">214</td><td class="v">158</td><td class="v">14.10</td><td class="v">15.2</td><td class="v">11.2</td><td class="v">12.40</td><td class="v">88</td><td class="v">7.8</td></tr>
+                <tr><td class="lbl">2 · 2022</td><td class="v">198</td><td class="v">142</td><td class="v">11.40</td><td class="v">17.4</td><td class="v">12.5</td><td class="v">12.50</td><td class="v">110</td><td class="v">8.8</td></tr>
+                <tr><td class="lbl">3 · 2023</td><td class="v">186</td><td class="v">131</td><td class="v">10.95</td><td class="v">17.0</td><td class="v">12.0</td><td class="v">12.50</td><td class="v">114</td><td class="v">9.5</td></tr>
+                <tr><td class="lbl">4 · 2024</td><td class="v">205</td><td class="v">160</td><td class="v">12.20</td><td class="v">16.8</td><td class="v">13.1</td><td class="v">12.50</td><td class="v">102</td><td class="v">7.8</td></tr>
+                <tr><td class="lbl">5 · 2025</td><td class="v">221</td><td class="v">171</td><td class="v">13.10</td><td class="v">16.9</td><td class="v">13.1</td><td class="v">12.50</td><td class="v">95</td><td class="v">7.3</td></tr>
+                <tr class="tot"><td class="lbl">6 · Total</td><td class="v"></td><td class="v"></td><td class="v"></td><td class="v">83.3</td><td class="v">61.9</td><td class="v"></td><td class="v">509</td><td class="v">41.2</td></tr>
+                <tr class="tot"><td class="lbl">7 · Moyenne</td><td class="v"></td><td class="v"></td><td class="v"></td><td class="v">16.7</td><td class="v">12.4</td><td class="v"></td><td class="v">102</td><td class="v">8.2</td></tr>
+                <tr class="tot"><td class="lbl" colspan="3">8 · PER moyen (haut + bas)/2</td><td class="v" colspan="2">14.5</td><td class="lbl" colspan="2">9 · PER courant</td><td class="v" colspan="2">14.7</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <details class="sec" data-sec="4" open>
+          <summary class="sech"><span class="chev">▸</span><span class="n">4</span><h3>Évaluation du risque &amp; de la récompense — 5 ans</h3><span class="fold-sum">ACHAT · zone 141–216 · H/B 3.4:1</span></summary>
+          <div class="secbody two">
+            <div class="calc">
+              <div class="crow"><span class="k">A · Prix haut — PER haut moy.</span><span class="op">16.7 ×</span><span class="k">BPA est. haut</span><span class="op">22.0 =</span><span class="res">368</span></div>
+              <div class="crow"><span class="k">B(a) · PER bas moy. × BPA est. bas</span><span class="op">12.4 × 11.4 =</span><span class="res">141</span></div>
+              <div class="crow"><span class="k">B(b) · Prix bas moyen 5 ans</span><span class="op">=</span><span class="res">152</span></div>
+              <div class="crow"><span class="k">B(c) · Plus bas sévère récent</span><span class="op">=</span><span class="res">131</span></div>
+              <div class="crow"><span class="k">B(d) · Soutenu par dividende</span><span class="op">div ÷ rdt h. =</span><span class="res">156</span></div>
+              <div class="crow"><span class="k">B · Prix bas prévu (sélectionné)</span><span class="op">→</span><span class="res">141</span></div>
+              <div class="crow"><span class="k">C · Zonage — fourchette ÷ 3</span><span class="op">(368−141)=227 · 1/3=76</span><span class="res">3 tiers</span></div>
+              <div class="crow"><span class="k">D · Ratio hausse / baisse</span><span class="op">(368−192)÷(192−141) =</span><span class="res">3.4:1</span></div>
+              <div class="crow"><span class="k">E · Appréciation potentielle</span><span class="op">368÷192×100−100 =</span><span class="res">+92 %</span></div>
+            </div>
+            <div>
+              <div class="sublabel" style="margin-bottom:8px">C · Zonage — le prix présent <b style="color:var(--text-hi);font-family:var(--num)">192</b> tombe dans la zone <b style="color:var(--text-hi)">Achat</b></div>
+              <div style="display:flex;gap:6px;align-items:stretch">
+                <div class="zonebar" style="width:104px;min-height:176px">
+                  <div class="seg zb-sell">VENTE</div><div class="seg zb-hold">NEUTRE</div><div class="seg zb-buy">ACHAT</div>
+                  <div class="zb-now" style="bottom:22%"><span>192 ▸</span></div>
+                </div>
+                <div class="zaxis" style="min-height:176px">
+                  <span style="top:0">368</span><span style="top:33%">292</span><span style="top:66%">216</span><span style="top:100%">141</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details class="sec" data-sec="5" open style="border-bottom:none">
+          <summary class="sech"><span class="chev">▸</span><span class="n">5</span><h3>Potentiel à 5 ans</h3><span class="fold-sum">Rdt annuel total 15.8%</span></summary>
+          <div class="secbody calc">
+            <div class="crow"><span class="k">A · Rendement courant</span><span class="op">div. ÷ prix × 100 =</span><span class="res">2.6 %</span></div>
+            <div class="crow"><span class="k">B · Rendement moyen sur 5 ans</span><span class="op">BPA moy. × distrib. ÷ prix =</span><span class="res">3.2 %</span></div>
+            <div class="crow"><span class="k">C · Appréciation annualisée</span><span class="op">92 % ÷ 5 =</span><span class="res">13.8 %</span></div>
+            <div class="crow"><span class="k">C · Rendement annuel total estimé</span><span class="op">appr. + rdt moy. =</span><span class="res">15.8 %</span></div>
+          </div>
+        </details>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function allOpen(v){document.querySelectorAll('details.sec').forEach(d=>d.open=v);}
+  function setRegime(r){
+    document.getElementById('bSaisie').classList.toggle('on', r==='saisie');
+    document.getElementById('bContempl').classList.toggle('on', r==='contempl');
+    const open = r==='saisie' ? {1:1,2:1,3:1,4:1,5:1} : {1:1,2:0,3:0,4:1,5:0};
+    document.querySelectorAll('details.sec').forEach(d=>{d.open = !!open[d.dataset.sec];});
+  }
+  setRegime('contempl');
+</script>
+</body>
+</html>
