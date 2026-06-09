@@ -4,9 +4,18 @@
 //! dependencies. Money and ratios use [`rust_decimal::Decimal`] exact decimals — never `f32`/`f64`
 //! in the decision chain — which makes results bit-identical across platforms.
 //!
-//! The real five-section SSG engine, quality flags, plausibility checks, verdict and risk math
-//! arrive in later Epic 1 stories (1.7–1.11). This file currently provides only the
-//! cross-platform **determinism probe** that the CI determinism-hash gate relies on.
+//! The versioned **method specification** (the authoritative oracle) is mirrored here as typed
+//! constants: see [`method`], [`quality_flags`], [`rounding`] and [`method_version`], backed by
+//! `docs/method/ssg-method-spec-v1.md`. The five-section SSG engine, plausibility checks, verdict
+//! and risk math that *consume* this spec arrive in later Epic 1 stories (1.7–1.11). This file also
+//! provides the cross-platform **determinism probe** that the CI determinism-hash gate relies on.
+
+pub mod method;
+pub mod method_version;
+pub mod quality_flags;
+pub mod rounding;
+
+pub use method_version::METHOD_VERSION;
 
 use rust_decimal::{Decimal, MathematicalOps};
 use sha2::{Digest, Sha256};
