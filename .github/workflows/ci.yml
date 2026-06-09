@@ -22,7 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Linux-only for now (decision 2026-06-09). Re-add macos-latest / windows-latest here to
+        # restore the cross-OS matrix when multi-OS support is back in scope.
+        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -47,7 +49,9 @@ jobs:
       - name: Tests
         run: cargo test --all --locked
 
-      - name: Determinism hash (cross-OS contract)
+      # Determinism hash (Linux-only for now; the test stays the cross-OS contract for when the
+      # macOS/Windows matrix is restored — exact decimal makes it deterministic by construction).
+      - name: Determinism hash
         run: cargo test -p steadyinvest-core --locked tests::determinism_hash_matches_cross_os_contract -- --exact
 
   license-audit:
