@@ -26,27 +26,25 @@ recolouring within **~100 ms (click-to-pixel, incl. recompute)** — **natively 
    property writes). Slint then repaints in its dirty-driven retained mode.
 4. Judge the **perceived** click-to-pixel latency: does the recolor track your hand with no lag?
 
-## Results
+## Results — RUN 2026-06-09 (Guy, on display)
 
 | Metric | Value |
 |--------|-------|
-| Builds + clippy `-D warnings` clean | ✅ (verified in CI, Linux) |
-| Recompute+property-set latency (stderr µs) | _to fill — Guy's run_ |
-| Perceived click-to-pixel < ~100 ms while dragging | _to fill — Guy's run_ |
-| Rendering correct (axes/lines/zone make sense) | _to fill — Guy's run_ |
+| Builds + clippy `-D warnings` clean | ✅ (CI, Linux) |
+| Recompute+property-set latency (stderr µs, **660 drag events**) | **~40–60 µs typical · 235 µs max** (≈ 0.04–0.24 ms) |
+| Perceived click-to-pixel < ~100 ms while dragging | ✅ **Yes — "suit mon geste instantanément, aucune perception de délai"** (Guy) |
+| Rendering correct (axis/lines/zone recolour live) | ✅ Yes |
 
-> **Status: PENDING Guy's on-display run.** The agent built it headless: it compiles, is clippy-clean,
-> and the event loop starts; the **perceptual <100 ms verdict requires a display** (same as the
-> Story-1.1 window check). The Decimal recompute itself is expected to be low-µs (well under 100 ms);
-> the open question the spike answers is whether Slint's native `Path` redraw + drag feel live.
+The recompute (exact `rust_decimal` signal + Slint property writes) costs **microseconds** — ~400×–2500×
+under the 100 ms budget — and Slint's dirty-driven retained-mode repaint keeps the recolor visually
+instant under the cursor. The native `Path` + `TouchArea` approach is comfortably fast.
 
-## Decision
+## Decision — **GO** (2026-06-09)
 
-- [ ] **GO** — native Slint meets <100 ms; lock the "Slint-only, no egui/web" decision; Story 2.8
-  builds the real chart natively.
-- [ ] **NO-GO** — fall back (record which, and why):
-  - [ ] dedicated Slint canvas/window, or
-  - [ ] `plotters` → `SharedPixelBuffer` static backdrop + Slint `TouchArea` overlay (drag stays Slint).
-  - **NOT egui, NOT web** (architecture-locked).
+- [x] **GO** — native Slint meets <100 ms (by a wide margin); the **"Slint-only, no egui/web"
+  decision is LOCKED**. Story 2.8 builds the real growth chart + zone bar natively (`Path` +
+  `TouchArea`, `log10` in Rust), reusing this spike's approach. GitHub issue #4 resolved.
+- [ ] ~~NO-GO fallback~~ — not needed.
 
-_Fill the table + tick a box after running; then this spike is complete and `app/examples/spike_b_chart.rs` can be deleted (its job is the decision above)._
+The throwaway example `app/examples/spike_b_chart.rs` has served its purpose (the decision above). It
+is kept for now as a working reference for Story 2.8 and may be deleted when the production chart lands.

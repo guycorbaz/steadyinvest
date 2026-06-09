@@ -1,6 +1,6 @@
 # Story 1.5: Spike B — native-Slint draggable judgment line, <100 ms recolor (hardened go/no-go)
 
-Status: review
+Status: done
 
 <!-- Note: THROWAWAY SPIKE. Deliverable = a GO/NO-GO decision + findings note, NOT production code. -->
 <!-- Epic 1. Done out of order (before 1.4) to de-risk the project's #1 technical unknown early. -->
@@ -89,7 +89,7 @@ Claude Opus 4.8 (1M context) — claude-opus-4-8 — via Claude Code dev-story (
 - **Signal recompute in exact `rust_decimal`** (forecast high/low, thirds zoning, U/D) — mirrors the method spec; only pixel/`log10` mapping uses floats (rendering ≠ decision chain). Each drag `eprintln!`s the recompute+property-set latency in µs.
 - `justfile` `spike` task wired to run it; `rust_decimal` added as an `app` **dev-dependency** (example-only — shipping binary stays lean).
 - **No production code touched** (`app/ui/app.slint`, `app/src/main.rs`, crates untouched). Gates green; CI stays green.
-- ⚠️ **GO/NO-GO verdict is PENDING Guy's on-display run.** The agent (headless) proved it builds, is clippy-clean, runs the loop, and the Decimal recompute is trivially fast; but the **perceptual click-to-pixel <100 ms** judgment needs a display (like the Story-1.1 window check). Run `just spike`, drag the line, read the µs logs, then fill `docs/spikes/spike-b-native-slint-chart.md` and tick GO or NO-GO. **The story's core question is not answered until that run.**
+- ✅ **VERDICT: GO (2026-06-09, Guy's on-display run).** Across **660 drag events** the recompute+property-set latency was **~40–60 µs typical, 235 µs max** (≈0.04–0.24 ms — far under the 100 ms budget), and Guy confirmed the recolor **"suit mon geste instantanément, aucune perception de délai."** The **"Slint-only, no egui/web" decision is LOCKED**; Story 2.8 builds the production chart natively (`Path`+`TouchArea`, log10 in Rust). GitHub issue #4 resolved. Findings recorded in `docs/spikes/spike-b-native-slint-chart.md`.
 
 ### File List
 

@@ -52,7 +52,7 @@ development_status:
   1-2-ssg-method-specification: done
   1-3-contract-v1-versioned-types-provenance-model: done
   1-4-spike-a-dense-editable-grid-paste-a-column: backlog
-  1-5-spike-b-native-slint-draggable-judgment-line-recolor: review
+  1-5-spike-b-native-slint-draggable-judgment-line-recolor: done
   1-6-spike-c-exact-decimal-cagr-precision-cross-os-determinism: backlog
   1-7-core-normalization-layer: backlog
   1-8-core-ssg-calculation-engine: backlog
