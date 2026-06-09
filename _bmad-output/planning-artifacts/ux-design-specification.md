@@ -18,6 +18,21 @@ inputDocuments:
 
 ---
 
+> **⚠️ ERRATUM — 2026-06-09 (chart engine: egui → native Slint).**
+> This spec was authored before the Architecture decision of 2026-06-08, which **removed `egui`
+> entirely** and locked the interactive chart to **native Slint** (`Path` + `TouchArea`, log10 in
+> Rust; live recolor via Slint's dirty-driven retained mode). Wherever this document says the chart
+> is "egui behind a `ChartView` trait", "egui-in-Slint compositing", or describes "theming across
+> the FFI / pushing tokens Slint→egui", read instead: **the chart is drawn natively in Slint, in the
+> same binary, reading the single `arc_swap` token source of truth (no FFI, no egui).** The week-1
+> chart spike is now a **native-Slint** draggable-judgment-line + <100 ms recolor go/no-go; the
+> documented fallback is a **dedicated Slint canvas** or **`plotters`→`SharedPixelBuffer` static
+> backdrop + Slint `TouchArea` overlay — NOT egui, NOT web.** The body below has been corrected to
+> match; this banner preserves the change history. (See `architecture.md` "Core Technical Decisions"
+> and `epics.md` Stories 1.5 / 2.8.)
+
+---
+
 <!-- UX design content will be appended sequentially through collaborative workflow steps -->
 
 ## Executive Summary
@@ -288,11 +303,13 @@ never a new page. In contemplation, **data and chart sit side-by-side in one win
 ### Feasibility Note (forward to Architecture)
 
 Grid = **custom on Slint** (Rust `TableModel` + virtualized `ListView`; cell-cursor keyboard nav,
-inline edit, paste-a-column). Chart = **egui behind a `ChartView` trait**, composited **side-by-side
-in the Slint window** (confirmed: same window, wide screens). **Week-1 spikes:** (A) grid —
-paste-a-column is the make-or-break test; (B) egui drag + real-time recolor — measure *perceived*
-latency; (C) egui-in-Slint same-window compositing — the real de-risking. Exit: A✅+C✅ → Slint bet
-holds, egui peripheral; C✗ → decide all-egui with less form fidelity.
+inline edit, paste-a-column). Chart = **drawn natively in Slint** (`Path` + `TouchArea`, log10 in
+Rust), in the same window as the grid (confirmed: same window, wide screens). **Week-1 spikes:**
+(A) grid — paste-a-column is the make-or-break test; (B) **native-Slint** draggable judgment line +
+real-time zone recolor — measure *perceived* drag→pixel latency (<100 ms go/no-go); (C) exact-decimal
+CAGR precision + cross-OS determinism hash. Exit: B✅ → Slint-only bet holds; B✗ → fallback to a
+**dedicated Slint canvas** or **`plotters`→`SharedPixelBuffer` backdrop + `TouchArea` overlay**
+(drag stays Slint) — **NOT egui, NOT web.**
 
 ## Design System Foundation
 
@@ -345,7 +362,7 @@ tools.
 ### Customization Strategy
 
 - **Bespoke components (the custom-heavy core):** editable data-grid cell + virtualized grid;
-  judgment-line chart (egui-backed behind a `ChartView` trait); zone legend; provenance/state
+  judgment-line chart (native Slint `Path`/`TouchArea`); zone legend; provenance/state
   markers; verdict badge with degraded/low-confidence states; freshness indicator; contextual
   help/glossary popover; empty & error states.
 - **Restyled Slint primitives:** buttons, inputs, scroll/list views, dialogs — reused but styled via
@@ -611,10 +628,11 @@ Same scene, different lighting — the literal expression of "two regimes, one t
 
 - **Typography feasibility:** confirm tabular-by-default numeric font in Slint in week 1; do **not**
   depend on `font-feature-settings: "tnum"` over Inter.
-- **Theming across the FFI:** the egui chart does not read Slint global singletons — themed tokens
-  (zone colours, ink, label-set) must be **pushed Slint→egui on theme change**. Extend the week-1
-  charting spike (B) to render zone-band colour from a *pushed themed token*, not a hard-coded egui
-  constant — de-risking cross-boundary theming alongside drag latency.
+- **Theming (single source of truth, no FFI):** the native-Slint chart reads the **same `arc_swap`
+  token snapshot** as the rest of the UI (zone colours, ink, label-set) — there is no FFI boundary
+  and no egui to push tokens to. A theme/regime change swaps the token snapshot and forces a redraw.
+  The week-1 chart spike (B) renders zone-band colour from the shared themed token, never a hard-coded
+  constant — proving live recolor and themed drawing in one move.
 - **Trust invariants as quality gates (Murat):** `render(state).trustMarker == state.trustState`
   for every reachable state; `verdict.isFull ⟹ ∀ load-bearing input validated ∧ ¬stale`; a
   refresh injected during contemplation flips `✓→?` **and** degrades the verdict in the same
@@ -675,7 +693,7 @@ directions are folded in as facets, not separate screens:
 - One scrollable **faithful form** = app nav rail + top bar (identity, regime, expand/collapse) +
   sticky verdict bar + non-collapsible header + collapsible §1–§5.
 - Collapsible section = a reusable component; fold presets bound to the regime control; the print
-  path forces all-expanded. Chart (egui) embedded in §1; the zoning bar in §4. Component-level
+  path forces all-expanded. Chart (native Slint `Path`/`TouchArea`) embedded in §1; the zoning bar in §4. Component-level
   detail (exact grid, log scale, judgment-line handles, fold-state persistence) is finalised in the
   Component-Strategy step.
 
@@ -857,7 +875,7 @@ domain logic — they consume the colour/alpha + metric/typo token families.
 2. **Collapsible SSG section** — `details/summary`-style with chevron, **summary-scent line when
    folded**, **persisted fold state**, bound to the **regime fold presets**. *States:* expanded /
    collapsed; print = force-expanded.
-3. **Semi-log growth chart (§1)** — egui behind a `ChartView` trait: Sales/EPS/Price lines
+3. **Semi-log growth chart (§1)** — native Slint (`Path` + `TouchArea`, log10 in Rust): Sales/EPS/Price lines
    (historical solid / projected dashed), 5–30 % guide fan, year axis, 1→200 log axis,
    **draggable growth trend lines** (visible handle, ~±8–10 px hit target), **no zones**.
    *States:* idle, hover-handle, dragging, low-confidence overlay.
@@ -890,8 +908,9 @@ domain logic — they consume the colour/alpha + metric/typo token families.
 
 - **Tokens only:** every component reads the colour/alpha & metric/typo token families — a token
   swap re-themes the whole app (dark/light, regime, future label-set/i18n).
-- **Chart across the FFI:** the egui `ChartView` receives **themed tokens pushed Slint→egui** on
-  theme change (per step-8 forward-note); zone-band colour is a pushed token, not a constant.
+- **Chart, single token source (no FFI):** the native-Slint chart reads the **same `arc_swap` token
+  snapshot** as the rest of the UI; on theme/regime change the snapshot swaps and the chart redraws.
+  Zone-band colour is a shared themed token, not a constant.
 - **Keyboard-first & accessible:** every entry/judgment component fully keyboard-operable; visible
   focus; decision never colour-only; markers pass the confusability gate.
 - **Reuse:** the data-grid, collapsible section, trust markers, calc-row and zone bar are shared
@@ -899,8 +918,9 @@ domain logic — they consume the colour/alpha + metric/typo token families.
 
 ### Implementation Roadmap
 
-- **Phase 1 (MVP) — de-risk first via week-1 spikes:** (A) data-grid paste-a-column, (B) egui
-  growth chart drag + live zone-bar recolor, (C) egui-in-Slint same-window compositing. Then:
+- **Phase 1 (MVP) — de-risk first via week-1 spikes:** (A) data-grid paste-a-column, (B) **native-Slint**
+  growth chart drag + live zone-bar recolor (<100 ms go/no-go), (C) exact-decimal CAGR precision +
+  cross-OS determinism hash. Then:
   collapsible section, trust markers, verdict badge + sticky verdict bar, error banner, form
   header/calc-rows, study dashboard, nav rail, settings, legend/help/demo, single-portfolio risk +
   sell/raise-stop, minimal scenario-compare.
@@ -1044,4 +1064,4 @@ dense §3 table never collapses its columns; it scrolls horizontally if the wind
 - **Slint accessibility properties** on interactive components; explicit focus management; never a
   colour-only signal.
 - **Minimum-window constraint**; persist window/fold/regime state.
-- **egui chart** exposes a keyboard/exact-value path for every judgment line (no mouse-only control).
+- **The native-Slint chart** exposes a keyboard/exact-value path for every judgment line (no mouse-only control).

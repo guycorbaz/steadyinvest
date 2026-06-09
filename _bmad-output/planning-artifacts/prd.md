@@ -537,7 +537,9 @@ but the *memory + risk + neutral-AI* layer on top.
 
 - **AI scope creep / posture erosion** → capability asymmetry enforced by construction; AI is
   post-v1, and v1 only builds the versioned contract it will sit on.
-- **Slint interactive-charting maturity** → week-1 spike; **egui** kept as an explicit fallback.
+- **Slint interactive-charting maturity** → week-1 spike; fallback = a **dedicated Slint canvas** or
+  **`plotters`→`SharedPixelBuffer` backdrop + `TouchArea` overlay** (NOT egui; egui was removed by the
+  2026-06-08 Architecture decision — chart is native Slint).
 - **Over-engineering the journal** → ship the versioned data contract now, defer the AI/analytics
   features.
 
@@ -554,7 +556,9 @@ system, and locale).
 
 - **Windows, macOS, Linux** from a single Rust + Slint codebase; native rendering.
 - The **interactive charting** (draggable judgment lines + zone bands) is the principal
-  cross-platform technical unknown → **spike early**; **egui** kept as an explicit fallback.
+  cross-platform technical unknown → **spike early**; chart is **native Slint** (`Path`/`TouchArea`),
+  fallback = dedicated Slint canvas or `plotters`→`SharedPixelBuffer` + `TouchArea` (NOT egui — removed
+  by the 2026-06-08 Architecture decision).
 
 ### System Integration
 
@@ -639,8 +643,9 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 ### Risk Mitigation Strategy
 
 - **Technical:** the **draggable judgment lines on Slint** are the top unknown → **week-1 spike**,
-  **egui** fallback. The *silent wrong signal* risk → deterministic engine with golden/property
-  tests, validated flags, stale flagging, 5-year floor.
+  with a Slint-only fallback (dedicated canvas or `plotters`→`SharedPixelBuffer` + `TouchArea`; NOT egui
+  — removed by the 2026-06-08 Architecture decision). The *silent wrong signal* risk → deterministic
+  engine with golden/property tests, validated flags, stale flagging, 5-year floor.
 - **Market / adoption:** the only user is the author → de-risked by building exactly his real
   workflow; validated by whether he actually uses it for every decision.
 - **Resource (solo dev):** the lean MVP defers portfolio complexity to Phase 2; ship the
@@ -869,8 +874,10 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 
 ### Constraints (technical & legal/IP)
 
-- **Technical:** Rust + Slint (**egui** as a contingency for interactive charting); local embedded
-  database (SQLite); offline-first; no server.
+- **Technical:** Rust + Slint, chart drawn **natively in Slint** (`Path`/`TouchArea`); local embedded
+  database (SQLite); offline-first; no server. *(The 2026-06-08 Architecture decision removed egui
+  entirely; the charting fallback is a dedicated Slint canvas or `plotters`→`SharedPixelBuffer` +
+  `TouchArea`, not egui.)*
 - **Legal / IP:** **GPL-3.0**, subject to a dependency-license audit (Slint tier; one-way
   Apache-2.0 ↔ GPL-3.0 compatibility). **No vendor market data** shipped (synthetic fixtures only).
   **Neutral labels — no NAIC marks/logos or verbatim instructional text.** "Educational, not
