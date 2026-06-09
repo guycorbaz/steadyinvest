@@ -7,7 +7,7 @@
 
 use crate::method_version::METHOD_VERSION;
 use crate::quality_flags::{PLAUSIBILITY_RULES, QUALITY_FLAGS};
-use crate::rounding::DisplayField;
+use crate::rounding::{strategy_behavior_probe, DisplayField};
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 
@@ -65,14 +65,32 @@ pub fn trend_even_band_pp() -> Decimal {
     Decimal::new(5, 1)
 }
 
+/// Verdict appreciation target (%): present price → forecast high should imply roughly doubling over
+/// the forecast horizon (≈ 15%/yr over 5 years). Spec §1 verdict.
+pub fn verdict_double_appreciation_pct() -> Decimal {
+    Decimal::new(1000, 1) // 100.0% total appreciation over FORECAST_HORIZON_YEARS
+}
+
 // ── Golden tolerance (FR9 / NFR-C2) ──
 
-/// Relative tolerance on derived numerics (0.005 = ±0.5%). Zoning + categorical verdict match EXACTLY.
+/// Method default relative tolerance on derived numerics (0.005 = ±0.5%). Zoning + categorical
+/// verdict match EXACTLY. (Fixed method constant — tests may compare with a tighter local epsilon,
+/// but the method's canonical tolerance is this value.)
 pub fn golden_relative_tolerance() -> Decimal {
     Decimal::new(5, 3)
 }
 
 // ── Plausibility bounds (spec §3) ──
+
+/// Magnitude bound (percentage points) for PTP and ROE plausibility: a value outside
+/// `[-this, +this]` is out-of-bounds (100 ⇒ [-100%, +100%]). Spec §3 `out_of_bounds_ratio`.
+pub fn ptp_roe_bound_pct() -> Decimal {
+    Decimal::new(100, 0)
+}
+/// Lower bound of the P/E plausibility range; P/E < this is out-of-bounds (0). Spec §3.
+pub fn pe_axis_min() -> Decimal {
+    Decimal::ZERO
+}
 
 /// Year-over-year jump factor at/above which a split/series break is suspected (1.5).
 pub fn split_jump_high() -> Decimal {
@@ -89,8 +107,12 @@ pub fn pe_axis_max() -> Decimal {
 
 // ── Neutral-posture banned verbs (FR13, spec §6) — scope: system-generated signals only ──
 
-/// Banned imperative action/recommendation verbs in system signals (English, lowercase whole-word).
-pub const BANNED_VERBS_EN: [&str; 15] = [
+/// Banned imperative action/recommendation verbs in **system-generated** signals (English,
+/// case-insensitive). Entries may be multi-word phrases (e.g. "ought to"); the future posture
+/// checker (Story 2.14) matches them case-insensitively against system strings only — never user
+/// free-text — and zone-label nouns ("Buy"/"Neutral"/"Sell" zone) are exempt (they name the defined
+/// price bands, they are not imperatives).
+pub const BANNED_VERBS_EN: [&str; 16] = [
     "buy",
     "sell",
     "hold",
@@ -106,6 +128,7 @@ pub const BANNED_VERBS_EN: [&str; 15] = [
     "suggest",
     "should",
     "must",
+    "ought to",
 ];
 
 /// Banned imperative verbs in the French-first UI (lowercase whole-word).
@@ -132,46 +155,67 @@ const DISPLAY_FIELDS: [DisplayField; 6] = [
     DisplayField::LargeMonetary,
 ];
 
-/// Canonical SHA-256 over the entire method definition (version + every constant, flag, rule, verb,
-/// and display scale). Changing any of those changes this fingerprint, so the change-detection test
-/// fails until `METHOD_VERSION` is bumped and the snapshot regenerated. This realizes "you cannot
-/// change the method silently".
+/// Serialize a `Decimal` canonically by **value** (not representation): `normalize()` collapses
+/// trailing-zero scale so `3.0` and `3` hash identically.
+fn d(value: Decimal) -> String {
+    value.normalize().to_string()
+}
+
+/// Canonical SHA-256 over the **entire** method definition: version, every numeric constant, the
+/// load-bearing field lists, the quality-flag catalog, the plausibility catalog, both banned-verb
+/// lists, every display-field scale, AND the rounding strategy's behavior. Serialization is explicit
+/// and value-based (no `Debug`, which is not a stability contract; decimals normalized) so the hash
+/// is stable across toolchains. Changing any of these changes the fingerprint, so the
+/// change-detection test fails until `METHOD_VERSION` is bumped and the snapshot regenerated —
+/// realizing "you cannot change the method silently".
 pub fn method_fingerprint() -> String {
     let mut p: Vec<String> = Vec::new();
     p.push(format!("method_version={METHOD_VERSION}"));
     p.push(format!("usable_years_floor={USABLE_YEARS_FLOOR}"));
     p.push(format!("forecast_horizon_years={FORECAST_HORIZON_YEARS}"));
     p.push(format!("zone_count={ZONE_COUNT}"));
-    p.push(format!("load_bearing_year={LOAD_BEARING_YEAR_FIELDS:?}"));
     p.push(format!(
-        "load_bearing_judgment={LOAD_BEARING_JUDGMENT_INPUTS:?}"
+        "load_bearing_year={}",
+        LOAD_BEARING_YEAR_FIELDS.join("|")
     ));
-    p.push(format!("ud_target={}", ud_target()));
-    p.push(format!("ud_extreme={}", ud_extreme()));
+    p.push(format!(
+        "load_bearing_judgment={}",
+        LOAD_BEARING_JUDGMENT_INPUTS.join("|")
+    ));
+    p.push(format!("ud_target={}", d(ud_target())));
+    p.push(format!("ud_extreme={}", d(ud_extreme())));
     p.push(format!(
         "relative_value_ceiling_pct={}",
-        relative_value_ceiling_pct()
+        d(relative_value_ceiling_pct())
     ));
-    p.push(format!("high_pe_aggressive={}", high_pe_aggressive()));
-    p.push(format!("high_pe_implausible={}", high_pe_implausible()));
-    p.push(format!("roe_low_pct={}", roe_low_pct()));
-    p.push(format!("trend_even_band_pp={}", trend_even_band_pp()));
+    p.push(format!("high_pe_aggressive={}", d(high_pe_aggressive())));
+    p.push(format!("high_pe_implausible={}", d(high_pe_implausible())));
+    p.push(format!("roe_low_pct={}", d(roe_low_pct())));
+    p.push(format!("trend_even_band_pp={}", d(trend_even_band_pp())));
+    p.push(format!(
+        "verdict_double_appreciation_pct={}",
+        d(verdict_double_appreciation_pct())
+    ));
     p.push(format!(
         "golden_relative_tolerance={}",
-        golden_relative_tolerance()
+        d(golden_relative_tolerance())
     ));
-    p.push(format!("split_jump_high={}", split_jump_high()));
-    p.push(format!("split_jump_low={}", split_jump_low()));
-    p.push(format!("pe_axis_max={}", pe_axis_max()));
+    p.push(format!("ptp_roe_bound_pct={}", d(ptp_roe_bound_pct())));
+    p.push(format!("pe_axis_min={}", d(pe_axis_min())));
+    p.push(format!("pe_axis_max={}", d(pe_axis_max())));
+    p.push(format!("split_jump_high={}", d(split_jump_high())));
+    p.push(format!("split_jump_low={}", d(split_jump_low())));
     for f in QUALITY_FLAGS {
-        p.push(format!("flag:{}={:?}", f.key, f.severity));
+        p.push(format!("flag:{}={}", f.key, f.severity.as_str()));
     }
-    p.push(format!("plausibility={PLAUSIBILITY_RULES:?}"));
-    p.push(format!("banned_en={BANNED_VERBS_EN:?}"));
-    p.push(format!("banned_fr={BANNED_VERBS_FR:?}"));
+    p.push(format!("plausibility={}", PLAUSIBILITY_RULES.join("|")));
+    p.push(format!("banned_en={}", BANNED_VERBS_EN.join("|")));
+    p.push(format!("banned_fr={}", BANNED_VERBS_FR.join("|")));
     for field in DISPLAY_FIELDS {
-        p.push(format!("scale:{field:?}={}", field.scale()));
+        p.push(format!("scale:{}={}", field.as_str(), field.scale()));
     }
+    // Behavioral fingerprint of the rounding strategy (closes the silent rounding-mode-change hole).
+    p.push(format!("rounding_behavior={}", strategy_behavior_probe()));
 
     let mut hasher = Sha256::new();
     hasher.update(p.join("\n").as_bytes());
@@ -191,12 +235,36 @@ mod tests {
     /// assertion prints the new value).
     #[test]
     fn method_fingerprint_is_pinned_to_version() {
-        const EXPECTED: &str = "78bfa4f044933320f2ad5df56aa91c4dfbbd3c7d614df225acaad7e35d12bb54";
+        const EXPECTED: &str = "f79e3c11227094ac8543376224cf2421d7f4d95082507cc6bf34d9395cd61d1d";
         assert_eq!(
             method_fingerprint(),
             EXPECTED,
             "method definition changed — bump METHOD_VERSION and regenerate this snapshot"
         );
+    }
+
+    #[test]
+    fn load_bearing_lists_are_coherent() {
+        // Non-empty, no duplicates, and the two sets are disjoint. (The vs-study-struct subset
+        // check is deferred to Story 1.7, where the input struct is defined.)
+        assert!(!LOAD_BEARING_YEAR_FIELDS.is_empty());
+        assert!(!LOAD_BEARING_JUDGMENT_INPUTS.is_empty());
+        for (i, a) in LOAD_BEARING_YEAR_FIELDS.iter().enumerate() {
+            assert!(
+                !LOAD_BEARING_YEAR_FIELDS[i + 1..].contains(a),
+                "duplicate load-bearing year field: {a}"
+            );
+            assert!(
+                !LOAD_BEARING_JUDGMENT_INPUTS.contains(a),
+                "field appears in both load-bearing sets: {a}"
+            );
+        }
+        for (i, b) in LOAD_BEARING_JUDGMENT_INPUTS.iter().enumerate() {
+            assert!(
+                !LOAD_BEARING_JUDGMENT_INPUTS[i + 1..].contains(b),
+                "duplicate load-bearing judgment input: {b}"
+            );
+        }
     }
 
     #[test]

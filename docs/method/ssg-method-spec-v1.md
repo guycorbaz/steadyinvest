@@ -167,8 +167,15 @@ text.)*
 
 - **Zoning and the categorical verdict must match EXACTLY** (Buy/Neutral/Sell; quality-candidate
   yes/no).
-- Derived **numeric** values must match within **±0.5%** relative (`|a − b| ≤ 0.005 × |expected|`),
-  tolerance configurable. [PRD NFR-C2]
+- Derived **numeric** values must match within **±0.5%** relative (`|a − b| ≤ 0.005 × |expected|`).
+  This is the **fixed method default** (`core::method::golden_relative_tolerance`); a test may compare
+  with a tighter local epsilon, but changing this constant is a method change (it is fingerprinted).
+  [PRD NFR-C2]
+
+> **Normative comparators.** The operators in the threshold tables below and in §2 are **normative** —
+> the engine must use exactly the stated comparator (`>`, `≥`, `<`, `≤`). The `core` constants pin the
+> magnitudes; the comparators here pin the boundary behavior. (E.g. `> 20` excludes exactly 20.0;
+> `relative value < 100%` for a quality candidate vs `≥ 100%` for the `relative_value_high` flag.)
 
 ## 8. Rounding mode & per-field display scale
 
@@ -188,6 +195,23 @@ text.)*
 | Sales / large monetary aggregates | 0 |
 
 ---
+
+## 9. Degenerate inputs & undefined cases (binding for the engine, Story 1.8)
+
+The engine must never panic or emit a plausible-but-wrong number on a degenerate input. Each case
+below resolves to either a typed `unknown/insufficient` result (carried into the verdict, which then
+degrades/withholds) or a named plausibility/quality state — never a silent 0 and never a `Decimal`
+division-by-zero panic.
+
+| Case | Rule |
+|------|------|
+| **U/D denominator ≤ 0** (`current_price ≤ forecast_low`; the §4 constraint allows equality) | U/D is **undefined** → verdict withheld for the U/D criterion; surface as a state, not a number. If `current_price < forecast_low`, also raise `low_price_above_current`. |
+| **CAGR base ≤ 0 or sign-crossing** (start EPS ≤ 0, or start/end opposite signs) | CAGR is **unknown/insufficient** (do not compute `(end/start)^(1/n)`); the affected growth output is `unknown`, never 0. |
+| **Current P/E with TTM EPS ≤ 0** (`Σ last 4 quarterly EPS ≤ 0`) | Current P/E **unknown** → relative value and `relative_value_high` are **unknown** (not computed); verdict's relative-value criterion is unmet-by-insufficiency. |
+| **Per-year P/E with EPS ≤ 0** | that year's P/E is `unknown` (`negative_or_zero_denominator`), excluded from the 5-yr P/E averages. |
+| **ROE with book value ≤ 0** | ROE `unknown` (`negative_or_zero_denominator`), excluded from the 5-yr ROE average/trend. |
+| **PTP gross-up with `tax_rate ≥ 1`** | `pre_tax_profit = net_profit / (1 − tax_rate)` is **unknown** (non-positive denominator); prefer a directly-reported pre-tax profit. |
+| **Forecast-low option (d) with `high_yield ≤ 0`** (non-dividend payer) | option (d) is **not selectable** (division by zero); the user must pick (a)/(b)/(c). |
 
 ## Change control
 Any edit to a formula, threshold, the banned-verb list, the tolerance, the rounding mode, or a display

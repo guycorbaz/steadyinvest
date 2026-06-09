@@ -1,6 +1,6 @@
 # Story 1.2: SSG method specification (versioned oracle)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Epic 1: Proven SSG core & data foundation (headless). Depends on Story 1.1 (workspace scaffold, DONE). -->
@@ -42,6 +42,22 @@ so that the engine and its golden tests have a single authoritative oracle and a
   - [x] `cargo test -p steadyinvest-core` green; `cargo fmt --all --check` + `cargo clippy --all-targets --all-features --locked -- -D warnings` green.
   - [x] Confirm `core` still has **no** I/O/UI/SQL/net deps (Cardinal Rule) — the method module is pure data + functions.
   - [x] Cross-link the prose doc and the `core` constants (doc references the module; module references the doc section).
+
+### Review Findings
+
+_Adversarial code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor), 2026-06-09. Acceptance Auditor: all 11 ACs met or met-with-gap; gaps captured below. 8 patch · 3 defer · 2 dismissed · 0 decision-needed._
+
+- [x] [Review][Patch] **Fingerprint omits the rounding strategy + several spec thresholds (silent-change holes)** [core/src/method/mod.rs, core/src/rounding.rs] — `method_fingerprint()` hashes `field.scale()` but NOT `DISPLAY_ROUNDING` (switching half-up→banker's would be undetected though §8 says it must bump METHOD_VERSION). Also missing as constants/hashed: PTP/ROE plausibility bounds (±100%), P/E lower bound (0), and the verdict "≈15%/yr / double-in-5-yr" appreciation target. Add constants + fold into the fingerprint so the module's "every constant" claim holds. (blind+edge+auditor, HIGH)
+- [x] [Review][Patch] **Fingerprint uses `{:?}` Debug + scale-sensitive `Decimal` Display (not a stable/canonical contract)** [core/src/method/mod.rs] — Debug output can change across toolchains (or on an enum-variant rename) → spurious fingerprint flips; `Decimal::new(30,1)` ("3.0") vs `Decimal::new(3,0)` ("3") hash differently though equal. Replace with explicit stable serialization and `.normalize()` the decimals; re-freeze the snapshot. (blind+edge, MEDIUM)
+- [x] [Review][Patch] **Banned-verb spec↔code drift: `"ought to"` in prose, absent from `BANNED_VERBS_EN`** [docs/method/ssg-method-spec-v1.md §6, core/src/method/mod.rs] — the machine-checkable list (15) is missing a verb the oracle bans (16). Reconcile; and clarify the matching scope (case-insensitive phrase/substring over **system-generated** strings; multi-word entries like `"il faut"`/`"ought to"`; zone-label nouns Buy/Neutral/Sell exempt). (blind+edge+auditor, MEDIUM)
+- [x] [Review][Patch] **Spec lacks degenerate/undefined-input rules** [docs/method/ssg-method-spec-v1.md] — as the oracle, the spec must define: U/D denominator ≤ 0 (current_price == forecast_low) → undefined/withheld; CAGR with start ≤ 0 or sign-crossing EPS → unknown/insufficient; Current P/E when TTM EPS ≤ 0 → relative value unknown; forecast-low option (d) requires dividend > 0; PTP gross-up requires tax_rate < 1. Add a "Degenerate inputs" section so Story 1.8 can't diverge. (edge, MEDIUM)
+- [x] [Review][Patch] **Threshold comparators (>/≥/</≤) not pinned** [docs/method/ssg-method-spec-v1.md] — constants pin magnitudes (20/25/3.0/15.0/100.0/10.0) but not the boundary operator; a future engine using ≥ vs > at a boundary diverges with no fingerprint change. State the exact comparator per threshold in the spec tables. (blind+edge, MEDIUM)
+- [x] [Review][Patch] **Rounding tests miss negatives and the `LargeMonetary` path** [core/src/rounding.rs] — `MidpointAwayFromZero` is sign-defined (−2.5 → −3); all tests are positive, and `LargeMonetary` (scale 0) is never exercised via `round_for_display`. Add a negative-midpoint test + a `LargeMonetary` test (negatives are real: EPS/PTP/ROE/growth). (blind+edge, LOW)
+- [x] [Review][Patch] **Spec says golden tolerance is "configurable" yet it is fingerprinted** [docs/method/ssg-method-spec-v1.md §7, core/src/method/mod.rs] — pinning it means a test-tolerance tweak would force a METHOD_VERSION bump (which re-addresses every verdict). Resolve the contradiction: treat it as the fixed method default (drop "configurable") — tests may override locally without changing the constant. (blind, LOW)
+- [x] [Review][Patch] **Task-3 "load-bearing subset" test absent; add internal coherence test** [core/src/method/mod.rs] — the promised subset assertion couldn't be written (the study-input struct is Story 1.7). Add a method-internal coherence test (load-bearing lists non-empty, no dups, year-fields vs judgment-inputs disjoint) and document that the vs-study-struct subset check is deferred to 1.7. (auditor, LOW)
+- [x] [Review][Defer] **Engine handling of the degenerate cases** [core] — the *computation* (guards, Result/unknown propagation) for the above degenerate inputs is Story 1.8 (engine); 1.2 only defines the rules. Deferred.
+- [x] [Review][Defer] **`split_series_break` "inconsistent with sales" is unquantified + split factor 0.67 ≠ exact 2/3** [docs/method] — the sales-divergence threshold and reciprocal precision are heuristic; quantify when the plausibility engine lands (1.8). Deferred.
+- [x] [Review][Defer] **`EXPECTED` fingerprint regeneration can be rubber-stamped** [core/src/method/mod.rs] — inherent to snapshot gates; the gate forces attention on change. Deferred (documented behavior).
 
 ## Dev Notes
 
@@ -101,7 +117,7 @@ Claude Opus 4.8 (1M context) — claude-opus-4-8 — via Claude Code dev-story (
 ### Debug Log References
 
 - Grounded the method in `docs/NAIC/Stock Selection Guide Tutorial.pdf` (pp.1–22): §1 growth/CAGR, §2 PTP/ROE, §3 P/E history, §4 forecast high/low + thirds zoning + U/D, §5 yield/return.
-- `cargo test -p steadyinvest-core` → 10/10 (2 determinism + 5 method + 3 rounding). Method fingerprint frozen: `78bfa4f044933320f2ad5df56aa91c4dfbbd3c7d614df225acaad7e35d12bb54`.
+- `cargo test -p steadyinvest-core` → 14/14 (2 determinism + 6 method + 6 rounding). Method fingerprint frozen: `f79e3c11227094ac8543376224cf2421d7f4d95082507cc6bf34d9395cd61d1d`.
 - All gates green: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features --locked -- -D warnings`, `cargo test --all --locked`, `cargo deny check` (advisories/bans/licenses/sources ok).
 
 ### Completion Notes List
@@ -112,6 +128,7 @@ Claude Opus 4.8 (1M context) — claude-opus-4-8 — via Claude Code dev-story (
 - **Rounding decision (resolves code-review deferral D2):** named mode = **half-up (`MidpointAwayFromZero`)**, applied only at display, per Guy's instruction + paper-form fidelity. *(The Story-1.1 determinism *probe* still uses default `round_dp` — it is unrelated scaffolding; the engine's display rounding is `core::rounding`.)*
 - Cardinal Rule preserved: `core` deps unchanged (`rust_decimal`, `serde`, `sha2`) — no I/O/UI/SQL/net.
 - **Note:** these are the method *definitions*; the engine that *computes* §1–§5, raises the flags, and constructs the verdict is Story 1.8 (+ normalization 1.7, golden self-check 1.9, verdict-integrity types 1.11), all implementing against this spec.
+- **Code review (8 patches applied):** hardened `method_fingerprint` to cover the rounding *strategy* (via a behavioral probe) + added constants (PTP/ROE bound ±100, P/E min 0, verdict appreciation target) that were prose-only → no more silent-change holes; replaced `{:?}` Debug with explicit value-based serialization + `.normalize()` decimals (toolchain-stable, canonical) → fingerprint re-frozen to `f79e3c11…`; added `"ought to"` to `BANNED_VERBS_EN` (spec↔code reconciled) + clarified matching scope; added a spec **§9 "Degenerate inputs & undefined cases"** (U/D denom ≤ 0, CAGR base ≤ 0, TTM EPS ≤ 0, forecast-low (d) needs dividend>0, tax_rate ≥ 1) binding the engine; made threshold comparators **normative** in the spec; resolved the "configurable tolerance" wording; added negative-midpoint + `LargeMonetary` rounding tests and a load-bearing-lists coherence test (study-struct subset check deferred to 1.7). 3 findings deferred (engine computation → 1.8; split precision; EXPECTED rubber-stamp), 2 dismissed.
 
 ### File List
 
@@ -132,3 +149,4 @@ Claude Opus 4.8 (1M context) — claude-opus-4-8 — via Claude Code dev-story (
 |------|--------|
 | 2026-06-09 | Story 1.2 created (ready-for-dev): versioned SSG method specification. |
 | 2026-06-09 | Story 1.2 implemented: prose oracle (`docs/method/ssg-method-spec-v1.md`) + `core` method constants (`method`, `quality_flags`, `rounding`, `method_version`) mirroring it, with a `method_fingerprint` change-detection test pinned to `METHOD_VERSION = ssg-1.0.0`. Rounding = half-up (display-only). All Appendix-A deferrals resolved. Gates green (fmt/clippy/test --all/deny). Status → review. |
+| 2026-06-09 | Code review: applied all 8 patch findings — fingerprint now covers the rounding strategy (behavioral probe) + previously prose-only constants; explicit value-based serialization (no Debug, normalized decimals), re-frozen to `f79e3c11…`; `"ought to"` reconciled; spec §9 degenerate-inputs + normative comparators added; tolerance wording fixed; negative/LargeMonetary rounding + load-bearing coherence tests added. core 14/14; fmt/clippy/test/deny green. Status → done. |

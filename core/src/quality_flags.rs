@@ -11,6 +11,16 @@ pub enum Severity {
     Warn,
 }
 
+impl Severity {
+    /// Stable identifier for the method fingerprint (NOT derived from `Debug`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Severity::Info => "info",
+            Severity::Warn => "warn",
+        }
+    }
+}
+
 /// A methodology quality flag (FR7): a signal about the *business*, distinct from a data
 /// plausibility warning and from the user's review tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
