@@ -38,23 +38,7 @@ Thumbs.db
 /dist/
 *.log
 
-# ── TEMP: legacy OLD-PROJECT artifacts (web/Leptos stack, Feb–May 2026) ──
-# Re-synced by Synology Drive; excluded from the fresh repo history.
-# REMOVE this block once the Synology source is cleaned.
-#
-# implementation-artifacts: ignore ALL legacy children (re-synced from Synology), but TRACK the new
-# post-restart artifacts via explicit "!" allowlist below. Add one "!" line per NEW story file as it
-# is created (dev-story / create-story). Once the Synology source is cleaned, replace this with a
-# plain tracked directory.
-_bmad-output/implementation-artifacts/*
-!_bmad-output/implementation-artifacts/sprint-status.yaml
-!_bmad-output/implementation-artifacts/1-1-workspace-scaffold-ci-gate-skeleton.md
-_bmad-output/test-artifacts/
-_bmad-output/brainstorming/
-_bmad-output/_archive/
-_bmad-output/planning-artifacts/prd-validation-report.md
-_bmad-output/planning-artifacts/product-brief-naic-2026-02-03.md
-_bmad-output/planning-artifacts/implementation-readiness-report-2026-02-*.md
-_bmad-output/planning-artifacts/sprint-change-proposal-2026-02-*.md
-_bmad-output/planning-artifacts/research/domain-naic-betterinvesting-methodology-research-2026-02-03.md
-_bmad-output/planning-artifacts/research/technical-market-data-apis-research-2026-02-03.md
+# ── _bmad-output artifacts ──
+# Legacy OLD-PROJECT artifacts (web/Leptos/Loco stack, Feb–May 2026) were DELETED 2026-06-09.
+# _bmad-output/ now holds only current artifacts and is tracked normally (no allowlist needed).
+# If Synology Drive re-syncs any legacy files back, delete them at the Synology source — do not commit.
