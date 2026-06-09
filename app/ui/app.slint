@@ -1,0 +1,31 @@
+// Placeholder window for the scaffold. The faithful collapsible SSG study screen, native charts
+// (Path/TouchArea) and the sticky verdict bar arrive in Epic 2. No web, no egui.
+
+export component MainWindow inherits Window {
+    title: "steadyinvest";
+    preferred-width: 800px;
+    preferred-height: 600px;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 8px;
+
+        Text {
+            text: "steadyinvest";
+            horizontal-alignment: center;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        Text {
+            text: "Workspace scaffold — UI lands in Epic 2.";
+            horizontal-alignment: center;
+            font-size: 14px;
+        }
+        Text {
+            text: "Educational, not a financial advisor.";
+            horizontal-alignment: center;
+            font-size: 12px;
+            opacity: 0.7;
+        }
+    }
+}

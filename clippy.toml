@@ -1,0 +1,4 @@
+# Clippy configuration (CI gate: `cargo clippy --all-targets --all-features -- -D warnings`).
+# The decision chain must never use floats; flag f32/f64 literals so money/ratio math stays on
+# rust_decimal. (Allowed inside the UI/render layer where pixels are legitimately floats.)
+disallowed-types = []

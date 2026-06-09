@@ -1,0 +1,4 @@
+# Formatting rules (CI gate: `cargo fmt --all --check`). Kept close to rustfmt defaults.
+edition = "2021"
+max_width = 100
+newline_style = "Unix"

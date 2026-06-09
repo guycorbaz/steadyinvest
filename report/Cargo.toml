@@ -1,0 +1,14 @@
+[package]
+name = "steadyinvest-report"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "UI-independent PDF/print of the faithful, neutral, grayscale-safe SSG form."
+
+[dependencies]
+steadyinvest-core = { workspace = true }
+steadyinvest-contract = { workspace = true }
+# A PDF backend (printpdf/genpdf) is added in Story 5.6 when the report layout is implemented.

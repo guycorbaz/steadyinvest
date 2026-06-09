@@ -48,7 +48,7 @@ story_location: _bmad-output/implementation-artifacts
 development_status:
   # ── Epic 1: Proven SSG core & data foundation (headless) [P1] ──
   epic-1: in-progress
-  1-1-workspace-scaffold-ci-gate-skeleton: ready-for-dev
+  1-1-workspace-scaffold-ci-gate-skeleton: review
   1-2-ssg-method-specification: backlog
   1-3-contract-v1-versioned-types-provenance-model: backlog
   1-4-spike-a-dense-editable-grid-paste-a-column: backlog
