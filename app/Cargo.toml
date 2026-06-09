@@ -25,5 +25,9 @@ directories = { workspace = true }
 tracing = { workspace = true }
 # keyring (OS keychain) is added in Story 3.2 once the correct credential crate is selected.
 
+[dev-dependencies]
+# Used only by the throwaway Story-1.5 chart spike example (signal recompute in exact decimal).
+rust_decimal = { workspace = true }
+
 [build-dependencies]
 slint-build = { workspace = true }

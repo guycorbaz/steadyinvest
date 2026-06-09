@@ -4977,6 +4977,7 @@ name = "steadyinvest-app"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "rust_decimal",
  "slint",
  "slint-build",
  "steadyinvest-contract",
