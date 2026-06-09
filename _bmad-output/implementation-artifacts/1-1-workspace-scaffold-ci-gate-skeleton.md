@@ -1,6 +1,6 @@
 # Story 1.1: Workspace scaffold & CI gate skeleton
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Epic 1: Proven SSG core & data foundation (headless). First story of the project (fresh restart 2026-06-05). -->
@@ -53,6 +53,22 @@ so that every later story builds on a consistent structure with quality gates fr
 - [x] **Task 7 — Verify & commit (AC: all)**
   - [x] Run `just ci` locally; confirm all gates green; `cargo run -p steadyinvest-app` opens the placeholder window (**Definition of Done: launch the app and visually verify**).
   - [x] Commit on a feature branch; push; confirm the GitHub Actions matrix is green before marking done.
+
+### Review Findings
+
+_Adversarial code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor), 2026-06-09. Acceptance Auditor: all 8 ACs satisfied; documented deviations verified. 6 patch · 5 defer · 4 dismissed · 0 decision-needed._
+
+- [x] [Review][Patch] **cargo-deny license-audit fails on the real dependency tree** [deny.toml] — Slint crates declare `GPL-3.0-only OR LicenseRef-Slint-*` (allow-list has `GPL-3.0`, not `GPL-3.0-only`); `BSL-1.0` (clipboard-win/error-code, Windows-gated) and `NCSA` (libfuzzer-sys via ravif/rav1e) are present but not allowed, and no `[graph] targets` is set so platform-gated crates are evaluated everywhere. CI `license-audit` job would go red on first push. (edge, verified via cargo metadata)
+- [x] [Review][Patch] **CI "Determinism hash" step matches zero tests** [.github/workflows/ci.yml] — `cargo test -p steadyinvest-core determinism_hash_matches_cross_os_contract -- --exact` uses `--exact` against the bare name, but the full path is `tests::determinism_hash_matches_cross_os_contract` → matches nothing, exits 0, silently passes. (Determinism is still enforced by the main `cargo test --all` step, so no coverage hole — but the dedicated gate is a no-op.) (blind)
+- [x] [Review][Patch] **CI cargo invocations don't use `--locked`** [.github/workflows/ci.yml] — CI can resolve newer dep versions than the committed `Cargo.lock`, undermining the frozen determinism hash and reproducibility. Add `--locked` to test/clippy/deny. (edge+blind)
+- [x] [Review][Patch] **`dtolnay/rust-toolchain@master` is a mutable ref** [.github/workflows/ci.yml] — supply-chain exposure; pin the action. (blind+edge)
+- [x] [Review][Patch] **Determinism probe under-tests its claim** [core/src/lib.rs] — integer exponents (`^0/^1/^2`) take `powd`'s exact integer path and never exercise the `exp(y·ln x)` series that is the real cross-OS/cross-version risk (and that future fractional-CAGR math will use). Add a non-integer-exponent term and re-freeze the hash. (edge)
+- [x] [Review][Patch] **`clippy.toml` float-ban is a no-op with a misleading comment** [clippy.toml] — `disallowed-types = []` enforces nothing (and clippy `disallowed-types` cannot target primitive `f32`/`f64` anyway); the comment falsely implies the Cardinal-Rule float ban is enforced. Correct the comment. (blind+edge+auditor)
+- [x] [Review][Defer] **macOS/Windows runners get no explicit Slint system-deps** [.github/workflows/ci.yml] — only Linux installs `libfontconfig1-dev`; relies on undocumented runner-image contents. Non-blocking (runners ship them). Deferred.
+- [x] [Review][Defer] **`round_dp` uses banker's rounding vs NAIC half-up** [core/src/lib.rs] — decide the named rounding mode in Story 1.2 (method spec). Deferred.
+- [x] [Review][Defer] **No overflow/`Result` handling in core decimal math** [core/src/lib.rs] — relevant when the real engine lands (Story 1.8). Deferred.
+- [x] [Review][Defer] **`concurrency.cancel-in-progress` can cancel `main` CI** [.github/workflows/ci.yml] — a green check may reflect a canceled run on `main`. Deferred (minor).
+- [x] [Review][Defer] **Cross-OS determinism degrades to Linux-only if a non-Linux build breaks upstream** [.github/workflows/ci.yml] — consequence of the system-deps item. Deferred.
 
 ## Dev Notes
 
@@ -131,7 +147,8 @@ Verification run locally (Linux, toolchain pinned via `rust-toolchain.toml`):
 - `cargo fmt --all --check` → clean.
 - `cargo clippy --all-targets --all-features -- -D warnings` → no warnings.
 - `cargo build -p steadyinvest-app` → builds; **app window launched and visually confirmed by Guy** (DoD met).
-- Determinism hash (Linux): `6ccd4cac2820867018eeabf755fb7371b8dcbf14b88201a276591b4772247fd3` — frozen in the core test; the CI 3-OS matrix asserts the same value on macOS/Windows.
+- Determinism hash (Linux): `eb45e761e031b0fa03c943e97a15aa41186f75c0088e33a69c426c2278fbd34f` — frozen in the core test; the CI 3-OS matrix asserts the same value on macOS/Windows. (Updated from `6ccd4cac…` after the review patch that added a fractional exponent to the probe.)
+- Post-review: `cargo deny check` → advisories ok, bans ok, licenses ok, sources ok (cargo-deny 0.19.8, run locally). CI determinism step now matches exactly 1 test (was 0 before the `--exact` path fix).
 
 ### Completion Notes List
 
@@ -168,3 +185,4 @@ Follow-ups (GitHub issues): keyring crate revalidation for Story 3.2; reqwest ru
 | Date | Change |
 |------|--------|
 | 2026-06-09 | Story 1.1 implemented: Cargo workspace (6 crates), pinned deps, toolchain/lint/deny config, native-Slint app placeholder (window verified), core determinism-hash test, 3-OS CI, justfile. Gates green (fmt/clippy/test/build); cargo-deny via CI. Deviations: MSRV 1.96 (not 1.88), keyring & reqwest-TLS deferred, app wired by hand. Status → review. |
+| 2026-06-09 | Code review (3 adversarial layers): applied all 6 patch findings. `deny.toml` fixed so `cargo deny check` passes on the real tree (allow `GPL-3.0-only`/`BSL-1.0`/`NCSA`, versioned internal deps, `unmaintained = workspace`); CI determinism step uses the full test path (was a `--exact` no-op); added `--locked` to CI cargo cmds; pinned `dtolnay/rust-toolchain` by SHA; determinism probe now exercises a fractional `powd` exponent (hash → `eb45e761…`); corrected the misleading `clippy.toml` float-ban comment. 5 findings deferred, 4 dismissed. All gates green locally incl. `cargo deny`. Status → done. |

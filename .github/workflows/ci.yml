@@ -30,8 +30,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
 
-      - name: Install Rust toolchain (pinned via rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-03-27 (pinned by SHA)
         with:
           toolchain: "1.96"
           components: rustfmt, clippy
@@ -42,20 +42,20 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy (deny warnings)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --all
+        run: cargo test --all --locked
 
       - name: Determinism hash (cross-OS contract)
-        run: cargo test -p steadyinvest-core determinism_hash_matches_cross_os_contract -- --exact
+        run: cargo test -p steadyinvest-core --locked tests::determinism_hash_matches_cross_os_contract -- --exact
 
   license-audit:
     name: License audit (cargo-deny)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-03-27 (pinned by SHA)
         with:
           toolchain: "1.96"
       - uses: taiki-e/install-action@v2

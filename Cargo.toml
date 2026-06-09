@@ -15,12 +15,12 @@ authors = ["Guy"]
 repository = "https://github.com/guycorbaz/steadyinvest"
 
 [workspace.dependencies]
-# ── Internal crates ──
-steadyinvest-core = { path = "core" }
-steadyinvest-contract = { path = "contract" }
-steadyinvest-ingestion = { path = "ingestion" }
-steadyinvest-persistence = { path = "persistence" }
-steadyinvest-report = { path = "report" }
+# ── Internal crates (version pinned so they are not wildcard deps) ──
+steadyinvest-core = { path = "core", version = "0.1.0" }
+steadyinvest-contract = { path = "contract", version = "0.1.0" }
+steadyinvest-ingestion = { path = "ingestion", version = "0.1.0" }
+steadyinvest-persistence = { path = "persistence", version = "0.1.0" }
+steadyinvest-report = { path = "report", version = "0.1.0" }
 
 # ── External (pinned; latest stable verified 2026-06) ──
 slint = "1.16"

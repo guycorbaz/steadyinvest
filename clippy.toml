@@ -1,4 +1,7 @@
-# Clippy configuration (CI gate: `cargo clippy --all-targets --all-features -- -D warnings`).
-# The decision chain must never use floats; flag f32/f64 literals so money/ratio math stays on
-# rust_decimal. (Allowed inside the UI/render layer where pixels are legitimately floats.)
-disallowed-types = []
+# Clippy configuration (CI gate: `cargo clippy --all-targets --all-features --locked -- -D warnings`).
+#
+# NOTE: the "no f32/f64 in the decision chain" Cardinal Rule is NOT enforced here — clippy's
+# `disallowed-types` cannot target primitive types like `f32`/`f64`. The rule is currently held by
+# (a) crate boundaries (`core`/`contract` declare no float-bearing deps), (b) review, and (c) the
+# golden/property tests. A dedicated lint (e.g. a custom dylint or a `clippy::disallowed_methods`
+# guard on float ops) is a follow-up. Keep this file as the home for future clippy tuning.

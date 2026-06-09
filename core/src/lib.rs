@@ -13,16 +13,26 @@ use sha2::{Digest, Sha256};
 
 /// A tiny, fixed exact-decimal computation used to prove cross-platform numeric determinism.
 ///
-/// It builds a 3-element compound-growth vector `1000 * (1 + 0.15)^n` for `n in 0..3` using
-/// `rust_decimal`'s `maths` feature (`powd`), rounded to 6 decimal places. This is **scaffolding**,
-/// not part of the SSG method.
+/// It builds a compound-growth vector `1000 * (1 + 0.15)^n` using `rust_decimal`'s `maths` feature
+/// (`powd`), rounded to 6 decimal places. The exponents deliberately include both **integer** powers
+/// (`n = 0,1,2` — the exact integer-power path) **and a fractional power** (`n = 1.5`), so the
+/// digest also pins `powd`'s transcendental `exp(y·ln x)` series — the path real fractional-CAGR math
+/// will use and the true cross-OS / cross-version risk. This is **scaffolding**, not the SSG method.
 pub fn determinism_probe() -> Vec<Decimal> {
     let base = Decimal::new(1000, 0); // 1000
     let rate = Decimal::new(15, 2); // 0.15
     let one = Decimal::ONE;
-    (0u32..3)
-        .map(|n| {
-            let factor = (one + rate).powd(Decimal::from(n));
+    // Integer exponents (exact path) + one fractional exponent (series path).
+    let exponents = [
+        Decimal::ZERO,
+        Decimal::ONE,
+        Decimal::TWO,
+        Decimal::new(15, 1), // 1.5 — exercises the transcendental series
+    ];
+    exponents
+        .iter()
+        .map(|&exp| {
+            let factor = (one + rate).powd(exp);
             (base * factor).round_dp(6)
         })
         .collect()
@@ -53,15 +63,15 @@ mod tests {
     #[test]
     fn determinism_probe_has_expected_shape() {
         let v = determinism_probe();
-        assert_eq!(v.len(), 3);
-        // n = 0 → 1000 * 1.15^0 = 1000
+        assert_eq!(v.len(), 4);
+        // exp = 0 → 1000 * 1.15^0 = 1000
         assert_eq!(v[0], Decimal::new(1000, 0));
     }
 
     #[test]
     fn determinism_hash_matches_cross_os_contract() {
         // If this fails on ANY OS, exact-decimal determinism broke — the build must not pass.
-        const EXPECTED: &str = "6ccd4cac2820867018eeabf755fb7371b8dcbf14b88201a276591b4772247fd3";
+        const EXPECTED: &str = "eb45e761e031b0fa03c943e97a15aa41186f75c0088e33a69c426c2278fbd34f";
         assert_eq!(determinism_hash(), EXPECTED);
     }
 }
