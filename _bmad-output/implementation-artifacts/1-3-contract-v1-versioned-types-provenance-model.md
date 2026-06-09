@@ -1,6 +1,6 @@
 # Story 1.3: contract v1 — versioned types & provenance model
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Epic 1: Proven SSG core & data foundation (headless). Depends on Stories 1.1 (scaffold) & 1.2 (method spec) — both DONE. -->
@@ -43,6 +43,18 @@ so that `core`, `persistence` and later epics share one vocabulary and never hav
   - [x] `contract/src/lib.rs`: declare `pub mod {money, cell, provenance, study, versioning};` re-export the key types; remove the old inline `SCHEMA_VERSION` (now in `versioning`).
   - [x] Confirm `contract` deps remain serde / serde_json / rust_decimal / uuid (+ proptest dev-dep); no Slint/SQL/net.
   - [x] All gates green (fmt, clippy --locked, test --all --locked, cargo deny check).
+
+### Review Findings
+
+_Adversarial code review (Blind Hunter + Edge Case Hunter + Acceptance Auditor), 2026-06-09. Acceptance Auditor: all 8 ACs PASS. 4 patch · 3 defer · 3 dismissed · 0 decision-needed._
+
+- [x] [Review][Patch] **`Money` deserialize silently rounds / accepts non-canonical strings** [contract/src/money.rs] — `Decimal::from_str` **silently rounds** money strings with > 28 significant digits / scale > 28 (silent precision loss for an "exact money" contract) and accepts non-canonical forms (`"1e5"`, `"+1"`, `"-0"`, underscores). Switch to `Decimal::from_str_exact` (errors instead of rounding) **and** reject non-canonical input (`parsed.to_string() != s`). Add tests: reject `"1e5"`, `"+1"`, a scale-29 string, and a bare number embedded in a struct field; accept canonical. (blind+edge, HIGH)
+- [x] [Review][Patch] **Round-trip proptest doesn't exercise the real boundaries** [contract/tests/roundtrip.rs] — `money()` caps scale at 0..=10 and only an `i64` mantissa (never high-scale/overflow), never parses adversarial *strings*, and `token()` excludes quotes/backslash/control/unicode → AC5 confidence is weaker than it reads. Add: a Money round-trip-from-canonical-string property + higher scales; broaden `token()` to include JSON-significant chars (escaping coverage); add explicit `roundtrip!` lines for `Timestamp` and `ForecastLowOption` (currently only transitively covered). (blind+edge, MEDIUM)
+- [x] [Review][Patch] **Document `Money` value-equality vs scale-preserving serialization** [contract/src/money.rs, provenance.rs] — `Money` derives value-based `Eq/Ord/Hash` (`3.0 == 3`), but `serialize` preserves scale (`"3.0"` ≠ `"3"`). Anything hashing serialized bytes (notably `Provenance.hash_of_dependencies`) must **normalize** first, or it will disagree with `==`. Document this on `Money` and on `hash_of_dependencies`. (blind+edge, MEDIUM)
+- [x] [Review][Patch] **Document the validation contract for free-string fields + enum-evolution policy** [contract/src/provenance.rs, study.rs, cell.rs] — `Timestamp`, `hash_of_dependencies`, `native_currency` are unvalidated `String`s with semantic promises (RFC3339 / hex / ISO-4217). Document that producers (app/ingestion) validate at construction and the contract stores the canonical string; and state that **adding an enum variant is a `schema_version` bump** (deliberately no `#[non_exhaustive]`/`#[serde(other)]` — an unknown `Source`/`Review` must fail loudly, not silently fall back). (blind+edge, LOW)
+- [x] [Review][Defer] **Unknown enum-value tolerance across versions** [contract] — by design, enum evolution = `schema_version` bump; an older build rejecting a newer file's unknown enum value is the intended (fail-loud) behavior for domain correctness. Deferred (documented as policy in patch #4).
+- [x] [Review][Defer] **Runtime validation of `Timestamp` / `native_currency` / `hash_of_dependencies`** [contract or app/ingestion] — add validating constructors / `TryFrom` when the producing layers land (app clock = Story 2.x, ingestion = Epic 3). v1 stores the string (story marked this optional). Deferred.
+- [x] [Review][Defer] **Required-field forward-evolution robustness** [contract] — current required fields are intended mandatory-forever; making any optional later needs `#[serde(default)]` + a migration at that time. Deferred to whenever a field's optionality changes.
 
 ## Dev Notes
 
@@ -88,8 +100,17 @@ Claude Opus 4.8 (1M context) — claude-opus-4-8 — via Claude Code dev-story (
 
 ### Debug Log References
 
-- `cargo test -p steadyinvest-contract` → 21/21 (11 unit + 10 proptest round-trip). `cargo test --all --locked` green (contract 11+10, core 14).
-- Gates: `cargo fmt --all --check` ✅ · `cargo clippy --all-targets --all-features --locked -- -D warnings` ✅ · `cargo deny check` ✅ (advisories/bans/licenses/sources).
+- `cargo test -p steadyinvest-contract` → 27/27 (14 unit + 13 proptest/integration). `cargo test --all --locked` green (core 14 + contract 27). Gates: fmt ✅ · clippy --locked ✅ · `cargo deny check` ✅.
+
+### Senior Developer Review (AI)
+
+**Outcome:** Approved with fixes applied (2026-06-09). Acceptance Auditor: all 8 ACs PASS. 4 patch (applied), 3 defer, 3 dismissed.
+**Patches applied:**
+- [HIGH] `Money` deserialize now uses `Decimal::from_str_exact` + a canonical-form guard → rejects silent precision loss (>28 digits/scale) and non-canonical spellings (`1e5`, `+1`, `-0`, underscores, `1.`, `.5`); added 4 rejection tests incl. a nested bare-number case.
+- [MED] Strengthened round-trip proptest: `money()` now spans scale 0..=28; `token()` includes JSON-significant chars (quotes/backslash/unicode); added explicit `Timestamp` + `ForecastLowOption` round-trip lines and a Money canonical-idempotence property.
+- [MED] Documented `Money` value-equality vs scale-preserving serialization; `Provenance.hash_of_dependencies` must normalize decimals before hashing serialized bytes.
+- [LOW] Documented the free-string validation contract (validated by producers) and the enum-evolution policy (variant add = `schema_version` bump; deliberately no `non_exhaustive`/`serde(other)`).
+**Deferred:** unknown-enum-value tolerance (fail-loud by design); runtime validation of Timestamp/currency/hash (producing layers); required-field forward-evolution. See `deferred-work.md`.
 
 ### Completion Notes List
 
@@ -124,3 +145,4 @@ Claude Opus 4.8 (1M context) — claude-opus-4-8 — via Claude Code dev-story (
 |------|--------|
 | 2026-06-09 | Story 1.3 created (ready-for-dev): versioned `contract` types (Cell data-state model + Provenance + Money-as-string + Study/Judgment + schema_version) with round-trip + forward-compat tests. Portfolio/FX/export types deferred to their epics. |
 | 2026-06-09 | Story 1.3 implemented: `contract` v1 — Money (string serde), Cell + Source/Freshness/Review/Coverage enums, Provenance + Timestamp, Study/Judgment/YearData/ForecastLowOption, SCHEMA_VERSION. 21 tests (10 proptest round-trip + forward-compat + money-string). Gates green (fmt/clippy/test --all/deny); no Slint/SQL/net. Status → review. |
+| 2026-06-09 | Code review: applied all 4 patch findings — `Money` deserialize hardened (`from_str_exact` + canonical guard, rejects silent rounding / non-canonical / nested bare numbers); proptest strengthened (scale 0..=28, escaping, explicit Timestamp/ForecastLowOption, canonical idempotence); documented value-eq-vs-serialization + hash normalization + free-string/enum-evolution policy. 27 tests; gates green. 3 deferred, 3 dismissed. Status → done. |

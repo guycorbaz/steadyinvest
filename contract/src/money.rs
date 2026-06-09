@@ -3,13 +3,26 @@
 //! [`Money`] wraps [`rust_decimal::Decimal`] and serializes to/from a JSON **string** (never a JSON
 //! number / float), so precision is preserved exactly across persistence and export. This enforces
 //! the "Decimal in JSON = string" contract in one place.
+//!
+//! Deserialization is **exact and canonical**: it uses `Decimal::from_str_exact` (errors instead of
+//! silently rounding inputs beyond `Decimal`'s 28-digit precision) and rejects non-canonical spellings
+//! (scientific notation `1e5`, leading `+`, `-0`, underscores) by requiring the input to equal its own
+//! re-serialized form. Our own `serialize` always emits the canonical form, so anything we write
+//! round-trips.
+//!
+//! **Equality vs serialization:** `Money` derives **value-based** `Eq`/`Ord`/`Hash` (via `Decimal`),
+//! so `Money("3.0") == Money("3")`. But `serialize` **preserves scale**, so those two serialize to
+//! different strings (`"3.0"` vs `"3"`). Therefore anything that hashes/compares *serialized bytes*
+//! (e.g. a content hash feeding `Provenance.hash_of_dependencies`) MUST normalize first — do not
+//! assume `a == b` implies identical JSON.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use std::str::FromStr;
 
-/// An exact decimal money/ratio value. Equality/ordering are by numeric value (via `Decimal`).
+/// An exact decimal money/ratio value. Equality/ordering are **by numeric value** (via `Decimal`):
+/// `Money` built from `"3.0"` equals one built from `"3"`. Serialization preserves scale (see module
+/// docs) — do not hash serialized bytes assuming value-equality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Money(Decimal);
 
@@ -47,9 +60,17 @@ impl Serialize for Money {
 impl<'de> Deserialize<'de> for Money {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        Decimal::from_str(&s)
-            .map(Money)
-            .map_err(serde::de::Error::custom)
+        // Exact: error (never silently round) if the string exceeds Decimal's precision.
+        let parsed = Decimal::from_str_exact(&s).map_err(serde::de::Error::custom)?;
+        // Canonical: reject non-canonical spellings (scientific notation, leading '+', '-0',
+        // underscores, …). Our own serialize emits the canonical form, so we always round-trip.
+        if parsed.to_string() != s {
+            return Err(serde::de::Error::custom(format!(
+                "non-canonical decimal string: {s:?} (expected {:?})",
+                parsed.to_string()
+            )));
+        }
+        Ok(Money(parsed))
     }
 }
 
@@ -71,7 +92,7 @@ mod tests {
     #[test]
     fn round_trips_preserving_scale() {
         for raw in ["0", "141.50", "-0.07", "1322.500000", "200"] {
-            let m = Money::from(Decimal::from_str(raw).unwrap());
+            let m = Money::from(Decimal::from_str_exact(raw).unwrap());
             let json = serde_json::to_string(&m).unwrap();
             let back: Money = serde_json::from_str(&json).unwrap();
             assert_eq!(m, back);
@@ -89,5 +110,47 @@ mod tests {
         // A bare number is not accepted — the contract is string-only.
         let r: Result<Money, _> = serde_json::from_str("141.50");
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn rejects_non_canonical_spellings() {
+        // Scientific notation, leading '+', '-0', underscores, leading/trailing dot — all rejected.
+        for bad in [
+            "\"1e5\"",
+            "\"1E5\"",
+            "\"+1\"",
+            "\"-0\"",
+            "\"1_000\"",
+            "\"1.\"",
+            "\".5\"",
+        ] {
+            let r: Result<Money, _> = serde_json::from_str(bad);
+            assert!(r.is_err(), "expected rejection of non-canonical {bad}");
+        }
+    }
+
+    #[test]
+    fn rejects_precision_loss_instead_of_silently_rounding() {
+        // A scale-29 string exceeds Decimal's 28-digit precision: must ERROR, never round to 0.
+        let r: Result<Money, _> = serde_json::from_str("\"0.00000000000000000000000000001\"");
+        assert!(
+            r.is_err(),
+            "must reject (not silently round) excess-precision money"
+        );
+    }
+
+    #[test]
+    fn rejects_bare_number_inside_a_struct_field() {
+        // The realistic case: a float where a money string is expected, nested in an object.
+        #[derive(serde::Deserialize)]
+        struct Holder {
+            #[allow(dead_code)]
+            amount: Money,
+        }
+        let r: Result<Holder, _> = serde_json::from_str(r#"{"amount":141.50}"#);
+        assert!(
+            r.is_err(),
+            "money must never accept a JSON number, even nested"
+        );
     }
 }

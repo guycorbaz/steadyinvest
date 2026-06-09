@@ -9,11 +9,19 @@ use steadyinvest_contract::{
 use uuid::Uuid;
 
 fn money() -> impl Strategy<Value = Money> {
-    (any::<i64>(), 0u32..=10u32).prop_map(|(m, s)| Money::from(Decimal::new(m, s)))
+    // Full i64 mantissa across the whole valid scale range 0..=28 (Decimal's max), so the round-trip
+    // exercises high-scale values, not just scale <= 10.
+    (any::<i64>(), 0u32..=28u32).prop_map(|(m, s)| Money::from(Decimal::new(m, s)))
 }
 
+/// Arbitrary UTF-8 strings INCLUDING JSON-significant characters (quotes, backslashes, control chars,
+/// unicode) so the round-trip exercises serde_json string escaping for `Timestamp`/ticker/etc.
 fn token() -> impl Strategy<Value = String> {
-    proptest::string::string_regex("[a-zA-Z0-9:_.+-]{0,24}").unwrap()
+    proptest::string::string_regex("(?s).{0,24}").unwrap()
+}
+
+fn timestamp() -> impl Strategy<Value = Timestamp> {
+    token().prop_map(Timestamp)
 }
 
 fn source() -> impl Strategy<Value = Source> {
@@ -170,8 +178,27 @@ roundtrip!(source_round_trips, source(), Source);
 roundtrip!(freshness_round_trips, freshness(), Freshness);
 roundtrip!(review_round_trips, review(), Review);
 roundtrip!(coverage_round_trips, coverage(), Coverage);
+roundtrip!(
+    forecast_low_option_round_trips,
+    forecast_low_option(),
+    ForecastLowOption
+);
+roundtrip!(timestamp_round_trips, timestamp(), Timestamp);
 roundtrip!(provenance_round_trips, provenance(), Provenance);
 roundtrip!(cell_round_trips, cell(), Cell);
 roundtrip!(year_data_round_trips, year_data(), YearData);
 roundtrip!(judgment_round_trips, judgment(), Judgment);
 roundtrip!(study_round_trips, study(), Study);
+
+proptest! {
+    /// Our own serialized output must always be canonical (re-parses through the strict canonical
+    /// guard) and idempotent — across the full scale range, the canonical deserialize guard never
+    /// rejects what we emit.
+    #[test]
+    fn money_serialization_is_canonical_and_reparses(x in money()) {
+        let s = serde_json::to_string(&x).unwrap();
+        let back: Money = serde_json::from_str(&s).unwrap();
+        prop_assert_eq!(&s, &serde_json::to_string(&back).unwrap());
+        prop_assert_eq!(back, x);
+    }
+}
