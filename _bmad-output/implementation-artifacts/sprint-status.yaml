@@ -1,0 +1,141 @@
+# generated: 2026-06-09
+# last_updated: 2026-06-09
+# project: steadyinvest
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+#
+# REGENERATED 2026-06-09 from the post-restart epics.md (8 epics, 62 stories). Replaces the legacy
+# web/Loco sprint status. PHASE NOTE: Epics 1-5 = P1 (MVP), detailed to story level; Epics 6 [P2] /
+# 7 [P3] / 8 [V] are deliberate story outlines (refine with create-epics-and-stories per phase).
+
+generated: 2026-06-09
+last_updated: 2026-06-09
+project: steadyinvest
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # ── Epic 1: Proven SSG core & data foundation (headless) [P1] ──
+  epic-1: in-progress
+  1-1-workspace-scaffold-ci-gate-skeleton: ready-for-dev
+  1-2-ssg-method-specification: backlog
+  1-3-contract-v1-versioned-types-provenance-model: backlog
+  1-4-spike-a-dense-editable-grid-paste-a-column: backlog
+  1-5-spike-b-native-slint-draggable-judgment-line-recolor: backlog
+  1-6-spike-c-exact-decimal-cagr-precision-cross-os-determinism: backlog
+  1-7-core-normalization-layer: backlog
+  1-8-core-ssg-calculation-engine: backlog
+  1-9-golden-reference-studies-self-check-gate: backlog
+  1-10-persistence-v1-hybrid-store-journal-identity-migrations: backlog
+  1-11-verdict-integrity-coherence-invariants: backlog
+  epic-1-retrospective: optional
+
+  # ── Epic 2: The trustworthy Stock Study (first usable product) [P1] ──
+  epic-2: backlog
+  2-1-application-shell-theme-disclaimer: backlog
+  2-2-create-save-reopen-study: backlog
+  2-3-faithful-collapsible-ssg-form: backlog
+  2-4-manual-data-entry-provenance-coverage: backlog
+  2-5-tri-state-validation-soft-lock: backlog
+  2-6-numeric-judgment-inputs-verdict-zone-bar: backlog
+  2-7-low-confidence-plausibility-surfacing: backlog
+  2-8-interactive-growth-chart-draggable-judgment-line: backlog
+  2-9-undo-redo-scenario-compare: backlog
+  2-10-decision-rationale-capture: backlog
+  2-11-update-existing-study-extend-projection: backlog
+  2-12-dashboard-search-sort-filter-archive-delete: backlog
+  2-13-legend-empty-error-states-help-demo-verify-engine: backlog
+  2-14-neutral-voice-banned-verb-enforcement: backlog
+  epic-2-retrospective: optional
+
+  # ── Epic 3: Provider data & reconciliation [P1] ──
+  epic-3: backlog
+  3-1-marketdataprovider-trait-eodhd-adapter: backlog
+  3-2-provider-configuration-api-keys-keychain: backlog
+  3-3-manual-refresh-recompute-freshness: backlog
+  3-4-non-destructive-reconciliation: backlog
+  3-5-graceful-provider-failure: backlog
+  3-6-annual-update-journey: backlog
+  epic-3-retrospective: optional
+
+  # ── Epic 4: Watchlist & single-portfolio risk [P1] ──
+  epic-4: backlog
+  4-1-watchlist-management: backlog
+  4-2-neutral-buy-zone-alerts: backlog
+  4-3-single-portfolio-holdings-register: backlog
+  4-4-manual-price-refresh-per-holding-zones: backlog
+  4-5-trailing-stop-per-holding: backlog
+  4-6-simple-capital-at-risk: backlog
+  4-7-neutral-sell-stop-triggers-manual-actions: backlog
+  epic-4-retrospective: optional
+
+  # ── Epic 5: Cumulative memory & portability [P1] ──
+  epic-5: backlog
+  5-1-reopen-confront-past-judgment-vs-reality: backlog
+  5-2-export-import-single-study: backlog
+  5-3-export-import-whole-journal: backlog
+  5-4-restore-from-backup: backlog
+  5-5-journal-location-recent-journals-sync-safety: backlog
+  5-6-pdf-export-of-study: backlog
+  epic-5-retrospective: optional
+
+  # ── Epic 6: Multi-portfolio, multi-currency & full risk overlay [P2] (story outlines) ──
+  epic-6: backlog
+  6-1-multiple-portfolios-one-per-bank: backlog
+  6-2-multi-currency-holdings: backlog
+  6-3-transaction-ledger-partial-sells-weighted-average-cost-basis: backlog
+  6-4-dividends-gross-study-net-reinvestable: backlog
+  6-5-fx-acquisition-consolidation: backlog
+  6-6-capital-at-risk-per-currency-bank-global: backlog
+  6-7-concentration-check-diversify-by-size: backlog
+  6-8-replacement-candidate-surfacing-on-sell: backlog
+  6-9-provider-fallback-chain-rate-limit-batching: backlog
+  epic-6-retrospective: optional
+
+  # ── Epic 7: Comparison, health review, screening & reports [P3] (story outlines) ──
+  epic-7: backlog
+  7-1-company-comparison: backlog
+  7-2-portfolio-health-review: backlog
+  7-3-discovery-screening-quick-screen: backlog
+  7-4-additional-provider-adapters: backlog
+  7-5-pdf-print-other-forms: backlog
+  epic-7-retrospective: optional
+
+  # ── Epic 8: Read-only AI clerk-of-memory & MCP façade [V] (story outlines) ──
+  epic-8: backlog
+  8-1-read-only-mcp-facade: backlog
+  8-2-local-first-read-only-ai-provider-abstraction: backlog
+  8-3-past-interrogation-prompts: backlog
+  8-4-capability-asymmetry-tests: backlog
+  epic-8-retrospective: optional

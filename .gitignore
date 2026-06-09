@@ -41,7 +41,14 @@ Thumbs.db
 # ── TEMP: legacy OLD-PROJECT artifacts (web/Leptos stack, Feb–May 2026) ──
 # Re-synced by Synology Drive; excluded from the fresh repo history.
 # REMOVE this block once the Synology source is cleaned.
-_bmad-output/implementation-artifacts/
+#
+# implementation-artifacts: ignore ALL legacy children (re-synced from Synology), but TRACK the new
+# post-restart artifacts via explicit "!" allowlist below. Add one "!" line per NEW story file as it
+# is created (dev-story / create-story). Once the Synology source is cleaned, replace this with a
+# plain tracked directory.
+_bmad-output/implementation-artifacts/*
+!_bmad-output/implementation-artifacts/sprint-status.yaml
+!_bmad-output/implementation-artifacts/1-1-workspace-scaffold-ci-gate-skeleton.md
 _bmad-output/test-artifacts/
 _bmad-output/brainstorming/
 _bmad-output/_archive/
