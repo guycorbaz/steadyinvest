@@ -1,0 +1,6 @@
+# Pins the toolchain used for builds/CI so results are reproducible across machines.
+# The project MSRV floor is 1.96 (enforced via workspace `rust-version`; driven by Slint 1.16's
+# transitive deps and libsqlite3-sys 0.38's cfg_select!). Bump deliberately when adopting newer stable.
+[toolchain]
+channel = "1.96"
+components = ["rustfmt", "clippy"]

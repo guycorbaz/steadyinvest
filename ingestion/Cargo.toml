@@ -1,0 +1,16 @@
+[package]
+name = "steadyinvest-ingestion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Provider-agnostic data acquisition + normalization. The only crate that does network I/O."
+
+[dependencies]
+steadyinvest-contract = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

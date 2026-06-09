@@ -1,0 +1,29 @@
+[package]
+name = "steadyinvest-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Thin Slint desktop UI (charts native Slint; no web, no egui)."
+default-run = "steadyinvest-app"
+
+[[bin]]
+name = "steadyinvest-app"
+path = "src/main.rs"
+
+[dependencies]
+steadyinvest-core = { workspace = true }
+steadyinvest-contract = { workspace = true }
+steadyinvest-ingestion = { workspace = true }
+steadyinvest-persistence = { workspace = true }
+steadyinvest-report = { workspace = true }
+slint = { workspace = true }
+tokio = { workspace = true }
+directories = { workspace = true }
+tracing = { workspace = true }
+# keyring (OS keychain) is added in Story 3.2 once the correct credential crate is selected.
+
+[build-dependencies]
+slint-build = { workspace = true }

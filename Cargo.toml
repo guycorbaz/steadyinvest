@@ -1,0 +1,49 @@
+# steadyinvest — Cargo workspace.
+# Thin Slint UI over a UI-independent, deterministic, tested calculation core.
+# Single source of dependency versions lives in [workspace.dependencies] below.
+
+[workspace]
+resolver = "2"
+members = ["core", "contract", "ingestion", "persistence", "report", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+rust-version = "1.96"          # MSRV — pinned deps (Slint 1.16, libsqlite3-sys 0.38 cfg_select!) require a recent stable
+authors = ["Guy"]
+repository = "https://github.com/guycorbaz/steadyinvest"
+
+[workspace.dependencies]
+# ── Internal crates (version pinned so they are not wildcard deps) ──
+steadyinvest-core = { path = "core", version = "0.1.0" }
+steadyinvest-contract = { path = "contract", version = "0.1.0" }
+steadyinvest-ingestion = { path = "ingestion", version = "0.1.0" }
+steadyinvest-persistence = { path = "persistence", version = "0.1.0" }
+steadyinvest-report = { path = "report", version = "0.1.0" }
+
+# ── External (pinned; latest stable verified 2026-06) ──
+slint = "1.16"
+slint-build = "1.16"
+rusqlite = { version = "0.40", features = ["bundled"] }       # SQLite compiled into the binary
+rust_decimal = { version = "1.42", features = ["maths"] }     # exact decimal + powd/exp/ln (no f64)
+# reqwest TLS backend deferred to Story 3.1 (first HTTP). In 0.13 the rustls feature pulls aws-lc-rs
+# (needs cmake); the locked posture is still pure-Rust rustls — activated when HTTP actually lands.
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+proptest = "1"
+tracing = "0.1"
+# NOTE: `keyring` is intentionally NOT pinned here yet. The crates.io `keyring` 4.0.x is NOT the
+# expected credential library (it pulls a turso/tantivy/dbus keystore stack). The OS-keychain crate
+# is selected & added in Story 3.2 (see GitHub issue). Architecture's "keyring 4.0" pin needs revalidation.
+directories = "6"
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.11"
+
+# Build artifacts are smaller/faster to ship for a desktop app.
+[profile.release]
+lto = "thin"
+strip = true
