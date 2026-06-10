@@ -1,6 +1,6 @@
 # Story 1.4: Spike A — dense editable grid with paste-a-column (go/no-go)
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: THROWAWAY SPIKE. Deliverable = a GO/NO-GO decision + findings note, NOT production code. -->
 <!-- Epic 1. Run after 1.5 (Spike B GO is locked); this settles the entry-regime feasibility. -->
@@ -22,22 +22,22 @@ so that the **entry-regime feasibility is settled** (and the "custom-grid-on-Sli
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Throwaway dense-grid Slint example (AC: 1, 5)**
-  - [ ] Add `app/examples/spike_a_grid.rs` using the inline `slint::slint!{ … }` macro (no `app/build.rs` change — keeps it isolated and deletable).
-  - [ ] Model the grid in **Rust** (a `VecModel`/`ModelRc` of row structs, mirroring the production "Rust `TableModel` + virtualized `ListView`" approach); render rows in a Slint `ListView`, each row a horizontal run of cells.
-  - [ ] Style for realism: row height **28 px**, visible light cell separators, right-aligned **tabular** digits; neutral labels only (**no NAIC marks/logos/verbatim prose**).
-- [ ] **Task 2 — Keyboard cell-cursor + inline edit (AC: 2)**
-  - [ ] Track `current_row`/`current_col`; a `FocusScope` (or per-cell `TouchArea` + key handling) moves the active cell with arrows, commits + advances on **Enter/Tab**, edits inline on type.
-  - [ ] Active-cell cursor visual: brighter surface + **1 px ink ring** (no colour).
-- [ ] **Task 3 — Paste-a-column (AC: 3) — the make-or-break**
-  - [ ] Capture **Ctrl+V** (FocusScope `key-pressed`) → call a Rust callback to read clipboard text. **Primary path:** the `arboard` crate (`Clipboard::new()?.get_text()`), added as an `app` **dev-dependency** (example-only). **Slint-native alternative to evaluate:** `slint::platform::Clipboard` / `Platform::clipboard_text()` if reachable from the example. Record which was used.
-  - [ ] Split the pasted text on `\n` / `\r\n`; for each line parse with `Decimal::from_str_exact` → `Money`; fill consecutive cells **downward from the cursor**. Blank/unparseable → leave the cell empty/flagged, **never `0`**.
-  - [ ] Note (don't necessarily solve) the **CH/EU reality**: spreadsheets may emit a decimal **comma** and tab/newline separators — record whether the canonical parse coped, since locale-aware entry is a production concern (Story 2.4), not this spike's pass/fail.
-- [ ] **Task 4 — Run wiring (AC: 5)**
-  - [ ] Add a `spike-a` recipe to the `justfile` → `cargo run -p steadyinvest-app --example spike_a_grid`. (Optional, low-risk: rename the existing `spike` recipe → `spike-b` for symmetry; leave `app/examples/spike_b_chart.rs` untouched.)
-  - [ ] Confirm `cargo build -p steadyinvest-app --example spike_a_grid` compiles and `cargo clippy --all-targets --all-features --locked -- -D warnings` stays clean.
-- [ ] **Task 5 — GO/NO-GO findings note (AC: 4)**
-  - [ ] Create `docs/spikes/spike-a-dense-grid.md`: what was built, **how the clipboard was read** (arboard vs Slint-native), keyboard-nav feel, whether paste-a-column landed ≥10 values correctly as `Decimal`, the **GO/NO-GO decision**, and — if NO-GO — the chosen fallback. Leave the perceptual verdict + final decision for **Guy to fill after running on real hardware** (headless here — see caveat).
+- [x] **Task 1 — Throwaway dense-grid Slint example (AC: 1, 5)**
+  - [x] Add `app/examples/spike_a_grid.rs` using the inline `slint::slint!{ … }` macro (no `app/build.rs` change — keeps it isolated and deletable).
+  - [x] Model the grid in **Rust** (a `VecModel<GridCell>` exposed as `ModelRc`, mirroring the production "Rust `TableModel` + virtualized `ListView`" approach); render rows with a Slint nested `for`-grid, each row a horizontal run of cells.
+  - [x] Style for realism: row height **28 px**, visible cell borders, right-aligned digits; neutral labels only (**no NAIC marks/logos/verbatim prose**).
+- [x] **Task 2 — Keyboard cell-cursor + inline edit (AC: 2)**
+  - [x] Track the active cell index; a `FocusScope` `key-pressed` handler moves it with arrows, advances on **Enter (down) / Tab (right)**, edits inline on type (digits/`.`/`,`/`-`), deletes on Backspace.
+  - [x] Active-cell cursor visual: brighter surface + **1 px ink ring** (no colour).
+- [x] **Task 3 — Paste-a-column (AC: 3) — the make-or-break**
+  - [x] Capture **Ctrl+V** (FocusScope `key-pressed`) → Rust `paste` callback reads clipboard text via **`arboard`** (`Clipboard::new()?.get_text()`), added as an `app` **dev-dependency** (example-only, `default-features = false`). (Slint-native `Platform::clipboard_text()` noted as the alternative; arboard chosen for app-level reachability.)
+  - [x] `parse_pasted_column` splits on `\n`/`\r\n`, trims, parses each with `Decimal::from_str_exact` → `Money`; fills consecutive cells **downward from the cursor**. Blank/unparseable → cell left **empty, never `0`**. Unit-tested (5 tests).
+  - [x] CH/EU reality recorded: a decimal **comma** (`1,5`) is **not** silently accepted by the canonical parse (test asserts it → `None`); locale-aware entry is a production concern (Story 2.4), not this spike's pass/fail.
+- [x] **Task 4 — Run wiring (AC: 5)**
+  - [x] Added a `spike-a` recipe to the `justfile` → `cargo run -p steadyinvest-app --example spike_a_grid`; renamed the existing `spike` recipe → `spike-b` for symmetry (`spike_b_chart.rs` untouched).
+  - [x] Confirmed the example compiles and `cargo clippy --all-targets --all-features --locked -- -D warnings` stays clean.
+- [x] **Task 5 — GO/NO-GO findings note (AC: 4)**
+  - [x] Created `docs/spikes/spike-a-dense-grid.md`: what was built, clipboard read via `arboard`, the unit-test evidence, the on-display verification steps, and the GO/NO-GO checklist. **Perceptual verdict + final decision left for Guy** to fill after running on a display (headless here — see caveat).
 
 ## Dev Notes
 
@@ -87,14 +87,38 @@ This environment has **no display**: the event loop starts but the **perceptual 
 
 ### Agent Model Used
 
+Claude Opus 4.8 (1M context) — claude-opus-4-8 — via Claude Code dev-story (2026-06-10).
+
 ### Debug Log References
+
+- `cargo build -p steadyinvest-app --example spike_a_grid` → compiles (after 2 fixes: a Slint hex colour ending in `e` confused the Rust lexer → changed `#23262e`→`#242832`; added `use slint::Model` for `set_row_data`).
+- `cargo test -p steadyinvest-app --example spike_a_grid` → **5/5 logic tests pass** (parse + column-fill).
+- Gates green: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features --locked -- -D warnings`, `cargo test --all --locked`, `cargo deny check` (arboard licenses pass; `clipboard-win` BSL-1.0 already allow-listed).
+- Headless here (no display / no clipboard) — the **perceptual GO/NO-GO is Guy's call** on a desktop session (`just spike-a`).
 
 ### Completion Notes List
 
+- Built the throwaway `app/examples/spike_a_grid.rs` (inline `slint::slint!`, no `build.rs` change): a dense 10×4 grid over a Rust `VecModel<GridCell>` (stand-in for the production `TableModel`), `FocusScope` keyboard cell-cursor (arrows / Enter↓ / Tab→ / type-to-edit / Backspace), active-cell 1px ink ring, 28px rows.
+- **Paste-a-column** (the make-or-break) reads the clipboard via **`arboard`** on Ctrl+V; `parse_pasted_column` parses each line **exactly** (`Decimal::from_str_exact` → `contract::Money`) and fills the current column downward. **Blank / non-numeric → empty cell, never `0`** (the `Cell` "missing ≠ 0" rule), asserted by 5 unit tests including the CH/EU decimal-comma case (rejected → locale handling deferred to Story 2.4).
+- `arboard` added as an `app` **dev-dependency** (`default-features = false`, text-only) + a `[workspace.dependencies]` pin; **shipping binary stays lean**. No production code touched (`app/ui/app.slint`, `app/src/main.rs`, `app/examples/spike_b_chart.rs`, all crates untouched). `justfile`: added `spike-a`, renamed `spike`→`spike-b`.
+- ✅ **VERDICT: GO (2026-06-10, Guy's on-display run).** All three checks passed on screen: keyboard cell-cursor navigation works, **paste-a-column lands the values in the correct cells**, and blank/non-numeric cells stay **empty (never 0)**. The **entry-regime feasibility is settled** — Epic 2 (Stories 2.3/2.4) builds the production grid as a `TableModel` + virtualized `ListView` with locale-aware parsing + tri-state review markers. Findings in `docs/spikes/spike-a-dense-grid.md`.
+
 ### File List
+
+**Added (throwaway / docs):**
+- `app/examples/spike_a_grid.rs` (throwaway dense-grid + paste-a-column spike)
+- `docs/spikes/spike-a-dense-grid.md` (GO/NO-GO findings note — decision pending Guy's run)
+
+**Modified:**
+- `Cargo.toml` (added `arboard` to `[workspace.dependencies]`, text-only)
+- `app/Cargo.toml` (added `arboard` dev-dependency for the example)
+- `justfile` (added `spike-a`; renamed `spike`→`spike-b`)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (1-4 → in-progress → review)
 
 ## Change Log
 
 | Date | Change |
 |------|--------|
 | 2026-06-10 | Story 1.4 created (ready-for-dev): throwaway custom-Slint dense editable grid spike — keyboard cell-cursor nav + **paste-a-column** parsed as exact `Decimal` → GO/NO-GO. Clipboard read via `arboard` (primary) or Slint-native `Platform::clipboard_text()`. Follows the Spike B (1.5) pattern; production grid deferred to Epic 2 (Stories 2.3/2.4). |
+| 2026-06-10 | Story 1.4 implemented: `app/examples/spike_a_grid.rs` (dense grid, `FocusScope` cell-cursor, `arboard` paste-a-column, exact-`Decimal` parse, blank≠0) + 5 logic unit tests + `just spike-a` + findings doc. Builds, clippy-clean, all gates green. Status → review. |
+| 2026-06-10 | **GO** (Guy's on-display run): keyboard nav, paste-a-column, and blank≠0 all confirmed. Entry-regime feasibility settled; production grid → Epic 2 (Stories 2.3/2.4). |
