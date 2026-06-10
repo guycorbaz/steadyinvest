@@ -1,6 +1,6 @@
 # Story 1.4: Spike A — dense editable grid with paste-a-column (go/no-go)
 
-Status: review
+Status: done
 
 <!-- Note: THROWAWAY SPIKE. Deliverable = a GO/NO-GO decision + findings note, NOT production code. -->
 <!-- Epic 1. Run after 1.5 (Spike B GO is locked); this settles the entry-regime feasibility. -->
@@ -39,6 +39,21 @@ so that the **entry-regime feasibility is settled** (and the "custom-grid-on-Sli
 - [x] **Task 5 — GO/NO-GO findings note (AC: 4)**
   - [x] Created `docs/spikes/spike-a-dense-grid.md`: what was built, clipboard read via `arboard`, the unit-test evidence, the on-display verification steps, and the GO/NO-GO checklist. **Perceptual verdict + final decision left for Guy** to fill after running on a display (headless here — see caveat).
 
+### Review Findings
+
+_Code review 2026-06-10 (3 adversarial layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor). No HIGH/MEDIUM blocking issues; GO verdict stands. ACs 1, 3, 4, 5 satisfied; AC2 substantively satisfied (only the literal "commit" verb is vacuous under live editing)._
+
+- [x] [Review][Patch] Modifier-blind `typed` fallthrough — a control/meta chord whose `.text` is a digit/`.`/`,`/`-` edits the cell (e.g. Ctrl+5 appends `5`); guarded with `!e.modifiers.control && !e.modifiers.meta`. ✅ Fixed.
+- [x] [Review][Patch] Dead no-op `let _ = &w;` in the `on_typed` handler — bound `_w` and dropped the line (mirrors `on_backspace`). ✅ Fixed.
+- [x] [Review][Patch] Paste status string can misreport when the column clips at grid height — now reports applied cell count and an explicit "{dropped} line(s) past the grid bottom were dropped" note. ✅ Fixed.
+- [x] [Review][Patch] Story Dev Note wording "No new runtime/workspace dependencies" contradicted the `arboard` `[workspace.dependencies]` pin — reworded to "no new *runtime* deps; a workspace-table pin for the dev-only dep is fine (same pattern as `rust_decimal`)". ✅ Fixed.
+- [x] [Review][Defer] Typed-edit path is not `Decimal`-validated — typing `1.2.3`/`--`/`,` yields a `filled=true` cell that isn't a number (the paste path is validated; typed isn't). Epic 2 entry must validate on commit [app/examples/spike_a_grid.rs:434] — deferred, production scope
+- [x] [Review][Defer] Locale/thousands-separator paste rejected — `1 234.50`, `1,234.50`, `$1234`, `1,5` all → empty; a realistically-formatted spreadsheet column leaves many cells empty (manual GO test used raw unformatted numbers). Story 2.4 locale-aware parsing [app/examples/spike_a_grid.rs:391] — deferred, production scope
+- [x] [Review][Defer] Tab/Enter have no row-wrap at edges and "commit" is vacuous under live editing — spreadsheet-grade nav (wrap, Shift+Tab, explicit commit) is Epic 2 grid scope [app/examples/spike_a_grid.rs:328] — deferred, production scope
+- [x] [Review][Defer] `type_char` drops multi-codepoint / IME / non-ASCII-digit input — Epic 2 i18n entry concern [app/examples/spike_a_grid.rs:436] — deferred, production scope
+
+_Dismissed as noise (5): `Money::to_string` re-display `007`→`7` (correct, scale-preserving); all-blank/whitespace clipboard collapses to no-op (harmless, debatable semantics); virtualization not exercised (already disclosed — `VecModel` is a documented stand-in); full 40-cell `refresh` per event (documented as cheap); on-display GO authenticity (verified — Guy ran it and confirmed all three checks in-session)._
+
 ## Dev Notes
 
 ### This is a SPIKE — what "done" means
@@ -70,7 +85,7 @@ This environment has **no display**: the event loop starts but the **perceptual 
 
 ### Project Structure Notes
 - **New (throwaway / docs):** `app/examples/spike_a_grid.rs`; `docs/spikes/spike-a-dense-grid.md`. **Modify:** `justfile` (add `spike-a`); `app/Cargo.toml` (add `arboard` dev-dependency, example-only); `_bmad-output/implementation-artifacts/sprint-status.yaml` (1-4 status transitions).
-- **Do NOT modify** `app/ui/app.slint`, `app/src/main.rs`, `app/examples/spike_b_chart.rs`, or any crate's production code. **No new runtime/workspace dependencies** (`arboard` is dev-only). The production grid will live at `app/.../ui/.../data_grid.slint` and is built in **Epic 2** — this spike must not pre-empt it. [Source: architecture.md crate layout "data_grid.slint — dense editable grid, paste-a-column, cell cursor (FR16,56)"]
+- **Do NOT modify** `app/ui/app.slint`, `app/src/main.rs`, `app/examples/spike_b_chart.rs`, or any crate's production code. **No new *runtime* dependencies** — `arboard` is consumed **only** as a dev-dependency (the shipping binary stays lean); a version pin in `[workspace.dependencies]` is fine and follows the same pattern as `rust_decimal` (pinned in the workspace table, used as a dev-dep by the spike-b example). The production grid will live at `app/.../ui/.../data_grid.slint` and is built in **Epic 2** — this spike must not pre-empt it. [Source: architecture.md crate layout "data_grid.slint — dense editable grid, paste-a-column, cell cursor (FR16,56)"]
 - If `cargo deny` flags an `arboard` transitive licence, record it in the findings note and pick the leanest acceptable clipboard crate (or fall back to the Slint-native/TextEdit path) — keep the tree GPL-3.0-compatible. [Source: deny.toml; project memory open-source/licensing]
 
 ### References
@@ -122,3 +137,4 @@ Claude Opus 4.8 (1M context) — claude-opus-4-8 — via Claude Code dev-story (
 | 2026-06-10 | Story 1.4 created (ready-for-dev): throwaway custom-Slint dense editable grid spike — keyboard cell-cursor nav + **paste-a-column** parsed as exact `Decimal` → GO/NO-GO. Clipboard read via `arboard` (primary) or Slint-native `Platform::clipboard_text()`. Follows the Spike B (1.5) pattern; production grid deferred to Epic 2 (Stories 2.3/2.4). |
 | 2026-06-10 | Story 1.4 implemented: `app/examples/spike_a_grid.rs` (dense grid, `FocusScope` cell-cursor, `arboard` paste-a-column, exact-`Decimal` parse, blank≠0) + 5 logic unit tests + `just spike-a` + findings doc. Builds, clippy-clean, all gates green. Status → review. |
 | 2026-06-10 | **GO** (Guy's on-display run): keyboard nav, paste-a-column, and blank≠0 all confirmed. Entry-regime feasibility settled; production grid → Epic 2 (Stories 2.3/2.4). |
+| 2026-06-10 | Code review (3 adversarial layers): no HIGH/MED blocking issues. 4 patches applied (modifier-guard on typed, dead no-op removed, paste status count, dev-note wording), 4 items deferred to Epic 2 (`deferred-work.md`), 5 dismissed. Gates green. Status → done. |

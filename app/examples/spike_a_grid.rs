@@ -61,7 +61,7 @@ slint::slint! {
                     else if (e.text == Key.Return) { root.nav(1); }
                     else if (e.text == Key.Backspace) { root.backspace(); }
                     else if (e.modifiers.control && e.text == "v") { root.paste(); }
-                    else { root.typed(e.text); }
+                    else if (!e.modifiers.control && !e.modifiers.meta) { root.typed(e.text); }
                     accept
                 }
 
@@ -257,10 +257,9 @@ fn main() -> Result<(), slint::PlatformError> {
     let g = grid.clone();
     let m = model.clone();
     window.on_typed(move |s| {
-        let Some(w) = weak.upgrade() else { return };
+        let Some(_w) = weak.upgrade() else { return };
         g.borrow_mut().type_char(&s);
         refresh(&m, &g.borrow());
-        let _ = &w;
     });
 
     let weak = window.as_weak();
@@ -282,10 +281,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 let values = parse_pasted_column(&text);
                 let (parsed, empty) = g.borrow_mut().paste_column(&values);
                 refresh(&m, &g.borrow());
+                let dropped = values.len() - (parsed + empty);
+                let dropped_note = if dropped > 0 {
+                    format!("; {dropped} line(s) past the grid bottom were dropped")
+                } else {
+                    String::new()
+                };
                 format!(
-                    "Pasted {} line(s) into the current column: {parsed} parsed as Decimal, \
-                     {empty} left empty (blank / non-numeric — never 0).",
-                    values.len()
+                    "Pasted {} cell(s) into the current column: {parsed} parsed as Decimal, \
+                     {empty} left empty (blank / non-numeric — never 0){dropped_note}.",
+                    parsed + empty
                 )
             }
             Err(e) => {
