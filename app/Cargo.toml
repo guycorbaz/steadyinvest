@@ -28,6 +28,8 @@ tracing = { workspace = true }
 [dev-dependencies]
 # Used only by the throwaway Story-1.5 chart spike example (signal recompute in exact decimal).
 rust_decimal = { workspace = true }
+# Used only by the throwaway Story-1.4 grid spike example (paste-a-column clipboard read).
+arboard = { workspace = true }
 
 [build-dependencies]
 slint-build = { workspace = true }
