@@ -694,8 +694,10 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 - FR17 **[P1]:** Each data cell carries an independently queryable **source** (provider/manual/derived).
 - FR18 **[P1]:** Each data cell carries an independently queryable **provenance and timestamp**.
 - FR19 **[P1]:** Per-cell coverage is represented as **present / to-fill / not-available-accepted**.
-- FR20 **[P1]:** The user can mark a cell or study **"validated"**; the flag resets on a cell when its
-  value changes.
+- FR20 **[P1]:** Each cell (and the study as a whole) carries a **tri-state review tag** —
+  `none` / `? to-review` / `✓ validated` — with a **soft-lock**: a `✓` cell must be explicitly
+  un-validated (→ `?`) before its value can be edited, and a refresh that diverges from a validated
+  value auto-tags it `✓→?`. (Supersedes the original binary auto-reset wording; see GitHub issue #1.)
 - FR21 **[P1]:** The user can trigger a **manual refresh** of provider data.
 - FR22 **[P1]:** On refresh, a **manual value takes precedence** over a fetched value while the fetched
   value is preserved (non-destructive reconciliation).
@@ -795,6 +797,18 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
   action is a user-initiated refresh.
 - FR66 **[P1]:** The journal is kept in a **portable local store** an external system (e.g. file sync) can
   back up.
+- FR67 **[P1]:** The user can **choose the journal directory**; the app remembers recent journals and
+  **reopens the last-used journal on launch**. The pointer `(journal_id, last-seen-version)` lives in
+  per-machine app-config (via `directories`), **never inside the journal**. A **single-instance lock**
+  guards the open journal. The app **detects a sync folder** (Synology/Dropbox/OneDrive/iCloud) and
+  warns, keeping the **live DB local** with **versioned backups** to the sync folder (SQLite
+  `journal_mode=DELETE/TRUNCATE`). (New requirement; arch ADD7/ADD8; GitHub issue #2.)
+- FR68 **[P1]:** The **decision-time verdict is frozen and immutable** — stamped with `method_version`,
+  dated FX and the exact inputs — and is the **only verdict persisted**. A "recompute with today's
+  method" verdict is produced **on demand** for comparison/debug, **never persisted and never
+  automatic**. On a `method_version` change the UI offers a labelled
+  **"frozen (vNN, DD/MM) vs recomputed (vMM, today)"** compare. (New requirement; arch ADD10; GitHub
+  issue #3.)
 
 > **Definitions referenced by these FRs** (SSG output set, quality-flag thresholds, "usable year"
 > & low-confidence rule, plausibility rules, "load-bearing input", neutrality banned-verb list,

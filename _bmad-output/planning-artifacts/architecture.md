@@ -212,10 +212,17 @@ for the UI crate.
   **`maths`** feature for compound-growth projections (`powd`/`exp`/`ln`): pure-Rust and
   **deterministic cross-platform**, which satisfies the determinism requirement WITHOUT vendoring a
   libm or bit-hashing f64. Verify CAGR precision in the Week-1 spike.
-- **keyring 4.0.1** — cross-platform OS secret store; **no default features** (platform backends
-  chosen explicitly: secret-service/Linux, Keychain/macOS, Credential Manager/Windows). Note: the
-  Linux secret-service backend needs a running D-Bus/secret agent — relevant for headless/NAS use;
-  keyless providers avoid the issue entirely.
+- **keyring 3.x (hwchen API)** — cross-platform OS secret store. **Do NOT use `keyring` 4.0**:
+  as of 4.0.x the crate was re-published as a sample/CLI meta-crate (crates.io description "Sample
+  code and CLI for the Rust Keyring") with **no feature flags** and **mandatory** deps on every
+  backend store (`keyring-core`, `db-keystore`, `*-keyring-store`) plus `clap`/`rpassword` — a heavy,
+  non-lean tree. The real library is **`keyring = "3"`** (3.6.x), pinned with
+  `default-features = false` and explicit platform features (`linux-native` or `sync-secret-service`
+  on Linux, `apple-native`/Keychain on macOS, `windows-native`/Credential Manager on Windows). The
+  forward-looking alternative is **`keyring-core` 1.x + a vetted backend store crate** per platform;
+  evaluate both in **Story 3.2** and lock the choice with `cargo deny` (lean tree, GPL-3.0-compatible).
+  Note: the Linux secret-service backend needs a running D-Bus/secret agent — relevant for
+  headless/NAS use; keyless providers avoid the issue entirely. Not introduced until Story 3.2.
 - **directories** — `ProjectDirs::from(...)` for the app-config location (XDG / AppData / macOS
   Application Support), separate from the journal DB.
 
@@ -257,7 +264,7 @@ cargo add rusqlite@0.40 --features bundled        --package persistence
 cargo add rust_decimal@1 --features maths          --package core
 cargo add serde@1 --features derive                --package contract
 cargo add directories@6                            --package app
-cargo add keyring@4                                --package providers   # choose platform backend features explicitly
+cargo add keyring@3 --no-default-features          --package app         # Story 3.2 only; add explicit platform feature (e.g. linux-native). NOT keyring 4.x (sample/CLI meta-crate)
 ```
 
 **Proposed workspace layout (crates):**
@@ -356,8 +363,9 @@ against this skeleton as the principal go/no-go before committing UI work.
 ### Authentication & Security
 
 - **No authentication / no accounts / no multi-user** — single-user offline desktop by design.
-- **Secrets:** provider API keys only in the OS secret store via `keyring` 4.0 (platform backends
-  chosen explicitly; Linux secret-service needs a D-Bus agent). Never in repo/config/logs/exports.
+- **Secrets:** provider API keys only in the OS secret store via `keyring` 3.x (platform backends
+  chosen explicitly, `default-features = false`; **not** keyring 4.0 — see Tech Stack note; Linux
+  secret-service needs a D-Bus agent). Never in repo/config/logs/exports.
 - **Privacy:** no telemetry; the only network calls are user-initiated provider/FX fetches under the
   user's own key; all data local.
 - **AI [V]:** read-only by construction over the data contract; never a write path (capability
@@ -747,7 +755,7 @@ drift appears.
 
 **Decision Compatibility:** All technology choices are mutually compatible and version-verified
 (June 2026): Slint 1.16.1 (MSRV 1.88) · rusqlite 0.40 (bundled) · rust_decimal 1.42 (+maths) ·
-reqwest 0.13 (rustls-tls) + tokio 1.52 · thiserror 2.0 · proptest 1.9 · keyring 4.0 · directories ·
+reqwest 0.13 (rustls-tls) + tokio 1.52 · thiserror 2.0 · proptest 1.9 · keyring 3.x (NOT 4.0) · directories ·
 tracing. The **Slint GPLv3 licence is compatible with the project's GPL-3.0** (the PRD's "Slint
 licensing tier" risk is closed, pending the `cargo deny` dependency audit). No contradictory
 decisions remain (egui fully removed; no web; no server).
