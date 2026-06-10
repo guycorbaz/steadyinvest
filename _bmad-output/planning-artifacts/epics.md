@@ -172,7 +172,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
   (`core`, `contract`, `ingestion`, `persistence`, `report`, `app`); seed the `app` UI crate from the
   official Slint Rust template (`cargo generate --git https://github.com/slint-ui/slint-rust-template`).
   Pinned deps: slint 1.16, rusqlite 0.40 (bundled), rust_decimal 1.42 (+maths), reqwest 0.13
-  (rustls-tls,json) + tokio 1.52, serde 1, thiserror 2.0, proptest 1.9, tracing, keyring 4.0, directories.
+  (rustls-tls,json) + tokio 1.52, serde 1, thiserror 2.0, proptest 1.9, tracing, keyring 3.x (NOT 4.0 — see issue #5; added in Story 3.2), directories.
 - ADD2 [P1] **Cardinal Rule enforced by structure:** all calculation lives in `core` (no I/O/UI/SQL/net);
   exact decimal (`rust_decimal`), never `f32/f64` in the decision chain; named rounding only at display.
 - ADD3 [P1] **Week-1 de-risking spikes (precede UI commitment):** (A) Slint dense grid + paste-a-column;
@@ -372,7 +372,7 @@ So that every later story builds on a consistent structure with quality gates fr
 **When** the workspace is scaffolded
 **Then** `core`, `contract`, `ingestion`, `persistence`, `report`, `app` crates exist with
 `[workspace.dependencies]` pinning the agreed versions (slint 1.16, rusqlite 0.40, rust_decimal 1.42,
-reqwest 0.13, tokio 1.52, serde 1, thiserror 2.0, proptest 1.9, tracing, keyring 4.0, directories)
+reqwest 0.13, tokio 1.52, serde 1, thiserror 2.0, proptest 1.9, tracing, keyring 3.x [deferred to Story 3.2, NOT 4.0 — issue #5], directories)
 **And** `rust-toolchain.toml` pins MSRV ≥ 1.88, with `rustfmt.toml`, `clippy.toml`, `deny.toml` present
 **When** CI runs on the Windows/macOS/Linux matrix
 **Then** `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, and `cargo deny` all pass on the empty workspace
