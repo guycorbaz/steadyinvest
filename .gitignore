@@ -42,3 +42,7 @@ Thumbs.db
 # Legacy OLD-PROJECT artifacts (web/Leptos/Loco stack, Feb–May 2026) were DELETED 2026-06-09.
 # _bmad-output/ now holds only current artifacts and is tracked normally (no allowlist needed).
 # If Synology Drive re-syncs any legacy files back, delete them at the Synology source — do not commit.
+
+# ── Tooling runtime noise (story-automator skill) ────────────────
+__pycache__/
+.claude/.story-automator-active

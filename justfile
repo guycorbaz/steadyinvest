@@ -27,3 +27,8 @@ spike-a:
 # Needs a display; drag the white line and watch the zone bar recolor. Logs recompute µs to stderr.
 spike-b:
     cargo run -p steadyinvest-app --example spike_b_chart
+
+# Week-1 precision/determinism go/no-go spike (Story 1.6 — exact-decimal CAGR + pinned hash).
+# Headless (no display needed); the measured deviations print to stderr.
+spike-c:
+    cargo test -p steadyinvest-core --test spike_c_cagr_precision -- --nocapture

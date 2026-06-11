@@ -52,7 +52,9 @@ jobs:
       # Determinism hash (Linux-only for now; the test stays the cross-OS contract for when the
       # macOS/Windows matrix is restored — exact decimal makes it deterministic by construction).
       - name: Determinism hash
-        run: cargo test -p steadyinvest-core --locked tests::determinism_hash_matches_cross_os_contract -- --exact
+        run: |
+          cargo test -p steadyinvest-core --locked tests::determinism_hash_matches_cross_os_contract -- --exact
+          cargo test -p steadyinvest-core --test spike_c_cagr_precision --locked
 
   license-audit:
     name: License audit (cargo-deny)
