@@ -6,16 +6,19 @@
 //!
 //! The versioned **method specification** (the authoritative oracle) is mirrored here as typed
 //! constants: see [`method`], [`quality_flags`], [`rounding`] and [`method_version`], backed by
-//! `docs/method/ssg-method-spec-v1.md`. The five-section SSG engine, plausibility checks, verdict
-//! and risk math that *consume* this spec arrive in later Epic 1 stories (1.7–1.11). This file also
-//! provides the cross-platform **determinism probe** that the CI determinism-hash gate relies on.
+//! `docs/method/ssg-method-spec-v1.md`. The raw → canonical [`normalize`] layer (Story 1.7) lives
+//! here too; the five-section SSG engine, plausibility checks, verdict and risk math that *consume*
+//! it arrive in later Epic 1 stories (1.8–1.11). This file also provides the cross-platform
+//! **determinism probe** that the CI determinism-hash gate relies on.
 
 pub mod method;
 pub mod method_version;
+pub mod normalize;
 pub mod quality_flags;
 pub mod rounding;
 
 pub use method_version::METHOD_VERSION;
+pub use normalize::{normalize, CanonicalFinancials, RawFinancials};
 
 use rust_decimal::{Decimal, MathematicalOps};
 use sha2::{Digest, Sha256};

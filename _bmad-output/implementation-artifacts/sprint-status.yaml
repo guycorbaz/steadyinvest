@@ -54,7 +54,7 @@ development_status:
   1-4-spike-a-dense-editable-grid-paste-a-column: done
   1-5-spike-b-native-slint-draggable-judgment-line-recolor: done
   1-6-spike-c-exact-decimal-cagr-precision-cross-os-determinism: done
-  1-7-core-normalization-layer: backlog
+  1-7-core-normalization-layer: done
   1-8-core-ssg-calculation-engine: backlog
   1-9-golden-reference-studies-self-check-gate: backlog
   1-10-persistence-v1-hybrid-store-journal-identity-migrations: backlog

@@ -12,3 +12,6 @@ description = "Pure, deterministic SSG calculation engine (no I/O, UI, SQL, or n
 rust_decimal = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

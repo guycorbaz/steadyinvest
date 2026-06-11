@@ -5054,6 +5054,7 @@ dependencies = [
 name = "steadyinvest-core"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "rust_decimal",
  "serde",
  "sha2",

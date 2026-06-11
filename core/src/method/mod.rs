@@ -245,8 +245,8 @@ mod tests {
 
     #[test]
     fn load_bearing_lists_are_coherent() {
-        // Non-empty, no duplicates, and the two sets are disjoint. (The vs-study-struct subset
-        // check is deferred to Story 1.7, where the input struct is defined.)
+        // Non-empty, no duplicates, and the two sets are disjoint. (The vs-year-struct subset
+        // check lives in `crate::normalize::types` tests — Story 1.7 closed the 1.2 deferral.)
         assert!(!LOAD_BEARING_YEAR_FIELDS.is_empty());
         assert!(!LOAD_BEARING_JUDGMENT_INPUTS.is_empty());
         for (i, a) in LOAD_BEARING_YEAR_FIELDS.iter().enumerate() {

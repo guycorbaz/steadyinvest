@@ -1,55 +1,72 @@
-# Test Automation Summary — Story 1.6 (Spike C: exact-decimal CAGR precision & cross-OS determinism)
+# Test Automation Summary — Story 1.7 (`core` normalization layer)
 
 Date: 2026-06-11
 Workflow: `bmad-qa-generate-e2e-tests` (auto-apply gaps mode)
-Framework: Rust integration tests (`cargo test`) — the project's existing framework. No UI/API surface in this story (headless core gate), so no browser-E2E or HTTP-API tests apply.
+Framework: Rust integration tests (`cargo test` + `proptest`) — the project's existing
+framework. No UI or HTTP surface exists in this story (pure `core` library), so browser-E2E
+and HTTP-API tests do not apply; "E2E" here = feature-level tests through the one public
+entry point `core::normalize::normalize`, exactly as Epic-2 manual entry and Epic-3
+providers will call it.
 
 ## Scope
 
-Story 1.6's feature is itself a permanent headless test gate (`core/tests/spike_c_cagr_precision.rs`,
-6 tests, all ACs covered). QA pass = gap analysis of that gate against the story's ACs and the
-GO/NO-GO findings note claims, with discovered gaps auto-applied as new tests in the same file
-(so they run under the CI "Determinism hash" step, `just spike-c`, and `cargo test --all`
-without any CI/justfile change, and without touching the pinned hash or the 6 existing tests).
+Story 1.7 already ships a strong metamorphic/property suite (`core/tests/normalize_metamorphic.rs`,
+AC 7) and per-submodule unit tests. QA pass = gap analysis at the **public-API (consumer) level**:
+behaviours pinned only on internal `pub(super)` functions, or documented contracts never asserted
+end to end. All discovered gaps were auto-applied as a new integration suite.
 
 ## Discovered Gaps → Generated Tests
 
-All in `core/tests/spike_c_cagr_precision.rs` (5 new tests, 6 → 11):
+All in `core/tests/normalize_e2e.rs` (new file, 9 tests):
 
-- [x] `fractional_cagr_with_non_unit_start_matches_exact_reference` — every existing series used
-  `start = 1.00`; the `end/start` division path with a realistic per-share base (2.50) was
-  unexercised. Measured: relative error 1e-27 (same as the unit-start series).
-- [x] `checked_ln_returns_none_on_degenerate_input_instead_of_panicking` — the findings note's
-  `checked_ln(≤ 0) = None` claim came from a throwaway `/tmp` probe and was pinned by no permanent
-  test; Story 1.8 relies on it.
-- [x] `checked_powd_returns_none_on_overflow` — same gap for the overflow → `None` claim
-  (`deferred-work.md` requires checked math in Story 1.8).
-- [x] `negative_base_fractional_powd_is_silent_sign_magnitude_not_an_error` — the spike's most
-  load-bearing finding (`powd(-2, 0.5)` silently returns `sign(x)·|x|^y`; `checked_powd` does NOT
-  guard it ⇒ the method-spec §9 degenerate-base guard is mandatory) was only documented, never
-  gated. A `rust_decimal` upgrade changing this semantics now fails the build.
-- [x] `hash_serialization_is_value_only_representation_independent` — the "value-only,
-  representation-independent" claim of the hash scheme (`normalize().to_string()`) was untested:
-  equal values at different internal scales must serialize identically.
+- [x] `full_messy_series_normalizes_end_to_end_with_deterministic_findings_order` — realistic
+  six-year SSG series given out of order, carrying every input-shape issue at once (declared
+  2:1 split, EUR amount, 9-month period, fiscal-year-end shift, undeclared EPS jump, missing
+  `low_price`). Pins the documented **cross-pass findings order** (currency → fiscal →
+  split-break) — a determinism contract previously untested — plus rebasing, pass-through,
+  usability naming, and `usable_years == USABLE_YEARS_FLOOR` (the FR8 input).
+- [x] `empty_input_yields_empty_canonical_output_without_panic` — zero years was never
+  exercised: empty output, no findings, `usable_years = 0`, no panic.
+- [x] `reverse_split_one_for_three_multiplies_pre_split_per_share_values` — 1:3 reverse split
+  through the public API (previously unit-only on `rebase_per_share`); declared reverse split
+  does not trip the break detector.
+- [x] `multiple_splits_compound_cumulatively_across_the_series` — two declared splits (2:1 +
+  3:1) compound ÷6/÷3/÷1 across the series, exact by construction (previously unit-only on
+  `cumulative_ratio`).
+- [x] `aggregate_ptp_and_gross_up_are_never_split_adjusted` — PTP (direct AND §2 gross-up
+  derived) is share-count independent: untested anywhere before (the existing aggregate test
+  only covered `sales`).
+- [x] `degenerate_tax_rate_yields_unknown_ptp_but_year_stays_usable` — `tax_rate = 1` through
+  the public API: PTP `None` (spec §9), year stays usable (PTP not load-bearing), no finding,
+  no panic.
+- [x] `non_adjacent_duplicate_years_are_rejected_after_sorting` — duplicates separated in the
+  input order (the structural check runs post-sort; only adjacent duplicates were tested).
+- [x] `split_effective_at_first_year_rebases_nothing` — boundary: only years strictly BEFORE
+  the effective year are rebased.
+- [x] `split_effective_after_last_year_rebases_every_year` — boundary: a uniform rebase
+  changes values but preserves every y/y factor (detector silent, usability intact).
 
 ## Verification
 
-- `cargo test -p steadyinvest-core --test spike_c_cagr_precision`: **11 passed, 0 failed** —
-  pinned digest `d9af5553…5557` unchanged (the new tests assert behaviour outside the hashed
-  result vector, by design).
+- `cargo test -p steadyinvest-core --test normalize_e2e --locked`: **9 passed, 0 failed**.
 - `cargo fmt --all --check`: clean. `cargo clippy --all-targets --all-features --locked -- -D warnings`: 0 warnings.
-- `cargo test --all --locked`: **52 passed, 0 failed** across the workspace.
+- `cargo test --all --locked`: **all green** — core now 72 tests (44 unit + 5 metamorphic +
+  9 e2e + 14 Spike C); contract suite unaffected.
+- `cargo deny check`: advisories/bans/licenses/sources ok.
+- Method discipline intact: no constant touched, `method_fingerprint_is_pinned_to_version`
+  and `determinism_hash_matches_cross_os_contract` pass unchanged.
 
 ## Coverage
 
-- Story 1.6 ACs: 4/4 covered (AC1 precision + display-rounding interaction: 6 tests; AC2 pinned
-  hash + serialization claim: 2; AC3 findings-note behavioural claims now mechanically pinned: 3;
-  AC4 gates green).
-- Findings-note `powd`/`ln` behavioural claims: 3/3 now regression-gated (previously 0/3).
+- Story 1.7 ACs at the public-API level: 8/8 exercised end to end (AC 1–6 each have at least
+  one e2e scenario; AC 7 was already covered by the metamorphic suite; AC 8 re-verified).
+- Plausibility findings: 3/3 pinned keys now asserted through `normalize` (fiscal-period
+  findings previously unit-only).
+- Findings cross-pass deterministic ordering: now regression-gated (previously 0 tests).
 
 ## Next Steps
 
-- Nothing to wire: the new tests already run in CI via the existing
-  `cargo test -p steadyinvest-core --test spike_c_cagr_precision --locked` command.
-- Story 1.8 (engine) should reference `negative_base_fractional_powd_is_silent_sign_magnitude_not_an_error`
-  as the rationale test for the §9 degenerate-base guard.
+- Nothing to wire: `cargo test --all --locked` in CI already runs the new file.
+- Story 1.8 (engine) can reuse `full_messy_series_…` as the seed scenario for extending the
+  metamorphic properties through the verdict level (see the handoff note in
+  `normalize_metamorphic.rs`).
