@@ -4,9 +4,8 @@
 //! (`assert_eq!` / `prop_assert_eq!`): the inputs are exact-by-construction (the Spike-C
 //! discipline) so every rebase/gross-up division is exact. The ACs phrased at verdict level
 //! ("equivalent IFRS/GAAP inputs ⇒ same verdict", "ratios/verdict unchanged under scaling")
-//! are satisfied here by identical/exactly-scaled canonical outputs — once the engine exists
-//! (Story 1.8), identical canonical input deterministically implies the verdict-level
-//! property; 1.8's suite extends these metamorphic tests through the engine.
+//! complete in `ssg_metamorphic.rs` (Story 1.8), which drives these same three invariances
+//! through `normalize` → `compute` to the full `SsgOutputs` — verdict facts included.
 
 use proptest::collection::vec;
 use proptest::option;

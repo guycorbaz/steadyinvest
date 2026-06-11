@@ -107,15 +107,19 @@ pub enum YearUsability {
     },
 }
 
-/// Typed key of an input-shape plausibility finding. Maps 1:1 onto a subset of the pinned
-/// strings of [`crate::quality_flags::PLAUSIBILITY_RULES`] — no invented keys. The three
-/// calc-time keys (`out_of_bounds_ratio`, `negative_or_zero_denominator`,
-/// `low_price_above_current`) belong to the engine (Story 1.8), not here.
+/// Typed key of a plausibility finding. Maps 1:1 onto the pinned strings of
+/// [`crate::quality_flags::PLAUSIBILITY_RULES`] — no invented keys. The first three are
+/// input-shape keys raised by [`crate::normalize`]; the three calc-time keys
+/// (`out_of_bounds_ratio`, `negative_or_zero_denominator`, `low_price_above_current`) are
+/// raised by the engine ([`crate::ssg`], Story 1.8) via its own finding shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlausibilityKey {
     SplitSeriesBreak,
     CurrencyMismatch,
     FiscalPeriodMisalignment,
+    OutOfBoundsRatio,
+    NegativeOrZeroDenominator,
+    LowPriceAboveCurrent,
 }
 
 impl PlausibilityKey {
@@ -125,6 +129,9 @@ impl PlausibilityKey {
             PlausibilityKey::SplitSeriesBreak => "split_series_break",
             PlausibilityKey::CurrencyMismatch => "currency_mismatch",
             PlausibilityKey::FiscalPeriodMisalignment => "fiscal_period_misalignment",
+            PlausibilityKey::OutOfBoundsRatio => "out_of_bounds_ratio",
+            PlausibilityKey::NegativeOrZeroDenominator => "negative_or_zero_denominator",
+            PlausibilityKey::LowPriceAboveCurrent => "low_price_above_current",
         }
     }
 }
@@ -315,7 +322,15 @@ mod tests {
             PlausibilityKey::SplitSeriesBreak,
             PlausibilityKey::CurrencyMismatch,
             PlausibilityKey::FiscalPeriodMisalignment,
+            PlausibilityKey::OutOfBoundsRatio,
+            PlausibilityKey::NegativeOrZeroDenominator,
+            PlausibilityKey::LowPriceAboveCurrent,
         ];
+        assert_eq!(
+            keys.len(),
+            PLAUSIBILITY_RULES.len(),
+            "every pinned plausibility rule must have a typed key"
+        );
         for key in keys {
             assert!(
                 PLAUSIBILITY_RULES.contains(&key.as_str()),
