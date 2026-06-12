@@ -203,7 +203,9 @@ for the UI crate.
 
 ### Versions Verified (web, June 2026)
 
-- **Slint 1.16.1** (MSRV Rust 1.88) — licensed GPLv3 / royalty-free / commercial; **GPLv3 is
+- **Slint 1.16.1** (its own MSRV is Rust 1.88, but the **workspace MSRV is 1.96** — forced by
+  Slint 1.16 transitive deps and libsqlite3-sys 0.38; pinned in `rust-toolchain.toml`, verified
+  Story 1.1) — licensed GPLv3 / royalty-free / commercial; **GPLv3 is
   compatible with this project's GPL-3.0**, closing the PRD's "Slint licensing tier" risk. Charts are
   drawn natively (`Path` + `TouchArea`); egui is removed.
 - **rusqlite 0.40.0** with the `bundled` feature — SQLite (public domain) compiled into the binary;
@@ -282,13 +284,16 @@ cargo add keyring@3 --no-default-features          --package app         # Story
 
 **Architectural Decisions Provided / Implied by this Foundation:**
 
-- **Language & Runtime:** Rust (workspace, MSRV ≥ 1.88 per Slint 1.16); single native binary per OS.
+- **Language & Runtime:** Rust (workspace, MSRV 1.96 — driven by Slint 1.16 transitive deps +
+  libsqlite3-sys 0.38; pinned in `rust-toolchain.toml`); single native binary per OS.
 - **UI:** Slint 1.16 (GPLv3), declarative `.slint` + `slint-build`; charts native; no web, no egui.
 - **Numerics:** `rust_decimal` (+`maths`) exact decimal in the core (determinism + correctness).
 - **Persistence:** rusqlite `bundled` SQLite, single local file.
 - **Secrets / Config:** `keyring` (OS store) + `directories` (app-config), kept out of the journal.
 - **Testing:** Cargo test in `core`/`ingestion` (golden/property/metamorphic), versioned-journal
-  corpus in `persistence`; CI matrix on the 3 OS asserting identical results.
+  corpus in `persistence`; CI is **Linux-only for now** (decision 2026-06-09) — cross-OS identity
+  is asserted via pinned determinism hashes (exact decimal makes it hold by construction); the
+  3-OS matrix returns when multi-OS support is back in scope.
 - **Code Organization:** multi-crate workspace enforcing the thin-UI-over-tested-core boundary.
 
 **Note:** Workspace + UI-crate initialization (these commands) should be the **first implementation
@@ -309,7 +314,10 @@ against this skeleton as the principal go/no-go before committing UI work.
   verdict → invalidation, not silent overwrite) — *step 2*.
 
 **Important Decisions (Shape Architecture):**
-- HTTP/fetch = **reqwest 0.13 (`rustls-tls`,`json`) + tokio 1.52** (async), off the UI thread.
+- HTTP/fetch = **reqwest 0.13 + tokio 1.52** (async), off the UI thread, with a pure-Rust TLS
+  backend. ⚠️ Story 1.1 verified the `rustls-tls` feature was renamed to `rustls` in reqwest 0.13
+  and the default provider (aws-lc-rs) needs cmake — the exact TLS feature/provider choice is
+  deferred to Story 3.1 (GitHub-tracked).
 - Error model (`thiserror` 2.0, neutral cause-named, no silent `.ok()`); logging (`tracing`, local
   file, no telemetry); test architecture (`proptest` 1.9 + golden/metamorphic + 3-OS CI).
 - App-config vs journal boundary (`directories` + `keyring`); journal identity (`journal_id` + logical
@@ -409,9 +417,10 @@ against this skeleton as the principal go/no-go before committing UI work.
 
 - **No cloud, no containers, no server.** Distribution = a native binary per OS (Win/macOS/Linux),
   built from the Cargo workspace; updates manual in v1 (git pull/rebuild or replace binary).
-- **CI:** cross-platform matrix (the 3 OS) running `cargo test` (engine golden/property/metamorphic,
-  versioned-journal corpus, marker-confusability snapshot); CI asserts **identical numeric results**
-  across OS (trivial under exact decimal) and gates merges on the trust quality-gates.
+- **CI:** `cargo test` gates (engine golden/property/metamorphic, versioned-journal corpus,
+  marker-confusability snapshot) and the trust quality-gates block merges. **Linux-only for now**
+  (decision 2026-06-09): cross-OS numeric identity is asserted by pinned determinism hashes
+  (trivial under exact decimal); restore the 3-OS matrix when multi-OS support returns.
 - **UI visual-verification strategy (decided — point 4):** the prior project shipped a blank chart
   marked "done" for 4 epics because nothing rendered it and looked. Therefore: **Slint render snapshot
   tests** for key surfaces (the chart, trust markers, verdict states), the **marker-confusability
@@ -584,14 +593,14 @@ steadyinvest/
 ├── rustfmt.toml                   # formatting rules (CI: cargo fmt --check)
 ├── clippy.toml                    # lint config (CI: cargo clippy -- -D warnings)
 ├── justfile                       # tooling tasks (build, test, lint, spike, release)
-├── rust-toolchain.toml            # pin MSRV ≥ 1.88 (Slint 1.16)
+├── rust-toolchain.toml            # pins 1.96 (MSRV driven by Slint 1.16 transitive deps + libsqlite3-sys 0.38)
 ├── deny.toml                      # cargo-deny: GPL-3.0 dependency-license audit
 ├── README.md
 ├── LICENSE                        # GPL-3.0
 ├── .gitignore                     # ignores: target/, *.db, .env, keys, local config
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                 # 3-OS matrix: fmt, clippy, test, trust gates, determinism hash
+│       └── ci.yml                 # fmt, clippy, test, trust gates, determinism hash (Linux-only for now; 3-OS matrix later)
 ├── docs/                          # (existing) NAIC reference PDFs + project docs
 │
 ├── core/                          # steadyinvest-core — PURE calc engine (NO I/O, UI, SQL, net)
@@ -606,6 +615,8 @@ steadyinvest/
 │   │   │   ├── valuation.rs       # §3 P/E history A–H
 │   │   │   ├── risk_reward.rs     # §4 forecast high/low, zoning, U/D ratio
 │   │   │   └── return_proj.rs     # §5 yield, total return
+│   │   ├── normalize/             # IFRS↔GAAP, split/series, fiscal-period, currency-of-report (built here in Story 1.7 — epics superseded the earlier ingestion/ placement; pure, reused by manual entry AND providers)
+│   │   ├── golden/                # golden-fixture schema + pure check/check_all (Story 1.9; file I/O stays caller-side)
 │   │   ├── verdict.rs             # FullVerdict (constructible only from validated+fresh inputs)
 │   │   ├── quality_flags.rs       # FR7 thresholds; plausibility checks (FR10)
 │   │   ├── risk/                  # capital-at-risk, trailing stop, concentration (FR42-45,47)
@@ -635,7 +646,7 @@ steadyinvest/
 │   │   ├── provider.rs            # MarketDataProvider trait; keys injected (not read here)
 │   │   ├── adapters/
 │   │   │   └── eodhd.rs           # first adapter (CH/EU+US)
-│   │   ├── normalize/             # IFRS↔GAAP, split/series, fiscal-period, currency-of-report
+│   │   ├──                        # (normalize/ moved to core/src/normalize/ — Story 1.7 documented variance; ingestion calls core::normalize)
 │   │   ├── reconcile.rs           # non-destructive: manual wins, provider preserved, divergence→?
 │   │   └── error.rs               # IngestionError (network/quota/key) — thiserror
 │   └── tests/fixtures/            # recollage goldens (split, fiscal change, currency rebasing)
@@ -745,17 +756,18 @@ drift appears.
 
 - **Dev:** `just run` (app), `just spike` (week-1 chart spike), `just test`, `just lint`.
 - **Build:** `cargo build --release` per OS produces a single native binary; `Cargo.lock` committed.
-- **CI/Deploy:** `.github/workflows/ci.yml` runs the 3-OS matrix (fmt, clippy -D warnings, tests,
-  trust gates, determinism hash, `cargo deny` license audit); distribution = the per-OS binary
-  (manual update in v1).
+- **CI/Deploy:** `.github/workflows/ci.yml` runs fmt, clippy -D warnings, tests, trust gates,
+  determinism hash, `cargo deny` license audit — **Linux-only for now** (decision 2026-06-09;
+  3-OS matrix returns later, determinism meanwhile asserted via pinned hashes); distribution =
+  the per-OS binary (manual update in v1).
 
 ## Architecture Validation Results
 
 ### Coherence Validation ✅
 
 **Decision Compatibility:** All technology choices are mutually compatible and version-verified
-(June 2026): Slint 1.16.1 (MSRV 1.88) · rusqlite 0.40 (bundled) · rust_decimal 1.42 (+maths) ·
-reqwest 0.13 (rustls-tls) + tokio 1.52 · thiserror 2.0 · proptest 1.9 · keyring 3.x (NOT 4.0) · directories ·
+(June 2026): Slint 1.16.1 (workspace MSRV 1.96, see Tech Stack note) · rusqlite 0.40 (bundled) · rust_decimal 1.42 (+maths) ·
+reqwest 0.13 (pure-Rust TLS, exact feature decided in Story 3.1) + tokio 1.52 · thiserror 2.0 · proptest 1.9 · keyring 3.x (NOT 4.0) · directories ·
 tracing. The **Slint GPLv3 licence is compatible with the project's GPL-3.0** (the PRD's "Slint
 licensing tier" risk is closed, pending the `cargo deny` dependency audit). No contradictory
 decisions remain (egui fully removed; no web; no server).

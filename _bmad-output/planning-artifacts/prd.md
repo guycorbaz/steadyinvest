@@ -822,7 +822,9 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 - **NFR-C1:** The calculation engine is **deterministic** — identical inputs always produce
   identical outputs, bit-stable across runs and platforms.
 - **NFR-C2:** Engine output **matches every bundled golden reference study**: exact match on zoning
-  and verdict, and within **±0.5%** on derived numeric values (tolerance configurable).
+  and verdict, and within **±0.5%** on derived numeric values. *(Superseded detail: "tolerance
+  configurable" — the method spec §7 pins ±0.5% as a fixed method default inside the fingerprinted
+  constants; no configurable-tolerance mechanism exists. Implemented as specified in Story 1.9.)*
 - **NFR-C3:** Property-based **invariants hold**: zone bounds ordered (low < buy < hold < sell <
   high); upside/downside ≥ 0; capital-at-risk ≥ 0; FX round-trip A→B→A within 1e-6.
 - **NFR-C4:** FX is applied **only at consolidation**; per-currency study results are independent of
