@@ -1,0 +1,180 @@
+{
+  "meta": {
+    "id": "g09-unknown-rich-degenerate",
+    "title": "Unknown-rich degenerate study: explicit nulls and insufficiency facts everywhere",
+    "description": "A 5-usable-year study whose first year has negative EPS (sign-crossing EPS CAGR -> unknown), whose TTM EPS sums negative (current P/E and relative value unknown, denominator finding), whose dividends are all zero (average high yield 0, so forecast-low option (d) is NOT selectable -> the whole section 4 degrades to unknown), and whose year-ago quarterly EPS is negative (quarterly change unknown). Every section-9 unknown is asserted as an explicit null and every dependent verdict criterion is unmet_by_insufficiency.",
+    "provenance": "Hand-computed 2026-06-11 on paper. Sales and PTP reuse the g01 series (CAGR exactly 10%, margins 12 -> 8% so avg 10, latest 8, declining). EPS = -1.00 then 1.10, 1.21, 1.331, 1.4641: the spec-9 sign rule makes the EPS CAGR unknown, and 2021's negative EPS excludes that year from the P/E and payout averages (remaining four years are constant 20 / 10), and makes ROE 2021 = -1.00 / 5.00 = -20% (within the +/-100 bound, no finding), so average ROE = (-20 + 4 x 20) / 5 = 12 and the latest 20 is 8 pp above -> up trend. All dividends 0: payout and high yield are exactly 0 every usable P/E year, so option (d) divides by a non-positive yield and is not selectable -> forecast low null, zones null, U/D unknown. TTM = -1.00 + 3 x 0.20 = -0.40 (the sum itself is still reported). Average low price = (10 + 11 + 12.1 + 13.31 + 14.641) / 5 = 12.2102. Present yield = 0 / 18 x 100 = 0 exactly; the remaining section-5 outputs are unknown because the projected EPS growth judgment is withheld (null) and the forecast high is unknown. Findings in engine pass order: the 2021 EPS denominator (valuation pass), then the study-level TTM denominator. Normalize-side: the 2021 -> 2022 EPS year-over-year factor is 1.10 / -1.00 = -1.1, which satisfies the break detector's at-or-below-0.67 rule while sales move +10% (not co-moving down), so split_series_break is raised at 2022 on eps - derived from the spec-3 detector rule, the sign-crossing year IS an unexplained series break.",
+    "method_version": "ssg-1.0.0",
+    "fixture_format_version": 1
+  },
+  "input": {
+    "native_currency": "USD",
+    "years": [
+      {
+        "year": 2021,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1000", "currency": "USD" },
+        "eps": { "value": "-1.00", "currency": "USD" },
+        "high_price": { "value": "20.00", "currency": "USD" },
+        "low_price": { "value": "10.00", "currency": "USD" },
+        "dividend_per_share": { "value": "0", "currency": "USD" },
+        "pre_tax_profit": { "value": "120", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "5.00", "currency": "USD" }
+      },
+      {
+        "year": 2022,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1100", "currency": "USD" },
+        "eps": { "value": "1.10", "currency": "USD" },
+        "high_price": { "value": "22.00", "currency": "USD" },
+        "low_price": { "value": "11.00", "currency": "USD" },
+        "dividend_per_share": { "value": "0", "currency": "USD" },
+        "pre_tax_profit": { "value": "121", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "5.50", "currency": "USD" }
+      },
+      {
+        "year": 2023,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1210", "currency": "USD" },
+        "eps": { "value": "1.21", "currency": "USD" },
+        "high_price": { "value": "24.20", "currency": "USD" },
+        "low_price": { "value": "12.10", "currency": "USD" },
+        "dividend_per_share": { "value": "0", "currency": "USD" },
+        "pre_tax_profit": { "value": "121", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "6.05", "currency": "USD" }
+      },
+      {
+        "year": 2024,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1331", "currency": "USD" },
+        "eps": { "value": "1.331", "currency": "USD" },
+        "high_price": { "value": "26.62", "currency": "USD" },
+        "low_price": { "value": "13.31", "currency": "USD" },
+        "dividend_per_share": { "value": "0", "currency": "USD" },
+        "pre_tax_profit": { "value": "119.79", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "6.655", "currency": "USD" }
+      },
+      {
+        "year": 2025,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1464.1", "currency": "USD" },
+        "eps": { "value": "1.4641", "currency": "USD" },
+        "high_price": { "value": "29.282", "currency": "USD" },
+        "low_price": { "value": "14.641", "currency": "USD" },
+        "dividend_per_share": { "value": "0", "currency": "USD" },
+        "pre_tax_profit": { "value": "117.128", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "7.3205", "currency": "USD" }
+      }
+    ],
+    "splits": [],
+    "judgment": {
+      "estimated_high_eps": null,
+      "estimated_low_eps": null,
+      "projected_sales_growth_pct": "10",
+      "projected_eps_growth_pct": null,
+      "judged_avg_high_pe": "18",
+      "judged_avg_low_pe": "9",
+      "forecast_low_option": "dividend_supported",
+      "recent_severe_low": null,
+      "current_price": "18",
+      "present_full_year_dividend": "0"
+    },
+    "quarterly": {
+      "ttm_quarterly_eps": ["-1.00", "0.20", "0.20", "0.20"],
+      "latest_quarter_sales": "400",
+      "latest_quarter_eps": "0.20",
+      "year_ago_quarter_sales": "320",
+      "year_ago_quarter_eps": "-0.10"
+    }
+  },
+  "expected": {
+    "growth": {
+      "sales_cagr_pct": "10",
+      "eps_cagr_pct": null,
+      "quarterly_sales_change_pct": "25",
+      "quarterly_eps_change_pct": null,
+      "estimated_high_eps": null,
+      "estimated_low_eps": null
+    },
+    "management": {
+      "avg_ptp_pct": "10",
+      "avg_roe_pct": "12",
+      "latest_ptp_pct": "8",
+      "latest_roe_pct": "20",
+      "ptp_trend": "down",
+      "roe_trend": "up",
+      "per_year": [
+        { "year": 2021, "ptp_pct": "12", "roe_pct": "-20" },
+        { "year": 2022, "ptp_pct": "11", "roe_pct": "20" },
+        { "year": 2023, "ptp_pct": "10", "roe_pct": "20" },
+        { "year": 2024, "ptp_pct": "9", "roe_pct": "20" },
+        { "year": 2025, "ptp_pct": "8", "roe_pct": "20" }
+      ]
+    },
+    "valuation": {
+      "avg_high_pe": "20",
+      "avg_low_pe": "10",
+      "avg_pe": "15",
+      "avg_payout_pct": "0",
+      "avg_high_yield_pct": "0",
+      "avg_low_price": "12.2102",
+      "ttm_eps": "-0.40",
+      "current_pe": null,
+      "relative_value_pct": null,
+      "per_year": [
+        { "year": 2021, "high_pe": null, "low_pe": null, "payout_pct": null, "high_yield_pct": "0" },
+        { "year": 2022, "high_pe": "20", "low_pe": "10", "payout_pct": "0", "high_yield_pct": "0" },
+        { "year": 2023, "high_pe": "20", "low_pe": "10", "payout_pct": "0", "high_yield_pct": "0" },
+        { "year": 2024, "high_pe": "20", "low_pe": "10", "payout_pct": "0", "high_yield_pct": "0" },
+        { "year": 2025, "high_pe": "20", "low_pe": "10", "payout_pct": "0", "high_yield_pct": "0" }
+      ]
+    },
+    "risk_reward": {
+      "forecast_high": null,
+      "forecast_low": null,
+      "zones": null,
+      "present_price_zone": null,
+      "upside_downside": "unknown"
+    },
+    "returns": {
+      "present_yield_pct": "0",
+      "avg_annual_eps": null,
+      "avg_annual_dividend": null,
+      "avg_yield_pct": null,
+      "projected_appreciation_pct": null,
+      "projected_total_annualized_return_pct": null
+    },
+    "quality_flags": ["ptp_trend_declining"],
+    "findings": [
+      { "key": "negative_or_zero_denominator", "year": 2021, "context": "eps" },
+      { "key": "negative_or_zero_denominator", "year": null, "context": "ttm_eps" }
+    ],
+    "low_confidence": false,
+    "verdict_facts": {
+      "present_price_zone": null,
+      "ud_at_or_above_target": "unmet_by_insufficiency",
+      "relative_value_below_ceiling": "unmet_by_insufficiency",
+      "present_price_in_buy_zone": "unmet_by_insufficiency",
+      "appreciation_at_or_above_double": "unmet_by_insufficiency",
+      "quality_value_candidate": false
+    },
+    "normalize_findings": [
+      { "key": "split_series_break", "year": 2022, "context": "eps" }
+    ]
+  }
+}

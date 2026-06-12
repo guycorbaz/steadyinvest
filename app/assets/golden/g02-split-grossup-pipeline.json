@@ -1,0 +1,197 @@
+{
+  "meta": {
+    "id": "g02-split-grossup-pipeline",
+    "title": "Pipeline golden: declared 2:1 split, tax-rate PTP gross-up, currency mismatch",
+    "description": "Six reported years on the exact 1.1 series. 2020 is reported in PRE-split per-share terms (2:1 split effective 2021) and reports net profit + tax rate instead of a direct pre-tax profit; the 2025 dividend is reported in EUR (flagged, passed through unconverted). Exercises normalize for real: split rebasing, the section-2 gross-up, and a normalize-side finding. Estimated high EPS is DERIVED from the judged EPS growth (no direct judgment).",
+    "provenance": "Hand-computed 2026-06-11 on paper from the spec formulas, never from engine output. Series: sales/EPS are exact powers of 1.1 from a 2020 base of 1000 / 1.00 (post-split terms), so both CAGRs over 2020->2025 are exactly 10%. 2020 raw values are the post-split targets times 2 (eps 2.00, high 40.00, low 20.00, dividend 0.60, book value 10.00); the split rebase divides by 2. Gross-up: 91 / (1 - 0.30) = 130 exactly, cross-checked as 13% of sales 1000. Derived high EPS: 1.61051 x 1.1^5 = 1.61051^2 = 2.5937424601 (= 1.1^10). Forecast high 18 x 2.5937424601 = 46.6873642818; low 9 x 1.55 = 13.95; range 32.7373642818, third 10.9124547606 (terminating, cross-checked 3 x third = range). U/D (46.6873642818 - 18) / (18 - 13.95) = 28.6873642818 / 4.05 = 7.0832998227 (cross-checked 4.05 x 7.0832998227 = 28.687364282). Current price 18 makes forecast_high/current = 1.1^10, so the annualised appreciation is exactly 21% (1.1^2 - 1); average yield 0.648933423666 / 18 x 100 = 3.6051856870 (avg annual EPS 1.61051 x (1.1+1.21+1.331+1.4641+1.61051)/5 = 2.16311141222, cross-checked via the factor sum 6.71561).",
+    "method_version": "ssg-1.0.0",
+    "fixture_format_version": 1
+  },
+  "input": {
+    "native_currency": "USD",
+    "years": [
+      {
+        "year": 2020,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1000", "currency": "USD" },
+        "eps": { "value": "2.00", "currency": "USD" },
+        "high_price": { "value": "40.00", "currency": "USD" },
+        "low_price": { "value": "20.00", "currency": "USD" },
+        "dividend_per_share": { "value": "0.60", "currency": "USD" },
+        "pre_tax_profit": null,
+        "net_profit": { "value": "91", "currency": "USD" },
+        "tax_rate": "0.30",
+        "book_value_per_share": { "value": "10.00", "currency": "USD" }
+      },
+      {
+        "year": 2021,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1100", "currency": "USD" },
+        "eps": { "value": "1.10", "currency": "USD" },
+        "high_price": { "value": "22.00", "currency": "USD" },
+        "low_price": { "value": "11.00", "currency": "USD" },
+        "dividend_per_share": { "value": "0.33", "currency": "USD" },
+        "pre_tax_profit": { "value": "132", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "5.50", "currency": "USD" }
+      },
+      {
+        "year": 2022,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1210", "currency": "USD" },
+        "eps": { "value": "1.21", "currency": "USD" },
+        "high_price": { "value": "24.20", "currency": "USD" },
+        "low_price": { "value": "12.10", "currency": "USD" },
+        "dividend_per_share": { "value": "0.363", "currency": "USD" },
+        "pre_tax_profit": { "value": "133.1", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "6.05", "currency": "USD" }
+      },
+      {
+        "year": 2023,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1331", "currency": "USD" },
+        "eps": { "value": "1.331", "currency": "USD" },
+        "high_price": { "value": "26.62", "currency": "USD" },
+        "low_price": { "value": "13.31", "currency": "USD" },
+        "dividend_per_share": { "value": "0.3993", "currency": "USD" },
+        "pre_tax_profit": { "value": "133.1", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "6.655", "currency": "USD" }
+      },
+      {
+        "year": 2024,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1464.1", "currency": "USD" },
+        "eps": { "value": "1.4641", "currency": "USD" },
+        "high_price": { "value": "29.282", "currency": "USD" },
+        "low_price": { "value": "14.641", "currency": "USD" },
+        "dividend_per_share": { "value": "0.43923", "currency": "USD" },
+        "pre_tax_profit": { "value": "131.769", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "7.3205", "currency": "USD" }
+      },
+      {
+        "year": 2025,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1610.51", "currency": "USD" },
+        "eps": { "value": "1.61051", "currency": "USD" },
+        "high_price": { "value": "32.2102", "currency": "USD" },
+        "low_price": { "value": "16.1051", "currency": "USD" },
+        "dividend_per_share": { "value": "0.483153", "currency": "EUR" },
+        "pre_tax_profit": { "value": "128.8408", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "8.05255", "currency": "USD" }
+      }
+    ],
+    "splits": [{ "effective_year": 2021, "numerator": 2, "denominator": 1 }],
+    "judgment": {
+      "estimated_high_eps": null,
+      "estimated_low_eps": "1.55",
+      "projected_sales_growth_pct": "10",
+      "projected_eps_growth_pct": "10",
+      "judged_avg_high_pe": "18",
+      "judged_avg_low_pe": "9",
+      "forecast_low_option": "avg_low_pe_times_eps",
+      "recent_severe_low": null,
+      "current_price": "18",
+      "present_full_year_dividend": "0.50"
+    },
+    "quarterly": {
+      "ttm_quarterly_eps": ["0.42", "0.43", "0.44", "0.45"],
+      "latest_quarter_sales": "430",
+      "latest_quarter_eps": "0.45",
+      "year_ago_quarter_sales": "400",
+      "year_ago_quarter_eps": "0.40"
+    }
+  },
+  "expected": {
+    "growth": {
+      "sales_cagr_pct": "10",
+      "eps_cagr_pct": "10",
+      "quarterly_sales_change_pct": "7.5",
+      "quarterly_eps_change_pct": "12.5",
+      "estimated_high_eps": "2.5937424601",
+      "estimated_low_eps": "1.55"
+    },
+    "management": {
+      "avg_ptp_pct": "10",
+      "avg_roe_pct": "20",
+      "latest_ptp_pct": "8",
+      "latest_roe_pct": "20",
+      "ptp_trend": "down",
+      "roe_trend": "even",
+      "per_year": [
+        { "year": 2020, "ptp_pct": "13", "roe_pct": "20" },
+        { "year": 2021, "ptp_pct": "12", "roe_pct": "20" },
+        { "year": 2022, "ptp_pct": "11", "roe_pct": "20" },
+        { "year": 2023, "ptp_pct": "10", "roe_pct": "20" },
+        { "year": 2024, "ptp_pct": "9", "roe_pct": "20" },
+        { "year": 2025, "ptp_pct": "8", "roe_pct": "20" }
+      ]
+    },
+    "valuation": {
+      "avg_high_pe": "20",
+      "avg_low_pe": "10",
+      "avg_pe": "15",
+      "avg_payout_pct": "30",
+      "avg_high_yield_pct": "3",
+      "avg_low_price": "13.43122",
+      "ttm_eps": "1.74",
+      "current_pe": "10.3448275862",
+      "relative_value_pct": "68.9655172414",
+      "per_year": [
+        { "year": 2021, "high_pe": "20", "low_pe": "10", "payout_pct": "30", "high_yield_pct": "3" },
+        { "year": 2022, "high_pe": "20", "low_pe": "10", "payout_pct": "30", "high_yield_pct": "3" },
+        { "year": 2023, "high_pe": "20", "low_pe": "10", "payout_pct": "30", "high_yield_pct": "3" },
+        { "year": 2024, "high_pe": "20", "low_pe": "10", "payout_pct": "30", "high_yield_pct": "3" },
+        { "year": 2025, "high_pe": "20", "low_pe": "10", "payout_pct": "30", "high_yield_pct": "3" }
+      ]
+    },
+    "risk_reward": {
+      "forecast_high": "46.6873642818",
+      "forecast_low": "13.95",
+      "zones": {
+        "forecast_low": "13.95",
+        "buy_top": "24.8624547606",
+        "neutral_top": "35.7749095212",
+        "forecast_high": "46.6873642818"
+      },
+      "present_price_zone": "buy",
+      "upside_downside": { "ratio": "7.0832998227" }
+    },
+    "returns": {
+      "present_yield_pct": "2.7777777778",
+      "avg_annual_eps": "2.16311141222",
+      "avg_annual_dividend": "0.648933423666",
+      "avg_yield_pct": "3.6051856870",
+      "projected_appreciation_pct": "159.37424601",
+      "projected_total_annualized_return_pct": "24.6051856870"
+    },
+    "quality_flags": ["ptp_trend_declining"],
+    "findings": [],
+    "low_confidence": false,
+    "verdict_facts": {
+      "present_price_zone": "buy",
+      "ud_at_or_above_target": "met",
+      "relative_value_below_ceiling": "met",
+      "present_price_in_buy_zone": "met",
+      "appreciation_at_or_above_double": "met",
+      "quality_value_candidate": true
+    },
+    "normalize_findings": [
+      { "key": "currency_mismatch", "year": 2025, "context": "dividend_per_share" }
+    ]
+  }
+}

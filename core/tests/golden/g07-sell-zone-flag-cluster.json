@@ -1,0 +1,180 @@
+{
+  "meta": {
+    "id": "g07-sell-zone-flag-cluster",
+    "title": "Sell-zone study with declining trends, low ROE, lagging EPS and high relative value",
+    "description": "Sales grow 10%/yr while EPS grows only 5%/yr (eps_lags_sales); the PTP margin declines 12% -> 8% and the ROE declines 12.5% -> 9% (both trend flags, plus roe_low at 9 < 10); the current price sits in the Sell zone with U/D far below target and relative value above the ceiling. Six of the nine raisable flags fire, in pinned catalog order.",
+    "provenance": "Hand-computed 2026-06-11 on paper, never from engine output. Sales = 1000 x 1.1^k; EPS = 1.00 x 1.05^k so the endpoints CAGR is exactly 5% (1.21550625 = 1.05^4); high/low prices = 20x / 10x EPS, dividends = 0.3 x EPS, so the section-3 table is constant (20 / 10 / 30% / 3%). Book values chosen for terminating ROE: 8 (12.5%), 8.75 (12%), 10.5 (10.5%), 11.57625 (10%), 13.505625 (9%); average 54 / 5 = 10.8, latest 9 -> declining. PTP set to 12/11/10/9/8% of sales (120, 121, 121, 119.79, 117.128). Forecast high = 20 x 1.575 = 31.5, low = 9 x 1.10 = 9.9; range 21.6 divisible by 3 -> thirds 7.2, bounds 17.1 / 24.3 (terminating by construction); price 28 is in (24.3, 31.5] = Sell. U/D = 3.5 / 18.1 = 0.1933701657 (cross-checked 18.1 x 0.1933701657 = 3.50000000). TTM = 4 x 0.30 = 1.20; current P/E = 28 / 1.2 = 23.3333333333; relative value = 23.3333... / 15 x 100 = 155.5555555556 (= 7000/45). Quarterly changes: 10 / 370 x 100 = 2.7027027027; -0.01 / 0.31 x 100 = -3.2258064516. Average annual EPS = 1.21550625 x (1.04 + 1.0816 + 1.124864 + 1.16985856 + 1.2166529024) / 5 = 1.21550625 x 1.12659509248 = 1.3693834 (paper multiplication, cross-checked by estimate 1.2155 x 1.1266); dividend = x 0.30 = 0.4108150; average yield = / 28 x 100 = 1.4671965. Appreciation = 3.5 / 28 x 100 = 12.5 exactly. Annualised: (1.125)^(1/5) = 1.0238362 via ln(9/8) = 0.11778304 (exact ln 9 - ln 8), cross-checked by the 5th power (= 1.1250000); total = 2.38362 + 1.46720 = 3.85082.",
+    "method_version": "ssg-1.0.0",
+    "fixture_format_version": 1
+  },
+  "input": {
+    "native_currency": "USD",
+    "years": [
+      {
+        "year": 2021,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1000", "currency": "USD" },
+        "eps": { "value": "1.00", "currency": "USD" },
+        "high_price": { "value": "20.00", "currency": "USD" },
+        "low_price": { "value": "10.00", "currency": "USD" },
+        "dividend_per_share": { "value": "0.30", "currency": "USD" },
+        "pre_tax_profit": { "value": "120", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "8", "currency": "USD" }
+      },
+      {
+        "year": 2022,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1100", "currency": "USD" },
+        "eps": { "value": "1.05", "currency": "USD" },
+        "high_price": { "value": "21.00", "currency": "USD" },
+        "low_price": { "value": "10.50", "currency": "USD" },
+        "dividend_per_share": { "value": "0.315", "currency": "USD" },
+        "pre_tax_profit": { "value": "121", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "8.75", "currency": "USD" }
+      },
+      {
+        "year": 2023,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1210", "currency": "USD" },
+        "eps": { "value": "1.1025", "currency": "USD" },
+        "high_price": { "value": "22.05", "currency": "USD" },
+        "low_price": { "value": "11.025", "currency": "USD" },
+        "dividend_per_share": { "value": "0.33075", "currency": "USD" },
+        "pre_tax_profit": { "value": "121", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "10.5", "currency": "USD" }
+      },
+      {
+        "year": 2024,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1331", "currency": "USD" },
+        "eps": { "value": "1.157625", "currency": "USD" },
+        "high_price": { "value": "23.1525", "currency": "USD" },
+        "low_price": { "value": "11.578125", "currency": "USD" },
+        "dividend_per_share": { "value": "0.3472875", "currency": "USD" },
+        "pre_tax_profit": { "value": "119.79", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "11.57625", "currency": "USD" }
+      },
+      {
+        "year": 2025,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1464.1", "currency": "USD" },
+        "eps": { "value": "1.21550625", "currency": "USD" },
+        "high_price": { "value": "24.310125", "currency": "USD" },
+        "low_price": { "value": "12.1550625", "currency": "USD" },
+        "dividend_per_share": { "value": "0.364651875", "currency": "USD" },
+        "pre_tax_profit": { "value": "117.128", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "13.505625", "currency": "USD" }
+      }
+    ],
+    "splits": [],
+    "judgment": {
+      "estimated_high_eps": "1.575",
+      "estimated_low_eps": "1.10",
+      "projected_sales_growth_pct": "8",
+      "projected_eps_growth_pct": "4",
+      "judged_avg_high_pe": "20",
+      "judged_avg_low_pe": "9",
+      "forecast_low_option": "avg_low_pe_times_eps",
+      "recent_severe_low": null,
+      "current_price": "28",
+      "present_full_year_dividend": "0.37"
+    },
+    "quarterly": {
+      "ttm_quarterly_eps": ["0.30", "0.30", "0.30", "0.30"],
+      "latest_quarter_sales": "380",
+      "latest_quarter_eps": "0.30",
+      "year_ago_quarter_sales": "370",
+      "year_ago_quarter_eps": "0.31"
+    }
+  },
+  "expected": {
+    "growth": {
+      "sales_cagr_pct": "10",
+      "eps_cagr_pct": "5",
+      "quarterly_sales_change_pct": "2.7027027027",
+      "quarterly_eps_change_pct": "-3.2258064516",
+      "estimated_high_eps": "1.575",
+      "estimated_low_eps": "1.10"
+    },
+    "management": {
+      "avg_ptp_pct": "10",
+      "avg_roe_pct": "10.8",
+      "latest_ptp_pct": "8",
+      "latest_roe_pct": "9",
+      "ptp_trend": "down",
+      "roe_trend": "down",
+      "per_year": [
+        { "year": 2021, "ptp_pct": "12", "roe_pct": "12.5" },
+        { "year": 2022, "ptp_pct": "11", "roe_pct": "12" },
+        { "year": 2023, "ptp_pct": "10", "roe_pct": "10.5" },
+        { "year": 2024, "ptp_pct": "9", "roe_pct": "10" },
+        { "year": 2025, "ptp_pct": "8", "roe_pct": "9" }
+      ]
+    },
+    "valuation": {
+      "avg_high_pe": "20",
+      "avg_low_pe": "10",
+      "avg_pe": "15",
+      "avg_payout_pct": "30",
+      "avg_high_yield_pct": "3",
+      "avg_low_price": "11.0516375",
+      "ttm_eps": "1.20",
+      "current_pe": "23.3333333333",
+      "relative_value_pct": "155.5555555556"
+    },
+    "risk_reward": {
+      "forecast_high": "31.5",
+      "forecast_low": "9.9",
+      "zones": {
+        "forecast_low": "9.9",
+        "buy_top": "17.1",
+        "neutral_top": "24.3",
+        "forecast_high": "31.5"
+      },
+      "present_price_zone": "sell",
+      "upside_downside": { "ratio": "0.1933701657" }
+    },
+    "returns": {
+      "present_yield_pct": "1.3214285714",
+      "avg_annual_eps": "1.3693834",
+      "avg_annual_dividend": "0.4108150",
+      "avg_yield_pct": "1.4671965",
+      "projected_appreciation_pct": "12.5",
+      "projected_total_annualized_return_pct": "3.85082"
+    },
+    "quality_flags": [
+      "ptp_trend_declining",
+      "roe_trend_declining",
+      "roe_low",
+      "eps_lags_sales",
+      "ud_below_target",
+      "relative_value_high"
+    ],
+    "findings": [],
+    "low_confidence": false,
+    "verdict_facts": {
+      "present_price_zone": "sell",
+      "ud_at_or_above_target": "unmet",
+      "relative_value_below_ceiling": "unmet",
+      "present_price_in_buy_zone": "unmet",
+      "appreciation_at_or_above_double": "unmet",
+      "quality_value_candidate": false
+    },
+    "normalize_findings": []
+  }
+}

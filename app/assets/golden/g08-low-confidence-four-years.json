@@ -1,0 +1,158 @@
+{
+  "meta": {
+    "id": "g08-low-confidence-four-years",
+    "title": "Low confidence: four usable years still compute (FR8 - never a hard block)",
+    "description": "The last four years of the worked-example series. With usable years below the floor of 5, low_confidence is true, but every section still computes on the available window: the averages run over 4 years, the CAGRs span 3 years, and the verdict facts are still derivable (all four criteria Met).",
+    "provenance": "Hand-computed 2026-06-11 from the g01 paper derivation, dropping 2021. CAGRs: 1100 -> 1464.1 over 3 years, ratio 1.331 = 1.1^3, exactly 10% (same for EPS). Average PTP = (11 + 10 + 9 + 8) / 4 = 9.5; latest 8 is 1.5 pp below -> declining. ROE constant 20 -> even. Average low price = (11 + 12.1 + 13.31 + 14.641) / 4 = 51.051 / 4 = 12.76275 (cross-checked 4 x 12.76275 = 51.051). Judgments and quarterly observations identical to g01, so sections 3 (current P/E 11.25, relative value 75), 4 (forecast 12.6 - 44.78976, U/D 4.9610666667) and 5 (annualised appreciation exactly 20% because 2.48832 = 1.2^5; total 23.2774415337) reuse g01's hand derivation unchanged - the projection base EPS 1.4641 is the same latest usable year.",
+    "method_version": "ssg-1.0.0",
+    "fixture_format_version": 1
+  },
+  "input": {
+    "native_currency": "USD",
+    "years": [
+      {
+        "year": 2022,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1100", "currency": "USD" },
+        "eps": { "value": "1.10", "currency": "USD" },
+        "high_price": { "value": "22.00", "currency": "USD" },
+        "low_price": { "value": "11.00", "currency": "USD" },
+        "dividend_per_share": { "value": "0.33", "currency": "USD" },
+        "pre_tax_profit": { "value": "121", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "5.50", "currency": "USD" }
+      },
+      {
+        "year": 2023,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1210", "currency": "USD" },
+        "eps": { "value": "1.21", "currency": "USD" },
+        "high_price": { "value": "24.20", "currency": "USD" },
+        "low_price": { "value": "12.10", "currency": "USD" },
+        "dividend_per_share": { "value": "0.363", "currency": "USD" },
+        "pre_tax_profit": { "value": "121", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "6.05", "currency": "USD" }
+      },
+      {
+        "year": 2024,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1331", "currency": "USD" },
+        "eps": { "value": "1.331", "currency": "USD" },
+        "high_price": { "value": "26.62", "currency": "USD" },
+        "low_price": { "value": "13.31", "currency": "USD" },
+        "dividend_per_share": { "value": "0.3993", "currency": "USD" },
+        "pre_tax_profit": { "value": "119.79", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "6.655", "currency": "USD" }
+      },
+      {
+        "year": 2025,
+        "period_months": null,
+        "fiscal_year_end_month": null,
+        "sales": { "value": "1464.1", "currency": "USD" },
+        "eps": { "value": "1.4641", "currency": "USD" },
+        "high_price": { "value": "29.282", "currency": "USD" },
+        "low_price": { "value": "14.641", "currency": "USD" },
+        "dividend_per_share": { "value": "0.43923", "currency": "USD" },
+        "pre_tax_profit": { "value": "117.128", "currency": "USD" },
+        "net_profit": null,
+        "tax_rate": null,
+        "book_value_per_share": { "value": "7.3205", "currency": "USD" }
+      }
+    ],
+    "splits": [],
+    "judgment": {
+      "estimated_high_eps": "2.48832",
+      "estimated_low_eps": "1.40",
+      "projected_sales_growth_pct": "10",
+      "projected_eps_growth_pct": "10",
+      "judged_avg_high_pe": "18",
+      "judged_avg_low_pe": "9",
+      "forecast_low_option": "avg_low_pe_times_eps",
+      "recent_severe_low": null,
+      "current_price": "18",
+      "present_full_year_dividend": "0.45"
+    },
+    "quarterly": {
+      "ttm_quarterly_eps": ["0.40", "0.40", "0.40", "0.40"],
+      "latest_quarter_sales": "400",
+      "latest_quarter_eps": "0.40",
+      "year_ago_quarter_sales": "320",
+      "year_ago_quarter_eps": "0.32"
+    }
+  },
+  "expected": {
+    "growth": {
+      "sales_cagr_pct": "10",
+      "eps_cagr_pct": "10",
+      "quarterly_sales_change_pct": "25",
+      "quarterly_eps_change_pct": "25",
+      "estimated_high_eps": "2.48832",
+      "estimated_low_eps": "1.40"
+    },
+    "management": {
+      "avg_ptp_pct": "9.5",
+      "avg_roe_pct": "20",
+      "latest_ptp_pct": "8",
+      "latest_roe_pct": "20",
+      "ptp_trend": "down",
+      "roe_trend": "even",
+      "per_year": [
+        { "year": 2022, "ptp_pct": "11", "roe_pct": "20" },
+        { "year": 2023, "ptp_pct": "10", "roe_pct": "20" },
+        { "year": 2024, "ptp_pct": "9", "roe_pct": "20" },
+        { "year": 2025, "ptp_pct": "8", "roe_pct": "20" }
+      ]
+    },
+    "valuation": {
+      "avg_high_pe": "20",
+      "avg_low_pe": "10",
+      "avg_pe": "15",
+      "avg_payout_pct": "30",
+      "avg_high_yield_pct": "3",
+      "avg_low_price": "12.76275",
+      "ttm_eps": "1.60",
+      "current_pe": "11.25",
+      "relative_value_pct": "75"
+    },
+    "risk_reward": {
+      "forecast_high": "44.78976",
+      "forecast_low": "12.6",
+      "zones": {
+        "forecast_low": "12.6",
+        "buy_top": "23.32992",
+        "neutral_top": "34.05984",
+        "forecast_high": "44.78976"
+      },
+      "present_price_zone": "buy",
+      "upside_downside": { "ratio": "4.9610666667" }
+    },
+    "returns": {
+      "present_yield_pct": "2.5",
+      "avg_annual_eps": "1.9664649202",
+      "avg_annual_dividend": "0.58993947606",
+      "avg_yield_pct": "3.2774415337",
+      "projected_appreciation_pct": "148.832",
+      "projected_total_annualized_return_pct": "23.2774415337"
+    },
+    "quality_flags": ["ptp_trend_declining"],
+    "findings": [],
+    "low_confidence": true,
+    "verdict_facts": {
+      "present_price_zone": "buy",
+      "ud_at_or_above_target": "met",
+      "relative_value_below_ceiling": "met",
+      "present_price_in_buy_zone": "met",
+      "appreciation_at_or_above_double": "met",
+      "quality_value_candidate": true
+    },
+    "normalize_findings": null
+  }
+}

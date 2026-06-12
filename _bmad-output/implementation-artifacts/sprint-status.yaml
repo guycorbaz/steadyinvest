@@ -56,7 +56,7 @@ development_status:
   1-6-spike-c-exact-decimal-cagr-precision-cross-os-determinism: done
   1-7-core-normalization-layer: done
   1-8-core-ssg-calculation-engine: done
-  1-9-golden-reference-studies-self-check-gate: backlog
+  1-9-golden-reference-studies-self-check-gate: done
   1-10-persistence-v1-hybrid-store-journal-identity-migrations: backlog
   1-11-verdict-integrity-coherence-invariants: backlog
   epic-1-retrospective: optional

@@ -11,6 +11,7 @@
 //! the integrity-gated verdict arrive in later Epic 1 stories (1.9/1.11). This file also provides
 //! the cross-platform **determinism probe** that the CI determinism-hash gate relies on.
 
+pub mod golden;
 pub mod method;
 pub mod method_version;
 pub mod normalize;
@@ -18,6 +19,7 @@ pub mod quality_flags;
 pub mod rounding;
 pub mod ssg;
 
+pub use golden::{check, check_all, GoldenDeviation, GoldenReport, GoldenStudy};
 pub use method_version::METHOD_VERSION;
 pub use normalize::{normalize, CanonicalFinancials, RawFinancials};
 pub use ssg::{compute, JudgmentInputs, QuarterlyObservations, SsgOutputs};

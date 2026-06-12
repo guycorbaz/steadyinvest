@@ -1,3 +1,98 @@
+# Test Automation Summary — Story 1.9 (golden reference studies & self-check gate)
+
+Date: 2026-06-12
+Workflow: `bmad-qa-generate-e2e-tests` (auto-apply gaps mode)
+Framework: Rust integration tests (`cargo test`) — the project's existing framework. No UI
+or HTTP surface exists in this story (pure `core` library, Cardinal Rule), so "E2E" here =
+consumer-level tests over the exact public surface Story 2.13 will call:
+`GoldenStudy` (serde) → `check` / `check_all` → `GoldenReport` / `GoldenDeviation`.
+
+## Scope
+
+Story 1.9 already ships a strong dev suite: the CI gate `core/tests/golden_gate.rs`
+(11-fixture bundle, AC-6 negative controls a–f, app-asset drift test) and 18 in-module unit
+tests (parse discipline, tolerance boundary, `null`⇔`None`, posture gate). QA pass = gap
+analysis at the **public-API (consumer) level**: behaviours pinned only on private
+comparison primitives, or documented report semantics never asserted through the full
+`check`. All discovered gaps were auto-applied as a new integration suite. Same tamper
+discipline as the gate: variants exist only in memory, never as fixture files.
+
+## Discovered Gaps → Generated Tests
+
+All in `core/tests/golden_qa_e2e.rs` (new file, 10 tests):
+
+- [x] `check_all_over_the_real_bundle_reports_in_input_order_and_isolates_failures` —
+  `check_all` (the literal Story-2.13 entry point) was only tested with a single passing
+  study in-module; now driven over the real 11-fixture bundle (report order = input order,
+  ids carried) plus a mixed bundle where an appended stale-method study fails alone.
+- [x] `categorical_deviations_accumulate_across_sections_in_pass_order` — the report being
+  a full deviation LIST (not first-failure) was never asserted: six categorical tampers
+  across five sections (trend, zone ×2, `low_confidence`, criterion fact, candidate) all
+  reported, exact pass-order pinned, `relative_error` always `None` for categoricals.
+- [x] `tampered_quality_flag_list_is_one_deviation_carrying_both_lists` — the ordered-list
+  comparison (`compare_list`) had zero tests at any level; a flag mismatch is ONE deviation
+  rendering both full lists (`[]` vs `[ptp_trend_declining]`).
+- [x] `tampered_findings_and_normalize_findings_are_both_reported` — a MISMATCH on
+  `findings` / `normalize_findings` was never proven to be reported (only matching values
+  passed in the gate); also pins the documented rendering (`study-level` vs `year N`).
+- [x] `upside_downside_state_is_exact_while_its_ratio_value_is_tolerance_compared` — the
+  U/D three-way state mismatch arm was untested at any level: expected `unknown` vs actual
+  `Ratio` deviates exactly, while a Ratio value inside ±0.5% passes (state exact, value
+  numeric — the AC-2 split).
+- [x] `expected_null_zones_against_computed_bounds_is_a_structural_deviation` — the
+  `zones` null ⇔ present mismatch arm was untested: one structural deviation for the whole
+  bounds block, not four numeric misses.
+- [x] `omitted_optional_blocks_are_not_asserted` — the AC-3 "omitted = not asserted" rule
+  was only implicit (fixtures g03–g11 omit the tables); now proven by structurally removing
+  both per-year tables AND `normalize_findings` from the fullest fixture (still passes).
+- [x] `present_per_year_tables_are_asserted_by_row_and_by_count` — a PRESENT table being
+  really asserted was never tested: a tampered row value deviates under its year-indexed
+  path (`management.per_year[2023].ptp_pct`), a popped row is one `"4 rows"` vs `"5 rows"`
+  structural deviation.
+- [x] `tolerance_is_relative_to_the_magnitude_of_a_negative_expected_value` — the spec-§7
+  `|expected|` (symmetric tolerance around a NEGATIVE expected) was only tested with
+  positive values; proven through the full check on g09's hand-computed TTM EPS −0.40
+  (−0.4018 passes, −0.4021 deviates).
+- [x] `deviation_display_renders_path_values_and_optional_relative_error` — the
+  `GoldenDeviation` Display string (the line Story 2.13 renders) had no test: numeric
+  deviations carry the `(relative error …)` suffix, categorical ones end at the actual
+  value.
+
+## Verification
+
+- `cargo test -p steadyinvest-core --test golden_qa_e2e --locked`: **10 passed, 0 failed**
+  (all on the first run — no engine or fixture changes were needed).
+- `cargo fmt --all --check`: clean. `cargo clippy --all-targets --all-features --locked -- -D warnings`: 0 warnings.
+- `cargo test --all --locked`: **all green** — workspace now 186 tests (core 159: 75 unit +
+  8 gate + 10 golden QA e2e + 9 normalize e2e + 5 metamorphic + 14 Spike C + 23 engine +
+  6 ssg metamorphic + 9 ssg QA e2e; contract 27).
+- `cargo deny check`: advisories/bans/licenses/sources ok.
+- Method discipline intact: no constant touched, `method_fingerprint_is_pinned_to_version`,
+  `determinism_hash_matches_cross_os_contract` and the Spike-C digest pass unchanged. No
+  fixture file modified (tampered variants are in-memory only); `app/assets` drift test
+  still green.
+
+## Coverage
+
+- Story 1.9 ACs at the consumer level: AC 1–3 and 5–7 each now have public-API coverage of
+  every comparison/reporting branch this QA pass could identify (AC 4 is the fixture bundle
+  itself; AC 8 re-verified above).
+- `check_all`: real-bundle + mixed pass/fail now tested (previously single-study only).
+- Comparison arms through the full `check`: list (flags/findings/normalize_findings) 3/3
+  (previously 0/3 mismatch-tested), U/D state mismatch 1/1 (previously 0), `zones`
+  null⇔present 1/1 (previously 0), per-year tables omitted/tampered/count 3/3 (previously
+  0 explicit), negative-expected tolerance 1/1 (previously 0).
+- `GoldenDeviation` Display: regression-gated (previously 0 tests).
+
+## Next Steps
+
+- Nothing to wire: `cargo test --all --locked` in CI already runs the new file.
+- Story 2.13 ("verify engine" UI) can consume `check_all` exactly as
+  `check_all_over_the_real_bundle_…` demonstrates, including the Display strings for the
+  deviation list.
+
+---
+
 # Test Automation Summary — Story 1.8 (`core` SSG calculation engine)
 
 Date: 2026-06-11
