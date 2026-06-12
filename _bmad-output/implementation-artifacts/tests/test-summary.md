@@ -1,3 +1,85 @@
+# Test Automation Summary — Story 1.10 (`persistence` v1 — hybrid store, journal identity & migrations)
+
+Date: 2026-06-12
+Workflow: `bmad-qa-generate-e2e-tests` (auto-apply gaps mode)
+Framework: Rust integration tests (`cargo test`) — the project's existing framework. No UI
+or HTTP surface exists in this story (headless persistence crate), so "E2E" here =
+multi-session journal-lifecycle tests through the public API
+`Journal::create/open` → `put_study` / `get_study` / `list_studies`, exactly as the Epic-2
+app will call it across launches.
+
+## Scope
+
+Story 1.10 already ships a strong dev suite: 33 tests (13 unit — error posture, migrations
+harness, schema posture; 13 `journal_roundtrip.rs`; 5 `readonly_newer.rs`; 2 + 1 ignored
+generator `corpus_gate.rs`). QA pass = gap analysis at the **lifecycle level**: every
+existing integration test is single-session (at most one reopen, one study), and the
+environment failure modes that the user-selectable-DB-location requirement makes reachable
+(wrong file picked, foreign SQLite db, hand-damaged metadata) were untested. All discovered
+gaps were auto-applied as a new integration suite.
+
+## Discovered Gaps → Generated Tests
+
+All in `persistence/tests/e2e_lifecycle.rs` (new file, 7 tests):
+
+- [x] `full_lifecycle_across_three_sessions_preserves_everything` — the real user journey
+  was never tested: create → write three studies → close → reopen → list/read → revise one
+  → close → reopen → exact state verified (identity and heartbeat survive every session
+  boundary, the revision updated in place, an absent id reads `None`).
+- [x] `two_journals_side_by_side_are_fully_independent` — journal identity (ADD6) was only
+  tested within one file: two journals in one directory keep independent identities and
+  logical versions, studies never leak across, and a study stamped with A's `journal_id`
+  is rejected by B (`JournalIdentityMismatch`).
+- [x] `list_studies_breaks_created_at_ties_by_id` — the documented deterministic-listing
+  contract (`ORDER BY created_at, id`) was only half-tested (distinct `created_at` values);
+  equal timestamps now prove the id tie-break.
+- [x] `opening_a_non_sqlite_file_is_a_typed_error_not_a_panic` — the DB location is
+  user-selectable (project requirement), so picking a non-SQLite file is a real scenario:
+  typed `Error::Sqlite`, no panic.
+- [x] `opening_a_foreign_sqlite_db_without_journal_meta_is_corrupt_meta_never_silent_adoption` —
+  a perfectly valid SQLite db that was never a journal (no `journal_meta` row) fails open
+  with `CorruptJournalMeta`, never a silent adoption.
+- [x] `invalid_journal_id_in_meta_fails_open_with_corrupt_meta` — a damaged identity
+  (non-UUID `journal_id`) is a loud typed failure at open, never guessed around.
+- [x] `negative_logical_version_reads_as_corrupt_meta` — the checked i64→u64 conversion in
+  `logical_version()` had no test: a hand-damaged negative heartbeat reads as
+  `CorruptJournalMeta`, not a wrapped value.
+
+## Verification
+
+- `cargo test -p steadyinvest-persistence --test e2e_lifecycle --locked`: **7 passed,
+  0 failed** (all on the first run — no crate changes were needed).
+- `cargo fmt --all --check`: clean. `cargo clippy --all-targets --all-features --locked -- -D warnings`: 0 warnings.
+- `cargo test --all --locked`: **all green** — workspace now 226 tests (persistence 40:
+  13 unit + 13 roundtrip + 7 lifecycle e2e + 5 readonly + 2 corpus gate, + 1 intentionally
+  ignored generator; core 159; contract 27).
+- `cargo deny check`: advisories/bans/licenses/sources ok.
+- Discipline intact: `core/`, `contract/`, the frozen corpus `v1.db` and the pinned snapshot
+  untouched; all file-backed scenarios run in `tempfile::TempDir` (outside the Synology
+  Drive sync watch); fixed UUIDs/timestamps throughout (no clock/random anywhere).
+
+## Coverage
+
+- Story 1.10 ACs: 8/8 covered (the pre-existing 33 tests carry the per-AC coverage; this
+  pass adds the cross-session and cross-journal journeys on top).
+- Multi-session lifecycle: create→write→reopen→revise→reopen now regression-gated
+  (previously single-reopen, single-study only).
+- Journal independence / cross-journal integrity: 1/1 (previously 0 — mismatch was only
+  tested within one journal).
+- Environment failure modes (wrong file picks): 4/4 (non-SQLite file, foreign db, invalid
+  meta UUID, negative heartbeat — all previously 0).
+- Deterministic listing: tie-break now asserted (previously order tested on distinct
+  timestamps only).
+
+## Next Steps
+
+- Nothing to wire: `cargo test --all --locked` in CI already runs the new file.
+- When Epic 2 lands `judgments` writes, extend the lifecycle journey with a study+judgment
+  sequence (FK + upsert-preserves-time-series across sessions).
+- When Epic 5 lands export/import and sync-guard, add portability journeys (NFR-X3).
+
+---
+
 # Test Automation Summary — Story 1.9 (golden reference studies & self-check gate)
 
 Date: 2026-06-12

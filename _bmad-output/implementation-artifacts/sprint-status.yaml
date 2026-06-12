@@ -39,7 +39,7 @@
 # 7 [P3] / 8 [V] are deliberate story outlines (refine with create-epics-and-stories per phase).
 
 generated: 2026-06-09
-last_updated: 2026-06-11
+last_updated: 2026-06-12
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -57,7 +57,7 @@ development_status:
   1-7-core-normalization-layer: done
   1-8-core-ssg-calculation-engine: done
   1-9-golden-reference-studies-self-check-gate: done
-  1-10-persistence-v1-hybrid-store-journal-identity-migrations: backlog
+  1-10-persistence-v1-hybrid-store-journal-identity-migrations: done
   1-11-verdict-integrity-coherence-invariants: backlog
   epic-1-retrospective: optional
 

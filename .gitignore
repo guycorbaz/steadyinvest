@@ -11,6 +11,9 @@
 *.db-shm
 *.sqlite
 *.sqlite3
+# EXCEPTION (after *.db — last match wins): the frozen, append-only test corpus IS committed.
+# It is the CI gate against silent schema drift (story 1.10); see persistence/tests/corpus/README.md.
+!persistence/tests/corpus/*.db
 
 # ── Secrets / local config (keys live in the OS keychain, never here) ─
 .env

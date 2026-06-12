@@ -5079,7 +5079,9 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "steadyinvest-contract",
+ "tempfile",
  "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]

@@ -42,6 +42,8 @@ tracing = "0.1"
 directories = "6"
 uuid = { version = "1", features = ["v4", "serde"] }
 sha2 = "0.11"
+# Dev-only (persistence tests): test DBs land in /tmp, outside the Synology Drive sync watch.
+tempfile = "3"
 # Clipboard read — used ONLY by the throwaway Story-1.4 grid spike (paste-a-column). Text-only
 # (`default-features = false` drops image-data deps) to keep the tree lean. deny.toml already allows
 # its Windows backend's BSL-1.0 (clipboard-win). Not a shipping dependency.
