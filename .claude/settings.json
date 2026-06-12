@@ -1,4 +1,34 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(.claude/skills/bmad-story-automator/scripts/story-automator *)",
+      "Bash(/home/gcorbaz/Synology/devel/steadyinvest/.claude/skills/bmad-story-automator/scripts/story-automator *)",
+      "Bash(tmux *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(jq *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(sed *)",
+      "Bash(mv *)",
+      "Bash(mktemp*)",
+      "Bash(echo *)",
+      "Bash(date *)",
+      "Bash(seq *)",
+      "Bash(sleep *)",
+      "Bash(cargo fmt*)",
+      "Bash(cargo clippy*)",
+      "Bash(cargo test*)",
+      "Bash(cargo deny*)",
+      "Edit(_bmad-output/**)",
+      "Write(_bmad-output/**)"
+    ]
+  },
   "hooks": {
     "Stop": [
       {
