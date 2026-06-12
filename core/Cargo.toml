@@ -18,3 +18,7 @@ proptest = { workspace = true }
 # Golden-fixture parsing in tests ONLY (Story 1.9) — the shipped engine's dependency
 # surface stays rust_decimal + serde + sha2; callers own file reading and JSON parsing.
 serde_json = { workspace = true }
+# Contract → core glue in tests ONLY (Story 1.11, same precedent): the end-to-end coherence
+# test exercises the Epic-2-preview mapping (Cell review/freshness → gate states) without
+# widening the shipped dependency surface. Do NOT promote to [dependencies].
+steadyinvest-contract = { workspace = true }

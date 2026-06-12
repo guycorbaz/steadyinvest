@@ -6,9 +6,10 @@
 //!
 //! The versioned **method specification** (the authoritative oracle) is mirrored here as typed
 //! constants: see [`method`], [`quality_flags`], [`rounding`] and [`method_version`], backed by
-//! `docs/method/ssg-method-spec-v1.md`. The raw → canonical [`normalize`] layer (Story 1.7) and
-//! the five-section SSG engine [`ssg`] (Story 1.8) live here too; the golden-fixture gate and
-//! the integrity-gated verdict arrive in later Epic 1 stories (1.9/1.11). This file also provides
+//! `docs/method/ssg-method-spec-v1.md`. The raw → canonical [`normalize`] layer (Story 1.7),
+//! the five-section SSG engine [`ssg`] (Story 1.8), the golden-fixture gate [`golden`]
+//! (Story 1.9) and the integrity-gated [`verdict`] (Story 1.11 — `FullVerdict` constructible
+//! only from all-validated-and-fresh load-bearing inputs) live here too. This file also provides
 //! the cross-platform **determinism probe** that the CI determinism-hash gate relies on.
 
 pub mod golden;
@@ -18,11 +19,16 @@ pub mod normalize;
 pub mod quality_flags;
 pub mod rounding;
 pub mod ssg;
+pub mod verdict;
 
 pub use golden::{check, check_all, GoldenDeviation, GoldenReport, GoldenStudy};
 pub use method_version::METHOD_VERSION;
 pub use normalize::{normalize, CanonicalFinancials, RawFinancials};
 pub use ssg::{compute, JudgmentInputs, QuarterlyObservations, SsgOutputs};
+pub use verdict::{
+    DegradedVerdict, FullVerdict, GateState, GatedInput, InputGates, OpenGate, StudySnapshot,
+    Verdict, YearGates,
+};
 
 use rust_decimal::{Decimal, MathematicalOps};
 use sha2::{Digest, Sha256};

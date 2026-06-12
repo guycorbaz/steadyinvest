@@ -58,7 +58,7 @@ development_status:
   1-8-core-ssg-calculation-engine: done
   1-9-golden-reference-studies-self-check-gate: done
   1-10-persistence-v1-hybrid-store-journal-identity-migrations: done
-  1-11-verdict-integrity-coherence-invariants: backlog
+  1-11-verdict-integrity-coherence-invariants: done
   epic-1-retrospective: optional
 
   # ── Epic 2: The trustworthy Stock Study (first usable product) [P1] ──
