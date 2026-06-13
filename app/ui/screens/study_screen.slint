@@ -1,0 +1,449 @@
+// The faithful, collapsible §1–§5 SSG study form (Story 2.3). Replaces the 2.2 minimal restore view:
+// a non-collapsible identity header + capitalization block, then five `CollapsibleSection`s in the
+// canonical SSG order — §3's A–H lettered P/E table with formula captions on a visible cell grid, the
+// §2 management grid, and the §4/§5 calc rows — each foldable with an information-scent summary, on a
+// regime-driven fold preset (entry ↔ contemplation) at CONSTANT GEOMETRY.
+//
+// SCOPE (2.3 = the faithful STRUCTURE only): NO engine/compute, NO verdict, NO zone bar (2.6); NO §1
+// interactive chart (2.8); NO data entry (2.4); NO validation markers (2.5). The §1 chart and §4 zone
+// bar are explicit faithful PLACEHOLDERS. Computed columns (D/E/G/H) and every result slot show their
+// caption only and a faithful em-dash value — NEVER a fake number, NEVER `0`.
+//
+// All colours/sizes read `Tokens`; every user-visible string is French inside `@tr()` (UX-DR29). The
+// formula captions (`A÷C`, …) are static display text, not computed.
+
+import { Tokens } from "../tokens.slint";
+import { Studies, FormHeader, PeRow } from "../state.slint";
+import { CollapsibleSection } from "../components/collapsible_section.slint";
+import { ChoiceChip } from "../components/choice_chip.slint";
+import { ActionButton } from "../components/action_button.slint";
+
+// The faithful em-dash slot, in one place (mirrors `viewmodel::form::EMPTY_SLOT`). A gap, never `0`.
+global FormConst {
+    out property <string> empty-slot: "—";
+}
+
+// ── Grid primitives (visible 1 px cell borders, the high-fidelity SSG look) ──
+
+// A data cell: right-aligned tabular figures on a bordered cell.
+component GridCell inherits Rectangle {
+    in property <string> value;
+    in property <bool> emphasise: false;
+    min-height: Tokens.row-height;
+    horizontal-stretch: 1;
+    background: transparent;
+    border-width: Tokens.border;
+    border-color: Tokens.grid-line;
+    HorizontalLayout {
+        padding-left: Tokens.space-8;
+        padding-right: Tokens.space-8;
+        Text {
+            text: root.value;
+            color: root.emphasise ? Tokens.text-high : Tokens.text-mid;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-body;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+// A left-aligned label cell (row labels, year cells) on the same grid.
+component GridLabelCell inherits Rectangle {
+    in property <string> label;
+    in property <bool> numeric: false;
+    min-height: Tokens.row-height;
+    horizontal-stretch: 1;
+    background: Tokens.surface-alt;
+    border-width: Tokens.border;
+    border-color: Tokens.grid-line;
+    HorizontalLayout {
+        padding-left: Tokens.space-8;
+        padding-right: Tokens.space-8;
+        Text {
+            text: root.label;
+            color: Tokens.text-mid;
+            font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+}
+
+// A §3 column header: the lettered box (A…H) + its formula/field caption beneath.
+component PeHeaderCell inherits Rectangle {
+    in property <string> letter;
+    in property <string> caption;
+    min-height: Tokens.row-height + Tokens.space-12;
+    horizontal-stretch: 1;
+    background: Tokens.surface-alt;
+    border-width: Tokens.border;
+    border-color: Tokens.grid-line;
+    VerticalLayout {
+        padding: Tokens.space-4;
+        Text {
+            text: root.letter;
+            color: Tokens.text-high;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-body;
+            font-weight: Tokens.weight-semibold;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: root.caption;
+            color: Tokens.text-low;
+            font-size: Tokens.font-caption;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// One §3 P/E table data row: year label + the A…H cells.
+component PeTableRow inherits HorizontalLayout {
+    in property <PeRow> pe;
+    spacing: 0;
+    GridLabelCell { label: root.pe.year; numeric: true; }
+    GridCell { value: root.pe.a; }
+    GridCell { value: root.pe.b; }
+    GridCell { value: root.pe.c; }
+    GridCell { value: root.pe.d; }
+    GridCell { value: root.pe.e; }
+    GridCell { value: root.pe.f; }
+    GridCell { value: root.pe.g; }
+    GridCell { value: root.pe.h; }
+}
+
+// A §3 summary row: a wide label + a single value slot (Total / Moyenne / PER moyen / PER courant).
+component PeSummaryRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 0;
+    GridLabelCell { label: root.label; horizontal-stretch: 4; }
+    GridCell { value: root.value; horizontal-stretch: 5; }
+}
+
+// A §4/§5 calc row: label · formula expression · boxed result slot.
+component CalcRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> formula;
+    in property <string> result;
+    spacing: Tokens.space-8;
+    min-height: Tokens.row-height;
+    Text {
+        text: root.label;
+        color: Tokens.text-high;
+        font-size: Tokens.font-body;
+        vertical-alignment: center;
+        horizontal-stretch: 0;
+        width: 38%;
+        overflow: elide;
+    }
+    Text {
+        text: root.formula;
+        color: Tokens.text-low;
+        font-size: Tokens.font-caption;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+        overflow: elide;
+    }
+    Rectangle {
+        width: 22%;
+        border-width: Tokens.border;
+        border-color: Tokens.grid-line;
+        background: Tokens.surface-alt;
+        Text {
+            text: root.result;
+            color: Tokens.text-mid;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-body;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            x: parent.width - self.width - Tokens.space-8;
+        }
+    }
+}
+
+// A calm, fact-stating placeholder region (§1 chart, §4 zone bar) on constant geometry. No fake
+// chart, no fake zones — the real visuals are 2.8 / 2.6.
+component PlaceholderRegion inherits Rectangle {
+    in property <string> caption;
+    in property <length> region-height: Tokens.space-48 * 2;
+    height: root.region-height;
+    background: Tokens.surface-alt;
+    border-width: Tokens.border;
+    border-color: Tokens.separator;
+    border-radius: Tokens.radius;
+    // The placeholder calms further in contemplation (the regime-emphasis token swap; colour-only).
+    opacity: 0.4 + 0.6 * Tokens.regime-emphasis;
+    Text {
+        text: root.caption;
+        color: Tokens.text-low;
+        font-size: Tokens.font-caption;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component StudyScreen inherits Rectangle {
+    in property <FormHeader> header: Studies.form-header;
+    in property <[PeRow]> pe-rows: Studies.pe-rows;
+
+    background: Tokens.bg;
+
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            alignment: start;
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
+
+            // ── Back to the studies list (closes the open form; pure-Slint view state) ──
+            HorizontalLayout {
+                alignment: start;
+                ActionButton {
+                    label: @tr("‹ Retour aux études");
+                    clicked => { Studies.study-open = false; }
+                }
+            }
+
+            // ── Regime toggle (active regime clearly indicated; label-not-colour, keyboard-operable) ──
+            HorizontalLayout {
+                alignment: start;
+                spacing: Tokens.space-8;
+                Text {
+                    text: @tr("Mode de lecture");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+                ChoiceChip {
+                    label: @tr("Saisie");
+                    selected: Studies.regime == "entry";
+                    activated => { Studies.set-regime("entry"); }
+                }
+                ChoiceChip {
+                    label: @tr("Contemplation");
+                    selected: Studies.regime == "contemplation";
+                    activated => { Studies.set-regime("contemplation"); }
+                }
+            }
+
+            // ── Non-collapsible header: identity + capitalization block ──
+            Rectangle {
+                background: Tokens.surface;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+                border-radius: Tokens.radius;
+
+                VerticalLayout {
+                    padding: Tokens.space-16;
+                    spacing: Tokens.space-12;
+
+                    // Identity line: ticker · devise · créée le · méthode.
+                    HorizontalLayout {
+                        spacing: Tokens.space-16;
+                        Text {
+                            text: root.header.ticker;
+                            color: Tokens.text-high;
+                            font-size: Tokens.font-h2;
+                            font-weight: Tokens.weight-semibold;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: @tr("Devise : {}", root.header.currency);
+                                color: Tokens.text-mid;
+                                font-size: Tokens.font-caption;
+                            }
+                            Text {
+                                text: @tr("Créée le {}", root.header.created-at);
+                                color: Tokens.text-low;
+                                font-family: Tokens.font-numeric;
+                                font-size: Tokens.font-caption;
+                            }
+                        }
+                        Text {
+                            text: @tr("Méthode : {}", root.header.method-version);
+                            color: Tokens.text-low;
+                            font-family: Tokens.font-numeric;
+                            font-size: Tokens.font-caption;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    Rectangle { height: Tokens.border; background: Tokens.separator; }
+
+                    // Capitalization block (faithful header table region). The contract does not yet
+                    // carry these fields, so each value is a faithful empty slot — the BLOCK exists
+                    // and is recognizable; it is not populated from non-existent data.
+                    Text {
+                        text: @tr("Capitalisation");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        font-weight: Tokens.weight-medium;
+                    }
+                    HorizontalLayout {
+                        spacing: 0;
+                        GridLabelCell { label: @tr("Actions en circulation"); }
+                        GridCell { value: FormConst.empty-slot; }
+                        GridLabelCell { label: @tr("Dette à long terme"); }
+                        GridCell { value: FormConst.empty-slot; }
+                    }
+                    HorizontalLayout {
+                        spacing: 0;
+                        GridLabelCell { label: @tr("Actions privilégiées"); }
+                        GridCell { value: FormConst.empty-slot; }
+                        GridLabelCell { label: @tr("Valeur comptable / action"); }
+                        GridCell { value: FormConst.empty-slot; }
+                    }
+                }
+            }
+
+            // ── §1 — Analyse visuelle (chart is a PLACEHOLDER; 2.8) ──
+            CollapsibleSection {
+                number: "§1";
+                title: @tr("Analyse visuelle des ventes, bénéfices & prix");
+                fold-summary: @tr("Croissance BPA est. — · ventes —");
+                open: Studies.folds[0];
+                toggled(v) => { Studies.toggle-fold(0, v); }
+
+                PlaceholderRegion { caption: @tr("Graphique disponible prochainement"); }
+
+                HorizontalLayout {
+                    spacing: 0;
+                    GridLabelCell { label: @tr("Croissance des ventes (TCAC)"); }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridLabelCell { label: @tr("Croissance du BPA (TCAC)"); }
+                    GridCell { value: FormConst.empty-slot; }
+                }
+                HorizontalLayout {
+                    spacing: 0;
+                    GridLabelCell { label: @tr("Croissance projetée des ventes"); }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridLabelCell { label: @tr("Croissance projetée du BPA"); }
+                    GridCell { value: FormConst.empty-slot; }
+                }
+            }
+
+            // ── §2 — Évaluation de la gestion (management grid) ──
+            CollapsibleSection {
+                number: "§2";
+                title: @tr("Évaluation de la gestion");
+                fold-summary: @tr("Marge — · ROE —");
+                open: Studies.folds[1];
+                toggled(v) => { Studies.toggle-fold(1, v); }
+
+                // Header row: row-label column + 5 year columns + Moy + Tendance.
+                HorizontalLayout {
+                    spacing: 0;
+                    GridLabelCell { label: @tr("Indicateur"); horizontal-stretch: 2; }
+                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
+                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
+                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
+                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
+                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
+                    GridLabelCell { label: @tr("Moy. 5 ans"); }
+                    GridLabelCell { label: @tr("Tendance"); }
+                }
+                HorizontalLayout {
+                    spacing: 0;
+                    GridLabelCell { label: @tr("PTP — Bén. av. impôt ÷ ventes"); horizontal-stretch: 2; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                }
+                HorizontalLayout {
+                    spacing: 0;
+                    GridLabelCell { label: @tr("ROE — BPA ÷ valeur comptable/action"); horizontal-stretch: 2; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: FormConst.empty-slot; }
+                }
+            }
+
+            // ── §3 — Historique cours / bénéfices (A–H lettered P/E table) ──
+            CollapsibleSection {
+                number: "§3";
+                title: @tr("Historique cours / bénéfices");
+                fold-summary: @tr("PER moy — · courant —");
+                open: Studies.folds[2];
+                toggled(v) => { Studies.toggle-fold(2, v); }
+
+                // Column header row: Année + lettered boxes A…H with formula/field captions.
+                HorizontalLayout {
+                    spacing: 0;
+                    PeHeaderCell { letter: @tr("Année"); caption: ""; }
+                    PeHeaderCell { letter: "A"; caption: @tr("Haut"); }
+                    PeHeaderCell { letter: "B"; caption: @tr("Bas"); }
+                    PeHeaderCell { letter: "C"; caption: @tr("BPA"); }
+                    PeHeaderCell { letter: "D"; caption: "A÷C"; }
+                    PeHeaderCell { letter: "E"; caption: "B÷C"; }
+                    PeHeaderCell { letter: "F"; caption: @tr("Div./action"); }
+                    PeHeaderCell { letter: "G"; caption: "F÷C×100"; }
+                    PeHeaderCell { letter: "H"; caption: "F÷B×100"; }
+                }
+                // Year rows (data-driven; faithful empties until 2.4 fills them).
+                for pe in root.pe-rows: PeTableRow { pe: pe; }
+                // Summary rows — faithful labels, value slots empty until 2.6.
+                PeSummaryRow { label: @tr("Total"); value: FormConst.empty-slot; }
+                PeSummaryRow { label: @tr("Moyenne"); value: FormConst.empty-slot; }
+                PeSummaryRow { label: @tr("PER moyen"); value: FormConst.empty-slot; }
+                PeSummaryRow { label: @tr("PER courant"); value: FormConst.empty-slot; }
+            }
+
+            // ── §4 — Évaluation du risque & de la récompense (zone bar is a PLACEHOLDER; 2.6) ──
+            CollapsibleSection {
+                number: "§4";
+                title: @tr("Évaluation du risque & de la récompense — 5 ans");
+                fold-summary: @tr("Zone — · H/B —");
+                open: Studies.folds[3];
+                toggled(v) => { Studies.toggle-fold(3, v); }
+
+                CalcRow { label: @tr("A · Prix haut"); formula: @tr("PER haut moy. × BPA est. haut"); result: FormConst.empty-slot; }
+                CalcRow { label: @tr("B(a) · PER bas moy. × BPA est. bas"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("B(b) · Prix bas moyen 5 ans"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("B(c) · Plus bas sévère récent"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("B(d) · Soutenu par dividende"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("B · Prix bas prévu (sélectionné)"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("C · Zonage"); formula: @tr("fourchette ÷ 3"); result: FormConst.empty-slot; }
+                CalcRow { label: @tr("D · Ratio hausse/baisse"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("E · Appréciation potentielle"); formula: ""; result: FormConst.empty-slot; }
+
+                PlaceholderRegion {
+                    caption: @tr("Barre de zonage disponible prochainement");
+                    region-height: Tokens.space-48;
+                }
+            }
+
+            // ── §5 — Potentiel à 5 ans ──
+            CollapsibleSection {
+                number: "§5";
+                title: @tr("Potentiel à 5 ans");
+                fold-summary: @tr("Rdt annuel total —");
+                open: Studies.folds[4];
+                toggled(v) => { Studies.toggle-fold(4, v); }
+
+                CalcRow { label: @tr("Rendement courant"); formula: @tr("div. ÷ prix × 100"); result: FormConst.empty-slot; }
+                CalcRow { label: @tr("Rendement moyen 5 ans"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("Appréciation annualisée"); formula: @tr("appr.% ÷ 5"); result: FormConst.empty-slot; }
+                CalcRow { label: @tr("Rendement annuel total"); formula: @tr("appréciation + rendement moyen"); result: FormConst.empty-slot; }
+            }
+        }
+    }
+}

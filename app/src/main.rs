@@ -23,18 +23,19 @@
 //! This axis is strictly distinct from the NAIC↔neutral label set (`labels.rs`), which is a
 //! runtime data table of method vocabulary, not a translation.
 
-// Story 2.2 puts `contract`, `persistence`, `uuid` and `chrono` onto the runtime path, so the
-// crate-wide allow Story 2.1 carried now covers a SHRUNK set: only `ingestion`, `report` and
-// `tokio` remain unused (they light up in Epic 3 — ingestion/report data flow, tokio async
-// provider I/O). `core` is used by the test-only posture gate, which this lint does not count.
-// (Scoping a crate-level lint allow to specific deps is not expressible; the comment is the
-// scope of record, re-verified each story.)
+// Story 2.2 put `contract`, `persistence`, `uuid` and `chrono` onto the runtime path; Story 2.3
+// adds `core` (the faithful form header shows `core::METHOD_VERSION`, a static method-identity
+// `&str` — display, NOT the forbidden engine call). So the crate-wide allow now covers a SHRUNK
+// set: only `ingestion`, `report` and `tokio` remain unused (they light up in Epic 3 —
+// ingestion/report data flow, tokio async provider I/O). (Scoping a crate-level lint allow to
+// specific deps is not expressible; the comment is the scope of record, re-verified each story.)
 #![allow(unused_crate_dependencies)]
 
 mod clock;
 mod config;
 mod labels;
 mod posture;
+mod regime;
 mod state;
 mod theme;
 mod viewmodel;
@@ -47,8 +48,9 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use uuid::Uuid;
 
 use crate::clock::{SystemClock, UuidGen};
-use crate::config::AppConfig;
+use crate::config::{AppConfig, StudyViewState};
 use crate::labels::LabelSet;
+use crate::regime::Regime;
 use crate::state::JournalState;
 use crate::theme::Theme;
 use crate::viewmodel::format::{format_amount, NumberFormat};
@@ -91,6 +93,16 @@ fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     studies.set_read_only(state.is_read_only());
 }
 
+/// Mirror a per-study view-state (regime + fold flags) into the `Studies` global and swap the
+/// regime-driven token snapshot. The single place the UI's fold/regime state is pushed, so the
+/// open-study restore and the toggle/regime callbacks stay consistent (one source of truth).
+fn push_view_state(ui: &MainWindow, view_state: &StudyViewState) {
+    let studies = ui.global::<Studies>();
+    studies.set_regime(view_state.regime.as_str().into());
+    studies.set_folds(ModelRc::new(VecModel::from(view_state.folds.to_vec())));
+    regime::apply(ui, view_state.regime);
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // Minimal logging: tracing carries the events; a real subscriber (ADD15 rotating logs) is
     // deferred — see the Story 2.1 GitHub issue. Until then load warnings also go to stderr.
@@ -130,6 +142,10 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     }
     let journal_state = Rc::new(RefCell::new(journal_state));
+
+    // The id (stringified UUID) of the study whose form is currently open, so the fold/regime
+    // callbacks know which `study_view_state` entry to mutate. `None` = the dashboard list view.
+    let current_study: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
 
     let ui = MainWindow::new()?;
 
@@ -186,24 +202,102 @@ fn main() -> Result<(), slint::PlatformError> {
             });
     }
 
-    // Open-study intent: reopen with full state and show the minimal restore view (the faithful
-    // SSG form is Story 2.3). Money surfaces as formatted strings via the locale helper.
+    // Open-study intent: reopen with full state and mount the faithful §1–§5 form (Story 2.3).
+    // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and
+    // the persisted per-study fold/regime view-state is restored (default = Entry + all open).
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(&journal_state);
         let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
         ui.global::<Studies>().on_open_study(move |id_text| {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
             let Ok(id) = Uuid::parse_str(&id_text) else {
                 return;
             };
-            if let Some(study) = journal_state.borrow().get_study(id) {
-                let format = config.borrow().number_format;
-                let (title, body) = viewmodel::studies::detail(&study, format);
-                studies.set_detail_title(title.into());
-                studies.set_detail_body(body.into());
+            let Some(study) = journal_state.borrow().get_study(id) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            studies.set_form_header(viewmodel::form::header(&study));
+            studies.set_pe_rows(ModelRc::new(VecModel::from(viewmodel::form::pe_rows(
+                &study, format,
+            ))));
+            let view_state = config
+                .borrow()
+                .study_view_state
+                .get(id_text.as_str())
+                .cloned()
+                .unwrap_or_default();
+            push_view_state(&ui, &view_state);
+            *current_study.borrow_mut() = Some(id_text.to_string());
+            studies.set_study_open(true);
+        });
+    }
+
+    // Fold a section: mutate this study's `study_view_state` (validate index → mutate → persist), then
+    // push the new state back (one source of truth). Mirrors the 2.2 Prefs persistence shape — no
+    // silent `.ok()`: a save failure surfaces via `persist`.
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let path = config_path.clone();
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>().on_toggle_fold(move |index, open| {
+            let Some(id) = current_study.borrow().clone() else {
+                return;
+            };
+            if !(0..regime::SECTION_COUNT as i32).contains(&index) {
+                return;
             }
+            let ui = ui_weak.unwrap();
+            let new_state = {
+                let mut cfg = config.borrow_mut();
+                let entry = cfg.study_view_state.entry(id).or_default();
+                entry.folds[index as usize] = open;
+                entry.clone()
+            };
+            persist(path.as_ref(), &config.borrow());
+            push_view_state(&ui, &new_state);
+        });
+    }
+
+    // Switch regime: apply the regime's fold preset + swap the regime token snapshot, persist, push.
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let path = config_path.clone();
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>().on_set_regime(move |value| {
+            let Some(new_regime) = Regime::parse(&value) else {
+                return;
+            };
+            let Some(id) = current_study.borrow().clone() else {
+                return;
+            };
+            // Selecting the already-active regime is a no-op (AC3: only an actual *switch* applies
+            // the fold preset). Re-applying the preset here would silently clobber the user's manual
+            // fold edits made within this regime.
+            let current_regime = config
+                .borrow()
+                .study_view_state
+                .get(&id)
+                .map(|state| state.regime)
+                .unwrap_or_default();
+            if current_regime == new_regime {
+                return;
+            }
+            let ui = ui_weak.unwrap();
+            let new_state = {
+                let mut cfg = config.borrow_mut();
+                let entry = cfg.study_view_state.entry(id).or_default();
+                entry.regime = new_regime;
+                entry.folds = new_regime.fold_preset();
+                entry.clone()
+            };
+            persist(path.as_ref(), &config.borrow());
+            push_view_state(&ui, &new_state);
         });
     }
 

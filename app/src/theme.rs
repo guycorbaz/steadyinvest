@@ -54,6 +54,9 @@ pub struct Palette {
     pub zone_alpha: f32,
     /// Keyboard focus-ring ink (NFR-U2).
     pub focus: u32,
+    /// Cell grid-line ink for the faithful SSG tables (Story 2.3) — a hair away from `separator`
+    /// so the 1 px borders read as a grid against the surface in both themes.
+    pub grid_line: u32,
 }
 
 /// Dark ink scale (the default).
@@ -70,6 +73,7 @@ pub const DARK: Palette = Palette {
     zone_sell: 0xD55E00,
     zone_alpha: 0.36,
     focus: 0xB8BDC7,
+    grid_line: 0x343842,
 };
 
 /// Light ink scale.
@@ -86,6 +90,7 @@ pub const LIGHT: Palette = Palette {
     zone_sell: 0xD55E00,
     zone_alpha: 0.165,
     focus: 0x3F454F,
+    grid_line: 0xD2D5DC,
 };
 
 fn color(rgb: u32) -> slint::Color {
@@ -111,6 +116,7 @@ pub fn apply(ui: &crate::MainWindow, theme: Theme) {
     tokens.set_zone_sell(color(palette.zone_sell));
     tokens.set_zone_alpha(palette.zone_alpha);
     tokens.set_focus(color(palette.focus));
+    tokens.set_grid_line(color(palette.grid_line));
 }
 
 #[cfg(test)]

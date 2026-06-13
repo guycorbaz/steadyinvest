@@ -9,9 +9,11 @@
 //! destroyed (validate-before-mutate, 1.10 lesson).
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::labels::LabelSet;
+use crate::regime::{Regime, SECTION_COUNT};
 use crate::theme::Theme;
 use crate::viewmodel::format::NumberFormat;
 
@@ -21,6 +23,32 @@ const DEFAULT_WINDOW_HEIGHT: u32 = 720;
 /// Sanity bounds for a persisted size — outside means a damaged value, fall back.
 const MIN_SANE_WINDOW: u32 = 320;
 const MAX_SANE_WINDOW: u32 = 16_384;
+
+/// Per-study UI view-state (Story 2.3, FR56): the active reading regime and the per-section
+/// open/closed flags (§1–§5). This is **UI view-state**, so it lives in app-config (ADD7) — NEVER
+/// in the journal or `contract::Study` (an immutable, versioned domain snapshot). Container-level
+/// `#[serde(default)]` so a partial entry (regime present, folds missing — or vice versa) still
+/// loads, falling back to the regime's own preset.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StudyViewState {
+    pub regime: Regime,
+    /// One open/closed flag per section §1–§5 (`true` = open).
+    pub folds: [bool; SECTION_COUNT],
+}
+
+impl Default for StudyViewState {
+    fn default() -> Self {
+        // A never-customised view defaults to the entry regime and its all-open preset — the same
+        // state a freshly-opened study shows, so a missing/partial entry is indistinguishable from
+        // "opened, never folded".
+        let regime = Regime::default();
+        StudyViewState {
+            regime,
+            folds: regime.fold_preset(),
+        }
+    }
+}
 
 /// Everything the app remembers across launches. Later stories append fields
 /// (fold/regime state in 2.3, provider prefs in 3.2) — append-only, defaults required.
@@ -41,6 +69,12 @@ pub struct AppConfig {
     /// so an older config without the field still loads.
     #[serde(default)]
     pub journal_path: Option<PathBuf>,
+    /// Per-study reading-regime + fold view-state (Story 2.3, FR56), keyed by the stringified study
+    /// id. Absent key ⇒ the study has never been folded ⇒ [`StudyViewState::default`] (entry regime,
+    /// all open). Append-only `#[serde(default)]`, exactly like `journal_path`: a 2.1/2.2-era config
+    /// without the field still loads. App-config only — never the journal (ADD7).
+    #[serde(default)]
+    pub study_view_state: BTreeMap<String, StudyViewState>,
 }
 
 impl Default for AppConfig {
@@ -53,6 +87,7 @@ impl Default for AppConfig {
             label_set: LabelSet::default(),
             number_format: NumberFormat::default(),
             journal_path: None,
+            study_view_state: BTreeMap::new(),
         }
     }
 }
@@ -167,6 +202,13 @@ mod tests {
             label_set: LabelSet::Neutral,
             number_format: NumberFormat::Point,
             journal_path: Some(PathBuf::from("/tmp/steadyinvest/journal.db")),
+            study_view_state: BTreeMap::from([(
+                "11111111-1111-1111-1111-111111111111".to_string(),
+                StudyViewState {
+                    regime: Regime::Contemplation,
+                    folds: [true, false, false, true, false],
+                },
+            )]),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
@@ -219,6 +261,113 @@ mod tests {
         );
         assert_eq!(loaded.config.journal_path, None, "the new field defaults");
         assert_eq!(loaded.config.window_width, 1280, "known fields still load");
+    }
+
+    #[test]
+    fn old_config_without_study_view_state_loads_and_defaults_the_field() {
+        // The append-only rail (Story 2.3): a 2.1/2.2-era config has no `study_view_state`. It must
+        // still load, with the new field defaulting to an empty map — no migration, no failure.
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        std::fs::write(
+            &path,
+            r#"{ "window_width": 1280, "theme": "light", "journal_path": "/x/journal.db" }"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert!(
+            loaded.warning.is_none(),
+            "an older config is not a fallback"
+        );
+        assert!(
+            loaded.config.study_view_state.is_empty(),
+            "the new view-state field defaults empty"
+        );
+        assert_eq!(loaded.config.window_width, 1280, "known fields still load");
+    }
+
+    #[test]
+    fn study_view_state_round_trips_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        let mut state = BTreeMap::new();
+        state.insert(
+            "22222222-2222-2222-2222-222222222222".to_string(),
+            StudyViewState {
+                regime: Regime::Contemplation,
+                folds: [true, false, true, false, true],
+            },
+        );
+        let config = AppConfig {
+            study_view_state: state,
+            ..AppConfig::default()
+        };
+        save(&path, &config).unwrap();
+        assert_eq!(load(&path).config.study_view_state, config.study_view_state);
+    }
+
+    #[test]
+    fn partial_view_state_entry_falls_back_to_the_regime_preset() {
+        // A view-state entry that carries only the regime (no `folds`) loads, with `folds` defaulting
+        // to the regime's preset rather than an all-false (all-collapsed) accident.
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        std::fs::write(
+            &path,
+            r#"{ "study_view_state": { "abc": { "regime": "entry" } } }"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert!(loaded.warning.is_none());
+        assert_eq!(
+            loaded.config.study_view_state.get("abc").unwrap().folds,
+            Regime::Entry.fold_preset(),
+            "a missing folds array defaults to the regime preset, never all-collapsed"
+        );
+    }
+
+    #[test]
+    fn study_view_state_default_is_entry_all_open() {
+        let s = StudyViewState::default();
+        assert_eq!(s.regime, Regime::Entry);
+        assert_eq!(s.folds, [true; SECTION_COUNT]);
+    }
+
+    #[test]
+    fn fold_and_regime_edits_survive_a_simulated_relaunch() {
+        // Mirrors the `main.rs` toggle-fold / set-regime callback path (`entry(id).or_default()` →
+        // mutate → persist) and then reloads from the real on-disk file — the headless proof of the
+        // AC2/AC6 fold+regime restore. (The in-GUI click-through is human/AT-SPI verified, as 2.1/2.2
+        // recorded for the sandbox.)
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        let id = "33333333-3333-3333-3333-333333333333".to_string();
+
+        // Launch 1: a never-opened study defaults to Entry + all-open; the user folds §3, then
+        // switches to contemplation (which applies that regime's preset).
+        let mut cfg = AppConfig::default();
+        cfg.study_view_state.entry(id.clone()).or_default().folds[2] = false;
+        save(&path, &cfg).unwrap();
+
+        let mut cfg = load(&path).config;
+        {
+            let entry = cfg.study_view_state.entry(id.clone()).or_default();
+            entry.regime = Regime::Contemplation;
+            entry.folds = Regime::Contemplation.fold_preset();
+        }
+        save(&path, &cfg).unwrap();
+
+        // Launch 2: reopen → the persisted regime + folds come back verbatim.
+        let restored = load(&path).config;
+        let view = restored.study_view_state.get(&id).expect("entry persisted");
+        assert_eq!(view.regime, Regime::Contemplation, "regime restored");
+        assert_eq!(
+            view.folds,
+            Regime::Contemplation.fold_preset(),
+            "the contemplation fold preset restored on reopen"
+        );
+        // An untouched study still defaults (absence ⇒ Entry + all open).
+        assert!(!restored.study_view_state.contains_key("never-opened"));
     }
 
     #[test]

@@ -107,7 +107,7 @@ mod tests {
     fn ui_tr_strings_are_neutral_no_banned_verb() {
         let files = slint_files();
         assert!(
-            files.len() >= 8,
+            files.len() >= 11,
             "posture gate found only {} .slint files — scan broken?",
             files.len()
         );
@@ -119,8 +119,12 @@ mod tests {
                 total += 1;
             }
         }
+        // Story 2.3 adds the whole faithful §1–§5 form's labels (section titles, column/row labels,
+        // formula captions, info-scent summaries, regime labels, header captions), so the scanned
+        // population jumped well past the 2.1/2.2 floor. Keep the floor strict so a future scan that
+        // silently stops finding literals (a broken extractor) fails loudly.
         assert!(
-            total >= 15,
+            total >= 60,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -135,27 +139,24 @@ mod tests {
 
     #[test]
     fn rust_side_user_facing_messages_are_neutral_no_banned_verb() {
-        // Story 2.2 adds Rust-side user-facing strings (create-dialog refusals, journal banners,
-        // the restore-view labels) that never pass through `@tr()`, so the .slint scan above
-        // misses them. They are collected in two `USER_FACING_MESSAGES` slices for exactly this
-        // gate (FR13). Persistence error messages spliced into some banners are gated in their own
-        // crate's posture test, so they are not re-scanned here.
+        // Story 2.2 adds Rust-side user-facing strings (create-dialog refusals, journal banners)
+        // that never pass through `@tr()`, so the .slint scan above misses them. They are collected
+        // in `state::USER_FACING_MESSAGES` for exactly this gate (FR13). Persistence error messages
+        // spliced into some banners are gated in their own crate's posture test, not re-scanned here.
+        //
+        // Story 2.3 note: every NEW user-facing string the faithful form introduces (section titles,
+        // column/row labels, formula captions, info-scent summaries, regime labels, header field
+        // captions) is a French `@tr()` literal in `ui/**/*.slint`, so the `.slint` scan above covers
+        // it — the form adapter (`viewmodel/form.rs`) emits only data + the wordless em-dash slot, so
+        // it has no label inventory to register here.
         for message in crate::state::USER_FACING_MESSAGES {
             assert_neutral(message, "state.rs (journal/create notices)");
-        }
-        for message in crate::viewmodel::studies::USER_FACING_MESSAGES {
-            assert_neutral(message, "viewmodel/studies.rs (restore-view labels)");
         }
         // Guard the count so a future message added without registering it here is caught.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
             8,
             "state.rs message inventory changed — register the new notice"
-        );
-        assert_eq!(
-            crate::viewmodel::studies::USER_FACING_MESSAGES.len(),
-            6,
-            "studies.rs restore-view label inventory changed — register the new label"
         );
     }
 

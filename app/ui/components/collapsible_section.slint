@@ -1,0 +1,120 @@
+// A reusable collapsible section (Story 2.3, FR56): a fold header (chevron glyph + number + title)
+// that toggles the body open/closed, and — when closed — a one-line, fact-stating information-scent
+// summary beside the title so a folded section still tells the reader its key figures.
+//
+// Accessibility (NFR-U1/U2, the 2.1 pattern): the header is a `FocusScope` button, Enter/Space
+// toggles, the focus ring is always visible, and the open/closed state is carried by a chevron GLYPH
+// + the summary line — never colour alone. Constant geometry: the header height is token-fixed, so a
+// regime fold-preset swap changes which bodies show, never a row height (UX-DR6).
+//
+// All colours/sizes read `Tokens`; no hard-coded hex/px (the 2.1 governance rule).
+
+import { Tokens } from "../tokens.slint";
+
+export component CollapsibleSection inherits Rectangle {
+    in property <string> number; // "§1" … "§5"
+    in property <string> title;
+    in property <string> fold-summary; // shown only when closed — a neutral fact line, not advice
+    in property <bool> open: true;
+    callback toggled(bool); // requested new open-state
+
+    background: Tokens.surface;
+    border-width: Tokens.border;
+    border-color: Tokens.separator;
+    border-radius: Tokens.radius;
+
+    VerticalLayout {
+        // ── Fold header (constant geometry: fixed height regardless of open/closed) ──
+        header := Rectangle {
+            height: Tokens.row-height + Tokens.space-8;
+            background: touch.has-hover ? Tokens.surface-alt : transparent;
+            border-radius: Tokens.radius;
+            border-width: fs.has-focus ? Tokens.focus-border : 0;
+            border-color: Tokens.focus;
+
+            // Assistive-tech semantics: a disclosure is a checkable button whose checked state
+            // mirrors "open"; the default action toggles it.
+            accessible-role: button;
+            accessible-label: root.number + " " + root.title;
+            accessible-checkable: true;
+            accessible-checked: root.open;
+            accessible-action-default => {
+                root.toggled(!root.open);
+            }
+
+            fs := FocusScope {
+                key-pressed(event) => {
+                    if (event.text == Key.Return || event.text == " ") {
+                        root.toggled(!root.open);
+                        return accept;
+                    }
+                    reject
+                }
+            }
+
+            touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    fs.focus();
+                    root.toggled(!root.open);
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: Tokens.space-12;
+                padding-right: Tokens.space-12;
+                spacing: Tokens.space-8;
+
+                // Chevron glyph — rotates with state (▾ open / ▸ closed). A glyph, not colour: the
+                // fold state is legible with colour stripped.
+                Text {
+                    text: root.open ? "▾" : "▸";
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-body;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.number;
+                    color: Tokens.text-mid;
+                    font-family: Tokens.font-numeric;
+                    font-size: Tokens.font-h3;
+                    font-weight: Tokens.weight-semibold;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.title;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-h3;
+                    font-weight: Tokens.weight-semibold;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                // Information-scent summary — only when folded. Right-aligned, low ink, numeric font.
+                if !root.open: Text {
+                    text: root.fold-summary;
+                    color: Tokens.text-low;
+                    font-family: Tokens.font-numeric;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                    horizontal-alignment: right;
+                }
+            }
+        }
+
+        // ── Body — collapses to height 0 when closed (clipped). `@children` must stay
+        //    unconditional (Slint forbids it inside an `if`), so we fold by height, not by
+        //    presence. This is the fold; the height change here is intended (≠ a regime re-layout).
+        Rectangle {
+            background: transparent;
+            clip: true;
+            height: root.open ? body.preferred-height : 0px;
+
+            body := VerticalLayout {
+                padding: Tokens.space-12;
+                spacing: Tokens.space-8;
+                @children
+            }
+        }
+    }
+}

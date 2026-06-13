@@ -28,6 +28,14 @@ export global Tokens {
     in-out property <float> zone-alpha: 0.36;
     // Always-visible keyboard focus ring ink (NFR-U2).
     in-out property <color> focus: #B8BDC7;
+    // Grid-line ink for the faithful SSG cell grid (§2/§3) — a hair lighter than `separator` so
+    // the 1 px cell borders read as a table, not a set of boxes (Story 2.3).
+    in-out property <color> grid-line: #2A2E37;
+    // Regime-driven emphasis alpha (Story 2.3, FR56): 1.0 in entry, attenuated in contemplation so
+    // the editing affordances calm down at the judgment moment. The ONE token the regime swap moves
+    // in 2.3; 2.5 (markers) / 2.6 (zones) hang their deltas on the same hook. Colour/alpha only —
+    // NEVER a geometry value, so a regime switch never re-lays-out (UX-DR6, constant geometry).
+    in-out property <float> regime-emphasis: 1.0;
 
     // ── Metric/typo family (quasi-static) ──
     // 4 px spacing scale: 4 · 8 · 12 · 16 · 24 · 32 · 48.

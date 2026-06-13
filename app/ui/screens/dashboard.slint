@@ -1,8 +1,9 @@
 // Études — the studies dashboard (Story 2.2): create a study (ticker + native currency), see it
 // listed (StudySummary rows in deterministic order), and reopen it with full state. Scope is
 // list + open only — search/sort/filter/archive/delete is 2.12, the actionable empty state +
-// legend is 2.13 (a calm "no studies yet" line is enough here). The SSG form is 2.3, so the
-// reopened-study view is a faithful-but-minimal restore proof, not the §1–§5 layout.
+// legend is 2.13 (a calm "no studies yet" line is enough here). Story 2.3: reopening a study now
+// mounts the faithful collapsible §1–§5 `StudyScreen` (replacing the 2.2 minimal restore view);
+// the create flow + list stay here and the form's "‹ Retour" returns to them.
 //
 // Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
@@ -10,6 +11,7 @@ import { Tokens } from "../tokens.slint";
 import { Labels, Studies, StudyRow } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
+import { StudyScreen } from "study_screen.slint";
 
 // One list row: ticker + date + status, openable by click or keyboard (Enter/Space). Default
 // assistive action reopens the study.
@@ -77,21 +79,26 @@ component StudyListRow inherits Rectangle {
 }
 
 export component DashboardScreen inherits Rectangle {
-    // One submit path shared by the Créer button and the Enter key in either field.
-    // Clear the fields only when a study was actually written — a recoverable refusal (blank
-    // field / read-only) keeps the user's input so they can fix it without retyping.
-    function submit-create() {
-        if (Studies.create-study(ticker.text, currency.text)) {
-            ticker.text = "";
-            currency.text = "";
-            ticker.focus();
-        }
-    }
+    // A reopened study mounts the faithful §1–§5 form (Story 2.3); otherwise the list + create flow
+    // (2.2). The form's own "‹ Retour" control clears `study-open` to return here.
+    if Studies.study-open: StudyScreen { }
 
-    Flickable {
+    if !Studies.study-open: Flickable {
         viewport-height: content.preferred-height;
 
         content := VerticalLayout {
+            // One submit path shared by the Créer button and the Enter key in either field. Declared
+            // here (not at component root) so it can reach the field ids, which live in this
+            // conditional branch. Clear the fields only when a study was actually written — a
+            // recoverable refusal keeps the user's input so they can fix it without retyping.
+            function submit-create() {
+                if (Studies.create-study(ticker.text, currency.text)) {
+                    ticker.text = "";
+                    currency.text = "";
+                    ticker.focus();
+                }
+            }
+
             alignment: start;
             padding: Tokens.space-24;
             spacing: Tokens.space-16;
@@ -112,21 +119,21 @@ export component DashboardScreen inherits Rectangle {
                     placeholder: @tr("Symbole (p. ex. NESN)");
                     width: 220px;
                     accepted => {
-                        root.submit-create();
+                        content.submit-create();
                     }
                 }
                 currency := TextField {
                     placeholder: @tr("Devise (p. ex. CHF)");
                     width: 140px;
                     accepted => {
-                        root.submit-create();
+                        content.submit-create();
                     }
                 }
                 create := ActionButton {
                     label: @tr("Créer l'étude");
                     enabled: !Studies.read-only;
                     clicked => {
-                        root.submit-create();
+                        content.submit-create();
                     }
                 }
             }
@@ -163,33 +170,6 @@ export component DashboardScreen inherits Rectangle {
                     entry: studyrow;
                     open => {
                         Studies.open-study(studyrow.id);
-                    }
-                }
-            }
-
-            // ── Reopened-study restore view (minimal — full SSG form is 2.3) ──
-            if Studies.detail-title != "": Rectangle {
-                background: Tokens.surface;
-                border-radius: Tokens.radius;
-                border-width: Tokens.border;
-                border-color: Tokens.separator;
-
-                VerticalLayout {
-                    padding: Tokens.space-16;
-                    spacing: Tokens.space-8;
-
-                    Text {
-                        text: Studies.detail-title;
-                        color: Tokens.text-high;
-                        font-size: Tokens.font-h3;
-                        font-weight: Tokens.weight-semibold;
-                    }
-                    Text {
-                        text: Studies.detail-body;
-                        color: Tokens.text-mid;
-                        font-family: Tokens.font-numeric;
-                        font-size: Tokens.font-caption;
-                        wrap: word-wrap;
                     }
                 }
             }

@@ -1,5 +1,5 @@
 # generated: 2026-06-09
-# last_updated: 2026-06-09
+# last_updated: 2026-06-13
 # project: steadyinvest
 # project_key: NOKEY
 # tracking_system: file-system
@@ -42,6 +42,13 @@ generated: 2026-06-09
 last_updated: 2026-06-13
 # 2026-06-13: story 2-2 dev complete → review (issue #14 closed; 4 gates green --locked).
 # 2026-06-13: story 2-2 review complete → done (1 MEDIUM auto-fixed: keep input on refusal; 4 gates re-green).
+# 2026-06-13: story 2-3 created (faithful collapsible SSG form §1–§5) → ready-for-dev. app-only UI-structure story;
+#             scope guarded: NO engine/verdict/zone (2.6), NO chart (2.8), NO data entry (2.4), NO markers (2.5).
+# 2026-06-13: story 2-3 dev complete → review. app-only; pinned surfaces + Cargo.lock untouched; 4 gates green --locked;
+#             app tests 39→53; interpretations → issue #20; AC6 GUI click-through left for human/AT-SPI (sandbox).
+# 2026-06-13: story 2-3 review complete → done. Adversarial review: 4 gates re-green --locked, pinned surfaces +
+#             Cargo.lock re-diffed empty, 53/53 app tests. 1 LOW auto-fixed (re-selecting active regime no longer
+#             clobbers manual folds); 2 LOWs recorded for 2.4/2.6. No CRITICAL/HIGH/MEDIUM.
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -67,7 +74,7 @@ development_status:
   epic-2: in-progress
   2-1-application-shell-theme-disclaimer: done
   2-2-create-save-reopen-study: done
-  2-3-faithful-collapsible-ssg-form: backlog
+  2-3-faithful-collapsible-ssg-form: done
   2-4-manual-data-entry-provenance-coverage: backlog
   2-5-tri-state-validation-soft-lock: backlog
   2-6-numeric-judgment-inputs-verdict-zone-bar: backlog
