@@ -1,0 +1,51 @@
+// A single-line text input primitive (no std-widgets, like ChoiceChip) — token-styled, with a
+// placeholder shown when empty and a visible keyboard focus ring (NFR-U2). Wraps the language's
+// built-in `TextInput` (low-level), which carries its own assistive-tech semantics.
+
+import { Tokens } from "../tokens.slint";
+
+export component TextField inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text <=> input.text;
+    callback accepted();
+
+    height: Tokens.row-height + Tokens.space-4;
+    border-radius: Tokens.radius;
+    background: Tokens.surface-alt;
+    border-width: input.has-focus ? Tokens.focus-border : Tokens.border;
+    border-color: input.has-focus ? Tokens.focus : Tokens.separator;
+    forward-focus: input;
+
+    HorizontalLayout {
+        padding-left: Tokens.space-12;
+        padding-right: Tokens.space-12;
+
+        Rectangle {
+            clip: true;
+
+            placeholder := Text {
+                text: root.placeholder;
+                color: Tokens.text-low;
+                font-size: Tokens.font-body;
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                width: 100%;
+                visible: input.text == "";
+            }
+
+            input := TextInput {
+                color: Tokens.text-high;
+                selection-background-color: Tokens.focus;
+                font-size: Tokens.font-body;
+                font-family: Tokens.font-ui;
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                width: 100%;
+                single-line: true;
+                accepted => {
+                    root.accepted();
+                }
+            }
+        }
+    }
+}

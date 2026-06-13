@@ -25,6 +25,10 @@ directories = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+# Identity + time are injected (ADD15): `uuid` (v4) and `chrono` (RFC3339 UTC) are the ONLY
+# sources of UUIDs / wall-clock timestamps in the app, funnelled through `clock.rs`.
+uuid = { workspace = true }
+chrono = { workspace = true }
 # keyring (OS keychain) is added in Story 3.2 once the correct credential crate is selected.
 
 [dev-dependencies]

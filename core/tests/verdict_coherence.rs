@@ -91,10 +91,18 @@ fn all_green_study() -> Study {
     study.judgment = Judgment {
         estimated_high_eps: Some(money("2.00")),
         estimated_low_eps: Some(money("1.50")),
+        // The four fields added to `contract::Judgment` in Story 2.2 (issue #14). This glue
+        // preview maps only the load-bearing inputs it already exercised, so they stay `None`
+        // here — the mechanical update keeps this construction compiling after the additive
+        // contract change (the four fields' engine mapping is Story 2.6's job).
+        projected_sales_growth_pct: None,
+        projected_eps_growth_pct: None,
         judged_avg_high_pe: Some(money("20")),
         judged_avg_low_pe: Some(money("10")),
         forecast_low_option: study.judgment.forecast_low_option,
+        recent_severe_low: None,
         current_price: Some(money("25")),
+        present_full_year_dividend: None,
     };
     study
 }

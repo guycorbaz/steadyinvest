@@ -1,0 +1,66 @@
+// A plain push-button primitive (no std-widgets, like ChoiceChip) — token-styled, Tab-reachable,
+// Enter/Space activates, visible focus ring (NFR-U1/U2). Assistive-tech: a button whose default
+// action is `clicked`.
+
+import { Tokens } from "../tokens.slint";
+
+export component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        root.activate();
+    }
+
+    function activate() {
+        if (root.enabled) {
+            root.clicked();
+        }
+    }
+
+    height: Tokens.row-height + Tokens.space-4;
+    horizontal-stretch: 0;
+    min-width: Tokens.space-48 * 2;
+    border-radius: Tokens.radius;
+    opacity: root.enabled ? 1.0 : 0.5;
+    background: touch.pressed ? Tokens.surface : Tokens.surface-alt;
+    border-width: fs.has-focus ? Tokens.focus-border : Tokens.border;
+    border-color: fs.has-focus ? Tokens.focus : Tokens.separator;
+
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.activate();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            fs.focus();
+            root.activate();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: Tokens.space-16;
+        padding-right: Tokens.space-16;
+
+        Text {
+            text: root.label;
+            color: Tokens.text-high;
+            font-size: Tokens.font-body;
+            font-weight: Tokens.weight-medium;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+}

@@ -1,33 +1,204 @@
-// Études — neutral placeholder (the actionable empty states of FR58 are Story 2.13; the real
-// dashboard with list/search/sort/filter is 2.2/2.12). The method line reads the runtime label
-// set, so a label-set swap is visible on a real screen, not only in Settings.
+// Études — the studies dashboard (Story 2.2): create a study (ticker + native currency), see it
+// listed (StudySummary rows in deterministic order), and reopen it with full state. Scope is
+// list + open only — search/sort/filter/archive/delete is 2.12, the actionable empty state +
+// legend is 2.13 (a calm "no studies yet" line is enough here). The SSG form is 2.3, so the
+// reopened-study view is a faithful-but-minimal restore proof, not the §1–§5 layout.
+//
+// Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
 import { Tokens } from "../tokens.slint";
-import { Labels } from "../state.slint";
+import { Labels, Studies, StudyRow } from "../state.slint";
+import { TextField } from "../components/text_field.slint";
+import { ActionButton } from "../components/action_button.slint";
 
-export component DashboardScreen inherits Rectangle {
-    VerticalLayout {
-        alignment: start;
-        padding: Tokens.space-24;
+// One list row: ticker + date + status, openable by click or keyboard (Enter/Space). Default
+// assistive action reopens the study.
+component StudyListRow inherits Rectangle {
+    in property <StudyRow> entry;
+    callback open();
+
+    accessible-role: button;
+    accessible-label: root.entry.ticker;
+    accessible-action-default => {
+        root.open();
+    }
+
+    height: Tokens.row-height + Tokens.space-8;
+    border-radius: Tokens.radius;
+    background: touch.has-hover ? Tokens.surface-alt : Tokens.surface;
+    border-width: fs.has-focus ? Tokens.focus-border : Tokens.border;
+    border-color: fs.has-focus ? Tokens.focus : Tokens.separator;
+
+    fs := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.open();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            fs.focus();
+            root.open();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: Tokens.space-12;
+        padding-right: Tokens.space-12;
         spacing: Tokens.space-12;
 
         Text {
-            text: @tr("Études");
+            text: root.entry.ticker;
             color: Tokens.text-high;
-            font-size: Tokens.font-h2;
-            font-weight: Tokens.weight-semibold;
-        }
-
-        Text {
-            text: @tr("Aucune étude pour le moment.");
-            color: Tokens.text-mid;
             font-size: Tokens.font-body;
+            font-weight: Tokens.weight-medium;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
         }
-
         Text {
-            text: @tr("Méthode : {}", Labels.study-method);
+            text: root.entry.created-at;
+            color: Tokens.text-mid;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.entry.status;
             color: Tokens.text-low;
             font-size: Tokens.font-caption;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component DashboardScreen inherits Rectangle {
+    // One submit path shared by the Créer button and the Enter key in either field.
+    // Clear the fields only when a study was actually written — a recoverable refusal (blank
+    // field / read-only) keeps the user's input so they can fix it without retyping.
+    function submit-create() {
+        if (Studies.create-study(ticker.text, currency.text)) {
+            ticker.text = "";
+            currency.text = "";
+            ticker.focus();
+        }
+    }
+
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            alignment: start;
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
+
+            Text {
+                text: @tr("Études");
+                color: Tokens.text-high;
+                font-size: Tokens.font-h2;
+                font-weight: Tokens.weight-semibold;
+            }
+
+            // ── Create a study ──
+            HorizontalLayout {
+                alignment: start;
+                spacing: Tokens.space-8;
+
+                ticker := TextField {
+                    placeholder: @tr("Symbole (p. ex. NESN)");
+                    width: 220px;
+                    accepted => {
+                        root.submit-create();
+                    }
+                }
+                currency := TextField {
+                    placeholder: @tr("Devise (p. ex. CHF)");
+                    width: 140px;
+                    accepted => {
+                        root.submit-create();
+                    }
+                }
+                create := ActionButton {
+                    label: @tr("Créer l'étude");
+                    enabled: !Studies.read-only;
+                    clicked => {
+                        root.submit-create();
+                    }
+                }
+            }
+
+            // ── Neutral banner (errors / read-only / startup notices) ──
+            if Studies.notice != "": Rectangle {
+                background: Tokens.surface;
+                border-radius: Tokens.radius;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+
+                HorizontalLayout {
+                    padding: Tokens.space-12;
+                    Text {
+                        text: Studies.notice;
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            // ── The list (or a calm empty line — full FR58 empty state is 2.13) ──
+            if Studies.rows.length == 0: Text {
+                text: @tr("Aucune étude pour le moment.");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-body;
+            }
+
+            if Studies.rows.length > 0: VerticalLayout {
+                spacing: Tokens.space-4;
+
+                for studyrow in Studies.rows: StudyListRow {
+                    entry: studyrow;
+                    open => {
+                        Studies.open-study(studyrow.id);
+                    }
+                }
+            }
+
+            // ── Reopened-study restore view (minimal — full SSG form is 2.3) ──
+            if Studies.detail-title != "": Rectangle {
+                background: Tokens.surface;
+                border-radius: Tokens.radius;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+
+                VerticalLayout {
+                    padding: Tokens.space-16;
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: Studies.detail-title;
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-h3;
+                        font-weight: Tokens.weight-semibold;
+                    }
+                    Text {
+                        text: Studies.detail-body;
+                        color: Tokens.text-mid;
+                        font-family: Tokens.font-numeric;
+                        font-size: Tokens.font-caption;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            Text {
+                text: @tr("Méthode : {}", Labels.study-method);
+                color: Tokens.text-low;
+                font-size: Tokens.font-caption;
+            }
         }
     }
 }

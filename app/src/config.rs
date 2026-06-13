@@ -22,7 +22,7 @@ const DEFAULT_WINDOW_HEIGHT: u32 = 720;
 const MIN_SANE_WINDOW: u32 = 320;
 const MAX_SANE_WINDOW: u32 = 16_384;
 
-/// Everything the app remembers across launches in 2.1. Later stories append fields
+/// Everything the app remembers across launches. Later stories append fields
 /// (fold/regime state in 2.3, provider prefs in 3.2) — append-only, defaults required.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -33,6 +33,14 @@ pub struct AppConfig {
     pub theme: Theme,
     pub label_set: LabelSet,
     pub number_format: NumberFormat,
+    /// Path of the last-used journal (Story 2.2, ADD7/NFR-R3). `None` until the first journal is
+    /// opened or created; then the app reopens it automatically next launch. Lives here in
+    /// app-config — outside the journal itself (never beside `config.json` in the *config* dir
+    /// either: a default journal goes in the OS *data* dir, see `state::default_journal_path`).
+    /// The location picker + recent-journals list is Story 5-5. Append-only `#[serde(default)]`,
+    /// so an older config without the field still loads.
+    #[serde(default)]
+    pub journal_path: Option<PathBuf>,
 }
 
 impl Default for AppConfig {
@@ -44,6 +52,7 @@ impl Default for AppConfig {
             theme: Theme::default(),
             label_set: LabelSet::default(),
             number_format: NumberFormat::default(),
+            journal_path: None,
         }
     }
 }
@@ -157,6 +166,7 @@ mod tests {
             theme: Theme::Light,
             label_set: LabelSet::Neutral,
             number_format: NumberFormat::Point,
+            journal_path: Some(PathBuf::from("/tmp/steadyinvest/journal.db")),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
@@ -189,6 +199,40 @@ mod tests {
             AppConfig::default().window_width
         );
         assert!(loaded.warning.is_none());
+    }
+
+    #[test]
+    fn old_config_without_journal_path_loads_and_defaults_the_field() {
+        // The append-only rail (Story 2.2): a 2.1-era config file has no `journal_path`. It must
+        // still load, with the new field defaulting to `None` — no migration, no failure.
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        std::fs::write(
+            &path,
+            r#"{ "window_width": 1280, "window_height": 800, "theme": "light" }"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert!(
+            loaded.warning.is_none(),
+            "an older config is not a fallback"
+        );
+        assert_eq!(loaded.config.journal_path, None, "the new field defaults");
+        assert_eq!(loaded.config.window_width, 1280, "known fields still load");
+    }
+
+    #[test]
+    fn journal_path_round_trips_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        let config = AppConfig {
+            journal_path: Some(PathBuf::from(
+                "/home/guy/.local/share/steadyinvest/journal.db",
+            )),
+            ..AppConfig::default()
+        };
+        save(&path, &config).unwrap();
+        assert_eq!(load(&path).config.journal_path, config.journal_path);
     }
 
     #[test]

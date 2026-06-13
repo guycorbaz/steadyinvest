@@ -5006,6 +5006,7 @@ name = "steadyinvest-app"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "chrono",
  "directories",
  "rust_decimal",
  "serde",
@@ -5020,6 +5021,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

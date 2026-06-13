@@ -120,17 +120,29 @@ fn judgment() -> impl Strategy<Value = Judgment> {
         proptest::option::of(money()),
         proptest::option::of(money()),
         proptest::option::of(money()),
+        proptest::option::of(money()),
+        proptest::option::of(money()),
         forecast_low_option(),
         proptest::option::of(money()),
+        proptest::option::of(money()),
+        proptest::option::of(money()),
     )
-        .prop_map(|(hi, lo, php, plp, opt, cur)| Judgment {
-            estimated_high_eps: hi,
-            estimated_low_eps: lo,
-            judged_avg_high_pe: php,
-            judged_avg_low_pe: plp,
-            forecast_low_option: opt,
-            current_price: cur,
-        })
+        .prop_map(
+            |(hi, lo, sales_growth, eps_growth, php, plp, opt, severe_low, cur, dividend)| {
+                Judgment {
+                    estimated_high_eps: hi,
+                    estimated_low_eps: lo,
+                    projected_sales_growth_pct: sales_growth,
+                    projected_eps_growth_pct: eps_growth,
+                    judged_avg_high_pe: php,
+                    judged_avg_low_pe: plp,
+                    forecast_low_option: opt,
+                    recent_severe_low: severe_low,
+                    current_price: cur,
+                    present_full_year_dividend: dividend,
+                }
+            },
+        )
 }
 
 fn study() -> impl Strategy<Value = Study> {

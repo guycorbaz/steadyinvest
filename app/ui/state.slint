@@ -14,6 +14,36 @@ export global Labels {
     in-out property <string> zone-sell;
 }
 
+// One row of the Studies dashboard list — the indexed columns of `persistence::StudySummary`,
+// mapped to display strings by `app/src/viewmodel/studies.rs` (dates/status formatted in Rust,
+// never computed in the UI). `id` is the stringified UUID, passed back verbatim on open.
+export struct StudyRow {
+    id: string,
+    ticker: string,
+    created-at: string,
+    status: string,
+}
+
+// Study-state axis (Story 2.2): create → list → reopen. Owned by the Rust side (`main.rs` wires
+// the callbacks against `state::JournalState`); the UI only renders what Rust pushes here.
+export global Studies {
+    // The current list (deterministic created_at,id order from persistence). Empty = none yet.
+    in-out property <[StudyRow]> rows;
+    // A neutral, fact-stating banner (errors / read-only / startup notices). Empty = hidden.
+    in-out property <string> notice;
+    // True when the open journal is read-only (newer-schema file) — creation is refused.
+    in-out property <bool> read-only;
+    // The reopened study's full-state restore view (minimal in 2.2; the SSG form is 2.3).
+    // Empty title = no study open.
+    in-out property <string> detail-title;
+    in-out property <string> detail-body;
+    // User intents — handled in Rust (validate + persist + refresh).
+    // create-study returns true only when a study was actually written, so the UI keeps the
+    // user's typed input on a recoverable refusal (blank field / read-only / save failure).
+    callback create-study(string, string) -> bool; // ticker, native-currency → written?
+    callback open-study(string); // row id (stringified UUID)
+}
+
 export global Prefs {
     // Current selections, mirrored from AppConfig by the Rust side.
     in-out property <bool> dark-theme: true;

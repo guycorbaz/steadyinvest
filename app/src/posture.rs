@@ -134,6 +134,32 @@ mod tests {
     }
 
     #[test]
+    fn rust_side_user_facing_messages_are_neutral_no_banned_verb() {
+        // Story 2.2 adds Rust-side user-facing strings (create-dialog refusals, journal banners,
+        // the restore-view labels) that never pass through `@tr()`, so the .slint scan above
+        // misses them. They are collected in two `USER_FACING_MESSAGES` slices for exactly this
+        // gate (FR13). Persistence error messages spliced into some banners are gated in their own
+        // crate's posture test, so they are not re-scanned here.
+        for message in crate::state::USER_FACING_MESSAGES {
+            assert_neutral(message, "state.rs (journal/create notices)");
+        }
+        for message in crate::viewmodel::studies::USER_FACING_MESSAGES {
+            assert_neutral(message, "viewmodel/studies.rs (restore-view labels)");
+        }
+        // Guard the count so a future message added without registering it here is caught.
+        assert_eq!(
+            crate::state::USER_FACING_MESSAGES.len(),
+            8,
+            "state.rs message inventory changed — register the new notice"
+        );
+        assert_eq!(
+            crate::viewmodel::studies::USER_FACING_MESSAGES.len(),
+            6,
+            "studies.rs restore-view label inventory changed — register the new label"
+        );
+    }
+
+    #[test]
     fn tr_literal_extraction_handles_context_placeholders_and_escapes() {
         let source = r#"
             Text { text: @tr("Bonjour {}", name); }

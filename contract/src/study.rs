@@ -42,20 +42,40 @@ pub enum ForecastLowOption {
 }
 
 /// The user's judgment snapshot — exactly the inputs that gate the verdict (method spec §5
-/// "load-bearing input"). Names mirror `core::method::LOAD_BEARING_JUDGMENT_INPUTS`.
+/// "load-bearing input"). Field names mirror `core::ssg::JudgmentInputs` exactly (and, for the
+/// overlap, `core::method::LOAD_BEARING_JUDGMENT_INPUTS`) so the Story-2.6 engine mapping can map
+/// them straight across. The four growth/option fields below were added in Story 2.2 to close
+/// issue #14 — without them an FR6 growth judgment and the §4 option (c)/(d) inputs were silently
+/// lost on save/reload. They are `#[serde(default)]` optionals, so the change is additive and
+/// forward- AND backward-compatible (no `SCHEMA_VERSION` bump — see the contract forward-compat
+/// policy in `lib.rs`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Judgment {
     #[serde(default)]
     pub estimated_high_eps: Option<Money>,
     #[serde(default)]
     pub estimated_low_eps: Option<Money>,
+    /// Judged future sales growth, percent per year (FR6). Stored as the percent value itself
+    /// (e.g. `"12.5"`). Added in Story 2.2 (issue #14).
+    #[serde(default)]
+    pub projected_sales_growth_pct: Option<Money>,
+    /// Judged future EPS growth, percent per year (FR6). Added in Story 2.2 (issue #14).
+    #[serde(default)]
+    pub projected_eps_growth_pct: Option<Money>,
     #[serde(default)]
     pub judged_avg_high_pe: Option<Money>,
     #[serde(default)]
     pub judged_avg_low_pe: Option<Money>,
     pub forecast_low_option: ForecastLowOption,
+    /// §4 forecast-low option (c) input: a recent severe market low. Added in Story 2.2 (issue #14).
+    #[serde(default)]
+    pub recent_severe_low: Option<Money>,
     #[serde(default)]
     pub current_price: Option<Money>,
+    /// §4 option (d) numerator + §5 present-yield input: the present full-year dividend per share.
+    /// Added in Story 2.2 (issue #14).
+    #[serde(default)]
+    pub present_full_year_dividend: Option<Money>,
 }
 
 /// A durable stock study (one row of the journal). Carries the `schema_version` it was written under.
@@ -108,10 +128,14 @@ mod tests {
         Judgment {
             estimated_high_eps: None,
             estimated_low_eps: None,
+            projected_sales_growth_pct: None,
+            projected_eps_growth_pct: None,
             judged_avg_high_pe: None,
             judged_avg_low_pe: None,
             forecast_low_option: ForecastLowOption::AvgLowPeTimesEps,
+            recent_severe_low: None,
             current_price: None,
+            present_full_year_dividend: None,
         }
     }
 

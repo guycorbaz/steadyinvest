@@ -2,3 +2,4 @@
 //! Nothing in here calculates — the Cardinal Rule keeps all arithmetic in `core`.
 
 pub mod format;
+pub mod studies;

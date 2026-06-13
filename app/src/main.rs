@@ -23,25 +23,33 @@
 //! This axis is strictly distinct from the NAIC↔neutral label set (`labels.rs`), which is a
 //! runtime data table of method vocabulary, not a translation.
 
-// contract/ingestion/persistence/report/tokio are declared since story 1.1 so the dependency
-// graph and crate boundaries are fixed; they stay unused until 2.2/3.x. steadyinvest-core is
-// used by the posture gate (tests only), which this lint does not count.
+// Story 2.2 puts `contract`, `persistence`, `uuid` and `chrono` onto the runtime path, so the
+// crate-wide allow Story 2.1 carried now covers a SHRUNK set: only `ingestion`, `report` and
+// `tokio` remain unused (they light up in Epic 3 — ingestion/report data flow, tokio async
+// provider I/O). `core` is used by the test-only posture gate, which this lint does not count.
+// (Scoping a crate-level lint allow to specific deps is not expressible; the comment is the
+// scope of record, re-verified each story.)
 #![allow(unused_crate_dependencies)]
 
+mod clock;
 mod config;
 mod labels;
 mod posture;
+mod state;
 mod theme;
 mod viewmodel;
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use slint::ComponentHandle;
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use uuid::Uuid;
 
+use crate::clock::{SystemClock, UuidGen};
 use crate::config::AppConfig;
 use crate::labels::LabelSet;
+use crate::state::JournalState;
 use crate::theme::Theme;
 use crate::viewmodel::format::{format_amount, NumberFormat};
 
@@ -70,6 +78,19 @@ fn push_samples(ui: &MainWindow, format: NumberFormat) {
     prefs.set_sample_amount_alt(format_amount(SAMPLE_AMOUNT_ALT, format).into());
 }
 
+/// Rebuild the dashboard list from the journal and mirror the read-only flag into the `Studies`
+/// global. Called on startup and after every create.
+fn refresh_studies(ui: &MainWindow, state: &JournalState) {
+    let rows: Vec<StudyRow> = state
+        .list_studies()
+        .iter()
+        .map(viewmodel::studies::to_row)
+        .collect();
+    let studies = ui.global::<Studies>();
+    studies.set_rows(ModelRc::new(VecModel::from(rows)));
+    studies.set_read_only(state.is_read_only());
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // Minimal logging: tracing carries the events; a real subscriber (ADD15 rotating logs) is
     // deferred — see the Story 2.1 GitHub issue. Until then load warnings also go to stderr.
@@ -88,6 +109,27 @@ fn main() -> Result<(), slint::PlatformError> {
         eprintln!("steadyinvest: {warning}");
     }
     let config = Rc::new(RefCell::new(loaded.config));
+
+    // Open the last-used journal (or create the default one), with identity + time from the
+    // injected sources (ADD15). This is the first time the app opens the journal — Story 2.1
+    // deliberately did not. Failure degrades to a usable journal-less state, never a crash.
+    let configured = config.borrow().journal_path.clone();
+    let (journal_state, startup_notice) = JournalState::open_or_create(
+        configured.as_deref(),
+        Box::new(SystemClock),
+        Box::new(UuidGen),
+    );
+    // Persist the resolved path so the same journal reopens next launch (only when it changed).
+    {
+        let resolved = journal_state.path().map(Path::to_path_buf);
+        let mut cfg = config.borrow_mut();
+        if cfg.journal_path != resolved {
+            cfg.journal_path = resolved;
+            drop(cfg);
+            persist(config_path.as_ref(), &config.borrow());
+        }
+    }
+    let journal_state = Rc::new(RefCell::new(journal_state));
 
     let ui = MainWindow::new()?;
 
@@ -111,6 +153,58 @@ fn main() -> Result<(), slint::PlatformError> {
         if cfg.maximized {
             ui.window().set_maximized(true);
         }
+    }
+
+    // Initial Studies state: the list, the read-only flag, and any startup notice (read-only
+    // journal / unreadable configured file). Pushed before the window shows.
+    {
+        refresh_studies(&ui, &journal_state.borrow());
+        if let Some(notice) = &startup_notice {
+            ui.global::<Studies>().set_notice(notice.clone().into());
+        }
+    }
+
+    // Create-study intent: validate + persist via the injected sources, then refresh the list.
+    // A refused create (blank input / read-only / save failure) surfaces a neutral banner; a
+    // successful one clears it.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Studies>()
+            .on_create_study(move |ticker, currency| {
+                let ui = ui_weak.unwrap();
+                let result = journal_state.borrow_mut().create_study(&ticker, &currency);
+                let studies = ui.global::<Studies>();
+                let written = result.is_ok();
+                match result {
+                    Ok(_id) => studies.set_notice(SharedString::new()),
+                    Err(message) => studies.set_notice(message.into()),
+                }
+                refresh_studies(&ui, &journal_state.borrow());
+                // Report whether a study was written so the UI keeps the user's input on refusal.
+                written
+            });
+    }
+
+    // Open-study intent: reopen with full state and show the minimal restore view (the faithful
+    // SSG form is Story 2.3). Money surfaces as formatted strings via the locale helper.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        ui.global::<Studies>().on_open_study(move |id_text| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            if let Some(study) = journal_state.borrow().get_study(id) {
+                let format = config.borrow().number_format;
+                let (title, body) = viewmodel::studies::detail(&study, format);
+                studies.set_detail_title(title.into());
+                studies.set_detail_body(body.into());
+            }
+        });
     }
 
     // Settings intents: apply live (no restart), mirror into Prefs, persist on change.

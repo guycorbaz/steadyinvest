@@ -46,10 +46,16 @@ fn judgment() -> Judgment {
     Judgment {
         estimated_high_eps: Some(money("5.20")),
         estimated_low_eps: Some(money("2.10")),
+        // The four issue-#14 fields, all populated — so the round-trip tests below prove they
+        // survive save/reload instead of being silently lost (the exact harm #14 documents).
+        projected_sales_growth_pct: Some(money("8.5")),
+        projected_eps_growth_pct: Some(money("11.0")),
         judged_avg_high_pe: Some(money("18")),
         judged_avg_low_pe: Some(money("11.5")),
         forecast_low_option: ForecastLowOption::AvgLowPeTimesEps,
+        recent_severe_low: Some(money("72.40")),
         current_price: Some(money("104.00")),
+        present_full_year_dividend: Some(money("2.95")),
     }
 }
 
@@ -178,10 +184,14 @@ fn varied_studies_round_trip_exactly() {
     bare_judgment.judgment = Judgment {
         estimated_high_eps: None,
         estimated_low_eps: None,
+        projected_sales_growth_pct: None,
+        projected_eps_growth_pct: None,
         judged_avg_high_pe: None,
         judged_avg_low_pe: None,
         forecast_low_option: ForecastLowOption::DividendSupported,
+        recent_severe_low: None,
         current_price: None,
+        present_full_year_dividend: None,
     };
 
     for s in [&full, &no_years, &bare_judgment] {
@@ -374,4 +384,53 @@ fn list_studies_returns_indexed_columns_without_payload_parse() {
     assert_eq!(listed[0].status, "active");
     assert_eq!(listed[1].id, b.id);
     assert_eq!(listed[1].security_ticker, "ROG");
+}
+
+// ── Issue #14: the four judgment fields survive save → close → reopen (AC 3, AC 4) ──
+
+#[test]
+fn issue_14_judgment_fields_round_trip_through_a_reopened_journal() {
+    // The harm issue #14 documents: a study's FR6 growth judgments and the §4 option (c)/(d)
+    // inputs were silently lost on save/reload because `contract::Judgment` could not hold them.
+    // Here all four are populated, written, the journal is CLOSED, then reopened in a fresh
+    // `Journal::open` (not an in-memory clone) — and every field reads back exactly.
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.db");
+    let jid = Uuid::from_u128(0x14);
+
+    let s = study(1, jid, "NESN");
+    // Guard the test's own premise: the fixture really populates all four issue-#14 fields.
+    assert!(s.judgment.projected_sales_growth_pct.is_some());
+    assert!(s.judgment.projected_eps_growth_pct.is_some());
+    assert!(s.judgment.recent_severe_low.is_some());
+    assert!(s.judgment.present_full_year_dividend.is_some());
+
+    {
+        let mut journal =
+            Journal::create(&path, jid, &ts(JOURNAL_TS)).expect("a fresh journal creates");
+        journal.put_study(&s).expect("study writes");
+    } // close: last connection drops, WAL checkpoints
+
+    let journal = Journal::open(&path).expect("the journal reopens on disk");
+    let back = journal
+        .get_study(s.id)
+        .expect("study reads")
+        .expect("study exists");
+    assert_eq!(
+        back.judgment, s.judgment,
+        "the full Judgment — including the four issue-#14 fields — survives a disk round-trip"
+    );
+    // Field-by-field, so a regression names the exact field that was dropped.
+    assert_eq!(back.judgment.projected_sales_growth_pct, Some(money("8.5")));
+    assert_eq!(back.judgment.projected_eps_growth_pct, Some(money("11.0")));
+    assert_eq!(back.judgment.recent_severe_low, Some(money("72.40")));
+    assert_eq!(
+        back.judgment.present_full_year_dividend,
+        Some(money("2.95"))
+    );
+    // And the whole study is value-equal (AC 3: nothing dropped, defaulted-away, or coerced).
+    assert_eq!(
+        back, s,
+        "the reopened study is value-equal to what was saved"
+    );
 }

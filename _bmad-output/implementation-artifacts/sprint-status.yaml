@@ -39,7 +39,9 @@
 # 7 [P3] / 8 [V] are deliberate story outlines (refine with create-epics-and-stories per phase).
 
 generated: 2026-06-09
-last_updated: 2026-06-12
+last_updated: 2026-06-13
+# 2026-06-13: story 2-2 dev complete → review (issue #14 closed; 4 gates green --locked).
+# 2026-06-13: story 2-2 review complete → done (1 MEDIUM auto-fixed: keep input on refusal; 4 gates re-green).
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -64,7 +66,7 @@ development_status:
   # ── Epic 2: The trustworthy Stock Study (first usable product) [P1] ──
   epic-2: in-progress
   2-1-application-shell-theme-disclaimer: done
-  2-2-create-save-reopen-study: backlog
+  2-2-create-save-reopen-study: done
   2-3-faithful-collapsible-ssg-form: backlog
   2-4-manual-data-entry-provenance-coverage: backlog
   2-5-tri-state-validation-soft-lock: backlog
