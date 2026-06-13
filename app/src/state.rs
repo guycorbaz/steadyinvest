@@ -13,11 +13,14 @@
 
 use std::path::{Path, PathBuf};
 
-use steadyinvest_contract::{ForecastLowOption, Judgment, Study, Timestamp};
+use steadyinvest_contract::{
+    Cell, Coverage, ForecastLowOption, Judgment, Money, Provenance, Source, Study, Timestamp,
+};
 use steadyinvest_persistence::{Error as PersistError, Journal, StudySummary};
 use uuid::Uuid;
 
 use crate::clock::{Clock, IdGen};
+use crate::viewmodel::entry;
 
 // ── User-facing neutral notices (FR13). French (the UI source language); the crate-local posture
 //    gate scans `USER_FACING_MESSAGES` for banned verbs, exactly like the `@tr()` literals. The
@@ -44,6 +47,12 @@ pub const MSG_NO_DATA_DIR: &str =
     "Aucun emplacement de journal n'est disponible ; les études ne sont pas enregistrées.";
 /// A save failed for a reason other than the read-only / identity guards (cause appended).
 pub const MSG_SAVE_FAILED: &str = "L'enregistrement a échoué.";
+/// The system clipboard could not be read for a paste-a-column (Story 2.4).
+pub const MSG_CLIPBOARD_UNAVAILABLE: &str =
+    "Le presse-papiers est indisponible ; aucune colonne n'a été collée.";
+/// A pasted column had more lines than the grid has years; the surplus lines were dropped.
+pub const MSG_PASTE_CLIPPED: &str =
+    "Certaines lignes dépassaient la grille et n'ont pas été collées.";
 
 /// Every static user-facing message above — exposed so the crate-local posture gate (FR13) scans
 /// them for banned verbs alongside the `@tr()` literals. Test-only (the gate's sole consumer);
@@ -58,6 +67,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,
+    MSG_CLIPBOARD_UNAVAILABLE,
+    MSG_PASTE_CLIPPED,
 ];
 
 /// Where a default journal lives when the user has none yet: the OS **data** dir (NOT the config
@@ -261,6 +272,157 @@ impl JournalState {
         }
     }
 
+    /// Build the manual [`Provenance`] for an edit (Story 2.4): `source = Manual`, `timestamp` from
+    /// the injected [`Clock`] (ADD15 — never a scattered wall clock). For a manually-entered **leaf**
+    /// input there is no app-side per-cell version counter and no upstream dependency digest, so v1
+    /// uses defensible sentinels — `logical_version = 1` and `hash_of_dependencies = "manual"` —
+    /// recorded in the 2.4 interpretations issue; both earn real meaning in Epic 3 reconciliation.
+    /// (`Provenance` performs no validation on these strings — `contract` module doc.)
+    fn manual_provenance(&self) -> Provenance {
+        Provenance {
+            source: Source::Manual,
+            logical_version: 1,
+            timestamp: self.clock.now(),
+            hash_of_dependencies: "manual".to_string(),
+        }
+    }
+
+    /// Manually set/clear a cell's value (FR16): parse-side `value` (already a [`Money`] or `None`)
+    /// is routed through the one mutation rail [`contract::Cell::edited`] with a manual provenance,
+    /// then the whole [`Study`] is upserted via [`Journal::put_study`] (bumps `logical_version`,
+    /// appends the FR51 time-series). A `None` value clears the cell to a [`Coverage::ToFill`] gap —
+    /// **never `0`**. Reuses the read-only / no-journal / save-failure guards (no silent `.ok()`).
+    pub fn edit_cell(
+        &mut self,
+        study_id: Uuid,
+        year_index: usize,
+        field: &str,
+        value: Option<Money>,
+    ) -> Result<(), String> {
+        self.mutate_cell(study_id, year_index, field, |base, provenance| {
+            base.edited(value, provenance)
+        })
+    }
+
+    /// Mark a cell **not-available-accepted** (a deliberate, permanent gap — FR19), or clear that
+    /// back to a to-fill gap (`accepted = false`). The value is cleared to `None` either way; only
+    /// the coverage differs, so this is N/A vs to-fill vs 0 kept distinct. Persisted through the
+    /// same upsert rail as [`Self::edit_cell`].
+    pub fn set_not_available(
+        &mut self,
+        study_id: Uuid,
+        year_index: usize,
+        field: &str,
+        accepted: bool,
+    ) -> Result<(), String> {
+        self.mutate_cell(study_id, year_index, field, move |base, provenance| {
+            // Reuse the edit rail for value/source/freshness/review, then override coverage only —
+            // `NotAvailableAccepted` is a coverage-only gesture, not reachable through `edited`.
+            let cleared = base.edited(None, provenance);
+            Cell {
+                coverage: if accepted {
+                    Coverage::NotAvailableAccepted
+                } else {
+                    Coverage::ToFill
+                },
+                ..cleared
+            }
+        })
+    }
+
+    /// The shared validate→materialize→mutate→persist path for a single cell. `make` builds the new
+    /// cell from the current one (cloned, snapshot semantics) and a fresh manual provenance. The
+    /// year-grid skeleton is materialized **on first edit** (not before — an untouched study is
+    /// never written as all-empty rows).
+    fn mutate_cell(
+        &mut self,
+        study_id: Uuid,
+        year_index: usize,
+        field: &str,
+        make: impl FnOnce(Cell, Provenance) -> Cell,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        if self.journal.is_none() {
+            return Err(MSG_NO_JOURNAL.to_string());
+        }
+        // Re-read the authoritative study, mutate one cell, write it back (the 2.2/2.3 rail).
+        let mut study = self
+            .get_study(study_id)
+            .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        if study.years.is_empty() {
+            study.years =
+                entry::materialize_year_window(&study.created_at, &self.manual_provenance());
+        }
+        let year = study
+            .years
+            .get_mut(year_index)
+            .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        let base = entry::get_cell(year, field)
+            .unwrap_or_else(|| entry::tofill_cell(self.manual_provenance()));
+        let new_cell = make(base, self.manual_provenance());
+        entry::set_cell(year, field, new_cell).map_err(|()| MSG_SAVE_FAILED.to_string())?;
+
+        let journal = self
+            .journal
+            .as_mut()
+            .expect("journal presence checked above");
+        match journal.put_study(&study) {
+            Ok(()) => Ok(()),
+            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
+            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+        }
+    }
+
+    /// Paste a parsed column into consecutive years of the **same field**, downward from
+    /// `start_year` (FR16). Each value is already a locale-parsed [`Money`] / `None`
+    /// ([`entry::parse_pasted_column`]); a `None` line leaves its cell an empty to-fill gap (**never
+    /// `0`**). Lines past the last year are dropped. One upsert for the whole column (one
+    /// `logical_version` bump). Returns the number of cells actually filled (the caller compares it
+    /// with the column length to surface a neutral "some lines dropped" notice).
+    pub fn paste_column(
+        &mut self,
+        study_id: Uuid,
+        start_year: usize,
+        field: &str,
+        values: &[Option<Money>],
+    ) -> Result<usize, String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        if self.journal.is_none() {
+            return Err(MSG_NO_JOURNAL.to_string());
+        }
+        let mut study = self
+            .get_study(study_id)
+            .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        if study.years.is_empty() {
+            study.years =
+                entry::materialize_year_window(&study.created_at, &self.manual_provenance());
+        }
+        let mut filled = 0usize;
+        for (offset, value) in values.iter().enumerate() {
+            let Some(year) = study.years.get_mut(start_year + offset) else {
+                break; // ran past the grid bottom — drop the surplus line
+            };
+            let base = entry::get_cell(year, field)
+                .unwrap_or_else(|| entry::tofill_cell(self.manual_provenance()));
+            let new_cell = base.edited(*value, self.manual_provenance());
+            entry::set_cell(year, field, new_cell).map_err(|()| MSG_SAVE_FAILED.to_string())?;
+            filled += 1;
+        }
+        let journal = self
+            .journal
+            .as_mut()
+            .expect("journal presence checked above");
+        match journal.put_study(&study) {
+            Ok(()) => Ok(filled),
+            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
+            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+        }
+    }
+
     /// Reopen a study by id with its **full** persisted state (FR2). `None` when absent or on a
     /// read error (logged).
     pub fn get_study(&self, id: Uuid) -> Option<Study> {
@@ -387,5 +549,163 @@ mod tests {
             "2026-06-13"
         );
         assert_eq!(created_at_date(&Timestamp("weird".to_string())), "weird");
+    }
+
+    // ── Story 2.4: manual entry → `Cell::edited` → `put_study` → reopen round-trip ──
+
+    fn open_state(path: &Path) -> JournalState {
+        let (clock, idgen) = fixed(0x5D, "2026-06-13T09:00:00Z");
+        let (state, _) = JournalState::open_or_create(Some(path), clock, idgen);
+        state
+    }
+
+    fn money(s: &str) -> Money {
+        Money::from(rust_decimal::Decimal::from_str_exact(s).unwrap())
+    }
+
+    #[test]
+    fn manual_edit_stamps_source_manual_present_and_survives_reopen() {
+        use steadyinvest_contract::{Freshness, Source};
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xC0FFEE),
+                &Timestamp("2026-06-13T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+        let mut state = open_state(&path);
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        // A fresh study has no years; the first edit materializes the window then sets the cell.
+        state
+            .edit_cell(id, 0, entry::FIELD_HIGH, Some(money("120.5")))
+            .expect("edit persists");
+
+        // Reopen from disk: the entered value, its manual source/freshness and Present coverage survive.
+        let back = open_state(&path).get_study(id).expect("study reopens");
+        assert_eq!(
+            back.years.len(),
+            entry::YEAR_WINDOW,
+            "the window was materialized"
+        );
+        let cell = &back.years[0].high_price;
+        assert_eq!(cell.value, Some(money("120.5")));
+        assert_eq!(
+            cell.source,
+            Source::Manual,
+            "a manual edit is stamped source=manual"
+        );
+        assert_eq!(
+            cell.freshness,
+            Freshness::Current,
+            "a fresh edit is current"
+        );
+        assert_eq!(cell.coverage, Coverage::Present);
+        assert_eq!(cell.provenance.source, Source::Manual);
+        assert_eq!(
+            cell.provenance.timestamp.0, "2026-06-13T09:00:00Z",
+            "the provenance timestamp comes from the injected clock"
+        );
+    }
+
+    #[test]
+    fn clearing_a_cell_reopens_a_to_fill_gap_never_zero() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xA),
+                &Timestamp("2026-06-13T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+        let mut state = open_state(&path);
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        state
+            .edit_cell(id, 1, entry::FIELD_EPS, Some(money("4.2")))
+            .unwrap();
+        state.edit_cell(id, 1, entry::FIELD_EPS, None).unwrap(); // clear it
+
+        let cell = open_state(&path).get_study(id).unwrap().years[1]
+            .eps
+            .clone();
+        assert_eq!(cell.value, None, "a cleared cell holds no value — never 0");
+        assert_eq!(
+            cell.coverage,
+            Coverage::ToFill,
+            "a cleared cell is a to-fill gap"
+        );
+    }
+
+    #[test]
+    fn not_available_is_a_distinct_quiet_gap_that_survives_reopen() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xB),
+                &Timestamp("2026-06-13T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+        let mut state = open_state(&path);
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        // An optional column (dividend) marked not-available: distinct from to-fill and from 0.
+        state
+            .set_not_available(id, 2, entry::FIELD_DIVIDEND, true)
+            .unwrap();
+        let cell = open_state(&path).get_study(id).unwrap().years[2]
+            .dividend_per_share
+            .clone()
+            .expect("the cell now exists");
+        assert_eq!(cell.value, None);
+        assert_eq!(cell.coverage, Coverage::NotAvailableAccepted);
+
+        // Clearing it back returns a to-fill gap.
+        state
+            .set_not_available(id, 2, entry::FIELD_DIVIDEND, false)
+            .unwrap();
+        let back = open_state(&path).get_study(id).unwrap().years[2]
+            .dividend_per_share
+            .clone()
+            .unwrap();
+        assert_eq!(back.coverage, Coverage::ToFill);
+    }
+
+    #[test]
+    fn an_edit_on_a_read_only_journal_is_refused_and_writes_nothing() {
+        // A study created in a writable journal, then reopened read-only: the edit is refused with the
+        // neutral notice and the on-disk value is unchanged.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xC),
+                &Timestamp("2026-06-13T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+        let id = {
+            let mut state = open_state(&path);
+            state.create_study("NESN", "CHF").unwrap()
+        };
+        // Force a read-only state by constructing one whose `read_only` flag is set.
+        let mut state = open_state(&path);
+        state.read_only = true;
+        assert_eq!(
+            state.edit_cell(id, 0, entry::FIELD_HIGH, Some(money("1"))),
+            Err(MSG_READ_ONLY_WRITE.to_string())
+        );
+        // Nothing was written: the cell is still absent/empty.
+        let back = open_state(&path).get_study(id).unwrap();
+        assert!(back.years.is_empty(), "a refused edit materialized nothing");
     }
 }

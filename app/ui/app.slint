@@ -12,7 +12,7 @@ import "../assets/fonts/IBMPlexSans-Medium.ttf";
 import "../assets/fonts/IBMPlexSans-SemiBold.ttf";
 
 import { Tokens } from "tokens.slint";
-import { Labels, Prefs, Studies, StudyRow, FormHeader, PeRow } from "state.slint";
+import { Labels, Prefs, Studies, StudyRow, FormHeader, PeRow, GridCellState, MgmtRow } from "state.slint";
 import { NavItem } from "components/nav_item.slint";
 import { DashboardScreen } from "screens/dashboard.slint";
 import { WatchlistScreen } from "screens/watchlist.slint";
@@ -21,7 +21,7 @@ import { SettingsScreen } from "screens/settings.slint";
 
 // Re-export the globals + form structs so the Rust side (theme.rs, labels.rs, regime.rs, state.rs,
 // viewmodel/form.rs, main.rs) can reach them.
-export { Tokens, Labels, Prefs, Studies, StudyRow, FormHeader, PeRow }
+export { Tokens, Labels, Prefs, Studies, StudyRow, FormHeader, PeRow, GridCellState, MgmtRow }
 
 export component MainWindow inherits Window {
     title: @tr("steadyinvest");

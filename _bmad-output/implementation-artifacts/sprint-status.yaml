@@ -49,6 +49,21 @@ last_updated: 2026-06-13
 # 2026-06-13: story 2-3 review complete → done. Adversarial review: 4 gates re-green --locked, pinned surfaces +
 #             Cargo.lock re-diffed empty, 53/53 app tests. 1 LOW auto-fixed (re-selecting active regime no longer
 #             clobbers manual folds); 2 LOWs recorded for 2.4/2.6. No CRITICAL/HIGH/MEDIUM.
+# 2026-06-13: story 2-4 created (manual data entry with provenance & coverage) → ready-for-dev. app-only entry story:
+#             editable §2/§3 grids (type + paste-a-column, locale-aware parse → contract::Money), each edit via
+#             contract::Cell::edited stamped source=manual + persisted (put_study upsert); source×freshness×coverage
+#             display under attention hierarchy (missing shouts, stale murmurs, source on demand), no colour spent;
+#             unknown never 0. arboard dev-dep→runtime dep. Scope-guarded: NO review markers/soft-lock (2.5), NO
+#             engine/verdict/zone (2.6), NO chart (2.8), NO plausibility (2.7), NO provider/reconcile (Epic 3).
+#             Carries the 2.3-review LOW: fix the PE_TABLE_ROWS=5 cap (issue #20).
+# 2026-06-13: story 2-4 dev started → in-progress.
+# 2026-06-13: story 2-4 dev complete → review. app-only entry story; editable §2/§3 grids (type +
+#             paste-a-column, locale-aware parse → contract::Money), each edit via Cell::edited stamped
+#             source=manual + persisted (put_study upsert), reopen round-trip proven headlessly;
+#             source×freshness×coverage under attention hierarchy, no colour spent; unknown never 0.
+#             arboard+rust_decimal dev→runtime deps (Cargo.lock UNCHANGED); pinned surfaces + deny.toml
+#             re-diffed empty; 4 gates green --locked; app tests 53→71. PE_TABLE_ROWS=5 cap removed
+#             (issue #20); interpretations → issue #21. AC6 GUI click-through left for human/AT-SPI (sandbox).
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -75,7 +90,7 @@ development_status:
   2-1-application-shell-theme-disclaimer: done
   2-2-create-save-reopen-study: done
   2-3-faithful-collapsible-ssg-form: done
-  2-4-manual-data-entry-provenance-coverage: backlog
+  2-4-manual-data-entry-provenance-coverage: done
   2-5-tri-state-validation-soft-lock: backlog
   2-6-numeric-judgment-inputs-verdict-zone-bar: backlog
   2-7-low-confidence-plausibility-surfacing: backlog

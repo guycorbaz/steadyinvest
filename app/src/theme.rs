@@ -57,6 +57,12 @@ pub struct Palette {
     /// Cell grid-line ink for the faithful SSG tables (Story 2.3) — a hair away from `separator`
     /// so the 1 px borders read as a grid against the surface in both themes.
     pub grid_line: u32,
+    /// Active-cell cursor surface (Story 2.4): a brighter neutral fill behind the focused entry
+    /// cell, paired with the `focus` ink ring — the visible cell cursor, no colour spent.
+    pub cell_active: u32,
+    /// Shouting to-fill gap ink (Story 2.4): a strong neutral so a hole in the grid is loud (UX
+    /// "missing shouts"). Still ink — never a judgment hue.
+    pub gap_ink: u32,
 }
 
 /// Dark ink scale (the default).
@@ -74,6 +80,8 @@ pub const DARK: Palette = Palette {
     zone_alpha: 0.36,
     focus: 0xB8BDC7,
     grid_line: 0x343842,
+    cell_active: 0x232A38,
+    gap_ink: 0xECEEF2,
 };
 
 /// Light ink scale.
@@ -91,6 +99,8 @@ pub const LIGHT: Palette = Palette {
     zone_alpha: 0.165,
     focus: 0x3F454F,
     grid_line: 0xD2D5DC,
+    cell_active: 0xE7ECF4,
+    gap_ink: 0x14161A,
 };
 
 fn color(rgb: u32) -> slint::Color {
@@ -117,6 +127,8 @@ pub fn apply(ui: &crate::MainWindow, theme: Theme) {
     tokens.set_zone_alpha(palette.zone_alpha);
     tokens.set_focus(color(palette.focus));
     tokens.set_grid_line(color(palette.grid_line));
+    tokens.set_cell_active(color(palette.cell_active));
+    tokens.set_gap_ink(color(palette.gap_ink));
 }
 
 #[cfg(test)]

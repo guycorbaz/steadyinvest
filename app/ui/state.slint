@@ -33,19 +33,43 @@ export struct FormHeader {
     method-version: string,
 }
 
-// One year row of the §3 A–H P/E table. A/B/C/F are direct stored values (formatted strings);
-// D/E/G/H are caption-only (computed by the engine in Story 2.6) and render as faithful em-dash
-// slots here, as does any absent cell — NEVER `0` (architecture rail). Built by `viewmodel/form.rs`.
+// One data cell's full presentation state (Story 2.4). Money still crosses as an already-formatted
+// `value` string (never a float); the rest are enum-derived strings/bools the cell switches its
+// texture on — provenance is texture, NEVER colour. `value` is "" for a gap (to-fill / not-available);
+// the shouting gap glyph / quiet n-a marker is rendered from `coverage`, not from `value`. The
+// `(year-index, field)` pair is the address the edit callbacks pass back. Built by `viewmodel/form.rs`.
+export struct GridCellState {
+    value: string,        // formatted display for a present cell; "" for a gap
+    coverage: string,     // "present" | "to-fill" | "not-available"
+    stale: bool,          // freshness == Stale (the ~60% murmur); current is the silent default
+    source: string,       // "manuel" | "fournisseur" | "calculé" — revealed on demand; "" when none
+    editable: bool,       // true for a raw input cell; false for a computed/derived slot
+    year-index: int,      // row address (0-based, into the materialized year window)
+    field: string,        // column address: "a"|"b"|"c"|"f" (§3) | "sales"|"pretax"|"book" (§2)
+}
+
+// One year row of the §3 A–H P/E table. A/B/C/F are editable raw-input cells (Story 2.4); D/E/G/H are
+// caption-only (computed by the engine in Story 2.6) and render as faithful em-dash slots — NEVER `0`.
+// Built by `viewmodel/form.rs`.
 export struct PeRow {
     year: string,
-    a: string,
-    b: string,
-    c: string,
+    year-index: int,
+    a: GridCellState,
+    b: GridCellState,
+    c: GridCellState,
     d: string,
     e: string,
-    f: string,
+    f: GridCellState,
     g: string,
     h: string,
+}
+
+// One §2 management-grid raw-input row (Story 2.4): one editable cell per year column. The row order
+// is fixed by `viewmodel/form.rs` (sales · pre-tax profit · book value), so the screen pairs each
+// with its own `@tr()` label by index — keeping every user-visible label posture-scanned. Each cell
+// already carries its own `(year-index, field)` address. Built by `viewmodel/form.rs`.
+export struct MgmtRow {
+    cells: [GridCellState],
 }
 
 // Study-state axis (Story 2.2 create → list → reopen; Story 2.3 adds the faithful form + the
@@ -65,6 +89,20 @@ export global Studies {
     // The header identity block + the §3 P/E table rows, built by `viewmodel/form.rs`.
     in-out property <FormHeader> form-header;
     in-out property <[PeRow]> pe-rows;
+    // ── §2 management grid + the cell-cursor (Story 2.4) ──
+    // The year-column header labels for the §2 grid (the materialized year window).
+    in-out property <[string]> year-headers;
+    // The §2 editable raw-input rows (sales / pre-tax profit / book value per share).
+    in-out property <[MgmtRow]> mgmt-rows;
+    // The active editing cell (the cell cursor). `active-year == -1` = no active cell. An
+    // `EditableCell` focuses itself when it becomes the active cell, so Rust-driven arrow/Enter
+    // navigation moves the keyboard focus. NO colour spent — the cursor is a brighter surface + ink
+    // ring (the 2.1/Spike-A pattern).
+    in-out property <int> active-year: -1;
+    in-out property <string> active-field;
+    // The focused cell's source, revealed on demand (a section caption shows it) — "" hides it. A
+    // gap reveals nothing (only a present cell carries a source). NOT an always-on per-cell badge.
+    in-out property <string> active-source;
     // The active reading regime, "entry" | "contemplation" (mirrored from app-config per study).
     in-out property <string> regime;
     // Per-section open/closed flags §1..§5 (index 0 = §1). Mirrored from app-config per study; the
@@ -80,6 +118,19 @@ export global Studies {
     // persists (validate→mutate→persist, the 2.2 Prefs pattern), then pushes `folds`/`regime` back.
     callback toggle-fold(int, bool); // section index (0..4), open
     callback set-regime(string); // "entry" | "contemplation"
+
+    // ── Manual-entry intents (Story 2.4) — handled in Rust (parse → Cell::edited → put_study →
+    //    re-read → re-push). Money is parsed locale-aware in the viewmodel, never in the UI. ──
+    // Commit a typed cell: (year-index, field, raw-text) → written? A blank/unparseable text clears
+    // the cell to a to-fill gap (never 0). Returns false on a refusal (read-only / save failure).
+    callback commit-cell(int, string, string) -> bool;
+    // Paste a clipboard column of newline-separated values downward from (year-index, field).
+    callback paste-column(int, string);
+    // Set/clear not-available-accepted on (year-index, field).
+    callback set-not-available(int, string, bool);
+    // Move the cell cursor from (year-index, field) in a direction ("up"|"down"|"left"|"right").
+    // Rust computes the neighbour and updates `active-year`/`active-field`; the target cell focuses.
+    callback cell-move(int, string, string);
 }
 
 export global Prefs {

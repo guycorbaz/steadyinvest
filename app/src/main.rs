@@ -24,11 +24,13 @@
 //! runtime data table of method vocabulary, not a translation.
 
 // Story 2.2 put `contract`, `persistence`, `uuid` and `chrono` onto the runtime path; Story 2.3
-// adds `core` (the faithful form header shows `core::METHOD_VERSION`, a static method-identity
-// `&str` — display, NOT the forbidden engine call). So the crate-wide allow now covers a SHRUNK
-// set: only `ingestion`, `report` and `tokio` remain unused (they light up in Epic 3 —
-// ingestion/report data flow, tokio async provider I/O). (Scoping a crate-level lint allow to
-// specific deps is not expressible; the comment is the scope of record, re-verified each story.)
+// added `core` (the faithful form header shows `core::METHOD_VERSION`, a static method-identity
+// `&str` — display, NOT the forbidden engine call); Story 2.4 promotes `arboard` (production
+// paste-a-column clipboard read) and `rust_decimal` (locale entry parsing → `contract::Money`) from
+// dev-only to genuinely-used runtime deps. So the crate-wide allow now covers a SHRUNK set: only
+// `ingestion`, `report` and `tokio` remain unused (they light up in Epic 3 — ingestion/report data
+// flow, tokio async provider I/O). (Scoping a crate-level lint allow to specific deps is not
+// expressible; the comment is the scope of record, re-verified each story.)
 #![allow(unused_crate_dependencies)]
 
 mod clock;
@@ -44,7 +46,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use uuid::Uuid;
 
 use crate::clock::{SystemClock, UuidGen};
@@ -101,6 +103,24 @@ fn push_view_state(ui: &MainWindow, view_state: &StudyViewState) {
     studies.set_regime(view_state.regime.as_str().into());
     studies.set_folds(ModelRc::new(VecModel::from(view_state.folds.to_vec())));
     regime::apply(ui, view_state.regime);
+}
+
+/// Rebuild the faithful-form structs from a (re-read) `Study` and push them into the `Studies`
+/// global — the single source of truth for the open form (Story 2.3 header + §3 rows, Story 2.4 §2
+/// management grid + year headers). Called on open and after every persisted edit so the UI always
+/// renders exactly what is on disk. Money crosses only as formatted strings (the adapter boundary).
+fn push_form(ui: &MainWindow, study: &steadyinvest_contract::Study, format: NumberFormat) {
+    let studies = ui.global::<Studies>();
+    studies.set_form_header(viewmodel::form::header(study));
+    studies.set_pe_rows(ModelRc::new(VecModel::from(viewmodel::form::pe_rows(
+        study, format,
+    ))));
+    studies.set_mgmt_rows(ModelRc::new(VecModel::from(viewmodel::form::mgmt_rows(
+        study, format,
+    ))));
+    studies.set_year_headers(ModelRc::new(VecModel::from(viewmodel::form::year_headers(
+        study,
+    ))));
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -220,10 +240,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let format = config.borrow().number_format;
-            studies.set_form_header(viewmodel::form::header(&study));
-            studies.set_pe_rows(ModelRc::new(VecModel::from(viewmodel::form::pe_rows(
-                &study, format,
-            ))));
+            push_form(&ui, &study, format);
+            // A freshly-opened form has no active entry cell (the cursor appears on first focus).
+            studies.set_active_year(-1);
+            studies.set_active_field(SharedString::new());
+            studies.set_active_source(SharedString::new());
             let view_state = config
                 .borrow()
                 .study_view_state
@@ -299,6 +320,161 @@ fn main() -> Result<(), slint::PlatformError> {
             persist(path.as_ref(), &config.borrow());
             push_view_state(&ui, &new_state);
         });
+    }
+
+    // ── Manual-entry intents (Story 2.4): parse → `Cell::edited` → `put_study` → re-read → re-push
+    //    (validate→mutate→persist→rebuild — the 2.3 single-source-of-truth shape). Every refusal
+    //    surfaces a neutral banner, never a silent `.ok()`. ──
+
+    // Commit a typed cell: parse the text locale-aware (None for blank/unparseable → a to-fill gap,
+    // never 0), edit + persist, then rebuild the form from the re-read study. Returns written? so
+    // the cell keeps the user's text on a recoverable refusal.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>()
+            .on_commit_cell(move |year_index, field, text| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return false;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return false;
+                };
+                let format = config.borrow().number_format;
+                let value = viewmodel::format::parse_amount(&text, format);
+                let result = journal_state.borrow_mut().edit_cell(
+                    id,
+                    year_index.max(0) as usize,
+                    field.as_str(),
+                    value,
+                );
+                match result {
+                    Ok(()) => {
+                        studies.set_notice(SharedString::new());
+                        if let Some(study) = journal_state.borrow().get_study(id) {
+                            push_form(&ui, &study, format);
+                        }
+                        true
+                    }
+                    Err(message) => {
+                        studies.set_notice(message.into());
+                        false
+                    }
+                }
+            });
+    }
+
+    // Paste a clipboard column downward from the active cell (same field). Read the clipboard via
+    // `arboard`; a failure is a neutral notice, never a panic. Surplus lines past the grid bottom
+    // are dropped with a neutral count notice.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>()
+            .on_paste_column(move |year_index, field| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let format = config.borrow().number_format;
+                let text = match arboard::Clipboard::new().and_then(|mut cb| cb.get_text()) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        tracing::warn!("clipboard read failed: {error}");
+                        studies.set_notice(state::MSG_CLIPBOARD_UNAVAILABLE.into());
+                        return;
+                    }
+                };
+                let values = viewmodel::entry::parse_pasted_column(&text, format);
+                if values.is_empty() {
+                    return;
+                }
+                let result = journal_state.borrow_mut().paste_column(
+                    id,
+                    year_index.max(0) as usize,
+                    field.as_str(),
+                    &values,
+                );
+                match result {
+                    Ok(filled) => {
+                        if filled < values.len() {
+                            studies.set_notice(state::MSG_PASTE_CLIPPED.into());
+                        } else {
+                            studies.set_notice(SharedString::new());
+                        }
+                        if let Some(study) = journal_state.borrow().get_study(id) {
+                            push_form(&ui, &study, format);
+                        }
+                    }
+                    Err(message) => studies.set_notice(message.into()),
+                }
+            });
+    }
+
+    // Mark / clear not-available-accepted on a cell (a deliberate, quiet, permanent gap — distinct
+    // from a to-fill gap and from a real 0).
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>()
+            .on_set_not_available(move |year_index, field, accepted| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let format = config.borrow().number_format;
+                let result = journal_state.borrow_mut().set_not_available(
+                    id,
+                    year_index.max(0) as usize,
+                    field.as_str(),
+                    accepted,
+                );
+                match result {
+                    Ok(()) => {
+                        studies.set_notice(SharedString::new());
+                        if let Some(study) = journal_state.borrow().get_study(id) {
+                            push_form(&ui, &study, format);
+                        }
+                    }
+                    Err(message) => studies.set_notice(message.into()),
+                }
+            });
+    }
+
+    // Move the cell cursor: pure index math (no persistence). Rust computes the neighbour within the
+    // grid and updates `active-year`/`active-field`; the target `EditableCell` then focuses itself.
+    {
+        let ui_weak = ui.as_weak();
+        ui.global::<Studies>()
+            .on_cell_move(move |year_index, field, dir| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let year_count = studies.get_pe_rows().row_count();
+                let (next_year, next_field) = viewmodel::entry::next_cell(
+                    year_index.max(0) as usize,
+                    field.as_str(),
+                    dir.as_str(),
+                    year_count,
+                );
+                studies.set_active_year(next_year as i32);
+                studies.set_active_field(next_field.into());
+            });
     }
 
     // Settings intents: apply live (no restart), mirror into Prefs, persist on change.

@@ -1,0 +1,151 @@
+// An editable §2/§3 data cell (Story 2.4): spreadsheet-grade inline numeric entry on the faithful
+// SSG grid, rendering each cell's source × freshness × coverage under the attention hierarchy with
+// NO colour spent (colour budget = judgment zones only, which don't exist until 2.6).
+//
+//  - active cell  → a brighter neutral surface + 1px ink ring (the visible cell cursor — reuses the
+//                   2.1/Spike-A focus pattern; no std-widgets, no colour);
+//  - to-fill gap  → a bold neutral glyph that SHOUTS ("a hole in a regular grid");
+//  - not-available→ a quiet "n/a" marker, distinct from the shouting gap (a deliberate accepted gap);
+//  - stale value  → ~60% opacity + a hollow dot (a discreet murmur); current is the silent default;
+//  - source       → revealed on demand (on focus, via a section caption), never an always-on badge.
+//
+// Keyboard: arrows / Enter move the cell cursor (commit + advance), Ctrl+V pastes a column, Ctrl+Space
+// toggles not-available-accepted, Backspace/Delete clears to a gap (→ to-fill, never 0). Constant
+// geometry — the cell never resizes between display and edit (UX-DR6). All colours/sizes read Tokens.
+
+import { Tokens } from "../tokens.slint";
+import { Studies, GridCellState } from "../state.slint";
+
+export component EditableCell inherits Rectangle {
+    in property <GridCellState> state;
+
+    min-height: Tokens.row-height;
+    horizontal-stretch: 1;
+    border-width: input.has-focus ? Tokens.focus-border : Tokens.border;
+    border-color: input.has-focus ? Tokens.focus : Tokens.grid-line;
+    background: input.has-focus ? Tokens.cell-active : transparent;
+
+    // Commit the typed text iff it differs from the displayed model value (so tabbing through
+    // untouched cells writes nothing — no no-op put_study, no polluted FR51 history). A blank /
+    // unparseable text clears the cell to a to-fill gap (Rust parses locale-aware → None, never 0).
+    // A refusal (read-only / save failure) keeps the user's text for a retry; Rust sets the notice.
+    function commit() {
+        // The written? result is intentionally ignored: on a refusal Rust sets the neutral notice
+        // and `commit()` leaves `input.text` untouched, so the user's text is retained either way.
+        if (input.text != root.state.value) {
+            Studies.commit-cell(root.state.year-index, root.state.field, input.text);
+        }
+    }
+
+    // Shouting to-fill gap — a bold neutral glyph (hidden while this cell is being edited).
+    Text {
+        visible: root.state.coverage == "to-fill" && !input.has-focus;
+        text: Tokens.gap-glyph;
+        color: Tokens.gap-ink;
+        font-size: Tokens.font-body;
+        x: parent.width - self.width - Tokens.space-8;
+        y: (parent.height - self.height) / 2;
+    }
+    // Quiet not-available-accepted marker — a calm "n/a", deliberately distinct from the gap.
+    Text {
+        visible: root.state.coverage == "not-available";
+        text: @tr("n/a");
+        color: Tokens.text-low;
+        font-size: Tokens.font-caption;
+        x: parent.width - self.width - Tokens.space-8;
+        y: (parent.height - self.height) / 2;
+    }
+    // Stale murmur — a hollow dot beside a present-but-stale value (the value itself dims via the
+    // root opacity below). No stale cell exists in 2.4 except via test fixtures (Epic 3 sets stale).
+    Text {
+        visible: root.state.coverage == "present" && root.state.stale;
+        text: Tokens.stale-dot;
+        color: Tokens.text-low;
+        font-size: Tokens.font-caption;
+        x: Tokens.space-4;
+        y: (parent.height - self.height) / 2;
+    }
+    TouchArea {
+        mouse-cursor: text;
+        clicked => {
+            input.focus();
+        }
+    }
+
+    input := TextInput {
+        // Right-aligned tabular figures, constant geometry (display ↔ edit never resizes).
+        color: Tokens.text-high;
+        selection-background-color: Tokens.focus;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-body;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        single-line: true;
+        width: parent.width - Tokens.space-8 * 2;
+        height: 100%;
+        x: Tokens.space-8;
+        // Dim a stale value to ~60% (the murmur); a present-current value is full strength.
+        opacity: (root.state.coverage == "present" && root.state.stale) ? Tokens.stale-opacity : 1.0;
+
+        // Seed the editable text from the model, and re-sync after every re-push (commit / paste
+        // rebuild the rows). Typing changes `self.text` without changing `root.state`, so it does
+        // not trigger this — the user's in-progress edit is never clobbered.
+        init => {
+            self.text = root.state.value;
+        }
+        changed has-focus => {
+            if (self.has-focus) {
+                Studies.active-year = root.state.year-index;
+                Studies.active-field = root.state.field;
+                Studies.active-source = root.state.source;
+                self.select-all(); // typing replaces the value (spreadsheet behaviour)
+            } else {
+                root.commit(); // commit on focus-out (covers Tab-away and arrow/Enter moves)
+            }
+        }
+        accepted => {
+            root.commit();
+            Studies.cell-move(root.state.year-index, root.state.field, "down"); // Enter advances down
+        }
+        key-pressed(e) => {
+            // Ctrl/Cmd chords first, so they never leak a character into the cell (Spike-A fix).
+            if ((e.modifiers.control || e.modifiers.meta) && e.text == "v") {
+                Studies.paste-column(root.state.year-index, root.state.field);
+                return EventResult.accept;
+            }
+            if ((e.modifiers.control || e.modifiers.meta) && e.text == " ") {
+                Studies.set-not-available(root.state.year-index, root.state.field, root.state.coverage != "not-available");
+                return EventResult.accept;
+            }
+            if (e.text == Key.UpArrow) {
+                root.commit();
+                Studies.cell-move(root.state.year-index, root.state.field, "up");
+                return EventResult.accept;
+            }
+            if (e.text == Key.DownArrow) {
+                root.commit();
+                Studies.cell-move(root.state.year-index, root.state.field, "down");
+                return EventResult.accept;
+            }
+            if (e.text == Key.LeftArrow) {
+                root.commit();
+                Studies.cell-move(root.state.year-index, root.state.field, "left");
+                return EventResult.accept;
+            }
+            if (e.text == Key.RightArrow) {
+                root.commit();
+                Studies.cell-move(root.state.year-index, root.state.field, "right");
+                return EventResult.accept;
+            }
+            return EventResult.reject; // digits, separators, sign, Backspace/Delete, Tab → TextInput
+        }
+    }
+
+    // Keep the active cell's TextInput focused when Rust-driven navigation makes it active.
+    property <bool> is-active: Studies.active-year == root.state.year-index && Studies.active-field == root.state.field;
+    changed is-active => {
+        if (root.is-active && !input.has-focus) {
+            input.focus();
+        }
+    }
+}

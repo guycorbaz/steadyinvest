@@ -29,13 +29,17 @@ tracing = { workspace = true }
 # sources of UUIDs / wall-clock timestamps in the app, funnelled through `clock.rs`.
 uuid = { workspace = true }
 chrono = { workspace = true }
+# Exact-decimal parsing for the locale-aware entry path (Story 2.4): `Decimal::from_str_exact`
+# turns a user's locale string into a `contract::Money`. Already in the tree (contract depends on
+# it), so promoting it from dev-only adds nothing to `Cargo.lock`. NEVER `f64` (Cardinal Rule).
+rust_decimal = { workspace = true }
+# Clipboard read for the production paste-a-column (Story 2.4): promoted from a dev-only example
+# dependency to a real runtime dependency (text-only, `default-features = false`). Its sole
+# Windows transitive `clipboard-win` (BSL-1.0) is already allow-listed in `deny.toml` (Spike A).
+arboard = { workspace = true }
 # keyring (OS keychain) is added in Story 3.2 once the correct credential crate is selected.
 
 [dev-dependencies]
-# Used only by the throwaway Story-1.5 chart spike example (signal recompute in exact decimal).
-rust_decimal = { workspace = true }
-# Used only by the throwaway Story-1.4 grid spike example (paste-a-column clipboard read).
-arboard = { workspace = true }
 # Config tests write to temp paths only — never the real config dir.
 tempfile = { workspace = true }
 

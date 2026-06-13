@@ -13,10 +13,11 @@
 // formula captions (`A÷C`, …) are static display text, not computed.
 
 import { Tokens } from "../tokens.slint";
-import { Studies, FormHeader, PeRow } from "../state.slint";
+import { Studies, FormHeader, PeRow, MgmtRow } from "../state.slint";
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
+import { EditableCell } from "../components/editable_cell.slint";
 
 // The faithful em-dash slot, in one place (mirrors `viewmodel::form::EMPTY_SLOT`). A gap, never `0`.
 global FormConst {
@@ -102,19 +103,31 @@ component PeHeaderCell inherits Rectangle {
     }
 }
 
-// One §3 P/E table data row: year label + the A…H cells.
+// One §3 P/E table data row: year label + the A…H cells. A/B/C/F are editable input cells (Story
+// 2.4); D/E/G/H stay caption-only em-dash slots (engine, Story 2.6).
 component PeTableRow inherits HorizontalLayout {
     in property <PeRow> pe;
     spacing: 0;
     GridLabelCell { label: root.pe.year; numeric: true; }
-    GridCell { value: root.pe.a; }
-    GridCell { value: root.pe.b; }
-    GridCell { value: root.pe.c; }
+    EditableCell { state: root.pe.a; }
+    EditableCell { state: root.pe.b; }
+    EditableCell { state: root.pe.c; }
     GridCell { value: root.pe.d; }
     GridCell { value: root.pe.e; }
-    GridCell { value: root.pe.f; }
+    EditableCell { state: root.pe.f; }
     GridCell { value: root.pe.g; }
     GridCell { value: root.pe.h; }
+}
+
+// One §2 management-grid editable raw-input row: a left label + one editable cell per year column.
+component MgmtInputRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <MgmtRow> mgmt;
+    spacing: 0;
+    GridLabelCell { label: root.label; horizontal-stretch: 2; }
+    for cell in root.mgmt.cells: EditableCell { state: cell; }
+    GridCell { value: FormConst.empty-slot; } // Moy. 5 ans (computed, 2.6)
+    GridCell { value: FormConst.empty-slot; } // Tendance (computed, 2.6)
 }
 
 // A §3 summary row: a wide label + a single value slot (Total / Moyenne / PER moyen / PER courant).
@@ -233,6 +246,27 @@ export component StudyScreen inherits Rectangle {
                 }
             }
 
+            // ── Source revealed on demand (focused cell) + the entry-gesture hints. Provenance is
+            //    fact-stating texture, never advice or colour. ──
+            HorizontalLayout {
+                alignment: start;
+                spacing: Tokens.space-16;
+                Text {
+                    text: Studies.active-source != "" ? @tr("Source : {}", Studies.active-source) : "";
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: @tr("Ctrl+V : coller une colonne · Ctrl+Espace : marquer non disponible");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    horizontal-alignment: right;
+                }
+            }
+
             // ── Non-collapsible header: identity + capitalization block ──
             Rectangle {
                 background: Tokens.surface;
@@ -341,37 +375,31 @@ export component StudyScreen inherits Rectangle {
                 open: Studies.folds[1];
                 toggled(v) => { Studies.toggle-fold(1, v); }
 
-                // Header row: row-label column + 5 year columns + Moy + Tendance.
+                // Header row: row-label column + the materialized year columns + Moy + Tendance.
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("Indicateur"); horizontal-stretch: 2; }
-                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
-                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
-                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
-                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
-                    GridLabelCell { label: FormConst.empty-slot; numeric: true; }
+                    for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; }
                     GridLabelCell { label: @tr("Moy. 5 ans"); }
                     GridLabelCell { label: @tr("Tendance"); }
                 }
+                // Editable raw-input rows (sales · pre-tax profit · book value), paired with their
+                // label by index — the row order is fixed by `viewmodel/form.rs`.
+                MgmtInputRow { label: @tr("Ventes"); mgmt: Studies.mgmt-rows[0]; }
+                MgmtInputRow { label: @tr("Bénéfice avant impôt"); mgmt: Studies.mgmt-rows[1]; }
+                MgmtInputRow { label: @tr("Valeur comptable / action"); mgmt: Studies.mgmt-rows[2]; }
+                // Computed management ratios — caption-only em-dash slots until the engine lands (2.6).
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("PTP — Bén. av. impôt ÷ ventes"); horizontal-stretch: 2; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
+                    for yh in Studies.year-headers: GridCell { value: FormConst.empty-slot; }
                     GridCell { value: FormConst.empty-slot; }
                     GridCell { value: FormConst.empty-slot; }
                 }
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("ROE — BPA ÷ valeur comptable/action"); horizontal-stretch: 2; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
+                    for yh in Studies.year-headers: GridCell { value: FormConst.empty-slot; }
                     GridCell { value: FormConst.empty-slot; }
                     GridCell { value: FormConst.empty-slot; }
                 }

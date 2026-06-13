@@ -31,6 +31,14 @@ export global Tokens {
     // Grid-line ink for the faithful SSG cell grid (§2/§3) — a hair lighter than `separator` so
     // the 1 px cell borders read as a table, not a set of boxes (Story 2.3).
     in-out property <color> grid-line: #2A2E37;
+    // ── Manual-entry neutrals (Story 2.4) — the attention hierarchy carried by texture/opacity,
+    //    NEVER colour (colour budget = judgment zones only, which don't exist until 2.6) ──
+    // The active-cell cursor surface: a brighter neutral fill behind the focused entry cell (paired
+    // with the `focus` ink ring) — the visible cell cursor, no colour spent.
+    in-out property <color> cell-active: #232A38;
+    // The shouting to-fill gap ink: a strong neutral so an unfilled hole in the grid is loud on its
+    // own (UX "missing shouts"). High-contrast, but still ink — not a judgment hue.
+    in-out property <color> gap-ink: #ECEEF2;
     // Regime-driven emphasis alpha (Story 2.3, FR56): 1.0 in entry, attenuated in contemplation so
     // the editing affordances calm down at the judgment moment. The ONE token the regime swap moves
     // in 2.3; 2.5 (markers) / 2.6 (zones) hang their deltas on the same hook. Colour/alpha only —
@@ -60,6 +68,13 @@ export global Tokens {
     out property <length> focus-border: 2px;
     out property <length> radius: 4px;
     out property <length> row-height: 28px;
+    // Manual-entry textures (Story 2.4), quasi-static so a theme/regime swap never re-lays-out:
+    // the bold glyph that marks a to-fill gap ("a hole in a regular grid"), the hollow dot that
+    // accompanies a stale value's murmur, and the stale opacity (~60%). Glyphs are language-neutral
+    // (not `@tr`). The not-available marker text is an `@tr("n/a")` literal in the cell component.
+    out property <string> gap-glyph: "▦";
+    out property <string> stale-dot: "◦";
+    out property <float> stale-opacity: 0.6;
     // Shell geometry.
     out property <length> nav-rail-width: 200px;
     out property <length> top-bar-height: 48px;
