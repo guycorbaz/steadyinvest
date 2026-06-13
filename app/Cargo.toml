@@ -22,6 +22,8 @@ steadyinvest-report = { workspace = true }
 slint = { workspace = true }
 tokio = { workspace = true }
 directories = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
 # keyring (OS keychain) is added in Story 3.2 once the correct credential crate is selected.
 
@@ -30,6 +32,8 @@ tracing = { workspace = true }
 rust_decimal = { workspace = true }
 # Used only by the throwaway Story-1.4 grid spike example (paste-a-column clipboard read).
 arboard = { workspace = true }
+# Config tests write to temp paths only — never the real config dir.
+tempfile = { workspace = true }
 
 [build-dependencies]
 slint-build = { workspace = true }

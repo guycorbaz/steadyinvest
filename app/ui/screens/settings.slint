@@ -1,0 +1,143 @@
+// Réglages — three plain panels, no wizard, nothing blocking (FR63): theme, method-vocabulary
+// label set, locale number format. Provider/key, currency and threshold panels are later
+// stories (3.2, 4.x). The sample amounts (constants formatted in Rust) prove the live locale
+// swap and render in the numeric font, digits stacked to show tabular figures.
+
+import { Tokens } from "../tokens.slint";
+import { Labels, Prefs } from "../state.slint";
+import { ChoiceChip } from "../components/choice_chip.slint";
+
+component SettingsPanel inherits Rectangle {
+    in property <string> title;
+
+    background: Tokens.surface;
+    border-width: Tokens.border;
+    border-color: Tokens.separator;
+    border-radius: Tokens.radius;
+
+    VerticalLayout {
+        padding: Tokens.space-16;
+        spacing: Tokens.space-12;
+
+        Text {
+            text: root.title;
+            color: Tokens.text-high;
+            font-size: Tokens.font-h3;
+            font-weight: Tokens.weight-semibold;
+        }
+
+        @children
+    }
+}
+
+export component SettingsScreen inherits Rectangle {
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            alignment: start;
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
+
+            Text {
+                text: @tr("Réglages");
+                color: Tokens.text-high;
+                font-size: Tokens.font-h2;
+                font-weight: Tokens.weight-semibold;
+            }
+
+            SettingsPanel {
+                title: @tr("Thème");
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ChoiceChip {
+                        label: @tr("Sombre");
+                        selected: Prefs.dark-theme;
+                        activated => { Prefs.theme-selected("dark"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Clair");
+                        selected: !Prefs.dark-theme;
+                        activated => { Prefs.theme-selected("light"); }
+                    }
+                }
+            }
+
+            SettingsPanel {
+                title: @tr("Vocabulaire de la méthode");
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ChoiceChip {
+                        label: @tr("NAIC");
+                        selected: Prefs.label-set == "naic";
+                        activated => { Prefs.label-set-selected("naic"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Neutre");
+                        selected: Prefs.label-set == "neutral";
+                        activated => { Prefs.label-set-selected("neutral"); }
+                    }
+                }
+
+                Text {
+                    text: Labels.study-method + " · " + Labels.zone-buy + " · "
+                        + Labels.zone-hold + " · " + Labels.zone-sell;
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                }
+            }
+
+            SettingsPanel {
+                title: @tr("Format des nombres");
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ChoiceChip {
+                        label: @tr("Virgule — 1 234,56");
+                        selected: Prefs.number-format == "comma";
+                        activated => { Prefs.number-format-selected("comma"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Point — 1,234.56");
+                        selected: Prefs.number-format == "point";
+                        activated => { Prefs.number-format-selected("point"); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: Tokens.space-4;
+
+                    Text {
+                        text: @tr("Exemples :");
+                        color: Tokens.text-low;
+                        font-size: Tokens.font-caption;
+                    }
+                    Text {
+                        text: Prefs.sample-amount;
+                        color: Tokens.text-mid;
+                        font-family: Tokens.font-numeric;
+                        font-size: Tokens.font-body;
+                        horizontal-alignment: right;
+                        width: 50%;
+                    }
+                    Text {
+                        text: Prefs.sample-amount-alt;
+                        color: Tokens.text-mid;
+                        font-family: Tokens.font-numeric;
+                        font-size: Tokens.font-body;
+                        horizontal-alignment: right;
+                        width: 50%;
+                    }
+                }
+            }
+        }
+    }
+}

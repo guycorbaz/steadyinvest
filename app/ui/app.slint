@@ -1,31 +1,124 @@
-// Placeholder window for the scaffold. The faithful collapsible SSG study screen, native charts
-// (Path/TouchArea) and the sticky verdict bar arrive in Epic 2. No web, no egui.
+// Application shell (Story 2.1): persistent left nav rail (4 destinations) + top bar + content
+// area + pinned footer disclaimer (FR64 — outside any scrollable area, on every screen).
+// Deliberately shallow: no breadcrumbs, no nested routing. Every colour/size reads `Tokens`;
+// every user-visible string is French inside `@tr()` (UX-DR29).
+//
+// Bundled fonts (OFL, app/assets/fonts/): importing the .ttf files registers the families.
+
+import "../assets/fonts/Inter-Regular.ttf";
+import "../assets/fonts/Inter-SemiBold.ttf";
+import "../assets/fonts/IBMPlexSans-Regular.ttf";
+import "../assets/fonts/IBMPlexSans-Medium.ttf";
+import "../assets/fonts/IBMPlexSans-SemiBold.ttf";
+
+import { Tokens } from "tokens.slint";
+import { Labels, Prefs } from "state.slint";
+import { NavItem } from "components/nav_item.slint";
+import { DashboardScreen } from "screens/dashboard.slint";
+import { WatchlistScreen } from "screens/watchlist.slint";
+import { PortfolioScreen } from "screens/portfolio.slint";
+import { SettingsScreen } from "screens/settings.slint";
+
+// Re-export the globals so the Rust side (theme.rs, labels.rs, main.rs) can reach them.
+export { Tokens, Labels, Prefs }
 
 export component MainWindow inherits Window {
-    title: "steadyinvest";
-    preferred-width: 800px;
-    preferred-height: 600px;
+    title: @tr("steadyinvest");
+    background: Tokens.bg;
+    default-font-family: Tokens.font-ui;
+    default-font-size: Tokens.font-body;
+    // Minimum window size so the shell stays legible (UX-DR28).
+    min-width: Tokens.min-window-width;
+    min-height: Tokens.min-window-height;
+
+    // Active destination index — pure-Slint nav state (no Rust round-trip needed in 2.1).
+    in-out property <int> current-screen: 0;
+    property <[string]> destinations: [
+        @tr("Études"),
+        @tr("Liste de suivi"),
+        @tr("Portefeuille"),
+        @tr("Réglages"),
+    ];
 
     VerticalLayout {
-        alignment: center;
-        spacing: 8px;
+        // ── Top bar (UX-DR19) ──
+        Rectangle {
+            height: Tokens.top-bar-height;
+            background: Tokens.surface;
 
-        Text {
-            text: "steadyinvest";
-            horizontal-alignment: center;
-            font-size: 24px;
-            font-weight: 600;
+            HorizontalLayout {
+                padding-left: Tokens.space-16;
+                padding-right: Tokens.space-16;
+
+                Text {
+                    text: root.destinations[root.current-screen];
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-h3;
+                    font-weight: Tokens.weight-semibold;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: @tr("steadyinvest");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
         }
-        Text {
-            text: "Workspace scaffold — UI lands in Epic 2.";
-            horizontal-alignment: center;
-            font-size: 14px;
+        Rectangle { height: Tokens.border; background: Tokens.separator; }
+
+        // ── Nav rail + content ──
+        HorizontalLayout {
+            // The middle row absorbs ALL extra height — the footer below must stay at its
+            // preferred height, pinned to the bottom edge.
+            vertical-stretch: 1;
+            Rectangle {
+                width: Tokens.nav-rail-width;
+                background: Tokens.surface;
+
+                VerticalLayout {
+                    alignment: start;
+                    padding: Tokens.space-8;
+                    spacing: Tokens.space-4;
+
+                    for destination[index] in root.destinations: NavItem {
+                        label: destination;
+                        active: root.current-screen == index;
+                        activated => { root.current-screen = index; }
+                    }
+                }
+            }
+            Rectangle { width: Tokens.border; background: Tokens.separator; }
+
+            Rectangle {
+                background: Tokens.bg;
+
+                if root.current-screen == 0: DashboardScreen { }
+                if root.current-screen == 1: WatchlistScreen { }
+                if root.current-screen == 2: PortfolioScreen { }
+                if root.current-screen == 3: SettingsScreen { }
+            }
         }
-        Text {
-            text: "Educational, not a financial advisor.";
-            horizontal-alignment: center;
-            font-size: 12px;
-            opacity: 0.7;
+
+        // ── Footer disclaimer (FR64) — pinned outside any scrollable area, always visible ──
+        Rectangle { height: Tokens.border; background: Tokens.separator; }
+        Rectangle {
+            background: Tokens.surface;
+            vertical-stretch: 0;
+
+            VerticalLayout {
+                padding-top: Tokens.space-8;
+                padding-bottom: Tokens.space-8;
+                padding-left: Tokens.space-16;
+                padding-right: Tokens.space-16;
+
+                Text {
+                    text: @tr("Outil éducatif — ne constitue pas un conseil financier.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                }
+            }
         }
     }
 }

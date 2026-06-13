@@ -1,0 +1,62 @@
+// One destination of the left nav rail. Active state is NOT colour-alone (NFR-U1): indicator
+// bar + ink step + weight step. Keyboard: Tab-reachable FocusScope, Enter/Space activates,
+// always-visible focus ring (NFR-U2).
+
+import { Tokens } from "../tokens.slint";
+
+export component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback activated();
+
+    // Assistive-tech semantics (NFR-U discipline): a nav destination is a button whose
+    // pressed state mirrors the active destination; the default action activates it.
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { root.activated(); }
+
+    height: Tokens.row-height + Tokens.space-8;
+    border-radius: Tokens.radius;
+    background: root.active ? Tokens.surface-alt : (touch.has-hover ? Tokens.surface : transparent);
+    border-width: fs.has-focus ? Tokens.focus-border : 0;
+    border-color: Tokens.focus;
+
+    fs := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.activated();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            fs.focus();
+            root.activated();
+        }
+    }
+
+    HorizontalLayout {
+        padding-top: Tokens.space-4;
+        padding-bottom: Tokens.space-4;
+        spacing: Tokens.space-12;
+
+        Rectangle {
+            width: Tokens.indicator-width;
+            background: root.active ? Tokens.text-high : transparent;
+        }
+
+        Text {
+            text: root.label;
+            color: root.active ? Tokens.text-high : Tokens.text-mid;
+            font-size: Tokens.font-body;
+            font-weight: root.active ? Tokens.weight-semibold : Tokens.weight-regular;
+            vertical-alignment: center;
+        }
+    }
+}

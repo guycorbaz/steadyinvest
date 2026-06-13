@@ -5008,6 +5008,8 @@ dependencies = [
  "arboard",
  "directories",
  "rust_decimal",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "steadyinvest-contract",
@@ -5015,6 +5017,7 @@ dependencies = [
  "steadyinvest-ingestion",
  "steadyinvest-persistence",
  "steadyinvest-report",
+ "tempfile",
  "tokio",
  "tracing",
 ]

@@ -1,0 +1,56 @@
+// A small selectable option chip for the Settings panels (restyled primitive — no std-widgets,
+// so no Palette sync is needed). Selected state is not colour-alone: filled background + border
+// step + weight step. Keyboard: Tab-reachable, Enter/Space activates, visible focus ring.
+
+import { Tokens } from "../tokens.slint";
+
+export component ChoiceChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback activated();
+
+    // Assistive-tech semantics (NFR-U discipline): a chip is a checkable button; the
+    // default action selects it.
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.activated(); }
+
+    height: Tokens.row-height + Tokens.space-4;
+    border-radius: Tokens.radius;
+    background: root.selected ? Tokens.surface-alt : transparent;
+    border-width: fs.has-focus ? Tokens.focus-border : Tokens.border;
+    border-color: fs.has-focus ? Tokens.focus : (root.selected ? Tokens.text-mid : Tokens.separator);
+
+    fs := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.activated();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            fs.focus();
+            root.activated();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: Tokens.space-12;
+        padding-right: Tokens.space-12;
+
+        Text {
+            text: root.label;
+            color: root.selected ? Tokens.text-high : Tokens.text-mid;
+            font-size: Tokens.font-body;
+            font-weight: root.selected ? Tokens.weight-semibold : Tokens.weight-regular;
+            vertical-alignment: center;
+        }
+    }
+}

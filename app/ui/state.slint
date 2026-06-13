@@ -1,0 +1,29 @@
+// UI-side state globals owned by the Rust side (`main.rs` wires the callbacks).
+//
+// Two strictly independent axes (FR63 / UX-DR29):
+//  - `Labels` — the NAIC↔neutral METHOD-VOCABULARY label set: a runtime data table owned by
+//    `app/src/labels.rs`, pushed here on startup and on every swap. NOT translations.
+//  - the UI language itself lives in `@tr()` source strings (French), compile-time axis.
+
+export global Labels {
+    // Resolved display strings for the active label set; `labels.rs` is the single source of
+    // truth and pushes values before the window shows (empty defaults are never visible).
+    in-out property <string> study-method;
+    in-out property <string> zone-buy;
+    in-out property <string> zone-hold;
+    in-out property <string> zone-sell;
+}
+
+export global Prefs {
+    // Current selections, mirrored from AppConfig by the Rust side.
+    in-out property <bool> dark-theme: true;
+    in-out property <string> label-set: "naic"; // "naic" | "neutral"
+    in-out property <string> number-format: "comma"; // "comma" | "point"
+    // Locale-format sample amounts (formatted by viewmodel/format.rs; constants, computed nothing).
+    in-out property <string> sample-amount;
+    in-out property <string> sample-amount-alt;
+    // User intents — handled in Rust (apply + persist).
+    callback theme-selected(string); // "dark" | "light"
+    callback label-set-selected(string); // "naic" | "neutral"
+    callback number-format-selected(string); // "comma" | "point"
+}

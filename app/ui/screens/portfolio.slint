@@ -1,0 +1,25 @@
+// Portefeuille — neutral placeholder (the holdings register is Epic 4; actionable empty
+// states are Story 2.13).
+
+import { Tokens } from "../tokens.slint";
+
+export component PortfolioScreen inherits Rectangle {
+    VerticalLayout {
+        alignment: start;
+        padding: Tokens.space-24;
+        spacing: Tokens.space-12;
+
+        Text {
+            text: @tr("Portefeuille");
+            color: Tokens.text-high;
+            font-size: Tokens.font-h2;
+            font-weight: Tokens.weight-semibold;
+        }
+
+        Text {
+            text: @tr("Aucune position pour le moment.");
+            color: Tokens.text-mid;
+            font-size: Tokens.font-body;
+        }
+    }
+}

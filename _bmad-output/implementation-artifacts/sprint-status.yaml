@@ -62,8 +62,8 @@ development_status:
   epic-1-retrospective: done
 
   # ── Epic 2: The trustworthy Stock Study (first usable product) [P1] ──
-  epic-2: backlog
-  2-1-application-shell-theme-disclaimer: backlog
+  epic-2: in-progress
+  2-1-application-shell-theme-disclaimer: done
   2-2-create-save-reopen-study: backlog
   2-3-faithful-collapsible-ssg-form: backlog
   2-4-manual-data-entry-provenance-coverage: backlog

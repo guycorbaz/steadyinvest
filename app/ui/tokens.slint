@@ -1,0 +1,65 @@
+// Token design system — the single source of truth every component reads (UX-DR1/2/6/7).
+// Governance rule: NO hard-coded colour or size anywhere else in ui/ — always read `Tokens`.
+//
+// Two families:
+//  - colour/alpha (in-out): freely swappable at runtime. `app/src/theme.rs` owns the canonical
+//    theme state and pushes a whole ink scale here on switch. Defaults below = the DARK scale.
+//  - metric/typo (out): quasi-static — never swapped during interaction, so a theme switch
+//    causes no geometry change.
+//
+// The judgment-zone hues (Okabe-Ito) and per-theme zone alphas are defined now so later stories
+// (2.6 verdict bar, 2.8 chart) consume tokens only; nothing renders a zone in 2.1.
+
+export global Tokens {
+    // ── Colour/alpha family (runtime-swappable; dark scale as defaults) ──
+    in-out property <bool> dark: true;
+    in-out property <color> bg: #0E0F12;
+    in-out property <color> surface: #16181D;
+    in-out property <color> surface-alt: #1C1F26;
+    in-out property <color> separator: #2A2E37;
+    in-out property <color> text-high: #ECEEF2;
+    in-out property <color> text-mid: #B8BDC7;
+    in-out property <color> text-low: #8A8F98;
+    // Judgment-zone hues — identical across themes; only the alpha is per-theme
+    // (dark 32–40 %, light 15–18 %).
+    in-out property <color> zone-buy: #009E73;
+    in-out property <color> zone-hold: #E69F00;
+    in-out property <color> zone-sell: #D55E00;
+    in-out property <float> zone-alpha: 0.36;
+    // Always-visible keyboard focus ring ink (NFR-U2).
+    in-out property <color> focus: #B8BDC7;
+
+    // ── Metric/typo family (quasi-static) ──
+    // 4 px spacing scale: 4 · 8 · 12 · 16 · 24 · 32 · 48.
+    out property <length> space-4: 4px;
+    out property <length> space-8: 8px;
+    out property <length> space-12: 12px;
+    out property <length> space-16: 16px;
+    out property <length> space-24: 24px;
+    out property <length> space-32: 32px;
+    out property <length> space-48: 48px;
+    // Type scale: verdict 28 / H2 18 / H3 15 / body 14 / caption 12.
+    out property <length> font-verdict: 28px;
+    out property <length> font-h2: 18px;
+    out property <length> font-h3: 15px;
+    out property <length> font-body: 14px;
+    out property <length> font-caption: 12px;
+    out property <int> weight-regular: 400;
+    out property <int> weight-medium: 500;
+    out property <int> weight-semibold: 600;
+    // Flat elevation: 1 px borders, no shadows.
+    out property <length> border: 1px;
+    out property <length> focus-border: 2px;
+    out property <length> radius: 4px;
+    out property <length> row-height: 28px;
+    // Shell geometry.
+    out property <length> nav-rail-width: 200px;
+    out property <length> top-bar-height: 48px;
+    out property <length> indicator-width: 3px;
+    out property <length> min-window-width: 720px;
+    out property <length> min-window-height: 480px;
+    // Bundled font families (app/assets/fonts/, OFL): Inter for UI text, IBM Plex Sans for
+    // numerals (tabular figures by default — verified, see Story 2.1 Dev Agent Record).
+    out property <string> font-ui: "Inter";
+    out property <string> font-numeric: "IBM Plex Sans";
+}

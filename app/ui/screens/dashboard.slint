@@ -1,0 +1,33 @@
+// Études — neutral placeholder (the actionable empty states of FR58 are Story 2.13; the real
+// dashboard with list/search/sort/filter is 2.2/2.12). The method line reads the runtime label
+// set, so a label-set swap is visible on a real screen, not only in Settings.
+
+import { Tokens } from "../tokens.slint";
+import { Labels } from "../state.slint";
+
+export component DashboardScreen inherits Rectangle {
+    VerticalLayout {
+        alignment: start;
+        padding: Tokens.space-24;
+        spacing: Tokens.space-12;
+
+        Text {
+            text: @tr("Études");
+            color: Tokens.text-high;
+            font-size: Tokens.font-h2;
+            font-weight: Tokens.weight-semibold;
+        }
+
+        Text {
+            text: @tr("Aucune étude pour le moment.");
+            color: Tokens.text-mid;
+            font-size: Tokens.font-body;
+        }
+
+        Text {
+            text: @tr("Méthode : {}", Labels.study-method);
+            color: Tokens.text-low;
+            font-size: Tokens.font-caption;
+        }
+    }
+}
