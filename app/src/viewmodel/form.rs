@@ -69,6 +69,9 @@ fn editable_cell(
         coverage: entry::coverage_str(cell).into(),
         stale: cell.is_some_and(|c| c.freshness == Freshness::Stale),
         source: entry::source_label(cell).into(),
+        // The tri-state review tag crosses as an enum-derived string (Story 2.5) — "none" draws no
+        // marker, "to-review" the ? glyph, "validated" the ✓ check. Never a float / 0/1/2.
+        review: entry::review_str(cell).into(),
         editable: true,
         year_index: year_index as i32,
         field: field.into(),
@@ -277,6 +280,31 @@ mod tests {
         let r2 = &rows[0];
         let _ = r2;
         assert_eq!(rows[0].c.value, "4,2");
+    }
+
+    #[test]
+    fn the_review_tag_crosses_the_adapter_as_an_enum_derived_string() {
+        let validated = Cell {
+            review: Review::Validated,
+            ..cell(Some("120.5"))
+        };
+        let year = YearData {
+            year: 2025,
+            sales: cell(Some("1")),
+            eps: cell(Some("1")),
+            high_price: validated,
+            low_price: cell(Some("1")),
+            dividend_per_share: None,
+            pre_tax_profit: None,
+            book_value_per_share: None,
+        };
+        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma);
+        assert_eq!(rows[0].a.review, "validated", "✓ crosses as a string");
+        assert_eq!(rows[0].b.review, "none", "an unreviewed cell is none");
+        assert_eq!(
+            rows[0].f.review, "none",
+            "an absent optional cell carries no sign-off"
+        );
     }
 
     #[test]

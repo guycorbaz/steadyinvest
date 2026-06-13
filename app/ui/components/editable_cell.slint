@@ -15,15 +15,40 @@
 
 import { Tokens } from "../tokens.slint";
 import { Studies, GridCellState } from "../state.slint";
+import { TrustMarker } from "trust_markers.slint";
 
 export component EditableCell inherits Rectangle {
     in property <GridCellState> state;
+
+    // Soft-lock (Story 2.5): a validated (`✓`) cell is edit-protected — its value cannot be changed
+    // by a stray keystroke; only the deliberate clear-✓ gesture releases it. Drives the read-only
+    // TextInput, the lock affordance and the refusal notice below.
+    property <bool> locked: root.state.review == "validated";
 
     min-height: Tokens.row-height;
     horizontal-stretch: 1;
     border-width: input.has-focus ? Tokens.focus-border : Tokens.border;
     border-color: input.has-focus ? Tokens.focus : Tokens.grid-line;
     background: input.has-focus ? Tokens.cell-active : transparent;
+
+    // The review-tag cycle none → ? → ✓ → none (the click affordance + the Ctrl+Enter chord both
+    // land here). A review-only change — Rust persists it without touching the value.
+    function next-review(current: string) -> string {
+        if (current == "none") {
+            return "to-review";
+        }
+        if (current == "to-review") {
+            return "validated";
+        }
+        return "none"; // validated → none (the full cycle; clear-✓ → ? is a separate gesture)
+    }
+    function cycle-review() {
+        Studies.set-review(root.state.year-index, root.state.field, root.next-review(root.state.review));
+    }
+    // The deliberate clear-✓ → ? (NOT → none): releases the soft-lock, preserving the recheck status.
+    function clear-validation() {
+        Studies.set-review(root.state.year-index, root.state.field, "to-review");
+    }
 
     // Commit the typed text iff it differs from the displayed model value (so tabbing through
     // untouched cells writes nothing — no no-op put_study, no polluted FR51 history). A blank /
@@ -81,6 +106,8 @@ export component EditableCell inherits Rectangle {
         horizontal-alignment: right;
         vertical-alignment: center;
         single-line: true;
+        // A validated cell is soft-locked: the value is read-only until the sign-off is cleared.
+        read-only: root.locked;
         width: parent.width - Tokens.space-8 * 2;
         height: 100%;
         x: Tokens.space-8;
@@ -109,6 +136,29 @@ export component EditableCell inherits Rectangle {
         }
         key-pressed(e) => {
             // Ctrl/Cmd chords first, so they never leak a character into the cell (Spike-A fix).
+            // Ctrl+Enter cycles the review tag none→?→✓→none (works regardless of the soft-lock —
+            // it changes the TAG, not the value). Intercepted here so it never commits/advances.
+            if ((e.modifiers.control || e.modifiers.meta) && e.text == Key.Return) {
+                root.cycle-review();
+                return EventResult.accept;
+            }
+            // Ctrl+Backspace on a locked cell is the deliberate clear-✓ → ? (the soft-lock release).
+            if (root.locked && (e.modifiers.control || e.modifiers.meta) && e.text == Key.Backspace) {
+                root.clear-validation();
+                return EventResult.accept;
+            }
+            // Soft-lock: a validated cell refuses every value edit (typing / Backspace / Delete /
+            // Ctrl+V / Ctrl+Space) with a neutral notice — never silently blanked. Arrow navigation
+            // AND Tab/Backtab focus traversal still work (they fall through to the move handlers /
+            // default focus order below) so a locked cell never traps the keyboard (logical tab
+            // order, AC 6) nor raises a spurious soft-lock notice on a pure navigation key.
+            if (root.locked
+                && e.text != Key.UpArrow && e.text != Key.DownArrow
+                && e.text != Key.LeftArrow && e.text != Key.RightArrow
+                && e.text != Key.Tab && e.text != Key.Backtab) {
+                Studies.notify-soft-lock();
+                return EventResult.accept;
+            }
             if ((e.modifiers.control || e.modifiers.meta) && e.text == "v") {
                 Studies.paste-column(root.state.year-index, root.state.field);
                 return EventResult.accept;
@@ -138,6 +188,41 @@ export component EditableCell inherits Rectangle {
                 return EventResult.accept;
             }
             return EventResult.reject; // digits, separators, sign, Backspace/Delete, Tab → TextInput
+        }
+    }
+
+    // The tri-state trust marker (Story 2.5), top-left — the click affordance cycles the tag, and on
+    // a locked cell it stays the way to reach the cycle by mouse. Constant geometry: a fixed box, so
+    // the cell never resizes on a tag change. Reduced-motion mirrored from the platform.
+    TrustMarker {
+        x: 0;
+        y: 0;
+        height: 100%;
+        review: root.state.review;
+        reduced-motion: Studies.reduced-motion;
+        clicked => {
+            root.cycle-review();
+        }
+    }
+    // Calm lock affordance on a soft-locked cell — a glyph (NO colour spent), clickable to reach the
+    // deliberate clear-✓ → ? release by mouse. Distinct from the cycle marker so the first gesture
+    // clears and a normal edit needs the cleared (?) cell — never both in one keystroke.
+    if root.locked: TouchArea {
+        width: Tokens.font-body + Tokens.space-8;
+        height: 100%;
+        x: parent.width - self.width;
+        mouse-cursor: no-drop;
+        clicked => {
+            root.clear-validation();
+        }
+        // A monochrome glyph (NOT an emoji — those render in colour, which the marker budget forbids):
+        // a small slashed mark reading "remove the sign-off". Neutral ink only.
+        Text {
+            text: "⦸";
+            color: Tokens.text-low;
+            font-size: Tokens.font-body;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 

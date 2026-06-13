@@ -53,7 +53,7 @@ use crate::clock::{SystemClock, UuidGen};
 use crate::config::{AppConfig, StudyViewState};
 use crate::labels::LabelSet;
 use crate::regime::Regime;
-use crate::state::JournalState;
+use crate::state::{JournalState, UnlockScope};
 use crate::theme::Theme;
 use crate::viewmodel::format::{format_amount, NumberFormat};
 
@@ -123,6 +123,18 @@ fn push_form(ui: &MainWindow, study: &steadyinvest_contract::Study, format: Numb
     ))));
 }
 
+/// Build an [`UnlockScope`] from the Slint callback's `(scope-kind, scope-arg)` pair (Story 2.5).
+/// `"study"` ignores the arg; `"year"` parses the arg as a year-window index; `"metric"` takes the
+/// arg as a field key. `None` for an unknown kind / unparseable index (the caller no-ops safely).
+fn parse_unlock_scope(kind: &str, arg: &str) -> Option<UnlockScope> {
+    match kind {
+        "study" => Some(UnlockScope::Study),
+        "year" => arg.parse::<usize>().ok().map(UnlockScope::Year),
+        "metric" => Some(UnlockScope::Metric(arg.to_string())),
+        _ => None,
+    }
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // Minimal logging: tracing carries the events; a real subscriber (ADD15 rotating logs) is
     // deferred — see the Story 2.1 GitHub issue. Until then load warnings also go to stderr.
@@ -166,6 +178,11 @@ fn main() -> Result<(), slint::PlatformError> {
     // The id (stringified UUID) of the study whose form is currently open, so the fold/regime
     // callbacks know which `study_view_state` entry to mutate. `None` = the dashboard list view.
     let current_study: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+
+    // The scope of a pending "unlock all" (Story 2.5), held between the confirmation overlay being
+    // raised (`request-unlock`) and the user pressing Confirmer (`confirm-unlock`). `None` = no
+    // pending action; Annuler clears it without mutating anything.
+    let pending_unlock: Rc<RefCell<Option<UnlockScope>>> = Rc::new(RefCell::new(None));
 
     let ui = MainWindow::new()?;
 
@@ -475,6 +492,129 @@ fn main() -> Result<(), slint::PlatformError> {
                 studies.set_active_year(next_year as i32);
                 studies.set_active_field(next_field.into());
             });
+    }
+
+    // ── Tri-state review tag + soft-lock + bulk unlock (Story 2.5) ──
+
+    // Set a cell's review tag (the cycle none→?→✓→none and the deliberate clear-✓ → ? both land
+    // here; the UI computes the target). A review-only change — the value/coverage are never touched;
+    // re-read + re-push so the marker reflects exactly what is on disk.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>()
+            .on_set_review(move |year_index, field, review| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let format = config.borrow().number_format;
+                let result = journal_state.borrow_mut().set_review(
+                    id,
+                    year_index.max(0) as usize,
+                    field.as_str(),
+                    viewmodel::entry::review_from_str(review.as_str()),
+                );
+                match result {
+                    Ok(()) => {
+                        studies.set_notice(SharedString::new());
+                        if let Some(study) = journal_state.borrow().get_study(id) {
+                            push_form(&ui, &study, format);
+                        }
+                    }
+                    Err(message) => studies.set_notice(message.into()),
+                }
+            });
+    }
+
+    // A value edit was attempted on a soft-locked (✓) cell: raise the neutral notice (the value is
+    // never mutated — the refusal is enforced both here and in `state::edit_cell`).
+    {
+        let ui_weak = ui.as_weak();
+        ui.global::<Studies>().on_notify_soft_lock(move || {
+            let ui = ui_weak.unwrap();
+            ui.global::<Studies>()
+                .set_notice(state::MSG_SOFT_LOCKED.into());
+        });
+    }
+
+    // Request an "unlock all": count the ✓ cells the chosen scope covers and raise the confirmation
+    // overlay (the bulk flip is never silent). The scope is parked in `pending_unlock` until Confirmer.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let current_study = Rc::clone(&current_study);
+        let pending_unlock = Rc::clone(&pending_unlock);
+        ui.global::<Studies>()
+            .on_request_unlock(move |scope_kind, scope_arg| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let Some(scope) = parse_unlock_scope(scope_kind.as_str(), scope_arg.as_str())
+                else {
+                    return;
+                };
+                let count = journal_state.borrow().count_validated(id, &scope);
+                *pending_unlock.borrow_mut() = Some(scope);
+                studies.set_confirm_message(state::unlock_confirm_message(count).into());
+                studies.set_confirm_visible(true);
+            });
+    }
+
+    // Confirm the pending "unlock all": flip every ✓→? in the parked scope in one upsert, surface a
+    // neutral "N flipped" notice, re-read + re-push, and dismiss the overlay.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        let pending_unlock = Rc::clone(&pending_unlock);
+        ui.global::<Studies>().on_confirm_unlock(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            studies.set_confirm_visible(false);
+            let Some(scope) = pending_unlock.borrow_mut().take() else {
+                return;
+            };
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            match journal_state.borrow_mut().unlock_all(id, &scope) {
+                Ok(count) => {
+                    studies.set_notice(state::unlock_done_message(count).into());
+                    if let Some(study) = journal_state.borrow().get_study(id) {
+                        push_form(&ui, &study, format);
+                    }
+                }
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+
+    // Cancel a pending "unlock all": dismiss the overlay and forget the scope — nothing is mutated.
+    {
+        let ui_weak = ui.as_weak();
+        let pending_unlock = Rc::clone(&pending_unlock);
+        ui.global::<Studies>().on_cancel_unlock(move || {
+            let ui = ui_weak.unwrap();
+            *pending_unlock.borrow_mut() = None;
+            ui.global::<Studies>().set_confirm_visible(false);
+        });
     }
 
     // Settings intents: apply live (no restart), mirror into Prefs, persist on change.

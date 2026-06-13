@@ -43,6 +43,7 @@ export struct GridCellState {
     coverage: string,     // "present" | "to-fill" | "not-available"
     stale: bool,          // freshness == Stale (the ~60% murmur); current is the silent default
     source: string,       // "manuel" | "fournisseur" | "calculé" — revealed on demand; "" when none
+    review: string,       // "none" | "to-review" | "validated" — the tri-state trust marker (Story 2.5)
     editable: bool,       // true for a raw input cell; false for a computed/derived slot
     year-index: int,      // row address (0-based, into the materialized year window)
     field: string,        // column address: "a"|"b"|"c"|"f" (§3) | "sales"|"pretax"|"book" (§2)
@@ -131,6 +132,30 @@ export global Studies {
     // Move the cell cursor from (year-index, field) in a direction ("up"|"down"|"left"|"right").
     // Rust computes the neighbour and updates `active-year`/`active-field`; the target cell focuses.
     callback cell-move(int, string, string);
+
+    // ── Tri-state review tag + soft-lock + bulk unlock (Story 2.5) — handled in Rust (set review →
+    //    put_study → re-read → re-push, the one-source-of-truth shape). The tag crosses as the
+    //    enum-derived string "none"|"to-review"|"validated"; never a 0/1/2. ──
+    // Set a cell's review tag (year-index, field, target). The cycle none→?→✓→none and the deliberate
+    // clear-✓ (✓→?) both call this; the UI computes the target. A review-only change (value untouched).
+    callback set-review(int, string, string);
+    // The bulk "unlock all" confirmation overlay (the app's first confirm-before-act). `request-unlock`
+    // asks Rust to count the ✓ in scope and raise the overlay (scope-kind "study"|"year"|"metric",
+    // scope-arg = year index as string / field key / "" for study). Confirm performs the flip; cancel
+    // mutates nothing.
+    callback request-unlock(string, string); // scope-kind, scope-arg
+    callback confirm-unlock();
+    callback cancel-unlock();
+    // A value edit was attempted on a soft-locked (`✓`) cell — Rust raises the neutral notice (the
+    // French string lives in `state.rs`, posture-scanned there). The value is never mutated.
+    callback notify-soft-lock();
+    // The confirmation overlay state, pushed by Rust: visible flag + the fact-stating "{n} cellule(s)"
+    // prompt. NO colour spent on the overlay (neutral surface + ink, like every other notice).
+    in-out property <bool> confirm-visible;
+    in-out property <string> confirm-message;
+    // OS reduced-motion: when true the ✓ draw micro-animation is disabled (AC 1 / AC 7). Mirrored
+    // from the platform by `main.rs`; default false (animation on).
+    in-out property <bool> reduced-motion;
 }
 
 export global Prefs {

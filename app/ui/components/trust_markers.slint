@@ -1,0 +1,91 @@
+// The per-cell tri-state TRUST MARKER (Story 2.5): the human-judgment axis of the per-cell
+// data-state model, rendered under the confusability spec (≥98 % ID / <2 % pairwise at 14 px).
+//
+// Three reachable states, each a DISTINCT SHAPE on a DISTINCT non-colour channel so they can never be
+// confused with the 2.4 markers (the stale `◦` dot, the `▦` gap glyph):
+//   - "none"       → nothing drawn (the cell shows only its 2.4 value/coverage/freshness state);
+//   - "to-review"  → a hollow `?` given a SECOND non-colour channel (a heavier ring outline + a
+//                    semibold, body-sized glyph) so it reads unmistakably apart from the `◦` dot;
+//   - "validated"  → a solid `✓` in the ONE geofenced, sanctioned desaturated ink-green
+//                    (`Tokens.validated-ink`) — the single carved-out colour-budget exception,
+//                    admissible only because no zone bands exist yet (Story 2.6). The green is a
+//                    REDUNDANT third channel: the solid check shape carries the meaning colour-free.
+//
+// Asymmetric attenuation (the SAFETY rule, AC 4): in contemplation ONLY the positive `✓` may dim
+// (opacity floor ~40 %, neutral ink) — it reads `Tokens.regime-emphasis`. The negative `?` is
+// regime-INDEPENDENT: it never attenuates, so a verdict (2.6) can never speak alone while a
+// load-bearing input is non-green.
+//
+// Constant geometry: the marker lives in a fixed-size box, so cycling the tag never resizes the cell.
+// The whole box is a click affordance (AC 1) — clickable even in "none" so a click cycles none→?.
+
+import { Tokens } from "../tokens.slint";
+
+export component TrustMarker inherits Rectangle {
+    in property <string> review;          // "none" | "to-review" | "validated"
+    in property <bool> reduced-motion;    // OS reduced-motion → disable the ✓ draw micro-animation
+    callback clicked();
+
+    // Fixed marker box — constant geometry whatever the tag (no resize on cycle, UX-DR6).
+    width: Tokens.font-body + Tokens.space-8;
+    horizontal-stretch: 0;
+    background: transparent;
+
+    // Asymmetric attenuation: ✓ dims in contemplation to the ~40 % floor; everything else is full.
+    // `regime-emphasis` is 1.0 in entry, 0.55 in contemplation — clamped to ≥0.4 by construction.
+    property <float> validated-opacity: Tokens.regime-emphasis < 0.4 ? 0.4 : Tokens.regime-emphasis;
+
+    // ── "to-review": a hollow `?` with a heavier ring (the second non-colour channel) ──
+    // Regime-INDEPENDENT (no `regime-emphasis`): the negative signal never attenuates (AC 4).
+    Rectangle {
+        visible: root.review == "to-review";
+        width: Tokens.font-body + Tokens.space-4;
+        height: self.width;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: transparent;
+        border-width: Tokens.marker-outline;     // heavier outline = the distinguishing channel
+        border-color: Tokens.text-mid;
+        border-radius: self.width / 2;
+        Text {
+            text: "?";
+            color: Tokens.text-high;
+            font-size: Tokens.font-body;
+            font-weight: Tokens.weight-semibold;  // slightly larger/heavier than the ◦ stale dot
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── "validated": a solid `✓` in the geofenced ink-green (entry) / neutral ink (contemplation) ──
+    // The ONLY token the regime swap moves on a marker; the check SHAPE carries meaning colour-free.
+    check := Text {
+        visible: root.review == "validated";
+        text: "✓";
+        // Geofenced desaturated ink-green in entry; drops to neutral ink in contemplation (AC 1/4).
+        color: Tokens.regime-emphasis >= 1.0 ? Tokens.validated-ink : Tokens.text-mid;
+        font-size: Tokens.font-body;
+        font-weight: Tokens.weight-semibold;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        // Attenuate only the positive marker (the safety rule). The ~120 ms draw micro-animation
+        // (0.9→1.0) is reduced-motion-respecting: 0 ms disables it. (Because the form rebuilds its
+        // rows on every persisted change, this animates only on an in-place opacity change — the
+        // reduced-motion gate is the structurally guaranteed behaviour; see the Dev Agent Record.)
+        opacity: root.review == "validated" ? root.validated-opacity : 0.0;
+        animate opacity {
+            duration: root.reduced-motion ? 0ms : 120ms;
+            easing: ease-out;
+        }
+    }
+
+    // The whole box is clickable (even in "none") so a click cycles the tag (AC 1 click affordance).
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}

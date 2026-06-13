@@ -40,6 +40,18 @@
 
 generated: 2026-06-09
 last_updated: 2026-06-13
+# 2026-06-13: story 2-5 created (tri-state validation with soft-lock) → ready-for-dev. app-only review-axis
+#             story: render + user-set the per-cell tri-state review tag (none/? to-review/✓ validated) on
+#             the §2/§3 editable cells (cycle via free keyboard chord + marker click); soft-lock a ✓ cell
+#             (edit refused until one deliberate clear-✓ → ? gesture, never silently blanked); "unlock all"
+#             (study / per-year / per-metric) flips ✓→? behind a confirmation (the app's first
+#             confirm-before-act). ✓ = geofenced sanctioned desaturated ink-green (≈#4A7C6F, the ONE colour-
+#             budget exception, never co-present with zones) + reduced-motion-respecting ~120ms draw anim;
+#             ? = hollow glyph on a 2nd non-colour channel (never the stale ◦ dot). Asymmetric attenuation:
+#             only ✓ dims in contemplation; ?/stale/missing never attenuate. NO new dependency (Cargo.lock +
+#             deny.toml expected UNCHANGED); contract NOT modified (Review enum + Cell::edited ✓→? rail
+#             already exist, Story 1.11). Scope-guarded: NO engine/verdict/verdict-integrity gate (2.6), NO
+#             chart (2.8), NO plausibility (2.7), NO provider/reconcile/provider-divergent auto-tag (Epic 3).
 # 2026-06-13: story 2-2 dev complete → review (issue #14 closed; 4 gates green --locked).
 # 2026-06-13: story 2-2 review complete → done (1 MEDIUM auto-fixed: keep input on refusal; 4 gates re-green).
 # 2026-06-13: story 2-3 created (faithful collapsible SSG form §1–§5) → ready-for-dev. app-only UI-structure story;
@@ -91,7 +103,7 @@ development_status:
   2-2-create-save-reopen-study: done
   2-3-faithful-collapsible-ssg-form: done
   2-4-manual-data-entry-provenance-coverage: done
-  2-5-tri-state-validation-soft-lock: backlog
+  2-5-tri-state-validation-soft-lock: done
   2-6-numeric-judgment-inputs-verdict-zone-bar: backlog
   2-7-low-confidence-plausibility-surfacing: backlog
   2-8-interactive-growth-chart-draggable-judgment-line: backlog

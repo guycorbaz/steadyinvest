@@ -63,6 +63,11 @@ pub struct Palette {
     /// Shouting to-fill gap ink (Story 2.4): a strong neutral so a hole in the grid is loud (UX
     /// "missing shouts"). Still ink — never a judgment hue.
     pub gap_ink: u32,
+    /// The geofenced desaturated ink-green of the `✓` validated marker (Story 2.5): the ONE
+    /// sanctioned colour-budget exception, deliberately NOT the Buy green (`zone_buy`). Per-theme
+    /// so it stays legible on both backgrounds; it attenuates to neutral ink in contemplation and
+    /// must never co-present with the (not-yet-existing) zone bands.
+    pub validated_ink: u32,
 }
 
 /// Dark ink scale (the default).
@@ -82,6 +87,8 @@ pub const DARK: Palette = Palette {
     grid_line: 0x343842,
     cell_active: 0x232A38,
     gap_ink: 0xECEEF2,
+    // Desaturated ink-green for ✓ on the dark bg (UX ≈ #4A7C6F) — NOT the Buy green #009E73.
+    validated_ink: 0x4A7C6F,
 };
 
 /// Light ink scale.
@@ -101,6 +108,9 @@ pub const LIGHT: Palette = Palette {
     grid_line: 0xD2D5DC,
     cell_active: 0xE7ECF4,
     gap_ink: 0x14161A,
+    // A slightly deeper desaturated ink-green for ✓ on the light bg (legible on near-white), still
+    // a desaturated teal-green, deliberately apart from the Buy green and never co-present with it.
+    validated_ink: 0x2F6657,
 };
 
 fn color(rgb: u32) -> slint::Color {
@@ -129,6 +139,7 @@ pub fn apply(ui: &crate::MainWindow, theme: Theme) {
     tokens.set_grid_line(color(palette.grid_line));
     tokens.set_cell_active(color(palette.cell_active));
     tokens.set_gap_ink(color(palette.gap_ink));
+    tokens.set_validated_ink(color(palette.validated_ink));
 }
 
 #[cfg(test)]
@@ -168,6 +179,18 @@ mod tests {
     fn zone_alphas_stay_within_the_spec_ranges() {
         assert!((0.32..=0.40).contains(&DARK.zone_alpha));
         assert!((0.15..=0.18).contains(&LIGHT.zone_alpha));
+    }
+
+    #[test]
+    fn validated_ink_is_geofenced_apart_from_the_buy_green() {
+        // The ONE sanctioned colour-budget exception (Story 2.5) is deliberately NOT the Buy green —
+        // the geofence is what keeps it admissible. If a future edit collapses them, this fails loud.
+        for palette in [&DARK, &LIGHT] {
+            assert_ne!(
+                palette.validated_ink, palette.zone_buy,
+                "the ✓ ink must never equal the Buy green (#009E73)"
+            );
+        }
     }
 
     #[test]

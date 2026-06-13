@@ -44,6 +44,12 @@ export global Tokens {
     // in 2.3; 2.5 (markers) / 2.6 (zones) hang their deltas on the same hook. Colour/alpha only —
     // NEVER a geometry value, so a regime switch never re-lays-out (UX-DR6, constant geometry).
     in-out property <float> regime-emphasis: 1.0;
+    // ── Trust markers (Story 2.5) — the human-judgment axis. The ONE sanctioned colour-budget
+    //    exception: the geofenced desaturated ink-green of the `✓` validated marker (≈ #4A7C6F dark),
+    //    deliberately NOT the Buy green (#009E73 / zone-buy). Admissible only because no zone bands
+    //    exist yet (2.6) and it attenuates to neutral ink in contemplation — it must NEVER co-present
+    //    with the judgment zones. Everything else on the markers is shape/outline/opacity, never hue.
+    in-out property <color> validated-ink: #4A7C6F;
 
     // ── Metric/typo family (quasi-static) ──
     // 4 px spacing scale: 4 · 8 · 12 · 16 · 24 · 32 · 48.
@@ -75,6 +81,10 @@ export global Tokens {
     out property <string> gap-glyph: "▦";
     out property <string> stale-dot: "◦";
     out property <float> stale-opacity: 0.6;
+    // Trust-marker outline weight (Story 2.5): the heavier ring on the `?` to-review glyph — the
+    // second non-colour channel that keeps it unmistakably distinct from the hollow `◦` stale dot.
+    // Quasi-static (a metric), so a theme/regime swap never re-lays-out the marker.
+    out property <length> marker-outline: 1.5px;
     // Shell geometry.
     out property <length> nav-rail-width: 200px;
     out property <length> top-bar-height: 48px;

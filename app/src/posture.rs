@@ -107,7 +107,7 @@ mod tests {
     fn ui_tr_strings_are_neutral_no_banned_verb() {
         let files = slint_files();
         assert!(
-            files.len() >= 13,
+            files.len() >= 14,
             "posture gate found only {} .slint files — scan broken?",
             files.len()
         );
@@ -125,7 +125,7 @@ mod tests {
         // so the scanned population grew again. Keep the floor strict so a future scan that silently
         // stops finding literals (a broken extractor) fails loudly.
         assert!(
-            total >= 90,
+            total >= 100,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -150,14 +150,16 @@ mod tests {
         // the source caption, the entry hint) is a French `@tr()` literal in `ui/**/*.slint`, so the
         // `.slint` scan above covers it — the form adapter (`viewmodel/form.rs`) emits only data +
         // enum-derived state strings, so it has no label inventory to register here. Story 2.4 adds
-        // two Rust-side notices (clipboard-unavailable, paste-clipped) to `state.rs`.
+        // two Rust-side notices (clipboard-unavailable, paste-clipped) to `state.rs`. Story 2.5 adds
+        // three more (soft-lock refusal, the unlock-all confirmation + completion notices — each with
+        // a `{n}` count placeholder that is harmless to the banned-verb scan).
         for message in crate::state::USER_FACING_MESSAGES {
             assert_neutral(message, "state.rs (journal/create/entry notices)");
         }
         // Guard the count so a future message added without registering it here is caught.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            10,
+            13,
             "state.rs message inventory changed — register the new notice"
         );
     }

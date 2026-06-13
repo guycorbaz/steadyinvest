@@ -12,6 +12,19 @@ use steadyinvest_contract::{
     Cell, Coverage, Freshness, Money, Provenance, Review, Source, Timestamp, YearData,
 };
 
+/// Every editable field of a study (the §3 A/B/C/F direct columns + the §2 sales/pretax/book rows),
+/// in a stable order. The bulk "unlock all" iterates this list; the cell cursor uses the per-grid
+/// sub-lists above. Keep in sync with [`PE_FIELDS`] + [`MGMT_FIELDS`].
+pub const ALL_FIELDS: [&str; 7] = [
+    FIELD_HIGH,
+    FIELD_LOW,
+    FIELD_EPS,
+    FIELD_DIVIDEND,
+    FIELD_SALES,
+    FIELD_PRETAX,
+    FIELD_BOOK,
+];
+
 use crate::viewmodel::format::{parse_amount, NumberFormat};
 
 /// How many most-recent complete fiscal years a freshly-created study materializes for entry. The
@@ -194,6 +207,29 @@ pub fn coverage_str(cell: Option<&Cell>) -> &'static str {
     }
 }
 
+/// The review tag as the stable string the Slint side switches its trust-marker on:
+/// `"none"` (no marker), `"to-review"` (the `?` hollow glyph), `"validated"` (the `✓` solid check).
+/// The enum crosses the adapter boundary as a string — never `0/1/2` (architecture: tri-state review
+/// is an enum). An absent optional cell reads as `"none"` (it carries no sign-off).
+pub fn review_str(cell: Option<&Cell>) -> &'static str {
+    match cell.map(|c| c.review) {
+        Some(Review::ToReview) => "to-review",
+        Some(Review::Validated) => "validated",
+        Some(Review::None) | None => "none",
+    }
+}
+
+/// Parse a UI-side review tag string back into the contract enum. The Slint callbacks pass
+/// `"none" | "to-review" | "validated"`; anything else is treated as [`Review::None`] (a safe
+/// default — the gate never panics on a stray string). The inverse of [`review_str`].
+pub fn review_from_str(value: &str) -> Review {
+    match value {
+        "to-review" => Review::ToReview,
+        "validated" => Review::Validated,
+        _ => Review::None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +373,46 @@ mod tests {
         assert_eq!(got[4], Some(money("14.25")));
         // An empty clipboard yields no cells (not one empty cell).
         assert!(parse_pasted_column("", NumberFormat::Point).is_empty());
+    }
+
+    #[test]
+    fn review_strings_round_trip_through_every_state() {
+        // The enum → string → enum round-trip is total over the three states, and an absent cell is
+        // "none" (no sign-off). This is the structural marker mapping AC 6 asks for: each reachable
+        // review state maps to a distinct stable string the Slint side draws a distinct glyph from.
+        for (review, text) in [
+            (Review::None, "none"),
+            (Review::ToReview, "to-review"),
+            (Review::Validated, "validated"),
+        ] {
+            let cell = Cell {
+                review,
+                ..tofill_cell(prov())
+            };
+            assert_eq!(review_str(Some(&cell)), text, "{review:?} → {text}");
+            assert_eq!(review_from_str(text), review, "{text} → {review:?}");
+        }
+        assert_eq!(
+            review_str(None),
+            "none",
+            "an absent cell carries no sign-off"
+        );
+        assert_eq!(
+            review_from_str("garbage"),
+            Review::None,
+            "a stray string is a safe None, never a panic"
+        );
+    }
+
+    #[test]
+    fn all_fields_is_the_union_of_the_two_grids() {
+        for field in PE_FIELDS.iter().chain(MGMT_FIELDS.iter()) {
+            assert!(
+                ALL_FIELDS.contains(field),
+                "{field} missing from ALL_FIELDS"
+            );
+        }
+        assert_eq!(ALL_FIELDS.len(), PE_FIELDS.len() + MGMT_FIELDS.len());
     }
 
     #[test]

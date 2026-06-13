@@ -258,12 +258,110 @@ export component StudyScreen inherits Rectangle {
                     vertical-alignment: center;
                 }
                 Text {
-                    text: @tr("Ctrl+V : coller une colonne · Ctrl+Espace : marquer non disponible");
+                    text: @tr("Ctrl+V : coller une colonne · Ctrl+Espace : marquer non disponible · Ctrl+Entrée : à revoir / validé");
                     color: Tokens.text-low;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                     horizontal-alignment: right;
+                }
+            }
+
+            // ── "Unlock all" confirmation overlay (Story 2.5) — the app's FIRST confirm-before-act.
+            //    A fact-stating, neutral banner (NO colour spent); Confirmer flips ✓→? in the chosen
+            //    scope, Annuler leaves every tag untouched. ──
+            if Studies.confirm-visible: Rectangle {
+                background: Tokens.surface;
+                border-width: Tokens.focus-border;
+                border-color: Tokens.focus;
+                border-radius: Tokens.radius;
+
+                HorizontalLayout {
+                    padding: Tokens.space-12;
+                    spacing: Tokens.space-16;
+                    Text {
+                        text: Studies.confirm-message;
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-body;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    ActionButton {
+                        label: @tr("Confirmer");
+                        clicked => { Studies.confirm-unlock(); }
+                    }
+                    ActionButton {
+                        label: @tr("Annuler");
+                        clicked => { Studies.cancel-unlock(); }
+                    }
+                }
+            }
+
+            // ── "Unlock all" entry points (Story 2.5): study-wide, per-year-column, per-metric-row.
+            //    Each turns a saved study into a re-check worklist (flips ✓→? behind the confirmation
+            //    above). Keyboard-reachable ActionButtons; fact-stating, posture-gated labels. ──
+            Rectangle {
+                background: Tokens.surface;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+                border-radius: Tokens.radius;
+
+                VerticalLayout {
+                    padding: Tokens.space-12;
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: @tr("Retirer les validations");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        font-weight: Tokens.weight-medium;
+                    }
+                    // Study-wide + per-year-column.
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        alignment: start;
+                        ActionButton {
+                            label: @tr("Toute l'étude");
+                            clicked => { Studies.request-unlock("study", ""); }
+                        }
+                        for yh[i] in Studies.year-headers: ActionButton {
+                            label: yh;
+                            clicked => { Studies.request-unlock("year", "\{i}"); }
+                        }
+                    }
+                    // Per-metric-row (the §3 A/B/C/F columns + the §2 sales/pre-tax/book rows).
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        alignment: start;
+                        ActionButton {
+                            label: @tr("Haut");
+                            clicked => { Studies.request-unlock("metric", "a"); }
+                        }
+                        ActionButton {
+                            label: @tr("Bas");
+                            clicked => { Studies.request-unlock("metric", "b"); }
+                        }
+                        ActionButton {
+                            label: @tr("BPA");
+                            clicked => { Studies.request-unlock("metric", "c"); }
+                        }
+                        ActionButton {
+                            label: @tr("Div./action");
+                            clicked => { Studies.request-unlock("metric", "f"); }
+                        }
+                        ActionButton {
+                            label: @tr("Ventes");
+                            clicked => { Studies.request-unlock("metric", "sales"); }
+                        }
+                        ActionButton {
+                            label: @tr("Bénéfice avant impôt");
+                            clicked => { Studies.request-unlock("metric", "pretax"); }
+                        }
+                        ActionButton {
+                            label: @tr("Valeur comptable / action");
+                            clicked => { Studies.request-unlock("metric", "book"); }
+                        }
+                    }
                 }
             }
 

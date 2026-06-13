@@ -14,7 +14,8 @@
 use std::path::{Path, PathBuf};
 
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Judgment, Money, Provenance, Source, Study, Timestamp,
+    Cell, Coverage, ForecastLowOption, Judgment, Money, Provenance, Review, Source, Study,
+    Timestamp,
 };
 use steadyinvest_persistence::{Error as PersistError, Journal, StudySummary};
 use uuid::Uuid;
@@ -53,6 +54,25 @@ pub const MSG_CLIPBOARD_UNAVAILABLE: &str =
 /// A pasted column had more lines than the grid has years; the surplus lines were dropped.
 pub const MSG_PASTE_CLIPPED: &str =
     "Certaines lignes dépassaient la grille et n'ont pas été collées.";
+/// A direct value edit was attempted on a validated (soft-locked) cell (Story 2.5). The sign-off
+/// must be cleared first — the cell is never silently blanked by a stray keystroke.
+pub const MSG_SOFT_LOCKED: &str = "Cellule validée ; retirez la validation avant de la modifier.";
+/// The "unlock all" confirmation copy (Story 2.5) — fact-stating, posture-gated. `{n}` is replaced
+/// with the count of validated cells the chosen scope would flip back to to-review.
+pub const MSG_UNLOCK_CONFIRM: &str = "Cette action retire la validation de {n} cellule(s).";
+/// The neutral notice after an "unlock all" completes — `{n}` is the count actually flipped.
+pub const MSG_UNLOCK_DONE: &str = "Validation retirée de {n} cellule(s).";
+
+/// The confirmation prompt for an "unlock all" of `count` cells (a `{n}`-substitution of
+/// [`MSG_UNLOCK_CONFIRM`] so the scanned const and the runtime string stay one source).
+pub fn unlock_confirm_message(count: usize) -> String {
+    MSG_UNLOCK_CONFIRM.replace("{n}", &count.to_string())
+}
+
+/// The completion notice for an "unlock all" that flipped `count` cells.
+pub fn unlock_done_message(count: usize) -> String {
+    MSG_UNLOCK_DONE.replace("{n}", &count.to_string())
+}
 
 /// Every static user-facing message above — exposed so the crate-local posture gate (FR13) scans
 /// them for banned verbs alongside the `@tr()` literals. Test-only (the gate's sole consumer);
@@ -69,7 +89,33 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SAVE_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,
+    MSG_SOFT_LOCKED,
+    MSG_UNLOCK_CONFIRM,
+    MSG_UNLOCK_DONE,
 ];
+
+/// The scope of a bulk "unlock all" (Story 2.5): the whole study, a single year column, or a single
+/// metric (one §3 column / §2 row) across all years. Each flips every `✓` it covers back to `?`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnlockScope {
+    /// Every validated cell in the study.
+    Study,
+    /// Every validated cell in one materialized year (by index into the year window).
+    Year(usize),
+    /// Every validated cell of one field (a §3 column letter / §2 row key) across all years.
+    Metric(String),
+}
+
+impl UnlockScope {
+    /// Whether this scope covers the `(year_index, field)` cell address.
+    fn covers(&self, year_index: usize, field: &str) -> bool {
+        match self {
+            UnlockScope::Study => true,
+            UnlockScope::Year(y) => *y == year_index,
+            UnlockScope::Metric(f) => f == field,
+        }
+    }
+}
 
 /// Where a default journal lives when the user has none yet: the OS **data** dir (NOT the config
 /// dir, NOT beside `config.json`, NOT inside the journal) — outside any sync-watched tree (the
@@ -299,9 +345,117 @@ impl JournalState {
         field: &str,
         value: Option<Money>,
     ) -> Result<(), String> {
+        // Soft-lock (Story 2.5): a validated (`✓`) cell refuses a DIRECT typed edit — the sign-off is
+        // load-bearing and must be cleared deliberately first (clear-✓ → `?`), never undone by a
+        // stray keystroke. This is the Rust-side backstop behind the read-only TextInput; the UI also
+        // guards visually, but the rail is the testable, authoritative refusal. (Bulk `paste_column`
+        // keeps the `Cell::edited` auto-demote backstop instead — recorded interpretation: typing is
+        // blocked (a), paste is allowed-with-demote (b).)
+        if self.current_review(study_id, year_index, field) == Some(Review::Validated) {
+            return Err(MSG_SOFT_LOCKED.to_string());
+        }
         self.mutate_cell(study_id, year_index, field, |base, provenance| {
             base.edited(value, provenance)
         })
+    }
+
+    /// The current review tag of a cell, or `None` if the study/year/cell is absent (a never-touched
+    /// optional column reads as no cell). Used by the soft-lock guard before a direct value edit.
+    fn current_review(&self, study_id: Uuid, year_index: usize, field: &str) -> Option<Review> {
+        let study = self.get_study(study_id)?;
+        let year = study.years.get(year_index)?;
+        entry::get_cell(year, field).map(|cell| cell.review)
+    }
+
+    /// Set a cell's **review tag only** (Story 2.5, FR20): a review-only change that preserves the
+    /// value, coverage, source, freshness and provenance verbatim — it does NOT route through
+    /// [`Cell::edited`] (which would re-stamp source/freshness from a fresh provenance and re-derive
+    /// coverage). The cycle `none → ? → ✓ → none` and the deliberate clear-✓ (`✓ → ?`) both land
+    /// here; the UI computes the target. Setting a tag on a never-touched optional column materializes
+    /// a to-fill gap carrying the tag — the value stays `None`, **never `0`**. Persisted via
+    /// [`Journal::put_study`]; reuses the read-only / no-journal / save-failure guards.
+    ///
+    /// **Interpretation (recorded):** a review-only edit changes ONLY the `review` field — the cell's
+    /// provenance (and its origin timestamp) is preserved verbatim, never re-stamped. The sign-off
+    /// act's timing is captured by the study-level `logical_version` bump (FR51), not a per-cell
+    /// provenance overwrite, so a value's source/fetch time is never lost to a review toggle.
+    pub fn set_review(
+        &mut self,
+        study_id: Uuid,
+        year_index: usize,
+        field: &str,
+        review: Review,
+    ) -> Result<(), String> {
+        self.mutate_cell(study_id, year_index, field, move |base, _provenance| Cell {
+            review,
+            ..base
+        })
+    }
+
+    /// Bulk "unlock all" (Story 2.5, FR20): flip every `Review::Validated → ToReview` within `scope`
+    /// (study / year / metric), leaving `None`/`ToReview` cells untouched, in **one** persisted
+    /// upsert (one `logical_version` bump). Returns the count of cells actually flipped (surfaced in a
+    /// neutral notice). A review-only flip — values/coverage are never touched. Reuses the read-only /
+    /// no-journal / save-failure guards.
+    pub fn unlock_all(&mut self, study_id: Uuid, scope: &UnlockScope) -> Result<usize, String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        if self.journal.is_none() {
+            return Err(MSG_NO_JOURNAL.to_string());
+        }
+        let mut study = self
+            .get_study(study_id)
+            .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        let mut flipped = 0usize;
+        for (year_index, year) in study.years.iter_mut().enumerate() {
+            for field in entry::ALL_FIELDS {
+                if !scope.covers(year_index, field) {
+                    continue;
+                }
+                let Some(cell) = entry::get_cell(year, field) else {
+                    continue; // an absent optional column carries no sign-off
+                };
+                if cell.review != Review::Validated {
+                    continue;
+                }
+                let demoted = Cell {
+                    review: Review::ToReview,
+                    ..cell
+                };
+                entry::set_cell(year, field, demoted).map_err(|()| MSG_SAVE_FAILED.to_string())?;
+                flipped += 1;
+            }
+        }
+        let journal = self
+            .journal
+            .as_mut()
+            .expect("journal presence checked above");
+        match journal.put_study(&study) {
+            Ok(()) => Ok(flipped),
+            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
+            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+        }
+    }
+
+    /// Count the validated (`✓`) cells the given `scope` would flip — for the confirmation prompt
+    /// (the bulk change is never silent). A read-only/pure query; never mutates or persists.
+    pub fn count_validated(&self, study_id: Uuid, scope: &UnlockScope) -> usize {
+        let Some(study) = self.get_study(study_id) else {
+            return 0;
+        };
+        let mut count = 0usize;
+        for (year_index, year) in study.years.iter().enumerate() {
+            for field in entry::ALL_FIELDS {
+                if !scope.covers(year_index, field) {
+                    continue;
+                }
+                if entry::get_cell(year, field).map(|c| c.review) == Some(Review::Validated) {
+                    count += 1;
+                }
+            }
+        }
+        count
     }
 
     /// Mark a cell **not-available-accepted** (a deliberate, permanent gap — FR19), or clear that
@@ -315,6 +469,14 @@ impl JournalState {
         field: &str,
         accepted: bool,
     ) -> Result<(), String> {
+        // Soft-lock (Story 2.5): the not-available gesture is a value/coverage mutation, and AC 2
+        // names it among the edits a `✓` cell must refuse — routed through `Cell::edited(None, …)` it
+        // would both blank the value AND demote `✓ → ?` (a divergent edit), silently undoing the
+        // sign-off. The UI swallows Ctrl+Space on a locked cell; this is the authoritative, testable
+        // Rust backstop, symmetric with `edit_cell`, so the sign-off can never be lost by this path.
+        if self.current_review(study_id, year_index, field) == Some(Review::Validated) {
+            return Err(MSG_SOFT_LOCKED.to_string());
+        }
         self.mutate_cell(study_id, year_index, field, move |base, provenance| {
             // Reuse the edit rail for value/source/freshness/review, then override coverage only —
             // `NotAvailableAccepted` is a coverage-only gesture, not reachable through `edited`.
@@ -677,6 +839,263 @@ mod tests {
             .clone()
             .unwrap();
         assert_eq!(back.coverage, Coverage::ToFill);
+    }
+
+    // ── Story 2.5: tri-state review tag set/clear → persist → reopen; soft-lock; bulk unlock ──
+
+    /// Open a journal at `path`, create a study, and fill A/C on year 0 so there is a present cell to
+    /// review. Returns the state (still open) and the study id.
+    fn study_with_entry(path: &Path) -> (JournalState, Uuid) {
+        drop(
+            Journal::create(
+                path,
+                Uuid::from_u128(0xC0FFEE),
+                &Timestamp("2026-06-13T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+        let mut state = open_state(path);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .edit_cell(id, 0, entry::FIELD_HIGH, Some(money("120.5")))
+            .unwrap();
+        (state, id)
+    }
+
+    #[test]
+    fn set_review_survives_reopen_and_leaves_value_and_coverage_untouched() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        // none → ? → ✓, each persisted; the value and coverage never move (review-only edits).
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::ToReview)
+            .unwrap();
+        let cell = open_state(&path).get_study(id).unwrap().years[0]
+            .high_price
+            .clone();
+        assert_eq!(cell.review, Review::ToReview);
+        assert_eq!(cell.value, Some(money("120.5")), "value untouched by ?");
+        assert_eq!(cell.coverage, Coverage::Present, "coverage untouched by ?");
+
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::Validated)
+            .unwrap();
+        let cell = open_state(&path).get_study(id).unwrap().years[0]
+            .high_price
+            .clone();
+        assert_eq!(cell.review, Review::Validated, "✓ survives reopen");
+        assert_eq!(cell.value, Some(money("120.5")));
+        assert_eq!(cell.coverage, Coverage::Present);
+
+        // ✓ → none clears the tag; still a review-only change.
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::None)
+            .unwrap();
+        let cell = open_state(&path).get_study(id).unwrap().years[0]
+            .high_price
+            .clone();
+        assert_eq!(cell.review, Review::None);
+        assert_eq!(
+            cell.value,
+            Some(money("120.5")),
+            "clearing ✓ keeps the value"
+        );
+    }
+
+    #[test]
+    fn reviewing_a_to_fill_gap_keeps_the_value_none_never_zero() {
+        // Setting a tag on a never-entered optional column materializes a to-fill cell carrying the
+        // tag — the value stays None (the project's most-repeated rail: unknown is never 0).
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        state
+            .set_review(id, 2, entry::FIELD_DIVIDEND, Review::ToReview)
+            .unwrap();
+        let cell = open_state(&path).get_study(id).unwrap().years[2]
+            .dividend_per_share
+            .clone()
+            .expect("the cell now exists");
+        assert_eq!(cell.review, Review::ToReview);
+        assert_eq!(cell.value, None, "a reviewed gap holds no value — never 0");
+        assert_eq!(cell.coverage, Coverage::ToFill);
+    }
+
+    #[test]
+    fn a_validated_cell_is_soft_locked_until_the_tag_is_cleared() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::Validated)
+            .unwrap();
+
+        // A direct typed edit on the ✓ cell is refused with the neutral soft-lock notice, and the
+        // on-disk value is unchanged (never silently blanked or overwritten).
+        assert_eq!(
+            state.edit_cell(id, 0, entry::FIELD_HIGH, Some(money("999"))),
+            Err(MSG_SOFT_LOCKED.to_string())
+        );
+        let cell = open_state(&path).get_study(id).unwrap().years[0]
+            .high_price
+            .clone();
+        assert_eq!(
+            cell.value,
+            Some(money("120.5")),
+            "the refused edit wrote nothing"
+        );
+        assert_eq!(cell.review, Review::Validated, "the sign-off is intact");
+
+        // The deliberate clear-✓ → ? releases the lock (recheck status preserved, not blanked).
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::ToReview)
+            .unwrap();
+        // Now the cell edits normally again.
+        state
+            .edit_cell(id, 0, entry::FIELD_HIGH, Some(money("130")))
+            .expect("a ? cell edits normally");
+        let cell = open_state(&path).get_study(id).unwrap().years[0]
+            .high_price
+            .clone();
+        assert_eq!(cell.value, Some(money("130")));
+        assert_eq!(cell.review, Review::ToReview, "editing a ? cell keeps ?");
+    }
+
+    #[test]
+    fn set_not_available_is_refused_on_a_validated_cell_so_the_sign_off_is_never_blanked() {
+        // The not-available gesture (Ctrl+Space) is a value/coverage mutation; on a `✓` cell it would
+        // otherwise route through `Cell::edited(None, …)`, blanking the value AND demoting `✓ → ?`.
+        // AC 2 forbids that — the soft-lock backstop must refuse it just like a typed edit does.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::Validated)
+            .unwrap();
+        assert_eq!(
+            state.set_not_available(id, 0, entry::FIELD_HIGH, true),
+            Err(MSG_SOFT_LOCKED.to_string()),
+            "not-available on a ✓ cell is refused"
+        );
+        // The on-disk cell is untouched: value kept, sign-off intact, still a present cell.
+        let cell = open_state(&path).get_study(id).unwrap().years[0]
+            .high_price
+            .clone();
+        assert_eq!(cell.value, Some(money("120.5")), "value untouched");
+        assert_eq!(cell.review, Review::Validated, "sign-off intact");
+        assert_eq!(cell.coverage, Coverage::Present, "coverage untouched");
+    }
+
+    #[test]
+    fn unlock_all_flips_only_validated_cells_at_each_scope_and_persists() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        // Build a mixed field of tags across years/fields:
+        //   (y0, A) ✓   (y1, A) ✓   (y0, C) ?   (y2, B) ✓
+        state
+            .edit_cell(id, 1, entry::FIELD_HIGH, Some(money("1")))
+            .unwrap();
+        state
+            .edit_cell(id, 0, entry::FIELD_EPS, Some(money("2")))
+            .unwrap();
+        state
+            .edit_cell(id, 2, entry::FIELD_LOW, Some(money("3")))
+            .unwrap();
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::Validated)
+            .unwrap();
+        state
+            .set_review(id, 1, entry::FIELD_HIGH, Review::Validated)
+            .unwrap();
+        state
+            .set_review(id, 0, entry::FIELD_EPS, Review::ToReview)
+            .unwrap();
+        state
+            .set_review(id, 2, entry::FIELD_LOW, Review::Validated)
+            .unwrap();
+
+        // ── Per-metric scope (field A): flips (y0,A) and (y1,A) only; (y2,B) ✓ is left.
+        assert_eq!(
+            state.count_validated(id, &UnlockScope::Metric(entry::FIELD_HIGH.to_string())),
+            2
+        );
+        let flipped = state
+            .unlock_all(id, &UnlockScope::Metric(entry::FIELD_HIGH.to_string()))
+            .unwrap();
+        assert_eq!(flipped, 2, "two A cells flipped");
+        let back = open_state(&path).get_study(id).unwrap();
+        assert_eq!(back.years[0].high_price.review, Review::ToReview);
+        assert_eq!(back.years[1].high_price.review, Review::ToReview);
+        assert_eq!(
+            back.years[0].eps.review,
+            Review::ToReview,
+            "the ? cell is untouched"
+        );
+        assert_eq!(
+            back.years[2].low_price.review,
+            Review::Validated,
+            "a different metric keeps its ✓"
+        );
+
+        // ── Per-year scope (year 2): flips (y2,B) only.
+        let flipped = state.unlock_all(id, &UnlockScope::Year(2)).unwrap();
+        assert_eq!(flipped, 1);
+        assert_eq!(
+            open_state(&path).get_study(id).unwrap().years[2]
+                .low_price
+                .review,
+            Review::ToReview
+        );
+
+        // ── Study scope on an already-cleared study: nothing left to flip.
+        assert_eq!(state.unlock_all(id, &UnlockScope::Study).unwrap(), 0);
+    }
+
+    #[test]
+    fn unlock_all_study_scope_flips_every_validated_cell_in_one_upsert() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+        state
+            .edit_cell(id, 3, entry::FIELD_EPS, Some(money("9")))
+            .unwrap();
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::Validated)
+            .unwrap();
+        state
+            .set_review(id, 3, entry::FIELD_EPS, Review::Validated)
+            .unwrap();
+
+        assert_eq!(state.count_validated(id, &UnlockScope::Study), 2);
+        let flipped = state.unlock_all(id, &UnlockScope::Study).unwrap();
+        assert_eq!(flipped, 2);
+        let back = open_state(&path).get_study(id).unwrap();
+        assert_eq!(back.years[0].high_price.review, Review::ToReview);
+        assert_eq!(back.years[3].eps.review, Review::ToReview);
+        assert_eq!(
+            back.years[0].high_price.value,
+            Some(money("120.5")),
+            "values untouched"
+        );
+    }
+
+    #[test]
+    fn unlock_messages_substitute_the_count() {
+        assert_eq!(
+            unlock_confirm_message(3),
+            "Cette action retire la validation de 3 cellule(s)."
+        );
+        assert_eq!(
+            unlock_done_message(1),
+            "Validation retirée de 1 cellule(s)."
+        );
     }
 
     #[test]
