@@ -20,8 +20,10 @@ use steadyinvest_contract::{
 use steadyinvest_persistence::{Error as PersistError, Journal, StudySummary};
 use uuid::Uuid;
 
+use steadyinvest_core::verdict::StudySnapshot;
+
 use crate::clock::{Clock, IdGen};
-use crate::viewmodel::entry;
+use crate::viewmodel::{engine, entry};
 
 // ── User-facing neutral notices (FR13). French (the UI source language); the crate-local posture
 //    gate scans `USER_FACING_MESSAGES` for banned verbs, exactly like the `@tr()` literals. The
@@ -62,6 +64,10 @@ pub const MSG_SOFT_LOCKED: &str = "Cellule validée ; retirez la validation avan
 pub const MSG_UNLOCK_CONFIRM: &str = "Cette action retire la validation de {n} cellule(s).";
 /// The neutral notice after an "unlock all" completes — `{n}` is the count actually flipped.
 pub const MSG_UNLOCK_DONE: &str = "Validation retirée de {n} cellule(s).";
+/// The engine could not normalize the study's data (a structural input error — duplicate year /
+/// invalid split): the verdict is suspended, never computed from broken inputs (Story 2.6).
+pub const MSG_NORMALIZE_FAILED: &str =
+    "Les données ne peuvent pas être préparées ; le calcul est suspendu.";
 
 /// The confirmation prompt for an "unlock all" of `count` cells (a `{n}`-substitution of
 /// [`MSG_UNLOCK_CONFIRM`] so the scanned const and the runtime string stay one source).
@@ -92,6 +98,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SOFT_LOCKED,
     MSG_UNLOCK_CONFIRM,
     MSG_UNLOCK_DONE,
+    MSG_NORMALIZE_FAILED,
 ];
 
 /// The scope of a bulk "unlock all" (Story 2.5): the whole study, a single year column, or a single
@@ -585,6 +592,81 @@ impl JournalState {
         }
     }
 
+    /// Set (or clear) one **numeric judgment field** (Story 2.6, FR6/FR31): re-read the study, set
+    /// the one `Judgment` field on the mutation rail, then `put_study` — reusing the read-only /
+    /// no-journal / save-failure guards (no silent `.ok()`). A cleared field is `None`, **never `0`**
+    /// (the project's most-repeated rail). The `field` key is the Slint callback's wire identifier
+    /// ([`judgment_field`] maps it to the struct field).
+    pub fn set_judgment_field(
+        &mut self,
+        study_id: Uuid,
+        field: &str,
+        value: Option<Money>,
+    ) -> Result<(), String> {
+        self.mutate_judgment(study_id, |judgment| {
+            apply_judgment_field(judgment, field, value)
+        })
+    }
+
+    /// Select the §4 forecast-low option (Story 2.6) — a judgment edit through the same rail.
+    pub fn set_forecast_low_option(
+        &mut self,
+        study_id: Uuid,
+        option: ForecastLowOption,
+    ) -> Result<(), String> {
+        self.mutate_judgment(study_id, |judgment| {
+            judgment.forecast_low_option = option;
+            true
+        })
+    }
+
+    /// The shared re-read → mutate-judgment → persist path. `apply` returns `false` for an unknown
+    /// field key (a neutral save-failure notice; never a panic). Mirrors [`Self::mutate_cell`] but
+    /// for the bare `Judgment` snapshot (judgment inputs are not review-tagged `Cell`s).
+    fn mutate_judgment(
+        &mut self,
+        study_id: Uuid,
+        apply: impl FnOnce(&mut Judgment) -> bool,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        if self.journal.is_none() {
+            return Err(MSG_NO_JOURNAL.to_string());
+        }
+        let mut study = self
+            .get_study(study_id)
+            .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        if !apply(&mut study.judgment) {
+            return Err(MSG_SAVE_FAILED.to_string());
+        }
+        let journal = self
+            .journal
+            .as_mut()
+            .expect("journal presence checked above");
+        match journal.put_study(&study) {
+            Ok(()) => Ok(()),
+            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
+            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+        }
+    }
+
+    /// Compute the coherent [`StudySnapshot`] for a study (Story 2.6 — THE engine-call site): re-read
+    /// the authoritative study, run the `contract` → `core` mapping, `normalize` (a [`NormalizeError`]
+    /// surfaces as the neutral [`MSG_NORMALIZE_FAILED`], never `unwrap`/`.ok()`), then
+    /// `StudySnapshot::new` ONCE — so the outputs and the verdict are always one coherent frame
+    /// (architecture: "an incoherent frame is structurally impossible"). `Err` for an absent study /
+    /// a normalize failure.
+    pub fn snapshot_for(&self, study_id: Uuid) -> Result<StudySnapshot, String> {
+        let study = self
+            .get_study(study_id)
+            .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        engine::build_snapshot(&study).map_err(|error| {
+            tracing::warn!("normalize failed for study {study_id}: {error}");
+            MSG_NORMALIZE_FAILED.to_string()
+        })
+    }
+
     /// Reopen a study by id with its **full** persisted state (FR2). `None` when absent or on a
     /// read error (logged).
     pub fn get_study(&self, id: Uuid) -> Option<Study> {
@@ -597,6 +679,26 @@ impl JournalState {
             }
         }
     }
+}
+
+/// Set one numeric judgment field by its Slint wire key (Story 2.6). Returns `false` for an unknown
+/// key (the caller surfaces a neutral notice; never a panic). A `None` value clears the field —
+/// **never `0`**. The `forecast_low_option` selector has its own rail ([`JournalState::
+/// set_forecast_low_option`]) — it is not routed here.
+fn apply_judgment_field(judgment: &mut Judgment, field: &str, value: Option<Money>) -> bool {
+    match field {
+        "sales_growth" => judgment.projected_sales_growth_pct = value,
+        "eps_growth" => judgment.projected_eps_growth_pct = value,
+        "est_high_eps" => judgment.estimated_high_eps = value,
+        "est_low_eps" => judgment.estimated_low_eps = value,
+        "high_pe" => judgment.judged_avg_high_pe = value,
+        "low_pe" => judgment.judged_avg_low_pe = value,
+        "recent_severe_low" => judgment.recent_severe_low = value,
+        "current_price" => judgment.current_price = value,
+        "dividend" => judgment.present_full_year_dividend = value,
+        _ => return false,
+    }
+    true
 }
 
 /// A neutral RFC3339 timestamp rendered for the dashboard list: the date portion only (the time of
@@ -1096,6 +1198,85 @@ mod tests {
             unlock_done_message(1),
             "Validation retirée de 1 cellule(s)."
         );
+    }
+
+    // ── Story 2.6: numeric judgment editing → persist → reopen; snapshot_for engine wiring ──
+
+    #[test]
+    fn judgment_fields_round_trip_and_clear_to_none_never_zero() {
+        use steadyinvest_contract::ForecastLowOption;
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        // Set each numeric judgment field; the option selector; then reopen and verify each survives.
+        for (field, value) in [
+            ("sales_growth", "12.5"),
+            ("eps_growth", "10"),
+            ("est_high_eps", "8.4"),
+            ("est_low_eps", "3.1"),
+            ("high_pe", "22"),
+            ("low_pe", "11"),
+            ("recent_severe_low", "44.5"),
+            ("current_price", "60"),
+            ("dividend", "2.25"),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(money(value)))
+                .unwrap();
+        }
+        state
+            .set_forecast_low_option(id, ForecastLowOption::RecentSevereLow)
+            .unwrap();
+
+        let j = open_state(&path).get_study(id).unwrap().judgment;
+        assert_eq!(j.projected_sales_growth_pct, Some(money("12.5")));
+        assert_eq!(j.estimated_high_eps, Some(money("8.4")));
+        assert_eq!(j.judged_avg_high_pe, Some(money("22")));
+        assert_eq!(j.current_price, Some(money("60")));
+        assert_eq!(j.present_full_year_dividend, Some(money("2.25")));
+        assert_eq!(j.forecast_low_option, ForecastLowOption::RecentSevereLow);
+
+        // Clearing a field stores None — never 0.
+        state.set_judgment_field(id, "current_price", None).unwrap();
+        let j = open_state(&path).get_study(id).unwrap().judgment;
+        assert_eq!(
+            j.current_price, None,
+            "a cleared judgment field is None, never 0"
+        );
+    }
+
+    #[test]
+    fn snapshot_for_runs_the_engine_and_matches_build_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+        // Fill the load-bearing cells + judgment so the snapshot is computable.
+        for y in 0..entry::YEAR_WINDOW {
+            for (field, v) in [
+                (entry::FIELD_HIGH, "100"),
+                (entry::FIELD_LOW, "50"),
+                (entry::FIELD_EPS, "5"),
+            ] {
+                state.edit_cell(id, y, field, Some(money(v))).unwrap();
+            }
+        }
+        for (field, v) in [
+            ("est_high_eps", "8"),
+            ("est_low_eps", "3"),
+            ("high_pe", "20"),
+            ("low_pe", "10"),
+            ("current_price", "60"),
+        ] {
+            state.set_judgment_field(id, field, Some(money(v))).unwrap();
+        }
+
+        let snap = state.snapshot_for(id).expect("snapshot computes");
+        // No drift: the state-level snapshot equals the pure adapter snapshot on the same study.
+        let study = state.get_study(id).unwrap();
+        let direct = crate::viewmodel::engine::build_snapshot(&study).unwrap();
+        assert_eq!(snap.outputs(), direct.outputs());
+        assert_eq!(snap.verdict(), direct.verdict());
     }
 
     #[test]

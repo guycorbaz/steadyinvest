@@ -107,7 +107,7 @@ mod tests {
     fn ui_tr_strings_are_neutral_no_banned_verb() {
         let files = slint_files();
         assert!(
-            files.len() >= 14,
+            files.len() >= 18,
             "posture gate found only {} .slint files — scan broken?",
             files.len()
         );
@@ -124,8 +124,11 @@ mod tests {
         // avant impôt / Valeur comptable), the source-on-demand caption and the entry-gesture hint,
         // so the scanned population grew again. Keep the floor strict so a future scan that silently
         // stops finding literals (a broken extractor) fails loudly.
+        // Story 2.6 added the judgment-input labels, the §4 forecast-low selector chips, the zone-bar
+        // empty-state + present-price captions, the verdict-bar facts, and the traceability surface
+        // labels — so the scanned population grew again. Keep the floor strict against a broken scan.
         assert!(
-            total >= 100,
+            total >= 130,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -156,11 +159,33 @@ mod tests {
         for message in crate::state::USER_FACING_MESSAGES {
             assert_neutral(message, "state.rs (journal/create/entry notices)");
         }
-        // Guard the count so a future message added without registering it here is caught.
+        // Guard the count so a future message added without registering it here is caught. Story 2.6
+        // adds the normalize-failure notice (`MSG_NORMALIZE_FAILED`).
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            13,
+            14,
             "state.rs message inventory changed — register the new notice"
+        );
+    }
+
+    /// Story 2.6 adds Rust-side user-facing labels in `viewmodel/engine.rs` (open-gate field/state
+    /// nouns, trend nouns, the temporal-provenance pieces, the traceability labels) that are built
+    /// dynamically and so never pass through `@tr()`. They are collected in
+    /// `engine::USER_FACING_LABELS` for exactly this gate (FR13). The zone-label nouns
+    /// (ACHAT/NEUTRE/VENTE) come from the `Labels` table (scanned in `label_table_strings_…`) and
+    /// are method nouns, banned-verb-exempt.
+    #[test]
+    fn engine_user_facing_labels_are_neutral_no_banned_verb() {
+        for label in crate::viewmodel::engine::USER_FACING_LABELS {
+            assert_neutral(
+                label,
+                "viewmodel/engine.rs (verdict/zone/traceability labels)",
+            );
+        }
+        assert_eq!(
+            crate::viewmodel::engine::USER_FACING_LABELS.len(),
+            21,
+            "engine.rs label inventory changed — register the new label"
         );
     }
 

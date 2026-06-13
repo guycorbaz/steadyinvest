@@ -1,0 +1,90 @@
+// A labelled numeric judgment-input field (Story 2.6, AC 1): an exact-keyboard-value entry for a
+// §1/§3/§4 judgment input, committed to `Studies.set-judgment(field-key, text)` on Enter and on
+// focus-out (the 2.4 commit-on-focus-out discipline). A cleared field is parsed to `None` in Rust —
+// never `0`. Token-styled, visible focus ring (NFR-U2), keyboard-reachable; constant geometry.
+//
+// The field re-seeds from the model (`value`) on every re-push (`init` + `changed`), so a persisted
+// edit / reopen restores the value without clobbering an in-progress edit.
+
+import { Tokens } from "../tokens.slint";
+import { Studies } from "../state.slint";
+
+export component JudgmentField inherits VerticalLayout {
+    in property <string> label;
+    in property <string> field-key;
+    in property <string> value;
+    in property <string> placeholder;
+    in property <string> suffix; // e.g. "%" — caption only, never sent back
+
+    spacing: Tokens.space-4;
+
+    // Re-seed the input from the model after a persisted re-push (Studies.judgment changed) — but
+    // only when this field is not focused, so an in-progress edit is never clobbered.
+    changed value => {
+        if (!input.has-focus) {
+            input.text = root.value;
+        }
+    }
+
+    Text {
+        text: root.label;
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+    }
+    HorizontalLayout {
+        spacing: Tokens.space-4;
+        box := Rectangle {
+            width: 140px;
+            height: Tokens.row-height;
+            border-radius: Tokens.radius;
+            background: Tokens.surface-alt;
+            border-width: input.has-focus ? Tokens.focus-border : Tokens.border;
+            border-color: input.has-focus ? Tokens.focus : Tokens.separator;
+            forward-focus: input;
+
+            placeholder := Text {
+                text: root.placeholder;
+                color: Tokens.text-low;
+                font-size: Tokens.font-body;
+                vertical-alignment: center;
+                x: Tokens.space-8;
+                visible: input.text == "";
+            }
+            input := TextInput {
+                color: Tokens.text-high;
+                selection-background-color: Tokens.focus;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-body;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                single-line: true;
+                width: parent.width - Tokens.space-8 * 2;
+                height: 100%;
+                x: Tokens.space-8;
+
+                init => {
+                    self.text = root.value;
+                }
+                accepted => {
+                    if (self.text != root.value) {
+                        Studies.set-judgment(root.field-key, self.text);
+                    }
+                }
+                changed has-focus => {
+                    if (!self.has-focus && self.text != root.value) {
+                        Studies.set-judgment(root.field-key, self.text);
+                    }
+                    if (self.has-focus) {
+                        self.select-all();
+                    }
+                }
+            }
+        }
+        if root.suffix != "": Text {
+            text: root.suffix;
+            color: Tokens.text-low;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+        }
+    }
+}

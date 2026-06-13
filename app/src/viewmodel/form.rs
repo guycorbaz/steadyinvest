@@ -17,7 +17,9 @@
 //! method-identity string (a `&str` constant, NOT a computed verdict — no engine call).
 
 use steadyinvest_contract::{Cell, Freshness, Provenance, Source, Study, Timestamp, YearData};
+use steadyinvest_core::ssg::SsgOutputs;
 
+use crate::viewmodel::engine;
 use crate::viewmodel::entry::{
     self, FIELD_DIVIDEND, FIELD_EPS, FIELD_HIGH, FIELD_LOW, MGMT_FIELDS,
 };
@@ -92,22 +94,36 @@ pub fn header(study: &Study) -> FormHeader {
 
 /// The §3 A–H P/E table rows, one per materialized year (no fixed cap — issue #20 / the 2.3 review
 /// LOW: the prior `PE_TABLE_ROWS = 5` dropped years 6+). A/B/C/F are editable input cells carrying
-/// their coverage/source/freshness state; D/E/G/H are caption-only (computed in 2.6).
-pub fn pe_rows(study: &Study, format: NumberFormat) -> Vec<PeRow> {
+/// their coverage/source/freshness state; **D/E/G/H are the engine's** (Story 2.6) — filled from the
+/// snapshot `outputs` (the last-5-usable window), each `None`/out-of-window cell the em-dash, never
+/// `0`. When `outputs` is `None` (a study that does not yet compute) every computed cell is the
+/// faithful em-dash, exactly as in 2.3.
+pub fn pe_rows(study: &Study, format: NumberFormat, outputs: Option<&SsgOutputs>) -> Vec<PeRow> {
     materialized_years(study)
         .iter()
         .enumerate()
-        .map(|(i, y)| PeRow {
-            year: y.year.to_string().into(),
-            year_index: i as i32,
-            a: editable_cell(Some(&y.high_price), FIELD_HIGH, i, format), // A · Haut (direct)
-            b: editable_cell(Some(&y.low_price), FIELD_LOW, i, format),   // B · Bas (direct)
-            c: editable_cell(Some(&y.eps), FIELD_EPS, i, format),         // C · BPA (direct)
-            d: EMPTY_SLOT.into(), // D · PER haut = A÷C (2.6)
-            e: EMPTY_SLOT.into(), // E · PER bas = B÷C (2.6)
-            f: editable_cell(y.dividend_per_share.as_ref(), FIELD_DIVIDEND, i, format), // F (direct)
-            g: EMPTY_SLOT.into(), // G · F÷C×100 (2.6)
-            h: EMPTY_SLOT.into(), // H · F÷B×100 (2.6)
+        .map(|(i, y)| {
+            let [d, e, g, h] = match outputs {
+                Some(o) => engine::pe_year_cells(o, y.year, format),
+                None => [
+                    EMPTY_SLOT.to_string(),
+                    EMPTY_SLOT.to_string(),
+                    EMPTY_SLOT.to_string(),
+                    EMPTY_SLOT.to_string(),
+                ],
+            };
+            PeRow {
+                year: y.year.to_string().into(),
+                year_index: i as i32,
+                a: editable_cell(Some(&y.high_price), FIELD_HIGH, i, format), // A · Haut (direct)
+                b: editable_cell(Some(&y.low_price), FIELD_LOW, i, format),   // B · Bas (direct)
+                c: editable_cell(Some(&y.eps), FIELD_EPS, i, format),         // C · BPA (direct)
+                d: d.into(),                                                  // D · PER haut = A÷C
+                e: e.into(),                                                  // E · PER bas = B÷C
+                f: editable_cell(y.dividend_per_share.as_ref(), FIELD_DIVIDEND, i, format), // F
+                g: g.into(),                                                  // G · F÷C×100
+                h: h.into(),                                                  // H · F÷B×100
+            }
         })
         .collect()
 }
@@ -131,6 +147,12 @@ pub fn mgmt_rows(study: &Study, format: NumberFormat) -> Vec<MgmtRow> {
             }
         })
         .collect()
+}
+
+/// The materialized year numbers (oldest → newest) — the alignment key the §2 computed-ratio adapter
+/// uses so its per-year cells line up with the input columns (Story 2.6).
+pub fn materialized_year_numbers(study: &Study) -> Vec<i32> {
+    materialized_years(study).iter().map(|y| y.year).collect()
 }
 
 /// The §2 grid's year-column header labels (the materialized window's years, oldest → newest).
@@ -223,7 +245,7 @@ mod tests {
 
     #[test]
     fn a_fresh_study_materializes_the_window_as_editable_to_fill_rows_never_zero() {
-        let rows = pe_rows(&study(vec![]), NumberFormat::Comma);
+        let rows = pe_rows(&study(vec![]), NumberFormat::Comma, None);
         assert_eq!(
             rows.len(),
             entry::YEAR_WINDOW,
@@ -263,7 +285,7 @@ mod tests {
             pre_tax_profit: None,
             book_value_per_share: None,
         };
-        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma);
+        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma, None);
         let r = &rows[0];
         assert_eq!(
             r.a.value, "120,5",
@@ -298,7 +320,7 @@ mod tests {
             pre_tax_profit: None,
             book_value_per_share: None,
         };
-        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma);
+        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma, None);
         assert_eq!(rows[0].a.review, "validated", "✓ crosses as a string");
         assert_eq!(rows[0].b.review, "none", "an unreviewed cell is none");
         assert_eq!(
@@ -319,7 +341,7 @@ mod tests {
             pre_tax_profit: None,
             book_value_per_share: None,
         };
-        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma);
+        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma, None);
         assert_eq!(rows[0].f.value, "", "no dividend cell ⇒ empty gap, never 0");
         assert_eq!(rows[0].f.coverage, "to-fill");
         assert_eq!(rows[0].f.source, "", "a gap reveals no source");

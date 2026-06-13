@@ -107,20 +107,62 @@ fn push_view_state(ui: &MainWindow, view_state: &StudyViewState) {
 
 /// Rebuild the faithful-form structs from a (re-read) `Study` and push them into the `Studies`
 /// global — the single source of truth for the open form (Story 2.3 header + §3 rows, Story 2.4 §2
-/// management grid + year headers). Called on open and after every persisted edit so the UI always
-/// renders exactly what is on disk. Money crosses only as formatted strings (the adapter boundary).
+/// management grid + year headers, **Story 2.6 the engine outputs + judgment inputs + §4 zone bar +
+/// verdict**). Called on open and after every persisted edit so the UI always renders exactly what is
+/// on disk + the coherent snapshot recomputed from it. Money/ratios cross only as formatted strings
+/// (the adapter boundary); the verdict crosses as an enum-derived string.
+///
+/// The engine call goes through the single construction path [`engine::build_snapshot`] (ONE
+/// `StudySnapshot::new`), so the §2–§5 results, the §4 zone bar and the verdict are always one
+/// coherent frame. A `NormalizeError` (unreachable from a well-formed manual study, but handled, never
+/// `unwrap`) surfaces as a neutral notice and leaves every computed slot the faithful em-dash.
 fn push_form(ui: &MainWindow, study: &steadyinvest_contract::Study, format: NumberFormat) {
+    use viewmodel::engine;
     let studies = ui.global::<Studies>();
     studies.set_form_header(viewmodel::form::header(study));
-    studies.set_pe_rows(ModelRc::new(VecModel::from(viewmodel::form::pe_rows(
-        study, format,
+    studies.set_year_headers(ModelRc::new(VecModel::from(viewmodel::form::year_headers(
+        study,
     ))));
     studies.set_mgmt_rows(ModelRc::new(VecModel::from(viewmodel::form::mgmt_rows(
         study, format,
     ))));
-    studies.set_year_headers(ModelRc::new(VecModel::from(viewmodel::form::year_headers(
-        study,
-    ))));
+    // The current judgment-input values (restored on reopen; "" for a cleared input, never "0").
+    studies.set_judgment(engine::judgment_fields(study, format));
+
+    match engine::build_snapshot(study) {
+        Ok(snapshot) => {
+            let outputs = snapshot.outputs();
+            studies.set_pe_rows(ModelRc::new(VecModel::from(viewmodel::form::pe_rows(
+                study,
+                format,
+                Some(outputs),
+            ))));
+            studies.set_growth_computed(engine::growth_computed(outputs, format));
+            let years = viewmodel::form::materialized_year_numbers(study);
+            studies.set_mgmt_computed(engine::mgmt_computed(outputs, &years, format));
+            studies.set_pe_computed(engine::pe_computed(outputs, format));
+            studies.set_risk_computed(engine::risk_computed(outputs, format));
+            studies.set_return_computed(engine::return_computed(outputs, format));
+            studies.set_zone_bar(engine::zone_bar(study, &snapshot, format));
+            studies.set_verdict(engine::verdict_badge(study, &snapshot, format));
+        }
+        Err(error) => {
+            // Degraded-but-safe: the form still renders, every computed slot the em-dash; the verdict
+            // and zone bar fall back to their calm empty states.
+            tracing::warn!("snapshot normalize failed: {error}");
+            studies.set_pe_rows(ModelRc::new(VecModel::from(viewmodel::form::pe_rows(
+                study, format, None,
+            ))));
+            studies.set_growth_computed(GrowthComputed::default());
+            studies.set_mgmt_computed(MgmtComputed::default());
+            studies.set_pe_computed(PeComputed::default());
+            studies.set_risk_computed(RiskComputed::default());
+            studies.set_return_computed(ReturnComputed::default());
+            studies.set_zone_bar(ZoneBarState::default());
+            studies.set_verdict(VerdictState::default());
+            studies.set_notice(state::MSG_NORMALIZE_FAILED.into());
+        }
+    }
 }
 
 /// Build an [`UnlockScope`] from the Slint callback's `(scope-kind, scope-arg)` pair (Story 2.5).
@@ -614,6 +656,117 @@ fn main() -> Result<(), slint::PlatformError> {
             let ui = ui_weak.unwrap();
             *pending_unlock.borrow_mut() = None;
             ui.global::<Studies>().set_confirm_visible(false);
+        });
+    }
+
+    // ── Numeric judgment-input editing + the §4 selector + traceability (Story 2.6) ──
+
+    // Commit a numeric judgment field: parse locale-aware (None for blank/unparseable → cleared,
+    // never 0), persist to `Study.judgment`, then re-read + re-push (which recomputes the snapshot).
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>().on_set_judgment(move |field, text| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            let value = viewmodel::format::parse_amount(&text, format);
+            let result = journal_state
+                .borrow_mut()
+                .set_judgment_field(id, field.as_str(), value);
+            match result {
+                Ok(()) => {
+                    studies.set_notice(SharedString::new());
+                    if let Some(study) = journal_state.borrow().get_study(id) {
+                        push_form(&ui, &study, format);
+                    }
+                }
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+
+    // Select the §4 forecast-low option (a judgment edit → recompute).
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>()
+            .on_set_forecast_low_option(move |key| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let Some(option) = viewmodel::engine::forecast_low_option_from_key(key.as_str())
+                else {
+                    return;
+                };
+                let format = config.borrow().number_format;
+                let result = journal_state
+                    .borrow_mut()
+                    .set_forecast_low_option(id, option);
+                match result {
+                    Ok(()) => {
+                        studies.set_notice(SharedString::new());
+                        if let Some(study) = journal_state.borrow().get_study(id) {
+                            push_form(&ui, &study, format);
+                        }
+                    }
+                    Err(message) => studies.set_notice(message.into()),
+                }
+            });
+    }
+
+    // Open the traceability surface for a result (v1: "verdict"): re-read the study, build the
+    // coherent snapshot, and push the inputs → provenance → rule trace (no colour spent).
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>().on_open_traceability(move |_result| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let Some(study) = journal_state.borrow().get_study(id) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            // The single engine-call site (`state::snapshot_for`): re-read + normalize + one
+            // `StudySnapshot::new`. A normalize failure surfaces neutrally, never `unwrap`.
+            match journal_state.borrow().snapshot_for(id) {
+                Ok(snapshot) => {
+                    studies.set_trace(viewmodel::engine::verdict_trace(&study, &snapshot, format));
+                }
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+
+    // Close the traceability surface.
+    {
+        let ui_weak = ui.as_weak();
+        ui.global::<Studies>().on_close_traceability(move || {
+            let ui = ui_weak.unwrap();
+            ui.global::<Studies>().set_trace(TraceState::default());
         });
     }
 

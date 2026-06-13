@@ -6,6 +6,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use steadyinvest_contract::Money;
+use steadyinvest_core::rounding::{round_for_display, DisplayField};
 
 /// True minus sign (U+2212) used for display — visually distinct from the ASCII hyphen.
 pub const MINUS_SIGN: char = '\u{2212}';
@@ -94,6 +95,17 @@ pub fn format_amount(canonical: &str, format: NumberFormat) -> String {
         out.push_str(fraction);
     }
     out
+}
+
+/// Round an exact engine [`Decimal`] for display — the named half-up mode + the field's decimal
+/// scale **both come from [`core::rounding`]** — then group it under the active locale preset. The
+/// app never invents a rounding mode or a scale (Cardinal Rule / architecture §rounding): it reads
+/// `core`'s and only *presents*. Story 2.6 uses this for every engine result string (§2–§5).
+pub fn format_scaled(value: Decimal, field: DisplayField, format: NumberFormat) -> String {
+    // `round_for_display` returns a `Decimal` carrying exactly `field.scale()` decimals, so the
+    // canonical string already shows the fixed places (e.g. price → "141.00"); `format_amount`
+    // only re-groups it for the locale. No arithmetic here.
+    format_amount(&round_for_display(value, field).to_string(), format)
 }
 
 /// Parse a **user-entered** amount under the active locale preset into an exact [`Money`], or
@@ -254,6 +266,38 @@ mod tests {
                 "{input:?} must map to None, never 0"
             );
         }
+    }
+
+    #[test]
+    fn format_scaled_reads_core_scale_and_groups_for_the_locale() {
+        // Price field → 2 decimals, half-up from core::rounding; grouped under the preset. The app
+        // applies neither the scale nor the rounding itself — both come from `core`.
+        assert_eq!(
+            format_scaled(
+                Decimal::new(1234567, 3),
+                DisplayField::Price,
+                NumberFormat::Comma
+            ),
+            "1\u{202F}234,57", // 1234.567 → half-up 2dp → 1234.57
+        );
+        // Ratio field → 1 decimal; 3.05 → 3.1 (half-up, not banker's).
+        assert_eq!(
+            format_scaled(
+                Decimal::new(305, 2),
+                DisplayField::Ratio,
+                NumberFormat::Point
+            ),
+            "3.1"
+        );
+        // Large monetary → 0 decimals.
+        assert_eq!(
+            format_scaled(
+                Decimal::new(12345, 1),
+                DisplayField::LargeMonetary,
+                NumberFormat::Point
+            ),
+            "1,235"
+        );
     }
 
     #[test]

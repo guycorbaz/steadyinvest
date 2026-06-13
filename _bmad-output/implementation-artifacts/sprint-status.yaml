@@ -1,5 +1,5 @@
 # generated: 2026-06-09
-# last_updated: 2026-06-13
+# last_updated: 2026-06-14
 # project: steadyinvest
 # project_key: NOKEY
 # tracking_system: file-system
@@ -39,7 +39,27 @@
 # 7 [P3] / 8 [V] are deliberate story outlines (refine with create-epics-and-stories per phase).
 
 generated: 2026-06-09
-last_updated: 2026-06-13
+last_updated: 2026-06-14
+# 2026-06-13: story 2-6 created (numeric judgment inputs, verdict & zone bar — integrity-gated) → ready-for-dev.
+#             THE engine-wiring story: first time `app` calls `core`. Adds exact-VALUE numeric judgment entry
+#             (sales/EPS growth %, est. high/low EPS, judged high/low P/E, 4-option low-price selector +
+#             recent-severe-low, current price, dividend) persisted to contract::Judgment; on any data/judgment
+#             edit maps Study→core::RawFinancials→normalize→CanonicalFinancials, Judgment→ssg::JudgmentInputs,
+#             builds verdict::InputGates from usable-years' cell review×freshness (2.5) + judgment inputs, calls
+#             StudySnapshot::new(...) ONCE per frame → renders §2/§3/§4/§5 result slots (formatted strings,
+#             unknown→em-dash never 0), the §4 zone bar (FIRST saturated-colour spend: Buy/Neutral/Sell @ per-
+#             theme alpha + edge strokes + present-price marker + price axis; muted entry→full contemplation),
+#             U/D ratio + projected return, the verdict badge (Full / Provisional-hatched+temporal-provenance /
+#             Withheld — engine's exact tri-partition), the sticky verdict bar, and a traceability view (inputs
+#             →provenance→rule). Verdict integrity holds by construction (full colour ⟺ all load-bearing inputs
+#             ✓ & not stale, FR12). NO new dependency (core already declared+used; Cargo.lock/deny.toml expected
+#             UNCHANGED); core/contract/persistence CONSUMED, NOT modified (all API verified present: 1.7
+#             normalize, 1.8 compute, 1.11 StudySnapshot, 2.2/#14 Judgment schema). Scope-guarded: NO §1
+#             draggable chart / drag-recolour (2.8 — zone recolours on VALUE change), NO cell-level plausibility
+#             warning (2.7 — but engine low_confidence DOES drive verdict→Provisional), NO undo/redo (2.9), NO
+#             rationale (2.10), NO provider fetch / quarterly auto-fill (Epic 3 — QuarterlyObservations::empty,
+#             current P/E honestly unknown). Recorded interp: judgment-input gate = None→Missing, Some→
+#             ValidatedFresh (deliberate personal judgment is the user's own validated number).
 # 2026-06-13: story 2-5 created (tri-state validation with soft-lock) → ready-for-dev. app-only review-axis
 #             story: render + user-set the per-cell tri-state review tag (none/? to-review/✓ validated) on
 #             the §2/§3 editable cells (cycle via free keyboard chord + marker click); soft-lock a ✓ cell
@@ -104,7 +124,7 @@ development_status:
   2-3-faithful-collapsible-ssg-form: done
   2-4-manual-data-entry-provenance-coverage: done
   2-5-tri-state-validation-soft-lock: done
-  2-6-numeric-judgment-inputs-verdict-zone-bar: backlog
+  2-6-numeric-judgment-inputs-verdict-zone-bar: done
   2-7-low-confidence-plausibility-surfacing: backlog
   2-8-interactive-growth-chart-draggable-judgment-line: backlog
   2-9-undo-redo-scenario-compare: backlog

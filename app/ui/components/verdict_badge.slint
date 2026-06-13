@@ -1,0 +1,190 @@
+// The verdict badge + the sticky verdict bar (Story 2.6, AC 4/5/6). The integrity-gated verdict
+// (`core::verdict::Verdict`) crosses as the enum-derived string "full"|"provisional"|"withheld";
+// the decision is carried by TEXTURE + LABEL, never colour alone (a11y, the colour budget):
+//
+//  - full        → the present-price zone hue at the per-theme zone-alpha + a full-saturation edge
+//                  stroke (the ONLY full-colour spend on the verdict — and only when the engine
+//                  returns `Full`, i.e. every load-bearing input is ✓ & not stale, by construction);
+//  - provisional → a NEUTRAL hatched strip (no colour band) + the temporal-provenance caption
+//                  ("Calculé à partir des données du DD/MM");
+//  - withheld    → no colour at all + the named open gates (the honest "why not full").
+//
+// Fact-stating French nouns only (posture-gated); never an imperative. All colours/sizes read Tokens.
+
+import { Tokens } from "../tokens.slint";
+import { Labels, Studies, VerdictState } from "../state.slint";
+
+// Resolve the present-price zone hue (full verdict only) from the zone key.
+component ZoneSwatch inherits Rectangle {
+    in property <string> zone; // "buy" | "neutral" | "sell" | ""
+    property <color> hue: root.zone == "buy" ? Tokens.zone-buy
+        : root.zone == "neutral" ? Tokens.zone-hold
+        : root.zone == "sell" ? Tokens.zone-sell
+        : Tokens.separator;
+    background: root.hue.with-alpha(Tokens.zone-alpha);
+    border-width: 1.5px;
+    border-color: root.hue;
+    border-radius: Tokens.radius;
+}
+
+// The localized zone noun (ACHAT/NEUTRE/VENTE) — topology nouns, banned-verb-exempt, from `Labels`.
+export component ZoneLabel inherits Text {
+    in property <string> zone;
+    text: root.zone == "buy" ? Labels.zone-buy
+        : root.zone == "neutral" ? Labels.zone-hold
+        : root.zone == "sell" ? Labels.zone-sell
+        : "";
+    color: Tokens.text-high;
+    font-size: Tokens.font-caption;
+    font-weight: Tokens.weight-semibold;
+    vertical-alignment: center;
+}
+
+// The verdict badge — a small state chip carried by texture + label.
+export component VerdictBadge inherits Rectangle {
+    in property <VerdictState> v;
+
+    property <string> caption: root.v.state == "full" ? @tr("Confiance pleine")
+        : root.v.state == "provisional" ? @tr("Confiance provisoire")
+        : root.v.state == "withheld" ? @tr("Conclusion en attente")
+        : "";
+
+    min-height: Tokens.row-height;
+    horizontal-stretch: 0;
+    border-radius: Tokens.radius;
+
+    // full → the zone-hue swatch; provisional/withheld spend no colour band here.
+    if root.v.state == "full": ZoneSwatch {
+        zone: root.v.present-zone;
+        width: 100%;
+        height: 100%;
+    }
+    // provisional → a neutral hatched strip (texture, NOT a colour band).
+    if root.v.state == "provisional": Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Tokens.surface-alt;
+        border-width: Tokens.border;
+        border-color: Tokens.separator;
+        border-radius: Tokens.radius;
+        Text {
+            text: "╱╱╱╱╱╱";
+            color: Tokens.text-low;
+            font-size: Tokens.font-caption;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            opacity: 0.6;
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: Tokens.space-8;
+        padding-right: Tokens.space-8;
+        spacing: Tokens.space-8;
+        Text {
+            text: root.caption;
+            color: Tokens.text-high;
+            font-size: Tokens.font-caption;
+            font-weight: Tokens.weight-semibold;
+            vertical-alignment: center;
+        }
+        if root.v.state == "full" && root.v.present-zone != "": ZoneLabel {
+            zone: root.v.present-zone;
+        }
+    }
+}
+
+// The sticky verdict bar (AC 5): pinned ABOVE the study scroll area (the caller places it outside the
+// Flickable), always visible while scrolling/folding. Derives from the SAME snapshot as the §4 badge.
+export component VerdictBar inherits Rectangle {
+    in property <VerdictState> v: Studies.verdict;
+    callback open-traceability();
+
+    height: Tokens.row-height + Tokens.space-16;
+    background: Tokens.surface;
+
+    HorizontalLayout {
+        padding-left: Tokens.space-16;
+        padding-right: Tokens.space-16;
+        spacing: Tokens.space-16;
+
+        VerdictBadge {
+            v: root.v;
+            width: 180px;
+        }
+
+        // The surfaced facts — present price · projected return · appreciation · capital-at-risk
+        // (Epic-4 forward, caption-only em-dash). Fact-stating, neutral.
+        fact := HorizontalLayout {
+            spacing: Tokens.space-16;
+            horizontal-stretch: 1;
+            Text {
+                text: @tr("Prix : {}", root.v.present-price);
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
+            Text {
+                text: @tr("Rendement annuel : {}", root.v.projected-return);
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
+            Text {
+                text: @tr("Appréciation : {}", root.v.appreciation);
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
+            Text {
+                text: @tr("Capital à risque : —");
+                color: Tokens.text-low;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
+        }
+
+        // The temporal-provenance caption (degraded verdict only) — fact-stating.
+        if root.v.provenance-date != "": Text {
+            text: @tr("Calculé à partir des données du {}", root.v.provenance-date);
+            color: Tokens.text-low;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+        }
+
+        // Traceability entry point (keyboard-reachable button).
+        trace-fs := FocusScope {
+            width: 120px;
+            key-pressed(e) => {
+                if (e.text == Key.Return || e.text == " ") {
+                    root.open-traceability();
+                    return accept;
+                }
+                reject
+            }
+            Rectangle {
+                border-radius: Tokens.radius;
+                border-width: trace-fs.has-focus ? Tokens.focus-border : Tokens.border;
+                border-color: trace-fs.has-focus ? Tokens.focus : Tokens.separator;
+                background: ta.has-hover ? Tokens.surface-alt : transparent;
+                ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        trace-fs.focus();
+                        root.open-traceability();
+                    }
+                }
+                Text {
+                    text: @tr("Traçabilité");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

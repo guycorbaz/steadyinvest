@@ -18,6 +18,9 @@ import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { EditableCell } from "../components/editable_cell.slint";
+import { JudgmentField } from "../components/judgment_field.slint";
+import { ZoneBar } from "../components/zone_bar.slint";
+import { VerdictBar } from "../components/verdict_badge.slint";
 
 // The faithful em-dash slot, in one place (mirrors `viewmodel::form::EMPTY_SLOT`). A gap, never `0`.
 global FormConst {
@@ -207,7 +210,17 @@ export component StudyScreen inherits Rectangle {
 
     background: Tokens.bg;
 
-    Flickable {
+    VerticalLayout {
+        // ── Sticky verdict bar (Story 2.6, AC 5): pinned at the top of the study scroll area, always
+        //    visible while scrolling/folding. Derives from the SAME snapshot as the §4 badge/zone bar. ──
+        VerdictBar {
+            v: Studies.verdict;
+            open-traceability => { Studies.open-traceability("verdict"); }
+        }
+        Rectangle { height: Tokens.border; background: Tokens.separator; }
+
+        Flickable {
+        vertical-stretch: 1;
         viewport-height: content.preferred-height;
 
         content := VerticalLayout {
@@ -449,19 +462,39 @@ export component StudyScreen inherits Rectangle {
 
                 PlaceholderRegion { caption: @tr("Graphique disponible prochainement"); }
 
+                // Historical CAGRs — now the engine's (Story 2.6), em-dash when unknown (never 0).
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("Croissance des ventes (TCAC)"); }
-                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: Studies.growth-computed.sales-cagr; emphasise: true; }
                     GridLabelCell { label: @tr("Croissance du BPA (TCAC)"); }
-                    GridCell { value: FormConst.empty-slot; }
+                    GridCell { value: Studies.growth-computed.eps-cagr; emphasise: true; }
                 }
+                // Growth & EPS judgment inputs (exact-value entry → persisted → recompute).
                 HorizontalLayout {
-                    spacing: 0;
-                    GridLabelCell { label: @tr("Croissance projetée des ventes"); }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridLabelCell { label: @tr("Croissance projetée du BPA"); }
-                    GridCell { value: FormConst.empty-slot; }
+                    spacing: Tokens.space-16;
+                    JudgmentField {
+                        label: @tr("Croissance projetée des ventes");
+                        field-key: "sales_growth";
+                        value: Studies.judgment.sales-growth;
+                        suffix: "%";
+                    }
+                    JudgmentField {
+                        label: @tr("Croissance projetée du BPA");
+                        field-key: "eps_growth";
+                        value: Studies.judgment.eps-growth;
+                        suffix: "%";
+                    }
+                    JudgmentField {
+                        label: @tr("BPA estimé haut");
+                        field-key: "est_high_eps";
+                        value: Studies.judgment.est-high-eps;
+                    }
+                    JudgmentField {
+                        label: @tr("BPA estimé bas");
+                        field-key: "est_low_eps";
+                        value: Studies.judgment.est-low-eps;
+                    }
                 }
             }
 
@@ -486,20 +519,40 @@ export component StudyScreen inherits Rectangle {
                 MgmtInputRow { label: @tr("Ventes"); mgmt: Studies.mgmt-rows[0]; }
                 MgmtInputRow { label: @tr("Bénéfice avant impôt"); mgmt: Studies.mgmt-rows[1]; }
                 MgmtInputRow { label: @tr("Valeur comptable / action"); mgmt: Studies.mgmt-rows[2]; }
-                // Computed management ratios — caption-only em-dash slots until the engine lands (2.6).
+                // Computed management ratios — now the engine's (Story 2.6). Per-year cells align to
+                // the year columns; the empty-study case (no computed values yet) keeps em-dash cells
+                // so the grid never misaligns.
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("PTP — Bén. av. impôt ÷ ventes"); horizontal-stretch: 2; }
-                    for yh in Studies.year-headers: GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
+                    if Studies.mgmt-computed.ptp.length > 0: HorizontalLayout {
+                        spacing: 0;
+                        horizontal-stretch: Studies.year-headers.length;
+                        for v in Studies.mgmt-computed.ptp: GridCell { value: v; }
+                    }
+                    if Studies.mgmt-computed.ptp.length == 0: HorizontalLayout {
+                        spacing: 0;
+                        horizontal-stretch: Studies.year-headers.length;
+                        for yh in Studies.year-headers: GridCell { value: FormConst.empty-slot; }
+                    }
+                    GridCell { value: Studies.mgmt-computed.avg-ptp; }
+                    GridCell { value: Studies.mgmt-computed.ptp-trend; }
                 }
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("ROE — BPA ÷ valeur comptable/action"); horizontal-stretch: 2; }
-                    for yh in Studies.year-headers: GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
-                    GridCell { value: FormConst.empty-slot; }
+                    if Studies.mgmt-computed.roe.length > 0: HorizontalLayout {
+                        spacing: 0;
+                        horizontal-stretch: Studies.year-headers.length;
+                        for v in Studies.mgmt-computed.roe: GridCell { value: v; }
+                    }
+                    if Studies.mgmt-computed.roe.length == 0: HorizontalLayout {
+                        spacing: 0;
+                        horizontal-stretch: Studies.year-headers.length;
+                        for yh in Studies.year-headers: GridCell { value: FormConst.empty-slot; }
+                    }
+                    GridCell { value: Studies.mgmt-computed.avg-roe; }
+                    GridCell { value: Studies.mgmt-computed.roe-trend; }
                 }
             }
 
@@ -526,11 +579,29 @@ export component StudyScreen inherits Rectangle {
                 }
                 // Year rows (data-driven; faithful empties until 2.4 fills them).
                 for pe in root.pe-rows: PeTableRow { pe: pe; }
-                // Summary rows — faithful labels, value slots empty until 2.6.
-                PeSummaryRow { label: @tr("Total"); value: FormConst.empty-slot; }
-                PeSummaryRow { label: @tr("Moyenne"); value: FormConst.empty-slot; }
-                PeSummaryRow { label: @tr("PER moyen"); value: FormConst.empty-slot; }
-                PeSummaryRow { label: @tr("PER courant"); value: FormConst.empty-slot; }
+                // Summary rows — now the engine's (Story 2.6). "Total"/"Moyenne" aggregate paper
+                // columns the single-slot layout can't faithfully render (recorded interpretation —
+                // the avg high/low P/E surface via the D/E columns); PER moyen / PER courant are direct.
+                PeSummaryRow { label: @tr("PER haut moyen"); value: Studies.pe-computed.avg-high-pe; }
+                PeSummaryRow { label: @tr("PER bas moyen"); value: Studies.pe-computed.avg-low-pe; }
+                PeSummaryRow { label: @tr("PER moyen"); value: Studies.pe-computed.avg-pe; }
+                PeSummaryRow { label: @tr("PER courant"); value: Studies.pe-computed.current-pe; }
+                PeSummaryRow { label: @tr("Valeur relative"); value: Studies.pe-computed.relative-value; }
+
+                // The §3 judged-multiple judgment inputs (exact-value entry → persist → recompute).
+                HorizontalLayout {
+                    spacing: Tokens.space-16;
+                    JudgmentField {
+                        label: @tr("PER haut moyen jugé");
+                        field-key: "high_pe";
+                        value: Studies.judgment.high-pe;
+                    }
+                    JudgmentField {
+                        label: @tr("PER bas moyen jugé");
+                        field-key: "low_pe";
+                        value: Studies.judgment.low-pe;
+                    }
+                }
             }
 
             // ── §4 — Évaluation du risque & de la récompense (zone bar is a PLACEHOLDER; 2.6) ──
@@ -541,20 +612,70 @@ export component StudyScreen inherits Rectangle {
                 open: Studies.folds[3];
                 toggled(v) => { Studies.toggle-fold(3, v); }
 
-                CalcRow { label: @tr("A · Prix haut"); formula: @tr("PER haut moy. × BPA est. haut"); result: FormConst.empty-slot; }
+                CalcRow { label: @tr("A · Prix haut"); formula: @tr("PER haut moy. × BPA est. haut"); result: Studies.risk-computed.forecast-high; }
+                // The four forecast-low options expose only the SELECTED value in v1 (the engine
+                // returns one forecast-low); the individual (a)–(d) values stay caption-only em-dash.
                 CalcRow { label: @tr("B(a) · PER bas moy. × BPA est. bas"); formula: ""; result: FormConst.empty-slot; }
                 CalcRow { label: @tr("B(b) · Prix bas moyen 5 ans"); formula: ""; result: FormConst.empty-slot; }
                 CalcRow { label: @tr("B(c) · Plus bas sévère récent"); formula: ""; result: FormConst.empty-slot; }
                 CalcRow { label: @tr("B(d) · Soutenu par dividende"); formula: ""; result: FormConst.empty-slot; }
-                CalcRow { label: @tr("B · Prix bas prévu (sélectionné)"); formula: ""; result: FormConst.empty-slot; }
-                CalcRow { label: @tr("C · Zonage"); formula: @tr("fourchette ÷ 3"); result: FormConst.empty-slot; }
-                CalcRow { label: @tr("D · Ratio hausse/baisse"); formula: ""; result: FormConst.empty-slot; }
-                CalcRow { label: @tr("E · Appréciation potentielle"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("B · Prix bas prévu (sélectionné)"); formula: ""; result: Studies.risk-computed.forecast-low; }
+                CalcRow { label: @tr("D · Ratio hausse/baisse"); formula: ""; result: Studies.risk-computed.ud-ratio; }
+                CalcRow { label: @tr("E · Appréciation potentielle"); formula: ""; result: Studies.risk-computed.appreciation; }
 
-                PlaceholderRegion {
-                    caption: @tr("Barre de zonage disponible prochainement");
-                    region-height: Tokens.space-48;
+                // The four-option forecast-low method selector (keyboard-operable chips).
+                Text {
+                    text: @tr("Méthode du prix bas prévu");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    font-weight: Tokens.weight-medium;
                 }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    ChoiceChip {
+                        label: @tr("PER bas × BPA bas");
+                        selected: Studies.judgment.forecast-low-option == "avg_low_pe_times_eps";
+                        activated => { Studies.set-forecast-low-option("avg_low_pe_times_eps"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Prix bas moyen 5 ans");
+                        selected: Studies.judgment.forecast-low-option == "avg_low_price_last_5y";
+                        activated => { Studies.set-forecast-low-option("avg_low_price_last_5y"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Plus bas sévère récent");
+                        selected: Studies.judgment.forecast-low-option == "recent_severe_low";
+                        activated => { Studies.set-forecast-low-option("recent_severe_low"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Soutenu par dividende");
+                        selected: Studies.judgment.forecast-low-option == "dividend_supported";
+                        activated => { Studies.set-forecast-low-option("dividend_supported"); }
+                    }
+                }
+                // §4 price/dividend judgment inputs.
+                HorizontalLayout {
+                    spacing: Tokens.space-16;
+                    JudgmentField {
+                        label: @tr("Plus bas sévère récent");
+                        field-key: "recent_severe_low";
+                        value: Studies.judgment.recent-severe-low;
+                    }
+                    JudgmentField {
+                        label: @tr("Prix actuel");
+                        field-key: "current_price";
+                        value: Studies.judgment.current-price;
+                    }
+                    JudgmentField {
+                        label: @tr("Dividende annuel courant");
+                        field-key: "dividend";
+                        value: Studies.judgment.dividend;
+                    }
+                }
+
+                // ── The §4 zone bar (Story 2.6) — the first saturated-colour spend ──
+                ZoneBar { bar: Studies.zone-bar; }
             }
 
             // ── §5 — Potentiel à 5 ans ──
@@ -565,10 +686,86 @@ export component StudyScreen inherits Rectangle {
                 open: Studies.folds[4];
                 toggled(v) => { Studies.toggle-fold(4, v); }
 
-                CalcRow { label: @tr("Rendement courant"); formula: @tr("div. ÷ prix × 100"); result: FormConst.empty-slot; }
-                CalcRow { label: @tr("Rendement moyen 5 ans"); formula: ""; result: FormConst.empty-slot; }
+                CalcRow { label: @tr("Rendement courant"); formula: @tr("div. ÷ prix × 100"); result: Studies.return-computed.present-yield; }
+                CalcRow { label: @tr("Rendement moyen 5 ans"); formula: ""; result: Studies.return-computed.avg-yield; }
                 CalcRow { label: @tr("Appréciation annualisée"); formula: @tr("appr.% ÷ 5"); result: FormConst.empty-slot; }
-                CalcRow { label: @tr("Rendement annuel total"); formula: @tr("appréciation + rendement moyen"); result: FormConst.empty-slot; }
+                CalcRow { label: @tr("Rendement annuel total"); formula: @tr("appréciation + rendement moyen"); result: Studies.return-computed.total-return; }
+            }
+        }
+        }
+    }
+
+    // ── Traceability surface (Story 2.6, AC 7): any result → its inputs, their provenance, and the
+    //    rule that produced it. Spends NO colour; the open gates are the honest "why not full". A
+    //    pinned overlay (the 2.5 confirm-overlay shape), keyboard-dismissable. ──
+    if Studies.trace.visible: Rectangle {
+        background: Tokens.bg.with-alpha(0.6);
+        TouchArea { clicked => { Studies.close-traceability(); } }
+        Rectangle {
+            width: Math.min(parent.width - Tokens.space-48, 560px);
+            height: Math.min(parent.height - Tokens.space-48, panel.preferred-height);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Tokens.surface;
+            border-width: Tokens.focus-border;
+            border-color: Tokens.focus;
+            border-radius: Tokens.radius;
+
+            panel := VerticalLayout {
+                padding: Tokens.space-16;
+                spacing: Tokens.space-12;
+
+                HorizontalLayout {
+                    Text {
+                        text: Studies.trace.title;
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-h3;
+                        font-weight: Tokens.weight-semibold;
+                        horizontal-stretch: 1;
+                    }
+                    ActionButton {
+                        label: @tr("Fermer");
+                        clicked => { Studies.close-traceability(); }
+                    }
+                }
+
+                Text {
+                    text: @tr("Entrées & provenance");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    font-weight: Tokens.weight-medium;
+                }
+                for line in Studies.trace.inputs: Text {
+                    text: line;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                }
+
+                Text {
+                    text: @tr("Règle");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    font-weight: Tokens.weight-medium;
+                }
+                Text {
+                    text: Studies.trace.rule;
+                    color: Tokens.text-low;
+                    font-family: Tokens.font-numeric;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+
+                if Studies.trace.open-gates.length > 0: Text {
+                    text: @tr("Pourquoi pas complet");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    font-weight: Tokens.weight-medium;
+                }
+                for gate in Studies.trace.open-gates: Text {
+                    text: gate;
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                }
             }
         }
     }

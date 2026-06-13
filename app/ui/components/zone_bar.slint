@@ -1,0 +1,137 @@
+// The §4 Buy/Neutral/Sell zone bar (Story 2.6, AC 3) — the FIRST sanctioned spend of saturated
+// colour. A vertical bar of three EQUAL thirds of the forecast range (`core::ssg::ZoneBounds`):
+// Buy at the BOTTOM (low price) → Sell at the TOP (high price), each filled at the per-theme
+// `zone-alpha` + a 1.5px full-saturation edge stroke per boundary, with a price axis beside it (the
+// four boundary prices, top→bottom) and a present-price marker tagged with its zone.
+//
+// Redundant encoding (a11y, never colour alone): hue + value + vertical position (buy low → sell
+// high) + the BUY/NEUTRE/VENTE label. The bar is MUTED in entry → FULL in contemplation (the
+// `regime-emphasis` hook; opacity only, constant geometry). Saturation is gated by the verdict
+// confidence (AC 6): full bands only for a `full` verdict; `provisional` hatches + desaturates; a
+// `None`-zones / `withheld` frame renders a CALM EMPTY STATE — never a fake band.
+//
+// No hard-coded hex/px beyond the token-derived geometry; all colour reads `Tokens`.
+
+import { Tokens } from "../tokens.slint";
+import { Labels, Studies, ZoneBarState } from "../state.slint";
+
+component ZoneSegment inherits Rectangle {
+    in property <color> hue;
+    in property <float> fill-alpha; // already gated by regime + confidence
+    in property <bool> hatched;
+    in property <string> label;
+    background: root.hue.with-alpha(root.fill-alpha);
+    border-width: 1.5px;
+    border-color: root.hue;
+    // Provisional hatch: a neutral texture marking "not full confidence" (never an extra hue).
+    if root.hatched: Text {
+        text: "╱╱╱╱";
+        color: Tokens.text-low;
+        font-size: Tokens.font-caption;
+        opacity: 0.5;
+        x: Tokens.space-4;
+        y: (parent.height - self.height) / 2;
+    }
+    Text {
+        text: root.label;
+        color: Tokens.text-high;
+        font-size: Tokens.font-caption;
+        font-weight: Tokens.weight-semibold;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component ZoneBar inherits Rectangle {
+    in property <ZoneBarState> bar: Studies.zone-bar;
+
+    // Constant geometry: three equal 44px thirds → a 132px bar (token-derived, never a magic px).
+    property <length> third-height: Tokens.space-48 - Tokens.space-4;
+    property <length> bar-height: root.third-height * 3;
+    // Muted in entry → full in contemplation (regime-emphasis = 1.0 entry / 0.55 contemplation).
+    property <float> regime-factor: 1.0 - (Tokens.regime-emphasis - 0.55);
+    // Saturation gate by verdict confidence (AC 6): full → full; provisional → desaturated + hatch.
+    property <float> sat: root.bar.confidence == "full" ? 1.0 : root.bar.confidence == "provisional" ? 0.45 : 0.0;
+    property <bool> hatched: root.bar.confidence == "provisional";
+    property <float> band-alpha: Tokens.zone-alpha * root.sat * root.regime-factor;
+
+    min-height: root.bar-height + Tokens.space-16;
+
+    // ── Calm empty state — no fake band when the forecast is missing/degenerate or withheld ──
+    if !root.bar.available || root.bar.confidence == "withheld": Rectangle {
+        height: root.bar-height;
+        background: Tokens.surface-alt;
+        border-width: Tokens.border;
+        border-color: Tokens.separator;
+        border-radius: Tokens.radius;
+        Text {
+            text: @tr("Zonage indisponible — entrée(s) manquante(s)");
+            color: Tokens.text-low;
+            font-size: Tokens.font-caption;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── The three-band bar + price axis + present-price marker ──
+    if root.bar.available && root.bar.confidence != "withheld": HorizontalLayout {
+        spacing: Tokens.space-8;
+        alignment: start;
+
+        // Price axis (the four boundary prices, top = high → bottom = low).
+        Rectangle {
+            width: 64px;
+            height: root.bar-height;
+            VerticalLayout {
+                Text { text: root.bar.forecast-high; color: Tokens.text-mid; font-family: Tokens.font-numeric; font-size: Tokens.font-caption; horizontal-alignment: right; }
+                Rectangle { vertical-stretch: 1; }
+                Text { text: root.bar.neutral-top; color: Tokens.text-mid; font-family: Tokens.font-numeric; font-size: Tokens.font-caption; horizontal-alignment: right; }
+                Rectangle { vertical-stretch: 1; }
+                Text { text: root.bar.buy-top; color: Tokens.text-mid; font-family: Tokens.font-numeric; font-size: Tokens.font-caption; horizontal-alignment: right; }
+                Rectangle { vertical-stretch: 1; }
+                Text { text: root.bar.forecast-low; color: Tokens.text-mid; font-family: Tokens.font-numeric; font-size: Tokens.font-caption; horizontal-alignment: right; }
+            }
+        }
+
+        // The bar (Sell top → Buy bottom) with the present-price marker overlaid.
+        Rectangle {
+            width: 96px;
+            height: root.bar-height;
+
+            VerticalLayout {
+                spacing: 0;
+                ZoneSegment { height: root.third-height; hue: Tokens.zone-sell; fill-alpha: root.band-alpha; hatched: root.hatched; label: Labels.zone-sell; }
+                ZoneSegment { height: root.third-height; hue: Tokens.zone-hold; fill-alpha: root.band-alpha; hatched: root.hatched; label: Labels.zone-hold; }
+                ZoneSegment { height: root.third-height; hue: Tokens.zone-buy; fill-alpha: root.band-alpha; hatched: root.hatched; label: Labels.zone-buy; }
+            }
+
+            // Present-price marker — a horizontal ink line + a caption, at (1 - pos) from the top
+            // (pos 0 = bottom = forecast low). Hidden when the price is unknown / out of range.
+            if root.bar.marker-pos >= 0.0: Rectangle {
+                y: (1.0 - root.bar.marker-pos) * (root.bar-height - self.height);
+                height: 2px;
+                width: 100%;
+                background: Tokens.text-high;
+            }
+        }
+
+        // Present-price caption beside the marker (value + zone), fact-stating.
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: @tr("Prix actuel : {}", root.bar.present-price);
+                color: Tokens.text-high;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+            }
+            Text {
+                text: root.bar.present-zone == "buy" ? Labels.zone-buy
+                    : root.bar.present-zone == "neutral" ? Labels.zone-hold
+                    : root.bar.present-zone == "sell" ? Labels.zone-sell
+                    : "—";
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+        }
+    }
+}

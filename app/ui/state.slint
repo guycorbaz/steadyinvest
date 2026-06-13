@@ -73,6 +73,107 @@ export struct MgmtRow {
     cells: [GridCellState],
 }
 
+// ── Story 2.6 — engine outputs, judgment inputs, the §4 zone bar, the verdict & traceability ──
+// Every value below is an already-formatted display string (or a layout float / enum-derived key)
+// built by `viewmodel/engine.rs` from ONE `core::verdict::StudySnapshot`. No Decimal / domain enum
+// crosses into `.slint` (the adapter rule); `None` outputs render as the em-dash, NEVER `0`.
+
+// The current judgment-input values, surfaced so reopening restores them (locale-formatted; "" for a
+// cleared/None input — never "0"). `forecast-low-option` is the selected option key.
+export struct JudgmentFields {
+    sales-growth: string,
+    eps-growth: string,
+    est-high-eps: string,
+    est-low-eps: string,
+    high-pe: string,
+    low-pe: string,
+    forecast-low-option: string, // "avg_low_pe_times_eps"|"avg_low_price_last_5y"|"recent_severe_low"|"dividend_supported"
+    recent-severe-low: string,
+    current-price: string,
+    dividend: string,
+}
+
+// §1 growth computed results (the historical CAGRs; the projected growths are editable inputs).
+export struct GrowthComputed {
+    sales-cagr: string,
+    eps-cagr: string,
+}
+
+// §2 computed results: per-year PTP%/ROE% (aligned with year-headers), the 5-yr averages + trends.
+export struct MgmtComputed {
+    ptp: [string],
+    roe: [string],
+    avg-ptp: string,
+    avg-roe: string,
+    ptp-trend: string,
+    roe-trend: string,
+}
+
+// §3 P/E summary results.
+export struct PeComputed {
+    avg-high-pe: string,
+    avg-low-pe: string,
+    avg-pe: string,
+    current-pe: string,
+    relative-value: string,
+}
+
+// §4 risk/reward computed results (the zone bands themselves cross via `ZoneBarState`).
+export struct RiskComputed {
+    forecast-high: string,
+    forecast-low: string,
+    ud-ratio: string,
+    appreciation: string,
+}
+
+// §5 five-year-potential computed results.
+export struct ReturnComputed {
+    present-yield: string,
+    avg-yield: string,
+    total-return: string,
+}
+
+// The §4 zone bar geometry + saturation gate. `available == false` → the calm empty state (no fake
+// band). Boundary prices are formatted strings; `marker-pos` is a LAYOUT float (0 = bottom = forecast
+// low, 1 = top = forecast high; -1 = no marker). `confidence` is the verdict state — full saturated
+// colour ONLY when "full" (AC 6); "provisional" hatches the bands, "withheld" spends no colour.
+export struct ZoneBarState {
+    available: bool,
+    confidence: string,    // "full" | "provisional" | "withheld"
+    forecast-low: string,
+    buy-top: string,
+    neutral-top: string,
+    forecast-high: string,
+    present-price: string,
+    present-zone: string,  // "buy" | "neutral" | "sell" | "" (outside range / unknown)
+    marker-pos: float,
+}
+
+// The verdict badge + sticky-bar facts (all from the SAME snapshot — one coherence frame). `state`
+// drives the badge texture; `provenance-date` ("DD/MM") is present only for a degraded verdict;
+// `open-gates` names the load-bearing inputs that are not validated-and-fresh (the honest "why not
+// full"). Neutral facts — never a buy/sell command.
+export struct VerdictState {
+    state: string,         // "full" | "provisional" | "withheld" | "" (no study)
+    present-price: string,
+    projected-return: string,
+    appreciation: string,
+    ud-ratio: string,
+    present-zone: string,  // "buy" | "neutral" | "sell" | ""
+    provenance-date: string,
+    open-gates: [string],
+}
+
+// The traceability surface for a chosen result (AC 7): the inputs it descends from (+ provenance),
+// the rule (method identity + formula), and — for a degraded verdict — the open gates. Spends NO colour.
+export struct TraceState {
+    visible: bool,
+    title: string,
+    inputs: [string],
+    rule: string,
+    open-gates: [string],
+}
+
 // Study-state axis (Story 2.2 create → list → reopen; Story 2.3 adds the faithful form + the
 // fold/regime view-state). Owned by the Rust side (`main.rs` wires the callbacks against
 // `state::JournalState` and `config::AppConfig`); the UI only renders what Rust pushes here.
@@ -156,6 +257,32 @@ export global Studies {
     // OS reduced-motion: when true the ✓ draw micro-animation is disabled (AC 1 / AC 7). Mirrored
     // from the platform by `main.rs`; default false (animation on).
     in-out property <bool> reduced-motion;
+
+    // ── Story 2.6 — judgment inputs, engine outputs, the §4 zone bar, the verdict & traceability.
+    //    Pushed by `main.rs` from ONE `core::verdict::StudySnapshot` after every data/judgment edit. ──
+    // The current judgment-input values (locale-formatted, restored on reopen).
+    in-out property <JudgmentFields> judgment;
+    // The computed engine results per section (already-formatted strings; "—" for unknown, never 0).
+    in-out property <GrowthComputed> growth-computed;
+    in-out property <MgmtComputed> mgmt-computed;
+    in-out property <PeComputed> pe-computed;
+    in-out property <RiskComputed> risk-computed;
+    in-out property <ReturnComputed> return-computed;
+    // The §4 zone bar + the verdict (badge + sticky bar) + the traceability surface.
+    in-out property <ZoneBarState> zone-bar;
+    in-out property <VerdictState> verdict;
+    in-out property <TraceState> trace;
+
+    // Set a numeric judgment field (field-key, raw-text). Rust parses locale-aware → Money/None
+    // (a cleared field is None, never 0), persists to `Study.judgment`, recomputes the snapshot.
+    // Field keys: "sales_growth"|"eps_growth"|"est_high_eps"|"est_low_eps"|"high_pe"|"low_pe"|
+    // "recent_severe_low"|"current_price"|"dividend".
+    callback set-judgment(string, string);
+    // Select the §4 forecast-low option (option-key).
+    callback set-forecast-low-option(string);
+    // Open / close the traceability surface for a result key (v1: "verdict").
+    callback open-traceability(string);
+    callback close-traceability();
 }
 
 export global Prefs {
