@@ -131,9 +131,10 @@ mod tests {
         // overlay (its column labels, the "alternate" caption + the confidence words) — so the
         // scanned population grew again. Story 2.10 adds the decision-rationale note's label +
         // placeholder (the user's typed rationale itself is NEVER scanned — it's user data, FR13).
-        // Keep the floor strict against a broken scan.
+        // Story 2.11 adds the "+ année" extend-projection affordance label (the annual roll-forward);
+        // the user's entered data is never scanned. Keep the floor strict against a broken scan.
         assert!(
-            total >= 162,
+            total >= 163,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

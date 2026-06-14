@@ -242,6 +242,33 @@ last_updated: 2026-06-14
 #             Auditor PASS AC1–6; 0 blocking patch, 5 dismiss (consistent with established rails), 2 defer →
 #             GitHub issues #32 (uncommitted-draft-lost-if-repush-during-focus, rail-wide) + #33 (no scroll
 #             on note >3 lines). In-GUI click-through = documented partial (human/AT-SPI). Epic 2: 10/14 done.
+# 2026-06-14: story 2-11 created (update existing study & extend projection) → ready-for-dev. SCOPE RESOLVED
+#             with Guy: "extend projection" = ROLL THE 5-YEAR DATA WINDOW FORWARD (append next actual year →
+#             engine re-bases canonical 5-yr horizon off new latest year), NOT a variable horizon (rejected —
+#             would break Epic-1 method-fingerprint/determinism gate). FR51 DURABLE history DEFERRED → undo
+#             (2.9)+logical_version in-session suffices (→ GitHub issue at dev time). Provider re-fetch/
+#             reconcile = Epic 3, NOT here (2.11 = MANUAL edit+extend). ⇒ APP-CRATE ONLY: YearData/
+#             Vec<YearData> already exist (no schema bump), FORECAST_HORIZON_YEARS stays 5 (no core change).
+#             Core new code = ONE structural mutator extend_history(study_id)→append YearData{latest_year+1,
+#             ToFill} on the 2.10 mutate_study rail (atomic+undoable); +extend-history() callback + "+ année"
+#             ink-only affordance. AC1/AC2 (edit cell/judgment recompute-in-coherence-frame + soft-lock) are
+#             the EXISTING 2.4–2.6 rails → 2.11 PROVES them across the reopen boundary (regression). Realizes
+#             the "year-column add" 2.4 documented-partial (entry.rs:31). posture floor +1 (@tr). 4 open Qs
+#             (one year/click, affordance placement, remove-year out-of-scope, empty-study extend) — defaults.
+# 2026-06-14: story 2-11 dev complete + review → done. APP-CRATE ONLY (verified: core/contract/persistence/
+#             Cargo.lock/deny.toml re-diff EMPTY; FORECAST_HORIZON_YEARS stays 5; YearData pre-existed → no
+#             schema bump; no new dep). extend_history(study_id) on the 2.10 mutate_study rail appends
+#             entry::tofill_year(latest_year+1, ToFill) — atomic+undoable; empty study materializes the 5-yr
+#             window then appends (5→6, never errors); engine re-bases its 5-yr projection off the new latest
+#             USABLE year by construction (latest_usable filters empty years). Shared tofill_year extracted
+#             (materialize_year_window reuses it). extend-history() callback + on_extend_history (mirrors
+#             on_set_rationale) + ink-only "Ajouter une année" ActionButton at §2 bottom. AC1/AC2 (edit cell/
+#             judgment recompute-in-frame + soft-lock) = existing 2.4–2.6 rails, PROVEN across reopen
+#             (editing_and_the_soft_lock_hold_across_a_reopen). app tests 121→126 (+5). posture @tr 162→163.
+#             3-layer review: Acceptance PASS AC1–6; 2 patches applied (read-only button enabled-gate;
+#             saturating_add for i32 overflow), 1 LOW deferred → issue #35 (unbounded year growth/§2 widen +
+#             chart empty-year slot). FR51 durable cross-reopen history deferred → issue #34. In-GUI
+#             click-through = documented partial (human/AT-SPI). Epic 2: 11/14 done.
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -275,7 +302,7 @@ development_status:
   2-8-interactive-growth-chart-draggable-judgment-line: done
   2-9-undo-redo-scenario-compare: done
   2-10-decision-rationale-capture: done
-  2-11-update-existing-study-extend-projection: backlog
+  2-11-update-existing-study-extend-projection: done
   2-12-dashboard-search-sort-filter-archive-delete: backlog
   2-13-legend-empty-error-states-help-demo-verify-engine: backlog
   2-14-neutral-voice-banned-verb-enforcement: backlog

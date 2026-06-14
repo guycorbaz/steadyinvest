@@ -804,6 +804,41 @@ impl JournalState {
         })
     }
 
+    /// Extend the study's data window forward by one year (Story 2.11, FR3): the **annual roll-forward**
+    /// ritual. Appends a fresh [`entry::tofill_year`] column for `latest_year + 1` (all cells
+    /// [`Coverage::ToFill`], no value computed — adding a year is structure, not calculation). The
+    /// engine then re-bases its canonical 5-year forward projection off the new latest **usable** year
+    /// once that year's EPS is entered ([`core`] reads `latest_usable`), so zones/verdict recompute in
+    /// the same coherence frame — **no method change** (`FORECAST_HORIZON_YEARS` stays `5`). Rides
+    /// [`Self::mutate_study`]: atomic (one `put_study`, `logical_version` bumped), guarded (read-only /
+    /// no-journal / save-failure → a neutral notice), and undoable (an append always changes `years`,
+    /// so it always records one undo step). A never-edited study (empty `years`) first materializes the
+    /// canonical window (the in-memory view the user sees), then appends — so "+ année" on a fresh study
+    /// grows it 5 → 6, never errors. The degraded all-empty case (unreadable `created_at`) appends
+    /// `year 0` — safe, never a panic.
+    pub fn extend_history(&mut self, study_id: Uuid) -> Result<(), String> {
+        let provenance = self.manual_provenance();
+        self.mutate_study(study_id, move |study| {
+            // Materialize the canonical window on first touch (the 2.4 materialize-on-first-edit rail),
+            // so extending a never-edited study grows the window the user actually sees, not an empty one.
+            if study.years.is_empty() {
+                study.years = entry::materialize_year_window(&study.created_at, &provenance);
+            }
+            let next_year = study
+                .years
+                .iter()
+                .map(|y| y.year)
+                .max()
+                // `saturating_add` keeps the year monotonic even at the i32 ceiling (defensive — real
+                // fiscal years never approach it, but the value is read from the journal blob).
+                .map(|latest| latest.saturating_add(1))
+                .or_else(|| entry::created_year(&study.created_at))
+                .unwrap_or(0);
+            // Newest sits at the bottom (oldest→newest SSG order); the appended year is the new max.
+            study.years.push(entry::tofill_year(next_year, provenance));
+        })
+    }
+
     /// The shared re-read → mutate-whole-study → persist path for a study-level field that is neither
     /// a review-tagged [`Cell`] nor a [`Judgment`] input (Story 2.10: the decision rationale). Mirrors
     /// [`Self::mutate_judgment`] but hands `apply` the whole [`Study`]. Records an undo snapshot only
@@ -1191,6 +1226,130 @@ mod tests {
         assert!(
             !state.can_undo(),
             "re-saving the same rationale records no phantom undo step (review P4)"
+        );
+    }
+
+    // ── Story 2.11 — update an existing study & extend its projection (roll the window forward) ──
+
+    #[test]
+    fn extend_history_appends_next_year_and_survives_reopen() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        // The window is materialized (2021..=2025); extending rolls it forward by one (2026).
+        state.extend_history(id).expect("extend persists");
+        let back = open_state(&path).get_study(id).expect("study reopens");
+        assert_eq!(
+            back.years.len(),
+            entry::YEAR_WINDOW + 1,
+            "the data window grew forward by one year"
+        );
+        let added = back.years.last().unwrap();
+        assert_eq!(
+            added.year, 2026,
+            "the appended year is latest+1 (newest at the bottom, SSG order)"
+        );
+        assert_eq!(added.eps.value, None, "the appended year is a to-fill gap, never 0");
+        assert_eq!(added.eps.coverage, Coverage::ToFill);
+    }
+
+    #[test]
+    fn extend_history_rolls_the_window_forward_each_call() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        state.extend_history(id).unwrap(); // 2026
+        state.extend_history(id).unwrap(); // 2027
+        let years: Vec<i32> = state
+            .get_study(id)
+            .unwrap()
+            .years
+            .iter()
+            .map(|y| y.year)
+            .collect();
+        assert_eq!(
+            years,
+            vec![2021, 2022, 2023, 2024, 2025, 2026, 2027],
+            "each call appends the next year (oldest→newest, horizon re-bases off the new latest)"
+        );
+    }
+
+    #[test]
+    fn undo_restores_the_pre_extend_year_window() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+        let before = state.get_study(id).unwrap().years.len();
+
+        state.extend_history(id).unwrap();
+        assert_eq!(state.get_study(id).unwrap().years.len(), before + 1);
+
+        // Adding a year is "any edit" — one undo step restores the prior window (FR32, never destroys).
+        assert_eq!(state.undo(id), Ok(true));
+        assert_eq!(
+            state.get_study(id).unwrap().years.len(),
+            before,
+            "undo restores the pre-add window"
+        );
+    }
+
+    #[test]
+    fn extend_history_on_a_read_only_journal_is_refused() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let id = study_with_entry(&path).1; // seeds + materializes the 5-year window, then drops the state
+
+        let mut state = open_state(&path);
+        state.read_only = true;
+        assert_eq!(
+            state.extend_history(id),
+            Err(MSG_READ_ONLY_WRITE.to_string())
+        );
+        assert_eq!(
+            open_state(&path).get_study(id).unwrap().years.len(),
+            entry::YEAR_WINDOW,
+            "a refused extend appended nothing"
+        );
+    }
+
+    #[test]
+    fn editing_and_the_soft_lock_hold_across_a_reopen() {
+        // AC1/AC2 regression: the existing edit + soft-lock rails behave correctly when the study is
+        // edited through a fresh reopen (a new JournalState on the same journal), not just in-session.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let id = study_with_entry(&path).1; // high_price@0 = 120.5, window materialized
+
+        // Validate the cell, then REOPEN a fresh state on the same journal.
+        {
+            let mut state = open_state(&path);
+            state
+                .set_review(id, 0, entry::FIELD_HIGH, Review::Validated)
+                .unwrap();
+        }
+        let mut reopened = open_state(&path);
+
+        // AC2: the soft-lock survives the reopen — a typed edit on the ✓ cell is still refused.
+        assert_eq!(
+            reopened.edit_cell(id, 0, entry::FIELD_HIGH, Some(money("999"))),
+            Err(MSG_SOFT_LOCKED.to_string())
+        );
+
+        // AC1: after the deliberate clear-✓, an edit on the reopened study persists (recompute frame).
+        reopened
+            .set_review(id, 0, entry::FIELD_HIGH, Review::ToReview)
+            .unwrap();
+        reopened
+            .edit_cell(id, 0, entry::FIELD_HIGH, Some(money("130")))
+            .expect("a ? cell edits normally after reopen");
+        assert_eq!(
+            open_state(&path).get_study(id).unwrap().years[0]
+                .high_price
+                .value,
+            Some(money("130")),
+            "an edit on a reopened study persists"
         );
     }
 

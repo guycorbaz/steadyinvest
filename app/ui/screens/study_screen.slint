@@ -590,6 +590,21 @@ export component StudyScreen inherits Rectangle {
                     GridCell { value: Studies.mgmt-computed.avg-roe; }
                     GridCell { value: Studies.mgmt-computed.roe-trend; }
                 }
+                // ── Story 2.11 — extend the projection (FR3): roll the data window forward one year.
+                //    Appends the next actual fiscal year as a new ToFill column; the grid re-renders
+                //    with it and the engine re-bases its 5-year projection off the new latest year.
+                //    Ink-only (ActionButton spends no colour); subordinate to the grid. ──
+                HorizontalLayout {
+                    padding-top: Tokens.space-8;
+                    alignment: start;
+                    ActionButton {
+                        label: @tr("Ajouter une année");
+                        // Disabled on a read-only journal — consistent with the undo/redo buttons; the
+                        // Rust rail refuses anyway, but the affordance shouldn't invite a doomed click.
+                        enabled: !Studies.read-only;
+                        clicked => { Studies.extend-history(); }
+                    }
+                }
             }
 
             // ── §3 — Historique cours / bénéfices (A–H lettered P/E table) ──

@@ -409,6 +409,12 @@ export global Studies {
     //    text only. The user's own words are NOT posture-scanned — only the label/placeholder are.
     in-out property <string> rationale;
     callback set-rationale(string);
+
+    // ── Story 2.11 — extend the projection (FR3): the annual roll-forward. Appends the next actual
+    //    fiscal year as a new ToFill column (`latest_year + 1`); the engine re-bases its canonical
+    //    5-year forward projection off the new latest usable year. Atomic + undoable (the 2.10
+    //    mutate_study rail). Structural — carries no payload; `main.rs` re-reads + re-renders the grid.
+    callback extend-history();
 }
 
 export global Prefs {

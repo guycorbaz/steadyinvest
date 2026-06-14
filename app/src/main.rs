@@ -828,6 +828,37 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ── Story 2.11 — extend the projection (FR3): the annual roll-forward. Mirrors `on_set_rationale`:
+    //    structural (no payload) → `state::extend_history` (appends `latest_year + 1`, atomic, undoable)
+    //    → re-read + `push_form` (the grid re-renders with the new ToFill column; undo flags refresh). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>().on_extend_history(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            let result = journal_state.borrow_mut().extend_history(id);
+            match result {
+                Ok(()) => {
+                    studies.set_notice(SharedString::new());
+                    if let Some(study) = journal_state.borrow().get_study(id) {
+                        push_form(&ui, &journal_state.borrow(), &study, format);
+                    }
+                }
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+
     // ── Story 2.8 — the draggable §1 judgment line (gesture ⇄ exact-value, kept in sync). ──
 
     // Drag start (pointer-down): cache the open study so each `moved` recomputes from memory — no

@@ -108,6 +108,24 @@ pub fn tofill_cell(provenance: Provenance) -> Cell {
     }
 }
 
+/// A fresh **to-fill** year column: every load-bearing cell a [`Coverage::ToFill`] gap, every
+/// optional column absent. The shared skeleton [`materialize_year_window`] seeds for a new study and
+/// [`crate::state::JournalState::extend_history`] (Story 2.11) appends when rolling the window
+/// forward. No value is computed — adding a year is structure, not calculation (Cardinal Rule).
+pub fn tofill_year(year: i32, provenance: Provenance) -> YearData {
+    YearData {
+        year,
+        sales: tofill_cell(provenance.clone()),
+        eps: tofill_cell(provenance.clone()),
+        high_price: tofill_cell(provenance.clone()),
+        low_price: tofill_cell(provenance),
+        // Optional columns stay absent until entered — an absent cell renders as a gap too.
+        dividend_per_share: None,
+        pre_tax_profit: None,
+        book_value_per_share: None,
+    }
+}
+
 /// The 4-digit calendar year of an RFC3339 timestamp (`"2026-06-13T…"` → `Some(2026)`); `None` if
 /// the prefix is not a year. v1 treats the fiscal year as the calendar year (no fiscal-offset
 /// handling — recorded interpretation).
@@ -129,17 +147,7 @@ pub fn materialize_year_window(created_at: &Timestamp, provenance: &Provenance) 
     };
     // Oldest → newest, so the most recent complete year sits at the bottom of the table (SSG order).
     ((year0 - YEAR_WINDOW as i32)..year0)
-        .map(|year| YearData {
-            year,
-            sales: tofill_cell(provenance.clone()),
-            eps: tofill_cell(provenance.clone()),
-            high_price: tofill_cell(provenance.clone()),
-            low_price: tofill_cell(provenance.clone()),
-            // Optional columns stay absent until entered — an absent cell renders as a gap too.
-            dividend_per_share: None,
-            pre_tax_profit: None,
-            book_value_per_share: None,
-        })
+        .map(|year| tofill_year(year, provenance.clone()))
         .collect()
 }
 
