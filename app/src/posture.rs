@@ -131,10 +131,12 @@ mod tests {
         // overlay (its column labels, the "alternate" caption + the confidence words) — so the
         // scanned population grew again. Story 2.10 adds the decision-rationale note's label +
         // placeholder (the user's typed rationale itself is NEVER scanned — it's user data, FR13).
-        // Story 2.11 adds the "+ année" extend-projection affordance label (the annual roll-forward);
-        // the user's entered data is never scanned. Keep the floor strict against a broken scan.
+        // Story 2.11 adds the "+ année" extend-projection affordance label (the annual roll-forward).
+        // Story 2.12 adds the dashboard search/sort/filter controls + the per-row archive/réactiver/
+        // supprimer actions + the delete-confirm banner labels; tickers/search text are user data and
+        // are never scanned. Keep the floor strict against a broken scan.
         assert!(
-            total >= 163,
+            total >= 177,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -166,10 +168,11 @@ mod tests {
             assert_neutral(message, "state.rs (journal/create/entry notices)");
         }
         // Guard the count so a future message added without registering it here is caught. Story 2.6
-        // adds the normalize-failure notice (`MSG_NORMALIZE_FAILED`).
+        // adds the normalize-failure notice (`MSG_NORMALIZE_FAILED`); Story 2.12 adds the six dashboard
+        // archive/un-archive/delete confirm + done templates.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            14,
+            20,
             "state.rs message inventory changed — register the new notice"
         );
     }

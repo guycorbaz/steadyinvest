@@ -11,13 +11,18 @@ import { Tokens } from "../tokens.slint";
 import { Labels, Studies, StudyRow } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
+import { ChoiceChip } from "../components/choice_chip.slint";
 import { StudyScreen } from "study_screen.slint";
 
 // One list row: ticker + date + status, openable by click or keyboard (Enter/Space). Default
-// assistive action reopens the study.
+// assistive action reopens the study. Story 2.12 adds lifecycle actions (archive/un-archive/delete)
+// as SEPARATE hit targets — the row's primary gesture stays "open", a stray click is never destructive.
 component StudyListRow inherits Rectangle {
     in property <StudyRow> entry;
     callback open();
+    callback archive();
+    callback unarchive();
+    callback delete-study();
 
     accessible-role: button;
     accessible-label: root.entry.ticker;
@@ -74,6 +79,20 @@ component StudyListRow inherits Rectangle {
             color: Tokens.text-low;
             font-size: Tokens.font-caption;
             vertical-alignment: center;
+        }
+        // ── Story 2.12 — lifecycle actions. These sit on top of the row's TouchArea (declared after
+        //    it), so their own TouchAreas consume the click — opening the row needs the ticker area. ──
+        if root.entry.status != "archived": ActionButton {
+            label: @tr("Archiver");
+            clicked => { root.archive(); }
+        }
+        if root.entry.status == "archived": ActionButton {
+            label: @tr("Réactiver");
+            clicked => { root.unarchive(); }
+        }
+        ActionButton {
+            label: @tr("Supprimer");
+            clicked => { root.delete-study(); }
         }
     }
 }
@@ -156,6 +175,91 @@ export component DashboardScreen inherits Rectangle {
                 }
             }
 
+            // ── Story 2.12 — archive/delete confirmation banner (mirrors the §-screen unlock overlay;
+            //    a SEPARATE channel). Fact-stating, NO colour spent; the delete confirm is labeled as
+            //    an irreversible removal. Annuler mutates nothing. ──
+            if Studies.study-action-confirm-visible: Rectangle {
+                background: Tokens.surface;
+                border-width: Tokens.focus-border;
+                border-color: Tokens.focus;
+                border-radius: Tokens.radius;
+
+                HorizontalLayout {
+                    padding: Tokens.space-12;
+                    spacing: Tokens.space-16;
+                    Text {
+                        text: Studies.study-action-message;
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-body;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                    ActionButton {
+                        label: Studies.study-action-destructive ? @tr("Supprimer définitivement") : @tr("Confirmer");
+                        clicked => { Studies.confirm-study-action(); }
+                    }
+                    ActionButton {
+                        label: @tr("Annuler");
+                        clicked => { Studies.cancel-study-action(); }
+                    }
+                }
+            }
+
+            // ── Story 2.12 — search / sort / filter controls. Shown whenever the journal holds ANY
+            //    study (total, before curation) — so a filter that curates to empty (e.g. every study
+            //    archived) never strands the user without a way to switch back. Ink only; user search
+            //    text is never posture-scanned. ──
+            if Studies.study-count > 0: VerticalLayout {
+                spacing: Tokens.space-8;
+
+                search := TextField {
+                    placeholder: @tr("Rechercher un symbole");
+                    width: 260px;
+                    // Live filter as the user types; the field owns its text, Rust re-curates `rows`.
+                    changed text => { Studies.set-search(self.text); }
+                    accepted => { Studies.set-search(self.text); }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    ChoiceChip {
+                        label: @tr("Actives");
+                        selected: Studies.status-filter == "active";
+                        activated => { Studies.set-status-filter("active"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Archivées");
+                        selected: Studies.status-filter == "archived";
+                        activated => { Studies.set-status-filter("archived"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Toutes");
+                        selected: Studies.status-filter == "all";
+                        activated => { Studies.set-status-filter("all"); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    ChoiceChip {
+                        label: @tr("Tri : date");
+                        selected: Studies.sort-key == "date";
+                        activated => { Studies.set-sort("date", Studies.sort-descending); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Tri : symbole");
+                        selected: Studies.sort-key == "ticker";
+                        activated => { Studies.set-sort("ticker", Studies.sort-descending); }
+                    }
+                    ChoiceChip {
+                        label: Studies.sort-descending ? @tr("Ordre : décroissant") : @tr("Ordre : croissant");
+                        selected: false;
+                        activated => { Studies.set-sort(Studies.sort-key, !Studies.sort-descending); }
+                    }
+                }
+            }
+
             // ── The list (or a calm empty line — full FR58 empty state is 2.13) ──
             if Studies.rows.length == 0: Text {
                 text: @tr("Aucune étude pour le moment.");
@@ -170,6 +274,15 @@ export component DashboardScreen inherits Rectangle {
                     entry: studyrow;
                     open => {
                         Studies.open-study(studyrow.id);
+                    }
+                    archive => {
+                        Studies.request-study-action("archive", studyrow.id);
+                    }
+                    unarchive => {
+                        Studies.request-study-action("unarchive", studyrow.id);
+                    }
+                    delete-study => {
+                        Studies.request-study-action("delete", studyrow.id);
                     }
                 }
             }

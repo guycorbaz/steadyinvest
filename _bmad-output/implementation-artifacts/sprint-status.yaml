@@ -269,6 +269,33 @@ last_updated: 2026-06-14
 #             saturating_add for i32 overflow), 1 LOW deferred → issue #35 (unbounded year growth/§2 widen +
 #             chart empty-year slot). FR51 durable cross-reopen history deferred → issue #34. In-GUI
 #             click-through = documented partial (human/AT-SPI). Epic 2: 11/14 done.
+# 2026-06-14: story 2-12 created (dashboard search/sort/filter, archive & delete) → ready-for-dev. SCOPE with
+#             Guy: ARCHIVE = soft (studies.status='archived', hidden from default active view, REVERSIBLE) +
+#             DELETE = hard ATOMIC (study row + its judgments time-series rows in ONE tx → FK-safe, no orphan,
+#             FR55, irreversible). View: active by default, filter active/archived/all, search by ticker, sort
+#             date+ticker. PERSISTENCE is a PRIMARY surface (archive/delete = SQL: set_study_status UPDATE +
+#             delete_study tx) but NO schema.rs DDL change + NO SCHEMA_VERSION bump (status col + idx + judgments
+#             FK already in v1; frozen v1.db corpus carries status). core/contract PINNED (archive via SQL col,
+#             NOT a Study.status blob field). Search/sort/filter = PURE app-side curate() over list_studies
+#             (deterministic, headless-testable). Confirm flow REUSES the 2.5 unlock-all request→count→park→
+#             confirm/cancel pattern via a SEPARATE study-action channel (dashboard overlay ≠ study-screen
+#             unlock overlay). NOT writing FR51 durable time-series (#34 stays deferred — empty judgments is
+#             why hard delete is safe now; the tx purges any rows that exist). 4 open Qs (delete-confirm
+#             strength, default sort, row-action placement, un-archive discoverability) — defaults chosen.
+# 2026-06-14: story 2-12 dev complete + review → done. app + persistence (NO schema.rs DDL change, NO
+#             SCHEMA_VERSION bump; core/contract/Cargo.lock/deny.toml re-diff EMPTY). Persistence:
+#             set_study_status (UPDATE) + delete_study (one tx: DELETE judgments→DELETE studies, FK-safe,
+#             no orphan, FR55; version bump only on real change). State: archive/unarchive/delete wrappers
+#             (guarded; delete resets undo). viewmodel::studies::curate (pure: case-insensitive ticker
+#             substring + stable date/ticker sort, id tiebreaker; SortKey/StatusFilter). Dashboard view
+#             state on Studies global → refresh_studies curates. Archive/delete via SEPARATE study-action
+#             confirm channel (mirrors 2.5 unlock); confirm/done MSG_* templates posture-gated. UI: search
+#             TextField (live), filter+sort ChoiceChips, per-row Archiver/Réactiver/Supprimer ActionButtons
+#             (separate hit targets), delete-confirm banner. app tests 126→135, persistence 14→17. posture
+#             @tr 163→177, msg inventory 14→20. 3-layer review: Acceptance PASS AC1–6; 2 patches (HIGH:
+#             controls vanished when active view curated-empty → gate on total study-count, not curated
+#             rows; LOW: no phantom logical_version bump on absent-id no-op). FR51 durable history still
+#             deferred (#34). In-GUI click-through = documented partial. Epic 2: 12/14 done.
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -303,7 +330,7 @@ development_status:
   2-9-undo-redo-scenario-compare: done
   2-10-decision-rationale-capture: done
   2-11-update-existing-study-extend-projection: done
-  2-12-dashboard-search-sort-filter-archive-delete: backlog
+  2-12-dashboard-search-sort-filter-archive-delete: done
   2-13-legend-empty-error-states-help-demo-verify-engine: backlog
   2-14-neutral-voice-banned-verb-enforcement: backlog
   epic-2-retrospective: optional

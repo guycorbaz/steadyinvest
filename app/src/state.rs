@@ -68,6 +68,15 @@ pub const MSG_UNLOCK_DONE: &str = "Validation retirée de {n} cellule(s).";
 /// invalid split): the verdict is suspended, never computed from broken inputs (Story 2.6).
 pub const MSG_NORMALIZE_FAILED: &str =
     "Les données ne peuvent pas être préparées ; le calcul est suspendu.";
+/// Dashboard archive/delete confirmation + completion copy (Story 2.12) — fact-stating, posture-gated.
+/// `{t}` is replaced with the study's ticker (user data, not scanned).
+pub const MSG_ARCHIVE_CONFIRM: &str = "Archiver l'étude {t} ? Elle sera masquée de la vue active.";
+pub const MSG_UNARCHIVE_CONFIRM: &str = "Réactiver l'étude {t} ?";
+pub const MSG_DELETE_CONFIRM: &str =
+    "Supprimer l'étude {t} et sa série temporelle ? Cette suppression est définitive.";
+pub const MSG_ARCHIVE_DONE: &str = "Étude {t} archivée.";
+pub const MSG_UNARCHIVE_DONE: &str = "Étude {t} réactivée.";
+pub const MSG_DELETE_DONE: &str = "Étude {t} supprimée.";
 
 /// The confirmation prompt for an "unlock all" of `count` cells (a `{n}`-substitution of
 /// [`MSG_UNLOCK_CONFIRM`] so the scanned const and the runtime string stay one source).
@@ -78,6 +87,29 @@ pub fn unlock_confirm_message(count: usize) -> String {
 /// The completion notice for an "unlock all" that flipped `count` cells.
 pub fn unlock_done_message(count: usize) -> String {
     MSG_UNLOCK_DONE.replace("{n}", &count.to_string())
+}
+
+/// The confirm prompt for a dashboard lifecycle action on the study `ticker` (Story 2.12) — a `{t}`
+/// substitution of the matching `MSG_*_CONFIRM` const so the scanned template and the runtime string
+/// stay one source. `action` is the Slint wire string (`"archive"`/`"unarchive"`/`"delete"`); an
+/// unknown action falls back to the (most cautious) delete prompt.
+pub fn study_action_confirm_message(action: &str, ticker: &str) -> String {
+    let template = match action {
+        "archive" => MSG_ARCHIVE_CONFIRM,
+        "unarchive" => MSG_UNARCHIVE_CONFIRM,
+        _ => MSG_DELETE_CONFIRM,
+    };
+    template.replace("{t}", ticker)
+}
+
+/// The completion notice after a dashboard lifecycle action on `ticker` completes (Story 2.12).
+pub fn study_action_done_message(action: &str, ticker: &str) -> String {
+    let template = match action {
+        "archive" => MSG_ARCHIVE_DONE,
+        "unarchive" => MSG_UNARCHIVE_DONE,
+        _ => MSG_DELETE_DONE,
+    };
+    template.replace("{t}", ticker)
 }
 
 /// Every static user-facing message above — exposed so the crate-local posture gate (FR13) scans
@@ -99,6 +131,12 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_UNLOCK_CONFIRM,
     MSG_UNLOCK_DONE,
     MSG_NORMALIZE_FAILED,
+    MSG_ARCHIVE_CONFIRM,
+    MSG_UNARCHIVE_CONFIRM,
+    MSG_DELETE_CONFIRM,
+    MSG_ARCHIVE_DONE,
+    MSG_UNARCHIVE_DONE,
+    MSG_DELETE_DONE,
 ];
 
 /// The scope of a bulk "unlock all" (Story 2.5): the whole study, a single year column, or a single
@@ -421,6 +459,58 @@ impl JournalState {
                 tracing::warn!("list_studies failed: {error}");
                 Vec::new()
             }
+        }
+    }
+
+    /// Archive a study (Story 2.12, FR54): flip `status` to `"archived"` so it leaves the default
+    /// dashboard view. Reversible via [`Self::unarchive_study`]. Guarded (read-only / no-journal /
+    /// save-failure → a neutral notice, never a silent `.ok()`). Not part of the per-open-study undo
+    /// stack — it's a dashboard-lifecycle action, reversed by un-archiving, not by Ctrl+Z.
+    pub fn archive_study(&mut self, study_id: Uuid) -> Result<(), String> {
+        self.set_study_status(study_id, "archived")
+    }
+
+    /// Un-archive a study (Story 2.12): flip `status` back to `"active"`. The inverse of
+    /// [`Self::archive_study`]; same guards.
+    pub fn unarchive_study(&mut self, study_id: Uuid) -> Result<(), String> {
+        self.set_study_status(study_id, "active")
+    }
+
+    /// The shared status-change rail (read-only / no-journal / save-failure guards → persist).
+    fn set_study_status(&mut self, study_id: Uuid, status: &str) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let Some(journal) = self.journal.as_mut() else {
+            return Err(MSG_NO_JOURNAL.to_string());
+        };
+        match journal.set_study_status(study_id, status) {
+            Ok(()) => Ok(()),
+            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
+            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+        }
+    }
+
+    /// Permanently delete a study and its FR51 `judgments` time-series rows in one transaction
+    /// (Story 2.12, FR55) — atomic, FK-safe, no orphan, other studies untouched. **Irreversible**
+    /// (distinct from archive's reversible hide); not undoable. Clears the in-memory undo history so
+    /// a later Ctrl+Z can't resurrect a pointer to a deleted study. Guarded (read-only / no-journal /
+    /// save-failure → a neutral notice, never a silent `.ok()`).
+    pub fn delete_study(&mut self, study_id: Uuid) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let Some(journal) = self.journal.as_mut() else {
+            return Err(MSG_NO_JOURNAL.to_string());
+        };
+        match journal.delete_study(study_id) {
+            Ok(()) => {
+                // The deleted study must not linger in any undo/redo snapshot stack.
+                self.reset_undo();
+                Ok(())
+            }
+            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
+            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
         }
     }
 
@@ -1963,5 +2053,65 @@ mod tests {
         // Nothing was written: the cell is still absent/empty.
         let back = open_state(&path).get_study(id).unwrap();
         assert!(back.years.is_empty(), "a refused edit materialized nothing");
+    }
+
+    // ── Story 2.12 — dashboard archive (soft) & delete (hard) state wrappers ──
+
+    fn status_in_list(state: &JournalState, id: Uuid) -> Option<String> {
+        state
+            .list_studies()
+            .into_iter()
+            .find(|s| s.id == id)
+            .map(|s| s.status)
+    }
+
+    #[test]
+    fn archive_then_unarchive_flips_status_reversibly() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+        assert_eq!(status_in_list(&state, id).as_deref(), Some("active"));
+
+        state.archive_study(id).expect("archive");
+        assert_eq!(status_in_list(&state, id).as_deref(), Some("archived"));
+
+        state.unarchive_study(id).expect("un-archive");
+        assert_eq!(status_in_list(&state, id).as_deref(), Some("active"));
+    }
+
+    #[test]
+    fn delete_removes_the_study_from_the_list() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+        assert!(status_in_list(&state, id).is_some(), "present before delete");
+
+        state.delete_study(id).expect("delete");
+        assert!(
+            status_in_list(&state, id).is_none(),
+            "the deleted study is gone from the list"
+        );
+        assert!(
+            state.get_study(id).is_none(),
+            "the deleted study is unreadable"
+        );
+    }
+
+    #[test]
+    fn archive_and_delete_are_refused_on_a_read_only_journal() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let id = study_with_entry(&path).1;
+
+        let mut state = open_state(&path);
+        state.read_only = true;
+        assert_eq!(state.archive_study(id), Err(MSG_READ_ONLY_WRITE.to_string()));
+        assert_eq!(state.delete_study(id), Err(MSG_READ_ONLY_WRITE.to_string()));
+        // Nothing changed on disk: the study is still present and active.
+        assert_eq!(
+            status_in_list(&open_state(&path), id).as_deref(),
+            Some("active"),
+            "a refused archive/delete mutated nothing"
+        );
     }
 }

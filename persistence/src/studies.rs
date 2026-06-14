@@ -127,4 +127,58 @@ impl Journal {
         }
         Ok(out)
     }
+
+    /// Set a study's lifecycle `status` (Story 2.12, FR54/FR55): `"archived"` hides it from the
+    /// default dashboard view, `"active"` restores it. One transaction that also bumps the journal's
+    /// logical version. A pure indexed-column change — the Study blob payload and the FR51
+    /// `judgments` time-series are untouched, so archive is fully reversible. An absent id is a no-op
+    /// success (idempotent).
+    pub fn set_study_status(&mut self, id: Uuid, status: &str) -> Result<()> {
+        self.check_writable()?;
+        let tx = self.conn.transaction()?;
+        let changed = tx.execute(
+            "UPDATE studies SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status, id.to_string()],
+        )?;
+        // Only a real change bumps the heartbeat — an absent id is a true no-op (no phantom version
+        // drift, which the stale-restore detection / external sync would otherwise see).
+        if changed > 0 {
+            tx.execute(
+                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
+                [],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Permanently delete a study **and its own FR51 `judgments` time-series rows** in a single
+    /// transaction (Story 2.12, FR55 — "without corrupting the journal time-series"): the judgments
+    /// rows are removed first so the `judgments.study_id REFERENCES studies(id)` constraint (RESTRICT,
+    /// `PRAGMA foreign_keys = true`) is never violated and **no orphan** is left behind; every other
+    /// study's rows are untouched. Bumps the logical version. An absent id is a no-op success
+    /// (idempotent — nothing to delete is not an error).
+    pub fn delete_study(&mut self, id: Uuid) -> Result<()> {
+        self.check_writable()?;
+        let id_text = id.to_string();
+        let tx = self.conn.transaction()?;
+        let removed_judgments = tx.execute(
+            "DELETE FROM judgments WHERE study_id = ?1",
+            rusqlite::params![id_text],
+        )?;
+        let removed_study = tx.execute(
+            "DELETE FROM studies WHERE id = ?1",
+            rusqlite::params![id_text],
+        )?;
+        // Only a real removal bumps the heartbeat — deleting an absent id is a true no-op (no phantom
+        // version drift for the stale-restore detection / external sync to see).
+        if removed_study > 0 || removed_judgments > 0 {
+            tx.execute(
+                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
+                [],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
 }

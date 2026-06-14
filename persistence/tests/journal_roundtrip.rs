@@ -434,3 +434,130 @@ fn issue_14_judgment_fields_round_trip_through_a_reopened_journal() {
         "the reopened study is value-equal to what was saved"
     );
 }
+
+// ── Story 2.12: archive (soft status) & delete (hard, FK-safe time-series purge) ──
+
+fn status_of(journal: &Journal, id: Uuid) -> Option<String> {
+    journal
+        .list_studies()
+        .expect("list")
+        .into_iter()
+        .find(|s| s.id == id)
+        .map(|s| s.status)
+}
+
+#[test]
+fn set_study_status_archives_and_unarchives_reversibly() {
+    let dir = TempDir::new().expect("tempdir");
+    let jid = Uuid::from_u128(0x21);
+    let mut journal = new_journal(&dir, jid);
+    let s = study(1, jid, "NESN");
+    journal.put_study(&s).expect("study writes");
+    assert_eq!(status_of(&journal, s.id).as_deref(), Some("active"));
+
+    journal.set_study_status(s.id, "archived").expect("archive");
+    assert_eq!(
+        status_of(&journal, s.id).as_deref(),
+        Some("archived"),
+        "archive flips the status column"
+    );
+    // The blob payload is untouched — archive is a pure status change, fully reversible.
+    assert_eq!(journal.get_study(s.id).expect("read").expect("exists"), s);
+
+    journal.set_study_status(s.id, "active").expect("un-archive");
+    assert_eq!(
+        status_of(&journal, s.id).as_deref(),
+        Some("active"),
+        "un-archive restores active"
+    );
+}
+
+#[test]
+fn delete_study_removes_the_row_and_its_judgments_leaving_others_intact() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.db");
+    let jid = Uuid::from_u128(0x22);
+    let keep = study(1, jid, "KEEP");
+    let drop_it = study(2, jid, "DROPME");
+    {
+        let mut journal = Journal::create(&path, jid, &ts(JOURNAL_TS)).expect("create");
+        journal.put_study(&keep).expect("keep writes");
+        journal.put_study(&drop_it).expect("dropme writes");
+    }
+    // Seed an FR51 `judgments` row for each study via a raw connection (the app doesn't write the
+    // time-series yet — issue #34) — proves the delete is FK-safe and purges only the target's rows.
+    {
+        let conn = Connection::open(&path).expect("raw conn");
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for (jrow, study_id) in [(0x100u128, keep.id), (0x101, drop_it.id), (0x102, drop_it.id)] {
+            conn.execute(
+                "INSERT INTO judgments (id, study_id, created_at, schema_version, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    Uuid::from_u128(jrow).to_string(),
+                    study_id.to_string(),
+                    "2026-06-12T09:00:00Z",
+                    steadyinvest_contract::SCHEMA_VERSION,
+                    "{}"
+                ],
+            )
+            .expect("judgment row inserts");
+        }
+    }
+
+    let mut journal = Journal::open(&path).expect("reopen writable");
+    let v_before = journal.logical_version().expect("version reads");
+    journal.delete_study(drop_it.id).expect("delete is FK-safe with judgments present");
+
+    // The deleted study is gone; the kept study remains and is intact.
+    let ids: Vec<Uuid> = journal
+        .list_studies()
+        .expect("list")
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(ids, vec![keep.id], "only the kept study remains in the list");
+    assert!(
+        journal.get_study(drop_it.id).expect("read").is_none(),
+        "the deleted study is unreadable"
+    );
+    assert_eq!(
+        journal.get_study(keep.id).expect("read").expect("exists"),
+        keep,
+        "the other study is value-intact"
+    );
+    assert!(
+        journal.logical_version().expect("version reads") > v_before,
+        "delete bumps the logical version"
+    );
+
+    // FR55: the deleted study's time-series rows are purged (no orphan); the kept study's are untouched.
+    let conn = Connection::open(&path).expect("raw conn");
+    let dropped: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",
+            rusqlite::params![drop_it.id.to_string()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(dropped, 0, "the deleted study's judgments rows are purged (FR55, no orphan)");
+    let kept: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",
+            rusqlite::params![keep.id.to_string()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, 1, "the kept study's time-series is untouched");
+}
+
+#[test]
+fn delete_study_of_an_absent_id_is_a_noop_success() {
+    let dir = TempDir::new().expect("tempdir");
+    let jid = Uuid::from_u128(0x23);
+    let mut journal = new_journal(&dir, jid);
+    journal
+        .delete_study(Uuid::from_u128(0xDEAD))
+        .expect("deleting an absent id is a no-op success");
+    assert!(journal.list_studies().expect("list").is_empty());
+}

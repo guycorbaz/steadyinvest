@@ -85,12 +85,18 @@ fn push_samples(ui: &MainWindow, format: NumberFormat) {
 /// Rebuild the dashboard list from the journal and mirror the read-only flag into the `Studies`
 /// global. Called on startup and after every create.
 fn refresh_studies(ui: &MainWindow, state: &JournalState) {
-    let rows: Vec<StudyRow> = state
-        .list_studies()
-        .iter()
-        .map(viewmodel::studies::to_row)
-        .collect();
     let studies = ui.global::<Studies>();
+    // The dashboard view state (search/sort/filter) lives on the `Studies` global — read it back and
+    // curate the persistence summaries (Story 2.12). Deterministic, pure (`viewmodel::studies::curate`).
+    let summaries = state.list_studies();
+    let rows: Vec<StudyRow> = viewmodel::studies::curate(
+        &summaries,
+        studies.get_search_query().as_str(),
+        viewmodel::studies::SortKey::from_wire(studies.get_sort_key().as_str()),
+        studies.get_sort_descending(),
+        viewmodel::studies::StatusFilter::from_wire(studies.get_status_filter().as_str()),
+    );
+    studies.set_study_count(summaries.len() as i32);
     studies.set_rows(ModelRc::new(VecModel::from(rows)));
     studies.set_read_only(state.is_read_only());
 }
@@ -298,6 +304,11 @@ fn main() -> Result<(), slint::PlatformError> {
     // raised (`request-unlock`) and the user pressing Confirmer (`confirm-unlock`). `None` = no
     // pending action; Annuler clears it without mutating anything.
     let pending_unlock: Rc<RefCell<Option<UnlockScope>>> = Rc::new(RefCell::new(None));
+
+    // Story 2.12 — the pending dashboard lifecycle action `(action, study_id)`, held between
+    // `request-study-action` raising the confirm overlay and `confirm-study-action`. `None` = no
+    // pending action; Annuler clears it without mutating anything.
+    let pending_study_action: Rc<RefCell<Option<(String, Uuid)>>> = Rc::new(RefCell::new(None));
 
     // Story 2.8 — the open study cached for the duration of a §1 judgment-line drag, so each `moved`
     // event recomputes from memory (no journal read/write) under the <100 ms budget. `None` = no drag
@@ -756,6 +767,118 @@ fn main() -> Result<(), slint::PlatformError> {
             let ui = ui_weak.unwrap();
             *pending_unlock.borrow_mut() = None;
             ui.global::<Studies>().set_confirm_visible(false);
+        });
+    }
+
+    // ── Story 2.12 — dashboard search / sort / filter. The view state lives on the `Studies` global;
+    //    each control updates it then re-lists + re-curates (pure `viewmodel::studies::curate`). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Studies>().on_set_search(move |text| {
+            let ui = ui_weak.unwrap();
+            ui.global::<Studies>().set_search_query(text);
+            refresh_studies(&ui, &journal_state.borrow());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Studies>().on_set_sort(move |key, descending| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            studies.set_sort_key(key);
+            studies.set_sort_descending(descending);
+            refresh_studies(&ui, &journal_state.borrow());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Studies>().on_set_status_filter(move |filter| {
+            let ui = ui_weak.unwrap();
+            ui.global::<Studies>().set_status_filter(filter);
+            refresh_studies(&ui, &journal_state.borrow());
+        });
+    }
+
+    // ── Story 2.12 — archive (soft) / un-archive / delete (hard), each behind the confirm overlay
+    //    (mirrors the unlock request→confirm→cancel pattern; a SEPARATE `study-action` channel). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let pending_study_action = Rc::clone(&pending_study_action);
+        ui.global::<Studies>()
+            .on_request_study_action(move |action, id_text| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                // The ticker for the fact-stating prompt (user data, not scanned); absent study → bail.
+                let Some(study) = journal_state.borrow().get_study(id) else {
+                    return;
+                };
+                let action = action.to_string();
+                let message = state::study_action_confirm_message(&action, &study.security_ticker);
+                let destructive = action == "delete";
+                *pending_study_action.borrow_mut() = Some((action, id));
+                studies.set_study_action_message(message.into());
+                studies.set_study_action_destructive(destructive);
+                studies.set_study_action_confirm_visible(true);
+            });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let current_study = Rc::clone(&current_study);
+        let pending_study_action = Rc::clone(&pending_study_action);
+        ui.global::<Studies>().on_confirm_study_action(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            studies.set_study_action_confirm_visible(false);
+            let Some((action, id)) = pending_study_action.borrow_mut().take() else {
+                return;
+            };
+            // The ticker for the completion notice, captured before a delete removes the row.
+            let ticker = journal_state
+                .borrow()
+                .get_study(id)
+                .map(|s| s.security_ticker)
+                .unwrap_or_default();
+            let result = {
+                let mut st = journal_state.borrow_mut();
+                match action.as_str() {
+                    "archive" => st.archive_study(id),
+                    "unarchive" => st.unarchive_study(id),
+                    _ => st.delete_study(id),
+                }
+            };
+            match result {
+                Ok(()) => {
+                    studies.set_notice(state::study_action_done_message(&action, &ticker).into());
+                    // If the affected study is the one currently open, close it back to the dashboard
+                    // (a hidden/removed study must not stay mounted).
+                    let is_open =
+                        current_study.borrow().as_deref() == Some(id.to_string().as_str());
+                    if is_open {
+                        *current_study.borrow_mut() = None;
+                        studies.set_study_open(false);
+                    }
+                    refresh_studies(&ui, &journal_state.borrow());
+                }
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let pending_study_action = Rc::clone(&pending_study_action);
+        ui.global::<Studies>().on_cancel_study_action(move || {
+            let ui = ui_weak.unwrap();
+            *pending_study_action.borrow_mut() = None;
+            ui.global::<Studies>()
+                .set_study_action_confirm_visible(false);
         });
     }
 

@@ -415,6 +415,32 @@ export global Studies {
     //    5-year forward projection off the new latest usable year. Atomic + undoable (the 2.10
     //    mutate_study rail). Structural — carries no payload; `main.rs` re-reads + re-renders the grid.
     callback extend-history();
+
+    // ── Story 2.12 — dashboard search / sort / filter + archive (soft) / delete (hard) ──
+    // View controls. Rust holds the authoritative view state and re-curates `rows` on each change;
+    // these mirror it so the controls render the current selection.
+    in-out property <string> search-query;
+    in-out property <string> sort-key: "date";       // "date" | "ticker"
+    in-out property <bool> sort-descending: true;     // default: most-recent / Z→A first
+    in-out property <string> status-filter: "active"; // "active" | "archived" | "all"
+    // The TOTAL study count (all statuses, before curation) — so the controls stay reachable even when
+    // the current filter curates to an empty list (e.g. every study archived → switch to "Archivées").
+    in-out property <int> study-count;
+    callback set-search(string);
+    callback set-sort(string, bool);                  // key, descending
+    callback set-status-filter(string);
+    // Lifecycle actions — each routed through a confirm overlay before it acts (the 2.5 unlock
+    // pattern): request parks the intent + raises the overlay; confirm performs it; cancel does nothing.
+    // action = "archive" | "unarchive" | "delete"; arg = study id (stringified UUID).
+    callback request-study-action(string, string);
+    callback confirm-study-action();
+    callback cancel-study-action();
+    // The dashboard confirm overlay state, pushed by Rust — DISTINCT from the study-screen `unlock`
+    // overlay (`confirm-visible`/`confirm-message`) so the two never clobber each other. `destructive`
+    // is true for delete, so the UI can label the confirm button as an irreversible removal.
+    in-out property <bool> study-action-confirm-visible;
+    in-out property <string> study-action-message;
+    in-out property <bool> study-action-destructive;
 }
 
 export global Prefs {
