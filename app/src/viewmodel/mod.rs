@@ -7,3 +7,4 @@ pub mod entry;
 pub mod form;
 pub mod format;
 pub mod studies;
+pub mod verify;

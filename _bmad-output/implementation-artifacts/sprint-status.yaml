@@ -296,6 +296,22 @@ last_updated: 2026-06-14
 #             controls vanished when active view curated-empty → gate on total study-count, not curated
 #             rows; LOW: no phantom logical_version bump on absent-id no-op). FR51 durable history still
 #             deferred (#34). In-GUI click-through = documented partial. Epic 2: 12/14 done.
+# 2026-06-14: story 2-13 created + dev complete + review → done. APP-CRATE ONLY (core/contract/persistence/
+#             Cargo.lock/deny.toml/app/assets re-diff EMPTY; method fingerprint pinned/green — Epic 1 pre-built
+#             the verify infra FOR this story: public core::golden::check_all + 11 byte-identical bundled
+#             fixtures in app/assets/golden/). All 4 features shipped, hub in Réglages (Guy's scope choice).
+#             verify.rs (NEW): include_str! 11 fixtures → run() replays via check_all → VerifyReport(method
+#             version+fingerprint+per-fixture pass/deviation; parse error = reported fail, never panic);
+#             demo_study() converts g01-worked-example GoldenInput→contract::Study (fields 1:1). Demo opened
+#             with current_study=None → ALL ~22 edit callbacks no-op (read-only by construction, Edge reviewer
+#             verified) + push_view_state(default)+reset_undo + "lecture seule" banner; never persisted.
+#             Réglages hub (settings.slint): Légende (real marker tokens beside neutral meanings) + Glossaire
+#             (8 terms) + Vérifier le moteur (button→results). Dashboard actionable empty state + demo CTA.
+#             new Verify global + FixtureLine struct (re-exported via app.slint). MSG_VERIFY_*/MSG_DEMO_*
+#             registered. app tests 135→137; posture @tr 177→212, msg inventory 20→23. 3-layer review:
+#             Acceptance ACCEPT AC1–6; 5 patches (demo view-state default, reset_undo, saturating_sub,
+#             present legend row, comment fix); currency-drop dismissed (mono-currency fixtures). Epic 2:
+#             13/14 done. Remaining: 2.14 (neutral-voice/banned-verb enforcement), then epic-2-retro.
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -331,7 +347,7 @@ development_status:
   2-10-decision-rationale-capture: done
   2-11-update-existing-study-extend-projection: done
   2-12-dashboard-search-sort-filter-archive-delete: done
-  2-13-legend-empty-error-states-help-demo-verify-engine: backlog
+  2-13-legend-empty-error-states-help-demo-verify-engine: done
   2-14-neutral-voice-banned-verb-enforcement: backlog
   epic-2-retrospective: optional
 

@@ -133,10 +133,12 @@ mod tests {
         // placeholder (the user's typed rationale itself is NEVER scanned — it's user data, FR13).
         // Story 2.11 adds the "+ année" extend-projection affordance label (the annual roll-forward).
         // Story 2.12 adds the dashboard search/sort/filter controls + the per-row archive/réactiver/
-        // supprimer actions + the delete-confirm banner labels; tickers/search text are user data and
-        // are never scanned. Keep the floor strict against a broken scan.
+        // supprimer actions + the delete-confirm banner labels. Story 2.13 adds the Réglages help hub
+        // (legend marker meanings + glossary terms/definitions + verify-engine controls/results), the
+        // actionable empty state + demo CTA, and the read-only demo banner; tickers/search text and the
+        // fixture data are never scanned. Keep the floor strict against a broken scan.
         assert!(
-            total >= 177,
+            total >= 212,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -169,10 +171,11 @@ mod tests {
         }
         // Guard the count so a future message added without registering it here is caught. Story 2.6
         // adds the normalize-failure notice (`MSG_NORMALIZE_FAILED`); Story 2.12 adds the six dashboard
-        // archive/un-archive/delete confirm + done templates.
+        // archive/un-archive/delete confirm + done templates; Story 2.13 adds the two verify-engine
+        // summary templates + the demo-unavailable notice.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            20,
+            23,
             "state.rs message inventory changed — register the new notice"
         );
     }

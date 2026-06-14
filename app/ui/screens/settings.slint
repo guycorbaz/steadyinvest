@@ -4,8 +4,52 @@
 // swap and render in the numeric font, digits stacked to show tabular figures.
 
 import { Tokens } from "../tokens.slint";
-import { Labels, Prefs } from "../state.slint";
+import { Labels, Prefs, Verify } from "../state.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
+import { ActionButton } from "../components/action_button.slint";
+
+// One legend row (Story 2.13, FR57): the REAL marker beside its neutral meaning, so the legend can
+// never drift from what the cells actually show. The marker is ink only (its own token colour).
+component LegendRow inherits HorizontalLayout {
+    in property <string> marker;
+    in property <color> marker-color: Tokens.text-high;
+    in property <string> meaning;
+    spacing: Tokens.space-12;
+    Text {
+        text: root.marker;
+        color: root.marker-color;
+        font-size: Tokens.font-body;
+        width: Tokens.space-48;
+        horizontal-alignment: center;
+    }
+    Text {
+        text: root.meaning;
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        horizontal-stretch: 1;
+    }
+}
+
+// One glossary entry (Story 2.13, FR62): a term + its neutral definition.
+component GlossaryRow inherits VerticalLayout {
+    in property <string> term;
+    in property <string> definition;
+    spacing: 2px;
+    Text {
+        text: root.term;
+        color: Tokens.text-high;
+        font-size: Tokens.font-caption;
+        font-weight: Tokens.weight-medium;
+    }
+    Text {
+        text: root.definition;
+        color: Tokens.text-low;
+        font-size: Tokens.font-caption;
+        wrap: word-wrap;
+    }
+}
 
 component SettingsPanel inherits Rectangle {
     in property <string> title;
@@ -135,6 +179,140 @@ export component SettingsScreen inherits Rectangle {
                         font-size: Tokens.font-body;
                         horizontal-alignment: right;
                         width: 50%;
+                    }
+                }
+            }
+
+            // ── Story 2.13 — Légende des marqueurs (FR57): the same markers the cells/verdict show. ──
+            SettingsPanel {
+                title: @tr("Légende des marqueurs");
+
+                LegendRow {
+                    marker: "·";
+                    marker-color: Tokens.text-low;
+                    meaning: @tr("Sans marqueur — valeur présente et à jour.");
+                }
+                LegendRow {
+                    marker: Tokens.gap-glyph;
+                    marker-color: Tokens.gap-ink;
+                    meaning: @tr("À remplir — donnée manquante dans une grille régulière.");
+                }
+                LegendRow {
+                    marker: @tr("n/a");
+                    marker-color: Tokens.text-low;
+                    meaning: @tr("Non disponible — absence acceptée, distincte d'un oubli.");
+                }
+                LegendRow {
+                    marker: Tokens.stale-dot;
+                    marker-color: Tokens.text-low;
+                    meaning: @tr("Périmée — valeur ancienne, à rafraîchir.");
+                }
+                LegendRow {
+                    marker: "?";
+                    meaning: @tr("À revoir — non encore vérifiée par vous.");
+                }
+                LegendRow {
+                    marker: "✓";
+                    meaning: @tr("Validée — vous avez vérifié cette valeur.");
+                }
+                LegendRow {
+                    marker: Tokens.warn-glyph;
+                    meaning: @tr("Point d'attention — une cohérence à examiner.");
+                }
+                Text {
+                    text: @tr("Provenance : manuel · fournisseur · calculé. Verdict : pleine · provisoire (hachurée) · suspendu.");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+
+            // ── Story 2.13 — Glossaire (FR62): neutral definitions of the key SSG terms. ──
+            SettingsPanel {
+                title: @tr("Glossaire");
+
+                GlossaryRow {
+                    term: @tr("Zone d'achat");
+                    definition: @tr("Le tiers bas de la fourchette de prix projetée.");
+                }
+                GlossaryRow {
+                    term: @tr("Ratio hausse / baisse");
+                    definition: @tr("Le potentiel de hausse rapporté au risque de baisse.");
+                }
+                GlossaryRow {
+                    term: @tr("BPA");
+                    definition: @tr("Bénéfice par action.");
+                }
+                GlossaryRow {
+                    term: @tr("Marge de sécurité");
+                    definition: @tr("L'écart entre le prix actuel et la valeur projetée basse.");
+                }
+                GlossaryRow {
+                    term: @tr("Historique suffisant");
+                    definition: @tr("Au moins cinq années exploitables ; en deçà, la confiance est réduite.");
+                }
+                GlossaryRow {
+                    term: @tr("P/E jugé");
+                    definition: @tr("Le multiple cours / bénéfice retenu pour la projection.");
+                }
+                GlossaryRow {
+                    term: @tr("Provenance");
+                    definition: @tr("L'origine d'une donnée : manuelle, fournisseur ou calculée.");
+                }
+                GlossaryRow {
+                    term: @tr("Fraîcheur");
+                    definition: @tr("Indique si une donnée est récente ou périmée.");
+                }
+            }
+
+            // ── Story 2.13 — Vérifier le moteur (FR9): replay the bundled golden studies on demand. ──
+            SettingsPanel {
+                title: @tr("Vérifier le moteur");
+
+                Text {
+                    text: @tr("Rejoue les études de référence intégrées à travers le moteur et signale tout écart.");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    ActionButton {
+                        label: @tr("Vérifier le moteur");
+                        clicked => { Verify.run(); }
+                    }
+                }
+                if Verify.ran: VerticalLayout {
+                    spacing: Tokens.space-4;
+
+                    Text {
+                        text: @tr("Méthode : {} · Empreinte : {}", Verify.method-version, Verify.method-fingerprint);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        font-family: Tokens.font-numeric;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: Verify.summary;
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-body;
+                        font-weight: Tokens.weight-medium;
+                    }
+                    for line in Verify.results: HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: line.passed ? "✓" : "△";
+                            color: line.passed ? Tokens.text-mid : Tokens.gap-ink;
+                            font-size: Tokens.font-caption;
+                            width: Tokens.space-16;
+                        }
+                        Text {
+                            text: line.passed ? line.id : (line.id + " — " + line.detail);
+                            color: line.passed ? Tokens.text-low : Tokens.text-high;
+                            font-size: Tokens.font-caption;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
                     }
                 }
             }

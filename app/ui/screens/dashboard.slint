@@ -260,9 +260,35 @@ export component DashboardScreen inherits Rectangle {
                 }
             }
 
-            // ── The list (or a calm empty line — full FR58 empty state is 2.13) ──
-            if Studies.rows.length == 0: Text {
-                text: @tr("Aucune étude pour le moment.");
+            // ── Story 2.13 — actionable empty state (FR58): a truly-empty journal gets a heading +
+            //    explanation + a path to the demonstration study; a filtered-to-empty list gets a calm
+            //    "no match" line (the controls above stay visible to switch the filter back). ──
+            if Studies.study-count == 0: VerticalLayout {
+                spacing: Tokens.space-8;
+                alignment: start;
+
+                Text {
+                    text: @tr("Aucune étude pour le moment.");
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-h3;
+                    font-weight: Tokens.weight-semibold;
+                }
+                Text {
+                    text: @tr("Créez votre première étude avec le champ ci-dessus, ou explorez l'étude de démonstration.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-body;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    ActionButton {
+                        label: @tr("Charger l'étude de démonstration");
+                        clicked => { Studies.load-demo(); }
+                    }
+                }
+            }
+            if Studies.study-count > 0 && Studies.rows.length == 0: Text {
+                text: @tr("Aucune étude ne correspond au filtre.");
                 color: Tokens.text-mid;
                 font-size: Tokens.font-body;
             }

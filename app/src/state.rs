@@ -77,6 +77,12 @@ pub const MSG_DELETE_CONFIRM: &str =
 pub const MSG_ARCHIVE_DONE: &str = "Étude {t} archivée.";
 pub const MSG_UNARCHIVE_DONE: &str = "Étude {t} réactivée.";
 pub const MSG_DELETE_DONE: &str = "Étude {t} supprimée.";
+/// Verify-engine summary copy (Story 2.13, FR9) — fact-stating, posture-gated. `{n}`/`{t}` are the
+/// passed/total counts.
+pub const MSG_VERIFY_PASSED: &str = "{n}/{t} études de référence réussies.";
+pub const MSG_VERIFY_DEVIATIONS: &str = "{n} écart(s) sur {t} études de référence.";
+/// The neutral notice when the demonstration study cannot be loaded (a packaging error, not a panic).
+pub const MSG_DEMO_UNAVAILABLE: &str = "L'étude de démonstration est indisponible.";
 
 /// The confirmation prompt for an "unlock all" of `count` cells (a `{n}`-substitution of
 /// [`MSG_UNLOCK_CONFIRM`] so the scanned const and the runtime string stay one source).
@@ -100,6 +106,19 @@ pub fn study_action_confirm_message(action: &str, ticker: &str) -> String {
         _ => MSG_DELETE_CONFIRM,
     };
     template.replace("{t}", ticker)
+}
+
+/// The verify-engine summary line (Story 2.13): all-passed → "{n}/{t} réussies", else "{n} écart(s)".
+pub fn verify_summary(passed: usize, total: usize) -> String {
+    if passed == total {
+        MSG_VERIFY_PASSED
+            .replace("{n}", &passed.to_string())
+            .replace("{t}", &total.to_string())
+    } else {
+        MSG_VERIFY_DEVIATIONS
+            .replace("{n}", &total.saturating_sub(passed).to_string())
+            .replace("{t}", &total.to_string())
+    }
 }
 
 /// The completion notice after a dashboard lifecycle action on `ticker` completes (Story 2.12).
@@ -137,6 +156,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_ARCHIVE_DONE,
     MSG_UNARCHIVE_DONE,
     MSG_DELETE_DONE,
+    MSG_VERIFY_PASSED,
+    MSG_VERIFY_DEVIATIONS,
+    MSG_DEMO_UNAVAILABLE,
 ];
 
 /// The scope of a bulk "unlock all" (Story 2.5): the whole study, a single year column, or a single

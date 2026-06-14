@@ -245,6 +245,7 @@ export component StudyScreen inherits Rectangle {
                     clicked => {
                         Studies.study-open = false;
                         Studies.judgment-dragging = false; // clear any stuck drag flag (review P5)
+                        Studies.demo-active = false; // leaving the read-only demo (Story 2.13)
                     }
                 }
                 // Story 2.9 — undo/redo of any judgment or grid edit (also Ctrl+Z / Ctrl+Y below).
@@ -262,6 +263,23 @@ export component StudyScreen inherits Rectangle {
                 ActionButton {
                     label: @tr("⇄ Comparer");
                     clicked => { Studies.open-compare(); }
+                }
+            }
+
+            // ── Story 2.13 — read-only demonstration banner (FR62): a neutral, fact-stating notice
+            //    that this is the sample study (edits no-op by construction — `current_study` is None). ──
+            if Studies.demo-active: Rectangle {
+                background: Tokens.surface-alt;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+                border-radius: Tokens.radius;
+                HorizontalLayout {
+                    padding: Tokens.space-12;
+                    Text {
+                        text: @tr("Étude de démonstration — lecture seule.");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
                 }
             }
 

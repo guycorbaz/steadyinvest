@@ -423,6 +423,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 .unwrap_or_default();
             push_view_state(&ui, &view_state);
             *current_study.borrow_mut() = Some(id_text.to_string());
+            studies.set_demo_active(false); // opening a real study leaves the demo (Story 2.13)
             studies.set_study_open(true);
         });
     }
@@ -879,6 +880,60 @@ fn main() -> Result<(), slint::PlatformError> {
             *pending_study_action.borrow_mut() = None;
             ui.global::<Studies>()
                 .set_study_action_confirm_visible(false);
+        });
+    }
+
+    // ── Story 2.13 — verify engine (FR9): replay the bundled golden fixtures through core and push the
+    //    method identity + per-fixture pass/deviation report into the `Verify` global (Réglages hub). ──
+    {
+        let ui_weak = ui.as_weak();
+        ui.global::<Verify>().on_run(move || {
+            let ui = ui_weak.unwrap();
+            let report = viewmodel::verify::run();
+            let verify = ui.global::<Verify>();
+            verify.set_method_version(report.method_version.as_str().into());
+            verify.set_method_fingerprint(report.method_fingerprint.as_str().into());
+            verify.set_summary(state::verify_summary(report.passed_count, report.total).into());
+            verify.set_all_passed(report.all_passed());
+            let lines: Vec<FixtureLine> = report
+                .results
+                .iter()
+                .map(|r| FixtureLine {
+                    id: r.id.as_str().into(),
+                    passed: r.passed,
+                    detail: r.deviations.join(" ; ").into(),
+                })
+                .collect();
+            verify.set_results(ModelRc::new(VecModel::from(lines)));
+            verify.set_ran(true);
+        });
+    }
+
+    // ── Story 2.13 — load the read-only demonstration study (FR62): build the bundled worked-example
+    //    in memory and render it via `push_form`. `current_study` stays None, so every edit rail
+    //    no-ops and nothing reaches the journal. `demo-active` drives the "lecture seule" banner. ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Studies>().on_load_demo(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let format = config.borrow().number_format;
+            match viewmodel::verify::demo_study() {
+                Ok(study) => {
+                    // The demo has no persisted view-state or undo history of its own: render it with
+                    // the default (entry regime, all sections open) and an empty undo stack, so it never
+                    // inherits the previously-open study's folds/regime or shows enabled undo/redo.
+                    journal_state.borrow_mut().reset_undo();
+                    push_form(&ui, &journal_state.borrow(), &study, format);
+                    push_view_state(&ui, &StudyViewState::default());
+                    studies.set_notice(SharedString::new());
+                    studies.set_demo_active(true);
+                    studies.set_study_open(true);
+                }
+                Err(_) => studies.set_notice(state::MSG_DEMO_UNAVAILABLE.into()),
+            }
         });
     }
 

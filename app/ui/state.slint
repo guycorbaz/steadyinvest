@@ -441,6 +441,32 @@ export global Studies {
     in-out property <bool> study-action-confirm-visible;
     in-out property <string> study-action-message;
     in-out property <bool> study-action-destructive;
+
+    // ── Story 2.13 — the read-only demonstration study (FR62). `load-demo` opens the bundled
+    //    worked-example in memory (Rust keeps `current_study` None, so every edit rail no-ops and the
+    //    journal is untouched); `demo-active` drives a neutral "lecture seule" banner. "‹ Retour"
+    //    clears it (Rust). The demo is never persisted and never appears as a dashboard row.
+    callback load-demo();
+    in-out property <bool> demo-active;
+}
+
+// ── Story 2.13 — verify engine (FR9). Rust replays the bundled golden fixtures through
+//    `core::golden::check_all` and pushes the report here; the Réglages hub renders it. ──
+export struct FixtureLine {
+    id: string,
+    passed: bool,
+    // The deviation lines joined for display, or "" when the fixture passed.
+    detail: string,
+}
+
+export global Verify {
+    in-out property <bool> ran;              // false until the user runs it once (hide results before)
+    in-out property <string> method-version;
+    in-out property <string> method-fingerprint;
+    in-out property <string> summary;        // "11/11 réussies" / "N écart(s)"
+    in-out property <bool> all-passed;
+    in-out property <[FixtureLine]> results;
+    callback run();
 }
 
 export global Prefs {
