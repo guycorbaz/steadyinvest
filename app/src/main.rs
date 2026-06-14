@@ -134,6 +134,9 @@ fn push_form(
     ))));
     // The current judgment-input values (restored on reopen; "" for a cleared input, never "0").
     studies.set_judgment(engine::judgment_fields(study, format));
+    // Story 2.10 — the study-level decision rationale (FR49), restored on reopen; "" when unset
+    // (the note re-seeds from this only while it does NOT have focus, the keep-input discipline).
+    studies.set_rationale(study.rationale.clone().unwrap_or_default().into());
 
     let years = viewmodel::form::materialized_year_numbers(study);
     match engine::build_frame(study) {
@@ -779,6 +782,40 @@ fn main() -> Result<(), slint::PlatformError> {
             let result = journal_state
                 .borrow_mut()
                 .set_judgment_field(id, field.as_str(), value);
+            match result {
+                Ok(()) => {
+                    studies.set_notice(SharedString::new());
+                    if let Some(study) = journal_state.borrow().get_study(id) {
+                        push_form(&ui, &journal_state.borrow(), &study, format);
+                    }
+                }
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+
+    // ── Story 2.10 — commit the study-level decision rationale (FR49). Mirrors `on_set_judgment`:
+    //    parse-free (it's free text) → `state::set_rationale` (trims → Some/None, atomic, undoable) →
+    //    re-read + `push_form` (refreshing the undo flags). Keep-input is the note's own concern. ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>().on_set_rationale(move |text| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            // Pass the raw text; `state::set_rationale` trims and maps empty → None (never Some("")).
+            let result = journal_state
+                .borrow_mut()
+                .set_rationale(id, Some(text.to_string()));
             match result {
                 Ok(()) => {
                     studies.set_notice(SharedString::new());

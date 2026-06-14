@@ -787,6 +787,65 @@ impl JournalState {
         })
     }
 
+    /// Set (or clear) the study-level **decision rationale** (Story 2.10, FR49): the user's free-text
+    /// "why I judged this way" note. Trims the incoming text and stores `Some(trimmed)`, or `None`
+    /// when it is empty/whitespace-only — the project's "absence ≠ empty value" rail (never the
+    /// empty-but-present `Some("")` surprise). Routed through [`Self::mutate_study`] so it is atomic
+    /// (one `put_study`, `logical_version` bumped), guarded (read-only / no-journal / save-failure →
+    /// a neutral notice, never a silent `.ok()`), and undoable (recorded only on a real change). The
+    /// rationale is the user's own words and is therefore **never** posture-scanned — only the
+    /// system-supplied label/placeholder are (FR13).
+    pub fn set_rationale(&mut self, study_id: Uuid, text: Option<String>) -> Result<(), String> {
+        let normalized = text
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
+        self.mutate_study(study_id, move |study| {
+            study.rationale = normalized;
+        })
+    }
+
+    /// The shared re-read → mutate-whole-study → persist path for a study-level field that is neither
+    /// a review-tagged [`Cell`] nor a [`Judgment`] input (Story 2.10: the decision rationale). Mirrors
+    /// [`Self::mutate_judgment`] but hands `apply` the whole [`Study`]. Records an undo snapshot only
+    /// on a real change (`before != study`, the Story-2.9 guard) so a no-op re-save pushes no phantom
+    /// step. Reuses the read-only / no-journal / save-failure guards.
+    fn mutate_study(
+        &mut self,
+        study_id: Uuid,
+        apply: impl FnOnce(&mut Study),
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        if self.journal.is_none() {
+            return Err(MSG_NO_JOURNAL.to_string());
+        }
+        let mut study = self
+            .get_study(study_id)
+            .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        let before = study.clone(); // pre-mutation snapshot for undo (Story 2.9)
+        apply(&mut study);
+        let result = {
+            let journal = self
+                .journal
+                .as_mut()
+                .expect("journal presence checked above");
+            journal.put_study(&study)
+        };
+        match result {
+            Ok(()) => {
+                // Only a REAL change is undoable — re-saving the same rationale must not push a
+                // phantom step or clear redo (review P4).
+                if before != study {
+                    self.history.record(before);
+                }
+                Ok(())
+            }
+            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
+            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+        }
+    }
+
     /// The shared re-read → mutate-judgment → persist path. `apply` returns `false` for an unknown
     /// field key (a neutral save-failure notice; never a panic). Mirrors [`Self::mutate_cell`] but
     /// for the bare `Judgment` snapshot (judgment inputs are not review-tagged `Cell`s).
@@ -1022,6 +1081,116 @@ mod tests {
         assert!(
             !state.can_undo() && !state.can_redo(),
             "opening a study starts from an empty history"
+        );
+    }
+
+    // ── Story 2.10 — decision rationale: set → reopen restores; clear → None; trim; undo restores ──
+
+    #[test]
+    fn rationale_round_trips_through_reopen_and_clears_to_none() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xC0FFEE),
+                &Timestamp("2026-06-14T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+        let mut state = open_state(&path);
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        // Set a rationale → it is restored on reopen (a fresh JournalState on the same journal, FR49).
+        state
+            .set_rationale(id, Some("Marge en hausse, dette faible".to_string()))
+            .unwrap();
+        assert_eq!(
+            open_state(&path).get_study(id).unwrap().rationale.as_deref(),
+            Some("Marge en hausse, dette faible"),
+            "a saved rationale survives reopen (FR49)"
+        );
+
+        // Whitespace-only clears to None (absence ≠ empty value) — never Some("").
+        state.set_rationale(id, Some("   ".to_string())).unwrap();
+        assert_eq!(
+            open_state(&path).get_study(id).unwrap().rationale,
+            None,
+            "an empty/whitespace rationale stores None, never Some(\"\")"
+        );
+
+        // A bare `None` clears it too.
+        state
+            .set_rationale(id, Some("re-rempli".to_string()))
+            .unwrap();
+        state.set_rationale(id, None).unwrap();
+        assert_eq!(open_state(&path).get_study(id).unwrap().rationale, None);
+    }
+
+    #[test]
+    fn rationale_is_trimmed_before_storage() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xA),
+                &Timestamp("2026-06-14T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+        let mut state = open_state(&path);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .set_rationale(id, Some("  garde le texte  ".to_string()))
+            .unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().rationale.as_deref(),
+            Some("garde le texte"),
+            "surrounding whitespace is trimmed before storage"
+        );
+    }
+
+    #[test]
+    fn undo_restores_the_prior_rationale() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x6A, "2026-06-14T09:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        state
+            .set_rationale(id, Some("première raison".to_string()))
+            .unwrap();
+        state
+            .set_rationale(id, Some("raison révisée".to_string()))
+            .unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().rationale.as_deref(),
+            Some("raison révisée")
+        );
+
+        // Undo restores the prior rationale (FR32 — a rationale edit is "any edit", never destroyed).
+        assert_eq!(state.undo(id), Ok(true));
+        assert_eq!(
+            state.get_study(id).unwrap().rationale.as_deref(),
+            Some("première raison"),
+            "undo restores the prior rationale, never destroys it"
+        );
+    }
+
+    #[test]
+    fn re_saving_the_same_rationale_records_no_phantom_undo_step() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x6B, "2026-06-14T09:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state.set_rationale(id, Some("inchangé".to_string())).unwrap();
+        state.reset_undo();
+        // Re-saving the identical rationale (after trimming) is a no-op → no undo step recorded (P4).
+        state
+            .set_rationale(id, Some("  inchangé  ".to_string()))
+            .unwrap();
+        assert!(
+            !state.can_undo(),
+            "re-saving the same rationale records no phantom undo step (review P4)"
         );
     }
 

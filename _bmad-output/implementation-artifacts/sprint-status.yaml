@@ -218,6 +218,30 @@ last_updated: 2026-06-14
 #             alternate silent). Dismissed incl. the Blind-Hunter FALSE POSITIVE "set_review not recorded"
 #             (it routes through mutate_cell, test green). Work NOT committed (manual cycle this session).
 #             Next: commit/push 2-9, then story 2.10 (decision rationale capture).
+# 2026-06-14: story 2-10 created (decision rationale capture) → ready-for-dev. COMPACT app-only story.
+#             contract::Study.rationale: Option<String> ALREADY EXISTS (#[serde(default)], FR49) → NO schema
+#             bump, NO migration, NO contract change. Single STUDY-LEVEL plain-text note (not per-cell, not
+#             per-judgment, not per-transaction, no rich text, no AI). Persist via a set_rationale mutator on
+#             the mutate_judgment-style rail (empty→None; record undo snapshot on before!=study so it's
+#             undoable per 2.9 and no-op makes no phantom step); push_form pushes Studies.rationale (restored
+#             on reopen); set-rationale callback. UI: a multi-line ink-only note near §5/verdict, neutral
+#             @tr label/placeholder (posture-scanned); the user's typed CONTENT is user data, NOT scanned.
+#             Only capture+show-on-reopen (FR50 projection-vs-actual = Epic 5, NOT here). NO new dep; pinned
+#             surfaces unchanged; posture floors bump for the new label/placeholder. 4 open Qs (char limit,
+#             placement/always-visible, multi-line, commit timing) — defaults chosen.
+# 2026-06-14: story 2-10 dev complete + review → done. set_rationale on a NEW mutate_study rail (read-only/
+#             no-journal/save-failure guards → re-read → set field → put_study; undo snapshot only on
+#             before!=study → no phantom step); empty/whitespace→None (never Some("")). push_form pushes
+#             Studies.rationale (restored on reopen); on_set_rationale callback mirrors on_set_judgment.
+#             New ink-only multi-line RationaleNote (faithful copy of JudgmentField rail: re-seed only
+#             !has-focus, commit on focus-out when text!=value), neutral @tr label/placeholder; user content
+#             NOT scanned (FR13). NO new dep; contract/core/persistence/Cargo.lock/deny.toml re-diffed empty
+#             (Study.rationale pre-existed). posture floors bumped (@tr 160→162, .slint 20→21 — but dev had
+#             over-bumped @tr to 165; corrected to actual 162). app tests 117→121 (+4: reopen round-trip+
+#             clear→None, trim, undo restores prior, no-phantom-step). 3-layer adversarial review: Acceptance
+#             Auditor PASS AC1–6; 0 blocking patch, 5 dismiss (consistent with established rails), 2 defer →
+#             GitHub issues #32 (uncommitted-draft-lost-if-repush-during-focus, rail-wide) + #33 (no scroll
+#             on note >3 lines). In-GUI click-through = documented partial (human/AT-SPI). Epic 2: 10/14 done.
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -250,7 +274,7 @@ development_status:
   2-7-low-confidence-plausibility-surfacing: done
   2-8-interactive-growth-chart-draggable-judgment-line: done
   2-9-undo-redo-scenario-compare: done
-  2-10-decision-rationale-capture: backlog
+  2-10-decision-rationale-capture: done
   2-11-update-existing-study-extend-projection: backlog
   2-12-dashboard-search-sort-filter-archive-delete: backlog
   2-13-legend-empty-error-states-help-demo-verify-engine: backlog

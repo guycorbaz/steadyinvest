@@ -23,6 +23,7 @@ import { ZoneBar } from "../components/zone_bar.slint";
 import { VerdictBar } from "../components/verdict_badge.slint";
 import { GrowthChart } from "../components/growth_chart.slint";
 import { ScenarioCompare } from "../components/scenario_compare.slint";
+import { RationaleNote } from "../components/rationale_note.slint";
 
 // The faithful em-dash slot, in one place (mirrors `viewmodel::form::EMPTY_SLOT`). A gap, never `0`.
 global FormConst {
@@ -735,6 +736,16 @@ export component StudyScreen inherits Rectangle {
                 CalcRow { label: @tr("Rendement moyen 5 ans"); formula: ""; result: Studies.return-computed.avg-yield; }
                 CalcRow { label: @tr("Appréciation annualisée"); formula: @tr("appr.% ÷ 5"); result: FormConst.empty-slot; }
                 CalcRow { label: @tr("Rendement annuel total"); formula: @tr("appréciation + rendement moyen"); result: Studies.return-computed.total-return; }
+            }
+
+            // ── Story 2.10 — decision rationale (FR49): a study-level "why" note, after §5 / near the
+            //    judgment-completion area (NOT inside the §1–§5 grid). Plain text, committed on
+            //    focus-out; restored on reopen. Spends NO colour. The user's words are NOT
+            //    posture-scanned — only the system label/placeholder are (FR13). ──
+            RationaleNote {
+                label: @tr("Justification de la décision");
+                placeholder: @tr("Pourquoi cette conclusion");
+                value: Studies.rationale;
             }
         }
         }

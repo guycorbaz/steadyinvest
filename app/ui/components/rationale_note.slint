@@ -1,0 +1,76 @@
+// A study-level multi-line decision-rationale note (Story 2.10, FR49): a free-text "why I judged
+// this way" entry, committed to `Studies.set-rationale(text)` on focus-out (the 2.4/2.6 commit-on-
+// focus-out discipline — Enter inserts a newline here, it does NOT commit). Plain text only — NO
+// rich text, NO markdown. Spends NO colour (ink only); constant geometry, reduced-motion-safe (no
+// animation). The user's own words are NEVER posture-scanned — only the system label/placeholder
+// are (FR13).
+//
+// Re-seeds the input from the model (`value`) on every re-push, but only when not focused, so a
+// persisted edit / reopen restores the value without clobbering an in-progress edit (the keep-input
+// rail, like `JudgmentField`).
+
+import { Tokens } from "../tokens.slint";
+import { Studies } from "../state.slint";
+
+export component RationaleNote inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <string> placeholder;
+
+    spacing: Tokens.space-4;
+
+    // Re-seed from the model after a persisted re-push (Studies.rationale changed) — but only when
+    // not focused, so an in-progress edit is never clobbered (2.4/2.6 keep-input discipline).
+    changed value => {
+        if (!input.has-focus) {
+            input.text = root.value;
+        }
+    }
+
+    Text {
+        text: root.label;
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+    }
+    box := Rectangle {
+        height: Tokens.row-height * 3;
+        border-radius: Tokens.radius;
+        background: Tokens.surface-alt;
+        border-width: input.has-focus ? Tokens.focus-border : Tokens.border;
+        border-color: input.has-focus ? Tokens.focus : Tokens.separator;
+        forward-focus: input;
+        clip: true;
+
+        placeholder := Text {
+            text: root.placeholder;
+            color: Tokens.text-low;
+            font-size: Tokens.font-body;
+            x: Tokens.space-8;
+            y: Tokens.space-8;
+            visible: input.text == "";
+        }
+        input := TextInput {
+            color: Tokens.text-high;
+            selection-background-color: Tokens.focus;
+            font-family: Tokens.font-ui;
+            font-size: Tokens.font-body;
+            single-line: false;
+            wrap: word-wrap;
+            width: parent.width - Tokens.space-8 * 2;
+            height: parent.height - Tokens.space-8 * 2;
+            x: Tokens.space-8;
+            y: Tokens.space-8;
+
+            init => {
+                self.text = root.value;
+            }
+            // Commit on focus-out only (Enter is a newline in a multi-line note), and only when the
+            // text actually changed → one undo step per committed edit, no no-op persistence.
+            changed has-focus => {
+                if (!self.has-focus && self.text != root.value) {
+                    Studies.set-rationale(self.text);
+                }
+            }
+        }
+    }
+}

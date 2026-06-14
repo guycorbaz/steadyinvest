@@ -402,6 +402,13 @@ export global Studies {
     callback open-compare();
     callback set-alternate(string);
     callback close-compare();
+
+    // ── Story 2.10 — decision rationale (FR49): a study-level, free-text "why I judged this way"
+    //    note. Restored on reopen (pushed by `main.rs` in `push_form`); committed on focus-out via
+    //    `set-rationale(text)` (Rust trims → `Some`/`None`, persists atomically, undoable). Plain
+    //    text only. The user's own words are NOT posture-scanned — only the label/placeholder are.
+    in-out property <string> rationale;
+    callback set-rationale(string);
 }
 
 export global Prefs {
