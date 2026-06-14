@@ -45,7 +45,7 @@ use crate::viewmodel::form::EMPTY_SLOT;
 use crate::viewmodel::format::{format_scaled, NumberFormat};
 use crate::{
     GrowthComputed, JudgmentFields, MgmtComputed, PeComputed, ReturnComputed, RiskComputed,
-    TraceState, VerdictState, ZoneBarState,
+    ScenarioCompareState, ScenarioOutcome, TraceState, VerdictState, ZoneBarState,
 };
 
 // ── contract → core mapping (pure, unit-tested, no I/O) ──
@@ -594,6 +594,65 @@ pub fn verdict_badge(
         present_zone: zone_key(r.present_price_zone).into(),
         provenance_date: provenance_date.into(),
         open_gates: slint::ModelRc::new(slint::VecModel::from(open_gates)),
+    }
+}
+
+/// One scenario's outcome (Story 2.9) — the §4 forecast boundaries + present-zone, U/D ratio and
+/// projected return, plus the verdict confidence — all already formatted. A pure read off ONE
+/// snapshot (Cardinal Rule); `None` zones render the calm em-dash, never `0`.
+pub fn scenario_outcome(snapshot: &StudySnapshot, format: NumberFormat) -> ScenarioOutcome {
+    let outputs = snapshot.outputs();
+    let r = &outputs.risk_reward;
+    let (forecast_high, forecast_low, buy_top, neutral_top) = match &r.zones {
+        Some(z) => (
+            format_scaled(z.forecast_high, DisplayField::Price, format),
+            format_scaled(z.forecast_low, DisplayField::Price, format),
+            format_scaled(z.buy_top, DisplayField::Price, format),
+            format_scaled(z.neutral_top, DisplayField::Price, format),
+        ),
+        None => (
+            EMPTY_SLOT.to_string(),
+            EMPTY_SLOT.to_string(),
+            EMPTY_SLOT.to_string(),
+            EMPTY_SLOT.to_string(),
+        ),
+    };
+    ScenarioOutcome {
+        confidence: verdict_state(snapshot.verdict()).into(),
+        forecast_high: forecast_high.into(),
+        forecast_low: forecast_low.into(),
+        buy_top: buy_top.into(),
+        neutral_top: neutral_top.into(),
+        present_zone: zone_key(r.present_price_zone).into(),
+        ud_ratio: fmt_ud(&r.upside_downside, format).into(),
+        projected_return: fmt_pct(
+            outputs.returns.projected_total_annualized_return_pct,
+            format,
+        )
+        .into(),
+    }
+}
+
+/// The scenario-compare overlay state (Story 2.9, Phase-1): the saved `current` placement and a
+/// user-set `alternate`, each recomputed via its OWN `build_frame` (TWO frames; all zone/U-D/return/
+/// verdict math in `core`). `alt_input` echoes the typed alternate est-high-EPS. The alternate is
+/// never persisted (the caller passes an in-memory clone); a normalize failure → a calm empty outcome.
+pub fn scenario_compare(
+    current: &Study,
+    alternate: &Study,
+    alt_input: &str,
+    format: NumberFormat,
+) -> ScenarioCompareState {
+    let outcome = |study: &Study| {
+        build_frame(study)
+            .map(|frame| scenario_outcome(&frame.snapshot, format))
+            .unwrap_or_default()
+    };
+    ScenarioCompareState {
+        visible: true,
+        alt_input: alt_input.into(),
+        current: outcome(current),
+        alternate: outcome(alternate),
     }
 }
 
@@ -1371,6 +1430,52 @@ mod tests {
         assert!(
             !frame.snapshot.verdict().low_confidence(),
             "five usable years is not low-confidence"
+        );
+    }
+
+    /// Story 2.9: scenario compare builds two INDEPENDENT outcomes from one study — a different
+    /// alternate est-high-EPS yields a different forecast high, without touching the current frame.
+    #[test]
+    fn scenario_compare_computes_two_independent_outcomes() {
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let current = study_with(years, full_judgment()); // estimated_high_eps = 8
+        let mut alternate = current.clone();
+        alternate.judgment.estimated_high_eps = Some(money("12")); // a higher forecast
+        let scs = scenario_compare(&current, &alternate, "12", NumberFormat::Comma);
+
+        assert!(scs.visible);
+        assert_eq!(scs.alt_input.as_str(), "12");
+        assert_ne!(
+            scs.current.forecast_high.as_str(),
+            EMPTY_SLOT,
+            "the current scenario has a forecast high"
+        );
+        assert_ne!(
+            scs.current.forecast_high.as_str(),
+            scs.alternate.forecast_high.as_str(),
+            "a different est-high-EPS yields a different forecast high (two independent frames)"
+        );
+        assert_eq!(
+            scs.current.confidence.as_str(),
+            "full",
+            "an all-validated study is full confidence in both columns"
+        );
+    }
+
+    /// Story 2.9 / AC5: a scenario whose load-bearing input is missing renders non-full (withheld) —
+    /// the compare overlay never paints a full-confidence outcome beside a missing input.
+    #[test]
+    fn scenario_compare_gates_confidence_per_scenario() {
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let current = study_with(years, full_judgment());
+        let mut alternate = current.clone();
+        alternate.judgment.current_price = None; // a missing load-bearing judgment input
+        let scs = scenario_compare(&current, &alternate, "", NumberFormat::Comma);
+        assert_eq!(scs.current.confidence.as_str(), "full");
+        assert_eq!(
+            scs.alternate.confidence.as_str(),
+            "withheld",
+            "the alternate with a missing load-bearing input is withheld, not full"
         );
     }
 }

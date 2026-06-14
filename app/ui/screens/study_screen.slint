@@ -22,6 +22,7 @@ import { JudgmentField } from "../components/judgment_field.slint";
 import { ZoneBar } from "../components/zone_bar.slint";
 import { VerdictBar } from "../components/verdict_badge.slint";
 import { GrowthChart } from "../components/growth_chart.slint";
+import { ScenarioCompare } from "../components/scenario_compare.slint";
 
 // The faithful em-dash slot, in one place (mirrors `viewmodel::form::EMPTY_SLOT`). A gap, never `0`.
 global FormConst {
@@ -191,6 +192,28 @@ export component StudyScreen inherits Rectangle {
 
     background: Tokens.bg;
 
+    // Story 2.9 — study-level key handler for undo/redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z). The cell
+    // editor's Ctrl-chords (Story 2.4/2.5) are intercepted first while a cell is focused and reject
+    // any other key, so Ctrl+Z bubbles up to here when no focused element consumes it.
+    FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(e) => {
+            if ((e.modifiers.control || e.modifiers.meta) && e.text == "z") {
+                if (e.modifiers.shift) {
+                    Studies.redo();
+                } else {
+                    Studies.undo();
+                }
+                return EventResult.accept;
+            }
+            if ((e.modifiers.control || e.modifiers.meta) && e.text == "y") {
+                Studies.redo();
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+
     VerticalLayout {
         // ── Sticky verdict bar (Story 2.6, AC 5): pinned at the top of the study scroll area, always
         //    visible while scrolling/folding. Derives from the SAME snapshot as the §4 badge/zone bar. ──
@@ -212,15 +235,32 @@ export component StudyScreen inherits Rectangle {
             padding: Tokens.space-24;
             spacing: Tokens.space-16;
 
-            // ── Back to the studies list (closes the open form; pure-Slint view state) ──
+            // ── Back to the studies list (closes the open form; pure-Slint view state) + undo/redo ──
             HorizontalLayout {
                 alignment: start;
+                spacing: Tokens.space-8;
                 ActionButton {
                     label: @tr("‹ Retour aux études");
                     clicked => {
                         Studies.study-open = false;
                         Studies.judgment-dragging = false; // clear any stuck drag flag (review P5)
                     }
+                }
+                // Story 2.9 — undo/redo of any judgment or grid edit (also Ctrl+Z / Ctrl+Y below).
+                ActionButton {
+                    label: @tr("↶ Annuler");
+                    enabled: Studies.can-undo;
+                    clicked => { Studies.undo(); }
+                }
+                ActionButton {
+                    label: @tr("↷ Rétablir");
+                    enabled: Studies.can-redo;
+                    clicked => { Studies.redo(); }
+                }
+                // Story 2.9 — open the scenario-compare overlay (current vs one alternate placement).
+                ActionButton {
+                    label: @tr("⇄ Comparer");
+                    clicked => { Studies.open-compare(); }
                 }
             }
 
@@ -699,6 +739,7 @@ export component StudyScreen inherits Rectangle {
         }
         }
     }
+    }
 
     // ── Traceability surface (Story 2.6, AC 7): any result → its inputs, their provenance, and the
     //    rule that produced it. Spends NO colour; the open gates are the honest "why not full". A
@@ -774,4 +815,7 @@ export component StudyScreen inherits Rectangle {
             }
         }
     }
+
+    // ── Story 2.9 — the scenario-compare overlay (self-gating on `scenario-compare.visible`). ──
+    ScenarioCompare { }
 }

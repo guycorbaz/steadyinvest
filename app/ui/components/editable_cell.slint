@@ -162,6 +162,12 @@ export component EditableCell inherits Rectangle {
                 root.clear-validation();
                 return EventResult.accept;
             }
+            // Story 2.9 (review P1): undo/redo (Ctrl+Z / Ctrl+Y) is NOT a cell edit — let it bubble to
+            // the study-screen handler even from a locked (✓) cell, so the soft-lock guard below never
+            // swallows it with a spurious notice.
+            if ((e.modifiers.control || e.modifiers.meta) && (e.text == "z" || e.text == "y")) {
+                return EventResult.reject;
+            }
             // Soft-lock: a validated cell refuses every value edit (typing / Backspace / Delete /
             // Ctrl+V / Ctrl+Space) with a neutral notice — never silently blanked. Arrow navigation
             // AND Tab/Backtab focus traversal still work (they fall through to the move handlers /

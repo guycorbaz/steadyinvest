@@ -1,0 +1,143 @@
+// The scenario-compare overlay (Story 2.9, Phase-1: one alternate). Shows the saved (current)
+// judgment placement and a user-set alternate side by side — each placement's §4 forecast boundaries,
+// present-zone, U/D ratio, projected return and verdict confidence. NON-committing: closing discards
+// the alternate (the saved judgment is never overwritten — FR32). Colour budget (UX-DR2/AC5): the two
+// placements differ by LABEL/position only — NO fourth saturated hue (zone hues stay reserved for §4);
+// everything here is ink. Neutral microcopy only (FR13). A pinned, keyboard-dismissable overlay on
+// constant geometry (the 2.5/2.6 overlay shape).
+
+import { Tokens } from "../tokens.slint";
+import { Studies, Labels, ScenarioOutcome, ScenarioCompareState } from "../state.slint";
+import { TextField } from "text_field.slint";
+import { ActionButton } from "action_button.slint";
+
+component OutcomeRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: Tokens.space-8;
+    Text {
+        text: root.label;
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+        horizontal-stretch: 1;
+    }
+    Text {
+        text: root.value;
+        color: Tokens.text-high;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-caption;
+        horizontal-alignment: right;
+    }
+}
+
+component OutcomeColumn inherits VerticalLayout {
+    in property <string> title;
+    in property <ScenarioOutcome> outcome;
+    spacing: Tokens.space-4;
+    min-width: Tokens.space-48 * 4;
+
+    Text {
+        text: root.title;
+        color: Tokens.text-high;
+        font-size: Tokens.font-h3;
+        font-weight: Tokens.weight-semibold;
+    }
+    OutcomeRow { label: @tr("Prévision haute"); value: root.outcome.forecast-high; }
+    OutcomeRow { label: @tr("Borne supérieure"); value: root.outcome.neutral-top; }
+    OutcomeRow { label: @tr("Borne inférieure"); value: root.outcome.buy-top; }
+    OutcomeRow { label: @tr("Prévision basse"); value: root.outcome.forecast-low; }
+    OutcomeRow {
+        label: @tr("Zone du prix");
+        value: root.outcome.present-zone == "buy" ? Labels.zone-buy
+            : root.outcome.present-zone == "neutral" ? Labels.zone-hold
+            : root.outcome.present-zone == "sell" ? Labels.zone-sell
+            : "—";
+    }
+    OutcomeRow { label: @tr("Ratio haut/bas"); value: root.outcome.ud-ratio; }
+    OutcomeRow { label: @tr("Rendement annuel total"); value: root.outcome.projected-return; }
+    OutcomeRow {
+        label: @tr("Confiance");
+        value: root.outcome.confidence == "full" ? @tr("complète")
+            : root.outcome.confidence == "provisional" ? @tr("provisoire")
+            : root.outcome.confidence == "withheld" ? @tr("indisponible")
+            : "—";
+    }
+}
+
+export component ScenarioCompare inherits Rectangle {
+    property <ScenarioCompareState> sc: Studies.scenario-compare;
+
+    // The overlay only exists while open (constant geometry; nothing rendered otherwise).
+    if root.sc.visible: Rectangle {
+        background: Tokens.bg.with-alpha(0.6);
+        // Click the scrim to dismiss (keyboard: the Fermer button is focusable).
+        TouchArea {
+            clicked => {
+                Studies.close-compare();
+            }
+        }
+        Rectangle {
+            width: Math.min(parent.width - Tokens.space-48, panel.preferred-width + Tokens.space-32);
+            height: Math.min(parent.height - Tokens.space-48, panel.preferred-height + Tokens.space-32);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Tokens.surface;
+            border-width: Tokens.border;
+            border-color: Tokens.separator;
+            border-radius: Tokens.radius;
+
+            panel := VerticalLayout {
+                padding: Tokens.space-16;
+                spacing: Tokens.space-12;
+
+                Text {
+                    text: @tr("Comparer un placement alternatif");
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-h2;
+                    font-weight: Tokens.weight-semibold;
+                }
+                Text {
+                    text: @tr("Sans engagement — le placement enregistré n'est jamais modifié.");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                }
+
+                HorizontalLayout {
+                    spacing: Tokens.space-24;
+                    OutcomeColumn {
+                        title: @tr("Placement actuel");
+                        outcome: root.sc.current;
+                    }
+                    VerticalLayout {
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: @tr("BPA estimé haut (alternatif)");
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                        }
+                        TextField {
+                            placeholder: root.sc.alt-input;
+                            accepted => {
+                                Studies.set-alternate(self.text);
+                            }
+                        }
+                        OutcomeColumn {
+                            title: @tr("Placement alternatif");
+                            outcome: root.sc.alternate;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    ActionButton {
+                        label: @tr("Fermer");
+                        clicked => {
+                            Studies.close-compare();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

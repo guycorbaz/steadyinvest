@@ -15,6 +15,7 @@ import { Tokens } from "tokens.slint";
 import { Labels, Prefs, Studies, StudyRow, FormHeader, PeRow, GridCellState, MgmtRow } from "state.slint";
 import { JudgmentFields, GrowthComputed, MgmtComputed, PeComputed, RiskComputed, ReturnComputed, ZoneBarState, VerdictState, TraceState } from "state.slint";
 import { AxisTick, GrowthChartState } from "state.slint";
+import { ScenarioOutcome, ScenarioCompareState } from "state.slint";
 import { NavItem } from "components/nav_item.slint";
 import { DashboardScreen } from "screens/dashboard.slint";
 import { WatchlistScreen } from "screens/watchlist.slint";
@@ -26,6 +27,7 @@ import { SettingsScreen } from "screens/settings.slint";
 export { Tokens, Labels, Prefs, Studies, StudyRow, FormHeader, PeRow, GridCellState, MgmtRow }
 export { JudgmentFields, GrowthComputed, MgmtComputed, PeComputed, RiskComputed, ReturnComputed, ZoneBarState, VerdictState, TraceState }
 export { AxisTick, GrowthChartState }
+export { ScenarioOutcome, ScenarioCompareState }
 
 export component MainWindow inherits Window {
     title: @tr("steadyinvest");

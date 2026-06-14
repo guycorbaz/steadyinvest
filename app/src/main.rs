@@ -116,9 +116,18 @@ fn push_view_state(ui: &MainWindow, view_state: &StudyViewState) {
 /// `StudySnapshot::new`), so the §2–§5 results, the §4 zone bar and the verdict are always one
 /// coherent frame. A `NormalizeError` (unreachable from a well-formed manual study, but handled, never
 /// `unwrap`) surfaces as a neutral notice and leaves every computed slot the faithful em-dash.
-fn push_form(ui: &MainWindow, study: &steadyinvest_contract::Study, format: NumberFormat) {
+fn push_form(
+    ui: &MainWindow,
+    state: &JournalState,
+    study: &steadyinvest_contract::Study,
+    format: NumberFormat,
+) {
     use viewmodel::engine;
     let studies = ui.global::<Studies>();
+    // Story 2.9 — mirror undo/redo availability so the header controls enable/disable in step with
+    // every persisted edit (an edit grows undo + clears redo; undo/redo move between the stacks).
+    studies.set_can_undo(state.can_undo());
+    studies.set_can_redo(state.can_redo());
     studies.set_form_header(viewmodel::form::header(study));
     studies.set_year_headers(ModelRc::new(VecModel::from(viewmodel::form::year_headers(
         study,
@@ -295,6 +304,11 @@ fn main() -> Result<(), slint::PlatformError> {
     // movement is a click, not a drag — it must NOT rewrite the forecast (review P2).
     let drag_moved: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
 
+    // Story 2.9 — the saved study captured while the scenario-compare overlay is open, so the typed
+    // alternate is recomputed against it WITHOUT persisting. `None` = the overlay is closed.
+    let compare_study: Rc<RefCell<Option<steadyinvest_contract::Study>>> =
+        Rc::new(RefCell::new(None));
+
     let ui = MainWindow::new()?;
 
     // Initial state, pushed before the window shows: no flash, no restart needed later.
@@ -358,6 +372,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let journal_state = Rc::clone(&journal_state);
         let config = Rc::clone(&config);
         let current_study = Rc::clone(&current_study);
+        let compare_study = Rc::clone(&compare_study);
         ui.global::<Studies>().on_open_study(move |id_text| {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
@@ -367,8 +382,16 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(study) = journal_state.borrow().get_study(id) else {
                 return;
             };
+            // Story 2.9 — a freshly-opened study starts with an empty undo/redo history (the edit
+            // history is per open study, in-memory, never carried across reopen). Reset BEFORE
+            // push_form so the mirrored can-undo/can-redo flags read empty.
+            journal_state.borrow_mut().reset_undo();
+            // Also discard any scenario-compare state from a previous study (review P3) — its overlay
+            // and cached baseline must never survive into a different study.
+            *compare_study.borrow_mut() = None;
+            studies.set_scenario_compare(ScenarioCompareState::default());
             let format = config.borrow().number_format;
-            push_form(&ui, &study, format);
+            push_form(&ui, &journal_state.borrow(), &study, format);
             // A freshly-opened form has no active entry cell (the cursor appears on first focus).
             studies.set_active_year(-1);
             studies.set_active_field(SharedString::new());
@@ -489,7 +512,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     Ok(()) => {
                         studies.set_notice(SharedString::new());
                         if let Some(study) = journal_state.borrow().get_study(id) {
-                            push_form(&ui, &study, format);
+                            push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                         true
                     }
@@ -546,7 +569,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             studies.set_notice(SharedString::new());
                         }
                         if let Some(study) = journal_state.borrow().get_study(id) {
-                            push_form(&ui, &study, format);
+                            push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
                     Err(message) => studies.set_notice(message.into()),
@@ -582,7 +605,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     Ok(()) => {
                         studies.set_notice(SharedString::new());
                         if let Some(study) = journal_state.borrow().get_study(id) {
-                            push_form(&ui, &study, format);
+                            push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
                     Err(message) => studies.set_notice(message.into()),
@@ -641,7 +664,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     Ok(()) => {
                         studies.set_notice(SharedString::new());
                         if let Some(study) = journal_state.borrow().get_study(id) {
-                            push_form(&ui, &study, format);
+                            push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
                     Err(message) => studies.set_notice(message.into()),
@@ -714,7 +737,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 Ok(count) => {
                     studies.set_notice(state::unlock_done_message(count).into());
                     if let Some(study) = journal_state.borrow().get_study(id) {
-                        push_form(&ui, &study, format);
+                        push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
                 Err(message) => studies.set_notice(message.into()),
@@ -760,7 +783,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 Ok(()) => {
                     studies.set_notice(SharedString::new());
                     if let Some(study) = journal_state.borrow().get_study(id) {
-                        push_form(&ui, &study, format);
+                        push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
                 Err(message) => studies.set_notice(message.into()),
@@ -852,7 +875,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // Re-read + re-push from disk: on success this confirms the saved value; on failure it
             // reverts the live preview to what is actually persisted.
             if let Some(study) = journal_state.borrow().get_study(id) {
-                push_form(&ui, &study, format);
+                push_form(&ui, &journal_state.borrow(), &study, format);
             }
         });
     }
@@ -878,8 +901,142 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let format = config.borrow().number_format;
             if let Some(study) = journal_state.borrow().get_study(id) {
-                push_form(&ui, &study, format);
+                push_form(&ui, &journal_state.borrow(), &study, format);
             }
+        });
+    }
+
+    // ── Story 2.9 — undo / redo (snapshot stack). Restore the prior/next whole study and re-render
+    //    the coherent frame; a no-op when the stack is empty. A refused write surfaces a neutral
+    //    notice (the history is preserved, never silently lost). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>().on_undo(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            // Undo/redo is disabled while the scenario-compare overlay is open (review P2) — otherwise
+            // it would mutate the study behind the overlay and leave the comparison's baseline stale.
+            if studies.get_scenario_compare().visible {
+                return;
+            }
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            match journal_state.borrow_mut().undo(id) {
+                Ok(true) => {
+                    studies.set_notice(SharedString::new());
+                    if let Some(study) = journal_state.borrow().get_study(id) {
+                        push_form(&ui, &journal_state.borrow(), &study, format);
+                    }
+                }
+                Ok(false) => {} // nothing to undo
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>().on_redo(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            if studies.get_scenario_compare().visible {
+                return; // disabled while the scenario-compare overlay is open (review P2)
+            }
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            match journal_state.borrow_mut().redo(id) {
+                Ok(true) => {
+                    studies.set_notice(SharedString::new());
+                    if let Some(study) = journal_state.borrow().get_study(id) {
+                        push_form(&ui, &journal_state.borrow(), &study, format);
+                    }
+                }
+                Ok(false) => {}
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+
+    // ── Story 2.9 — scenario compare (Phase-1, one alternate). Open caches the saved study and seeds
+    //    the alternate = current; set-alternate recomputes the alternate's outcome from a NON-persisted
+    //    clone; close discards it (the saved judgment is never overwritten — FR32). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        let compare_study = Rc::clone(&compare_study);
+        ui.global::<Studies>().on_open_compare(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let Some(study) = journal_state.borrow().get_study(id) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            // Seed the alternate input from the current est-high-EPS (the alternate starts == current).
+            let seed = viewmodel::engine::judgment_fields(&study, format).est_high_eps;
+            studies.set_scenario_compare(viewmodel::engine::scenario_compare(
+                &study,
+                &study,
+                seed.as_str(),
+                format,
+            ));
+            *compare_study.borrow_mut() = Some(study);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let compare_study = Rc::clone(&compare_study);
+        ui.global::<Studies>().on_set_alternate(move |text| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Some(current) = compare_study.borrow().clone() else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            let value = viewmodel::format::parse_amount(&text, format);
+            let mut alternate = current.clone();
+            // The alternate placement is the user's typed est-high-EPS (the §4-forecast driver).
+            state::apply_judgment_field(&mut alternate.judgment, "est_high_eps", value);
+            studies.set_scenario_compare(viewmodel::engine::scenario_compare(
+                &current,
+                &alternate,
+                text.as_str(),
+                format,
+            ));
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let compare_study = Rc::clone(&compare_study);
+        ui.global::<Studies>().on_close_compare(move || {
+            let ui = ui_weak.unwrap();
+            *compare_study.borrow_mut() = None;
+            // Discard the alternate; the saved judgment was never touched.
+            ui.global::<Studies>()
+                .set_scenario_compare(ScenarioCompareState::default());
         });
     }
 
@@ -911,7 +1068,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     Ok(()) => {
                         studies.set_notice(SharedString::new());
                         if let Some(study) = journal_state.borrow().get_study(id) {
-                            push_form(&ui, &study, format);
+                            push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
                     Err(message) => studies.set_notice(message.into()),

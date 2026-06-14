@@ -34,6 +34,8 @@ _Throwaway spike (GO). These apply to the **Epic 2 production grid** (Stories 2.
 
 ## Deferred from: code review of story-2.8 (2026-06-14)
 
+> Filed as GitHub issues **#25–#31** (the canonical tracking source): #25 axis 1→200 vs sub-$1/>$200 EPS · #26 orphan grip (all-None EPS) · #27 single-point series renders nothing · #28 slider a11y keyboard step · #29 grip/endpoint offset + dead `judgment_x` · #30 mouse-y fixed-height coupling · #31 derived→direct forecast conversion.
+
 - **Drag converts a growth-%-derived forecast into a direct `est_high_eps`** — when the forecast EPS is derived from `projected_eps_growth_pct`, the line is drawn but a drag writes the direct `est_high_eps` field, silently shadowing the growth-% link. Spec Q2 chose `est_high_eps` as the handle, so this is by design; revisit if a smarter mapping is wanted. [app/src/viewmodel/chart.rs, app/src/main.rs]
 - **1→200 axis can't represent sub-$1 or >$200 EPS** — a stock with est-high-EPS < 1.00 or > 200 can't be set by drag (the line pins to an edge) and a drag/commit can snap a typed sub-dollar forecast to 1.00. Strengthens the per-series axis-scaling refinement (deferred item #1). [app/src/viewmodel/chart.rs value_for_y]
 - **Drag strip a11y** — `accessible-role: slider` with no keyboard step handler; the keyboard path is the exact-value JudgmentField (NFR-U2 satisfied), but AT announces an adjustable slider that arrows can't move. Add arrow-key stepping or adjust the role. [app/ui/components/growth_chart.slint]
@@ -41,3 +43,10 @@ _Throwaway spike (GO). These apply to the **Epic 2 production grid** (Stories 2.
 - **Single-point series renders nothing** — a 1-year study (or a series with one non-`None` point) emits a lone `M` command → blank plot, no isolated-point marker. [app/src/viewmodel/chart.rs path_commands]
 - **Grip vs line-endpoint offset + dead `judgment_x`** — the grip sits centered in the right strip while the trend-line endpoint renders at the plot's right edge; `judgment_x` (always `CHART_W`) is exported but unused. Cosmetic; GUI polish deferred post-MVP. [growth_chart.slint / chart.rs]
 - **mouse-y→viewbox-y coupling to fixed height** — the 1:1 drag mapping holds only because the plot is rendered at exactly `CHART_H` px; add a guard/test before making the chart responsive/zoomable. [chart.rs / growth_chart.slint]
+
+## Deferred from: code review of story-2.9 (2026-06-14)
+
+- **Scenario-compare alternate input is a placeholder, not a pre-filled value** — the seeded est-high-EPS binds to `placeholder:` (ghost hint) rather than `text:`, so the field looks empty on open. Minor UX; bind the seed as the editable value. [app/ui/components/scenario_compare.slint]
+- **Alternate placement varies only est-high-EPS (Phase-1)** — current price / est-low-EPS / forecast-low option can't be varied in the alternate (Q4 exact-value default). Broaden if richer what-if is wanted (Phase-2 multi-scenario territory). [app/src/main.rs, app/src/viewmodel/engine.rs]
+- **Keyboard undo path (AC3) lacks automated coverage + FocusScope focus-order unverified** — the form-wrapping study-screen `FocusScope` relies on key bubbling; manual AT-SPI pass needed on Ctrl+Z with (a) no focus, (b) a validated cell focused, (c) the compare TextField focused. [app/ui/screens/study_screen.slint]
+- **Blank/negative/non-numeric alternate input is silently calm** — collapses to an em-dash / withheld alternate column with no rejection signal, indistinguishable from a legitimately missing input. Calm-by-design; consider a neutral "valeur non reconnue" hint. [app/src/main.rs on_set_alternate]

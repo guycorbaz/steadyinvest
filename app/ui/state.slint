@@ -183,6 +183,32 @@ export struct ZoneBarState {
     marker-pos: float,
 }
 
+// ── Story 2.9 — scenario compare (Phase-1, one alternate). The outcome of ONE judgment placement:
+//    its §4 forecast boundaries + present-zone, U/D ratio, projected return, and verdict confidence
+//    — all already-formatted strings from `engine::scenario_outcome` (two `build_frame` calls). The
+//    two placements are differentiated by LABEL/position only (no fourth hue); each scenario's bands
+//    still gate on its own `confidence` (full/provisional/withheld).
+export struct ScenarioOutcome {
+    confidence: string,      // "full" | "provisional" | "withheld"
+    forecast-high: string,
+    forecast-low: string,
+    buy-top: string,
+    neutral-top: string,
+    present-zone: string,    // "buy" | "neutral" | "sell" | ""
+    ud-ratio: string,
+    projected-return: string,
+}
+
+// The scenario-compare overlay state: the saved (current) placement vs a user-set alternate, shown
+// alongside. `alt-input` echoes the alternate est-high-EPS the user typed. NON-committing: closing
+// discards the alternate (the saved judgment is never overwritten).
+export struct ScenarioCompareState {
+    visible: bool,
+    alt-input: string,
+    current: ScenarioOutcome,
+    alternate: ScenarioOutcome,
+}
+
 // The verdict badge + sticky-bar facts (all from the SAME snapshot — one coherence frame). `state`
 // drives the badge texture; `provenance-date` ("DD/MM") is present only for a degraded verdict;
 // `open-gates` names the load-bearing inputs that are not validated-and-fresh (the honest "why not
@@ -340,6 +366,11 @@ export global Studies {
     // True while the user holds the §1 judgment endpoint — the enclosing form `Flickable` disables its
     // scroll so the vertical drag is not stolen (set on pointer-down, cleared on release).
     in-out property <bool> judgment-dragging;
+    // ── Story 2.9 — undo/redo availability (the controls disable when their stack is empty).
+    in-out property <bool> can-undo;
+    in-out property <bool> can-redo;
+    // ── Story 2.9 — the scenario-compare overlay (current vs one alternate placement).
+    in-out property <ScenarioCompareState> scenario-compare;
 
     // Set a numeric judgment field (field-key, raw-text). Rust parses locale-aware → Money/None
     // (a cleared field is None, never 0), persists to `Study.judgment`, recomputes the snapshot.
@@ -361,6 +392,16 @@ export global Studies {
     callback judgment-moved(string, length);  // field-key, viewbox-y
     callback judgment-commit(string, length);  // field-key, viewbox-y → persist (pointer up)
     callback judgment-cancel();                // gesture abandoned → revert to saved, no persist
+
+    // ── Story 2.9 — undo/redo of any judgment or grid edit (snapshot stack). No-op when its stack
+    //    is empty; the controls disable on `!can-undo` / `!can-redo`.
+    callback undo();
+    callback redo();
+    // ── Story 2.9 — scenario compare: open (seed alternate = current), set the alternate est-high-EPS
+    //    (recompute the alternate outcome, non-committing), and close (discard the alternate).
+    callback open-compare();
+    callback set-alternate(string);
+    callback close-compare();
 }
 
 export global Prefs {

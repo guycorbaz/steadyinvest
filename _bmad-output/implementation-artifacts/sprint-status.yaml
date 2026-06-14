@@ -171,6 +171,53 @@ last_updated: 2026-06-14
 #             series rendering, fixed-height coupling) — consistent with Guy's "GUI polish post-MVP". Work
 #             NOT yet committed (manual dev-story this session, not story-automator). Next: commit/push 2-8,
 #             then story 2.9 (undo/redo & scenario compare).
+# 2026-06-14: story 2-9 created (undo/redo & scenario compare) → ready-for-dev. app-only. KEY architectural
+#             reconciliation pinned: the app has NO in-memory StudyState (journal = source of truth, every
+#             edit mutate→put_study→re-read→push_form) → undo realized as an in-memory stack of contract::
+#             Study CLONES (faithful to architecture's "snapshot stack, simple clones"), NOT a new StudyState
+#             abstraction, NOT a diff log. Undo covers EVERY persisting journal mutation (edit_cell, paste,
+#             not-available, set_review, unlock_all, set_judgment_field, set_forecast_low_option, chart drag
+#             COMMIT) — snapshot the pre-mutation study before each put_study, clear redo on a new edit. Live
+#             drag previews never persist → one drag = one undo step (no per-`moved` snapshot). Restore =
+#             put_study(prev clone)+push_form (whole coherent frame, deterministic). NOT undoable: fold/regime
+#             view-state (app-config, not journal) + app prefs. Ctrl+Z/Y/Shift+Z (not pinned in spec; must not
+#             collide with editable_cell Ctrl-chords). Scenario compare = Phase-1 ONE alternate, overlay,
+#             zones/U-D/return current-vs-alternate via TWO build_frame calls, non-committing, NO 4th hue
+#             (differentiate by ink/dash/label), verdict-integrity-gated per scenario. Q1 SCOPE FLAG: epic
+#             permits deferring scenario-compare per sizing — recommend ship undo/redo (FR32 must-have) first,
+#             decide compare with Guy (his "GUI polish post-MVP" stance). NO new dependency; core/contract/
+#             persistence pinned. 4 open Qs (scope split, persistence=in-mem, keybindings, alternate-set UX).
+# 2026-06-14: story 2-9 dev complete (FULL scope, Guy's call) → review. UNDO/REDO: in-memory UndoHistory
+#             {undo,redo: Vec<Study>} on JournalState (NOT a new StudyState, NOT a diff log — the archi's
+#             "snapshot stack, simple clones" over the persisted Study blob since journal=source of truth),
+#             cap 100, per-open-study, reset on open, never persisted. Pre-mutation Study cloned in 4 choke
+#             points (mutate_cell covers edit/not-available/review; mutate_judgment covers judgment+forecast-
+#             low; paste_column; unlock_all only if flips≥1), recorded on successful put_study + redo cleared.
+#             One drag = one undo step (live moved previews never persist). undo/redo pop→put_study(whole
+#             prior/next Study)→push_form (deterministic coherent frame); empty=Ok(false) no-op; write-fail
+#             pushes the snapshot back. UI: ↶Annuler/↷Rétablir buttons (disabled via can-undo/redo mirrored
+#             in push_form, now takes &JournalState) + study-screen FocusScope Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y
+#             (bubbles past cell chords). SCENARIO COMPARE (Phase-1, one alternate): exact-value alternate
+#             est-high-EPS → engine::scenario_compare builds TWO build_frames → ScenarioCompare overlay shows
+#             current vs alternate (forecast bounds/present-zone/U-D/return/confidence), ink-only (NO 4th hue),
+#             verdict-integrity-gated per scenario, NON-committing (in-mem clone, discard on close). Cardinal
+#             Rule kept; NO new dependency; pinned surfaces unchanged. 4 gates green --locked; app tests 110→
+#             117 (+5 undo state.rs, +2 scenario engine.rs); posture floors .slint 19→20, @tr 140→160. Binary
+#             launches+event loop (exit 124). in-GUI click-through = documented partial (human/AT-SPI). NOT
+#             committed yet. Next: code-review 2-9, then commit/push, then story 2.10 (decision rationale).
+# 2026-06-14: story 2-9 review complete → done. 3-layer adversarial review (0 failed): undo/redo two-stack
+#             core verified correct (redo-cleared-on-record, write-failure push-back, no present-state loss);
+#             no AC violation in engine/scope. 0 decision · 4 patch · 4 defer · ~8 dismiss. All 4 patches
+#             applied + 4 gates re-green --locked (app tests 117): P1 Ctrl+Z/Y now bubbles past the soft-lock
+#             guard on a ✓ cell (editable_cell.slint exempts Ctrl/Cmd+Z/Y → reject) instead of a spurious
+#             notice; P2 undo/redo no-op while the scenario-compare overlay is open (guard on scenario-
+#             compare.visible — no stale baseline); P3 compare state reset on study open (parallel to
+#             reset_undo); P4 no-op edits no longer record a phantom undo step/clear redo (before!=after
+#             guard, Study:PartialEq). 4 deferred → deferred-work.md + Review Findings (alt input placeholder-
+#             vs-value, alternate limited to est-high-EPS Phase-1, keyboard-path AT-SPI untested, blank/neg
+#             alternate silent). Dismissed incl. the Blind-Hunter FALSE POSITIVE "set_review not recorded"
+#             (it routes through mutate_cell, test green). Work NOT committed (manual cycle this session).
+#             Next: commit/push 2-9, then story 2.10 (decision rationale capture).
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -202,7 +249,7 @@ development_status:
   2-6-numeric-judgment-inputs-verdict-zone-bar: done
   2-7-low-confidence-plausibility-surfacing: done
   2-8-interactive-growth-chart-draggable-judgment-line: done
-  2-9-undo-redo-scenario-compare: backlog
+  2-9-undo-redo-scenario-compare: done
   2-10-decision-rationale-capture: backlog
   2-11-update-existing-study-extend-projection: backlog
   2-12-dashboard-search-sort-filter-archive-delete: backlog

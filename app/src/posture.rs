@@ -107,7 +107,7 @@ mod tests {
     fn ui_tr_strings_are_neutral_no_banned_verb() {
         let files = slint_files();
         assert!(
-            files.len() >= 19,
+            files.len() >= 20,
             "posture gate found only {} .slint files — scan broken?",
             files.len()
         );
@@ -127,10 +127,11 @@ mod tests {
         // Story 2.6 added the judgment-input labels, the §4 forecast-low selector chips, the zone-bar
         // empty-state + present-price captions, the verdict-bar facts, and the traceability surface
         // labels. Story 2.8 adds the §1 growth-chart component (its empty-state caption + the draggable
-        // line's accessible label) — so the scanned population grew again. Keep the floor strict
-        // against a broken scan.
+        // line's accessible label). Story 2.9 adds the undo/redo controls + the scenario-compare
+        // overlay (its column labels, the "alternate" caption + the confidence words) — so the
+        // scanned population grew again. Keep the floor strict against a broken scan.
         assert!(
-            total >= 140,
+            total >= 160,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

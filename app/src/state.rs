@@ -150,6 +150,54 @@ fn empty_judgment() -> Judgment {
     }
 }
 
+/// The maximum number of undo steps kept in memory (oldest dropped past this). `Study` clones are
+/// small but not free; a long session does not grow the history unboundedly (Story 2.9).
+const UNDO_CAP: usize = 100;
+
+/// Which way [`JournalState::step`] moves through the history.
+#[derive(Clone, Copy)]
+enum Direction {
+    Undo,
+    Redo,
+}
+
+/// In-memory undo/redo history for the open study (Story 2.9) — a stack of whole [`Study`] snapshots,
+/// **NOT a diff log**. This realizes the architecture's "snapshot stack, simple clones because state
+/// is small" directly over the persisted `Study` blob: the app keeps no separate in-memory domain
+/// state (the journal is the source of truth), so a snapshot IS a `Study` clone. Per open study,
+/// reset on open, never persisted across reopen.
+#[derive(Default)]
+pub struct UndoHistory {
+    /// States as they were BEFORE each mutation (most recent on top).
+    undo: Vec<Study>,
+    /// States displaced by an undo, available to redo (most recent on top).
+    redo: Vec<Study>,
+}
+
+impl UndoHistory {
+    /// Record the pre-mutation snapshot and invalidate the redo branch (a new edit forks history).
+    fn record(&mut self, before: Study) {
+        self.undo.push(before);
+        if self.undo.len() > UNDO_CAP {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    fn reset(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
+
+    fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+}
+
 /// The live journal session plus the injected time/identity sources. Owns the open [`Journal`] for
 /// the lifetime of the window so the create/open callbacks can reach it.
 pub struct JournalState {
@@ -162,6 +210,8 @@ pub struct JournalState {
     read_only: bool,
     clock: Box<dyn Clock>,
     idgen: Box<dyn IdGen>,
+    /// Undo/redo history for the currently-open study (Story 2.9). Reset on open.
+    history: UndoHistory,
 }
 
 impl JournalState {
@@ -186,6 +236,7 @@ impl JournalState {
                                 read_only,
                                 clock,
                                 idgen,
+                                history: UndoHistory::default(),
                             },
                             read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                         );
@@ -219,6 +270,7 @@ impl JournalState {
                     read_only: false,
                     clock,
                     idgen,
+                    history: UndoHistory::default(),
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
             );
@@ -245,6 +297,7 @@ impl JournalState {
                         read_only,
                         clock,
                         idgen,
+                        history: UndoHistory::default(),
                     },
                     read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                 )
@@ -258,6 +311,7 @@ impl JournalState {
                         read_only: false,
                         clock,
                         idgen,
+                        history: UndoHistory::default(),
                     },
                     Some(format!("{MSG_SAVE_FAILED} {error}")),
                 )
@@ -273,6 +327,87 @@ impl JournalState {
     /// True when the open journal is read-only (newer-schema file).
     pub fn is_read_only(&self) -> bool {
         self.read_only
+    }
+
+    // ── Undo/redo (Story 2.9) ──
+
+    /// Clear the undo/redo history — a different study was opened, so its edit history starts empty.
+    pub fn reset_undo(&mut self) {
+        self.history.reset();
+    }
+
+    /// Whether an undo / redo step is available (the UI disables its control when not).
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    /// Step the open study **back** to the snapshot before the last mutation (FR32). Returns
+    /// `Ok(true)` when a step was taken (the caller re-reads + re-renders), `Ok(false)` when the
+    /// undo stack is empty. The restore is a real, guarded `put_study` of the whole prior `Study`.
+    pub fn undo(&mut self, study_id: Uuid) -> Result<bool, String> {
+        self.step(study_id, Direction::Undo)
+    }
+
+    /// Step the open study **forward** to a snapshot displaced by a prior undo (no-op if the redo
+    /// stack is empty).
+    pub fn redo(&mut self, study_id: Uuid) -> Result<bool, String> {
+        self.step(study_id, Direction::Redo)
+    }
+
+    /// The shared undo/redo engine: pop the target snapshot, write it back, and move the present
+    /// state onto the opposite stack so the step is itself reversible. On a write failure the popped
+    /// snapshot is pushed back (the history is never silently lost) and a neutral notice surfaces.
+    fn step(&mut self, study_id: Uuid, dir: Direction) -> Result<bool, String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        if self.journal.is_none() {
+            return Err(MSG_NO_JOURNAL.to_string());
+        }
+        let popped = match dir {
+            Direction::Undo => self.history.undo.pop(),
+            Direction::Redo => self.history.redo.pop(),
+        };
+        let Some(restored) = popped else {
+            return Ok(false); // nothing to step to
+        };
+        let push_back = |history: &mut UndoHistory, study: Study| match dir {
+            Direction::Undo => history.undo.push(study),
+            Direction::Redo => history.redo.push(study),
+        };
+        let Some(current) = self.get_study(study_id) else {
+            push_back(&mut self.history, restored);
+            return Err(MSG_SAVE_FAILED.to_string());
+        };
+        let result = {
+            let journal = self
+                .journal
+                .as_mut()
+                .expect("journal presence checked above");
+            journal.put_study(&restored)
+        };
+        match result {
+            Ok(()) => {
+                // The present state becomes reversible on the opposite stack.
+                match dir {
+                    Direction::Undo => self.history.redo.push(current),
+                    Direction::Redo => self.history.undo.push(current),
+                }
+                Ok(true)
+            }
+            Err(PersistError::NewerJournalSchema { .. }) => {
+                push_back(&mut self.history, restored);
+                Err(MSG_READ_ONLY_WRITE.to_string())
+            }
+            Err(error) => {
+                push_back(&mut self.history, restored);
+                Err(format!("{MSG_SAVE_FAILED} {error}"))
+            }
+        }
     }
 
     /// The deterministic `created_at, id`-ordered study summaries (empty on no-journal / read error).
@@ -414,6 +549,7 @@ impl JournalState {
         let mut study = self
             .get_study(study_id)
             .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        let before = study.clone(); // pre-mutation snapshot for undo (Story 2.9)
         let mut flipped = 0usize;
         for (year_index, year) in study.years.iter_mut().enumerate() {
             for field in entry::ALL_FIELDS {
@@ -434,12 +570,21 @@ impl JournalState {
                 flipped += 1;
             }
         }
-        let journal = self
-            .journal
-            .as_mut()
-            .expect("journal presence checked above");
-        match journal.put_study(&study) {
-            Ok(()) => Ok(flipped),
+        let result = {
+            let journal = self
+                .journal
+                .as_mut()
+                .expect("journal presence checked above");
+            journal.put_study(&study)
+        };
+        match result {
+            Ok(()) => {
+                // Only an unlock that actually flipped a ✓ is an undoable change.
+                if flipped > 0 {
+                    self.history.record(before);
+                }
+                Ok(flipped)
+            }
             Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
             Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
         }
@@ -520,6 +665,8 @@ impl JournalState {
         let mut study = self
             .get_study(study_id)
             .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        // The pre-mutation snapshot for undo (Story 2.9) — captured as read, before any materialize.
+        let before = study.clone();
         if study.years.is_empty() {
             study.years =
                 entry::materialize_year_window(&study.created_at, &self.manual_provenance());
@@ -533,12 +680,22 @@ impl JournalState {
         let new_cell = make(base, self.manual_provenance());
         entry::set_cell(year, field, new_cell).map_err(|()| MSG_SAVE_FAILED.to_string())?;
 
-        let journal = self
-            .journal
-            .as_mut()
-            .expect("journal presence checked above");
-        match journal.put_study(&study) {
-            Ok(()) => Ok(()),
+        let result = {
+            let journal = self
+                .journal
+                .as_mut()
+                .expect("journal presence checked above");
+            journal.put_study(&study)
+        };
+        match result {
+            Ok(()) => {
+                // Only a REAL change is undoable — a no-op edit (same value re-typed, same option
+                // re-selected, same review tag) must not push a phantom step or clear redo (review P4).
+                if before != study {
+                    self.history.record(before);
+                }
+                Ok(())
+            }
             Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
             Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
         }
@@ -566,6 +723,7 @@ impl JournalState {
         let mut study = self
             .get_study(study_id)
             .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        let before = study.clone(); // pre-mutation snapshot for undo (Story 2.9)
         if study.years.is_empty() {
             study.years =
                 entry::materialize_year_window(&study.created_at, &self.manual_provenance());
@@ -581,12 +739,21 @@ impl JournalState {
             entry::set_cell(year, field, new_cell).map_err(|()| MSG_SAVE_FAILED.to_string())?;
             filled += 1;
         }
-        let journal = self
-            .journal
-            .as_mut()
-            .expect("journal presence checked above");
-        match journal.put_study(&study) {
-            Ok(()) => Ok(filled),
+        let result = {
+            let journal = self
+                .journal
+                .as_mut()
+                .expect("journal presence checked above");
+            journal.put_study(&study)
+        };
+        match result {
+            Ok(()) => {
+                // Only a real change is undoable (review P4).
+                if before != study {
+                    self.history.record(before);
+                }
+                Ok(filled)
+            }
             Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
             Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
         }
@@ -637,15 +804,26 @@ impl JournalState {
         let mut study = self
             .get_study(study_id)
             .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
+        let before = study.clone(); // pre-mutation snapshot for undo (Story 2.9)
         if !apply(&mut study.judgment) {
             return Err(MSG_SAVE_FAILED.to_string());
         }
-        let journal = self
-            .journal
-            .as_mut()
-            .expect("journal presence checked above");
-        match journal.put_study(&study) {
-            Ok(()) => Ok(()),
+        let result = {
+            let journal = self
+                .journal
+                .as_mut()
+                .expect("journal presence checked above");
+            journal.put_study(&study)
+        };
+        match result {
+            Ok(()) => {
+                // Only a REAL change is undoable — a no-op edit (same value re-typed, same option
+                // re-selected, same review tag) must not push a phantom step or clear redo (review P4).
+                if before != study {
+                    self.history.record(before);
+                }
+                Ok(())
+            }
             Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
             Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
         }
@@ -723,6 +901,152 @@ mod tests {
             Box::new(FixedClock(Timestamp(ts.to_string()))),
             Box::new(FixedIdGen(Uuid::from_u128(id))),
         )
+    }
+
+    // ── Story 2.9 — undo/redo history ──
+
+    /// Open a fresh temp journal + state (creating the file on first use), with injected clock/id.
+    fn undo_state(dir: &TempDir, seed: u128, ts: &str) -> JournalState {
+        let path = dir.path().join("journal.db");
+        if !path.exists() {
+            drop(
+                Journal::create(
+                    &path,
+                    Uuid::from_u128(0xC0FFEE),
+                    &Timestamp("2026-06-14T00:00:00Z".to_string()),
+                )
+                .unwrap(),
+            );
+        }
+        let (clock, idgen) = fixed(seed, ts);
+        let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+        state
+    }
+
+    fn und_money(v: i64) -> Money {
+        Money::from(rust_decimal::Decimal::new(v, 0))
+    }
+
+    #[test]
+    fn undo_redo_steps_back_and_forward_and_a_new_edit_clears_redo() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x1D, "2026-06-14T09:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        assert!(
+            !state.can_undo() && !state.can_redo(),
+            "a fresh study has empty history"
+        );
+
+        // Edit one §3 cell (field "a" = high price) on year 0.
+        state.edit_cell(id, 0, "a", Some(und_money(100))).unwrap();
+        assert!(state.can_undo(), "an edit is undoable");
+        assert!(!state.can_redo());
+        assert!(state.get_study(id).unwrap().years[0]
+            .high_price
+            .value
+            .is_some());
+
+        // Undo → the pre-edit (fresh, no-value) state returns.
+        assert_eq!(state.undo(id), Ok(true));
+        assert!(state.can_redo());
+        let undone = state.get_study(id).unwrap();
+        assert!(
+            undone.years.is_empty() || undone.years[0].high_price.value.is_none(),
+            "undo restores the pre-edit state (no value)"
+        );
+
+        // Redo → the value comes back.
+        assert_eq!(state.redo(id), Ok(true));
+        assert!(state.get_study(id).unwrap().years[0]
+            .high_price
+            .value
+            .is_some());
+
+        // A NEW edit after an undo forks history → the redo branch is cleared.
+        assert_eq!(state.undo(id), Ok(true));
+        assert!(state.can_redo());
+        state.edit_cell(id, 0, "b", Some(und_money(50))).unwrap();
+        assert!(
+            !state.can_redo(),
+            "a new edit after an undo clears the redo branch"
+        );
+        assert!(state.can_undo());
+    }
+
+    #[test]
+    fn undo_restores_a_judgment_edit() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x2D, "2026-06-14T09:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .set_judgment_field(id, "est_high_eps", Some(und_money(9)))
+            .unwrap();
+        assert!(state
+            .get_study(id)
+            .unwrap()
+            .judgment
+            .estimated_high_eps
+            .is_some());
+        assert_eq!(state.undo(id), Ok(true));
+        assert!(
+            state
+                .get_study(id)
+                .unwrap()
+                .judgment
+                .estimated_high_eps
+                .is_none(),
+            "undo restores the prior (unset) judgment — FR32, never destroys a saved input"
+        );
+    }
+
+    #[test]
+    fn undo_redo_on_empty_history_are_noops() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x3D, "2026-06-14T09:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        assert_eq!(state.undo(id), Ok(false), "nothing to undo");
+        assert_eq!(state.redo(id), Ok(false), "nothing to redo");
+        assert!(!state.can_undo() && !state.can_redo());
+    }
+
+    #[test]
+    fn reset_undo_clears_history() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x4D, "2026-06-14T09:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .set_judgment_field(id, "est_high_eps", Some(und_money(9)))
+            .unwrap();
+        assert!(state.can_undo());
+        state.reset_undo(); // a different study is opened
+        assert!(
+            !state.can_undo() && !state.can_redo(),
+            "opening a study starts from an empty history"
+        );
+    }
+
+    #[test]
+    fn undo_restores_a_review_tag_without_destroying_the_value() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x5E, "2026-06-14T09:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state.edit_cell(id, 0, "a", Some(und_money(100))).unwrap();
+        state.set_review(id, 0, "a", Review::Validated).unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].high_price.review,
+            Review::Validated
+        );
+        assert_eq!(state.undo(id), Ok(true)); // undo the review change only
+        let undone = state.get_study(id).unwrap();
+        assert_eq!(
+            undone.years[0].high_price.review,
+            Review::None,
+            "undo restores the prior review tag"
+        );
+        assert!(
+            undone.years[0].high_price.value.is_some(),
+            "undoing the review tag never destroys the value"
+        );
     }
 
     #[test]
