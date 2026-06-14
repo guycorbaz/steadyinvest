@@ -110,6 +110,67 @@ last_updated: 2026-06-14
 #             arboard+rust_decimal dev→runtime deps (Cargo.lock UNCHANGED); pinned surfaces + deny.toml
 #             re-diffed empty; 4 gates green --locked; app tests 53→71. PE_TABLE_ROWS=5 cap removed
 #             (issue #20); interpretations → issue #21. AC6 GUI click-through left for human/AT-SPI (sandbox).
+# 2026-06-14: story 2-8 created (interactive §1 growth chart — draggable judgment line, live recolor) →
+#             ready-for-dev. THE signature interaction; productionizes Spike B (1.5, GO: 40–60µs/235µs max,
+#             400×–2500× under the 100ms NFR-P1 budget) and drives the §4 ZoneBar built in 2.6. app-ONLY
+#             (core/contract/persistence/ingestion/report + Cargo.lock + deny.toml all pinned, re-diff empty;
+#             NO new dependency). Two PHYSICALLY DISTINCT surfaces (locked): NEW §1 growth_chart.slint
+#             (semi-log 1→200, solid hist/dashed proj, 5–30% guide fan, draggable trend line(s), Path+
+#             TouchArea, NO zones, ink-scale ONLY — colour budget = §4 hues only) vs the EXISTING §4
+#             zone_bar.slint (recolour target, do NOT rebuild). Drag → value_for_y → judgment input on a
+#             NON-persisted Study clone → engine::build_frame ONCE → push zone-bar+verdict live; persist
+#             (put_study) ONLY on drag-end. CENTRAL TRAP flagged: do NOT route each `moved` through
+#             push_form+put_study (rebuilds every row + journals — misses 100ms); recompute is sub-ms, the
+#             cost to avoid is per-event writes. Cardinal Rule: zone/forecast/verdict recompute in CORE,
+#             never in a Slint callback; pixels are f32/f64 (rendering ≠ decision chain, spike-proven).
+#             Task 1 extends StudyFrame with per-year canonical series CLONED before the StudySnapshot::new
+#             move (2.7 plausibility pattern — NO second normalize → coherence). Gesture↔exact-value sync by
+#             construction (both write same Study.judgment via set_judgment; JudgmentField re-seeds only
+#             !has-focus). Verdict integrity by construction: live recolour respects the §4 sat/confidence
+#             gate (full⟺all load-bearing ✓&fresh∧¬low-conf; provisional hatch; withheld empty). Spike
+#             example + justfile spike-b recipe REMOVED (clippy --all-targets lints examples); spike findings
+#             doc kept. Scope-guarded: NO undo/redo/scenario-compare (2.9 — incl. FR32 undo), NO rationale
+#             (2.10), NO §1 zones, NO provider (Epic 3). 3 non-blocking open Qs recorded (soft-lock on
+#             judgment fields; exact line→field geometry; #draggable lines in v1 — defaults chosen). DoD:
+#             headless tests (coord↔value round-trip, series→Path commands, recompute coherence, persist
+#             round-trip, integrity gate) + posture floors bumped; in-GUI drag click-through = documented
+#             partial (human/AT-SPI sandbox), as 2.1–2.7.
+# 2026-06-14: story 2-8 dev complete → review. Native-Slint §1 interactive growth chart (Path+TouchArea):
+#             semi-log 1→200, Sales/EPS/Price solid historical + DASHED EPS projection (Rust-built dash —
+#             Slint Path has no dash array), 5–30% guide fan, decade axis, ink-scale ONLY (no judgment hue
+#             on §1). The signature gesture: drag the est-high-EPS line → value_for_y → apply to an in-mem
+#             Study clone (cached at pointer-down) → engine::build_frame ONCE → push judgment+§1 chart+§4
+#             zone bar+verdict LIVE; persist ONCE on pointer-up via set_judgment_field (gesture⇄exact-value
+#             one source of truth, FR31). Central latency trap AVOIDED: no per-`moved` put_study/push_form.
+#             Cardinal Rule kept (zone/forecast/verdict in core; only pixels are f32/f64). Verdict integrity
+#             by construction: live recolour reuses §4 sat/confidence gate (full⟺all load-bearing ✓&fresh;
+#             provisional hatch; withheld empty) — proven by a drag-on-withheld test. FR33: line drawn only
+#             when engine has a forecast (judgment_y=-1=unset, never auto-placed). AC5: ZoneSegment animate
+#             background 150ms, 0ms under reduced-motion. Series cloned off canonical BEFORE StudySnapshot::
+#             new move (2.7 coherence invariant). Spike B example + justfile recipe REMOVED (findings doc
+#             kept); NO dependency change (Cargo.lock/deny.toml byte-identical; core/contract/persistence/
+#             ingestion/report + rust-toolchain pinned, re-diffed empty). 4 gates green --locked; app tests
+#             102→110 (+8 chart: axis round-trip+clamp, path_commands, series→commands, dashed projection,
+#             gesture→value→chart round-trip, live integrity gate, persist round-trip). posture floors
+#             bumped (.slint 18→19, @tr 130→140). Binary launches + runs the event loop (Wayland, exit 124);
+#             in-GUI pointer-drag click-through = documented partial (human/AT-SPI sandbox), as 2.1–2.7.
+#             3 interpretations → GitHub issues: shared-axis series scaling (sales clamps), fixed-size chart
+#             box, single draggable handle (EPS only) — all deliberate v1 scope, refinements deferred.
+# 2026-06-14: story 2-8 review complete → done. Adversarial 3-layer code review (Blind/Edge/Acceptance,
+#             0 failed): NO hard AC violation (Cardinal Rule, colour budget, verdict integrity, FR33,
+#             gesture⇄value sync, pinned surfaces all verified clean). 0 decision · 5 patch · 7 defer · 4
+#             dismiss. All 5 patches applied + 4 gates re-green --locked (app tests 110): P2 a zero-movement
+#             click on the drag strip no longer rewrites the forecast (commit gated on a real `moved`); P3 a
+#             refused/failed write reconciles the preview to disk (no phantom un-saved line); P4 pointer
+#             `cancel` reverts instead of persisting (new judgment-cancel callback); P1 §4/§5 numbers
+#             (forecast high/low, U/D, projected return, §4 warning) refresh on the live drag frame so the
+#             bar + numbers stay coherent; P5 judgment-dragging defensively reset on study open + both close
+#             paths (mid-drag teardown can't leave the form unscrollable). 7 deferred → deferred-work.md +
+#             story Review Findings (axis 1→200 can't show sub-$1/>$200 EPS, slider a11y keyboard step,
+#             grip/endpoint cosmetic offset, derived-forecast→direct conversion, single-point/all-None
+#             series rendering, fixed-height coupling) — consistent with Guy's "GUI polish post-MVP". Work
+#             NOT yet committed (manual dev-story this session, not story-automator). Next: commit/push 2-8,
+#             then story 2.9 (undo/redo & scenario compare).
 project: steadyinvest
 project_key: NOKEY
 tracking_system: file-system
@@ -140,7 +201,7 @@ development_status:
   2-5-tri-state-validation-soft-lock: done
   2-6-numeric-judgment-inputs-verdict-zone-bar: done
   2-7-low-confidence-plausibility-surfacing: done
-  2-8-interactive-growth-chart-draggable-judgment-line: backlog
+  2-8-interactive-growth-chart-draggable-judgment-line: done
   2-9-undo-redo-scenario-compare: backlog
   2-10-decision-rationale-capture: backlog
   2-11-update-existing-study-extend-projection: backlog

@@ -151,6 +151,8 @@ fn push_form(ui: &MainWindow, study: &steadyinvest_contract::Study, format: Numb
             studies.set_return_computed(engine::return_computed(outputs, format));
             studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
             studies.set_verdict(engine::verdict_badge(study, snapshot, format));
+            // Story 2.8 — the §1 interactive growth chart geometry (from the SAME coherent frame).
+            studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
             // The study-level (§4) warning key — `low_price_above_current`, anchored near forecast-low.
             studies.set_section4_warning_key(
                 warnings
@@ -183,9 +185,44 @@ fn push_form(ui: &MainWindow, study: &steadyinvest_contract::Study, format: Numb
             studies.set_return_computed(ReturnComputed::default());
             studies.set_zone_bar(ZoneBarState::default());
             studies.set_verdict(VerdictState::default());
+            studies.set_growth_chart(viewmodel::chart::unavailable());
             studies.set_section4_warning_key(SharedString::new());
             studies.set_notice(state::MSG_NORMALIZE_FAILED.into());
         }
+    }
+}
+
+/// A LIVE, NON-persisted recompute frame for a §1 judgment-line drag (Story 2.8, NFR-P1). Builds ONE
+/// coherent [`engine::build_frame`] from the in-memory (un-saved) study and pushes only the surfaces a
+/// drag moves — the judgment fields (so the exact-value field mirrors the line, FR31), the §1 chart
+/// line, the §4 zone bar and the verdict. Deliberately does NOT touch the journal or rebuild the whole
+/// form (`push_form`'s per-edit `put_study` + full rebuild is far too heavy per `moved` event — the
+/// recompute itself is sub-millisecond, the cost to avoid is the per-event write). A transient
+/// normalize error mid-drag leaves the last good frame untouched (never a flash of blanked outputs).
+fn push_live_preview(ui: &MainWindow, study: &steadyinvest_contract::Study, format: NumberFormat) {
+    use viewmodel::engine;
+    let studies = ui.global::<Studies>();
+    if let Ok(frame) = engine::build_frame(study) {
+        let snapshot = &frame.snapshot;
+        let outputs = snapshot.outputs();
+        let years = viewmodel::form::materialized_year_numbers(study);
+        let warnings = engine::plausibility(&frame.plausibility, &outputs.findings, &years);
+        studies.set_judgment(engine::judgment_fields(study, format));
+        studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
+        studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
+        studies.set_verdict(engine::verdict_badge(study, snapshot, format));
+        // §4/§5 judgment-dependent numbers stay in step with the recolouring bar (review P1) — the
+        // forecast high/low + U/D, the projected return, and the §4 study-level warning all move
+        // with the est-high-EPS the drag sets, so the §4 surface never disagrees with itself.
+        studies.set_risk_computed(engine::risk_computed(outputs, format));
+        studies.set_return_computed(engine::return_computed(outputs, format));
+        studies.set_section4_warning_key(
+            warnings
+                .study_key()
+                .map(|k| k.as_str())
+                .unwrap_or("")
+                .into(),
+        );
     }
 }
 
@@ -249,6 +286,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // raised (`request-unlock`) and the user pressing Confirmer (`confirm-unlock`). `None` = no
     // pending action; Annuler clears it without mutating anything.
     let pending_unlock: Rc<RefCell<Option<UnlockScope>>> = Rc::new(RefCell::new(None));
+
+    // Story 2.8 — the open study cached for the duration of a §1 judgment-line drag, so each `moved`
+    // event recomputes from memory (no journal read/write) under the <100 ms budget. `None` = no drag
+    // in flight; set on pointer-down, cleared on release/commit.
+    let drag_study: Rc<RefCell<Option<steadyinvest_contract::Study>>> = Rc::new(RefCell::new(None));
+    // Whether the in-flight drag actually moved (a `moved` event fired). A pointer-up with no
+    // movement is a click, not a drag — it must NOT rewrite the forecast (review P2).
+    let drag_moved: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
 
     let ui = MainWindow::new()?;
 
@@ -329,6 +374,10 @@ fn main() -> Result<(), slint::PlatformError> {
             studies.set_active_field(SharedString::new());
             studies.set_active_source(SharedString::new());
             studies.set_active_warning(SharedString::new());
+            // Defensively clear any stuck drag state (review P5): if a previous study was closed
+            // mid-drag the `up`/`cancel` may never have fired, which would leave the form's scroll
+            // disabled. Opening a study always starts from a clean, scrollable state.
+            studies.set_judgment_dragging(false);
             let view_state = config
                 .borrow()
                 .study_view_state
@@ -715,6 +764,121 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
                 Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+
+    // ── Story 2.8 — the draggable §1 judgment line (gesture ⇄ exact-value, kept in sync). ──
+
+    // Drag start (pointer-down): cache the open study so each `moved` recomputes from memory — no
+    // journal read/write during the drag (the per-event cost `push_form` would otherwise incur).
+    {
+        let journal_state = Rc::clone(&journal_state);
+        let current_study = Rc::clone(&current_study);
+        let drag_study = Rc::clone(&drag_study);
+        let drag_moved = Rc::clone(&drag_moved);
+        ui.global::<Studies>().on_judgment_drag_start(move || {
+            *drag_moved.borrow_mut() = false;
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            *drag_study.borrow_mut() = journal_state.borrow().get_study(id);
+        });
+    }
+
+    // Drag move: map pointer-y → est-high-EPS, apply it to the CACHED (un-saved) study, push a LIVE
+    // recompute frame — NO persistence (NFR-P1). The exact-value field mirrors the line (FR31).
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let drag_study = Rc::clone(&drag_study);
+        let drag_moved = Rc::clone(&drag_moved);
+        ui.global::<Studies>().on_judgment_moved(move |field, y| {
+            let ui = ui_weak.unwrap();
+            let Some(mut preview) = drag_study.borrow().clone() else {
+                return;
+            };
+            *drag_moved.borrow_mut() = true;
+            let value = Some(viewmodel::chart::judgment_value_for_y(y));
+            if !state::apply_judgment_field(&mut preview.judgment, field.as_str(), value) {
+                return;
+            }
+            let format = config.borrow().number_format;
+            push_live_preview(&ui, &preview, format);
+        });
+    }
+
+    // Drag commit (pointer-up): persist the final value ONCE via the SAME rail as the exact-value
+    // field (one source of truth), then re-read + full re-push; clear the drag cache. A refused write
+    // (read-only / save failure) surfaces a neutral notice and the preview is reconciled to disk.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        let drag_study = Rc::clone(&drag_study);
+        let drag_moved = Rc::clone(&drag_moved);
+        ui.global::<Studies>().on_judgment_commit(move |field, y| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            *drag_study.borrow_mut() = None;
+            let moved = std::mem::replace(&mut *drag_moved.borrow_mut(), false);
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            // A pointer-up with no movement is a click, not a drag — it must NOT rewrite the
+            // forecast (review P2). No `moved` ran, so the on-screen preview still equals the saved
+            // study; there is nothing to persist and nothing to reconcile.
+            if !moved {
+                return;
+            }
+            let value = Some(viewmodel::chart::judgment_value_for_y(y));
+            let result = journal_state
+                .borrow_mut()
+                .set_judgment_field(id, field.as_str(), value);
+            match result {
+                Ok(()) => studies.set_notice(SharedString::new()),
+                // The write was refused — surface the notice AND reconcile the (un-saved) preview
+                // back to the saved study below, so no phantom line is left on screen (review P3).
+                Err(message) => studies.set_notice(message.into()),
+            }
+            // Re-read + re-push from disk: on success this confirms the saved value; on failure it
+            // reverts the live preview to what is actually persisted.
+            if let Some(study) = journal_state.borrow().get_study(id) {
+                push_form(&ui, &study, format);
+            }
+        });
+    }
+
+    // Drag cancel (pointer-event cancel): the gesture was abandoned — revert the live preview to the
+    // saved study WITHOUT persisting (review P4). The Slint side clears `judgment-dragging`.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        let drag_study = Rc::clone(&drag_study);
+        let drag_moved = Rc::clone(&drag_moved);
+        ui.global::<Studies>().on_judgment_cancel(move || {
+            let ui = ui_weak.unwrap();
+            *drag_study.borrow_mut() = None;
+            *drag_moved.borrow_mut() = false;
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            if let Some(study) = journal_state.borrow().get_study(id) {
+                push_form(&ui, &study, format);
             }
         });
     }

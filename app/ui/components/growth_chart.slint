@@ -1,0 +1,194 @@
+// The §1 interactive semi-log growth chart (Story 2.8) — the signature interaction. Productionizes
+// the GO'd Spike B: native Slint, `Path` + `TouchArea`, no egui, no web. The Sales/EPS/Price series,
+// the 5–30 % guide fan and the 1→200 decade axis are pre-computed in `viewmodel/chart.rs` and cross
+// as `Path` `commands` strings against a viewbox whose HEIGHT is rendered 1:1 (so a vertical drag's
+// `mouse-y` maps directly to the viewbox-y the adapter inverts); the width is free to stretch.
+//
+// The judgment is a TREND LINE the user draws: its origin is FIXED at the last historical EPS point,
+// and only the future ENDPOINT moves. The right-edge drag strip is the grab target — dragging it
+// vertically sets the est-high-EPS (→ §4 forecast/zone recolor). While held, `Studies.judgment-
+// dragging` disables the enclosing form `Flickable` so the gesture is not stolen by the scroll.
+//
+// COLOUR BUDGET (UX-DR10): NO judgment hue on §1 — series separate by VALUE (text-high EPS, text-mid
+// Price, text-low Sales) + stroke weight, never colour. NEVER auto-placed (FR33): the line + handle
+// render only once the engine has a forecast (`judgment-y >= 0`); unset shows a neutral drag hint.
+
+import { Tokens } from "../tokens.slint";
+import { Studies, GrowthChartState, AxisTick } from "../state.slint";
+
+export component GrowthChart inherits Rectangle {
+    in property <GrowthChartState> chart: Studies.growth-chart;
+    // The judgment field the §1 drag writes — the forecast est-high-EPS (drives §4 forecast_high →
+    // zone recolor). Kept in sync with the exact-value `JudgmentField` of the same key (FR31).
+    property <string> drag-field: "est_high_eps";
+
+    // Height is rendered 1:1 with the viewbox (so the drag's mouse-y maps directly); width stretches.
+    property <length> plot-h: root.chart.chart-h * 1px;
+    property <length> strip-w: Tokens.space-48;
+
+    min-height: root.plot-h + 2 * Tokens.chart-pad;
+
+    // ── Calm empty state (no plottable years) — constant geometry, nothing drawn ──
+    if !root.chart.available: Rectangle {
+        height: root.plot-h;
+        background: Tokens.surface-alt;
+        border-width: Tokens.border;
+        border-color: Tokens.separator;
+        border-radius: Tokens.radius;
+        opacity: 0.4 + 0.6 * Tokens.regime-emphasis;
+        Text {
+            text: @tr("Aucune donnée à tracer");
+            color: Tokens.text-low;
+            font-size: Tokens.font-caption;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // ── The chart: side axis + plot area ──
+    if root.chart.available: HorizontalLayout {
+        spacing: Tokens.space-8;
+        alignment: stretch;
+
+        // Side axis — the 1→200 semi-log decade labels at their viewbox-y.
+        Rectangle {
+            width: Tokens.space-32;
+            height: root.plot-h;
+            for tick in root.chart.axis-ticks: Text {
+                text: tick.label;
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+                horizontal-alignment: right;
+                width: parent.width;
+                y: tick.y * 1px - self.height / 2;
+            }
+        }
+
+        // The plot area — fixed HEIGHT, stretching WIDTH (clips overflowing fan/series).
+        Rectangle {
+            horizontal-stretch: 1;
+            height: root.plot-h;
+            background: Tokens.surface;
+            border-width: Tokens.border;
+            border-color: Tokens.separator;
+            border-radius: Tokens.radius;
+            clip: true;
+
+            // Axis gridlines at each decade tick — contrasted enough to read as a grid.
+            for tick in root.chart.axis-ticks: Rectangle {
+                x: 0;
+                y: tick.y * 1px;
+                width: parent.width;
+                height: Tokens.chart-stroke-thin;
+                background: Tokens.text-low;
+                opacity: 0.35;
+            }
+
+            // The 5–30 % growth-guide fan (faint, under the curves).
+            for cmd in root.chart.fan-commands: Path {
+                commands: cmd;
+                stroke: Tokens.text-low;
+                stroke-width: Tokens.chart-stroke-thin;
+                opacity: Tokens.chart-fan-opacity;
+                viewbox-width: root.chart.chart-w;
+                viewbox-height: root.chart.chart-h;
+            }
+
+            // Historical series — ink scale, separated by lightness + stroke weight (no colour).
+            Path {
+                commands: root.chart.sales-commands;
+                stroke: Tokens.text-low;
+                stroke-width: Tokens.chart-stroke;
+                viewbox-width: root.chart.chart-w;
+                viewbox-height: root.chart.chart-h;
+            }
+            Path {
+                commands: root.chart.price-commands;
+                stroke: Tokens.text-mid;
+                stroke-width: Tokens.chart-stroke-thin;
+                viewbox-width: root.chart.chart-w;
+                viewbox-height: root.chart.chart-h;
+            }
+            // EPS — the protagonist (brightest).
+            Path {
+                commands: root.chart.eps-commands;
+                stroke: Tokens.text-high;
+                stroke-width: Tokens.chart-stroke;
+                viewbox-width: root.chart.chart-w;
+                viewbox-height: root.chart.chart-h;
+            }
+            // The judgment trend line (origin fixed at the last historical EPS → forecast endpoint),
+            // drawn solid + thick as the actor. Rendered only when set (FR33).
+            if root.chart.judgment-y >= 0.0: Path {
+                commands: root.chart.judgment-commands;
+                stroke: Tokens.text-high;
+                stroke-width: Tokens.chart-judgment-stroke;
+                viewbox-width: root.chart.chart-w;
+                viewbox-height: root.chart.chart-h;
+            }
+
+            // ── The right-edge drag strip: the grab target for the future endpoint. mouse-y spans
+            //    the full height, so it maps 1:1 to the viewbox-y the adapter inverts. ──
+            Rectangle {
+                x: parent.width - root.strip-w;
+                width: root.strip-w;
+                height: parent.height;
+                background: Tokens.surface-alt.with-alpha(strip-touch.has-hover ? 0.6 : 0.3);
+
+                // The grip handle at the endpoint (only when set) + the est-high-EPS caption.
+                if root.chart.judgment-y >= 0.0: Rectangle {
+                    width: Tokens.chart-grip;
+                    height: Tokens.chart-grip;
+                    x: (parent.width - self.width) / 2;
+                    y: root.chart.judgment-y * 1px - self.height / 2;
+                    background: Tokens.text-high;
+                    border-radius: Tokens.radius;
+                }
+                if root.chart.judgment-y >= 0.0: Text {
+                    text: root.chart.judgment-label;
+                    color: Tokens.text-high;
+                    font-family: Tokens.font-numeric;
+                    font-size: Tokens.font-caption;
+                    horizontal-alignment: center;
+                    width: parent.width;
+                    y: root.chart.judgment-y * 1px - self.height - Tokens.space-4;
+                }
+                // A neutral drag hint when no line is set yet (an affordance, never a suggested value).
+                if root.chart.judgment-y < 0.0: Text {
+                    text: "⇕";
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-h3;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                strip-touch := TouchArea {
+                    mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                    moved => {
+                        Studies.judgment-moved(root.drag-field, self.mouse-y);
+                    }
+                    pointer-event(ev) => {
+                        if (ev.kind == PointerEventKind.down) {
+                            Studies.judgment-drag-start();
+                            Studies.judgment-dragging = true;
+                        }
+                        // Pointer-up = commit (persist). Cancel = abandon → revert to saved (review
+                        // P4): a cancelled gesture must never persist the release position.
+                        if (ev.kind == PointerEventKind.up) {
+                            Studies.judgment-commit(root.drag-field, self.mouse-y);
+                            Studies.judgment-dragging = false;
+                        }
+                        if (ev.kind == PointerEventKind.cancel) {
+                            Studies.judgment-cancel();
+                            Studies.judgment-dragging = false;
+                        }
+                    }
+                    accessible-role: slider;
+                    accessible-label: @tr("Tendance du BPA estimé haut — glisser pour ajuster");
+                    accessible-value: root.chart.judgment-label;
+                }
+            }
+        }
+    }
+}

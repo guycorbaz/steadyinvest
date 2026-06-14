@@ -104,6 +104,35 @@ export struct GrowthComputed {
     eps-cagr: string,
 }
 
+// ── Story 2.8 — the §1 interactive semi-log growth chart ──
+// One 1→200 semi-log axis tick: its decade label + the viewbox-y it sits at.
+export struct AxisTick {
+    label: string,
+    y: float,
+}
+
+// The §1 chart geometry, ALL pre-computed in `viewmodel/chart.rs` against a FIXED viewbox
+// (`chart-w` × `chart-h` logical units). The series cross as Slint `Path` `commands` strings; the
+// Slint `Path` scales the viewbox onto the rendered element, so the only floats here are layout
+// coordinates (rendering, NEVER the decision chain — the spike-proven rule). The judgment line is
+// the draggable EPS-forecast handle: `judgment-y` is its viewbox-y (`-1` = unset → the line is NOT
+// drawn; the chart NEVER auto-places a judgment line, FR33). `available == false` → a calm
+// placeholder (no data to plot). No zones live on the §1 chart (UX-DR10) — zones are the §4 bar.
+export struct GrowthChartState {
+    available: bool,
+    chart-w: float,
+    chart-h: float,
+    sales-commands: string,             // historical, solid
+    eps-commands: string,               // historical, solid
+    price-commands: string,             // historical (high price), solid
+    judgment-commands: string,          // the trend line: last historical EPS (fixed) → forecast endpoint
+    fan-commands: [string],             // the 5–30 % growth-guide fan from the last historical EPS
+    axis-ticks: [AxisTick],             // 1→200 semi-log decade labels
+    judgment-x: float,                  // viewbox-x of the draggable endpoint (the future edge)
+    judgment-y: float,                  // viewbox-y of the draggable endpoint; -1 = unset
+    judgment-label: string,             // formatted est. high EPS caption ("" when unset)
+}
+
 // §2 computed results: per-year PTP%/ROE% (aligned with year-headers), the 5-yr averages + trends.
 export struct MgmtComputed {
     ptp: [string],
@@ -306,6 +335,11 @@ export global Studies {
     in-out property <ZoneBarState> zone-bar;
     in-out property <VerdictState> verdict;
     in-out property <TraceState> trace;
+    // ── Story 2.8 — the §1 interactive growth chart geometry (pre-computed by `viewmodel/chart.rs`).
+    in-out property <GrowthChartState> growth-chart;
+    // True while the user holds the §1 judgment endpoint — the enclosing form `Flickable` disables its
+    // scroll so the vertical drag is not stolen (set on pointer-down, cleared on release).
+    in-out property <bool> judgment-dragging;
 
     // Set a numeric judgment field (field-key, raw-text). Rust parses locale-aware → Money/None
     // (a cleared field is None, never 0), persists to `Study.judgment`, recomputes the snapshot.
@@ -317,6 +351,16 @@ export global Studies {
     // Open / close the traceability surface for a result key (v1: "verdict").
     callback open-traceability(string);
     callback close-traceability();
+
+    // ── Story 2.8 — the draggable §1 judgment line. The chart area is a FIXED viewbox so the
+    //    TouchArea's `mouse-y` (px) equals the viewbox-y the adapter mapped against. The gesture
+    //    writes the SAME `Study.judgment` field as the exact-value `JudgmentField` (FR31, kept in
+    //    sync). `drag-start` caches the open study for a journal-free live recompute; `moved` pushes
+    //    a live (NON-persisted) recompute frame (<100 ms, NFR-P1); `commit` persists once on release.
+    callback judgment-drag-start();
+    callback judgment-moved(string, length);  // field-key, viewbox-y
+    callback judgment-commit(string, length);  // field-key, viewbox-y → persist (pointer up)
+    callback judgment-cancel();                // gesture abandoned → revert to saved, no persist
 }
 
 export global Prefs {

@@ -21,6 +21,7 @@ import { EditableCell } from "../components/editable_cell.slint";
 import { JudgmentField } from "../components/judgment_field.slint";
 import { ZoneBar } from "../components/zone_bar.slint";
 import { VerdictBar } from "../components/verdict_badge.slint";
+import { GrowthChart } from "../components/growth_chart.slint";
 
 // The faithful em-dash slot, in one place (mirrors `viewmodel::form::EMPTY_SLOT`). A gap, never `0`.
 global FormConst {
@@ -183,26 +184,6 @@ component CalcRow inherits HorizontalLayout {
     }
 }
 
-// A calm, fact-stating placeholder region (§1 chart, §4 zone bar) on constant geometry. No fake
-// chart, no fake zones — the real visuals are 2.8 / 2.6.
-component PlaceholderRegion inherits Rectangle {
-    in property <string> caption;
-    in property <length> region-height: Tokens.space-48 * 2;
-    height: root.region-height;
-    background: Tokens.surface-alt;
-    border-width: Tokens.border;
-    border-color: Tokens.separator;
-    border-radius: Tokens.radius;
-    // The placeholder calms further in contemplation (the regime-emphasis token swap; colour-only).
-    opacity: 0.4 + 0.6 * Tokens.regime-emphasis;
-    Text {
-        text: root.caption;
-        color: Tokens.text-low;
-        font-size: Tokens.font-caption;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
 
 export component StudyScreen inherits Rectangle {
     in property <FormHeader> header: Studies.form-header;
@@ -222,6 +203,9 @@ export component StudyScreen inherits Rectangle {
         Flickable {
         vertical-stretch: 1;
         viewport-height: content.preferred-height;
+        // While the §1 judgment endpoint is held, yield the scroll so the vertical drag is not stolen
+        // by the form's flick (Story 2.8). The flag flips on the chart handle's pointer down/up.
+        interactive: !Studies.judgment-dragging;
 
         content := VerticalLayout {
             alignment: start;
@@ -233,7 +217,10 @@ export component StudyScreen inherits Rectangle {
                 alignment: start;
                 ActionButton {
                     label: @tr("‹ Retour aux études");
-                    clicked => { Studies.study-open = false; }
+                    clicked => {
+                        Studies.study-open = false;
+                        Studies.judgment-dragging = false; // clear any stuck drag flag (review P5)
+                    }
                 }
             }
 
@@ -468,7 +455,7 @@ export component StudyScreen inherits Rectangle {
                 open: Studies.folds[0];
                 toggled(v) => { Studies.toggle-fold(0, v); }
 
-                PlaceholderRegion { caption: @tr("Graphique disponible prochainement"); }
+                GrowthChart { }
 
                 // Historical CAGRs — now the engine's (Story 2.6), em-dash when unknown (never 0).
                 HorizontalLayout {

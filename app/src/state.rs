@@ -685,7 +685,11 @@ impl JournalState {
 /// key (the caller surfaces a neutral notice; never a panic). A `None` value clears the field —
 /// **never `0`**. The `forecast_low_option` selector has its own rail ([`JournalState::
 /// set_forecast_low_option`]) — it is not routed here.
-fn apply_judgment_field(judgment: &mut Judgment, field: &str, value: Option<Money>) -> bool {
+pub(crate) fn apply_judgment_field(
+    judgment: &mut Judgment,
+    field: &str,
+    value: Option<Money>,
+) -> bool {
     match field {
         "sales_growth" => judgment.projected_sales_growth_pct = value,
         "eps_growth" => judgment.projected_eps_growth_pct = value,

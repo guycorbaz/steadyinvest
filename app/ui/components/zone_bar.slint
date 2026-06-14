@@ -21,6 +21,12 @@ component ZoneSegment inherits Rectangle {
     in property <bool> hatched;
     in property <string> label;
     background: root.hue.with-alpha(root.fill-alpha);
+    // Story 2.8 (AC5): the live recolor eases smoothly (never a flash) when a drag shifts the
+    // confidence/saturation; disabled under OS reduced-motion (the easing collapses to 0 ms).
+    animate background {
+        duration: Studies.reduced-motion ? 0ms : 150ms;
+        easing: ease-in-out;
+    }
     border-width: 1.5px;
     border-color: root.hue;
     // Provisional hatch: a neutral texture marking "not full confidence" (never an extra hue).

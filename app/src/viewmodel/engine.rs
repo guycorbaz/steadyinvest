@@ -28,8 +28,8 @@ use steadyinvest_contract::{
     Cell, ForecastLowOption as CForecastLowOption, Judgment, Money, Study,
 };
 use steadyinvest_core::normalize::{
-    self, CanonicalFinancials, Finding, NormalizeError, PlausibilityKey, RawAmount, RawFinancials,
-    RawYear, YearUsability,
+    self, CanonicalFinancials, CanonicalYear, Finding, NormalizeError, PlausibilityKey, RawAmount,
+    RawFinancials, RawYear, YearUsability,
 };
 use steadyinvest_core::rounding::DisplayField;
 use steadyinvest_core::ssg::{
@@ -204,6 +204,11 @@ pub struct StudyFrame {
     /// `fiscal_period_misalignment`) on `CanonicalFinancials`; the calc-time findings live on
     /// `snapshot.outputs().findings`.
     pub plausibility: Vec<Finding>,
+    /// The canonical per-year series (sorted ascending), cloned off the canonical BEFORE the
+    /// `StudySnapshot::new` move — the §1 growth chart (Story 2.8) plots these (`sales` / `eps` /
+    /// `high_price`), and they descend from the SAME single `normalize` as the verdict and the
+    /// warnings (no second pass, no frame drift).
+    pub series: Vec<CanonicalYear>,
 }
 
 /// The single construction path: `Study` → raw → `normalize` → `StudySnapshot::new` once, returning
@@ -216,11 +221,15 @@ pub fn build_frame(study: &Study) -> Result<StudyFrame, NormalizeError> {
     let judgment = to_judgment_inputs(&study.judgment);
     let observations = to_observations(study);
     let gates = to_input_gates(study, &canonical);
-    // Clone the input-shape findings off the canonical before the `new(...)` move consumes it.
+    // Clone the input-shape findings AND the per-year series off the canonical before the `new(...)`
+    // move consumes it — both descend from this one `normalize`, so the chart, the warnings and the
+    // verdict share a single coherent frame (no second normalize, the Story-2.7 invariant).
     let plausibility = canonical.findings.clone();
+    let series = canonical.years.clone();
     Ok(StudyFrame {
         snapshot: StudySnapshot::new(&canonical, &judgment, &observations, gates),
         plausibility,
+        series,
     })
 }
 

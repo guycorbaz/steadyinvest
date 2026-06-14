@@ -107,7 +107,7 @@ mod tests {
     fn ui_tr_strings_are_neutral_no_banned_verb() {
         let files = slint_files();
         assert!(
-            files.len() >= 18,
+            files.len() >= 19,
             "posture gate found only {} .slint files — scan broken?",
             files.len()
         );
@@ -126,9 +126,11 @@ mod tests {
         // stops finding literals (a broken extractor) fails loudly.
         // Story 2.6 added the judgment-input labels, the §4 forecast-low selector chips, the zone-bar
         // empty-state + present-price captions, the verdict-bar facts, and the traceability surface
-        // labels — so the scanned population grew again. Keep the floor strict against a broken scan.
+        // labels. Story 2.8 adds the §1 growth-chart component (its empty-state caption + the draggable
+        // line's accessible label) — so the scanned population grew again. Keep the floor strict
+        // against a broken scan.
         assert!(
-            total >= 130,
+            total >= 140,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

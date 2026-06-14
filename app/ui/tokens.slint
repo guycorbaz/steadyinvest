@@ -90,6 +90,16 @@ export global Tokens {
     // second non-colour channel that keeps it unmistakably distinct from the hollow `◦` stale dot.
     // Quasi-static (a metric), so a theme/regime swap never re-lays-out the marker.
     out property <length> marker-outline: 1.5px;
+    // ── §1 growth-chart strokes (Story 2.8). INK-SCALE ONLY: the §1 chart spends NO judgment hue
+    //    (those are geofenced to the §4 zone bar); the three series separate by VALUE (text-high/mid/
+    //    low lightness) + stroke weight + dash, never colour. All metric/typo (quasi-static), so a
+    //    theme/regime swap never re-lays-out the chart. ──
+    out property <length> chart-stroke: 2px;            // historical series stroke (EPS, Sales)
+    out property <length> chart-stroke-thin: 1px;       // the price line + the guide fan + axis grid
+    out property <length> chart-judgment-stroke: 2.5px; // the draggable judgment line — thicker, grabbable
+    out property <length> chart-grip: 18px;             // the grip-handle box (~±8–10px hit target, UX-DR10)
+    out property <float> chart-fan-opacity: 0.22;       // the 5–30% guide fan murmurs under the curves
+    out property <length> chart-pad: 8px;               // inset between the chart box and its section
     // Shell geometry.
     out property <length> nav-rail-width: 200px;
     out property <length> top-bar-height: 48px;
