@@ -17,9 +17,10 @@
 //! method-identity string (a `&str` constant, NOT a computed verdict — no engine call).
 
 use steadyinvest_contract::{Cell, Freshness, Provenance, Source, Study, Timestamp, YearData};
+use steadyinvest_core::normalize::PlausibilityKey;
 use steadyinvest_core::ssg::SsgOutputs;
 
-use crate::viewmodel::engine;
+use crate::viewmodel::engine::{self, PlausibilityWarnings};
 use crate::viewmodel::entry::{
     self, FIELD_DIVIDEND, FIELD_EPS, FIELD_HIGH, FIELD_LOW, MGMT_FIELDS,
 };
@@ -60,6 +61,7 @@ fn editable_cell(
     field: &str,
     year_index: usize,
     format: NumberFormat,
+    warning: Option<PlausibilityKey>,
 ) -> GridCellState {
     let value = match cell.and_then(|c| c.value.as_ref()) {
         // `Money: Display` is the canonical decimal string; `format_amount` only re-groups it.
@@ -77,6 +79,11 @@ fn editable_cell(
         editable: true,
         year_index: year_index as i32,
         field: field.into(),
+        // Story 2.7 — the plausibility warning channel: a neutral attention glyph + the stable key
+        // (its human-readable fact is revealed on focus). Independent of the review/coverage/stale
+        // channels (AC3): a cell can be both `✓ validated` AND warned.
+        warning: warning.is_some(),
+        warning_key: warning.map(|k| k.as_str()).unwrap_or("").into(),
     }
 }
 
@@ -98,7 +105,12 @@ pub fn header(study: &Study) -> FormHeader {
 /// snapshot `outputs` (the last-5-usable window), each `None`/out-of-window cell the em-dash, never
 /// `0`. When `outputs` is `None` (a study that does not yet compute) every computed cell is the
 /// faithful em-dash, exactly as in 2.3.
-pub fn pe_rows(study: &Study, format: NumberFormat, outputs: Option<&SsgOutputs>) -> Vec<PeRow> {
+pub fn pe_rows(
+    study: &Study,
+    format: NumberFormat,
+    outputs: Option<&SsgOutputs>,
+    warnings: &PlausibilityWarnings,
+) -> Vec<PeRow> {
     materialized_years(study)
         .iter()
         .enumerate()
@@ -112,17 +124,24 @@ pub fn pe_rows(study: &Study, format: NumberFormat, outputs: Option<&SsgOutputs>
                     EMPTY_SLOT.to_string(),
                 ],
             };
+            let warn = |field: &str| warnings.cell_key(i, field);
             PeRow {
                 year: y.year.to_string().into(),
                 year_index: i as i32,
-                a: editable_cell(Some(&y.high_price), FIELD_HIGH, i, format), // A · Haut (direct)
-                b: editable_cell(Some(&y.low_price), FIELD_LOW, i, format),   // B · Bas (direct)
-                c: editable_cell(Some(&y.eps), FIELD_EPS, i, format),         // C · BPA (direct)
-                d: d.into(),                                                  // D · PER haut = A÷C
-                e: e.into(),                                                  // E · PER bas = B÷C
-                f: editable_cell(y.dividend_per_share.as_ref(), FIELD_DIVIDEND, i, format), // F
-                g: g.into(),                                                  // G · F÷C×100
-                h: h.into(),                                                  // H · F÷B×100
+                a: editable_cell(Some(&y.high_price), FIELD_HIGH, i, format, warn(FIELD_HIGH)), // A · Haut
+                b: editable_cell(Some(&y.low_price), FIELD_LOW, i, format, warn(FIELD_LOW)), // B · Bas
+                c: editable_cell(Some(&y.eps), FIELD_EPS, i, format, warn(FIELD_EPS)), // C · BPA
+                d: d.into(), // D · PER haut = A÷C
+                e: e.into(), // E · PER bas = B÷C
+                f: editable_cell(
+                    y.dividend_per_share.as_ref(),
+                    FIELD_DIVIDEND,
+                    i,
+                    format,
+                    warn(FIELD_DIVIDEND),
+                ), // F
+                g: g.into(), // G · F÷C×100
+                h: h.into(), // H · F÷B×100
             }
         })
         .collect()
@@ -132,7 +151,11 @@ pub fn pe_rows(study: &Study, format: NumberFormat, outputs: Option<&SsgOutputs>
 /// book value per share** (the screen pairs each with its own `@tr()` label by index). Each row is
 /// one editable cell per materialized year. The displayed PTP/ROE ratios are computed (2.6) and stay
 /// caption-only in the screen — not here.
-pub fn mgmt_rows(study: &Study, format: NumberFormat) -> Vec<MgmtRow> {
+pub fn mgmt_rows(
+    study: &Study,
+    format: NumberFormat,
+    warnings: &PlausibilityWarnings,
+) -> Vec<MgmtRow> {
     let years = materialized_years(study);
     MGMT_FIELDS
         .iter()
@@ -140,7 +163,15 @@ pub fn mgmt_rows(study: &Study, format: NumberFormat) -> Vec<MgmtRow> {
             let cells: Vec<GridCellState> = years
                 .iter()
                 .enumerate()
-                .map(|(i, y)| editable_cell(entry::get_cell(y, field).as_ref(), field, i, format))
+                .map(|(i, y)| {
+                    editable_cell(
+                        entry::get_cell(y, field).as_ref(),
+                        field,
+                        i,
+                        format,
+                        warnings.cell_key(i, field),
+                    )
+                })
                 .collect();
             MgmtRow {
                 cells: slint::ModelRc::new(slint::VecModel::from(cells)),
@@ -245,7 +276,12 @@ mod tests {
 
     #[test]
     fn a_fresh_study_materializes_the_window_as_editable_to_fill_rows_never_zero() {
-        let rows = pe_rows(&study(vec![]), NumberFormat::Comma, None);
+        let rows = pe_rows(
+            &study(vec![]),
+            NumberFormat::Comma,
+            None,
+            &PlausibilityWarnings::default(),
+        );
         assert_eq!(
             rows.len(),
             entry::YEAR_WINDOW,
@@ -285,7 +321,12 @@ mod tests {
             pre_tax_profit: None,
             book_value_per_share: None,
         };
-        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma, None);
+        let rows = pe_rows(
+            &study(vec![year]),
+            NumberFormat::Comma,
+            None,
+            &PlausibilityWarnings::default(),
+        );
         let r = &rows[0];
         assert_eq!(
             r.a.value, "120,5",
@@ -320,7 +361,12 @@ mod tests {
             pre_tax_profit: None,
             book_value_per_share: None,
         };
-        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma, None);
+        let rows = pe_rows(
+            &study(vec![year]),
+            NumberFormat::Comma,
+            None,
+            &PlausibilityWarnings::default(),
+        );
         assert_eq!(rows[0].a.review, "validated", "✓ crosses as a string");
         assert_eq!(rows[0].b.review, "none", "an unreviewed cell is none");
         assert_eq!(
@@ -341,7 +387,12 @@ mod tests {
             pre_tax_profit: None,
             book_value_per_share: None,
         };
-        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma, None);
+        let rows = pe_rows(
+            &study(vec![year]),
+            NumberFormat::Comma,
+            None,
+            &PlausibilityWarnings::default(),
+        );
         assert_eq!(rows[0].f.value, "", "no dividend cell ⇒ empty gap, never 0");
         assert_eq!(rows[0].f.coverage, "to-fill");
         assert_eq!(rows[0].f.source, "", "a gap reveals no source");
@@ -349,7 +400,11 @@ mod tests {
 
     #[test]
     fn mgmt_rows_are_three_editable_input_rows_one_cell_per_year() {
-        let rows = mgmt_rows(&study(vec![]), NumberFormat::Point);
+        let rows = mgmt_rows(
+            &study(vec![]),
+            NumberFormat::Point,
+            &PlausibilityWarnings::default(),
+        );
         assert_eq!(rows.len(), 3, "sales · pre-tax · book");
         for row in &rows {
             assert_eq!(slint::Model::row_count(&row.cells), entry::YEAR_WINDOW);
@@ -366,5 +421,50 @@ mod tests {
         let headers = year_headers(&study(vec![]));
         let headers: Vec<&str> = headers.iter().map(|s| s.as_str()).collect();
         assert_eq!(headers, vec!["2021", "2022", "2023", "2024", "2025"]);
+    }
+
+    // ── Story 2.7 — the plausibility warning channel on the cell state ──
+
+    #[test]
+    fn a_warned_validated_cell_carries_both_channels_independently() {
+        use crate::viewmodel::engine::{PlausibilityWarning, WarningAnchor};
+        // AC3: the plausibility channel is independent of the tri-state review channel — a single
+        // cell can be both `✓ validated` (soft-locked) AND carry a warning glyph, with no collision.
+        let validated = Cell {
+            review: Review::Validated,
+            ..cell(Some("120.5"))
+        };
+        let year = YearData {
+            year: 2025,
+            sales: cell(Some("1")),
+            eps: cell(Some("1")),
+            high_price: validated,
+            low_price: cell(Some("1")),
+            dividend_per_share: None,
+            pre_tax_profit: None,
+            book_value_per_share: None,
+        };
+        let warnings = PlausibilityWarnings {
+            items: vec![PlausibilityWarning {
+                key: PlausibilityKey::SplitSeriesBreak,
+                anchor: WarningAnchor::Cell {
+                    year_index: 0,
+                    field: FIELD_HIGH,
+                },
+            }],
+        };
+        let rows = pe_rows(&study(vec![year]), NumberFormat::Comma, None, &warnings);
+        assert_eq!(
+            rows[0].a.review, "validated",
+            "the sign-off channel is intact"
+        );
+        assert!(
+            rows[0].a.warning,
+            "the same cell independently carries the warning glyph"
+        );
+        assert_eq!(rows[0].a.warning_key, "split_series_break");
+        // A cell with no finding stays silent on the warning channel (AC6).
+        assert!(!rows[0].b.warning);
+        assert_eq!(rows[0].b.warning_key, "");
     }
 }

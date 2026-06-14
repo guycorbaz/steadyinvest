@@ -14,7 +14,7 @@
 // geometry — the cell never resizes between display and edit (UX-DR6). All colours/sizes read Tokens.
 
 import { Tokens } from "../tokens.slint";
-import { Studies, GridCellState } from "../state.slint";
+import { Studies, GridCellState, Warnings } from "../state.slint";
 import { TrustMarker } from "trust_markers.slint";
 
 export component EditableCell inherits Rectangle {
@@ -90,6 +90,19 @@ export component EditableCell inherits Rectangle {
         x: Tokens.space-4;
         y: (parent.height - self.height) / 2;
     }
+    // Story 2.7 — the plausibility warning glyph (△). Anchored at the TOP edge, just trailing of the
+    // leading trust-marker box and clear of the right-centred coverage/stale markers (AC3: a corner
+    // distinct from the review marker AND the coverage glyph, no collision). Neutral ink, never a hue;
+    // a static glyph (no animation → reduced-motion-safe by construction, AC5). Its human-readable
+    // fact is revealed on focus via `Studies.active-warning` (the source-on-demand mirror).
+    Text {
+        visible: root.state.warning;
+        text: Tokens.warn-glyph;
+        color: Tokens.gap-ink;
+        font-size: Tokens.font-caption;
+        x: Tokens.font-body + Tokens.space-8 + Tokens.space-4;
+        y: 0;
+    }
     TouchArea {
         mouse-cursor: text;
         clicked => {
@@ -125,6 +138,8 @@ export component EditableCell inherits Rectangle {
                 Studies.active-year = root.state.year-index;
                 Studies.active-field = root.state.field;
                 Studies.active-source = root.state.source;
+                // Reveal the plausibility fact on focus (keyboard-reachable, NFR-U2) — "" when none.
+                Studies.active-warning = Warnings.text(root.state.warning-key);
                 self.select-all(); // typing replaces the value (spreadsheet behaviour)
             } else {
                 root.commit(); // commit on focus-out (covers Tab-away and arrow/Enter moves)

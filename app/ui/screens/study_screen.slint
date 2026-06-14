@@ -13,7 +13,7 @@
 // formula captions (`A÷C`, …) are static display text, not computed.
 
 import { Tokens } from "../tokens.slint";
-import { Studies, FormHeader, PeRow, MgmtRow } from "../state.slint";
+import { Studies, FormHeader, PeRow, MgmtRow, Warnings } from "../state.slint";
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
@@ -266,6 +266,14 @@ export component StudyScreen inherits Rectangle {
                 spacing: Tokens.space-16;
                 Text {
                     text: Studies.active-source != "" ? @tr("Source : {}", Studies.active-source) : "";
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+                // Story 2.7 — the focused cell's plausibility fact, revealed on demand (mirrors the
+                // source caption). Keyboard-reachable (NFR-U2), no animation (AC5). "" hides it.
+                Text {
+                    text: Studies.active-warning != "" ? @tr("Signalement : {}", Studies.active-warning) : "";
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
@@ -672,6 +680,16 @@ export component StudyScreen inherits Rectangle {
                         field-key: "dividend";
                         value: Studies.judgment.dividend;
                     }
+                }
+
+                // Story 2.7 — a study-level plausibility finding (low_price_above_current, year-less)
+                // anchors here near the forecast-low surface, not a §2/§3 cell. Neutral fact-stating
+                // text, silent by default (AC6). "" key → hidden.
+                if Studies.section4-warning-key != "": Text {
+                    text: @tr("Signalement : {}", Warnings.text(Studies.section4-warning-key));
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
                 }
 
                 // ── The §4 zone bar (Story 2.6) — the first saturated-colour spend ──

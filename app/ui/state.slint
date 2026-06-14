@@ -47,6 +47,11 @@ export struct GridCellState {
     editable: bool,       // true for a raw input cell; false for a computed/derived slot
     year-index: int,      // row address (0-based, into the materialized year window)
     field: string,        // column address: "a"|"b"|"c"|"f" (§3) | "sales"|"pretax"|"book" (§2)
+    // ── Story 2.7 — the plausibility warning channel (FR10 surfacing). A neutral, non-colour
+    //    attention glyph (△) distinct from the coverage/stale/review markers; its human-readable
+    //    fact is revealed on focus (via `Studies.active-warning`). Silent by default (AC6).
+    warning: bool,        // an input-shape / calc-time plausibility finding anchors at this cell
+    warning-key: string,  // the PlausibilityKey wire key ("" when none) → `Warnings.text(...)`
 }
 
 // One year row of the §3 A–H P/E table. A/B/C/F are editable raw-input cells (Story 2.4); D/E/G/H are
@@ -155,6 +160,12 @@ export struct ZoneBarState {
 // full"). Neutral facts — never a buy/sell command.
 export struct VerdictState {
     state: string,         // "full" | "provisional" | "withheld" | "" (no study)
+    // ── Story 2.7 (AC1) — the FR8 low-confidence reason, carried ON the verdict surface (badge +
+    //    sticky bar) so it travels with the verdict wherever it renders. `low-confidence` is true
+    //    iff fewer than five usable years exist (never for a Full verdict); `confidence-label` is the
+    //    fact-stating reason text ("" when not low-confidence → silent, AC6). Neutral ink, no colour.
+    low-confidence: bool,
+    confidence-label: string,
     present-price: string,
     projected-return: string,
     appreciation: string,
@@ -162,6 +173,22 @@ export struct VerdictState {
     present-zone: string,  // "buy" | "neutral" | "sell" | ""
     provenance-date: string,
     open-gates: [string],
+}
+
+// ── Story 2.7 — neutral plausibility microcopy (FR10 + FR13). One fact-only French string per
+//    PlausibilityKey, resolved from the stable wire key. Kept as `@tr()` literals here so the
+//    `ui_tr_strings_are_neutral_no_banned_verb` posture gate scans them (AC4). "" for an unknown/
+//    empty key — the channel is silent by default.
+export global Warnings {
+    public pure function text(key: string) -> string {
+        return key == "split_series_break" ? @tr("Rupture de série détectée")
+            : key == "currency_mismatch" ? @tr("Devise incohérente")
+            : key == "fiscal_period_misalignment" ? @tr("Période fiscale non alignée")
+            : key == "out_of_bounds_ratio" ? @tr("Valeur hors de la plage attendue")
+            : key == "negative_or_zero_denominator" ? @tr("Dénominateur nul ou négatif")
+            : key == "low_price_above_current" ? @tr("Prix bas supérieur au prix actuel")
+            : "";
+    }
 }
 
 // The traceability surface for a chosen result (AC 7): the inputs it descends from (+ provenance),
@@ -205,6 +232,13 @@ export global Studies {
     // The focused cell's source, revealed on demand (a section caption shows it) — "" hides it. A
     // gap reveals nothing (only a present cell carries a source). NOT an always-on per-cell badge.
     in-out property <string> active-source;
+    // ── Story 2.7 — the focused cell's plausibility fact, revealed on demand (mirrors active-source).
+    //    The already-resolved human-readable warning text ("" hides it); set on focus from the cell's
+    //    `warning-key` via `Warnings.text(...)`. Keyboard-reachable (NFR-U2), no animation (AC5).
+    in-out property <string> active-warning;
+    // A study-level (§4 / judgment-area) plausibility finding's wire key — `low_price_above_current`
+    // (year-less), anchored near the forecast-low surface, not a §2/§3 cell. "" = none (silent, AC6).
+    in-out property <string> section4-warning-key;
     // The active reading regime, "entry" | "contemplation" (mirrored from app-config per study).
     in-out property <string> regime;
     // Per-section open/closed flags §1..§5 (index 0 = §1). Mirrored from app-config per study; the

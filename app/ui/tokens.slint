@@ -81,6 +81,11 @@ export global Tokens {
     out property <string> gap-glyph: "▦";
     out property <string> stale-dot: "◦";
     out property <float> stale-opacity: 0.6;
+    // The Story-2.7 plausibility attention glyph — a neutral outline triangle, a DELIBERATELY distinct
+    // shape from the gap "▦", stale "◦", review "?"/"✓" and the "n/a" marker (the confusability gate).
+    // Drawn in neutral ink (`gap-ink`/`text-high`), NEVER a judgment hue. Quasi-static, so a theme/
+    // regime swap never re-lays-out the glyph.
+    out property <string> warn-glyph: "△";
     // Trust-marker outline weight (Story 2.5): the heavier ring on the `?` to-review glyph — the
     // second non-colour channel that keeps it unmistakably distinct from the hollow `◦` stale dot.
     // Quasi-static (a metric), so a theme/regime swap never re-lays-out the marker.

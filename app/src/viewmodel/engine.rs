@@ -28,17 +28,19 @@ use steadyinvest_contract::{
     Cell, ForecastLowOption as CForecastLowOption, Judgment, Money, Study,
 };
 use steadyinvest_core::normalize::{
-    self, CanonicalFinancials, NormalizeError, RawAmount, RawFinancials, RawYear, YearUsability,
+    self, CanonicalFinancials, Finding, NormalizeError, PlausibilityKey, RawAmount, RawFinancials,
+    RawYear, YearUsability,
 };
 use steadyinvest_core::rounding::DisplayField;
 use steadyinvest_core::ssg::{
-    ForecastLowOption, JudgmentInputs, QuarterlyObservations, SsgOutputs, Trend, UpsideDownside,
-    Zone,
+    CalcFinding, ForecastLowOption, JudgmentInputs, QuarterlyObservations, SsgOutputs, Trend,
+    UpsideDownside, Zone,
 };
 use steadyinvest_core::verdict::{
     GateState, GatedInput, InputGates, OpenGate, StudySnapshot, Verdict, YearGates,
 };
 
+use crate::viewmodel::entry;
 use crate::viewmodel::form::EMPTY_SLOT;
 use crate::viewmodel::format::{format_scaled, NumberFormat};
 use crate::{
@@ -191,20 +193,153 @@ pub fn to_input_gates(study: &Study, canonical: &CanonicalFinancials) -> InputGa
     InputGates::new(year_gates, judgment_gates)
 }
 
-/// The single construction path: `Study` → raw → `normalize` → `StudySnapshot::new` once. A
-/// [`NormalizeError`] surfaces to the caller (a neutral notice in `state.rs`) — never `unwrap`/`.ok()`.
-pub fn build_snapshot(study: &Study) -> Result<StudySnapshot, NormalizeError> {
+/// One coherent engine frame (Story 2.7): the immutable [`StudySnapshot`] **and** the input-shape
+/// plausibility findings that `normalize` raised for the SAME mapped inputs. [`StudySnapshot::new`]
+/// consumes `&CanonicalFinancials` without re-exposing its `.findings`, so they are cloned off the
+/// canonical BEFORE the move — the verdict and the cell warnings then descend from one normalize, no
+/// drift (the coherence invariant Story 2.6 established for outputs/verdict, extended to findings).
+pub struct StudyFrame {
+    pub snapshot: StudySnapshot,
+    /// The input-shape findings (`split_series_break` / `currency_mismatch` /
+    /// `fiscal_period_misalignment`) on `CanonicalFinancials`; the calc-time findings live on
+    /// `snapshot.outputs().findings`.
+    pub plausibility: Vec<Finding>,
+}
+
+/// The single construction path: `Study` → raw → `normalize` → `StudySnapshot::new` once, returning
+/// the snapshot together with the input-shape findings (Story 2.7). A [`NormalizeError`] surfaces to
+/// the caller (a neutral notice in `state.rs`) — never `unwrap`/`.ok()`. **Normalizes exactly once**
+/// (no second pass that could drift from the frame that produced the verdict).
+pub fn build_frame(study: &Study) -> Result<StudyFrame, NormalizeError> {
     let raw = to_raw_financials(study);
     let canonical = normalize::normalize(raw)?;
     let judgment = to_judgment_inputs(&study.judgment);
     let observations = to_observations(study);
     let gates = to_input_gates(study, &canonical);
-    Ok(StudySnapshot::new(
-        &canonical,
-        &judgment,
-        &observations,
-        gates,
-    ))
+    // Clone the input-shape findings off the canonical before the `new(...)` move consumes it.
+    let plausibility = canonical.findings.clone();
+    Ok(StudyFrame {
+        snapshot: StudySnapshot::new(&canonical, &judgment, &observations, gates),
+        plausibility,
+    })
+}
+
+/// The snapshot-only view of [`build_frame`] — the Story-2.6 call shape, preserved for the callers
+/// that need only the snapshot (`state::snapshot_for`, the adapter tests). Normalizes once.
+pub fn build_snapshot(study: &Study) -> Result<StudySnapshot, NormalizeError> {
+    build_frame(study).map(|frame| frame.snapshot)
+}
+
+// ── Plausibility surfacing (Story 2.7) — map the engine's two finding sets to UI cell addresses ──
+
+/// Where a plausibility finding attaches on the faithful form. A `Cell` finding draws the inline §2/§3
+/// warning glyph; a `Year` finding marks the whole year suspect (fiscal metadata has no value cell);
+/// a `Study` finding (the study-level `low_price_above_current`, `year == None`) anchors near §4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarningAnchor {
+    Cell {
+        year_index: usize,
+        field: &'static str,
+    },
+    Year {
+        year_index: usize,
+    },
+    Study,
+}
+
+/// One resolved plausibility warning: its key (for the glyph/microcopy) and where it anchors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlausibilityWarning {
+    pub key: PlausibilityKey,
+    pub anchor: WarningAnchor,
+}
+
+/// The per-study set of resolved warnings, the thin-UI view the form adapter reads (Story 2.7, AC2).
+/// Detection stays in `core` (Cardinal Rule); this only maps already-computed findings to addresses.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlausibilityWarnings {
+    pub items: Vec<PlausibilityWarning>,
+}
+
+impl PlausibilityWarnings {
+    /// The first warning key anchored at the `(year_index, field)` §2/§3 cell, if any (the form
+    /// adapter's per-cell lookup). Deterministic: findings are stored in the engine's pass order.
+    pub fn cell_key(&self, year_index: usize, field: &str) -> Option<PlausibilityKey> {
+        self.items.iter().find_map(|w| match w.anchor {
+            WarningAnchor::Cell {
+                year_index: y,
+                field: f,
+            } if y == year_index && f == field => Some(w.key),
+            _ => None,
+        })
+    }
+
+    /// The first study-level (§4 / judgment-area) warning key, if any.
+    pub fn study_key(&self) -> Option<PlausibilityKey> {
+        self.items
+            .iter()
+            .find_map(|w| matches!(w.anchor, WarningAnchor::Study).then_some(w.key))
+    }
+}
+
+/// A finding `context` field name → its §2/§3 editable cell field, when one exists. Covers the raw
+/// input contexts AND the derived-ratio fallback (a `*_pe`/`*_pct`/`ttm_eps` finding anchors at the
+/// input cell that contributes it) — the Story-2.7 interpretation table. `None` for fiscal metadata
+/// (`period_months` / `fiscal_year_end_month`) and the study-level `current_pe` / `forecast_low`.
+fn context_to_field(context: &str) -> Option<&'static str> {
+    match context {
+        // §3 P/E inputs (raw + the derived ratios that descend from them).
+        "high_price" | "high_pe" => Some(entry::FIELD_HIGH), // "a"
+        "low_price" | "low_pe" => Some(entry::FIELD_LOW),    // "b"
+        "eps" | "ttm_eps" => Some(entry::FIELD_EPS),         // "c"
+        "dividend" | "dividend_per_share" => Some(entry::FIELD_DIVIDEND), // "f"
+        // §2 management inputs (raw + the derived ratios).
+        "sales" => Some(entry::FIELD_SALES),
+        "net_profit" | "pre_tax_profit" | "pretax" | "ptp_pct" => Some(entry::FIELD_PRETAX),
+        "book_value_per_share" | "roe_pct" => Some(entry::FIELD_BOOK),
+        _ => None,
+    }
+}
+
+/// Resolve one finding `(year, context)` to a [`WarningAnchor`] against the materialized-year window.
+/// A `None` year (study-level: `forecast_low`, `current_pe`) → [`WarningAnchor::Study`]; a year outside
+/// the window → `Study` too (anchored, never dropped, never mis-attached to the wrong value cell); a
+/// known input/derived context → the [`WarningAnchor::Cell`]; otherwise the whole [`WarningAnchor::Year`].
+fn resolve_anchor(year: Option<i32>, context: &str, year_numbers: &[i32]) -> WarningAnchor {
+    let Some(y) = year else {
+        return WarningAnchor::Study;
+    };
+    let Some(year_index) = year_numbers.iter().position(|n| *n == y) else {
+        return WarningAnchor::Study;
+    };
+    match context_to_field(context) {
+        Some(field) => WarningAnchor::Cell { year_index, field },
+        None => WarningAnchor::Year { year_index },
+    }
+}
+
+/// Map the two engine finding sets (input-shape `Finding`s off the frame + calc-time `CalcFinding`s
+/// off the outputs) to per-cell / per-year / study-level warnings against the materialized-year
+/// window (Story 2.7, AC2/AC3/AC7). Pure mapping — no detection, no thresholds.
+pub fn plausibility(
+    input_findings: &[Finding],
+    calc_findings: &[CalcFinding],
+    year_numbers: &[i32],
+) -> PlausibilityWarnings {
+    let mut items = Vec::with_capacity(input_findings.len() + calc_findings.len());
+    for f in input_findings {
+        items.push(PlausibilityWarning {
+            key: f.key,
+            anchor: resolve_anchor(Some(f.year), f.context, year_numbers),
+        });
+    }
+    for f in calc_findings {
+        items.push(PlausibilityWarning {
+            key: f.key,
+            anchor: resolve_anchor(f.year, f.context, year_numbers),
+        });
+    }
+    PlausibilityWarnings { items }
 }
 
 // ── core → Slint formatting (already-grouped strings + layout floats; no `Decimal` into `.slint`) ──
@@ -424,8 +559,16 @@ pub fn verdict_badge(
         .iter()
         .map(|g| open_gate_label(g).into())
         .collect();
+    // The FR8 low-confidence reason, carried as explicit text ON the verdict surface (AC1) — it shows
+    // whenever fewer than five usable years exist, independent of the Provisional/Withheld split, and
+    // is empty (silent) otherwise (AC6). `Verdict::low_confidence()` is `false` for a `Full` verdict
+    // by construction, so a Full verdict never carries the label.
+    let low_confidence = verdict.low_confidence();
+    let confidence_label = if low_confidence { CONFIDENCE_LOW } else { "" };
     VerdictState {
         state: verdict_state(verdict).into(),
+        low_confidence,
+        confidence_label: confidence_label.into(),
         present_price: fmt(
             money_dec(study.judgment.current_price),
             DisplayField::Price,
@@ -667,6 +810,9 @@ pub const PROVENANCE_MANUAL: &str = "manuel";
 pub const TRACE_TITLE_VERDICT: &str = "Conclusion — entrées, provenance & règle";
 pub const TRACE_RULE_PREFIX: &str = "Méthode";
 pub const TRACE_VERDICT_FORMULA: &str = "zones §4 + ratio H/B + appréciation §5";
+/// The FR8 low-confidence reason carried onto the verdict surface (Story 2.7, AC1). Fact-stating,
+/// no imperative — scanned by the posture gate alongside the other engine labels.
+pub const CONFIDENCE_LOW: &str = "Historique insuffisant — confiance réduite";
 
 /// Every Story-2.6 Rust-side user-facing label, exposed so the crate-local posture gate (FR13)
 /// scans them for banned verbs alongside the `@tr()` literals and `state::USER_FACING_MESSAGES`.
@@ -693,6 +839,7 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TRACE_TITLE_VERDICT,
     TRACE_RULE_PREFIX,
     TRACE_VERDICT_FORMULA,
+    CONFIDENCE_LOW,
 ];
 
 #[cfg(test)]
@@ -1029,6 +1176,192 @@ mod tests {
         assert!(
             trace.open_gates.row_count() >= 1,
             "a degraded verdict surfaces its open gate(s)"
+        );
+    }
+
+    // ── Story 2.7 — plausibility surfacing + the low-confidence label ──
+
+    /// AC2/AC3: each `(year, context)` maps to its expected §2/§3 cell address against the
+    /// materialized-year window; the derived-ratio fallback lands on the contributing input cell.
+    #[test]
+    fn plausibility_maps_findings_to_their_cell_addresses() {
+        let years = vec![2021, 2022, 2023, 2024, 2025];
+        let input = vec![
+            Finding {
+                key: PlausibilityKey::SplitSeriesBreak,
+                year: 2023,
+                context: "eps",
+            },
+            Finding {
+                key: PlausibilityKey::CurrencyMismatch,
+                year: 2021,
+                context: "high_price",
+            },
+        ];
+        let calc = vec![
+            CalcFinding {
+                key: PlausibilityKey::NegativeOrZeroDenominator,
+                year: Some(2022),
+                context: "sales",
+            },
+            // a derived ratio (ptp_pct) anchors at the §2 pre-tax-profit input that contributes it.
+            CalcFinding {
+                key: PlausibilityKey::OutOfBoundsRatio,
+                year: Some(2025),
+                context: "ptp_pct",
+            },
+            // a §3 low-P/E bound anchors at the low-price input cell.
+            CalcFinding {
+                key: PlausibilityKey::OutOfBoundsRatio,
+                year: Some(2024),
+                context: "low_pe",
+            },
+        ];
+        let w = plausibility(&input, &calc, &years);
+        assert_eq!(
+            w.cell_key(2, entry::FIELD_EPS),
+            Some(PlausibilityKey::SplitSeriesBreak)
+        );
+        assert_eq!(
+            w.cell_key(0, entry::FIELD_HIGH),
+            Some(PlausibilityKey::CurrencyMismatch)
+        );
+        assert_eq!(
+            w.cell_key(1, entry::FIELD_SALES),
+            Some(PlausibilityKey::NegativeOrZeroDenominator)
+        );
+        assert_eq!(
+            w.cell_key(4, entry::FIELD_PRETAX),
+            Some(PlausibilityKey::OutOfBoundsRatio)
+        );
+        assert_eq!(
+            w.cell_key(3, entry::FIELD_LOW),
+            Some(PlausibilityKey::OutOfBoundsRatio)
+        );
+        // A cell with no finding is silent (AC6).
+        assert_eq!(w.cell_key(3, entry::FIELD_HIGH), None);
+    }
+
+    /// Anchor policy: fiscal-metadata and study-level / out-of-window findings are RETAINED (never
+    /// dropped) and resolve to their year-level / §4 anchors — never mis-attached to a value cell.
+    #[test]
+    fn non_cell_findings_anchor_at_year_or_study_never_dropped_or_misattached() {
+        let years = vec![2023, 2024, 2025];
+        let input = vec![
+            // fiscal metadata → the whole year is suspect, not one value cell.
+            Finding {
+                key: PlausibilityKey::FiscalPeriodMisalignment,
+                year: 2024,
+                context: "fiscal_year_end_month",
+            },
+            // a finding on a year OUTSIDE the window → §4/study fallback (anchored, not dropped).
+            Finding {
+                key: PlausibilityKey::CurrencyMismatch,
+                year: 1999,
+                context: "sales",
+            },
+        ];
+        let calc = vec![
+            CalcFinding {
+                key: PlausibilityKey::LowPriceAboveCurrent,
+                year: None,
+                context: "forecast_low",
+            },
+            CalcFinding {
+                key: PlausibilityKey::OutOfBoundsRatio,
+                year: None,
+                context: "current_pe",
+            },
+        ];
+        let w = plausibility(&input, &calc, &years);
+        assert_eq!(w.items.len(), 4, "every finding is retained, none dropped");
+        assert!(
+            w.study_key().is_some(),
+            "a study-level warning surfaces near §4, not at a cell"
+        );
+        assert!(
+            w.items
+                .iter()
+                .any(|it| it.key == PlausibilityKey::LowPriceAboveCurrent
+                    && it.anchor == WarningAnchor::Study),
+            "the year-less forecast_low finding anchors at the §4/study surface"
+        );
+        // The fiscal metadata anchors at the year (index 1), never at a value cell.
+        assert!(w
+            .items
+            .iter()
+            .any(|it| it.anchor == WarningAnchor::Year { year_index: 1 }));
+        // forecast_low + current_pe (year None) + the out-of-window currency finding → §4/study.
+        assert_eq!(
+            w.items
+                .iter()
+                .filter(|it| it.anchor == WarningAnchor::Study)
+                .count(),
+            3
+        );
+        // No fiscal/study finding leaks into a §2/§3 cell address.
+        assert!(w.cell_key(1, entry::FIELD_SALES).is_none());
+    }
+
+    /// AC1/AC6: a study with fewer than five usable years carries the explicit low-confidence label on
+    /// the verdict; a clean ≥5-year study does not (and Full never does, by construction).
+    #[test]
+    fn low_confidence_label_only_under_five_usable_years() {
+        let fmt = NumberFormat::Comma;
+
+        let thin = study_with(
+            (2023..=2025).map(|y| year(y, validated_cell)).collect(),
+            full_judgment(),
+        );
+        let snap = build_snapshot(&thin).unwrap();
+        let badge = verdict_badge(&thin, &snap, fmt);
+        assert!(badge.low_confidence, "3 usable years is low-confidence");
+        assert_eq!(
+            badge.confidence_label.as_str(),
+            CONFIDENCE_LOW,
+            "the FR8 reason is carried as explicit text"
+        );
+
+        let full = study_with(
+            (2021..=2025).map(|y| year(y, validated_cell)).collect(),
+            full_judgment(),
+        );
+        let snap = build_snapshot(&full).unwrap();
+        let badge = verdict_badge(&full, &snap, fmt);
+        assert!(
+            !badge.low_confidence,
+            "five usable years is full confidence"
+        );
+        assert_eq!(
+            badge.confidence_label.as_str(),
+            "",
+            "no low-confidence reason is shown when history suffices (AC6)"
+        );
+    }
+
+    /// AC6/AC7: a clean ≥5-year validated study raises no plausibility findings (the channels are
+    /// silent) and is not low-confidence — both finding sets read off ONE coherent frame.
+    #[test]
+    fn a_clean_five_year_study_is_silent_and_full_confidence() {
+        let study = study_with(
+            (2021..=2025).map(|y| year(y, validated_cell)).collect(),
+            full_judgment(),
+        );
+        let frame = build_frame(&study).expect("normalizes");
+        let years: Vec<i32> = (2021..=2025).collect();
+        let w = plausibility(
+            &frame.plausibility,
+            &frame.snapshot.outputs().findings,
+            &years,
+        );
+        assert!(
+            w.items.is_empty(),
+            "a clean study raises no plausibility findings (AC6), got {:?}",
+            w.items
+        );
+        assert!(
+            !frame.snapshot.verdict().low_confidence(),
+            "five usable years is not low-confidence"
         );
     }
 }

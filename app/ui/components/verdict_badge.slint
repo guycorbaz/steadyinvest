@@ -43,6 +43,9 @@ export component ZoneLabel inherits Text {
 // The verdict badge — a small state chip carried by texture + label.
 export component VerdictBadge inherits Rectangle {
     in property <VerdictState> v;
+    // When this badge stands alone it carries the low-confidence label itself (AC1); the sticky bar
+    // sets this false and renders the label in its own roomier fact row (so it shows once, not twice).
+    in property <bool> show-confidence-label: true;
 
     property <string> caption: root.v.state == "full" ? @tr("Confiance pleine")
         : root.v.state == "provisional" ? @tr("Confiance provisoire")
@@ -91,6 +94,15 @@ export component VerdictBadge inherits Rectangle {
         if root.v.state == "full" && root.v.present-zone != "": ZoneLabel {
             zone: root.v.present-zone;
         }
+        // Story 2.7 (AC1) — the FR8 low-confidence reason, attached to the verdict surface as neutral
+        // ink (never colour). Shows whenever low-confidence, independent of Provisional/Withheld.
+        if root.show-confidence-label && root.v.low-confidence: Text {
+            text: root.v.confidence-label;
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+            overflow: elide;
+        }
     }
 }
 
@@ -111,6 +123,18 @@ export component VerdictBar inherits Rectangle {
         VerdictBadge {
             v: root.v;
             width: 180px;
+            // The bar renders the low-confidence label itself (below) — keep the embedded badge from
+            // drawing it too, so the reason shows once, in the roomier fact row.
+            show-confidence-label: false;
+        }
+
+        // Story 2.7 (AC1) — the low-confidence reason on the sticky bar (travels with the verdict).
+        // Neutral ink; shown whenever low-confidence, independent of the Provisional/Withheld split.
+        if root.v.low-confidence: Text {
+            text: root.v.confidence-label;
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
         }
 
         // The surfaced facts — present price · projected return · appreciation · capital-at-risk

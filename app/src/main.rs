@@ -123,35 +123,58 @@ fn push_form(ui: &MainWindow, study: &steadyinvest_contract::Study, format: Numb
     studies.set_year_headers(ModelRc::new(VecModel::from(viewmodel::form::year_headers(
         study,
     ))));
-    studies.set_mgmt_rows(ModelRc::new(VecModel::from(viewmodel::form::mgmt_rows(
-        study, format,
-    ))));
     // The current judgment-input values (restored on reopen; "" for a cleared input, never "0").
     studies.set_judgment(engine::judgment_fields(study, format));
 
-    match engine::build_snapshot(study) {
-        Ok(snapshot) => {
+    let years = viewmodel::form::materialized_year_numbers(study);
+    match engine::build_frame(study) {
+        Ok(frame) => {
+            let snapshot = &frame.snapshot;
             let outputs = snapshot.outputs();
+            // Story 2.7 — map BOTH finding sets (input-shape off the frame + calc-time off the
+            // outputs) to per-cell / study-level warnings against the SAME materialized window the
+            // grids render, so the verdict and the warnings descend from one coherent frame.
+            let warnings = engine::plausibility(&frame.plausibility, &outputs.findings, &years);
             studies.set_pe_rows(ModelRc::new(VecModel::from(viewmodel::form::pe_rows(
                 study,
                 format,
                 Some(outputs),
+                &warnings,
+            ))));
+            studies.set_mgmt_rows(ModelRc::new(VecModel::from(viewmodel::form::mgmt_rows(
+                study, format, &warnings,
             ))));
             studies.set_growth_computed(engine::growth_computed(outputs, format));
-            let years = viewmodel::form::materialized_year_numbers(study);
             studies.set_mgmt_computed(engine::mgmt_computed(outputs, &years, format));
             studies.set_pe_computed(engine::pe_computed(outputs, format));
             studies.set_risk_computed(engine::risk_computed(outputs, format));
             studies.set_return_computed(engine::return_computed(outputs, format));
-            studies.set_zone_bar(engine::zone_bar(study, &snapshot, format));
-            studies.set_verdict(engine::verdict_badge(study, &snapshot, format));
+            studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
+            studies.set_verdict(engine::verdict_badge(study, snapshot, format));
+            // The study-level (§4) warning key — `low_price_above_current`, anchored near forecast-low.
+            studies.set_section4_warning_key(
+                warnings
+                    .study_key()
+                    .map(|k| k.as_str())
+                    .unwrap_or("")
+                    .into(),
+            );
         }
         Err(error) => {
             // Degraded-but-safe: the form still renders, every computed slot the em-dash; the verdict
-            // and zone bar fall back to their calm empty states.
+            // and zone bar fall back to their calm empty states; no warning channel speaks.
             tracing::warn!("snapshot normalize failed: {error}");
+            let no_warnings = engine::PlausibilityWarnings::default();
             studies.set_pe_rows(ModelRc::new(VecModel::from(viewmodel::form::pe_rows(
-                study, format, None,
+                study,
+                format,
+                None,
+                &no_warnings,
+            ))));
+            studies.set_mgmt_rows(ModelRc::new(VecModel::from(viewmodel::form::mgmt_rows(
+                study,
+                format,
+                &no_warnings,
             ))));
             studies.set_growth_computed(GrowthComputed::default());
             studies.set_mgmt_computed(MgmtComputed::default());
@@ -160,6 +183,7 @@ fn push_form(ui: &MainWindow, study: &steadyinvest_contract::Study, format: Numb
             studies.set_return_computed(ReturnComputed::default());
             studies.set_zone_bar(ZoneBarState::default());
             studies.set_verdict(VerdictState::default());
+            studies.set_section4_warning_key(SharedString::new());
             studies.set_notice(state::MSG_NORMALIZE_FAILED.into());
         }
     }
@@ -304,6 +328,7 @@ fn main() -> Result<(), slint::PlatformError> {
             studies.set_active_year(-1);
             studies.set_active_field(SharedString::new());
             studies.set_active_source(SharedString::new());
+            studies.set_active_warning(SharedString::new());
             let view_state = config
                 .borrow()
                 .study_view_state

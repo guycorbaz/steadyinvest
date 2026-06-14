@@ -40,6 +40,20 @@
 
 generated: 2026-06-09
 last_updated: 2026-06-14
+# 2026-06-14: story 2-7 created (low-confidence & plausibility surfacing) → ready-for-dev. app-only SURFACING
+#             story (no detection — engine already computes both): (a) carries an explicit "Historique insuffisant
+#             — confiance réduite" label onto the verdict badge + sticky bar from verdict.low_confidence() (<5
+#             usable years, FR8); (b) renders each plausibility Finding/CalcFinding as a NEUTRAL inline glyph (△)
+#             at the affected §2/§3 cell, distinct from coverage/stale/review markers AND from quality flags (FR10),
+#             detail revealed on focus (NFR-U2). Key dev trap flagged: build_snapshot currently DROPS the input-
+#             shape findings on CanonicalFinancials (consumed by StudySnapshot::new, not re-exposed) → must return
+#             a StudyFrame{snapshot, plausibility} cloning canonical.findings BEFORE the move, NO second normalize
+#             (single-frame coherence). Calc-time findings + low_confidence already on snapshot.outputs(). Concrete
+#             context→cell map pinned (high_price→a, low_price→b, eps→c, dividend→f; sales/pretax/book §2); fiscal &
+#             study-level (forecast_low, year=None) findings anchored, not dropped. NO new dependency (Cargo.lock +
+#             deny.toml UNCHANGED); core/contract/persistence CONSUMED, NOT modified; colour budget honoured (glyph
+#             + label neutral ink, never a hue). Scope-guarded: NO chart/drag (2.8), NO quality-flag rendering
+#             (different concept), NO undo/redo (2.9), NO provider/reconcile (Epic 3). Interp → new GitHub issue.
 # 2026-06-13: story 2-6 created (numeric judgment inputs, verdict & zone bar — integrity-gated) → ready-for-dev.
 #             THE engine-wiring story: first time `app` calls `core`. Adds exact-VALUE numeric judgment entry
 #             (sales/EPS growth %, est. high/low EPS, judged high/low P/E, 4-option low-price selector +
@@ -125,7 +139,7 @@ development_status:
   2-4-manual-data-entry-provenance-coverage: done
   2-5-tri-state-validation-soft-lock: done
   2-6-numeric-judgment-inputs-verdict-zone-bar: done
-  2-7-low-confidence-plausibility-surfacing: backlog
+  2-7-low-confidence-plausibility-surfacing: done
   2-8-interactive-growth-chart-draggable-judgment-line: backlog
   2-9-undo-redo-scenario-compare: backlog
   2-10-decision-rationale-capture: backlog
