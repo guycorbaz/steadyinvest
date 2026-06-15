@@ -132,7 +132,11 @@ mod tests {
     #[test]
     fn status_filter_active_hides_archived() {
         let rows = curate(&sample(), "", SortKey::Date, false, StatusFilter::Active);
-        assert_eq!(tickers(&rows), vec!["NESN", "ROG"], "archived ABBN is hidden");
+        assert_eq!(
+            tickers(&rows),
+            vec!["NESN", "ROG"],
+            "archived ABBN is hidden"
+        );
     }
 
     #[test]
@@ -146,7 +150,11 @@ mod tests {
     #[test]
     fn search_is_case_insensitive_ticker_substring() {
         let rows = curate(&sample(), "bb", SortKey::Date, false, StatusFilter::All);
-        assert_eq!(tickers(&rows), vec!["ABBN"], "substring match, case-insensitive");
+        assert_eq!(
+            tickers(&rows),
+            vec!["ABBN"],
+            "substring match, case-insensitive"
+        );
         let none = curate(&sample(), "ZZZ", SortKey::Date, false, StatusFilter::All);
         assert!(none.is_empty(), "no match → empty");
     }
@@ -154,11 +162,23 @@ mod tests {
     #[test]
     fn sort_by_date_and_ticker_both_directions() {
         let by_date = curate(&sample(), "", SortKey::Date, false, StatusFilter::All);
-        assert_eq!(tickers(&by_date), vec!["NESN", "ABBN", "ROG"], "date ascending");
+        assert_eq!(
+            tickers(&by_date),
+            vec!["NESN", "ABBN", "ROG"],
+            "date ascending"
+        );
         let by_date_desc = curate(&sample(), "", SortKey::Date, true, StatusFilter::All);
-        assert_eq!(tickers(&by_date_desc), vec!["ROG", "ABBN", "NESN"], "date descending");
+        assert_eq!(
+            tickers(&by_date_desc),
+            vec!["ROG", "ABBN", "NESN"],
+            "date descending"
+        );
         let by_ticker = curate(&sample(), "", SortKey::Ticker, false, StatusFilter::All);
-        assert_eq!(tickers(&by_ticker), vec!["ABBN", "NESN", "ROG"], "ticker A→Z");
+        assert_eq!(
+            tickers(&by_ticker),
+            vec!["ABBN", "NESN", "ROG"],
+            "ticker A→Z"
+        );
     }
 
     #[test]
@@ -170,7 +190,11 @@ mod tests {
         ];
         let rows = curate(&same, "", SortKey::Date, false, StatusFilter::All);
         let ids: Vec<String> = rows.iter().map(|r| r.id.to_string()).collect();
-        assert_eq!(ids[0], Uuid::from_u128(1).to_string(), "lower id first (deterministic)");
+        assert_eq!(
+            ids[0],
+            Uuid::from_u128(1).to_string(),
+            "lower id first (deterministic)"
+        );
     }
 
     #[test]

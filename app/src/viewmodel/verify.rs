@@ -25,17 +25,50 @@ use crate::viewmodel::entry::tofill_cell;
 /// (the golden-gate drift test enforces the copy). `(id, json)`. `include_str!` paths are checked at
 /// build time; no runtime filesystem, no new dependency.
 const GOLDEN_FIXTURES: &[(&str, &str)] = &[
-    ("g01-worked-example", include_str!("../../assets/golden/g01-worked-example.json")),
-    ("g02-split-grossup-pipeline", include_str!("../../assets/golden/g02-split-grossup-pipeline.json")),
-    ("g03-candidate-avg-low-price-option", include_str!("../../assets/golden/g03-candidate-avg-low-price-option.json")),
-    ("g04-price-on-buy-top-boundary", include_str!("../../assets/golden/g04-price-on-buy-top-boundary.json")),
-    ("g05-ud-exactly-at-target", include_str!("../../assets/golden/g05-ud-exactly-at-target.json")),
-    ("g06-relative-value-at-ceiling", include_str!("../../assets/golden/g06-relative-value-at-ceiling.json")),
-    ("g07-sell-zone-flag-cluster", include_str!("../../assets/golden/g07-sell-zone-flag-cluster.json")),
-    ("g08-low-confidence-four-years", include_str!("../../assets/golden/g08-low-confidence-four-years.json")),
-    ("g09-unknown-rich-degenerate", include_str!("../../assets/golden/g09-unknown-rich-degenerate.json")),
-    ("g10-recent-severe-low-option", include_str!("../../assets/golden/g10-recent-severe-low-option.json")),
-    ("g11-dividend-supported-option", include_str!("../../assets/golden/g11-dividend-supported-option.json")),
+    (
+        "g01-worked-example",
+        include_str!("../../assets/golden/g01-worked-example.json"),
+    ),
+    (
+        "g02-split-grossup-pipeline",
+        include_str!("../../assets/golden/g02-split-grossup-pipeline.json"),
+    ),
+    (
+        "g03-candidate-avg-low-price-option",
+        include_str!("../../assets/golden/g03-candidate-avg-low-price-option.json"),
+    ),
+    (
+        "g04-price-on-buy-top-boundary",
+        include_str!("../../assets/golden/g04-price-on-buy-top-boundary.json"),
+    ),
+    (
+        "g05-ud-exactly-at-target",
+        include_str!("../../assets/golden/g05-ud-exactly-at-target.json"),
+    ),
+    (
+        "g06-relative-value-at-ceiling",
+        include_str!("../../assets/golden/g06-relative-value-at-ceiling.json"),
+    ),
+    (
+        "g07-sell-zone-flag-cluster",
+        include_str!("../../assets/golden/g07-sell-zone-flag-cluster.json"),
+    ),
+    (
+        "g08-low-confidence-four-years",
+        include_str!("../../assets/golden/g08-low-confidence-four-years.json"),
+    ),
+    (
+        "g09-unknown-rich-degenerate",
+        include_str!("../../assets/golden/g09-unknown-rich-degenerate.json"),
+    ),
+    (
+        "g10-recent-severe-low-option",
+        include_str!("../../assets/golden/g10-recent-severe-low-option.json"),
+    ),
+    (
+        "g11-dividend-supported-option",
+        include_str!("../../assets/golden/g11-dividend-supported-option.json"),
+    ),
 ];
 
 /// The fixture chosen as the read-only demonstration study (FR62) — the tutorial-style worked example.
@@ -187,8 +220,11 @@ fn year_to_data(y: &FixtureYear, provenance: &Provenance) -> YearData {
         Some(a) => present_cell(Money::from(a.value), provenance),
         None => tofill_cell(provenance.clone()),
     };
-    let optional =
-        |amount: &Option<FixtureAmount>| amount.as_ref().map(|a| present_cell(Money::from(a.value), provenance));
+    let optional = |amount: &Option<FixtureAmount>| {
+        amount
+            .as_ref()
+            .map(|a| present_cell(Money::from(a.value), provenance))
+    };
     YearData {
         year: y.year,
         sales: required(&y.sales),
@@ -241,14 +277,20 @@ mod tests {
         );
         assert_eq!(report.passed_count, 11);
         assert_eq!(report.method_version, METHOD_VERSION);
-        assert!(!report.method_fingerprint.is_empty(), "the method fingerprint is surfaced");
+        assert!(
+            !report.method_fingerprint.is_empty(),
+            "the method fingerprint is surfaced"
+        );
     }
 
     #[test]
     fn demo_study_converts_the_worked_example_faithfully_and_yields_a_frame() {
         let study = demo_study().expect("the bundled demo fixture converts");
         assert_eq!(study.security_ticker, "DÉMO");
-        assert!(!study.years.is_empty(), "the demo carries the worked-example years");
+        assert!(
+            !study.years.is_empty(),
+            "the demo carries the worked-example years"
+        );
         // Every load-bearing cell that the fixture filled is Present (not a gap) — the conversion is
         // faithful; and the engine builds a coherent frame from it (the demo renders a real verdict).
         let present_eps = study
@@ -258,6 +300,9 @@ mod tests {
             .count();
         assert!(present_eps > 0, "the worked example has filled EPS years");
         let snapshot = crate::viewmodel::engine::build_snapshot(&study);
-        assert!(snapshot.is_ok(), "the demo study normalizes + computes a coherent frame");
+        assert!(
+            snapshot.is_ok(),
+            "the demo study normalizes + computes a coherent frame"
+        );
     }
 }

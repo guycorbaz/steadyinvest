@@ -908,9 +908,7 @@ impl JournalState {
     /// rationale is the user's own words and is therefore **never** posture-scanned — only the
     /// system-supplied label/placeholder are (FR13).
     pub fn set_rationale(&mut self, study_id: Uuid, text: Option<String>) -> Result<(), String> {
-        let normalized = text
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty());
+        let normalized = text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         self.mutate_study(study_id, move |study| {
             study.rationale = normalized;
         })
@@ -1253,7 +1251,11 @@ mod tests {
             .set_rationale(id, Some("Marge en hausse, dette faible".to_string()))
             .unwrap();
         assert_eq!(
-            open_state(&path).get_study(id).unwrap().rationale.as_deref(),
+            open_state(&path)
+                .get_study(id)
+                .unwrap()
+                .rationale
+                .as_deref(),
             Some("Marge en hausse, dette faible"),
             "a saved rationale survives reopen (FR49)"
         );
@@ -1329,7 +1331,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut state = undo_state(&dir, 0x6B, "2026-06-14T09:00:00Z");
         let id = state.create_study("NESN", "CHF").unwrap();
-        state.set_rationale(id, Some("inchangé".to_string())).unwrap();
+        state
+            .set_rationale(id, Some("inchangé".to_string()))
+            .unwrap();
         state.reset_undo();
         // Re-saving the identical rationale (after trimming) is a no-op → no undo step recorded (P4).
         state
@@ -1362,7 +1366,10 @@ mod tests {
             added.year, 2026,
             "the appended year is latest+1 (newest at the bottom, SSG order)"
         );
-        assert_eq!(added.eps.value, None, "the appended year is a to-fill gap, never 0");
+        assert_eq!(
+            added.eps.value, None,
+            "the appended year is a to-fill gap, never 0"
+        );
         assert_eq!(added.eps.coverage, Coverage::ToFill);
     }
 
@@ -2106,7 +2113,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("journal.db");
         let (mut state, id) = study_with_entry(&path);
-        assert!(status_in_list(&state, id).is_some(), "present before delete");
+        assert!(
+            status_in_list(&state, id).is_some(),
+            "present before delete"
+        );
 
         state.delete_study(id).expect("delete");
         assert!(
@@ -2127,7 +2137,10 @@ mod tests {
 
         let mut state = open_state(&path);
         state.read_only = true;
-        assert_eq!(state.archive_study(id), Err(MSG_READ_ONLY_WRITE.to_string()));
+        assert_eq!(
+            state.archive_study(id),
+            Err(MSG_READ_ONLY_WRITE.to_string())
+        );
         assert_eq!(state.delete_study(id), Err(MSG_READ_ONLY_WRITE.to_string()));
         // Nothing changed on disk: the study is still present and active.
         assert_eq!(

@@ -464,7 +464,9 @@ fn set_study_status_archives_and_unarchives_reversibly() {
     // The blob payload is untouched — archive is a pure status change, fully reversible.
     assert_eq!(journal.get_study(s.id).expect("read").expect("exists"), s);
 
-    journal.set_study_status(s.id, "active").expect("un-archive");
+    journal
+        .set_study_status(s.id, "active")
+        .expect("un-archive");
     assert_eq!(
         status_of(&journal, s.id).as_deref(),
         Some("active"),
@@ -489,7 +491,11 @@ fn delete_study_removes_the_row_and_its_judgments_leaving_others_intact() {
     {
         let conn = Connection::open(&path).expect("raw conn");
         conn.pragma_update(None, "foreign_keys", true).unwrap();
-        for (jrow, study_id) in [(0x100u128, keep.id), (0x101, drop_it.id), (0x102, drop_it.id)] {
+        for (jrow, study_id) in [
+            (0x100u128, keep.id),
+            (0x101, drop_it.id),
+            (0x102, drop_it.id),
+        ] {
             conn.execute(
                 "INSERT INTO judgments (id, study_id, created_at, schema_version, payload)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -507,7 +513,9 @@ fn delete_study_removes_the_row_and_its_judgments_leaving_others_intact() {
 
     let mut journal = Journal::open(&path).expect("reopen writable");
     let v_before = journal.logical_version().expect("version reads");
-    journal.delete_study(drop_it.id).expect("delete is FK-safe with judgments present");
+    journal
+        .delete_study(drop_it.id)
+        .expect("delete is FK-safe with judgments present");
 
     // The deleted study is gone; the kept study remains and is intact.
     let ids: Vec<Uuid> = journal
@@ -516,7 +524,11 @@ fn delete_study_removes_the_row_and_its_judgments_leaving_others_intact() {
         .into_iter()
         .map(|s| s.id)
         .collect();
-    assert_eq!(ids, vec![keep.id], "only the kept study remains in the list");
+    assert_eq!(
+        ids,
+        vec![keep.id],
+        "only the kept study remains in the list"
+    );
     assert!(
         journal.get_study(drop_it.id).expect("read").is_none(),
         "the deleted study is unreadable"
@@ -540,7 +552,10 @@ fn delete_study_removes_the_row_and_its_judgments_leaving_others_intact() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(dropped, 0, "the deleted study's judgments rows are purged (FR55, no orphan)");
+    assert_eq!(
+        dropped, 0,
+        "the deleted study's judgments rows are purged (FR55, no orphan)"
+    );
     let kept: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",
