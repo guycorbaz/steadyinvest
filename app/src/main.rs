@@ -38,6 +38,7 @@ mod config;
 mod labels;
 mod posture;
 mod regime;
+mod seam_check;
 mod state;
 mod theme;
 mod viewmodel;
