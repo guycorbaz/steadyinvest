@@ -1,0 +1,6 @@
+[
+  { "date": "2023-03-15", "open": "19", "high": "22", "low": "18", "close": "20", "adjusted_close": "20", "volume": 1000 },
+  { "date": "2023-09-20", "open": "21", "high": "25", "low": "19", "close": "24", "adjusted_close": "24", "volume": 1200 },
+  { "date": "2024-02-10", "open": "27", "high": "30", "low": "26", "close": "28", "adjusted_close": "28", "volume": 1500 },
+  { "date": "2024-11-05", "open": "29", "high": "33", "low": "21", "close": "31", "adjusted_close": "31", "volume": 1700 }
+]

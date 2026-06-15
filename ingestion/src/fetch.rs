@@ -1,0 +1,176 @@
+//! Fetch orchestration: a provider → `core::normalize` → [`FetchedFinancials`].
+//!
+//! Enum dispatch ([`Provider`]) keeps `MarketDataProvider`'s `async fn` usable without `dyn`
+//! (native async-fn-in-trait is not dyn-compatible) and without an `async-trait` dependency.
+
+use sha2::{Digest, Sha256};
+use steadyinvest_core::normalize::{normalize, CanonicalFinancials, RawFinancials};
+
+use crate::error::{IngestionError, ProviderError};
+use crate::provider::MarketDataProvider;
+
+/// The normalized result of a fetch plus the **dependency digest** (#21): a SHA-256 over the
+/// provider + ticker + the value-normalized canonical decimals. The app stamps this into each
+/// provider cell's `provenance.hash_of_dependencies`, replacing the manual `"manual"` placeholder.
+#[derive(Debug, Clone)]
+pub struct FetchedFinancials {
+    pub canonical: CanonicalFinancials,
+    pub digest: String,
+}
+
+/// Concrete providers, dispatched by enum so the `async fn` trait needs no `dyn`/`async-trait`.
+pub enum Provider {
+    Eodhd(crate::adapters::eodhd::EodhdProvider),
+    /// A deterministic, offline test double (kept in the public API so `app` tests can use it).
+    Fake(FakeProvider),
+}
+
+impl MarketDataProvider for Provider {
+    async fn fetch_fundamentals(
+        &self,
+        ticker: &str,
+        api_key: Option<&str>,
+    ) -> Result<RawFinancials, ProviderError> {
+        match self {
+            Provider::Eodhd(p) => p.fetch_fundamentals(ticker, api_key).await,
+            Provider::Fake(p) => p.fetch_fundamentals(ticker, api_key).await,
+        }
+    }
+}
+
+/// Fetch a ticker, normalize it through `core`, and compute the dependency digest.
+pub async fn fetch_canonical(
+    provider: &Provider,
+    ticker: &str,
+    api_key: Option<&str>,
+) -> Result<FetchedFinancials, IngestionError> {
+    let raw = provider.fetch_fundamentals(ticker, api_key).await?;
+    let canonical = normalize(raw)?;
+    let digest = dependency_digest(ticker, &canonical);
+    Ok(FetchedFinancials { canonical, digest })
+}
+
+/// SHA-256 hex over `"eodhd:{ticker}"` + each canonical year's value-normalized decimals (so
+/// `"3.0"` and `"3"` hash identically — `Money`/`Decimal` value equality, not byte equality).
+pub fn dependency_digest(ticker: &str, canonical: &CanonicalFinancials) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"eodhd:");
+    hasher.update(ticker.as_bytes());
+    for year in &canonical.years {
+        hasher.update(year.year.to_le_bytes());
+        for field in [
+            year.sales,
+            year.eps,
+            year.high_price,
+            year.low_price,
+            year.dividend_per_share,
+            year.pre_tax_profit,
+            year.book_value_per_share,
+        ] {
+            match field {
+                Some(d) => {
+                    hasher.update([1u8]);
+                    hasher.update(d.normalize().to_string().as_bytes());
+                }
+                None => hasher.update([0u8]),
+            }
+        }
+    }
+    let bytes = hasher.finalize();
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
+}
+
+/// A canned, offline provider for tests (`app` and `ingestion`): returns a fixed `RawFinancials`
+/// or a fixed [`ProviderError`], ignoring the ticker/key.
+pub struct FakeProvider {
+    result: Result<RawFinancials, ProviderError>,
+}
+
+impl FakeProvider {
+    pub fn returning(result: Result<RawFinancials, ProviderError>) -> Self {
+        FakeProvider { result }
+    }
+}
+
+impl MarketDataProvider for FakeProvider {
+    async fn fetch_fundamentals(
+        &self,
+        _ticker: &str,
+        _api_key: Option<&str>,
+    ) -> Result<RawFinancials, ProviderError> {
+        self.result.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+    use steadyinvest_core::normalize::{RawAmount, RawYear};
+
+    fn raw(value: &str) -> RawFinancials {
+        let amt = |v: &str| {
+            Some(RawAmount {
+                value: Decimal::from_str_exact(v).unwrap(),
+                currency: "USD".into(),
+            })
+        };
+        RawFinancials {
+            native_currency: "USD".into(),
+            years: vec![RawYear {
+                sales: amt(value),
+                eps: amt("1"),
+                high_price: amt("20"),
+                low_price: amt("10"),
+                ..RawYear::empty(2024)
+            }],
+            splits: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_canonical_normalizes_and_digests_a_fake_provider() {
+        let provider = Provider::Fake(FakeProvider::returning(Ok(raw("100"))));
+        let fetched = fetch_canonical(&provider, "AAPL.US", Some("key"))
+            .await
+            .expect("fake fetch normalizes");
+        assert_eq!(fetched.canonical.years.len(), 1);
+        assert_eq!(fetched.canonical.years[0].sales, Some(Decimal::from(100)));
+        assert_eq!(fetched.digest.len(), 64, "sha-256 hex is 64 chars");
+    }
+
+    #[tokio::test]
+    async fn digest_is_value_normalized_not_byte_sensitive() {
+        // "100" vs "100.00" are the same value → identical digest.
+        let a = Provider::Fake(FakeProvider::returning(Ok(raw("100"))));
+        let b = Provider::Fake(FakeProvider::returning(Ok(raw("100.00"))));
+        let da = fetch_canonical(&a, "AAPL.US", Some("k"))
+            .await
+            .unwrap()
+            .digest;
+        let db = fetch_canonical(&b, "AAPL.US", Some("k"))
+            .await
+            .unwrap()
+            .digest;
+        assert_eq!(da, db);
+    }
+
+    #[tokio::test]
+    async fn provider_error_propagates_as_ingestion_error() {
+        let provider = Provider::Fake(FakeProvider::returning(Err(
+            ProviderError::InvalidOrAbsentKey,
+        )));
+        let err = fetch_canonical(&provider, "AAPL.US", None)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            IngestionError::Provider(ProviderError::InvalidOrAbsentKey)
+        ));
+    }
+}

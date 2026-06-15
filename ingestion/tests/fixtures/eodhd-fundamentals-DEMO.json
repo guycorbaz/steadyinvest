@@ -1,0 +1,49 @@
+{
+  "General": {
+    "Code": "DEMO",
+    "CurrencyCode": "USD"
+  },
+  "Financials": {
+    "Income_Statement": {
+      "yearly": {
+        "2023-12-31": {
+          "date": "2023-12-31",
+          "totalRevenue": "1000",
+          "incomeBeforeTax": "200",
+          "netIncome": "150"
+        },
+        "2024-12-31": {
+          "date": "2024-12-31",
+          "totalRevenue": "1100",
+          "incomeBeforeTax": "240",
+          "netIncome": "180"
+        }
+      }
+    },
+    "Balance_Sheet": {
+      "yearly": {
+        "2023-12-31": {
+          "date": "2023-12-31",
+          "totalStockholderEquity": "500",
+          "commonStockSharesOutstanding": "100"
+        },
+        "2024-12-31": {
+          "date": "2024-12-31",
+          "totalStockholderEquity": "560",
+          "commonStockSharesOutstanding": "100"
+        }
+      }
+    }
+  },
+  "Earnings": {
+    "Annual": {
+      "2023-12-31": { "date": "2023-12-31", "epsActual": "1.50" },
+      "2024-12-31": { "date": "2024-12-31", "epsActual": null }
+    }
+  },
+  "SplitsDividends": {
+    "Splits": {
+      "2024-06-01": "2.000000/1.000000"
+    }
+  }
+}

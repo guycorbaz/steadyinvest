@@ -448,6 +448,13 @@ export global Studies {
     //    clears it (Rust). The demo is never persisted and never appears as a dashboard row.
     callback load-demo();
     in-out property <bool> demo-active;
+
+    // ── Story 3.1 — provider auto-fetch (EODHD). `fetch-provider` runs the off-thread fetch for the
+    //    open study (Rust reads the ticker + the STEADYINVEST_EODHD_API_KEY env key); `fetching` drives
+    //    a neutral in-progress state (the button disables); the neutral result/cause lands in `notice`.
+    //    Reconciliation of existing manual data, staleness and the cause-classified banner are 3.4/3.3/3.5.
+    callback fetch-provider();
+    in-out property <bool> fetching;
 }
 
 // ── Story 2.13 — verify engine (FR9). Rust replays the bundled golden fixtures through

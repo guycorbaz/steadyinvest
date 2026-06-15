@@ -24,6 +24,7 @@ allow = [
     "NCSA",                           # University of Illinois/NCSA (libfuzzer-sys via ravif) — permissive, GPL-compatible
     "MPL-2.0",
     "CC0-1.0",
+    "CDLA-Permissive-2.0",            # Mozilla webpki cert bundle (webpki-roots/-root-certs) — Story 3.1 TLS; permissive data license, GPL-compatible
 ]
 
 [bans]

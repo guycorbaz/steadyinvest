@@ -35,6 +35,7 @@
 
 mod clock;
 mod config;
+mod fetch;
 mod labels;
 mod posture;
 mod regime;
@@ -260,6 +261,10 @@ fn parse_unlock_scope(kind: &str, arg: &str) -> Option<UnlockScope> {
 fn main() -> Result<(), slint::PlatformError> {
     // Minimal logging: tracing carries the events; a real subscriber (ADD15 rotating logs) is
     // deferred — see the Story 2.1 GitHub issue. Until then load warnings also go to stderr.
+    // Story 3.1 — install the pure-Rust `ring` crypto provider for rustls before any HTTPS fetch
+    // (reqwest uses `rustls-no-provider`). Idempotent; must run before the fetch worker is used.
+    steadyinvest_ingestion::install_crypto_provider();
+
     let config_path = config::default_path();
     if config_path.is_none() {
         eprintln!("steadyinvest: no OS config directory found; preferences are not persisted");
@@ -355,6 +360,113 @@ fn main() -> Result<(), slint::PlatformError> {
         if let Some(notice) = &startup_notice {
             ui.global::<Studies>().set_notice(notice.clone().into());
         }
+    }
+
+    // ── Story 3.1 — provider auto-fetch (EODHD), off the UI thread ──
+    // The worker thread owns the tokio runtime + network I/O; results return via the thread_local
+    // handler set below (which holds the `Rc` state and runs on the UI thread).
+    let fetch_tx = fetch::spawn_fetch_worker();
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let current_study = Rc::clone(&current_study);
+        let config = Rc::clone(&config);
+        fetch::set_outcome_handler(move |outcome| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            let studies = ui.global::<Studies>();
+            studies.set_fetching(false);
+            match outcome.result {
+                Ok(fetched) => {
+                    let applied = journal_state
+                        .borrow_mut()
+                        .apply_provider_fetch(outcome.study_id, &fetched);
+                    match applied {
+                        Ok(filled) => {
+                            studies.set_notice(
+                                state::MSG_PROVIDER_DONE
+                                    .replace("{n}", &filled.to_string())
+                                    .into(),
+                            );
+                            // Re-render the form + recompute if this study is still the open one.
+                            let still_open = current_study
+                                .borrow()
+                                .as_deref()
+                                .and_then(|s| Uuid::parse_str(s).ok())
+                                == Some(outcome.study_id);
+                            if still_open {
+                                if let Some(study) =
+                                    journal_state.borrow().get_study(outcome.study_id)
+                                {
+                                    let format = config.borrow().number_format;
+                                    push_form(&ui, &journal_state.borrow(), &study, format);
+                                }
+                            }
+                            refresh_studies(&ui, &journal_state.borrow());
+                        }
+                        Err(message) => studies.set_notice(message.into()),
+                    }
+                }
+                Err(error) => studies.set_notice(
+                    state::MSG_PROVIDER_FAILED
+                        .replace("{cause}", &error.to_string())
+                        .into(),
+                ),
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let current_study = Rc::clone(&current_study);
+        let fetch_tx = fetch_tx.clone();
+        ui.global::<Studies>().on_fetch_provider(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            // The open study (the demo keeps `current_study` None → no fetch on the demo).
+            let Some(study_id) = current_study
+                .borrow()
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+            else {
+                return;
+            };
+            let Some(ticker) = journal_state
+                .borrow()
+                .get_study(study_id)
+                .map(|s| s.security_ticker)
+            else {
+                return;
+            };
+            // Interim key source (Story 3.2 moves this to the OS keychain).
+            let api_key = std::env::var("STEADYINVEST_EODHD_API_KEY")
+                .ok()
+                .filter(|k| !k.trim().is_empty());
+            if api_key.is_none() {
+                studies.set_notice(state::MSG_PROVIDER_NO_KEY.into());
+                return;
+            }
+            studies.set_fetching(true);
+            studies.set_notice(state::MSG_PROVIDER_FETCHING.into());
+            if fetch_tx
+                .send(fetch::FetchRequest {
+                    study_id,
+                    ticker,
+                    api_key,
+                })
+                .is_err()
+            {
+                // The worker thread is gone (should never happen) — don't latch the in-progress
+                // state, which would disable the button for the rest of the session (review P1).
+                studies.set_fetching(false);
+                studies.set_notice(
+                    state::MSG_PROVIDER_FAILED
+                        .replace("{cause}", "le service de récupération est indisponible")
+                        .into(),
+                );
+            }
+        });
     }
 
     // Create-study intent: validate + persist via the injected sources, then refresh the list.

@@ -600,7 +600,7 @@ mod tests {
         // summary templates + the demo-unavailable notice.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            23,
+            27,
             "state.rs message inventory changed — register the new notice"
         );
     }

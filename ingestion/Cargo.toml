@@ -10,7 +10,18 @@ description = "Provider-agnostic data acquisition + normalization. The only crat
 
 [dependencies]
 steadyinvest-contract = { workspace = true }
+steadyinvest-core = { workspace = true }       # Story 3.1: ingestion calls core::normalize
+rust_decimal = { workspace = true }            # RawAmount/RawYear values are exact Decimal
 reqwest = { workspace = true }
+rustls = { workspace = true }                  # install the ring CryptoProvider (rustls-no-provider)
 tokio = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }              # parse provider JSON responses
+sha2 = { workspace = true }                    # provider dependency digest (provenance, #21)
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+steadyinvest-core = { workspace = true }       # name the raw/canonical types in integration tests
+rust_decimal = { workspace = true }
+serde_json = { workspace = true }

@@ -264,6 +264,14 @@ export component StudyScreen inherits Rectangle {
                     label: @tr("⇄ Comparer");
                     clicked => { Studies.open-compare(); }
                 }
+                // Story 3.1 — auto-fetch the open study's data from the provider (off-thread). Disabled
+                // while a fetch is in flight and on the read-only demo. The neutral result lands in the
+                // notice banner; provider cells arrive unvalidated (the verdict stays provisional).
+                ActionButton {
+                    label: Studies.fetching ? @tr("Récupération en cours…") : @tr("⤓ Récupérer (fournisseur)");
+                    enabled: !Studies.fetching && !Studies.demo-active;
+                    clicked => { Studies.fetch-provider(); }
+                }
             }
 
             // ── Story 2.13 — read-only demonstration banner (FR62): a neutral, fact-stating notice

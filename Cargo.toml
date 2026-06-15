@@ -33,8 +33,15 @@ rust_decimal = { version = "1.42", features = ["maths"] }     # exact decimal + 
 # rustls-native-certs, rustls-no-provider, webpki-roots, socks, stream, zstd, query). The pure-Rust,
 # no-cmake path for 3.1 = `rustls-no-provider` + install the `ring` CryptoProvider in code (avoids the
 # default aws-lc-rs/cmake), with `webpki-roots` (or `rustls-native-certs`) for roots. Activate then.
-reqwest = { version = "0.13", default-features = false, features = ["json"] }
+# Story 3.1 ACTIVATED the TLS backend (#5/B5): `rustls-no-provider` (rustls without a bundled crypto
+# provider — we install `ring` below, avoiding the default aws-lc-rs/cmake) + `webpki-roots` (bundled
+# Mozilla roots → no system cert store dependency, portable single binary).
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "webpki-roots"] }
 tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "macros"] }
+# Pure-Rust rustls + the `ring` crypto provider (no aws-lc-rs, no cmake). Must match reqwest 0.13's
+# rustls (0.23) so the process-default provider installed via `ingestion::install_crypto_provider()`
+# applies to reqwest's TLS. default-features off drops the aws-lc-rs default.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

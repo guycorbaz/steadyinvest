@@ -13,10 +13,12 @@
 
 use std::path::{Path, PathBuf};
 
+use rust_decimal::Decimal;
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Judgment, Money, Provenance, Review, Source, Study,
-    Timestamp,
+    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review, Source,
+    Study, Timestamp, YearData,
 };
+use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use steadyinvest_persistence::{Error as PersistError, Journal, StudySummary};
 use uuid::Uuid;
 
@@ -83,6 +85,13 @@ pub const MSG_VERIFY_PASSED: &str = "{n}/{t} études de référence réussies.";
 pub const MSG_VERIFY_DEVIATIONS: &str = "{n} écart(s) sur {t} études de référence.";
 /// The neutral notice when the demonstration study cannot be loaded (a packaging error, not a panic).
 pub const MSG_DEMO_UNAVAILABLE: &str = "L'étude de démonstration est indisponible.";
+/// Provider auto-fetch copy (Story 3.1) — fact-stating, posture-gated. `{n}` is the filled-cell count;
+/// `{cause}` is the provider's own neutral message (already banned-verb-gated in `ingestion::error`).
+pub const MSG_PROVIDER_NO_KEY: &str =
+    "Aucune clé fournisseur n'est configurée ; la récupération n'a pas eu lieu.";
+pub const MSG_PROVIDER_FETCHING: &str = "Récupération des données du fournisseur en cours.";
+pub const MSG_PROVIDER_DONE: &str = "{n} cellule(s) remplie(s) depuis le fournisseur.";
+pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause}";
 
 /// The confirmation prompt for an "unlock all" of `count` cells (a `{n}`-substitution of
 /// [`MSG_UNLOCK_CONFIRM`] so the scanned const and the runtime string stay one source).
@@ -159,6 +168,10 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_VERIFY_PASSED,
     MSG_VERIFY_DEVIATIONS,
     MSG_DEMO_UNAVAILABLE,
+    MSG_PROVIDER_NO_KEY,
+    MSG_PROVIDER_FETCHING,
+    MSG_PROVIDER_DONE,
+    MSG_PROVIDER_FAILED,
 ];
 
 /// The scope of a bulk "unlock all" (Story 2.5): the whole study, a single year column, or a single
@@ -585,6 +598,57 @@ impl JournalState {
             timestamp: self.clock.now(),
             hash_of_dependencies: "manual".to_string(),
         }
+    }
+
+    /// Provenance for a provider-fetched leaf (Story 3.1): `Source::Provider`, the injected clock's
+    /// timestamp, and the **real** dependency digest from the fetch (#21 — no longer the `"manual"`
+    /// sentinel). `logical_version` stays the app-side sentinel `1` (there is no per-cell counter;
+    /// the study-level bump on `put_study` records the act's timing).
+    fn provider_provenance(&self, digest: String) -> Provenance {
+        Provenance {
+            source: Source::Provider,
+            logical_version: 1,
+            timestamp: self.clock.now(),
+            hash_of_dependencies: digest,
+        }
+    }
+
+    /// Apply a provider fetch (Story 3.1): fill the study's **empty / to-fill** load-bearing cells
+    /// (and present optional cells) from the normalized provider data, stamped `Source::Provider`.
+    /// **Fill-gaps-only** — a cell that already holds a manual value is never overwritten (manual-wins
+    /// reconciliation of *changed* values is Story 3.4). A fresh (never-edited) study materializes its
+    /// year grid from the provider years. Returns the count of cells filled. Routed through the atomic
+    /// [`Self::mutate_study`] rail (one `put_study`, guards, undo). Provider cells are `Review::None`,
+    /// so the verdict stays Provisional/Withheld until the user validates — the Epic-2 gate, unchanged.
+    pub fn apply_provider_fetch(
+        &mut self,
+        study_id: Uuid,
+        fetched: &FetchedFinancials,
+    ) -> Result<usize, String> {
+        let provenance = self.provider_provenance(fetched.digest.clone());
+        let years: Vec<CanonicalYear> = fetched.canonical.years.clone();
+        let filled = std::cell::Cell::new(0usize);
+        let filled_ref = &filled;
+        self.mutate_study(study_id, move |study| {
+            if study.years.is_empty() {
+                // Fresh study — build the whole grid from the provider years.
+                study.years = years
+                    .iter()
+                    .map(|cy| provider_year(cy, &provenance))
+                    .collect();
+                filled_ref.set(study.years.iter().map(present_cell_count).sum());
+            } else {
+                // Existing grid — fill only empty load-bearing/optional cells of matching years.
+                let mut count = 0;
+                for cy in &years {
+                    if let Some(yd) = study.years.iter_mut().find(|y| y.year == cy.year) {
+                        count += fill_year_gaps(yd, cy, &provenance);
+                    }
+                }
+                filled_ref.set(count);
+            }
+        })?;
+        Ok(filled.get())
     }
 
     /// Manually set/clear a cell's value (FR16): parse-side `value` (already a [`Money`] or `None`)
@@ -1094,6 +1158,92 @@ pub fn created_at_date(ts: &Timestamp) -> String {
     ts.0.split('T').next().unwrap_or(&ts.0).to_string()
 }
 
+// ── Provider-fetch cell helpers (Story 3.1) ────────────────────────────────────────────────────
+
+/// A provider-sourced cell: `Source::Provider`, `Freshness::Current`, `Review::None` (unvalidated),
+/// `Coverage::Present` for a value / `ToFill` for a gap (absent stays hand-editable, never `0`).
+fn provider_cell(value: Option<Decimal>, provenance: &Provenance) -> Cell {
+    Cell {
+        value: value.map(Money::from),
+        source: Source::Provider,
+        freshness: Freshness::Current,
+        review: Review::None,
+        coverage: if value.is_some() {
+            Coverage::Present
+        } else {
+            Coverage::ToFill
+        },
+        provenance: provenance.clone(),
+    }
+}
+
+/// Build a whole `YearData` from a canonical provider year (fresh-study path).
+fn provider_year(cy: &CanonicalYear, provenance: &Provenance) -> YearData {
+    let optional = |d: Option<Decimal>| d.map(|v| provider_cell(Some(v), provenance));
+    YearData {
+        year: cy.year,
+        sales: provider_cell(cy.sales, provenance),
+        eps: provider_cell(cy.eps, provenance),
+        high_price: provider_cell(cy.high_price, provenance),
+        low_price: provider_cell(cy.low_price, provenance),
+        dividend_per_share: optional(cy.dividend_per_share),
+        pre_tax_profit: optional(cy.pre_tax_profit),
+        book_value_per_share: optional(cy.book_value_per_share),
+    }
+}
+
+/// Count of present (value-bearing) load-bearing + optional cells in a year — the "filled" tally.
+fn present_cell_count(yd: &YearData) -> usize {
+    let req = [&yd.sales, &yd.eps, &yd.high_price, &yd.low_price]
+        .iter()
+        .filter(|c| c.value.is_some())
+        .count();
+    let opt = [
+        &yd.dividend_per_share,
+        &yd.pre_tax_profit,
+        &yd.book_value_per_share,
+    ]
+    .iter()
+    .filter(|c| c.as_ref().is_some_and(|c| c.value.is_some()))
+    .count();
+    req + opt
+}
+
+/// Fill only the EMPTY load-bearing / optional cells of an existing year from the provider data
+/// (fill-gaps-only — a cell that already holds a value is left untouched). Returns the fill count.
+fn fill_year_gaps(yd: &mut YearData, cy: &CanonicalYear, provenance: &Provenance) -> usize {
+    let mut count = 0;
+    // Required load-bearing cells: fill when currently empty (no value).
+    for (cell, value) in [
+        (&mut yd.sales, cy.sales),
+        (&mut yd.eps, cy.eps),
+        (&mut yd.high_price, cy.high_price),
+        (&mut yd.low_price, cy.low_price),
+    ] {
+        if cell.value.is_none() {
+            if let Some(v) = value {
+                *cell = provider_cell(Some(v), provenance);
+                count += 1;
+            }
+        }
+    }
+    // Optional cells: fill when absent (None) and the provider has a value.
+    for (slot, value) in [
+        (&mut yd.dividend_per_share, cy.dividend_per_share),
+        (&mut yd.pre_tax_profit, cy.pre_tax_profit),
+        (&mut yd.book_value_per_share, cy.book_value_per_share),
+    ] {
+        let empty = slot.as_ref().is_none_or(|c| c.value.is_none());
+        if empty {
+            if let Some(v) = value {
+                *slot = Some(provider_cell(Some(v), provenance));
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1129,6 +1279,121 @@ mod tests {
 
     fn und_money(v: i64) -> Money {
         Money::from(rust_decimal::Decimal::new(v, 0))
+    }
+
+    // ── Story 3.1 — provider fetch pipeline (FakeProvider-style, offline) ──
+
+    /// A normalized provider result covering the given fiscal years, every load-bearing field present.
+    fn fetched_for(years: &[i32]) -> FetchedFinancials {
+        use steadyinvest_core::normalize::{normalize, RawAmount, RawFinancials, RawYear};
+        let amt = |v: i64| {
+            Some(RawAmount {
+                value: rust_decimal::Decimal::new(v, 0),
+                currency: "CHF".to_string(),
+            })
+        };
+        let rows = years
+            .iter()
+            .map(|&y| RawYear {
+                sales: amt(1000),
+                eps: amt(5),
+                high_price: amt(100),
+                low_price: amt(50),
+                ..RawYear::empty(y)
+            })
+            .collect();
+        let raw = RawFinancials {
+            native_currency: "CHF".to_string(),
+            years: rows,
+            splits: vec![],
+        };
+        FetchedFinancials {
+            canonical: normalize(raw).expect("the test raw normalizes"),
+            digest: "deadbeefcafe".to_string(),
+        }
+    }
+
+    #[test]
+    fn provider_fetch_fills_a_fresh_study_with_provider_stamped_cells() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x3F, "2026-06-15T10:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        let fetched = fetched_for(&[2020, 2021, 2022, 2023, 2024]);
+        let filled = state.apply_provider_fetch(id, &fetched).unwrap();
+        assert_eq!(filled, 20, "5 years × 4 load-bearing cells were filled");
+
+        let study = state.get_study(id).unwrap();
+        assert_eq!(study.years.len(), 5);
+        let sales = &study.years[0].sales;
+        assert_eq!(sales.source, Source::Provider);
+        assert_eq!(
+            sales.review,
+            Review::None,
+            "fresh provider data is unvalidated"
+        );
+        assert_eq!(sales.freshness, Freshness::Current);
+        assert_eq!(sales.coverage, Coverage::Present);
+        assert_eq!(sales.provenance.source, Source::Provider);
+        assert_eq!(
+            sales.provenance.hash_of_dependencies, "deadbeefcafe",
+            "the real fetch digest replaces the manual placeholder (#21)"
+        );
+    }
+
+    #[test]
+    fn provider_data_is_unvalidated_so_the_verdict_is_not_full() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x41, "2026-06-15T10:30:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_fetch(id, &fetched_for(&[2020, 2021, 2022, 2023, 2024]))
+            .unwrap();
+
+        let study = state.get_study(id).unwrap();
+        let snapshot = engine::build_snapshot(&study).expect("normalizes");
+        assert!(
+            !matches!(
+                snapshot.verdict(),
+                steadyinvest_core::verdict::Verdict::Full(_)
+            ),
+            "unvalidated (Review::None) provider cells can never yield a Full verdict"
+        );
+    }
+
+    #[test]
+    fn provider_fetch_does_not_overwrite_a_manual_value() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x42, "2026-06-15T11:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        // A manual edit on year 0, field "a" (high_price) — this also materializes the year grid.
+        state.edit_cell(id, 0, "a", Some(und_money(999))).unwrap();
+        let years: Vec<i32> = state
+            .get_study(id)
+            .unwrap()
+            .years
+            .iter()
+            .map(|y| y.year)
+            .collect();
+
+        // Fetch covering those exact years; year-0 high_price is held manually, low_price is empty.
+        state
+            .apply_provider_fetch(id, &fetched_for(&years))
+            .unwrap();
+
+        let study = state.get_study(id).unwrap();
+        assert_eq!(
+            study.years[0].high_price.value,
+            Some(und_money(999)),
+            "the manual value survives the fetch (fill-gaps-only)"
+        );
+        assert_eq!(study.years[0].high_price.source, Source::Manual);
+        assert_eq!(
+            study.years[0].low_price.source,
+            Source::Provider,
+            "the empty sibling cell was filled by the provider"
+        );
     }
 
     #[test]
