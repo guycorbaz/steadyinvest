@@ -27,8 +27,12 @@ slint = "1.16"
 slint-build = "1.16"
 rusqlite = { version = "0.40", features = ["bundled"] }       # SQLite compiled into the binary
 rust_decimal = { version = "1.42", features = ["maths"] }     # exact decimal + powd/exp/ln (no f64)
-# reqwest TLS backend deferred to Story 3.1 (first HTTP). In 0.13 the rustls feature pulls aws-lc-rs
-# (needs cmake); the locked posture is still pure-Rust rustls — activated when HTTP actually lands.
+# reqwest TLS backend deferred to Story 3.1 (first HTTP). REVALIDATED 2026-06-15 (#5/B5): in 0.13 the
+# TLS feature names have CHANGED — the old `rustls-tls`/`rustls-tls-webpki-roots` are GONE. Current
+# features: `rustls-no-provider`, `rustls-native-certs`, `webpki-roots` (full TLS set: native-tls*,
+# rustls-native-certs, rustls-no-provider, webpki-roots, socks, stream, zstd, query). The pure-Rust,
+# no-cmake path for 3.1 = `rustls-no-provider` + install the `ring` CryptoProvider in code (avoids the
+# default aws-lc-rs/cmake), with `webpki-roots` (or `rustls-native-certs`) for roots. Activate then.
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }
@@ -37,8 +41,11 @@ thiserror = "2"
 proptest = "1"
 tracing = "0.1"
 # NOTE: `keyring` is intentionally NOT pinned here yet. The crates.io `keyring` 4.0.x is NOT the
-# expected credential library (it pulls a turso/tantivy/dbus keystore stack). The OS-keychain crate
-# is selected & added in Story 3.2 (see GitHub issue). Architecture's "keyring 4.0" pin needs revalidation.
+# expected credential library (it pulls a turso/tantivy/dbus keystore stack). REVALIDATED 2026-06-15
+# (#5/B5): `keyring = "3"` with `--no-default-features --features linux-native` resolves lean (enables
+# only the kernel keyutils backend, drops async/sync-secret-service). Add in Story 3.2. Decision for
+# 3.2: `linux-native` (keyutils) is session-scoped; `sync-secret-service` (dbus gnome-keyring/KWallet)
+# is the persistent-across-reboot option — pick per the "keys survive restart" requirement.
 directories = "6"
 uuid = { version = "1", features = ["v4", "serde"] }
 # RFC3339 UTC wall clock for the app's injected `Clock` (ADD15). `clock` feature only — no civil

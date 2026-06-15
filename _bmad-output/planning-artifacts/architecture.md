@@ -315,9 +315,12 @@ against this skeleton as the principal go/no-go before committing UI work.
 
 **Important Decisions (Shape Architecture):**
 - HTTP/fetch = **reqwest 0.13 + tokio 1.52** (async), off the UI thread, with a pure-Rust TLS
-  backend. ⚠️ Story 1.1 verified the `rustls-tls` feature was renamed to `rustls` in reqwest 0.13
-  and the default provider (aws-lc-rs) needs cmake — the exact TLS feature/provider choice is
-  deferred to Story 3.1 (GitHub-tracked).
+  backend. ⚠️ **REVALIDATED 2026-06-15 (#5/B5):** reqwest 0.13's TLS features changed again — there is
+  no `rustls-tls`/`rustls` umbrella feature. The current set is `rustls-no-provider`,
+  `rustls-native-certs`, `webpki-roots` (the default crypto provider is aws-lc-rs, which needs cmake).
+  **Story 3.1 pure-Rust no-cmake path:** enable `rustls-no-provider` + install the `ring`
+  `CryptoProvider` in code, with `webpki-roots` (bundled roots) or `rustls-native-certs` for the trust
+  anchors.
 - Error model (`thiserror` 2.0, neutral cause-named, no silent `.ok()`); logging (`tracing`, local
   file, no telemetry); test architecture (`proptest` 1.9 + golden/metamorphic + 3-OS CI).
 - App-config vs journal boundary (`directories` + `keyring`); journal identity (`journal_id` + logical
@@ -385,8 +388,9 @@ against this skeleton as the principal go/no-go before committing UI work.
   types, `schema_version`), decoupled from Slint and rusqlite — the boundary a future **read-only MCP**
   façade [V] will sit on at near-zero cost.
 - **Provider acquisition:** `MarketDataProvider` trait; first adapter **EODHD** (CH/EU+US coverage);
-  keyless adapters supported. HTTP via **reqwest 0.13** with **`rustls-tls`** (pure-Rust, no system
-  OpenSSL → portable single binary) + `json`, on a **dedicated `current_thread` tokio 1.52 runtime on
+  keyless adapters supported. HTTP via **reqwest 0.13** with **`rustls-no-provider` + the `ring`
+  provider** (pure-Rust, no system OpenSSL, no cmake → portable single binary; see §Tech Stack
+  revalidation 2026-06-15) + `json`, on a **dedicated `current_thread` tokio 1.52 runtime on
   a worker thread** (sufficient for manual refresh; P2 ticker-batching via concurrent tasks
   `join_all`). Results marshalled back to the Slint event loop via `invoke_from_event_loop`. Provider
   failure is classified (network / quota / invalid-or-absent key), recorded, surfaced as a neutral
@@ -640,7 +644,7 @@ steadyinvest/
 │       └── export.rs              # portable export envelope (JSON + schema_version + integrity hash, FR59-61)
 │
 ├── ingestion/                     # steadyinvest-ingestion — providers + normalization (FR15-16,21-27)
-│   ├── Cargo.toml                 # deps: reqwest (rustls-tls,json), tokio (current_thread), serde, thiserror, contract
+│   ├── Cargo.toml                 # deps: reqwest (rustls-no-provider+ring,json), tokio (current_thread), serde, thiserror, contract
 │   ├── src/
 │   │   ├── lib.rs
 │   │   ├── provider.rs            # MarketDataProvider trait; keys injected (not read here)
