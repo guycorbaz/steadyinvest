@@ -9,7 +9,7 @@
 - [ ] Tech stack detected and documented
 - [ ] MCP doc search performed (or web fallback) and references captured
 - [ ] Acceptance Criteria cross-checked against implementation
-- [ ] File List reviewed and validated for completeness
+- [ ] File List validated **exact against `git status`** (every changed/created `.rs`/`.slint`/test/`test-summary.md`/automator-log file is listed; no `[x]` task claims a test absent from disk) — issue #18
 - [ ] Tests identified and mapped to ACs; gaps noted
 - [ ] Code quality review performed on changed files
 - [ ] Security review performed on changed files and dependencies

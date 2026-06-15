@@ -53,7 +53,7 @@ result=$("$scripts" monitor-session "$session" --json --agent "$current_agent")
   sed "s/^| ${story_id} |.*$/| ${story_id} | done | done | done | - | - | in-progress |/" "{outputFile}" > "$tmp_state" && mv "$tmp_state" "{outputFile}"
   ```
   Display: `[story {N}/{total}] automate -> done`
-  → proceed to D
+  → proceed to C2
 - FAILURE → retry up to 3 attempts (non-blocking, so fewer retries), then log warning:
   ```bash
   # Update Story Progress: mark automate skipped
@@ -61,7 +61,29 @@ result=$("$scripts" monitor-session "$session" --json --agent "$current_agent")
   sed "s/^| ${story_id} |.*$/| ${story_id} | done | done | skip | - | - | in-progress |/" "{outputFile}" > "$tmp_state" && mv "$tmp_state" "{outputFile}"
   ```
   Display: `[story {N}/{total}] automate -> skip (non-blocking)`
-  → proceed to D
+  → proceed to C2
+
+### C2. File-List ⇄ git reconciliation (issue #18 — MANDATORY, runs whether automate ran or was skipped)
+
+The single most repeated review finding across Epic 1 (and recurring in Epic 2) was a story `### File List` that omitted files the dev-story / automate step created — especially `*_qa_e2e.rs` suites, `tests/test-summary.md`, and automator logs — plus stale test-count claims. Fix it **before** handing off to review so the review never re-raises it.
+
+The orchestrator (which has repo access between sub-sessions) runs:
+
+```bash
+# Every tracked-but-modified and untracked file under the story's source/test trees.
+changed=$(git -C "{project-root}" status --porcelain -- '*.rs' '*.slint' 'tests/' '**/tests/' '*test-summary.md' \
+  | sed -E 's/^.{3}//')
+```
+
+Then, for the current story file (`{story_file}`):
+1. For each path in `$changed`, verify it appears verbatim in the story's `### File List`. Append any missing path with a one-line role note (mark `(NEW)`/`(M)`), preserving the existing list.
+2. Refresh any test-count claim in **Dev Agent Record / Completion Notes / Change Log** to the real number (`cargo test --all` summary), or add a Change Log line if the automate step added suites (per 1.8's review precedent).
+3. Do **not** silently mark `[x]` for a test that does not exist on disk — if a task claims a test, confirm the file + test name are present before leaving the checkbox checked.
+
+- DONE → Display: `[story {N}/{total}] file-list-sync -> done` → proceed to D
+- If `$changed` is empty (nothing to add) → proceed to D
+
+This is a structural gate: the code-review step (D) must inherit a File List that already equals `git`.
 
 ### D. Code Review Loop
 
