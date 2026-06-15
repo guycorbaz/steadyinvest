@@ -1,8 +1,47 @@
-//! Crate-local banned-verb posture gate (the 1.9/1.10/1.11 local-gate pattern, FR13): every
-//! user-visible string this crate introduces — the `@tr()` literals in `ui/**/*.slint` (read
-//! from the files at test time) and the `labels.rs` display strings — is scanned against
-//! `core::method::BANNED_VERBS_EN/FR` (reused, never copied). Zone labels are nouns naming the
-//! defined price bands, not imperatives, so they pass the whole-word scan by construction.
+//! Neutral-voice / banned-verb posture gate (FR13, spec §6) — the single audit point.
+//!
+//! Story 2.14 consolidates the per-surface gates built incrementally across 2.1–2.13 into one
+//! auditable place. A reviewer confirms FR13 coverage from this file alone.
+//!
+//! ## Canonical source (one truth)
+//! Every scan here uses `core::method::{BANNED_VERBS_EN, BANNED_VERBS_FR}` — **reused, never
+//! re-declared** in this crate. There is exactly one verb list the app scans against. The
+//! `persistence` crate keeps an intentional crate-local *copy* (it must not depend on `core` —
+//! dependency-graph boundary); that copy is verified *indirectly* here by scanning the rendered
+//! `persistence::Error` Display strings against the canonical list (see the umbrella scan), so a
+//! drift in persistence's copy cannot let a banned verb reach a UI banner unseen.
+//!
+//! ## Scanned surfaces (the union — `all_user_facing_app_strings_are_neutral`)
+//! - **`@tr()` literals** in every `ui/**/*.slint` (read from the files at test time).
+//! - **`state::USER_FACING_MESSAGES`** — Rust-side notices that never pass through `@tr()`.
+//! - **`viewmodel::engine::USER_FACING_LABELS`** — dynamically-built verdict/zone/trace labels.
+//! - **`labels::LABELS`** — the NAIC↔neutral runtime label table (both sets).
+//! - **`entry::source_label`** outputs — the provenance words ("manuel"/"fournisseur"/"calculé")
+//!   interpolated into `@tr("Source : {}", …)` as a dynamic value the template scan can't see.
+//! - **`viewmodel::verify::USER_FACING_TEMPLATES`** — the verify-panel / demo-notice prose built
+//!   with `format!` (the `{…}` values are data / core-gated `GoldenDeviation` strings).
+//! - **rendered `persistence::Error` Display strings** (incl. the `Sqlite` static own-prefix) —
+//!   the app interpolates these verbatim into the `MSG_SAVE_FAILED` banner; scanned against the
+//!   canonical list so persistence's crate-local verb copy can't drift unseen.
+//!
+//! ## No bare literal escapes the gate (`no_bare_user_facing_literal_bypasses_tr`)
+//! The `@tr()` scan only sees strings *inside* `@tr(...)`. A bare `Text { text: "Achetez"; }` —
+//! or a banned verb in a **ternary branch** (`cond ? @tr("…") : "Achetez"`) or a **concatenation**
+//! (`base + "Achetez"`) — would render to the user yet bypass the `@tr` scan. The leak gate scans
+//! the whole right-hand side of every user-facing text property and flags every string literal
+//! that is neither an `@tr(...)` argument nor an `==`/`!=` state-key comparison operand (method
+//! keys like `zone == "buy"`, compared not displayed). Each surviving literal must be an
+//! `@tr(...)` call or an allow-listed non-prose glyph/separator — so the union scan sees 100% of
+//! rendered prose.
+//!
+//! ## Exemption
+//! Zone-label nouns (the Buy/Neutral/Sell price-band names) are nouns naming the defined bands,
+//! not imperatives, so they pass the whole-word scan by construction (spec §6).
+//!
+//! ## Never scanned (user free-text, not system signals — FR13 scope)
+//! Tickers, the decision-rationale note, data-cell values (Money), and the bundled fixture / demo
+//! study data are user/sample data, not system-generated signals: they are never wrapped in
+//! `@tr()` nor registered in any inventory, so no scan ever encounters them.
 
 #[cfg(test)]
 mod tests {
@@ -101,6 +140,392 @@ mod tests {
             rest = &rest[consumed.min(rest.len())..];
         }
         literals
+    }
+
+    /// User-facing text properties whose value must go through `@tr()` (or a binding) so the
+    /// `@tr` scan can see the rendered prose — never a bare string literal (FR13, AC2).
+    const USER_FACING_SLINT_PROPS: &[&str] = &[
+        "text",
+        "title",
+        "placeholder-text",
+        "accessible-label",
+        "accessible-description",
+        "accessible-value",
+        "accessible-placeholder-text",
+        "accessible-action-default",
+    ];
+
+    /// The only bare string literals permitted in a user-facing property: single-glyph visual
+    /// markers that ARE the legend's own tokens (not prose), and the empty default. Each is a
+    /// symbol, carries no banned verb, and is meaningless to translate. A NEW bare literal that is
+    /// not here fails the leak gate — forcing prose through `@tr()` where the union scan sees it.
+    // Comments sit on their own line (not trailing) so the multi-byte glyphs can't make
+    // comment-alignment formatting version-dependent.
+    const BARE_LITERAL_ALLOW: &[&str] = &[
+        // empty default — renders nothing
+        "",
+        // editable_cell: the not-available marker
+        "⦸",
+        // growth_chart: the drag-handle glyph
+        "⇕",
+        // zone_bar: provisional-verdict hatching
+        "╱╱╱╱",
+        // verdict_badge: provisional-verdict hatching
+        "╱╱╱╱╱╱",
+        // trust_markers: the "to review" tag
+        "?",
+        // trust_markers: the "validated" tag
+        "✓",
+        // collapsible_section: the folded / unfolded chevrons
+        "▾",
+        "▸",
+        // settings: the plausibility-warning glyph (mirrors the cell marker)
+        "△",
+        // zone_bar / verdict: the em-dash "no value" marker
+        "—",
+        // single-space and punctuation-only separators (no prose, no verb)
+        " ",
+        " · ",
+        " — ",
+    ];
+
+    /// Every bare (non-`@tr`) string literal in a user-facing text property's value — including
+    /// literals nested in a ternary branch (`cond ? @tr("a") : "Achetez"`) or a concatenation
+    /// (`base + " — "`), not just a value that *starts* with `"`. A first-char-only check would let
+    /// a banned verb in a ternary else-branch reach the UI unscanned; this scans the whole RHS up
+    /// to the statement `;`, returning every literal that is NOT an `@tr(...)` argument. Returns
+    /// `(prop, literal)` pairs, whole-token matched on the property name so `placeholder-text` is
+    /// not mistaken for `text`.
+    fn bare_user_facing_literals(source: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for prop in USER_FACING_SLINT_PROPS {
+            let mut from = 0;
+            while let Some(rel) = source[from..].find(prop) {
+                let start = from + rel;
+                let end = start + prop.len();
+                from = end;
+                // Whole-token boundary on the LEFT: a `-`/`_`/alphanumeric before means this is a
+                // longer identifier (e.g. the `text` inside `placeholder-text`), skip it.
+                let left_ok = start == 0
+                    || !source[..start]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '-' || c == '_');
+                if !left_ok {
+                    continue;
+                }
+                // The property token must be followed (after optional ws) by a single `:` (a
+                // binding) — not `::` (a path/enum like `Foo::Bar`).
+                let after_prop = source[end..].trim_start();
+                let Some(after_colon) = after_prop.strip_prefix(':') else {
+                    continue;
+                };
+                if after_colon.starts_with(':') {
+                    continue;
+                }
+                for lit in rhs_non_tr_literals(after_colon) {
+                    out.push(((*prop).to_string(), lit));
+                }
+            }
+        }
+        out
+    }
+
+    /// Scan a property's right-hand side (text after the `:`) up to the statement-terminating `;`
+    /// at paren depth 0, returning every string literal that is RENDERED to the user — i.e. not an
+    /// argument of an `@tr(...)` call (those are translated and the `@tr` scan already covers them)
+    /// and not an operand of an `==`/`!=` comparison (those are method state-keys like `zone ==
+    /// "buy"`, compared not displayed — the rendered value is the ternary's result branch). Every
+    /// other `"…"` is a bare literal that would reach the user unscanned.
+    fn rhs_non_tr_literals(rhs: &str) -> Vec<String> {
+        let chars: Vec<char> = rhs.chars().collect();
+        let mut out = Vec::new();
+        let mut i = 0;
+        let mut paren_depth: usize = 0;
+        // Paren depths at which an `@tr(` is currently open; a string is translated iff non-empty.
+        let mut tr_stack: Vec<usize> = Vec::new();
+        // True iff the nearest non-whitespace token ending at `idx` is `==` or `!=`.
+        let comparison_before = |idx: usize| -> bool {
+            let mut k = idx;
+            while k > 0 && chars[k - 1].is_whitespace() {
+                k -= 1;
+            }
+            k >= 2 && chars[k - 1] == '=' && (chars[k - 2] == '=' || chars[k - 2] == '!')
+        };
+        // True iff the nearest non-whitespace token starting at `idx` is `==` or `!=`.
+        let comparison_after = |idx: usize| -> bool {
+            let mut k = idx;
+            while k < chars.len() && chars[k].is_whitespace() {
+                k += 1;
+            }
+            k + 1 < chars.len() && chars[k + 1] == '=' && (chars[k] == '=' || chars[k] == '!')
+        };
+        while i < chars.len() {
+            match chars[i] {
+                ';' if paren_depth == 0 => break,
+                '"' => {
+                    let open = i;
+                    let mut lit = String::new();
+                    i += 1;
+                    while i < chars.len() {
+                        match chars[i] {
+                            '\\' => {
+                                i += 1;
+                                if i < chars.len() {
+                                    lit.push(chars[i]);
+                                }
+                            }
+                            '"' => break,
+                            ch => lit.push(ch),
+                        }
+                        i += 1;
+                    }
+                    let is_comparison = comparison_before(open) || comparison_after(i + 1);
+                    if tr_stack.is_empty() && !is_comparison {
+                        out.push(lit);
+                    }
+                }
+                '@' if chars[i..].starts_with(&['@', 't', 'r']) => {
+                    // `@tr` followed (after optional ws) by `(` opens a translated region.
+                    let mut j = i + 3;
+                    while j < chars.len() && chars[j].is_whitespace() {
+                        j += 1;
+                    }
+                    if j < chars.len() && chars[j] == '(' {
+                        paren_depth += 1;
+                        tr_stack.push(paren_depth);
+                        i = j + 1;
+                        continue;
+                    }
+                }
+                '(' => paren_depth += 1,
+                ')' => {
+                    if tr_stack.last() == Some(&paren_depth) {
+                        tr_stack.pop();
+                    }
+                    paren_depth = paren_depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// The user-facing provenance display strings rendered by `entry::source_label` (shown via
+    /// `@tr("Source : {}", …)`): the interpolated value is a dynamic Rust string, so the `@tr`
+    /// template scan never sees it. Scanned here over every `Source` variant so a future banned
+    /// verb in a provenance label is caught (only `"manuel"` was otherwise registered, as
+    /// `PROVENANCE_MANUAL`).
+    fn provenance_display_labels() -> Vec<&'static str> {
+        use steadyinvest_contract::{Cell, Coverage, Provenance, Source, Timestamp};
+        [Source::Manual, Source::Provider, Source::Derived]
+            .into_iter()
+            .map(|source| {
+                let provenance = Provenance {
+                    source,
+                    logical_version: 1,
+                    timestamp: Timestamp("2026-01-01T00:00:00Z".to_string()),
+                    hash_of_dependencies: "posture".to_string(),
+                };
+                // A present cell with this source — `source_label` reveals a label only when
+                // present. Reuse the real `tofill_cell` skeleton, flip coverage to Present.
+                let cell = Cell {
+                    coverage: Coverage::Present,
+                    ..crate::viewmodel::entry::tofill_cell(provenance)
+                };
+                crate::viewmodel::entry::source_label(Some(&cell))
+            })
+            .collect()
+    }
+
+    /// Representative `persistence::Error` instances. Covers every variant whose own prose the app
+    /// could surface in a banner (the app interpolates `persistence::Error` Display verbatim into
+    /// the `MSG_SAVE_FAILED` catch-all). `Sqlite(rusqlite::Error)` cannot be constructed here
+    /// (`app` has no `rusqlite` dep), so its static own-prefix is scanned as a literal instead; the
+    /// variable tail is third-party `rusqlite` text, outside our signal.
+    fn sample_persistence_error_messages() -> Vec<String> {
+        use std::path::PathBuf;
+        use steadyinvest_persistence::Error;
+        use uuid::Uuid;
+        vec![
+            // `Error::Sqlite` static own-prefix (the variant needs `rusqlite` to construct).
+            "sqlite operation failed:".to_string(),
+            Error::JournalExists(PathBuf::from("/tmp/example.journal")).to_string(),
+            Error::CorruptPayload {
+                detail: "example".into(),
+            }
+            .to_string(),
+            Error::CorruptJournalMeta {
+                detail: "example".into(),
+            }
+            .to_string(),
+            Error::NewerJournalSchema {
+                file_user_version: 9,
+                supported: 1,
+            }
+            .to_string(),
+            Error::NewerRowSchema {
+                row_schema_version: 9,
+                supported: 1,
+            }
+            .to_string(),
+            Error::JournalIdentityMismatch {
+                study_journal_id: Uuid::nil(),
+                journal_id: Uuid::nil(),
+            }
+            .to_string(),
+            Error::Migration {
+                version: 2,
+                source: Box::new(Error::CorruptPayload {
+                    detail: "example".into(),
+                }),
+            }
+            .to_string(),
+        ]
+    }
+
+    #[test]
+    fn no_bare_user_facing_literal_bypasses_tr() {
+        let mut offenders = Vec::new();
+        for file in slint_files() {
+            let source = std::fs::read_to_string(&file).expect("slint file readable");
+            for (prop, lit) in bare_user_facing_literals(&source) {
+                if !BARE_LITERAL_ALLOW.contains(&lit.as_str()) {
+                    offenders.push(format!("{}: {prop}: {lit:?}", file.display()));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "user-facing text must go through @tr() so the posture scan sees it (FR13); \
+             bare prose literal(s): {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn all_user_facing_app_strings_are_neutral() {
+        // The consolidated FR13 proof: scan the UNION of every user-facing string the app can
+        // render, against the canonical core list. The per-surface tests below keep their precise
+        // floors + failure locality; this one is the single completeness gate.
+        let mut union: Vec<(String, String)> = Vec::new();
+        for file in slint_files() {
+            let source = std::fs::read_to_string(&file).expect("slint file readable");
+            for literal in tr_literals(&source) {
+                union.push((file.display().to_string(), literal));
+            }
+        }
+        for message in crate::state::USER_FACING_MESSAGES {
+            union.push(("state.rs".into(), (*message).to_string()));
+        }
+        for label in crate::viewmodel::engine::USER_FACING_LABELS {
+            union.push(("engine.rs".into(), (*label).to_string()));
+        }
+        for entry in &crate::labels::LABELS {
+            union.push(("labels.rs (naic)".into(), entry.naic.to_string()));
+            union.push(("labels.rs (neutral)".into(), entry.neutral.to_string()));
+        }
+        for label in provenance_display_labels() {
+            union.push(("entry::source_label".into(), label.to_string()));
+        }
+        for template in crate::viewmodel::verify::USER_FACING_TEMPLATES {
+            union.push(("verify.rs".into(), (*template).to_string()));
+        }
+        for message in sample_persistence_error_messages() {
+            union.push(("persistence::Error".into(), message));
+        }
+        assert!(
+            !union.is_empty(),
+            "union posture scan collected zero strings — scan broken?"
+        );
+        for (origin, text) in &union {
+            assert_neutral(text, origin);
+        }
+    }
+
+    /// Non-exhaustive advice-phrasing heuristic (AC3). The hard FR13 contract is the banned-verb
+    /// gate above; this catches *advice phrasing* that is not a single banned verb (a soft "you
+    /// should …" / "pensez à …"). Signals must state facts, never direct the user. Kept short and
+    /// documented — not a natural-language grader.
+    #[test]
+    fn user_facing_strings_state_facts_not_advice() {
+        const ADVICE_SCAFFOLDS: &[&str] = &[
+            "pensez à",
+            "n'oubliez",
+            "veuillez",
+            "vous devriez",
+            "devriez",
+            "make sure",
+            "be sure to",
+            "remember to",
+            "don't forget",
+            "you should",
+            "assurez-vous",
+        ];
+        let mut strings: Vec<(String, String)> = Vec::new();
+        for file in slint_files() {
+            let source = std::fs::read_to_string(&file).expect("slint file readable");
+            for literal in tr_literals(&source) {
+                strings.push((file.display().to_string(), literal));
+            }
+        }
+        for message in crate::state::USER_FACING_MESSAGES {
+            strings.push(("state.rs".into(), (*message).to_string()));
+        }
+        for label in crate::viewmodel::engine::USER_FACING_LABELS {
+            strings.push(("engine.rs".into(), (*label).to_string()));
+        }
+        for (origin, text) in &strings {
+            let lower = text.to_lowercase();
+            for scaffold in ADVICE_SCAFFOLDS {
+                assert!(
+                    !lower.contains(scaffold),
+                    "{origin}: {text:?} reads as advice ({scaffold:?}); state a neutral fact (FR13)"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bare_literal_detector_distinguishes_tr_bindings_and_bare_prose() {
+        let source = r#"
+            Text { text: "Achetez maintenant"; }
+            Text { text: @tr("Prix actuel"); }
+            Text { text: root.dynamic-value; }
+            Text { placeholder-text: "garder"; }
+            Text { accessible-label: ""; }
+        "#;
+        let bare = bare_user_facing_literals(source);
+        // @tr() and binding values are NOT bare; the two quoted literals + the empty one are.
+        assert_eq!(
+            bare,
+            vec![
+                ("text".to_string(), "Achetez maintenant".to_string()),
+                ("placeholder-text".to_string(), "garder".to_string()),
+                ("accessible-label".to_string(), String::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn bare_literal_detector_sees_ternary_branches_and_skips_state_key_comparisons() {
+        // A banned verb in a ternary ELSE branch must be caught (the real FR13 hole): a first-char
+        // check would miss it because the value starts with an identifier.
+        let ternary = r#"Text { text: cond ? @tr("Replié") : "Achetez maintenant"; }"#;
+        assert_eq!(
+            bare_user_facing_literals(ternary),
+            vec![("text".to_string(), "Achetez maintenant".to_string())]
+        );
+        // State-key comparisons (`zone == "buy"`) are operands, not rendered text — the rendered
+        // value is the result branch (a scanned label binding), so the key must NOT be flagged.
+        let state_key = r#"text: root.zone == "buy" ? Labels.zone-buy : Labels.zone-sell;"#;
+        assert!(bare_user_facing_literals(state_key).is_empty());
+        // A rendered concatenation scaffold IS caught (then allow-listed if non-prose).
+        let concat = r#"text: root.id + " — " + root.detail;"#;
+        assert_eq!(
+            bare_user_facing_literals(concat),
+            vec![("text".to_string(), " — ".to_string())]
+        );
     }
 
     #[test]

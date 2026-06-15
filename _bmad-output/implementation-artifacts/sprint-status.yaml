@@ -334,7 +334,7 @@ development_status:
   epic-1-retrospective: done
 
   # ── Epic 2: The trustworthy Stock Study (first usable product) [P1] ──
-  epic-2: in-progress
+  epic-2: done
   2-1-application-shell-theme-disclaimer: done
   2-2-create-save-reopen-study: done
   2-3-faithful-collapsible-ssg-form: done
@@ -348,7 +348,7 @@ development_status:
   2-11-update-existing-study-extend-projection: done
   2-12-dashboard-search-sort-filter-archive-delete: done
   2-13-legend-empty-error-states-help-demo-verify-engine: done
-  2-14-neutral-voice-banned-verb-enforcement: backlog
+  2-14-neutral-voice-banned-verb-enforcement: done
   epic-2-retrospective: done
 
   # ── Epic 3: Provider data & reconciliation [P1] ──
