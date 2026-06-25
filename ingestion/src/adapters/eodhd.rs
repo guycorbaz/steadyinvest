@@ -45,13 +45,16 @@ impl EodhdProvider {
     }
 
     async fn get_json(&self, url: &str, ticker: &str) -> Result<Value, ProviderError> {
+        // NFR-S1: the request URL carries `?api_token=…`. `reqwest::Error`'s Display can include the
+        // URL, so `.without_url()` is MANDATORY before stringifying — otherwise the key would leak
+        // into `ProviderError::{Network,Parse}` detail and on into a user-facing notice.
         let resp = self
             .http
             .get(url)
             .send()
             .await
             .map_err(|e| ProviderError::Network {
-                detail: e.to_string(),
+                detail: e.without_url().to_string(),
             })?;
         let status = resp.status();
         if status.is_success() {
@@ -59,7 +62,7 @@ impl EodhdProvider {
                 .json::<Value>()
                 .await
                 .map_err(|e| ProviderError::Parse {
-                    detail: e.to_string(),
+                    detail: e.without_url().to_string(),
                 });
         }
         Err(classify_status(status.as_u16(), ticker))

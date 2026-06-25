@@ -561,9 +561,11 @@ mod tests {
         // supprimer actions + the delete-confirm banner labels. Story 2.13 adds the Réglages help hub
         // (legend marker meanings + glossary terms/definitions + verify-engine controls/results), the
         // actionable empty state + demo CTA, and the read-only demo banner; tickers/search text and the
-        // fixture data are never scanned. Keep the floor strict against a broken scan.
+        // fixture data are never scanned. Story 3.2 adds the Réglages provider/key panel (provider chips,
+        // key status + placeholder, save/delete/test action labels); the API key value is user data,
+        // NEVER scanned (NFR-S1). Keep the floor strict against a broken scan.
         assert!(
-            total >= 212,
+            total >= 223,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -597,10 +599,11 @@ mod tests {
         // Guard the count so a future message added without registering it here is caught. Story 2.6
         // adds the normalize-failure notice (`MSG_NORMALIZE_FAILED`); Story 2.12 adds the six dashboard
         // archive/un-archive/delete confirm + done templates; Story 2.13 adds the two verify-engine
-        // summary templates + the demo-unavailable notice.
+        // summary templates + the demo-unavailable notice; Story 3.2 adds the six provider-key
+        // notices (saved/deleted/testing/ok/invalid/keychain-unavailable).
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            27,
+            33,
             "state.rs message inventory changed — register the new notice"
         );
     }

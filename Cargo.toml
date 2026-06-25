@@ -47,12 +47,21 @@ serde_json = "1"
 thiserror = "2"
 proptest = "1"
 tracing = "0.1"
-# NOTE: `keyring` is intentionally NOT pinned here yet. The crates.io `keyring` 4.0.x is NOT the
-# expected credential library (it pulls a turso/tantivy/dbus keystore stack). REVALIDATED 2026-06-15
-# (#5/B5): `keyring = "3"` with `--no-default-features --features linux-native` resolves lean (enables
-# only the kernel keyutils backend, drops async/sync-secret-service). Add in Story 3.2. Decision for
-# 3.2: `linux-native` (keyutils) is session-scoped; `sync-secret-service` (dbus gnome-keyring/KWallet)
-# is the persistent-across-reboot option — pick per the "keys survive restart" requirement.
+# OS secret store for provider API keys (Story 3.2, FR25/NFR-S1). `keyring = "3"` is the REAL
+# credential library — NOT crates.io `keyring` 4.0.x (a sample/CLI meta-crate pulling a
+# turso/tantivy/dbus keystore stack). default-features off + explicit backend. Decision (Guy,
+# 2026-06-25): a PERSISTENT secret-service backend (gnome-keyring/KWallet) over `linux-native`
+# (keyutils, session-scoped) so the key SURVIVES A REBOOT. We use `async-secret-service` (pure-Rust
+# `zbus`) NOT `sync-secret-service` (the latter pulls `dbus-secret-service` → `libdbus-sys`, a C
+# system lib needing `libdbus-1-dev` + pkg-config — against this project's no-C-deps / no-cmake
+# posture). `async-secret-service` keeps `Entry` SYNCHRONOUS (it block_on's internally) via a runtime
+# feature. We pick `async-io` (NOT `tokio`): the keyring docs warn that with the `tokio` runtime,
+# keyring calls on the MAIN/UI thread "will likely deadlock" (secret_service.rs "Tokio runtime
+# caution", issue #132) — and our keychain reads/writes all run on the Slint UI thread. `async-io`
+# has no such restriction. `crypto-rust` keeps the encrypted session pure-Rust (aes/hkdf, no
+# openssl/aws-lc) — consistent with the reqwest/rustls `ring` posture. Needs a running D-Bus secret
+# agent at runtime → app handles its absence gracefully (AC6).
+keyring = { version = "3", default-features = false, features = ["async-secret-service", "crypto-rust", "async-io"] }
 directories = "6"
 uuid = { version = "1", features = ["v4", "serde"] }
 # RFC3339 UTC wall clock for the app's injected `Clock` (ADD15). `clock` feature only — no civil

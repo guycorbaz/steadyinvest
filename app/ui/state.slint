@@ -484,8 +484,22 @@ export global Prefs {
     // Locale-format sample amounts (formatted by viewmodel/format.rs; constants, computed nothing).
     in-out property <string> sample-amount;
     in-out property <string> sample-amount-alt;
+    // ── Story 3.2 — Provider / API key (FR25/FR63) ──
+    // The selected provider, mirrored from AppConfig.preferred_provider ("eodhd" | "none").
+    in-out property <string> provider: "eodhd";
+    // Whether a key is currently stored in the OS keychain for the selected provider. The key VALUE
+    // is NEVER mirrored to the UI (NFR-S1) — only this boolean status crosses the boundary.
+    in-out property <bool> key-configured: false;
+    // The latest neutral provider/key notice (save/delete/test outcome), set by the Rust side.
+    in-out property <string> provider-status;
     // User intents — handled in Rust (apply + persist).
     callback theme-selected(string); // "dark" | "light"
     callback label-set-selected(string); // "naic" | "neutral"
     callback number-format-selected(string); // "comma" | "point"
+    callback provider-selected(string); // "eodhd" | "none"
+    // The key travels ONE WAY into Rust as a call argument — never stored in an `in-out` property
+    // that could round-trip back out to config/UI (NFR-S1).
+    callback key-saved(string);
+    callback key-deleted();
+    callback key-tested();
 }

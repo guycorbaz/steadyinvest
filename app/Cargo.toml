@@ -25,6 +25,9 @@ directories = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+# Per-crate error enum (ADD15) for the keychain cause taxonomy (Story 3.2). Already in the lock
+# tree via core/ingestion, so promoting it to the app adds nothing to Cargo.lock.
+thiserror = { workspace = true }
 # Identity + time are injected (ADD15): `uuid` (v4) and `chrono` (RFC3339 UTC) are the ONLY
 # sources of UUIDs / wall-clock timestamps in the app, funnelled through `clock.rs`.
 uuid = { workspace = true }
@@ -37,7 +40,11 @@ rust_decimal = { workspace = true }
 # dependency to a real runtime dependency (text-only, `default-features = false`). Its sole
 # Windows transitive `clipboard-win` (BSL-1.0) is already allow-listed in `deny.toml` (Spike A).
 arboard = { workspace = true }
-# keyring (OS keychain) is added in Story 3.2 once the correct credential crate is selected.
+# OS keychain for provider API keys (Story 3.2): keyring 3.x, async-secret-service backend with the
+# async-io runtime (pinned in the workspace; async-io avoids the tokio main-thread deadlock). `app`
+# is the ONLY crate that touches it — the key is injected into `ingestion`, never read there
+# (FR63 / architecture invariant).
+keyring = { workspace = true }
 
 [dev-dependencies]
 # Config tests write to temp paths only — never the real config dir.

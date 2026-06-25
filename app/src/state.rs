@@ -93,6 +93,17 @@ pub const MSG_PROVIDER_FETCHING: &str = "Récupération des données du fourniss
 pub const MSG_PROVIDER_DONE: &str = "{n} cellule(s) remplie(s) depuis le fournisseur.";
 pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause}";
 
+/// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
+/// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
+pub const MSG_KEY_SAVED: &str =
+    "La clé du fournisseur est enregistrée dans le trousseau du système.";
+pub const MSG_KEY_DELETED: &str = "La clé du fournisseur est retirée du trousseau du système.";
+pub const MSG_KEY_TESTING: &str = "Test de la clé du fournisseur en cours.";
+pub const MSG_KEY_OK: &str = "La clé est valide ; le fournisseur a répondu.";
+pub const MSG_KEY_INVALID: &str = "La clé est invalide ou absente ; le fournisseur l'a refusée.";
+pub const MSG_KEYCHAIN_UNAVAILABLE: &str =
+    "Le trousseau du système est indisponible ; la clé n'a pas été enregistrée.";
+
 /// The confirmation prompt for an "unlock all" of `count` cells (a `{n}`-substitution of
 /// [`MSG_UNLOCK_CONFIRM`] so the scanned const and the runtime string stay one source).
 pub fn unlock_confirm_message(count: usize) -> String {
@@ -172,6 +183,12 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_PROVIDER_FETCHING,
     MSG_PROVIDER_DONE,
     MSG_PROVIDER_FAILED,
+    MSG_KEY_SAVED,
+    MSG_KEY_DELETED,
+    MSG_KEY_TESTING,
+    MSG_KEY_OK,
+    MSG_KEY_INVALID,
+    MSG_KEYCHAIN_UNAVAILABLE,
 ];
 
 /// The scope of a bulk "unlock all" (Story 2.5): the whole study, a single year column, or a single

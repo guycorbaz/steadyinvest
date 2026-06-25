@@ -7,6 +7,7 @@ import { Tokens } from "../tokens.slint";
 import { Labels, Prefs, Verify } from "../state.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
+import { TextField } from "../components/text_field.slint";
 
 // One legend row (Story 2.13, FR57): the REAL marker beside its neutral meaning, so the legend can
 // never drift from what the cells actually show. The marker is ink only (its own token colour).
@@ -88,6 +89,72 @@ export component SettingsScreen inherits Rectangle {
                 color: Tokens.text-high;
                 font-size: Tokens.font-h2;
                 font-weight: Tokens.weight-semibold;
+            }
+
+            // ── Story 3.2 — Fournisseur de données & clé API (FR25/FR63). No wizard: configured
+            // as-needed here. The key VALUE never appears on screen — only a "configured" status —
+            // and travels one-way into Rust via `key-saved` (NFR-S1). ──
+            SettingsPanel {
+                title: @tr("Fournisseur de données");
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ChoiceChip {
+                        label: @tr("EODHD");
+                        selected: Prefs.provider == "eodhd";
+                        activated => { Prefs.provider-selected("eodhd"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Aucun (sans clé)");
+                        selected: Prefs.provider == "none";
+                        activated => { Prefs.provider-selected("none"); }
+                    }
+                }
+
+                // Key status + entry + actions only matter for a key-requiring provider — a keyless
+                // "none" provider shows no key status at all (F13).
+                if Prefs.provider == "eodhd": VerticalLayout {
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: Prefs.key-configured ? @tr("Clé configurée") : @tr("Aucune clé configurée");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+
+                    keyfield := TextField {
+                        placeholder: @tr("Clé API du fournisseur");
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+
+                        ActionButton {
+                            label: @tr("Enregistrer");
+                            clicked => {
+                                Prefs.key-saved(keyfield.text);
+                                keyfield.text = "";
+                            }
+                        }
+                        ActionButton {
+                            label: @tr("Supprimer");
+                            clicked => { Prefs.key-deleted(); }
+                        }
+                        ActionButton {
+                            label: @tr("Tester");
+                            clicked => { Prefs.key-tested(); }
+                        }
+                    }
+                }
+
+                if Prefs.provider-status != "": Text {
+                    text: Prefs.provider-status;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
             }
 
             SettingsPanel {

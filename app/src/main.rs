@@ -36,8 +36,10 @@
 mod clock;
 mod config;
 mod fetch;
+mod keychain;
 mod labels;
 mod posture;
+mod provider;
 mod regime;
 mod seam_check;
 mod state;
@@ -54,6 +56,7 @@ use uuid::Uuid;
 use crate::clock::{SystemClock, UuidGen};
 use crate::config::{AppConfig, StudyViewState};
 use crate::labels::LabelSet;
+use crate::provider::ProviderChoice;
 use crate::regime::Regime;
 use crate::state::{JournalState, UnlockScope};
 use crate::theme::Theme;
@@ -76,6 +79,51 @@ fn persist(path: Option<&PathBuf>, config: &AppConfig) {
         tracing::warn!("{message}");
         eprintln!("steadyinvest: {message}");
     }
+}
+
+/// The legacy interim key source (Story 3.1), kept ONLY as a fallback for environments with no
+/// running OS secret agent (headless/NAS — AC5/AC6).
+const ENV_KEY_FALLBACK: &str = "STEADYINVEST_EODHD_API_KEY";
+
+/// Resolve the API key for a fetch/test (Story 3.2): the OS keychain first, then the env-var
+/// fallback. `None` for a keyless provider or when no key is found anywhere. The key value is never
+/// logged — only the fact that the fallback was used.
+fn resolve_provider_key(provider: ProviderChoice) -> Option<String> {
+    if !provider.requires_key() {
+        return None;
+    }
+    match keychain::get_key(provider) {
+        Ok(Some(key)) => return Some(key),
+        Ok(None) => {}
+        // Store unavailable (no agent) — fall through to the env fallback rather than fail (AC6).
+        Err(_) => {}
+    }
+    // Trim consistently with the keychain path (which stores `key.trim()`), so a padded env value
+    // doesn't fetch with stray whitespace the provider would reject (F9).
+    let env_key = std::env::var(ENV_KEY_FALLBACK)
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty());
+    if env_key.is_some() {
+        tracing::info!(
+            "provider key read from the {ENV_KEY_FALLBACK} fallback environment variable"
+        );
+    }
+    env_key
+}
+
+/// Mirror the provider choice + keychain status into `Prefs` (Story 3.2). The key VALUE never
+/// crosses — only the boolean "configured" status (NFR-S1). A store failure shows as "not
+/// configured" plus a neutral notice (AC6).
+fn mirror_provider_prefs(ui: &MainWindow, provider: ProviderChoice) {
+    let prefs = ui.global::<Prefs>();
+    prefs.set_provider(provider.wire().into());
+    // A read failure (no secret agent) is reported as "not configured" — SILENTLY here: this runs at
+    // startup and on provider switch, before the user has asked for anything. The explicit
+    // save/delete/test actions surface `MSG_KEYCHAIN_UNAVAILABLE` when the user actually acts (AC6),
+    // and a fetch still falls back to the env-var key.
+    let configured = provider.requires_key() && keychain::has_key(provider).unwrap_or(false);
+    prefs.set_key_configured(configured);
 }
 
 fn push_samples(ui: &MainWindow, format: NumberFormat) {
@@ -341,6 +389,7 @@ fn main() -> Result<(), slint::PlatformError> {
         prefs.set_label_set(cfg.label_set.as_str().into());
         prefs.set_number_format(cfg.number_format.as_str().into());
         push_samples(&ui, cfg.number_format);
+        mirror_provider_prefs(&ui, cfg.preferred_provider);
 
         // Best-effort restore BEFORE show to minimise the visible jump; the authoritative
         // restore happens again right after show() below — before the window is mapped, winit
@@ -376,43 +425,64 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let studies = ui.global::<Studies>();
-            studies.set_fetching(false);
-            match outcome.result {
-                Ok(fetched) => {
-                    let applied = journal_state
-                        .borrow_mut()
-                        .apply_provider_fetch(outcome.study_id, &fetched);
-                    match applied {
-                        Ok(filled) => {
-                            studies.set_notice(
-                                state::MSG_PROVIDER_DONE
-                                    .replace("{n}", &filled.to_string())
-                                    .into(),
-                            );
-                            // Re-render the form + recompute if this study is still the open one.
-                            let still_open = current_study
-                                .borrow()
-                                .as_deref()
-                                .and_then(|s| Uuid::parse_str(s).ok())
-                                == Some(outcome.study_id);
-                            if still_open {
-                                if let Some(study) =
-                                    journal_state.borrow().get_study(outcome.study_id)
-                                {
-                                    let format = config.borrow().number_format;
-                                    push_form(&ui, &journal_state.borrow(), &study, format);
+            match outcome {
+                fetch::WorkerOutcome::Fetch(outcome) => {
+                    // Clear the in-progress flag ONLY for a study fetch — a key-test (which never
+                    // sets `fetching`) must not re-enable the study Fetch button mid-fetch (F5).
+                    studies.set_fetching(false);
+                    match outcome.result {
+                        Ok(fetched) => {
+                            let applied = journal_state
+                                .borrow_mut()
+                                .apply_provider_fetch(outcome.study_id, &fetched);
+                            match applied {
+                                Ok(filled) => {
+                                    studies.set_notice(
+                                        state::MSG_PROVIDER_DONE
+                                            .replace("{n}", &filled.to_string())
+                                            .into(),
+                                    );
+                                    // Re-render the form + recompute if this study is still the open one.
+                                    let still_open = current_study
+                                        .borrow()
+                                        .as_deref()
+                                        .and_then(|s| Uuid::parse_str(s).ok())
+                                        == Some(outcome.study_id);
+                                    if still_open {
+                                        if let Some(study) =
+                                            journal_state.borrow().get_study(outcome.study_id)
+                                        {
+                                            let format = config.borrow().number_format;
+                                            push_form(&ui, &journal_state.borrow(), &study, format);
+                                        }
+                                    }
+                                    refresh_studies(&ui, &journal_state.borrow());
                                 }
+                                Err(message) => studies.set_notice(message.into()),
                             }
-                            refresh_studies(&ui, &journal_state.borrow());
                         }
-                        Err(message) => studies.set_notice(message.into()),
+                        Err(error) => studies.set_notice(
+                            state::MSG_PROVIDER_FAILED
+                                .replace("{cause}", &error.to_string())
+                                .into(),
+                        ),
                     }
                 }
-                Err(error) => studies.set_notice(
-                    state::MSG_PROVIDER_FAILED
-                        .replace("{cause}", &error.to_string())
-                        .into(),
-                ),
+                fetch::WorkerOutcome::TestKey(result) => {
+                    // The key test (Story 3.2): a verdict, not study data. Surface it as the
+                    // provider/key status in Réglages (cause-named on failure).
+                    let prefs = ui.global::<Prefs>();
+                    let status = match result {
+                        Ok(()) => state::MSG_KEY_OK.to_string(),
+                        Err(steadyinvest_ingestion::IngestionError::Provider(
+                            steadyinvest_ingestion::ProviderError::InvalidOrAbsentKey,
+                        )) => state::MSG_KEY_INVALID.to_string(),
+                        Err(error) => {
+                            state::MSG_PROVIDER_FAILED.replace("{cause}", &error.to_string())
+                        }
+                    };
+                    prefs.set_provider_status(status.into());
+                }
             }
         });
     }
@@ -420,6 +490,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(&journal_state);
         let current_study = Rc::clone(&current_study);
+        let config = Rc::clone(&config);
         let fetch_tx = fetch_tx.clone();
         ui.global::<Studies>().on_fetch_provider(move || {
             let ui = ui_weak.unwrap();
@@ -439,22 +510,23 @@ fn main() -> Result<(), slint::PlatformError> {
             else {
                 return;
             };
-            // Interim key source (Story 3.2 moves this to the OS keychain).
-            let api_key = std::env::var("STEADYINVEST_EODHD_API_KEY")
-                .ok()
-                .filter(|k| !k.trim().is_empty());
-            if api_key.is_none() {
+            // Key source (Story 3.2): the OS keychain for the preferred provider, with an env-var
+            // fallback for environments that have no running secret agent (AC5/AC6). A keyless
+            // provider fetches with no key; a key-requiring provider with no key found is refused.
+            let provider_choice = config.borrow().preferred_provider;
+            let api_key = resolve_provider_key(provider_choice);
+            if provider_choice.requires_key() && api_key.is_none() {
                 studies.set_notice(state::MSG_PROVIDER_NO_KEY.into());
                 return;
             }
             studies.set_fetching(true);
             studies.set_notice(state::MSG_PROVIDER_FETCHING.into());
             if fetch_tx
-                .send(fetch::FetchRequest {
+                .send(fetch::WorkerJob::Fetch(fetch::FetchRequest {
                     study_id,
                     ticker,
                     api_key,
-                })
+                }))
                 .is_err()
             {
                 // The worker thread is gone (should never happen) — don't latch the in-progress
@@ -1522,6 +1594,91 @@ fn main() -> Result<(), slint::PlatformError> {
                 config.borrow_mut().number_format = format;
                 persist(path.as_ref(), &config.borrow());
             });
+    }
+    // ── Story 3.2 — provider selection + key management (FR25/FR63) ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let path = config_path.clone();
+        ui.global::<Prefs>().on_provider_selected(move |value| {
+            let Some(choice) = ProviderChoice::parse(&value) else {
+                return;
+            };
+            let ui = ui_weak.unwrap();
+            config.borrow_mut().preferred_provider = choice;
+            persist(path.as_ref(), &config.borrow());
+            mirror_provider_prefs(&ui, choice);
+            // Drop any prior save/test verdict — it referred to the previous provider (F3).
+            ui.global::<Prefs>().set_provider_status("".into());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        ui.global::<Prefs>().on_key_saved(move |key| {
+            let ui = ui_weak.unwrap();
+            let prefs = ui.global::<Prefs>();
+            let provider = config.borrow().preferred_provider;
+            // A blank field is a no-op (mirror the `set_rationale` empty-is-nothing discipline).
+            if key.trim().is_empty() {
+                return;
+            }
+            match keychain::set_key(provider, key.trim()) {
+                Ok(()) => {
+                    prefs.set_key_configured(true);
+                    prefs.set_provider_status(state::MSG_KEY_SAVED.into());
+                }
+                Err(_) => prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into()),
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        ui.global::<Prefs>().on_key_deleted(move || {
+            let ui = ui_weak.unwrap();
+            let prefs = ui.global::<Prefs>();
+            let provider = config.borrow().preferred_provider;
+            match keychain::delete_key(provider) {
+                Ok(()) => {
+                    prefs.set_key_configured(false);
+                    prefs.set_provider_status(state::MSG_KEY_DELETED.into());
+                }
+                Err(_) => prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into()),
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let fetch_tx = fetch_tx.clone();
+        ui.global::<Prefs>().on_key_tested(move || {
+            let ui = ui_weak.unwrap();
+            let prefs = ui.global::<Prefs>();
+            let provider = config.borrow().preferred_provider;
+            // A keyless provider has nothing to test.
+            if !provider.requires_key() {
+                prefs.set_provider_status(state::MSG_KEY_OK.into());
+                return;
+            }
+            let api_key = resolve_provider_key(provider);
+            if api_key.is_none() {
+                prefs.set_provider_status(state::MSG_PROVIDER_NO_KEY.into());
+                return;
+            }
+            // Off the UI thread: a minimal live fetch whose verdict returns via the outcome handler.
+            prefs.set_provider_status(state::MSG_KEY_TESTING.into());
+            if fetch_tx
+                .send(fetch::WorkerJob::TestKey(fetch::TestKeyRequest { api_key }))
+                .is_err()
+            {
+                prefs.set_provider_status(
+                    state::MSG_PROVIDER_FAILED
+                        .replace("{cause}", "le service de récupération est indisponible")
+                        .into(),
+                );
+            }
+        });
     }
 
     // show() → re-apply the size from inside the running event loop → run: before the window

@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::labels::LabelSet;
+use crate::provider::ProviderChoice;
 use crate::regime::{Regime, SECTION_COUNT};
 use crate::theme::Theme;
 use crate::viewmodel::format::NumberFormat;
@@ -75,6 +76,12 @@ pub struct AppConfig {
     /// without the field still loads. App-config only — never the journal (ADD7).
     #[serde(default)]
     pub study_view_state: BTreeMap<String, StudyViewState>,
+    /// The preferred data provider (Story 3.2, FR63). Records only *which* provider — the API
+    /// **key** lives only in the OS secret store (`keychain.rs`), NEVER here (NFR-S1). Append-only
+    /// `#[serde(default)]`: a pre-3.2 config without the field loads and defaults to
+    /// [`ProviderChoice::Eodhd`] (the only adapter today).
+    #[serde(default)]
+    pub preferred_provider: ProviderChoice,
 }
 
 impl Default for AppConfig {
@@ -88,6 +95,7 @@ impl Default for AppConfig {
             number_format: NumberFormat::default(),
             journal_path: None,
             study_view_state: BTreeMap::new(),
+            preferred_provider: ProviderChoice::default(),
         }
     }
 }
@@ -209,11 +217,70 @@ mod tests {
                     folds: [true, false, false, true, false],
                 },
             )]),
+            preferred_provider: ProviderChoice::None,
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
         assert_eq!(loaded.config, config);
         assert!(loaded.warning.is_none());
+    }
+
+    #[test]
+    fn preferred_provider_round_trips_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        let config = AppConfig {
+            preferred_provider: ProviderChoice::None,
+            ..AppConfig::default()
+        };
+        save(&path, &config).unwrap();
+        assert_eq!(load(&path).config.preferred_provider, ProviderChoice::None);
+    }
+
+    #[test]
+    fn old_config_without_preferred_provider_loads_and_defaults_the_field() {
+        // The append-only rail (Story 3.2): a pre-3.2 config has no `preferred_provider`. It must
+        // still load, defaulting the field to `Eodhd` — no migration, no failure. The API key is
+        // NOT in config (NFR-S1), so there is nothing secret to default here.
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        std::fs::write(
+            &path,
+            r#"{ "window_width": 1280, "theme": "light", "journal_path": "/x/journal.db" }"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert!(
+            loaded.warning.is_none(),
+            "an older config is not a fallback"
+        );
+        assert_eq!(
+            loaded.config.preferred_provider,
+            ProviderChoice::Eodhd,
+            "the new provider field defaults to the only adapter"
+        );
+        assert_eq!(loaded.config.window_width, 1280, "known fields still load");
+    }
+
+    #[test]
+    fn config_never_serializes_an_api_key_field() {
+        // NFR-S1 structural guard: app-config holds the provider *choice*, never a secret. Serialize
+        // a config and assert no key-like field name appears — the key lives only in the keychain.
+        let json = serde_json::to_string(&AppConfig {
+            preferred_provider: ProviderChoice::Eodhd,
+            ..AppConfig::default()
+        })
+        .unwrap();
+        // Match field-name tokens precisely (`"api_key"`, `"secret"` as JSON keys) rather than a
+        // bare `"key"` substring, which would false-positive on any future field whose name merely
+        // contains "key". The real NFR-S1 guarantee is structural — no key field exists — so this is
+        // a smoke test against an accidental future addition, not the guarantee itself.
+        assert!(!json.contains("\"api_key\""), "no api_key field in config");
+        assert!(!json.contains("\"secret\""), "no secret field in config");
+        assert!(
+            json.contains("preferred_provider"),
+            "but the choice is recorded"
+        );
     }
 
     #[test]
