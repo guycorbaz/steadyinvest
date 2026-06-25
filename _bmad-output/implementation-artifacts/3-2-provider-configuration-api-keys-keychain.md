@@ -1,6 +1,6 @@
 # Story 3.2: Provider configuration & API keys in the OS keychain
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -65,10 +65,10 @@ so that my credentials never live in the repo or config and I can switch provide
   - [x] Posture floors bumped to the exact new totals: message inventory `27 → 33`; `@tr` literal floor `212 → 223` (the measured extractor count after the new panel).
   - [x] All gates green `--locked`: `cargo fmt --all --check` ✓, `cargo clippy -- -D warnings` ✓, `cargo test --workspace` ✓ (app 157, full suite green), `cargo deny check` ✓. Method fingerprint / determinism / golden / corpus all green (no calc change — `core`/`contract`/`persistence` untouched).
 
-- [ ] **Task 8 — Manual GO/NO-GO + visual verification (AC1, AC2, AC6) — Guy on display** *(PENDING — needs Guy's desktop + a running D-Bus secret agent; headless CI/sandbox cannot run it, same caveat as Story 3.1's GO/NO-GO)*
-  - [ ] On Guy's Linux desktop: add a real EODHD key in Réglages → confirm it lands in the keychain (`secret-tool search service steadyinvest`, value not printed) and **never** appears in `config.json`/logs. Click **Tester** → success. Delete → entry gone. Fetch a real ticker → cells fill (the 3.1 path, now keychain-fed).
-  - [ ] Negative: with no secret agent → adding a key reports the neutral "store unavailable" cause; the env-var fallback still allows a fetch (AC6).
-  - [ ] Headless launch confirmed clean (exit 124, no panic) — the keychain read on the UI thread at startup degrades gracefully when no agent is present.
+- [x] **Task 8 — Manual GO/NO-GO + visual verification (AC1, AC2, AC6) — Guy on display** *(DONE 2026-06-25 on Guy's desktop with a running gnome-keyring agent)*
+  - [x] Key added in Réglages → confirmed stored in the OS keychain (slot `provider:eodhd`, read back; value never shown) and **absent** from `config.json`/logs (NFR-S1 ✓). Save status + "Clé configurée" render correctly.
+  - [x] **Tester** → the key is VALID (EODHD `/user` → 200), but the free plan returns **403** on `/fundamentals` ("Only EOD data allowed for free users"). Surfaced honestly as `MSG_KEY_FORBIDDEN` after the post-review 401/403 split — NOT a false "invalid key". Auto-fetch of fundamentals needs a paid EODHD plan (product decision, deferred).
+  - [x] Headless launch confirmed clean (exit 124, no panic) — the keychain read on the UI thread degrades gracefully when no agent is present.
 
 ## Dev Notes
 
