@@ -477,6 +477,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         Err(steadyinvest_ingestion::IngestionError::Provider(
                             steadyinvest_ingestion::ProviderError::InvalidOrAbsentKey,
                         )) => state::MSG_KEY_INVALID.to_string(),
+                        // 403: the key is valid but the plan/account is not authorized (e.g. EODHD
+                        // free tier excludes fundamentals) — say so honestly, not "key invalid".
+                        Err(steadyinvest_ingestion::IngestionError::Provider(
+                            steadyinvest_ingestion::ProviderError::Forbidden { .. },
+                        )) => state::MSG_KEY_FORBIDDEN.to_string(),
                         Err(error) => {
                             state::MSG_PROVIDER_FAILED.replace("{cause}", &error.to_string())
                         }

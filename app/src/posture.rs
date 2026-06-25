@@ -599,11 +599,11 @@ mod tests {
         // Guard the count so a future message added without registering it here is caught. Story 2.6
         // adds the normalize-failure notice (`MSG_NORMALIZE_FAILED`); Story 2.12 adds the six dashboard
         // archive/un-archive/delete confirm + done templates; Story 2.13 adds the two verify-engine
-        // summary templates + the demo-unavailable notice; Story 3.2 adds the six provider-key
-        // notices (saved/deleted/testing/ok/invalid/keychain-unavailable).
+        // summary templates + the demo-unavailable notice; Story 3.2 adds the seven provider-key
+        // notices (saved/deleted/testing/ok/invalid/forbidden/keychain-unavailable).
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            33,
+            34,
             "state.rs message inventory changed — register the new notice"
         );
     }

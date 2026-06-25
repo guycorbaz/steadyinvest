@@ -65,6 +65,14 @@ impl EodhdProvider {
                     detail: e.without_url().to_string(),
                 });
         }
+        // A 403 means the key is valid but the account/plan is not authorized for this resource
+        // (e.g. EODHD's free tier excludes /fundamentals). Surface the provider's own reason — far
+        // more honest than "key invalid" — capped, and key-free (the body never carries the token).
+        if status.as_u16() == 403 {
+            let detail = resp.text().await.unwrap_or_default();
+            let detail: String = detail.trim().chars().take(200).collect();
+            return Err(ProviderError::Forbidden { detail });
+        }
         Err(classify_status(status.as_u16(), ticker))
     }
 }
@@ -97,10 +105,11 @@ impl MarketDataProvider for EodhdProvider {
     }
 }
 
-/// HTTP status → cause-named [`ProviderError`].
+/// HTTP status → cause-named [`ProviderError`]. (403 is handled in `get_json` with the body, so it
+/// never reaches here — only 401 maps to an invalid/absent key.)
 fn classify_status(status: u16, ticker: &str) -> ProviderError {
     match status {
-        401 | 403 => ProviderError::InvalidOrAbsentKey,
+        401 => ProviderError::InvalidOrAbsentKey,
         404 => ProviderError::TickerNotFound {
             ticker: ticker.to_string(),
         },

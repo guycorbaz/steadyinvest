@@ -24,6 +24,13 @@ pub enum ProviderError {
     #[error("the provider rejected the request as unauthenticated (key invalid or absent)")]
     InvalidOrAbsentKey,
 
+    /// The key is valid but this resource is not authorized for the account (e.g. a plan that does
+    /// not include this data). HTTP 403 — distinct from [`Self::InvalidOrAbsentKey`] (401): the
+    /// credential works, the *subscription* does not cover the request. `detail` carries the
+    /// provider's own reason (never the key — the body has no token).
+    #[error("the provider refused access to this resource for the account: {detail}")]
+    Forbidden { detail: String },
+
     /// The provider has no data for this ticker (404 or empty payload).
     #[error("the provider returned no data for ticker {ticker}")]
     TickerNotFound { ticker: String },
@@ -98,6 +105,9 @@ mod tests {
                 retry_after_secs: Some(60),
             },
             ProviderError::InvalidOrAbsentKey,
+            ProviderError::Forbidden {
+                detail: "Only EOD data allowed for free users".into(),
+            },
             ProviderError::TickerNotFound {
                 ticker: "AAPL.US".into(),
             },

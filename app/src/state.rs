@@ -101,6 +101,8 @@ pub const MSG_KEY_DELETED: &str = "La clé du fournisseur est retirée du trouss
 pub const MSG_KEY_TESTING: &str = "Test de la clé du fournisseur en cours.";
 pub const MSG_KEY_OK: &str = "La clé est valide ; le fournisseur a répondu.";
 pub const MSG_KEY_INVALID: &str = "La clé est invalide ou absente ; le fournisseur l'a refusée.";
+pub const MSG_KEY_FORBIDDEN: &str =
+    "La clé est valide, mais l'abonnement ne couvre pas ces données ; le fournisseur a refusé l'accès.";
 pub const MSG_KEYCHAIN_UNAVAILABLE: &str =
     "Le trousseau du système est indisponible ; la clé n'a pas été enregistrée.";
 
@@ -188,6 +190,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_KEY_TESTING,
     MSG_KEY_OK,
     MSG_KEY_INVALID,
+    MSG_KEY_FORBIDDEN,
     MSG_KEYCHAIN_UNAVAILABLE,
 ];
 
