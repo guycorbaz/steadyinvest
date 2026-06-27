@@ -364,7 +364,7 @@ development_status:
   # ── Epic 4: Watchlist & single-portfolio risk [P1] ──
   epic-4: in-progress
   4-1-watchlist-management: done
-  4-2-neutral-buy-zone-alerts: backlog
+  4-2-neutral-buy-zone-alerts: done
   4-3-single-portfolio-holdings-register: backlog
   4-4-manual-price-refresh-per-holding-zones: backlog
   4-5-trailing-stop-per-holding: backlog

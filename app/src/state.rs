@@ -3034,6 +3034,50 @@ mod tests {
         assert_eq!(state.study_id_for_ticker("UNKNOWN"), None);
     }
 
+    // ── Story 4.2 — buy-zone alert (the app-surface read of the engine zone) ──
+
+    #[test]
+    fn study_in_buy_zone_reflects_the_current_price_and_is_verdict_independent() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x95, "2026-06-27T16:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        // Provider-fill (cells stay Review::None → the verdict is NOT Full) + a complete judgment so
+        // the §4 forecast band exists; est_low_eps 6 × low_pe 10 ⇒ forecast low ≈ 60.
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        // Forecast band ≈ [low 50–60, high 160] (high = est_high_eps 8 × high_pe 20). The buy third
+        // is ≈ [low, 93] (buy_top = low + (high − low)/3). A current_price of 70 sits in it.
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+            ("current_price", 70),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+        // The verdict is NOT Full (unvalidated provider cells), yet the buy-zone fact still holds
+        // (AC6 — verdict-independent).
+        assert!(
+            engine::study_in_buy_zone(&state.get_study(id).unwrap()),
+            "a current price in the bottom third of the band is in the buy zone, regardless of verdict"
+        );
+
+        // Move the price into the upper band (sell third) → not in the buy zone.
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(150)))
+            .unwrap();
+        assert!(!engine::study_in_buy_zone(&state.get_study(id).unwrap()));
+
+        // No current price → no defined zone → not in the buy zone.
+        state.set_judgment_field(id, "current_price", None).unwrap();
+        assert!(!engine::study_in_buy_zone(&state.get_study(id).unwrap()));
+    }
+
     #[test]
     fn undo_redo_steps_back_and_forward_and_a_new_edit_clears_redo() {
         let dir = TempDir::new().unwrap();

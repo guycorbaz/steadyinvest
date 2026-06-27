@@ -144,23 +144,37 @@ fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
         .map(|s| (s.id, s.security_ticker))
         .collect();
     let items = state.list_watch_items();
+    let mut in_buy_zone_count = 0i32;
     let rows: Vec<WatchRow> = items
         .iter()
-        .map(|w| WatchRow {
-            id: w.id.to_string().into(),
-            ticker: w.security_ticker.clone().into(),
-            // `linked` is authoritative (the cell carries a study_id); `study_link` is the resolved
-            // ticker for display (may be "" if the linked study no longer resolves).
-            linked: w.study_id.is_some(),
-            study_link: w
+        .map(|w| {
+            // Story 4.2: a linked study whose current price is in its §4 buy zone flags a neutral
+            // alert (one `build_snapshot` per linked study; unlinked entries are never in a zone).
+            let in_buy_zone = w
                 .study_id
-                .and_then(|sid| by_id.get(&sid))
-                .cloned()
-                .unwrap_or_default()
-                .into(),
+                .and_then(|sid| state.get_study(sid))
+                .is_some_and(|study| viewmodel::engine::study_in_buy_zone(&study));
+            if in_buy_zone {
+                in_buy_zone_count += 1;
+            }
+            WatchRow {
+                id: w.id.to_string().into(),
+                ticker: w.security_ticker.clone().into(),
+                // `linked` is authoritative (the cell carries a study_id); `study_link` is the
+                // resolved ticker for display (may be "" if the linked study no longer resolves).
+                linked: w.study_id.is_some(),
+                study_link: w
+                    .study_id
+                    .and_then(|sid| by_id.get(&sid))
+                    .cloned()
+                    .unwrap_or_default()
+                    .into(),
+                in_buy_zone,
+            }
         })
         .collect();
     watchlist.set_count(items.len() as i32);
+    watchlist.set_in_buy_zone_count(in_buy_zone_count);
     watchlist.set_rows(ModelRc::new(VecModel::from(rows)));
     watchlist.set_read_only(state.is_read_only());
 }

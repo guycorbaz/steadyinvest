@@ -32,6 +32,7 @@ export struct WatchRow {
     ticker: string,
     linked: bool,
     study-link: string,
+    in-buy-zone: bool, // the linked study's current price is in its §4 buy zone (Story 4.2, FR35)
 }
 
 // The non-collapsible header identity block of the faithful SSG form (Story 2.3). Every field is an
@@ -532,6 +533,8 @@ export global Prefs {
 export global Watchlist {
     in-out property <[WatchRow]> rows;
     in-out property <int> count;
+    // How many watched securities are currently in their buy zone (Story 4.2) — the summary alert.
+    in-out property <int> in-buy-zone-count;
     in-out property <bool> read-only;
     in-out property <string> notice;
     callback add-watch(string); // ticker

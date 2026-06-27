@@ -566,10 +566,10 @@ mod tests {
         // NEVER scanned (NFR-S1). Story 3.3 adds the focused cell's freshness as-of caption ("Mis à
         // jour le {}"). Story 3.4 adds the reconciliation reveal + resolve controls ("Fournisseur :
         // {}", "Accepter (fournisseur)", "Ignorer (fournisseur)"). Story 4.1 fleshes out the watchlist
-        // screen (add field, list rows, link/reorder/remove actions): net +9 @tr literals. Keep the
-        // floor strict against a broken scan.
+        // screen (add field, list rows, link/reorder/remove actions): net +9 @tr literals. Story 4.2
+        // adds the neutral buy-zone summary + per-row fact: +2. Keep the floor strict against a broken scan.
         assert!(
-            total >= 236,
+            total >= 238,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

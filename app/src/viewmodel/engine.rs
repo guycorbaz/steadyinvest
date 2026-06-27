@@ -239,6 +239,19 @@ pub fn build_snapshot(study: &Study) -> Result<StudySnapshot, NormalizeError> {
     build_frame(study).map(|frame| frame.snapshot)
 }
 
+/// Whether a study's current price sits in its §4 **buy zone** (Story 4.2, FR35). A presentation-only
+/// read of the existing `core::ssg` risk-reward output — it never alters the verdict and is
+/// independent of input-validation state (a `Provisional`/`Withheld` study can still be in its buy
+/// zone). A study that does not normalize is **not** in the zone. Neither is one whose
+/// `present_price_zone` is `None` — no `current_price`, a degenerate band, **or** a price outside
+/// `[forecast_low, forecast_high]` (a price *below* the band is therefore silent, by design: the
+/// §4 zone is only defined inside the band; cf. issue tracker for the below-band UX question).
+pub fn study_in_buy_zone(study: &Study) -> bool {
+    build_snapshot(study)
+        .map(|snapshot| snapshot.outputs().risk_reward.present_price_zone == Some(Zone::Buy))
+        .unwrap_or(false)
+}
+
 // ── Plausibility surfacing (Story 2.7) — map the engine's two finding sets to UI cell addresses ──
 
 /// Where a plausibility finding attaches on the faithful form. A `Cell` finding draws the inline §2/§3

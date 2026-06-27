@@ -45,6 +45,14 @@ export component WatchlistScreen inherits Rectangle {
             font-size: Tokens.font-caption;
         }
 
+        // Story 4.2 (FR35) — neutral buy-zone summary. Ink + a small attention glyph, NEVER a buy
+        // hue (the saturated zones stay geofenced to the open study's §4 zone bar). Fact-stating.
+        if Watchlist.in-buy-zone-count > 0: Text {
+            text: @tr("◆ {} valeur(s) dans leur zone d'achat.", Watchlist.in-buy-zone-count);
+            color: Tokens.text-high;
+            font-size: Tokens.font-body;
+        }
+
         // ── Empty state ──
         if Watchlist.count == 0: Text {
             text: @tr("Aucune valeur suivie pour le moment ; ajoutez un symbole ci-dessus.");
@@ -71,6 +79,14 @@ export component WatchlistScreen inherits Rectangle {
                 Text {
                     text: row.linked ? @tr("Étude : {}", row.study-link) : @tr("Aucune étude liée");
                     color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+                // Story 4.2 (FR35) — neutral buy-zone marker (ink + glyph, never a buy hue). The fact,
+                // not an instruction. Silent unless the linked study's current price is in its buy zone.
+                Text {
+                    text: row.in-buy-zone ? @tr("◆ Le prix est dans la zone que vous avez définie.") : "";
+                    color: Tokens.text-high;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
                 }
