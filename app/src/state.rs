@@ -93,6 +93,17 @@ pub const MSG_PROVIDER_NO_KEY: &str =
 pub const MSG_PROVIDER_FETCHING: &str = "Récupération des données du fournisseur en cours.";
 pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause}";
 
+/// Graceful-failure cause-named copy (Story 3.5, FR23/FR24) — fact-stating, posture-gated. Each
+/// names the cause; last-known values stay in place and affected provider data is flagged stale. The
+/// API key never appears (NFR-S1 — these are static, no raw-error interpolation). Selected by
+/// [`provider_failure_notice`].
+pub const MSG_PROVIDER_OFFLINE: &str =
+    "La connexion au fournisseur a échoué ; les dernières données connues restent affichées (à actualiser).";
+pub const MSG_PROVIDER_QUOTA: &str =
+    "Le fournisseur a signalé une limite d'usage ; les dernières données connues restent affichées, réessayez plus tard.";
+pub const MSG_PROVIDER_NO_DATA: &str =
+    "Le fournisseur n'a renvoyé aucune donnée pour ce symbole ; les dernières données connues restent affichées.";
+
 /// Manual-refresh recompute-cause copy (Story 3.3, FR29) — fact-stating, posture-gated. The cause is
 /// a classification of what the refresh changed; the message names it (price / fundamentals / both),
 /// or states that nothing moved. Selected by [`refresh_notice`].
@@ -168,6 +179,28 @@ pub fn refresh_notice(report: RefreshReport) -> &'static str {
     }
 }
 
+/// Classify a provider/ingestion failure into its neutral, cause-named notice (Story 3.5, FR24).
+/// The single mapping from the `ingestion` taxonomy to the global banner — never the raw error
+/// string (NFR-S1: the api_token lives in the request URL; static notices cannot leak it).
+pub fn provider_failure_notice(error: &steadyinvest_ingestion::IngestionError) -> &'static str {
+    use steadyinvest_ingestion::{IngestionError, ProviderError};
+    match error {
+        IngestionError::Provider(p) => match p {
+            ProviderError::Network { .. } => MSG_PROVIDER_OFFLINE,
+            ProviderError::Quota { .. } => MSG_PROVIDER_QUOTA,
+            ProviderError::InvalidOrAbsentKey => MSG_KEY_INVALID,
+            ProviderError::Forbidden { .. } => MSG_KEY_FORBIDDEN,
+            ProviderError::TickerNotFound { .. } => MSG_PROVIDER_NO_DATA,
+            // A malformed / unsupported / unparseable payload is not an outage but the data cannot be
+            // prepared — the neutral "data can't be prepared" notice (a static string, no token, and
+            // never `MSG_PROVIDER_FAILED`'s `{cause}` placeholder which only the worker-gone path fills).
+            ProviderError::Parse { .. } | ProviderError::Unsupported { .. } => MSG_NORMALIZE_FAILED,
+        },
+        // The fetched data reached us but did not normalize (a structural payload error).
+        IngestionError::Normalize(_) => MSG_NORMALIZE_FAILED,
+    }
+}
+
 /// The completion notice after a dashboard lifecycle action on `ticker` completes (Story 2.12).
 pub fn study_action_done_message(action: &str, ticker: &str) -> String {
     let template = match action {
@@ -209,6 +242,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_PROVIDER_NO_KEY,
     MSG_PROVIDER_FETCHING,
     MSG_PROVIDER_FAILED,
+    MSG_PROVIDER_OFFLINE,
+    MSG_PROVIDER_QUOTA,
+    MSG_PROVIDER_NO_DATA,
     MSG_REFRESH_NOCHANGE,
     MSG_REFRESH_PRICE,
     MSG_REFRESH_INPUT,
@@ -706,6 +742,18 @@ impl JournalState {
         let report = std::cell::Cell::new(RefreshReport::default());
         let report_ref = &report;
         self.mutate_study(study_id, move |study| {
+            // A successful refresh means the provider responded → the outage (Story 3.5) is over.
+            // Clear the stale flag on EVERY provider cell up front, so cells this fetch does not
+            // re-visit (an omitted optional field, a year outside the fetched set) also recover —
+            // not just the ones whose value is re-confirmed below. A freshness-only recovery; it is
+            // not counted in the report (no value moved), it just lets the verdict come back.
+            for year in &mut study.years {
+                for cell in year_cells_mut(year) {
+                    if cell.source == Source::Provider && cell.freshness == Freshness::Stale {
+                        cell.freshness = Freshness::Current;
+                    }
+                }
+            }
             // A fresh (never-edited) study first gets empty to-fill provider rows, so the SAME
             // per-cell accounting path then fills + classifies them — one rail, one tally.
             if study.years.is_empty() {
@@ -723,6 +771,45 @@ impl JournalState {
             report_ref.set(acc);
         })?;
         Ok(report.get())
+    }
+
+    /// Flag the open study's **provider-sourced** cells `Freshness::Stale` after a failed (or
+    /// empty) refresh (Story 3.5, FR23/NFR-R1). Only the **freshness** axis moves — `value`, `source`,
+    /// `review`, `coverage`, `provenance`, and any Story-3.4 `pending` are all retained (last-known
+    /// values are never cleared). Manual/derived cells are untouched (the user owns manual data). The
+    /// engine already degrades a validated-but-stale load-bearing input to `Verdict::Provisional`
+    /// (Story 2.6 wiring), and the form already renders the dimmed `◦` murmur (Story 2.4) — this is
+    /// the first production caller that SETS the flag. Returns the count flagged; idempotent (an
+    /// already-stale cell is left untouched, so `mutate_study`'s `before != study` guard records no
+    /// phantom undo step). Routed through the atomic [`Self::mutate_study`] rail.
+    pub fn mark_provider_stale(&mut self, study_id: Uuid) -> Result<usize, String> {
+        // Pre-check: if there is nothing to flag (no provider cells, or all already stale), return a
+        // true no-op WITHOUT entering `mutate_study` — so a failed refresh on an already-stale study
+        // (repeated offline retries), an empty study, or a manual-only study writes no journal
+        // revision and bumps no `logical_version` (mirrors the Story-3.4 accept/keep guard; the
+        // Synology-sync corruption risk makes avoidable writes worth suppressing).
+        let candidates = self
+            .get_study(study_id)
+            .map(|s| count_provider_to_stale(&s))
+            .unwrap_or(0);
+        if candidates == 0 {
+            return Ok(0);
+        }
+        let count = std::cell::Cell::new(0usize);
+        let count_ref = &count;
+        self.mutate_study(study_id, move |study| {
+            let mut flagged = 0usize;
+            for year in &mut study.years {
+                for cell in year_cells_mut(year) {
+                    if cell.source == Source::Provider && cell.freshness != Freshness::Stale {
+                        cell.freshness = Freshness::Stale;
+                        flagged += 1;
+                    }
+                }
+            }
+            count_ref.set(flagged);
+        })?;
+        Ok(count.get())
     }
 
     /// Manually set/clear a cell's value (FR16): parse-side `value` (already a [`Money`] or `None`)
@@ -1329,6 +1416,50 @@ impl RefreshReport {
     }
 }
 
+/// Mutable refs to every present cell of a year — the 4 load-bearing cells plus any present optional
+/// cell. The shared walk for the freshness rails (Story 3.5: flag/clear `Freshness::Stale`).
+fn year_cells_mut(year: &mut YearData) -> Vec<&mut Cell> {
+    let mut cells: Vec<&mut Cell> = vec![
+        &mut year.sales,
+        &mut year.eps,
+        &mut year.high_price,
+        &mut year.low_price,
+    ];
+    for slot in [
+        &mut year.dividend_per_share,
+        &mut year.pre_tax_profit,
+        &mut year.book_value_per_share,
+    ] {
+        if let Some(cell) = slot.as_mut() {
+            cells.push(cell);
+        }
+    }
+    cells
+}
+
+/// How many provider cells of `study` are not yet `Stale` — the [`JournalState::mark_provider_stale`]
+/// pre-check (a `&Study` read, no mutation), so a no-op failure writes no journal revision.
+fn count_provider_to_stale(study: &Study) -> usize {
+    study
+        .years
+        .iter()
+        .flat_map(|y| {
+            let req = [&y.sales, &y.eps, &y.high_price, &y.low_price];
+            let opt = [
+                y.dividend_per_share.as_ref(),
+                y.pre_tax_profit.as_ref(),
+                y.book_value_per_share.as_ref(),
+            ];
+            req.into_iter()
+                .map(Some)
+                .chain(opt)
+                .flatten()
+                .collect::<Vec<_>>()
+        })
+        .filter(|c| c.source == Source::Provider && c.freshness != Freshness::Stale)
+        .count()
+}
+
 /// A provider-sourced cell: `Source::Provider`, `Freshness::Current`, `Review::None` (unvalidated),
 /// `Coverage::Present` for a value / `ToFill` for a gap (absent stays hand-editable, never `0`).
 fn provider_cell(value: Option<Decimal>, provenance: &Provenance) -> Cell {
@@ -1419,6 +1550,9 @@ fn refresh_cell(cell: &mut Cell, value: Option<Decimal>, provenance: &Provenance
             Some(v) => {
                 let new_value = Some(Money::from(v));
                 if cell.value == new_value {
+                    // The value agrees → a true no-op. (Any `Stale` flag from a prior failed refresh
+                    // was already cleared up front by `apply_provider_refresh`'s outage-recovery pass,
+                    // Story 3.5 — so this stays a pure value-based idempotency check.)
                     CellRefresh::Unchanged
                 } else {
                     *cell = cell.edited(new_value, provenance.clone());
@@ -2216,6 +2350,238 @@ mod tests {
             state.undo_depth(),
             depth,
             "a repeated divergence records no phantom undo step"
+        );
+    }
+
+    // ── Story 3.5 — graceful provider failure ──
+
+    #[test]
+    fn provider_failure_notice_maps_each_cause() {
+        use steadyinvest_ingestion::{IngestionError, ProviderError};
+        let p = |e: ProviderError| provider_failure_notice(&IngestionError::Provider(e));
+        assert_eq!(
+            p(ProviderError::Network {
+                detail: "dns".into()
+            }),
+            MSG_PROVIDER_OFFLINE
+        );
+        assert_eq!(
+            p(ProviderError::Quota {
+                retry_after_secs: Some(60)
+            }),
+            MSG_PROVIDER_QUOTA
+        );
+        assert_eq!(p(ProviderError::InvalidOrAbsentKey), MSG_KEY_INVALID);
+        assert_eq!(
+            p(ProviderError::Forbidden {
+                detail: "plan".into()
+            }),
+            MSG_KEY_FORBIDDEN
+        );
+        assert_eq!(
+            p(ProviderError::TickerNotFound {
+                ticker: "AAPL.US".into()
+            }),
+            MSG_PROVIDER_NO_DATA
+        );
+        assert_eq!(
+            p(ProviderError::Parse {
+                detail: "shape".into()
+            }),
+            MSG_NORMALIZE_FAILED
+        );
+        let normalize = IngestionError::Normalize(
+            steadyinvest_core::normalize::NormalizeError::DuplicateYear { year: 2020 },
+        );
+        assert_eq!(provider_failure_notice(&normalize), MSG_NORMALIZE_FAILED);
+    }
+
+    #[test]
+    fn mark_provider_stale_flags_provider_cells_and_retains_values() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x70, "2026-06-27T10:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+
+        let flagged = state.mark_provider_stale(id).unwrap();
+        assert_eq!(
+            flagged, 20,
+            "5 years × 4 load-bearing provider cells flagged"
+        );
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(high.freshness, Freshness::Stale);
+        assert_eq!(
+            high.value,
+            Some(und_money(100)),
+            "the last-known value is retained (NFR-R1)"
+        );
+        assert_eq!(high.source, Source::Provider);
+    }
+
+    #[test]
+    fn mark_provider_stale_leaves_manual_cells_current_and_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x71, "2026-06-27T10:30:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        // A manual high_price on year 0 (materializes the grid); the rest are empty (manual to-fill).
+        state.edit_cell(id, 0, "a", Some(und_money(999))).unwrap();
+
+        let flagged = state.mark_provider_stale(id).unwrap();
+        assert_eq!(flagged, 0, "a study with no provider cells flags nothing");
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].high_price.freshness,
+            Freshness::Current,
+            "a manual cell is never flagged stale (the user owns it)"
+        );
+
+        // Now fill the rest from the provider, flag, then RE-flag — the second is a no-op.
+        let years: Vec<i32> = state
+            .get_study(id)
+            .unwrap()
+            .years
+            .iter()
+            .map(|y| y.year)
+            .collect();
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        state.mark_provider_stale(id).unwrap();
+        let depth = state.undo_depth();
+        let version = state.logical_version();
+        let again = state.mark_provider_stale(id).unwrap();
+        assert_eq!(again, 0, "already-stale cells are not re-flagged");
+        assert_eq!(
+            state.undo_depth(),
+            depth,
+            "an idempotent re-flag records no phantom undo step"
+        );
+        assert_eq!(
+            state.logical_version(),
+            version,
+            "an idempotent re-flag writes no journal revision (no version bump)"
+        );
+        // The manually-held cell is still Current after both flags.
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].high_price.source,
+            Source::Manual
+        );
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].high_price.freshness,
+            Freshness::Current
+        );
+    }
+
+    /// A failed refresh that flags a validated provider study stale degrades the verdict to
+    /// Provisional in the same frame (the production path through `mark_provider_stale`). (AC3)
+    #[test]
+    fn a_stale_flag_degrades_a_full_verdict_to_provisional() {
+        use steadyinvest_core::verdict::Verdict;
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x72, "2026-06-27T11:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        for y in 0..years.len() {
+            for field in [
+                entry::FIELD_SALES,
+                entry::FIELD_HIGH,
+                entry::FIELD_LOW,
+                entry::FIELD_EPS,
+            ] {
+                state.set_review(id, y, field, Review::Validated).unwrap();
+            }
+        }
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+            ("current_price", 60),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+        assert!(
+            matches!(
+                engine::build_snapshot(&state.get_study(id).unwrap())
+                    .unwrap()
+                    .verdict(),
+                Verdict::Full(_)
+            ),
+            "precondition: a validated provider study reads Full"
+        );
+
+        // A failed refresh flags the provider cells stale → the validated inputs degrade.
+        state.mark_provider_stale(id).unwrap();
+        assert!(
+            matches!(
+                engine::build_snapshot(&state.get_study(id).unwrap())
+                    .unwrap()
+                    .verdict(),
+                Verdict::Provisional(_)
+            ),
+            "a stale validated load-bearing input degrades Full → Provisional"
+        );
+    }
+
+    /// A later successful refresh re-confirms currency and clears the stale flag, even when the
+    /// provider returns the SAME values. (AC2 lifecycle)
+    #[test]
+    fn a_successful_refresh_clears_the_stale_flag() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x73, "2026-06-27T11:30:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        state.mark_provider_stale(id).unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].high_price.freshness,
+            Freshness::Stale
+        );
+
+        // The same data comes back on a successful retry — currency confirmed → Current again.
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].high_price.freshness,
+            Freshness::Current,
+            "a successful refresh clears the stale flag (even on unchanged values)"
+        );
+    }
+
+    /// A successful refresh that covers only a SUBSET of the grid's years still clears the stale flag
+    /// on the years it omits — the outage is over, so the recovery is study-wide, not per-fetched-cell
+    /// (review-fix: a year/field the fetch omits must not stay stale forever). (AC2)
+    #[test]
+    fn a_successful_refresh_clears_stale_on_years_it_omits() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x74, "2026-06-27T12:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let all_years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&all_years))
+            .unwrap();
+        state.mark_provider_stale(id).unwrap();
+
+        // A narrower successful refresh (only the last 3 years) — the omitted 2020/2021 must recover.
+        state
+            .apply_provider_refresh(id, &fetched_for(&[2022, 2023, 2024]))
+            .unwrap();
+        let study = state.get_study(id).unwrap();
+        let year_2020 = study.years.iter().find(|y| y.year == 2020).unwrap();
+        assert_eq!(
+            year_2020.high_price.freshness,
+            Freshness::Current,
+            "a year the successful fetch omitted still recovers from stale (outage over)"
         );
     }
 

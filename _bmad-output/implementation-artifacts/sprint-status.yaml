@@ -357,7 +357,7 @@ development_status:
   3-2-provider-configuration-api-keys-keychain: done
   3-3-manual-refresh-recompute-freshness: done
   3-4-non-destructive-reconciliation: done
-  3-5-graceful-provider-failure: backlog
+  3-5-graceful-provider-failure: done
   3-6-annual-update-journey: backlog
   epic-3-retrospective: optional
 

@@ -430,7 +430,34 @@ fn main() -> Result<(), slint::PlatformError> {
                     // Clear the in-progress flag ONLY for a study fetch — a key-test (which never
                     // sets `fetching`) must not re-enable the study Fetch button mid-fetch (F5).
                     studies.set_fetching(false);
+                    // Re-render the open study (the stale murmur + degraded verdict show here) and
+                    // refresh the dashboard — shared by the success, empty-payload, and failure arms.
+                    let render_open = || {
+                        let still_open = current_study
+                            .borrow()
+                            .as_deref()
+                            .and_then(|s| Uuid::parse_str(s).ok())
+                            == Some(outcome.study_id);
+                        if still_open {
+                            if let Some(study) = journal_state.borrow().get_study(outcome.study_id)
+                            {
+                                let format = config.borrow().number_format;
+                                push_form(&ui, &journal_state.borrow(), &study, format);
+                            }
+                        }
+                        refresh_studies(&ui, &journal_state.borrow());
+                    };
                     match outcome.result {
+                        // Story 3.5 / #46: a transport-success that returned ZERO usable years is
+                        // "no data", NOT "no change" — report it honestly and flag last-known
+                        // provider data stale (never apply an empty refresh as if nothing changed).
+                        Ok(fetched) if fetched.canonical.years.is_empty() => {
+                            studies.set_notice(state::MSG_PROVIDER_NO_DATA.into());
+                            let _ = journal_state
+                                .borrow_mut()
+                                .mark_provider_stale(outcome.study_id);
+                            render_open();
+                        }
                         Ok(fetched) => {
                             let applied = journal_state
                                 .borrow_mut()
@@ -440,30 +467,21 @@ fn main() -> Result<(), slint::PlatformError> {
                                     // Name the recompute cause (FR29): price / fundamentals / both,
                                     // or "no change" when an idempotent re-fetch moved nothing.
                                     studies.set_notice(state::refresh_notice(report).into());
-                                    // Re-render the form + recompute if this study is still the open one.
-                                    let still_open = current_study
-                                        .borrow()
-                                        .as_deref()
-                                        .and_then(|s| Uuid::parse_str(s).ok())
-                                        == Some(outcome.study_id);
-                                    if still_open {
-                                        if let Some(study) =
-                                            journal_state.borrow().get_study(outcome.study_id)
-                                        {
-                                            let format = config.borrow().number_format;
-                                            push_form(&ui, &journal_state.borrow(), &study, format);
-                                        }
-                                    }
-                                    refresh_studies(&ui, &journal_state.borrow());
+                                    render_open();
                                 }
                                 Err(message) => studies.set_notice(message.into()),
                             }
                         }
-                        Err(error) => studies.set_notice(
-                            state::MSG_PROVIDER_FAILED
-                                .replace("{cause}", &error.to_string())
-                                .into(),
-                        ),
+                        // Story 3.5 (FR23/FR24/NFR-R1): name the cause, RETAIN last-known values, and
+                        // flag the open study's provider cells stale (degrading the verdict). Never
+                        // clear data; the user keeps working offline and retries later.
+                        Err(error) => {
+                            studies.set_notice(state::provider_failure_notice(&error).into());
+                            let _ = journal_state
+                                .borrow_mut()
+                                .mark_provider_stale(outcome.study_id);
+                            render_open();
+                        }
                     }
                 }
                 fetch::WorkerOutcome::TestKey(result) => {

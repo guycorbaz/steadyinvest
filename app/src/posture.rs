@@ -604,10 +604,11 @@ mod tests {
         // summary templates + the demo-unavailable notice; Story 3.2 adds the seven provider-key
         // notices (saved/deleted/testing/ok/invalid/forbidden/keychain-unavailable). Story 3.3 retires
         // MSG_PROVIDER_DONE (folded into the refresh path) and adds the four refresh-cause notices
-        // (no-change / price / input / both): net 34 − 1 + 4 = 37.
+        // (no-change / price / input / both): net 34 − 1 + 4 = 37. Story 3.5 adds the three
+        // graceful-failure cause notices (offline / quota / no-data): 37 + 3 = 40.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            37,
+            40,
             "state.rs message inventory changed — register the new notice"
         );
     }
