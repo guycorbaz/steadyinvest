@@ -565,9 +565,11 @@ mod tests {
         // key status + placeholder, save/delete/test action labels); the API key value is user data,
         // NEVER scanned (NFR-S1). Story 3.3 adds the focused cell's freshness as-of caption ("Mis à
         // jour le {}"). Story 3.4 adds the reconciliation reveal + resolve controls ("Fournisseur :
-        // {}", "Accepter (fournisseur)", "Ignorer (fournisseur)"). Keep the floor strict against a broken scan.
+        // {}", "Accepter (fournisseur)", "Ignorer (fournisseur)"). Story 4.1 fleshes out the watchlist
+        // screen (add field, list rows, link/reorder/remove actions): net +9 @tr literals. Keep the
+        // floor strict against a broken scan.
         assert!(
-            total >= 227,
+            total >= 236,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -606,10 +608,11 @@ mod tests {
         // MSG_PROVIDER_DONE (folded into the refresh path) and adds the four refresh-cause notices
         // (no-change / price / input / both): net 34 − 1 + 4 = 37. Story 3.5 adds the three
         // graceful-failure cause notices (offline / quota / no-data): 37 + 3 = 40. Story 3.6 adds
-        // the annual-update re-validation-scope clause (MSG_REFRESH_REVALIDATE): 40 + 1 = 41.
+        // the annual-update re-validation-scope clause (MSG_REFRESH_REVALIDATE): 40 + 1 = 41. Story
+        // 4.1 adds the watchlist "no study for this ticker" notice (MSG_WATCH_NO_STUDY): 41 + 1 = 42.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            41,
+            42,
             "state.rs message inventory changed — register the new notice"
         );
     }

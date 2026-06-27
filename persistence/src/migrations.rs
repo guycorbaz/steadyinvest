@@ -20,7 +20,11 @@ use rusqlite::{Connection, Transaction};
 pub(crate) type MigrationStep = fn(&Transaction<'_>) -> Result<()>;
 
 /// The ordered registry of all known migrations. Append-only; numbers are strictly ascending.
-pub(crate) const REGISTRY: &[(u32, MigrationStep)] = &[(1, crate::schema::migrate_to_v1)];
+/// v2 (Story 4.1): `watchlist_items.study_id` — the watchlist→study soft link (FR34).
+pub(crate) const REGISTRY: &[(u32, MigrationStep)] = &[
+    (1, crate::schema::migrate_to_v1),
+    (2, crate::schema::migrate_to_v2),
+];
 
 /// The newest schema version this build knows how to produce.
 pub(crate) fn latest_version(registry: &[(u32, MigrationStep)]) -> u32 {
@@ -77,44 +81,55 @@ mod tests {
                 pair[1].0
             );
         }
-        assert_eq!(latest_version(REGISTRY), 1, "this story ships exactly v1");
+        assert_eq!(
+            latest_version(REGISTRY),
+            2,
+            "v1 (1.10) + v2 (4.1 watchlist study_id)"
+        );
     }
 
     #[test]
-    fn fresh_database_migrates_to_v1() {
+    fn fresh_database_migrates_to_latest() {
         let mut conn = mem();
         assert_eq!(user_version(&conn).expect("pragma reads"), 0);
-        run_pending(&mut conn, REGISTRY).expect("v1 applies");
-        assert_eq!(user_version(&conn).expect("pragma reads"), 1);
+        run_pending(&mut conn, REGISTRY).expect("v1 + v2 apply");
+        assert_eq!(
+            user_version(&conn).expect("pragma reads"),
+            2,
+            "a fresh DB migrates to the latest known version"
+        );
     }
 
     #[test]
     fn rerun_is_idempotent_no_step_reruns() {
         let mut conn = mem();
-        run_pending(&mut conn, REGISTRY).expect("first run applies v1");
-        // A second run re-executing migrate_to_v1 would fail on CREATE TABLE (tables exist):
-        // success here proves no step re-ran.
+        run_pending(&mut conn, REGISTRY).expect("first run applies v1 + v2");
+        // A second run re-executing migrate_to_v1 would fail on CREATE TABLE (tables exist), and
+        // migrate_to_v2 would fail on a duplicate ADD COLUMN: success here proves no step re-ran.
         run_pending(&mut conn, REGISTRY).expect("second run is a no-op");
-        assert_eq!(user_version(&conn).expect("pragma reads"), 1);
+        assert_eq!(user_version(&conn).expect("pragma reads"), 2);
     }
 
-    // ── Fake v2 in a test-local registry: ordering + per-step stamping ──
+    // ── A fake future step (v3) on top of the real registry: ordering + per-step stamping ──
 
-    fn fake_v2(tx: &Transaction<'_>) -> Result<()> {
+    fn fake_v3(tx: &Transaction<'_>) -> Result<()> {
         // Writes into a table created by step 1 — fails loudly if steps ran out of order.
         tx.execute_batch(
             "INSERT INTO watchlist_items (id, security_ticker, position, created_at)
-             VALUES ('migration-marker-v2', 'TEST', 0, '2026-01-01T00:00:00Z')",
+             VALUES ('migration-marker-v3', 'TEST', 0, '2026-01-01T00:00:00Z')",
         )?;
         Ok(())
     }
 
-    const TWO_STEP_REGISTRY: &[(u32, MigrationStep)] =
-        &[(1, crate::schema::migrate_to_v1), (2, fake_v2)];
+    const THREE_STEP_REGISTRY: &[(u32, MigrationStep)] = &[
+        (1, crate::schema::migrate_to_v1),
+        (2, crate::schema::migrate_to_v2),
+        (3, fake_v3),
+    ];
 
     fn marker_rows(conn: &Connection) -> i64 {
         conn.query_row(
-            "SELECT COUNT(*) FROM watchlist_items WHERE id = 'migration-marker-v2'",
+            "SELECT COUNT(*) FROM watchlist_items WHERE id = 'migration-marker-v3'",
             [],
             |r| r.get(0),
         )
@@ -124,65 +139,68 @@ mod tests {
     #[test]
     fn steps_apply_in_order_from_zero() {
         let mut conn = mem();
-        run_pending(&mut conn, TWO_STEP_REGISTRY).expect("v1 then v2 apply in order");
-        assert_eq!(user_version(&conn).expect("pragma reads"), 2);
+        run_pending(&mut conn, THREE_STEP_REGISTRY).expect("v1 → v2 → v3 apply in order");
+        assert_eq!(user_version(&conn).expect("pragma reads"), 3);
         assert_eq!(marker_rows(&conn), 1);
     }
 
     #[test]
-    fn only_pending_steps_apply_from_v1() {
+    fn only_pending_steps_apply_from_latest() {
         let mut conn = mem();
-        run_pending(&mut conn, REGISTRY).expect("v1 applies");
-        run_pending(&mut conn, TWO_STEP_REGISTRY).expect("only v2 applies on top");
-        assert_eq!(user_version(&conn).expect("pragma reads"), 2);
+        run_pending(&mut conn, REGISTRY).expect("v1 + v2 apply");
+        run_pending(&mut conn, THREE_STEP_REGISTRY).expect("only v3 applies on top");
+        assert_eq!(user_version(&conn).expect("pragma reads"), 3);
         assert_eq!(
             marker_rows(&conn),
             1,
-            "v2 ran exactly once and v1 did not re-run (CREATE TABLE would have failed)"
+            "v3 ran exactly once; v1/v2 did not re-run (CREATE TABLE / duplicate ADD COLUMN would fail)"
         );
         // Idempotence at the new latest too.
-        run_pending(&mut conn, TWO_STEP_REGISTRY).expect("no-op at latest");
+        run_pending(&mut conn, THREE_STEP_REGISTRY).expect("no-op at latest");
         assert_eq!(marker_rows(&conn), 1, "no step re-ran");
     }
 
     #[test]
     fn newer_file_is_refused_not_migrated() {
         let mut conn = mem();
-        run_pending(&mut conn, TWO_STEP_REGISTRY).expect("file at v2");
+        run_pending(&mut conn, THREE_STEP_REGISTRY).expect("file at v3");
         let err = run_pending(&mut conn, REGISTRY)
-            .expect_err("a build knowing only v1 refuses a v2 file");
+            .expect_err("a build knowing only v1/v2 refuses a v3 file");
         match err {
             Error::NewerJournalSchema {
-                file_user_version: 2,
-                supported: 1,
+                file_user_version: 3,
+                supported: 2,
             } => {}
             other => panic!("expected NewerJournalSchema, got {other:?}"),
         }
         assert_eq!(
             user_version(&conn).expect("pragma reads"),
-            2,
+            3,
             "refusal leaves the file untouched"
         );
     }
 
     #[test]
     fn failed_step_leaves_user_version_at_previous_step() {
-        fn failing_v2(tx: &Transaction<'_>) -> Result<()> {
+        fn failing_v3(tx: &Transaction<'_>) -> Result<()> {
             tx.execute_batch("INSERT INTO no_such_table VALUES (1)")?;
             Ok(())
         }
-        const FAILING: &[(u32, MigrationStep)] =
-            &[(1, crate::schema::migrate_to_v1), (2, failing_v2)];
+        const FAILING: &[(u32, MigrationStep)] = &[
+            (1, crate::schema::migrate_to_v1),
+            (2, crate::schema::migrate_to_v2),
+            (3, failing_v3),
+        ];
         let mut conn = mem();
-        let err = run_pending(&mut conn, FAILING).expect_err("v2 step fails");
+        let err = run_pending(&mut conn, FAILING).expect_err("v3 step fails");
         match err {
-            Error::Migration { version: 2, .. } => {}
-            other => panic!("expected Migration {{ version: 2 }}, got {other:?}"),
+            Error::Migration { version: 3, .. } => {}
+            other => panic!("expected Migration {{ version: 3 }}, got {other:?}"),
         }
         assert_eq!(
             user_version(&conn).expect("pragma reads"),
-            1,
-            "v1 committed, the failing v2 rolled back wholly (own-transaction rule)"
+            2,
+            "v1 + v2 committed, the failing v3 rolled back wholly (own-transaction rule)"
         );
     }
 }

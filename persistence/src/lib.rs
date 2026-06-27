@@ -15,7 +15,9 @@ mod journal;
 mod migrations;
 mod schema;
 mod studies;
+mod watchlist;
 
 pub use error::{Error, Result};
 pub use journal::Journal;
 pub use studies::StudySummary;
+pub use watchlist::WatchItem;

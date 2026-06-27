@@ -28,6 +28,17 @@ pub(crate) fn migrate_to_v1(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration step 2 (Story 4.1, the project's first real v2): a `watchlist_items` row can reference
+/// the saved study whose buy zone it tracks (FR34). The v1 table had no such column, so add a
+/// **nullable** `study_id` (a soft link cleared on study delete, never a hard FK — see
+/// `studies::delete_study`). SQLite `ALTER TABLE … ADD COLUMN` is a metadata-only change (no table
+/// rebuild) and is forward-safe: an existing v1 journal gains the column on open. `DDL_V1` stays
+/// frozen — the column exists only via this step, so a fresh v2 DB and a migrated v1 DB are identical.
+pub(crate) fn migrate_to_v2(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch("ALTER TABLE watchlist_items ADD COLUMN study_id TEXT")?;
+    Ok(())
+}
+
 /// The complete v1 DDL. Frozen once shipped — schema changes go through new migration steps.
 const DDL_V1: &str = "
     -- Journal identity (ADD6): one row, journal_id (UUID) + monotonic logical_version.
@@ -160,6 +171,35 @@ mod tests {
             ],
             "hybrid schema v1 table set drifted — that is a migration-step change, not an edit"
         );
+    }
+
+    fn column_names(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("table_info is queryable");
+        stmt.query_map([], |r| r.get::<_, String>(1))
+            .expect("column names read")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("column names collect")
+    }
+
+    #[test]
+    fn v2_adds_the_watchlist_study_id_column() {
+        // Story 4.1: the v2 migration (in REGISTRY) gives `watchlist_items` a nullable `study_id`.
+        let conn = v1_connection();
+        assert_eq!(
+            migrations::user_version(&conn).expect("user_version reads"),
+            2,
+            "the registry migrates a fresh DB to v2"
+        );
+        assert!(
+            column_names(&conn, "watchlist_items").contains(&"study_id".to_string()),
+            "v2 added watchlist_items.study_id"
+        );
+        // The v1 columns are untouched (additive migration).
+        for col in ["id", "security_ticker", "position", "created_at"] {
+            assert!(column_names(&conn, "watchlist_items").contains(&col.to_string()));
+        }
     }
 
     #[test]

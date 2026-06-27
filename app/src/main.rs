@@ -134,6 +134,60 @@ fn push_samples(ui: &MainWindow, format: NumberFormat) {
 
 /// Rebuild the dashboard list from the journal and mirror the read-only flag into the `Studies`
 /// global. Called on startup and after every create.
+/// Rebuild the watchlist surface from persistence (Story 4.1): rows ordered by position, each
+/// resolving its optional study link to that study's ticker (the buy-zone source for Story 4.2).
+fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
+    let watchlist = ui.global::<Watchlist>();
+    let by_id: std::collections::HashMap<Uuid, String> = state
+        .list_studies()
+        .into_iter()
+        .map(|s| (s.id, s.security_ticker))
+        .collect();
+    let items = state.list_watch_items();
+    let rows: Vec<WatchRow> = items
+        .iter()
+        .map(|w| WatchRow {
+            id: w.id.to_string().into(),
+            ticker: w.security_ticker.clone().into(),
+            // `linked` is authoritative (the cell carries a study_id); `study_link` is the resolved
+            // ticker for display (may be "" if the linked study no longer resolves).
+            linked: w.study_id.is_some(),
+            study_link: w
+                .study_id
+                .and_then(|sid| by_id.get(&sid))
+                .cloned()
+                .unwrap_or_default()
+                .into(),
+        })
+        .collect();
+    watchlist.set_count(items.len() as i32);
+    watchlist.set_rows(ModelRc::new(VecModel::from(rows)));
+    watchlist.set_read_only(state.is_read_only());
+}
+
+/// Surface a watchlist write's outcome (neutral notice on refusal) and re-render the list.
+fn apply_watch_result(ui: &MainWindow, state: &JournalState, result: Result<(), String>) {
+    let watchlist = ui.global::<Watchlist>();
+    match result {
+        Ok(()) => watchlist.set_notice(SharedString::new()),
+        Err(message) => watchlist.set_notice(message.into()),
+    }
+    refresh_watchlist(ui, state);
+}
+
+/// Link a watchlist entry to a saved study of the SAME ticker (the most recent), or a neutral
+/// "no study for this ticker" notice if none exists (Story 4.1 — an explicit picker is a later
+/// refinement; auto-match by ticker covers the common case).
+fn link_watch_to_same_ticker_study(state: &mut JournalState, id: Uuid) -> Result<(), String> {
+    let Some(item) = state.list_watch_items().into_iter().find(|w| w.id == id) else {
+        return Ok(()); // entry gone — nothing to link
+    };
+    match state.study_id_for_ticker(&item.security_ticker) {
+        Some(sid) => state.update_watch_item(id, &item.security_ticker, Some(sid)),
+        None => Err(state::MSG_WATCH_NO_STUDY.to_string()),
+    }
+}
+
 fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     let studies = ui.global::<Studies>();
     // The dashboard view state (search/sort/filter) lives on the `Studies` global — read it back and
@@ -406,6 +460,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // journal / unreadable configured file). Pushed before the window shows.
     {
         refresh_studies(&ui, &journal_state.borrow());
+        refresh_watchlist(&ui, &journal_state.borrow());
         if let Some(notice) = &startup_notice {
             ui.global::<Studies>().set_notice(notice.clone().into());
         }
@@ -584,7 +639,76 @@ fn main() -> Result<(), slint::PlatformError> {
             });
     }
 
-    // Open-study intent: reopen with full state and mount the faithful §1–§5 form (Story 2.3).
+    // ── Watchlist intents (Story 4.1, FR34) ── add / remove / move / link / unlink, each persisted
+    // then re-rendered with a neutral notice on refusal. The link callbacks attach/clear a
+    // same-ticker saved study (its buy zone — the seam Story 4.2 reads).
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Watchlist>().on_add_watch(move |ticker| {
+            let ui = ui_weak.unwrap();
+            let result = journal_state.borrow_mut().add_watch_item(&ticker, None);
+            apply_watch_result(&ui, &journal_state.borrow(), result);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Watchlist>().on_remove_watch(move |id| {
+            let ui = ui_weak.unwrap();
+            let Ok(id) = Uuid::parse_str(&id) else {
+                return;
+            };
+            let result = journal_state.borrow_mut().delete_watch_item(id);
+            apply_watch_result(&ui, &journal_state.borrow(), result);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Watchlist>().on_move_watch(move |id, up| {
+            let ui = ui_weak.unwrap();
+            let Ok(id) = Uuid::parse_str(&id) else {
+                return;
+            };
+            let result = journal_state.borrow_mut().move_watch_item(id, up);
+            apply_watch_result(&ui, &journal_state.borrow(), result);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Watchlist>().on_link_watch(move |id| {
+            let ui = ui_weak.unwrap();
+            let Ok(id) = Uuid::parse_str(&id) else {
+                return;
+            };
+            let result = link_watch_to_same_ticker_study(&mut journal_state.borrow_mut(), id);
+            apply_watch_result(&ui, &journal_state.borrow(), result);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Watchlist>().on_unlink_watch(move |id| {
+            let ui = ui_weak.unwrap();
+            let Ok(id) = Uuid::parse_str(&id) else {
+                return;
+            };
+            // Clear the link by re-saving the entry's ticker with no study.
+            let ticker = journal_state
+                .borrow()
+                .list_watch_items()
+                .into_iter()
+                .find(|w| w.id == id)
+                .map(|w| w.security_ticker);
+            let result = match ticker {
+                Some(t) => journal_state.borrow_mut().update_watch_item(id, &t, None),
+                None => Ok(()),
+            };
+            apply_watch_result(&ui, &journal_state.borrow(), result);
+        });
+    }
     // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and
     // the persisted per-study fold/regime view-state is restored (default = Entry + all open).
     {
@@ -1145,6 +1269,9 @@ fn main() -> Result<(), slint::PlatformError> {
                         studies.set_study_open(false);
                     }
                     refresh_studies(&ui, &journal_state.borrow());
+                    // A delete clears any watchlist soft link to this study (Story 4.1) — re-render
+                    // the watchlist so a linked row drops its (now-cleared) study link.
+                    refresh_watchlist(&ui, &journal_state.borrow());
                 }
                 Err(message) => studies.set_notice(message.into()),
             }

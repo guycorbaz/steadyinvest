@@ -19,7 +19,7 @@ use steadyinvest_contract::{
     Review, Source, Study, Timestamp, YearData,
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
-use steadyinvest_persistence::{Error as PersistError, Journal, StudySummary};
+use steadyinvest_persistence::{Error as PersistError, Journal, StudySummary, WatchItem};
 use uuid::Uuid;
 
 use steadyinvest_core::verdict::StudySnapshot;
@@ -114,6 +114,11 @@ pub const MSG_REFRESH_BOTH: &str = "Recalculé : prix et données fondamentales 
 /// Annual-update change-visibility clause (Story 3.6, FR3/Journey-2b) — appended to the refresh
 /// notice when a re-fetch reset `✓` cells to `?`, naming the re-validation scope. `{n}` is the count.
 pub const MSG_REFRESH_REVALIDATE: &str = "{n} cellule(s) à revérifier.";
+
+/// Watchlist copy (Story 4.1, FR34) — fact-stating, posture-gated. Raised when a link is requested
+/// but no saved study matches the watched ticker.
+pub const MSG_WATCH_NO_STUDY: &str =
+    "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études.";
 
 /// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
@@ -266,6 +271,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_INPUT,
     MSG_REFRESH_BOTH,
     MSG_REFRESH_REVALIDATE,
+    MSG_WATCH_NO_STUDY,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -613,6 +619,106 @@ impl JournalState {
                 Vec::new()
             }
         }
+    }
+
+    // ── Watchlist (Story 4.1, FR34) ──
+
+    /// Every watched security, ordered by position. Empty when no journal is open.
+    pub fn list_watch_items(&self) -> Vec<WatchItem> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Vec::new();
+        };
+        journal.list_watch_items().unwrap_or_else(|error| {
+            tracing::warn!("list_watch_items failed: {error}");
+            Vec::new()
+        })
+    }
+
+    /// The most-recent saved study whose ticker matches `ticker` **case-insensitively** (Story 4.1
+    /// watchlist link auto-match), or `None`. `list_studies` is ascending by `created_at`, so the
+    /// last match is the newest. Case-insensitive so a watched `"nesn"` still finds the `"NESN"`
+    /// study (tickers are stored as entered, not normalized).
+    pub fn study_id_for_ticker(&self, ticker: &str) -> Option<Uuid> {
+        self.list_studies()
+            .into_iter()
+            .rev()
+            .find(|s| s.security_ticker.eq_ignore_ascii_case(ticker))
+            .map(|s| s.id)
+    }
+
+    /// Add a watched security (FR34) — appended at the end. Id/timestamp from the injected sources
+    /// (ADD15). Guarded (read-only / no-journal / save-failure → a neutral notice).
+    pub fn add_watch_item(&mut self, ticker: &str, study_id: Option<Uuid>) -> Result<(), String> {
+        let ticker = ticker.trim();
+        if ticker.is_empty() {
+            return Err(MSG_BLANK_TICKER.to_string());
+        }
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let id = self.idgen.new_id();
+        let created_at = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .add_watch_item(id, ticker, study_id, &created_at)
+            .map(|_| ())
+            .map_err(watch_error)
+    }
+
+    /// Edit a watched security's ticker and/or study link (FR34). Blank ticker is refused.
+    pub fn update_watch_item(
+        &mut self,
+        id: Uuid,
+        ticker: &str,
+        study_id: Option<Uuid>,
+    ) -> Result<(), String> {
+        let ticker = ticker.trim();
+        if ticker.is_empty() {
+            return Err(MSG_BLANK_TICKER.to_string());
+        }
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .update_watch_item(id, ticker, study_id)
+            .map_err(watch_error)
+    }
+
+    /// Remove a watched security (FR34); the remaining rows re-pack to contiguous positions.
+    pub fn delete_watch_item(&mut self, id: Uuid) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal.delete_watch_item(id).map_err(watch_error)
+    }
+
+    /// Move a watched security one slot up (`up = true`) or down in the order (FR34): swap its
+    /// position with its neighbour. A no-op at the list edge.
+    pub fn move_watch_item(&mut self, id: Uuid, up: bool) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let items = self.list_watch_items();
+        let Some(index) = items.iter().position(|w| w.id == id) else {
+            return Ok(()); // gone — nothing to move
+        };
+        let neighbour = if up {
+            index.checked_sub(1)
+        } else {
+            (index + 1 < items.len()).then_some(index + 1)
+        };
+        let Some(n) = neighbour else {
+            return Ok(()); // already at the edge — a neutral no-op
+        };
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .set_watch_positions(&[
+                (items[index].id, items[n].position),
+                (items[n].id, items[index].position),
+            ])
+            .map_err(watch_error)
     }
 
     /// Archive a study (Story 2.12, FR54): flip `status` to `"archived"` so it leaves the default
@@ -1400,6 +1506,15 @@ pub fn created_at_date(ts: &Timestamp) -> String {
     ts.0.split('T').next().unwrap_or(&ts.0).to_string()
 }
 
+/// Map a persistence error from a watchlist write to a neutral notice (Story 4.1): a newer-schema
+/// journal reads as read-only, anything else as the generic save-failure (cause appended).
+fn watch_error(error: PersistError) -> String {
+    match error {
+        PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
+        other => format!("{MSG_SAVE_FAILED} {other}"),
+    }
+}
+
 // ── Provider fetch/refresh cell helpers (Story 3.1 / 3.3) ───────────────────────────────────────
 
 /// The outcome of an [`JournalState::apply_provider_refresh`] (Story 3.3): how many cells were
@@ -1725,6 +1840,27 @@ mod tests {
             );
         }
         let (clock, idgen) = fixed(seed, ts);
+        let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+        state
+    }
+
+    /// Like [`undo_state`] but with a **sequential** id source — for tests that create several
+    /// entities (Story 4.1 watchlist: each `add_watch_item` needs a distinct id).
+    fn watch_state(dir: &TempDir, seed: u128) -> JournalState {
+        let path = dir.path().join("journal.db");
+        if !path.exists() {
+            drop(
+                Journal::create(
+                    &path,
+                    Uuid::from_u128(0xC0FFEE),
+                    &Timestamp("2026-06-14T00:00:00Z".to_string()),
+                )
+                .unwrap(),
+            );
+        }
+        let clock: Box<dyn Clock> =
+            Box::new(FixedClock(Timestamp("2026-06-27T15:00:00Z".to_string())));
+        let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
         let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
         state
     }
@@ -2810,6 +2946,92 @@ mod tests {
             Some(und_money(5000)),
             "the manual value is still preserved after unlock + refresh"
         );
+    }
+
+    // ── Story 4.1 — watchlist app rails ──
+
+    fn watch_id(state: &JournalState, ticker: &str) -> Uuid {
+        state
+            .list_watch_items()
+            .into_iter()
+            .find(|w| w.security_ticker == ticker)
+            .map(|w| w.id)
+            .expect("the watch item exists")
+    }
+
+    #[test]
+    fn watchlist_add_list_move_delete_through_the_app_rails() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x900);
+        state.add_watch_item("NESN", None).unwrap();
+        state.add_watch_item("ROG", None).unwrap();
+        state.add_watch_item("NOVN", None).unwrap();
+        let order = |s: &JournalState| {
+            s.list_watch_items()
+                .into_iter()
+                .map(|w| w.security_ticker)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(order(&state), ["NESN", "ROG", "NOVN"]);
+
+        // Move ROG up → ROG, NESN, NOVN.
+        let rog = watch_id(&state, "ROG");
+        state.move_watch_item(rog, true).unwrap();
+        assert_eq!(order(&state), ["ROG", "NESN", "NOVN"]);
+
+        // Move ROG up again at the top edge → no-op.
+        state.move_watch_item(rog, true).unwrap();
+        assert_eq!(order(&state), ["ROG", "NESN", "NOVN"]);
+
+        // Delete NESN → re-packed contiguous.
+        state.delete_watch_item(watch_id(&state, "NESN")).unwrap();
+        assert_eq!(order(&state), ["ROG", "NOVN"]);
+        assert_eq!(
+            state
+                .list_watch_items()
+                .into_iter()
+                .map(|w| w.position)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+    }
+
+    #[test]
+    fn add_watch_blank_ticker_is_refused_and_link_round_trips() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x910);
+        assert!(
+            state.add_watch_item("   ", None).is_err(),
+            "blank ticker refused"
+        );
+
+        let study = state.create_study("NESN", "CHF").unwrap();
+        state.add_watch_item("NESN", Some(study)).unwrap();
+        assert_eq!(
+            state.list_watch_items()[0].study_id,
+            Some(study),
+            "the study link round-trips through the app rail"
+        );
+        // Clearing it via update.
+        let wid = watch_id(&state, "NESN");
+        state.update_watch_item(wid, "NESN", None).unwrap();
+        assert_eq!(state.list_watch_items()[0].study_id, None);
+    }
+
+    #[test]
+    fn study_id_for_ticker_matches_case_insensitively_and_picks_most_recent() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x920);
+        let first = state.create_study("NESN", "CHF").unwrap();
+        let second = state.create_study("NESN", "CHF").unwrap();
+        // A lowercase watched ticker still resolves to the (most recent) "NESN" study.
+        assert_eq!(
+            state.study_id_for_ticker("nesn"),
+            Some(second),
+            "case-insensitive + most-recent"
+        );
+        assert_ne!(state.study_id_for_ticker("nesn"), Some(first));
+        assert_eq!(state.study_id_for_ticker("UNKNOWN"), None);
     }
 
     #[test]

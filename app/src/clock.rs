@@ -72,6 +72,28 @@ impl IdGen for FixedIdGen {
     }
 }
 
+/// Test double: a sequential id source returning **distinct** deterministic UUIDs from a counter —
+/// for tests that create several entities in one state (e.g. the Story-4.1 watchlist).
+#[cfg(test)]
+#[derive(Debug)]
+pub struct SeqIdGen(std::cell::Cell<u128>);
+
+#[cfg(test)]
+impl SeqIdGen {
+    pub fn starting_at(seed: u128) -> Self {
+        SeqIdGen(std::cell::Cell::new(seed))
+    }
+}
+
+#[cfg(test)]
+impl IdGen for SeqIdGen {
+    fn new_id(&self) -> Uuid {
+        let n = self.0.get();
+        self.0.set(n + 1);
+        Uuid::from_u128(n)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

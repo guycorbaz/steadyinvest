@@ -1,13 +1,18 @@
-// Liste de suivi — neutral placeholder (watchlist management is Epic 4; actionable empty
-// states are Story 2.13).
+// Liste de suivi (Story 4.1, FR34): add / edit / remove / reorder watched securities, each
+// optionally linked to a saved study for its buy zone. Neutral, no advice. Intents → Rust.
 
 import { Tokens } from "../tokens.slint";
+import { Watchlist, WatchRow } from "../state.slint";
+import { ActionButton } from "../components/action_button.slint";
+import { TextField } from "../components/text_field.slint";
 
 export component WatchlistScreen inherits Rectangle {
+    property <string> draft-ticker;
+
     VerticalLayout {
         alignment: start;
         padding: Tokens.space-24;
-        spacing: Tokens.space-12;
+        spacing: Tokens.space-16;
 
         Text {
             text: @tr("Liste de suivi");
@@ -16,10 +21,86 @@ export component WatchlistScreen inherits Rectangle {
             font-weight: Tokens.weight-semibold;
         }
 
-        Text {
-            text: @tr("Aucune valeur suivie pour le moment.");
+        // ── Add a security ──
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            TextField {
+                placeholder: @tr("Symbole à suivre");
+                text <=> root.draft-ticker;
+                horizontal-stretch: 1;
+            }
+            ActionButton {
+                label: @tr("Ajouter");
+                enabled: !Watchlist.read-only && root.draft-ticker != "";
+                clicked => {
+                    Watchlist.add-watch(root.draft-ticker);
+                    root.draft-ticker = "";
+                }
+            }
+        }
+
+        if Watchlist.notice != "": Text {
+            text: Watchlist.notice;
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+        }
+
+        // ── Empty state ──
+        if Watchlist.count == 0: Text {
+            text: @tr("Aucune valeur suivie pour le moment ; ajoutez un symbole ci-dessus.");
             color: Tokens.text-mid;
             font-size: Tokens.font-body;
+        }
+
+        // ── The list ──
+        for row[index] in Watchlist.rows: Rectangle {
+            background: Tokens.surface-alt;
+            border-radius: Tokens.radius;
+            height: 44px;
+            HorizontalLayout {
+                padding-left: Tokens.space-12;
+                padding-right: Tokens.space-12;
+                spacing: Tokens.space-12;
+                Text {
+                    text: row.ticker;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-body;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: row.linked ? @tr("Étude : {}", row.study-link) : @tr("Aucune étude liée");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+                ActionButton {
+                    label: row.linked ? @tr("Délier") : @tr("Lier une étude");
+                    enabled: !Watchlist.read-only;
+                    clicked => {
+                        if (row.linked) {
+                            Watchlist.unlink-watch(row.id);
+                        } else {
+                            Watchlist.link-watch(row.id);
+                        }
+                    }
+                }
+                ActionButton {
+                    label: @tr("▲");
+                    enabled: !Watchlist.read-only && index > 0;
+                    clicked => { Watchlist.move-watch(row.id, true); }
+                }
+                ActionButton {
+                    label: @tr("▼");
+                    enabled: !Watchlist.read-only && index < Watchlist.count - 1;
+                    clicked => { Watchlist.move-watch(row.id, false); }
+                }
+                ActionButton {
+                    label: @tr("Retirer");
+                    enabled: !Watchlist.read-only;
+                    clicked => { Watchlist.remove-watch(row.id); }
+                }
+            }
         }
     }
 }

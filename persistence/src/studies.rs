@@ -170,9 +170,16 @@ impl Journal {
             "DELETE FROM studies WHERE id = ?1",
             rusqlite::params![id_text],
         )?;
+        // Story 4.1 (FR34): a watchlist entry that pointed at this study must not dangle — clear the
+        // soft link in the SAME transaction (the column is nullable, never a hard FK). Counts as a
+        // real change so the version bumps when a link was actually cleared.
+        let cleared_links = tx.execute(
+            "UPDATE watchlist_items SET study_id = NULL WHERE study_id = ?1",
+            rusqlite::params![id_text],
+        )?;
         // Only a real removal bumps the heartbeat — deleting an absent id is a true no-op (no phantom
         // version drift for the stale-restore detection / external sync to see).
-        if removed_study > 0 || removed_judgments > 0 {
+        if removed_study > 0 || removed_judgments > 0 || cleared_links > 0 {
             tx.execute(
                 "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
                 [],

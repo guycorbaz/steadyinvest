@@ -24,6 +24,16 @@ export struct StudyRow {
     status: string,
 }
 
+// One watchlist row (Story 4.1, FR34). `linked` is the authoritative link state (the cell's
+// `study_id` is set); `study-link` is the linked study's ticker for display ("" if it does not
+// resolve). Built by `app/src/main.rs::refresh_watchlist`.
+export struct WatchRow {
+    id: string,
+    ticker: string,
+    linked: bool,
+    study-link: string,
+}
+
 // The non-collapsible header identity block of the faithful SSG form (Story 2.3). Every field is an
 // already-formatted display string built by `app/src/viewmodel/form.rs` — never a float/Decimal.
 export struct FormHeader {
@@ -514,4 +524,19 @@ export global Prefs {
     callback key-saved(string);
     callback key-deleted();
     callback key-tested();
+}
+
+// The watchlist surface (Story 4.1, FR34). Rows are built/ordered by Rust; intents are handled in
+// Rust (persist + re-render). `link-watch` links the entry to a saved study of the same ticker (if
+// one exists); `unlink-watch` clears the link.
+export global Watchlist {
+    in-out property <[WatchRow]> rows;
+    in-out property <int> count;
+    in-out property <bool> read-only;
+    in-out property <string> notice;
+    callback add-watch(string); // ticker
+    callback remove-watch(string); // id
+    callback move-watch(string, bool); // id, up?
+    callback link-watch(string); // id → link to a same-ticker study
+    callback unlink-watch(string); // id
 }
