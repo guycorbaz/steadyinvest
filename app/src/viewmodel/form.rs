@@ -44,6 +44,20 @@ fn materialized_years(study: &Study) -> Vec<YearData> {
     }
 }
 
+/// The cell's freshness timestamp as a display date (the `YYYY-MM-DD` prefix of the RFC3339
+/// provenance timestamp), revealed on demand (Story 3.3, FR18). Only a **present** cell carries a
+/// meaningful as-of; a gap (or an empty/sentinel timestamp) yields `""` so the screen hides it.
+fn provenance_date(cell: Option<&Cell>) -> String {
+    match cell {
+        Some(c) if c.value.is_some() => {
+            let ts = &c.provenance.timestamp.0;
+            // RFC3339 "2026-06-27T10:00:00Z" → the calendar date; tolerate a bare/empty string.
+            ts.split_once('T').map(|(d, _)| d).unwrap_or(ts).to_string()
+        }
+        _ => String::new(),
+    }
+}
+
 /// A display-only sentinel provenance for the view-side skeleton (never persisted from here).
 fn view_provenance() -> Provenance {
     Provenance {
@@ -73,6 +87,10 @@ fn editable_cell(
         coverage: entry::coverage_str(cell).into(),
         stale: cell.is_some_and(|c| c.freshness == Freshness::Stale),
         source: entry::source_label(cell).into(),
+        // Story 3.3 (FR18/AC4) — the cell's freshness timestamp, revealed on demand alongside the
+        // source (the attention-hierarchy rule: provenance is a murmur, never an always-on column).
+        // Only a present cell carries a meaningful "as-of"; a gap reveals nothing.
+        timestamp: provenance_date(cell).into(),
         // The tri-state review tag crosses as an enum-derived string (Story 2.5) — "none" draws no
         // marker, "to-review" the ? glyph, "validated" the ✓ check. Never a float / 0/1/2.
         review: entry::review_str(cell).into(),

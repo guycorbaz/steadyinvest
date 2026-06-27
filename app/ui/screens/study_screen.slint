@@ -324,6 +324,14 @@ export component StudyScreen inherits Rectangle {
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
                 }
+                // Story 3.3 (FR18) — the focused cell's freshness as-of date, revealed on demand
+                // beside the source. Fact-stating, never colour; "" hides it (a gap has no as-of).
+                Text {
+                    text: Studies.active-timestamp != "" ? @tr("Mis à jour le {}", Studies.active-timestamp) : "";
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
                 // Story 2.7 — the focused cell's plausibility fact, revealed on demand (mirrors the
                 // source caption). Keyboard-reachable (NFR-U2), no animation (AC5). "" hides it.
                 Text {

@@ -434,14 +434,12 @@ fn main() -> Result<(), slint::PlatformError> {
                         Ok(fetched) => {
                             let applied = journal_state
                                 .borrow_mut()
-                                .apply_provider_fetch(outcome.study_id, &fetched);
+                                .apply_provider_refresh(outcome.study_id, &fetched);
                             match applied {
-                                Ok(filled) => {
-                                    studies.set_notice(
-                                        state::MSG_PROVIDER_DONE
-                                            .replace("{n}", &filled.to_string())
-                                            .into(),
-                                    );
+                                Ok(report) => {
+                                    // Name the recompute cause (FR29): price / fundamentals / both,
+                                    // or "no change" when an idempotent re-fetch moved nothing.
+                                    studies.set_notice(state::refresh_notice(report).into());
                                     // Re-render the form + recompute if this study is still the open one.
                                     let still_open = current_study
                                         .borrow()

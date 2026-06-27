@@ -138,6 +138,7 @@ export component EditableCell inherits Rectangle {
                 Studies.active-year = root.state.year-index;
                 Studies.active-field = root.state.field;
                 Studies.active-source = root.state.source;
+                Studies.active-timestamp = root.state.timestamp; // freshness as-of, revealed on focus (Story 3.3)
                 // Reveal the plausibility fact on focus (keyboard-reachable, NFR-U2) — "" when none.
                 Studies.active-warning = Warnings.text(root.state.warning-key);
                 self.select-all(); // typing replaces the value (spreadsheet behaviour)

@@ -43,6 +43,7 @@ export struct GridCellState {
     coverage: string,     // "present" | "to-fill" | "not-available"
     stale: bool,          // freshness == Stale (the ~60% murmur); current is the silent default
     source: string,       // "manuel" | "fournisseur" | "calculé" — revealed on demand; "" when none
+    timestamp: string,    // freshness as-of date (YYYY-MM-DD), revealed on demand; "" for a gap (Story 3.3)
     review: string,       // "none" | "to-review" | "validated" — the tri-state trust marker (Story 2.5)
     editable: bool,       // true for a raw input cell; false for a computed/derived slot
     year-index: int,      // row address (0-based, into the materialized year window)
@@ -287,6 +288,9 @@ export global Studies {
     // The focused cell's source, revealed on demand (a section caption shows it) — "" hides it. A
     // gap reveals nothing (only a present cell carries a source). NOT an always-on per-cell badge.
     in-out property <string> active-source;
+    // The focused cell's freshness as-of date, revealed on demand beside the source (Story 3.3,
+    // FR18) — "" hides it (a gap has no as-of). NOT an always-on per-cell badge.
+    in-out property <string> active-timestamp;
     // ── Story 2.7 — the focused cell's plausibility fact, revealed on demand (mirrors active-source).
     //    The already-resolved human-readable warning text ("" hides it); set on focus from the cell's
     //    `warning-key` via `Warnings.text(...)`. Keyboard-reachable (NFR-U2), no animation (AC5).

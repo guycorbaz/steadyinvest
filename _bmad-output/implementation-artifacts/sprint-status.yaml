@@ -1,5 +1,5 @@
 # generated: 2026-06-09
-# last_updated: 2026-06-25
+# last_updated: 2026-06-27
 # project: steadyinvest
 # project_key: NOKEY
 # tracking_system: file-system
@@ -39,7 +39,7 @@
 # 7 [P3] / 8 [V] are deliberate story outlines (refine with create-epics-and-stories per phase).
 
 generated: 2026-06-09
-last_updated: 2026-06-25
+last_updated: 2026-06-27
 # 2026-06-14: story 2-7 created (low-confidence & plausibility surfacing) → ready-for-dev. app-only SURFACING
 #             story (no detection — engine already computes both): (a) carries an explicit "Historique insuffisant
 #             — confiance réduite" label onto the verdict badge + sticky bar from verdict.low_confidence() (<5
@@ -355,7 +355,7 @@ development_status:
   epic-3: in-progress
   3-1-marketdataprovider-trait-eodhd-adapter: done
   3-2-provider-configuration-api-keys-keychain: done
-  3-3-manual-refresh-recompute-freshness: backlog
+  3-3-manual-refresh-recompute-freshness: done
   3-4-non-destructive-reconciliation: backlog
   3-5-graceful-provider-failure: backlog
   3-6-annual-update-journey: backlog

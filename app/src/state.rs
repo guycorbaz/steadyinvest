@@ -25,6 +25,7 @@ use uuid::Uuid;
 use steadyinvest_core::verdict::StudySnapshot;
 
 use crate::clock::{Clock, IdGen};
+use crate::viewmodel::refresh::RefreshCause;
 use crate::viewmodel::{engine, entry};
 
 // ── User-facing neutral notices (FR13). French (the UI source language); the crate-local posture
@@ -85,13 +86,20 @@ pub const MSG_VERIFY_PASSED: &str = "{n}/{t} études de référence réussies.";
 pub const MSG_VERIFY_DEVIATIONS: &str = "{n} écart(s) sur {t} études de référence.";
 /// The neutral notice when the demonstration study cannot be loaded (a packaging error, not a panic).
 pub const MSG_DEMO_UNAVAILABLE: &str = "L'étude de démonstration est indisponible.";
-/// Provider auto-fetch copy (Story 3.1) — fact-stating, posture-gated. `{n}` is the filled-cell count;
-/// `{cause}` is the provider's own neutral message (already banned-verb-gated in `ingestion::error`).
+/// Provider auto-fetch copy (Story 3.1) — fact-stating, posture-gated. `{cause}` is the provider's
+/// own neutral message (already banned-verb-gated in `ingestion::error`).
 pub const MSG_PROVIDER_NO_KEY: &str =
     "Aucune clé fournisseur n'est configurée ; la récupération n'a pas eu lieu.";
 pub const MSG_PROVIDER_FETCHING: &str = "Récupération des données du fournisseur en cours.";
-pub const MSG_PROVIDER_DONE: &str = "{n} cellule(s) remplie(s) depuis le fournisseur.";
 pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause}";
+
+/// Manual-refresh recompute-cause copy (Story 3.3, FR29) — fact-stating, posture-gated. The cause is
+/// a classification of what the refresh changed; the message names it (price / fundamentals / both),
+/// or states that nothing moved. Selected by [`refresh_notice`].
+pub const MSG_REFRESH_NOCHANGE: &str = "Aucun changement ; les données sont déjà à jour.";
+pub const MSG_REFRESH_PRICE: &str = "Recalculé : prix actualisés.";
+pub const MSG_REFRESH_INPUT: &str = "Recalculé : données fondamentales actualisées.";
+pub const MSG_REFRESH_BOTH: &str = "Recalculé : prix et données fondamentales actualisés.";
 
 /// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
@@ -143,6 +151,23 @@ pub fn verify_summary(passed: usize, total: usize) -> String {
     }
 }
 
+/// The neutral notice after a manual refresh (Story 3.3, FR29): name the recompute cause from the
+/// [`RefreshReport`] — price, fundamentals, both, or "no change" when nothing moved. The single
+/// source mapping a refresh outcome to its posture-gated message.
+pub fn refresh_notice(report: RefreshReport) -> &'static str {
+    if !report.changed() {
+        return MSG_REFRESH_NOCHANGE;
+    }
+    match (report.cause.price, report.cause.input) {
+        (true, true) => MSG_REFRESH_BOTH,
+        (true, false) => MSG_REFRESH_PRICE,
+        (false, true) => MSG_REFRESH_INPUT,
+        // Changed cells with no price/input cause (e.g. FX once FR28 lands) — fall back to the
+        // fundamentals wording rather than claim "no change". Unreachable in this story.
+        (false, false) => MSG_REFRESH_INPUT,
+    }
+}
+
 /// The completion notice after a dashboard lifecycle action on `ticker` completes (Story 2.12).
 pub fn study_action_done_message(action: &str, ticker: &str) -> String {
     let template = match action {
@@ -183,8 +208,11 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_DEMO_UNAVAILABLE,
     MSG_PROVIDER_NO_KEY,
     MSG_PROVIDER_FETCHING,
-    MSG_PROVIDER_DONE,
     MSG_PROVIDER_FAILED,
+    MSG_REFRESH_NOCHANGE,
+    MSG_REFRESH_PRICE,
+    MSG_REFRESH_INPUT,
+    MSG_REFRESH_BOTH,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -438,6 +466,13 @@ impl JournalState {
         self.history.can_redo()
     }
 
+    /// The number of recorded undo steps — test-only, to prove an idempotent mutation records no
+    /// phantom step (Story 3.3 AC1: a no-op refresh must not push undo state).
+    #[cfg(test)]
+    pub fn undo_depth(&self) -> usize {
+        self.history.undo.len()
+    }
+
     /// Step the open study **back** to the snapshot before the last mutation (FR32). Returns
     /// `Ok(true)` when a step was taken (the caller re-reads + re-renders), `Ok(false)` when the
     /// undo stack is empty. The restore is a real, guarded `put_study` of the whole prior `Study`.
@@ -633,42 +668,51 @@ impl JournalState {
         }
     }
 
-    /// Apply a provider fetch (Story 3.1): fill the study's **empty / to-fill** load-bearing cells
-    /// (and present optional cells) from the normalized provider data, stamped `Source::Provider`.
-    /// **Fill-gaps-only** — a cell that already holds a manual value is never overwritten (manual-wins
-    /// reconciliation of *changed* values is Story 3.4). A fresh (never-edited) study materializes its
-    /// year grid from the provider years. Returns the count of cells filled. Routed through the atomic
-    /// [`Self::mutate_study`] rail (one `put_study`, guards, undo). Provider cells are `Review::None`,
-    /// so the verdict stays Provisional/Withheld until the user validates — the Epic-2 gate, unchanged.
-    pub fn apply_provider_fetch(
+    /// Apply a manual provider **refresh** (Story 3.3, FR21/FR29) — the single deliberate online
+    /// action that re-fetches and recomputes. Subsumes the Story-3.1 first-fetch (an empty study
+    /// builds its grid) and generalises it: an already-populated study now **updates** its
+    /// provider/derived cells with the new value + timestamp, on top of filling former gaps.
+    ///
+    /// Per cell, branching on the **current** cell's source (see [`refresh_cell`]):
+    /// - a **gap** (no value) is **filled** from the provider, whatever its skeleton source;
+    /// - a present **`Source::Manual`** value is **skipped** — manual wins, never overwritten here
+    ///   (non-destructive dual-value reconciliation of a divergent manual cell is Story 3.4);
+    /// - a present **provider/derived** value is **re-stamped via [`Cell::edited`] only when the
+    ///   value actually changed** — an equal re-fetch is a no-op (idempotency: no timestamp churn,
+    ///   no phantom undo step, no `✓→?` demotion). A divergent value auto-demotes a `✓` provider
+    ///   cell to `?` and degrades the dependent verdict in the same frame (the Epic-1 invariant 2b).
+    ///
+    /// Returns a [`RefreshReport`] (updated / filled counts + the classified [`RefreshCause`]) so the
+    /// caller can state *why* it recomputed (price / input / FX). Routed through the atomic
+    /// [`Self::mutate_study`] rail (one `put_study`, guards, undo-only-on-real-change). Provider cells
+    /// are `Review::None`, so the verdict stays Provisional/Withheld until the user validates.
+    pub fn apply_provider_refresh(
         &mut self,
         study_id: Uuid,
         fetched: &FetchedFinancials,
-    ) -> Result<usize, String> {
+    ) -> Result<RefreshReport, String> {
         let provenance = self.provider_provenance(fetched.digest.clone());
         let years: Vec<CanonicalYear> = fetched.canonical.years.clone();
-        let filled = std::cell::Cell::new(0usize);
-        let filled_ref = &filled;
+        let report = std::cell::Cell::new(RefreshReport::default());
+        let report_ref = &report;
         self.mutate_study(study_id, move |study| {
+            // A fresh (never-edited) study first gets empty to-fill provider rows, so the SAME
+            // per-cell accounting path then fills + classifies them — one rail, one tally.
             if study.years.is_empty() {
-                // Fresh study — build the whole grid from the provider years.
                 study.years = years
                     .iter()
-                    .map(|cy| provider_year(cy, &provenance))
+                    .map(|cy| empty_provider_year(cy.year, &provenance))
                     .collect();
-                filled_ref.set(study.years.iter().map(present_cell_count).sum());
-            } else {
-                // Existing grid — fill only empty load-bearing/optional cells of matching years.
-                let mut count = 0;
-                for cy in &years {
-                    if let Some(yd) = study.years.iter_mut().find(|y| y.year == cy.year) {
-                        count += fill_year_gaps(yd, cy, &provenance);
-                    }
-                }
-                filled_ref.set(count);
             }
+            let mut acc = RefreshReport::default();
+            for cy in &years {
+                if let Some(yd) = study.years.iter_mut().find(|y| y.year == cy.year) {
+                    acc = acc.merge(refresh_year(yd, cy, &provenance));
+                }
+            }
+            report_ref.set(acc);
         })?;
-        Ok(filled.get())
+        Ok(report.get())
     }
 
     /// Manually set/clear a cell's value (FR16): parse-side `value` (already a [`Money`] or `None`)
@@ -1178,7 +1222,34 @@ pub fn created_at_date(ts: &Timestamp) -> String {
     ts.0.split('T').next().unwrap_or(&ts.0).to_string()
 }
 
-// ── Provider-fetch cell helpers (Story 3.1) ────────────────────────────────────────────────────
+// ── Provider fetch/refresh cell helpers (Story 3.1 / 3.3) ───────────────────────────────────────
+
+/// The outcome of an [`JournalState::apply_provider_refresh`] (Story 3.3): how many cells were
+/// **updated** (a present provider/derived value changed) vs **filled** (a former gap), and the
+/// classified [`RefreshCause`] of the recompute (price / input / FX). `updated + filled == 0` means
+/// an idempotent no-op (the study was already current). Merged across years.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RefreshReport {
+    pub updated: usize,
+    pub filled: usize,
+    pub cause: RefreshCause,
+}
+
+impl RefreshReport {
+    /// Accumulate another year's report into this one (sum counts, OR-merge the cause).
+    fn merge(self, other: RefreshReport) -> RefreshReport {
+        RefreshReport {
+            updated: self.updated + other.updated,
+            filled: self.filled + other.filled,
+            cause: self.cause.merge(other.cause),
+        }
+    }
+
+    /// Whether the refresh changed anything (filled a gap or updated a provider value).
+    pub fn changed(self) -> bool {
+        self.updated + self.filled > 0
+    }
+}
 
 /// A provider-sourced cell: `Source::Provider`, `Freshness::Current`, `Review::None` (unvalidated),
 /// `Coverage::Present` for a value / `ToFill` for a gap (absent stays hand-editable, never `0`).
@@ -1197,71 +1268,147 @@ fn provider_cell(value: Option<Decimal>, provenance: &Provenance) -> Cell {
     }
 }
 
-/// Build a whole `YearData` from a canonical provider year (fresh-study path).
-fn provider_year(cy: &CanonicalYear, provenance: &Provenance) -> YearData {
-    let optional = |d: Option<Decimal>| d.map(|v| provider_cell(Some(v), provenance));
+/// Build an empty (all to-fill) provider year row — the fresh-study seed the [`refresh_cell`] rail
+/// then fills, so one accounting path covers both the first fetch and a later refresh.
+fn empty_provider_year(year: i32, provenance: &Provenance) -> YearData {
     YearData {
-        year: cy.year,
-        sales: provider_cell(cy.sales, provenance),
-        eps: provider_cell(cy.eps, provenance),
-        high_price: provider_cell(cy.high_price, provenance),
-        low_price: provider_cell(cy.low_price, provenance),
-        dividend_per_share: optional(cy.dividend_per_share),
-        pre_tax_profit: optional(cy.pre_tax_profit),
-        book_value_per_share: optional(cy.book_value_per_share),
+        year,
+        sales: provider_cell(None, provenance),
+        eps: provider_cell(None, provenance),
+        high_price: provider_cell(None, provenance),
+        low_price: provider_cell(None, provenance),
+        dividend_per_share: None,
+        pre_tax_profit: None,
+        book_value_per_share: None,
     }
 }
 
-/// Count of present (value-bearing) load-bearing + optional cells in a year — the "filled" tally.
-fn present_cell_count(yd: &YearData) -> usize {
-    let req = [&yd.sales, &yd.eps, &yd.high_price, &yd.low_price]
-        .iter()
-        .filter(|c| c.value.is_some())
-        .count();
-    let opt = [
-        &yd.dividend_per_share,
-        &yd.pre_tax_profit,
-        &yd.book_value_per_share,
-    ]
-    .iter()
-    .filter(|c| c.as_ref().is_some_and(|c| c.value.is_some()))
-    .count();
-    req + opt
+/// What a single cell's refresh did — drives the per-year tally + cause classification.
+enum CellRefresh {
+    /// A present `Source::Manual` value — left untouched (manual wins; Story 3.4 owns the divergent
+    /// dual-value case).
+    Skipped,
+    /// No change (an equal re-fetch, or the provider has no value for this cell).
+    Unchanged,
+    /// A former gap was filled from the provider.
+    Filled,
+    /// A present provider/derived value changed and was re-stamped.
+    Updated,
 }
 
-/// Fill only the EMPTY load-bearing / optional cells of an existing year from the provider data
-/// (fill-gaps-only — a cell that already holds a value is left untouched). Returns the fill count.
-fn fill_year_gaps(yd: &mut YearData, cy: &CanonicalYear, provenance: &Provenance) -> usize {
-    let mut count = 0;
-    // Required load-bearing cells: fill when currently empty (no value).
-    for (cell, value) in [
-        (&mut yd.sales, cy.sales),
-        (&mut yd.eps, cy.eps),
-        (&mut yd.high_price, cy.high_price),
-        (&mut yd.low_price, cy.low_price),
-    ] {
-        if cell.value.is_none() {
-            if let Some(v) = value {
+/// Refresh one **required** load-bearing cell (Story 3.3). Branches on the current cell:
+/// - empty (gap) → fill from the provider, whatever the skeleton source;
+/// - present + `Source::Manual` → skip (manual wins);
+/// - present + provider/derived → re-stamp via [`Cell::edited`] **only when the value changed** (a
+///   divergent value auto-demotes a `✓` and is `Current`; an equal value is a true no-op). A
+///   provider that returns no value for an existing cell keeps the last-known value (FR23 spirit).
+fn refresh_cell(cell: &mut Cell, value: Option<Decimal>, provenance: &Provenance) -> CellRefresh {
+    // A deliberate "not available" decision (FR19) is a user gesture, NOT a gap — never refilled by a
+    // refresh (it would silently flip the accepted-blank back to a provider value). Checked before the
+    // empty-cell gap-fill, because an N/A-accepted cell also carries `value: None`.
+    if cell.coverage == Coverage::NotAvailableAccepted {
+        CellRefresh::Skipped
+    } else if cell.value.is_none() {
+        match value {
+            Some(v) => {
                 *cell = provider_cell(Some(v), provenance);
-                count += 1;
+                CellRefresh::Filled
             }
+            None => CellRefresh::Unchanged,
+        }
+    } else if cell.source == Source::Manual {
+        CellRefresh::Skipped
+    } else {
+        match value {
+            Some(v) => {
+                let new_value = Some(Money::from(v));
+                if cell.value == new_value {
+                    CellRefresh::Unchanged
+                } else {
+                    *cell = cell.edited(new_value, provenance.clone());
+                    CellRefresh::Updated
+                }
+            }
+            // The provider has no value now → retain the last-known value (never blank it).
+            None => CellRefresh::Unchanged,
         }
     }
-    // Optional cells: fill when absent (None) and the provider has a value.
-    for (slot, value) in [
-        (&mut yd.dividend_per_share, cy.dividend_per_share),
-        (&mut yd.pre_tax_profit, cy.pre_tax_profit),
-        (&mut yd.book_value_per_share, cy.book_value_per_share),
-    ] {
-        let empty = slot.as_ref().is_none_or(|c| c.value.is_none());
-        if empty {
-            if let Some(v) = value {
+}
+
+/// Refresh one **optional** cell slot (same semantics as [`refresh_cell`]; an absent slot is a gap).
+/// Any present slot — including a value-less `ToFill` or `NotAvailableAccepted` cell — delegates to
+/// [`refresh_cell`] so the N/A-accepted skip and the manual-skip rules apply uniformly; only a truly
+/// absent (`None`) slot is filled directly.
+fn refresh_optional(
+    slot: &mut Option<Cell>,
+    value: Option<Decimal>,
+    provenance: &Provenance,
+) -> CellRefresh {
+    match slot {
+        Some(cell) => refresh_cell(cell, value, provenance),
+        None => match value {
+            Some(v) => {
                 *slot = Some(provider_cell(Some(v), provenance));
-                count += 1;
+                CellRefresh::Filled
             }
-        }
+            None => CellRefresh::Unchanged,
+        },
     }
-    count
+}
+
+/// Refresh every cell of one matching year, tallying updated/filled counts and OR-merging the
+/// recompute cause from each cell that actually changed (a fill counts toward the cause too — it
+/// feeds the recompute). Field names drive [`refresh::classify_field`] (no parallel list).
+fn refresh_year(yd: &mut YearData, cy: &CanonicalYear, provenance: &Provenance) -> RefreshReport {
+    let mut report = RefreshReport::default();
+    let mut account = |outcome: CellRefresh, field: &str| match outcome {
+        CellRefresh::Updated => {
+            report.updated += 1;
+            report.cause = report
+                .cause
+                .merge(crate::viewmodel::refresh::classify_field(field));
+        }
+        CellRefresh::Filled => {
+            report.filled += 1;
+            report.cause = report
+                .cause
+                .merge(crate::viewmodel::refresh::classify_field(field));
+        }
+        CellRefresh::Skipped | CellRefresh::Unchanged => {}
+    };
+    // Required load-bearing cells (disjoint &mut borrows of distinct struct fields).
+    account(refresh_cell(&mut yd.sales, cy.sales, provenance), "sales");
+    account(refresh_cell(&mut yd.eps, cy.eps, provenance), "eps");
+    account(
+        refresh_cell(&mut yd.high_price, cy.high_price, provenance),
+        "high_price",
+    );
+    account(
+        refresh_cell(&mut yd.low_price, cy.low_price, provenance),
+        "low_price",
+    );
+    // Optional cells.
+    account(
+        refresh_optional(
+            &mut yd.dividend_per_share,
+            cy.dividend_per_share,
+            provenance,
+        ),
+        "dividend_per_share",
+    );
+    account(
+        refresh_optional(&mut yd.pre_tax_profit, cy.pre_tax_profit, provenance),
+        "pre_tax_profit",
+    );
+    account(
+        refresh_optional(
+            &mut yd.book_value_per_share,
+            cy.book_value_per_share,
+            provenance,
+        ),
+        "book_value_per_share",
+    );
+    report
 }
 
 #[cfg(test)]
@@ -1305,6 +1452,19 @@ mod tests {
 
     /// A normalized provider result covering the given fiscal years, every load-bearing field present.
     fn fetched_for(years: &[i32]) -> FetchedFinancials {
+        fetched_custom(years, 1000, 5, 100, 50, "deadbeefcafe")
+    }
+
+    /// A normalized provider result with caller-chosen load-bearing values + digest — for refresh
+    /// divergence/idempotency tests (Story 3.3).
+    fn fetched_custom(
+        years: &[i32],
+        sales: i64,
+        eps: i64,
+        high: i64,
+        low: i64,
+        digest: &str,
+    ) -> FetchedFinancials {
         use steadyinvest_core::normalize::{normalize, RawAmount, RawFinancials, RawYear};
         let amt = |v: i64| {
             Some(RawAmount {
@@ -1315,10 +1475,10 @@ mod tests {
         let rows = years
             .iter()
             .map(|&y| RawYear {
-                sales: amt(1000),
-                eps: amt(5),
-                high_price: amt(100),
-                low_price: amt(50),
+                sales: amt(sales),
+                eps: amt(eps),
+                high_price: amt(high),
+                low_price: amt(low),
                 ..RawYear::empty(y)
             })
             .collect();
@@ -1329,7 +1489,7 @@ mod tests {
         };
         FetchedFinancials {
             canonical: normalize(raw).expect("the test raw normalizes"),
-            digest: "deadbeefcafe".to_string(),
+            digest: digest.to_string(),
         }
     }
 
@@ -1340,8 +1500,16 @@ mod tests {
         let id = state.create_study("NESN", "CHF").unwrap();
 
         let fetched = fetched_for(&[2020, 2021, 2022, 2023, 2024]);
-        let filled = state.apply_provider_fetch(id, &fetched).unwrap();
-        assert_eq!(filled, 20, "5 years × 4 load-bearing cells were filled");
+        let report = state.apply_provider_refresh(id, &fetched).unwrap();
+        assert_eq!(
+            report.filled, 20,
+            "5 years × 4 load-bearing cells were filled"
+        );
+        assert_eq!(report.updated, 0, "a first fetch fills, it does not update");
+        assert!(
+            report.cause.price && report.cause.input,
+            "filling prices + fundamentals classifies as both"
+        );
 
         let study = state.get_study(id).unwrap();
         assert_eq!(study.years.len(), 5);
@@ -1367,7 +1535,7 @@ mod tests {
         let mut state = undo_state(&dir, 0x41, "2026-06-15T10:30:00Z");
         let id = state.create_study("NESN", "CHF").unwrap();
         state
-            .apply_provider_fetch(id, &fetched_for(&[2020, 2021, 2022, 2023, 2024]))
+            .apply_provider_refresh(id, &fetched_for(&[2020, 2021, 2022, 2023, 2024]))
             .unwrap();
 
         let study = state.get_study(id).unwrap();
@@ -1399,7 +1567,7 @@ mod tests {
 
         // Fetch covering those exact years; year-0 high_price is held manually, low_price is empty.
         state
-            .apply_provider_fetch(id, &fetched_for(&years))
+            .apply_provider_refresh(id, &fetched_for(&years))
             .unwrap();
 
         let study = state.get_study(id).unwrap();
@@ -1413,6 +1581,298 @@ mod tests {
             study.years[0].low_price.source,
             Source::Provider,
             "the empty sibling cell was filled by the provider"
+        );
+    }
+
+    // ── Story 3.3 — manual refresh: update / freshness / cause / idempotency ──
+
+    /// A refresh re-stamps a present **provider** cell whose value changed (new value + provenance
+    /// digest), and reports it as `updated` (not `filled`). (AC1/AC2)
+    #[test]
+    fn refresh_updates_a_changed_provider_cell() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x51, "2026-06-20T10:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        // Second refresh: high_price 100 → 200 (price diverges), everything else identical.
+        let report = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 200, 50, "feed0042"))
+            .unwrap();
+
+        assert_eq!(report.filled, 0, "no gaps remain to fill");
+        assert_eq!(report.updated, 5, "one high_price per year changed");
+        assert!(
+            report.cause.price && !report.cause.input,
+            "only a price moved → price cause only"
+        );
+
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(high.value, Some(und_money(200)), "the new value is stamped");
+        assert_eq!(high.source, Source::Provider);
+        assert_eq!(
+            high.provenance.hash_of_dependencies, "feed0042",
+            "the cell carries the new fetch digest (re-stamped)"
+        );
+    }
+
+    /// An identical re-fetch is a true no-op: nothing changes, the cause is empty, and **no phantom
+    /// undo step** is recorded (the timestamp-churn trap). (AC1 idempotency)
+    #[test]
+    fn idempotent_refresh_changes_nothing_and_records_no_undo_step() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x52, "2026-06-20T11:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        let depth_after_fill = state.undo_depth();
+        assert_eq!(depth_after_fill, 1, "the first fill is one undo step");
+
+        // Re-run the SAME refresh (same values, same digest) — must be a no-op.
+        let report = state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        assert!(!report.changed(), "an identical re-fetch changes nothing");
+        assert!(!report.cause.price && !report.cause.input);
+        assert_eq!(
+            state.undo_depth(),
+            depth_after_fill,
+            "a no-op refresh records no phantom undo step"
+        );
+    }
+
+    /// A present **manual** cell is never overwritten by a refresh — even a divergent one (manual
+    /// wins; the divergent dual-value case is Story 3.4). (AC2)
+    #[test]
+    fn refresh_skips_a_manual_cell_even_when_divergent() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x53, "2026-06-20T12:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        // Manual high_price on year 0 (also materializes the grid).
+        state.edit_cell(id, 0, "a", Some(und_money(999))).unwrap();
+        let years: Vec<i32> = state
+            .get_study(id)
+            .unwrap()
+            .years
+            .iter()
+            .map(|y| y.year)
+            .collect();
+
+        // Refresh with a DIVERGENT high_price (100 ≠ 999) for those years.
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(
+            high.value,
+            Some(und_money(999)),
+            "the manual value stands; the divergent fetch never overwrites it"
+        );
+        assert_eq!(high.source, Source::Manual);
+    }
+
+    /// A deliberate "not available" decision (FR19) is never refilled by a refresh — neither a
+    /// load-bearing cell nor an optional one (it carries `value: None` but is a user choice, not a
+    /// gap). Regression guard for the code-review HIGH finding. (AC2)
+    #[test]
+    fn refresh_never_refills_a_not_available_accepted_cell() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x57, "2026-06-20T16:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+
+        // Mark a load-bearing cell (year-0 sales) AND an optional cell (year-0 dividend, "f")
+        // as not-available-accepted (this also materializes the grid).
+        state
+            .set_not_available(id, 0, entry::FIELD_SALES, true)
+            .unwrap();
+        state
+            .set_not_available(id, 0, entry::FIELD_DIVIDEND, true)
+            .unwrap();
+        let years: Vec<i32> = state
+            .get_study(id)
+            .unwrap()
+            .years
+            .iter()
+            .map(|y| y.year)
+            .collect();
+
+        // A refresh that supplies values for those exact cells must NOT refill them.
+        let report = state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+
+        let y0 = &state.get_study(id).unwrap().years[0];
+        assert_eq!(
+            y0.sales.coverage,
+            Coverage::NotAvailableAccepted,
+            "an N/A-accepted load-bearing cell is preserved, never refilled"
+        );
+        assert_eq!(y0.sales.value, None);
+        assert_eq!(y0.sales.source, Source::Manual);
+        // `fetched_for` leaves dividend absent, but assert the optional N/A slot is preserved anyway.
+        assert!(
+            y0.dividend_per_share
+                .as_ref()
+                .is_some_and(|c| c.coverage == Coverage::NotAvailableAccepted),
+            "an N/A-accepted optional cell is preserved too"
+        );
+        // The empty sibling (low_price) was still filled — only the N/A decisions are protected.
+        assert_eq!(y0.low_price.source, Source::Provider);
+        assert!(report.filled > 0, "ordinary gaps still fill");
+    }
+
+    /// A divergent refresh of a **validated** provider cell auto-demotes `✓ → ?` (FR20, AC3); a
+    /// non-divergent re-fetch keeps the human `✓`.
+    #[test]
+    fn refresh_demotes_a_divergent_validated_provider_cell() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x54, "2026-06-20T13:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        // The user reviews & validates year-0 high_price (a provider cell).
+        state.set_review(id, 0, "a", Review::Validated).unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].high_price.review,
+            Review::Validated
+        );
+
+        // A non-divergent re-fetch (same 100) keeps the ✓.
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].high_price.review,
+            Review::Validated,
+            "an equal re-fetch keeps the human ✓"
+        );
+
+        // A divergent re-fetch (100 → 250) auto-demotes the ✓ to ?.
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 250, 50, "beadfeed"))
+            .unwrap();
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(
+            high.review,
+            Review::ToReview,
+            "a divergent provider value auto-tags ✓ → ?"
+        );
+        assert_eq!(high.value, Some(und_money(250)));
+    }
+
+    /// The recompute cause distinguishes a pure-fundamental change from a pure-price change (FR29,
+    /// AC5) — driven through the real `apply_provider_refresh`, not a hand-built diff.
+    #[test]
+    fn refresh_classifies_input_only_vs_price_only_cause() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x55, "2026-06-20T14:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+
+        // Only EPS moves (5 → 6): an input cause, no price cause.
+        let input_only = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 6, 100, 50, "d1"))
+            .unwrap();
+        assert!(
+            input_only.cause.input && !input_only.cause.price,
+            "an EPS-only change is an input cause"
+        );
+        assert_eq!(refresh_notice(input_only), MSG_REFRESH_INPUT);
+
+        // Only low_price moves (50 → 40): a price cause, no input cause.
+        let price_only = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 6, 100, 40, "d2"))
+            .unwrap();
+        assert!(
+            price_only.cause.price && !price_only.cause.input,
+            "a price-only change is a price cause"
+        );
+        assert_eq!(refresh_notice(price_only), MSG_REFRESH_PRICE);
+    }
+
+    /// End-to-end (the Story-3.3 invariant 2b through a REAL refresh, not a hand-set freshness):
+    /// a fully-validated provider study reads `Full`; a divergent refresh of a load-bearing provider
+    /// cell auto-demotes it and the verdict degrades to `Provisional` in the same frame. (AC3,
+    /// complements `seam_check.rs` SEAM 3 which sets the flag by hand.)
+    #[test]
+    fn a_divergent_refresh_degrades_a_full_verdict_to_provisional() {
+        use steadyinvest_core::verdict::Verdict;
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x56, "2026-06-20T15:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+
+        // Fill from the provider, then the user validates every load-bearing year cell …
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        for y in 0..years.len() {
+            for field in [
+                entry::FIELD_SALES,
+                entry::FIELD_HIGH,
+                entry::FIELD_LOW,
+                entry::FIELD_EPS,
+            ] {
+                state.set_review(id, y, field, Review::Validated).unwrap();
+            }
+        }
+        // … and completes the judgment (the five load-bearing judgment inputs).
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+            ("current_price", 60),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+
+        let study = state.get_study(id).unwrap();
+        assert!(
+            matches!(
+                engine::build_snapshot(&study)
+                    .expect("normalizes")
+                    .verdict(),
+                Verdict::Full(_)
+            ),
+            "an all-validated provider study with a complete judgment reads Full"
+        );
+
+        // A divergent refresh of the (validated, provider) high_price demotes ✓ → ? …
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 250, 50, "deg"))
+            .unwrap();
+        let study = state.get_study(id).unwrap();
+        assert_eq!(
+            study.years[0].high_price.review,
+            Review::ToReview,
+            "the divergent provider value auto-demotes the ✓"
+        );
+        assert!(
+            matches!(
+                engine::build_snapshot(&study)
+                    .expect("normalizes")
+                    .verdict(),
+                Verdict::Provisional(_)
+            ),
+            "a demoted load-bearing input degrades Full → Provisional in the same frame"
         );
     }
 

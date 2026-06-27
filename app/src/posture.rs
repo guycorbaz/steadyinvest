@@ -563,9 +563,10 @@ mod tests {
         // actionable empty state + demo CTA, and the read-only demo banner; tickers/search text and the
         // fixture data are never scanned. Story 3.2 adds the Réglages provider/key panel (provider chips,
         // key status + placeholder, save/delete/test action labels); the API key value is user data,
-        // NEVER scanned (NFR-S1). Keep the floor strict against a broken scan.
+        // NEVER scanned (NFR-S1). Story 3.3 adds the focused cell's freshness as-of caption ("Mis à
+        // jour le {}"), revealed beside the source. Keep the floor strict against a broken scan.
         assert!(
-            total >= 223,
+            total >= 224,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -600,10 +601,12 @@ mod tests {
         // adds the normalize-failure notice (`MSG_NORMALIZE_FAILED`); Story 2.12 adds the six dashboard
         // archive/un-archive/delete confirm + done templates; Story 2.13 adds the two verify-engine
         // summary templates + the demo-unavailable notice; Story 3.2 adds the seven provider-key
-        // notices (saved/deleted/testing/ok/invalid/forbidden/keychain-unavailable).
+        // notices (saved/deleted/testing/ok/invalid/forbidden/keychain-unavailable). Story 3.3 retires
+        // MSG_PROVIDER_DONE (folded into the refresh path) and adds the four refresh-cause notices
+        // (no-change / price / input / both): net 34 − 1 + 4 = 37.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            34,
+            37,
             "state.rs message inventory changed — register the new notice"
         );
     }
