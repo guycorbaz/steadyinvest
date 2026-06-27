@@ -567,9 +567,13 @@ mod tests {
         // jour le {}"). Story 3.4 adds the reconciliation reveal + resolve controls ("Fournisseur :
         // {}", "Accepter (fournisseur)", "Ignorer (fournisseur)"). Story 4.1 fleshes out the watchlist
         // screen (add field, list rows, link/reorder/remove actions): net +9 @tr literals. Story 4.2
-        // adds the neutral buy-zone summary + per-row fact: +2. Keep the floor strict against a broken scan.
+        // adds the neutral buy-zone summary + per-row fact: +2. Story 4.3 builds the holdings register
+        // (reference-currency fact, the add/edit form's symbole/quantité/prix fields + ajouter/
+        // enregistrer/annuler/modifier/retirer actions, the empty state, the per-row quantité/prix
+        // facts) and the Réglages reference-currency panel (title + CHF/EUR/USD/GBP chips): net +16.
+        // Keep the floor strict against a broken scan.
         assert!(
-            total >= 238,
+            total >= 254,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -610,9 +614,11 @@ mod tests {
         // graceful-failure cause notices (offline / quota / no-data): 37 + 3 = 40. Story 3.6 adds
         // the annual-update re-validation-scope clause (MSG_REFRESH_REVALIDATE): 40 + 1 = 41. Story
         // 4.1 adds the watchlist "no study for this ticker" notice (MSG_WATCH_NO_STUDY): 41 + 1 = 42.
+        // Story 4.3 adds the two holdings-register validation notices (invalid number / empty
+        // symbol): 42 + 2 = 44.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            42,
+            44,
             "state.rs message inventory changed — register the new notice"
         );
     }

@@ -11,6 +11,7 @@
 //! cause-named error on writes (NFR-R3). Export/import/backup and sync-guard are Epic 5.
 
 mod error;
+mod holdings;
 mod journal;
 mod migrations;
 mod schema;
@@ -18,6 +19,7 @@ mod studies;
 mod watchlist;
 
 pub use error::{Error, Result};
+pub use holdings::{HoldingItem, PortfolioItem};
 pub use journal::Journal;
 pub use studies::StudySummary;
 pub use watchlist::WatchItem;

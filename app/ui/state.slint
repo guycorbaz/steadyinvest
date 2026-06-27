@@ -515,11 +515,16 @@ export global Prefs {
     in-out property <bool> key-configured: false;
     // The latest neutral provider/key notice (save/delete/test outcome), set by the Rust side.
     in-out property <string> provider-status;
+    // ── Story 4.3 — reference currency (FR63) ──
+    // The single global reference currency the portfolio is read in, mirrored from
+    // AppConfig.reference_currency (a 3-letter ISO-4217 code: "CHF" | "EUR" | "USD" | "GBP" | …).
+    in-out property <string> reference-currency: "CHF";
     // User intents — handled in Rust (apply + persist).
     callback theme-selected(string); // "dark" | "light"
     callback label-set-selected(string); // "naic" | "neutral"
     callback number-format-selected(string); // "comma" | "point"
     callback provider-selected(string); // "eodhd" | "none"
+    callback reference-currency-selected(string); // "CHF" | "EUR" | "USD" | "GBP" | …
     // The key travels ONE WAY into Rust as a call argument — never stored in an `in-out` property
     // that could round-trip back out to config/UI (NFR-S1).
     callback key-saved(string);
@@ -542,4 +547,29 @@ export global Watchlist {
     callback move-watch(string, bool); // id, up?
     callback link-watch(string); // id → link to a same-ticker study
     callback unlink-watch(string); // id
+}
+
+// One holding in the single portfolio (Story 4.3, FR36). Amounts cross as already-formatted display
+// strings (never a float/Decimal); `quantity`/`purchase-price` are the canonical decimal spellings.
+export struct HoldingRow {
+    id: string,
+    ticker: string,
+    quantity: string,
+    purchase-price: string,
+}
+
+// The single-portfolio holdings register (Story 4.3, FR36). Rows are built/ordered by Rust; intents
+// are handled in Rust (validate + persist + re-render). `reference-currency` is the global currency
+// the amounts are read in (FR63) — a label only, no conversion in Epic 4.
+export global Holdings {
+    in-out property <[HoldingRow]> rows;
+    in-out property <int> holding-count;
+    in-out property <bool> read-only;
+    in-out property <string> notice;
+    in-out property <string> reference-currency: "CHF";
+    // ticker, quantity, purchase-price → written? (so the form keeps the user's input on refusal)
+    callback add-holding(string, string, string) -> bool;
+    // id, ticker, quantity, purchase-price → written?
+    callback edit-holding(string, string, string, string) -> bool;
+    callback remove-holding(string); // id
 }

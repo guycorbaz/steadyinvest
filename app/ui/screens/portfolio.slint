@@ -1,13 +1,31 @@
-// Portefeuille — neutral placeholder (the holdings register is Epic 4; actionable empty
-// states are Story 2.13).
+// Portefeuille — the single-portfolio holdings register (Story 4.3, FR36). Add / edit / remove a
+// holding (symbole, quantité, prix d'achat) in the global reference currency (FR63). Neutral, no
+// advice, no zone hues (no zone is computed here — that's Story 4.4). Intents → Rust (validate +
+// persist + re-render).
 
 import { Tokens } from "../tokens.slint";
+import { Holdings, HoldingRow } from "../state.slint";
+import { ActionButton } from "../components/action_button.slint";
+import { TextField } from "../components/text_field.slint";
 
 export component PortfolioScreen inherits Rectangle {
+    // Draft fields for the add/edit form. `editing-id` is "" when adding, or the row id being edited.
+    property <string> draft-ticker;
+    property <string> draft-quantity;
+    property <string> draft-price;
+    property <string> editing-id;
+
+    function reset-draft() {
+        root.draft-ticker = "";
+        root.draft-quantity = "";
+        root.draft-price = "";
+        root.editing-id = "";
+    }
+
     VerticalLayout {
         alignment: start;
         padding: Tokens.space-24;
-        spacing: Tokens.space-12;
+        spacing: Tokens.space-16;
 
         Text {
             text: @tr("Portefeuille");
@@ -16,10 +34,117 @@ export component PortfolioScreen inherits Rectangle {
             font-weight: Tokens.weight-semibold;
         }
 
+        // The reference currency the amounts are read in (FR63) — set in Réglages. A fact, not a control.
         Text {
-            text: @tr("Aucune position pour le moment.");
+            text: @tr("Devise de référence : {} (modifiable dans Réglages)", Holdings.reference-currency);
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+        }
+
+        // ── Add / edit a holding ──
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            TextField {
+                placeholder: @tr("Symbole");
+                text <=> root.draft-ticker;
+                horizontal-stretch: 1;
+            }
+            TextField {
+                placeholder: @tr("Quantité");
+                text <=> root.draft-quantity;
+                horizontal-stretch: 1;
+            }
+            TextField {
+                placeholder: @tr("Prix d'achat");
+                text <=> root.draft-price;
+                horizontal-stretch: 1;
+            }
+            ActionButton {
+                label: root.editing-id == "" ? @tr("Ajouter") : @tr("Enregistrer");
+                enabled: !Holdings.read-only && root.draft-ticker != "";
+                clicked => {
+                    // Reset the form ONLY when the write was accepted — a refused add/edit (bad
+                    // number / empty symbol) keeps the user's input so they can correct it.
+                    if (root.editing-id == "") {
+                        if (Holdings.add-holding(root.draft-ticker, root.draft-quantity, root.draft-price)) {
+                            root.reset-draft();
+                        }
+                    } else {
+                        if (Holdings.edit-holding(root.editing-id, root.draft-ticker, root.draft-quantity, root.draft-price)) {
+                            root.reset-draft();
+                        }
+                    }
+                }
+            }
+            if root.editing-id != "": ActionButton {
+                label: @tr("Annuler");
+                enabled: true;
+                clicked => { root.reset-draft(); }
+            }
+        }
+
+        if Holdings.notice != "": Text {
+            text: Holdings.notice;
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+        }
+
+        // ── Empty state ──
+        if Holdings.holding-count == 0: Text {
+            text: @tr("Aucune position pour le moment ; ajoutez-en une ci-dessus.");
             color: Tokens.text-mid;
             font-size: Tokens.font-body;
+        }
+
+        // ── The register ──
+        for row[index] in Holdings.rows: Rectangle {
+            background: Tokens.surface-alt;
+            border-radius: Tokens.radius;
+            height: 44px;
+            HorizontalLayout {
+                padding-left: Tokens.space-12;
+                padding-right: Tokens.space-12;
+                spacing: Tokens.space-12;
+                Text {
+                    text: row.ticker;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-body;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: @tr("Quantité : {}", row.quantity);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: @tr("Prix d'achat : {} {}", row.purchase-price, Holdings.reference-currency);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+                ActionButton {
+                    label: @tr("Modifier");
+                    enabled: !Holdings.read-only;
+                    clicked => {
+                        root.editing-id = row.id;
+                        root.draft-ticker = row.ticker;
+                        root.draft-quantity = row.quantity;
+                        root.draft-price = row.purchase-price;
+                    }
+                }
+                ActionButton {
+                    label: @tr("Retirer");
+                    enabled: !Holdings.read-only;
+                    clicked => {
+                        if (root.editing-id == row.id) {
+                            root.reset-draft();
+                        }
+                        Holdings.remove-holding(row.id);
+                    }
+                }
+            }
         }
     }
 }

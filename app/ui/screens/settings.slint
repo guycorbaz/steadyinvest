@@ -204,6 +204,38 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
+            // Story 4.3 (FR63) — the single global reference currency the portfolio is read in. A
+            // label only (no FX conversion in Epic 4); the open set is covered by quick picks.
+            SettingsPanel {
+                title: @tr("Devise de référence");
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ChoiceChip {
+                        label: @tr("CHF");
+                        selected: Prefs.reference-currency == "CHF";
+                        activated => { Prefs.reference-currency-selected("CHF"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("EUR");
+                        selected: Prefs.reference-currency == "EUR";
+                        activated => { Prefs.reference-currency-selected("EUR"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("USD");
+                        selected: Prefs.reference-currency == "USD";
+                        activated => { Prefs.reference-currency-selected("USD"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("GBP");
+                        selected: Prefs.reference-currency == "GBP";
+                        activated => { Prefs.reference-currency-selected("GBP"); }
+                    }
+                }
+            }
+
             SettingsPanel {
                 title: @tr("Format des nombres");
 

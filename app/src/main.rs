@@ -189,6 +189,35 @@ fn apply_watch_result(ui: &MainWindow, state: &JournalState, result: Result<(), 
     refresh_watchlist(ui, state);
 }
 
+/// Rebuild the holdings register from the journal (Story 4.3, FR36). Reference-currency labelling is
+/// set separately (from app-config, on startup + on change) — a holdings mutation doesn't touch it.
+fn refresh_holdings(ui: &MainWindow, state: &JournalState) {
+    let holdings = ui.global::<Holdings>();
+    let items = state.list_holdings();
+    let rows: Vec<HoldingRow> = items
+        .iter()
+        .map(|h| HoldingRow {
+            id: h.id.to_string().into(),
+            ticker: h.security_ticker.clone().into(),
+            quantity: h.quantity.clone().into(),
+            purchase_price: h.purchase_price.clone().into(),
+        })
+        .collect();
+    holdings.set_holding_count(items.len() as i32);
+    holdings.set_rows(ModelRc::new(VecModel::from(rows)));
+    holdings.set_read_only(state.is_read_only());
+}
+
+/// Surface a holdings write's outcome (neutral notice on refusal) and re-render the register.
+fn apply_holdings_result(ui: &MainWindow, state: &JournalState, result: Result<(), String>) {
+    let holdings = ui.global::<Holdings>();
+    match result {
+        Ok(()) => holdings.set_notice(SharedString::new()),
+        Err(message) => holdings.set_notice(message.into()),
+    }
+    refresh_holdings(ui, state);
+}
+
 /// Link a watchlist entry to a saved study of the SAME ticker (the most recent), or a neutral
 /// "no study for this ticker" notice if none exists (Story 4.1 — an explicit picker is a later
 /// refinement; auto-match by ticker covers the common case).
@@ -458,6 +487,12 @@ fn main() -> Result<(), slint::PlatformError> {
         prefs.set_number_format(cfg.number_format.as_str().into());
         push_samples(&ui, cfg.number_format);
         mirror_provider_prefs(&ui, cfg.preferred_provider);
+        // Story 4.3 (FR63): mirror the reference currency (validated) into Prefs + the holdings
+        // register, so the picker reflects it and amounts are labelled before the window shows.
+        let currency = cfg.reference_currency_or_default();
+        prefs.set_reference_currency(currency.clone().into());
+        ui.global::<Holdings>()
+            .set_reference_currency(currency.into());
 
         // Best-effort restore BEFORE show to minimise the visible jump; the authoritative
         // restore happens again right after show() below — before the window is mapped, winit
@@ -475,6 +510,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         refresh_studies(&ui, &journal_state.borrow());
         refresh_watchlist(&ui, &journal_state.borrow());
+        refresh_holdings(&ui, &journal_state.borrow());
         if let Some(notice) = &startup_notice {
             ui.global::<Studies>().set_notice(notice.clone().into());
         }
@@ -721,6 +757,54 @@ fn main() -> Result<(), slint::PlatformError> {
                 None => Ok(()),
             };
             apply_watch_result(&ui, &journal_state.borrow(), result);
+        });
+    }
+
+    // ── Holdings intents (Story 4.3, FR36) ── add / edit / remove a holding, each validated +
+    // persisted then re-rendered with a neutral notice on refusal (invalid number / empty symbol /
+    // read-only / no journal). Amounts are in the global reference currency (no FX in Epic 4).
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Holdings>()
+            .on_add_holding(move |ticker, quantity, price| {
+                let ui = ui_weak.unwrap();
+                let result = journal_state
+                    .borrow_mut()
+                    .add_holding(&ticker, &quantity, &price);
+                let written = result.is_ok();
+                apply_holdings_result(&ui, &journal_state.borrow(), result);
+                // Report whether the holding was written so the UI keeps the user's input on refusal.
+                written
+            });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Holdings>()
+            .on_edit_holding(move |id, ticker, quantity, price| {
+                let ui = ui_weak.unwrap();
+                let Ok(id) = Uuid::parse_str(&id) else {
+                    return false;
+                };
+                let result = journal_state
+                    .borrow_mut()
+                    .update_holding(id, &ticker, &quantity, &price);
+                let written = result.is_ok();
+                apply_holdings_result(&ui, &journal_state.borrow(), result);
+                written
+            });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Holdings>().on_remove_holding(move |id| {
+            let ui = ui_weak.unwrap();
+            let Ok(id) = Uuid::parse_str(&id) else {
+                return;
+            };
+            let result = journal_state.borrow_mut().delete_holding(id);
+            apply_holdings_result(&ui, &journal_state.borrow(), result);
         });
     }
     // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and
@@ -1827,6 +1911,26 @@ fn main() -> Result<(), slint::PlatformError> {
                     .set_number_format(format.as_str().into());
                 config.borrow_mut().number_format = format;
                 persist(path.as_ref(), &config.borrow());
+            });
+    }
+    // ── Story 4.3 — reference currency (FR63) ── persist the chosen code and re-label the register.
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let path = config_path.clone();
+        ui.global::<Prefs>()
+            .on_reference_currency_selected(move |value| {
+                // Validate the shape (3 uppercase letters); ignore a malformed pick rather than
+                // persist garbage (mirrors the parse-guard of the other Prefs callbacks).
+                if !config::is_valid_currency_code(&value) {
+                    return;
+                }
+                let ui = ui_weak.unwrap();
+                config.borrow_mut().reference_currency = value.to_string();
+                persist(path.as_ref(), &config.borrow());
+                ui.global::<Prefs>().set_reference_currency(value.clone());
+                // Re-label the holdings amounts immediately (no conversion — Epic 4 is single-currency).
+                ui.global::<Holdings>().set_reference_currency(value);
             });
     }
     // ── Story 3.2 — provider selection + key management (FR25/FR63) ──

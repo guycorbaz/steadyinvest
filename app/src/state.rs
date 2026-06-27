@@ -19,7 +19,9 @@ use steadyinvest_contract::{
     Review, Source, Study, Timestamp, YearData,
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
-use steadyinvest_persistence::{Error as PersistError, Journal, StudySummary, WatchItem};
+use steadyinvest_persistence::{
+    Error as PersistError, HoldingItem, Journal, PortfolioItem, StudySummary, WatchItem,
+};
 use uuid::Uuid;
 
 use steadyinvest_core::verdict::StudySnapshot;
@@ -119,6 +121,13 @@ pub const MSG_REFRESH_REVALIDATE: &str = "{n} cellule(s) à revérifier.";
 /// but no saved study matches the watched ticker.
 pub const MSG_WATCH_NO_STUDY: &str =
     "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études.";
+
+/// Holdings register copy (Story 4.3, FR36) — fact-stating, posture-gated. Raised when a holding's
+/// quantity or price is not a valid number, or its symbol is empty; nothing is written.
+pub const MSG_HOLDING_INVALID_NUMBER: &str =
+    "La quantité et le prix d'achat doivent être des nombres ; aucune position n'a été enregistrée.";
+pub const MSG_HOLDING_INVALID_TICKER: &str =
+    "Le symbole est vide ; aucune position n'a été enregistrée.";
 
 /// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
@@ -272,6 +281,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_BOTH,
     MSG_REFRESH_REVALIDATE,
     MSG_WATCH_NO_STUDY,
+    MSG_HOLDING_INVALID_NUMBER,
+    MSG_HOLDING_INVALID_TICKER,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -719,6 +730,112 @@ impl JournalState {
                 (items[n].id, items[index].position),
             ])
             .map_err(watch_error)
+    }
+
+    // ── Holdings register (Story 4.3, FR36) ──
+
+    /// The single portfolio's holdings, ordered by creation. Empty when no journal / no portfolio
+    /// exists yet. A pure read — it never creates the portfolio (that happens on the first add).
+    pub fn list_holdings(&self) -> Vec<HoldingItem> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Vec::new();
+        };
+        let portfolio = match journal.first_portfolio() {
+            Ok(Some(p)) => p,
+            Ok(None) => return Vec::new(),
+            Err(error) => {
+                tracing::warn!("first_portfolio failed: {error}");
+                return Vec::new();
+            }
+        };
+        journal.list_holdings(portfolio.id).unwrap_or_else(|error| {
+            tracing::warn!("list_holdings failed: {error}");
+            Vec::new()
+        })
+    }
+
+    /// Ensure the single default portfolio exists and return it (FR36, single-portfolio). Lazily
+    /// created with an injected id/timestamp (ADD15) on first use; idempotent thereafter. The id/
+    /// timestamp are minted **only when the portfolio is absent** — so a repeat add doesn't burn an
+    /// `IdGen` id (which would shift a deterministic test sequence) and the common path is a pure read.
+    fn ensure_default_portfolio(&mut self) -> Result<PortfolioItem, String> {
+        let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
+        if let Some(existing) = journal.first_portfolio().map_err(watch_error)? {
+            return Ok(existing);
+        }
+        let id = self.idgen.new_id();
+        let created_at = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .ensure_portfolio(id, DEFAULT_PORTFOLIO_NAME, &created_at)
+            .map_err(watch_error)
+    }
+
+    /// Add a holding (FR36): a security symbol, a quantity and a purchase price in the reference
+    /// currency. Validates the symbol (non-empty) and the two decimals (exact, quantity > 0, price
+    /// ≥ 0) **in the app layer** — persistence stores faithfully. Id/timestamp from the injected
+    /// sources. Guarded (read-only / no-journal / save-failure → a neutral notice).
+    pub fn add_holding(
+        &mut self,
+        ticker: &str,
+        quantity: &str,
+        purchase_price: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let ticker = ticker.trim();
+        if ticker.is_empty() {
+            return Err(MSG_HOLDING_INVALID_TICKER.to_string());
+        }
+        let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
+        let portfolio_id = self.ensure_default_portfolio()?.id;
+        let id = self.idgen.new_id();
+        let created_at = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .add_holding(
+                id,
+                portfolio_id,
+                ticker,
+                &quantity,
+                &purchase_price,
+                &created_at,
+            )
+            .map(|_| ())
+            .map_err(watch_error)
+    }
+
+    /// Edit a holding's symbol, quantity and/or purchase price (FR36). Same validation as
+    /// [`Self::add_holding`]. A no-op (identical values) writes nothing.
+    pub fn update_holding(
+        &mut self,
+        id: Uuid,
+        ticker: &str,
+        quantity: &str,
+        purchase_price: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let ticker = ticker.trim();
+        if ticker.is_empty() {
+            return Err(MSG_HOLDING_INVALID_TICKER.to_string());
+        }
+        let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .update_holding(id, ticker, &quantity, &purchase_price)
+            .map_err(watch_error)
+    }
+
+    /// Remove a holding (FR36). Guarded; an absent id is a neutral no-op.
+    pub fn delete_holding(&mut self, id: Uuid) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal.delete_holding(id).map_err(watch_error)
     }
 
     /// Archive a study (Story 2.12, FR54): flip `status` to `"archived"` so it leaves the default
@@ -1513,6 +1630,29 @@ fn watch_error(error: PersistError) -> String {
         PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
         other => format!("{MSG_SAVE_FAILED} {other}"),
     }
+}
+
+/// The display name of the single default portfolio (Story 4.3, FR36). Not user-editable in 4.3
+/// (multi-portfolio naming is FR37/Epic 6).
+const DEFAULT_PORTFOLIO_NAME: &str = "Portefeuille";
+
+/// Validate a holding's quantity and purchase price (Story 4.3, FR36 + NFR-C1). Both must parse as
+/// **exact** decimals (`Decimal::from_str_exact` — errors instead of silently rounding); quantity
+/// must be strictly positive and price non-negative. On success returns their **canonical** decimal
+/// spellings to store as TEXT; on any failure, the neutral [`MSG_HOLDING_INVALID_NUMBER`].
+fn validate_holding_amounts(
+    quantity: &str,
+    purchase_price: &str,
+) -> Result<(String, String), String> {
+    let qty = Decimal::from_str_exact(quantity.trim())
+        .ok()
+        .filter(|q| q.is_sign_positive() && !q.is_zero())
+        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+    let price = Decimal::from_str_exact(purchase_price.trim())
+        .ok()
+        .filter(|p| !p.is_sign_negative())
+        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+    Ok((qty.to_string(), price.to_string()))
 }
 
 // ── Provider fetch/refresh cell helpers (Story 3.1 / 3.3) ───────────────────────────────────────
@@ -3076,6 +3216,93 @@ mod tests {
         // No current price → no defined zone → not in the buy zone.
         state.set_judgment_field(id, "current_price", None).unwrap();
         assert!(!engine::study_in_buy_zone(&state.get_study(id).unwrap()));
+    }
+
+    // ── Story 4.3 — holdings register (single-portfolio CRUD + decimal validation) ──
+
+    #[test]
+    fn add_holding_persists_lazily_creates_one_portfolio_and_lists_in_order() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x430);
+        assert!(
+            state.list_holdings().is_empty(),
+            "no holdings, no portfolio yet"
+        );
+
+        state.add_holding("NESN", "10", "95.40").unwrap();
+        state.add_holding("ROG", "5", "248.10").unwrap();
+        let rows = state.list_holdings();
+        assert_eq!(
+            rows.iter()
+                .map(|h| h.security_ticker.as_str())
+                .collect::<Vec<_>>(),
+            ["NESN", "ROG"],
+            "both holdings persist, in creation order"
+        );
+        assert_eq!(rows[0].quantity, "10");
+        assert_eq!(rows[0].purchase_price, "95.40");
+        // All holdings share the single lazily-created portfolio.
+        assert_eq!(rows[0].portfolio_id, rows[1].portfolio_id, "one portfolio");
+    }
+
+    #[test]
+    fn holding_amounts_are_validated_and_bad_input_writes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x431);
+        assert_eq!(
+            state.add_holding("  ", "10", "5").unwrap_err(),
+            MSG_HOLDING_INVALID_TICKER
+        );
+        assert_eq!(
+            state.add_holding("NESN", "abc", "5").unwrap_err(),
+            MSG_HOLDING_INVALID_NUMBER
+        );
+        assert_eq!(
+            state.add_holding("NESN", "0", "5").unwrap_err(),
+            MSG_HOLDING_INVALID_NUMBER,
+            "quantity must be strictly positive"
+        );
+        assert_eq!(
+            state.add_holding("NESN", "-2", "5").unwrap_err(),
+            MSG_HOLDING_INVALID_NUMBER
+        );
+        assert_eq!(
+            state.add_holding("NESN", "2", "-5").unwrap_err(),
+            MSG_HOLDING_INVALID_NUMBER,
+            "price must be non-negative"
+        );
+        assert!(
+            state.list_holdings().is_empty(),
+            "no invalid input wrote a row"
+        );
+        // A free purchase (price 0) is allowed (e.g. a gift/spin-off).
+        state.add_holding("FREE", "1", "0").unwrap();
+        assert_eq!(state.list_holdings().len(), 1);
+    }
+
+    #[test]
+    fn edit_and_delete_holding_round_trip_and_survive_reopen() {
+        let dir = TempDir::new().unwrap();
+        let id = {
+            let mut state = watch_state(&dir, 0x432);
+            state.add_holding("NESN", "10", "95.40").unwrap();
+            state.add_holding("ROG", "5", "248.10").unwrap();
+            let nesn = state.list_holdings()[0].id;
+            state
+                .update_holding(nesn, "NESN.SW", "12", "96.00")
+                .unwrap();
+            let rog = state.list_holdings()[1].id;
+            state.delete_holding(rog).unwrap();
+            nesn
+        };
+        // Reopen the same on-disk journal → the edit and the delete persisted.
+        let reopened = watch_state(&dir, 0x999);
+        let rows = reopened.list_holdings();
+        assert_eq!(rows.len(), 1, "the deleted holding stayed deleted");
+        assert_eq!(rows[0].id, id);
+        assert_eq!(rows[0].security_ticker, "NESN.SW");
+        assert_eq!(rows[0].quantity, "12");
+        assert_eq!(rows[0].purchase_price, "96.00");
     }
 
     #[test]

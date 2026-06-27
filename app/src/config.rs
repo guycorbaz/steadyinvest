@@ -21,6 +21,10 @@ use crate::viewmodel::format::NumberFormat;
 /// Default window size (physical pixels) on first launch.
 const DEFAULT_WINDOW_WIDTH: u32 = 1100;
 const DEFAULT_WINDOW_HEIGHT: u32 = 720;
+/// The reference currency a fresh install starts with (Story 4.3, FR63). A plain ISO-4217-style
+/// 3-letter code; the set is open (the user can pick another in Settings), so this is a `String`,
+/// not an enum — no `contract` type, no migration when the picker grows.
+pub const DEFAULT_REFERENCE_CURRENCY: &str = "CHF";
 /// Sanity bounds for a persisted size — outside means a damaged value, fall back.
 const MIN_SANE_WINDOW: u32 = 320;
 const MAX_SANE_WINDOW: u32 = 16_384;
@@ -82,6 +86,27 @@ pub struct AppConfig {
     /// [`ProviderChoice::Eodhd`] (the only adapter today).
     #[serde(default)]
     pub preferred_provider: ProviderChoice,
+    /// The single global reference currency the portfolio is read in (Story 4.3, FR63). A 3-letter
+    /// ISO-4217-style code (CHF/EUR/USD/…). The holdings register **labels** amounts with it but
+    /// performs **no** FX conversion in Epic 4 (Guy's 2026-06-27 single-currency decision). Lives in
+    /// app-config (ADD7 — outside the journal). Append-only `#[serde(default …)]`: a pre-4.3 config
+    /// without the field loads and defaults to [`DEFAULT_REFERENCE_CURRENCY`]. Read it through
+    /// [`AppConfig::reference_currency_or_default`] so a damaged on-disk value falls back.
+    #[serde(default = "default_reference_currency")]
+    pub reference_currency: String,
+}
+
+/// serde default for [`AppConfig::reference_currency`] (a free function — `#[serde(default = …)]`
+/// needs a path, and `String`'s own `Default` is `""`, which we never want).
+fn default_reference_currency() -> String {
+    DEFAULT_REFERENCE_CURRENCY.to_string()
+}
+
+/// Whether `code` is a well-formed reference currency: exactly three ASCII uppercase letters
+/// (ISO-4217 shape). We validate the *shape*, not membership in the live ISO list — the user may
+/// legitimately use a code our hard-coded picker doesn't list.
+pub fn is_valid_currency_code(code: &str) -> bool {
+    code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase())
 }
 
 impl Default for AppConfig {
@@ -96,11 +121,23 @@ impl Default for AppConfig {
             journal_path: None,
             study_view_state: BTreeMap::new(),
             preferred_provider: ProviderChoice::default(),
+            reference_currency: default_reference_currency(),
         }
     }
 }
 
 impl AppConfig {
+    /// The reference currency if the persisted value is well-formed, the default otherwise (a
+    /// damaged/empty code must not produce a blank or malformed currency label — validate before
+    /// trust, the same posture as [`Self::sane_window_size`]).
+    pub fn reference_currency_or_default(&self) -> String {
+        if is_valid_currency_code(&self.reference_currency) {
+            self.reference_currency.clone()
+        } else {
+            DEFAULT_REFERENCE_CURRENCY.to_string()
+        }
+    }
+
     /// Persisted window size if it is sane, the default size otherwise (a 0×0 or absurd value
     /// must not produce an unusable window — validate before trust).
     pub fn sane_window_size(&self) -> (u32, u32) {
@@ -218,11 +255,62 @@ mod tests {
                 },
             )]),
             preferred_provider: ProviderChoice::None,
+            reference_currency: "EUR".to_string(),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
         assert_eq!(loaded.config, config);
         assert!(loaded.warning.is_none());
+    }
+
+    #[test]
+    fn reference_currency_round_trips_and_an_old_config_defaults_it() {
+        // Append-only rail (Story 4.3): a chosen currency persists; a pre-4.3 config without the
+        // field still loads, defaulting to CHF — no migration, no failure.
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        let config = AppConfig {
+            reference_currency: "USD".to_string(),
+            ..AppConfig::default()
+        };
+        save(&path, &config).unwrap();
+        assert_eq!(load(&path).config.reference_currency, "USD");
+
+        std::fs::write(
+            &path,
+            r#"{ "window_width": 1280, "theme": "light", "journal_path": "/x/journal.db" }"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert!(
+            loaded.warning.is_none(),
+            "an older config is not a fallback"
+        );
+        assert_eq!(
+            loaded.config.reference_currency, DEFAULT_REFERENCE_CURRENCY,
+            "the new currency field defaults to CHF"
+        );
+    }
+
+    #[test]
+    fn a_damaged_reference_currency_falls_back_on_read() {
+        // The on-disk value is loaded verbatim, but the read accessor validates the shape: a blank
+        // or malformed code must not surface as a currency label.
+        assert!(is_valid_currency_code("CHF"));
+        assert!(!is_valid_currency_code(""));
+        assert!(!is_valid_currency_code("chf"), "must be uppercase");
+        assert!(!is_valid_currency_code("US"), "must be three letters");
+        assert!(!is_valid_currency_code("US1"), "letters only");
+
+        let damaged = AppConfig {
+            reference_currency: "??".to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            damaged.reference_currency_or_default(),
+            DEFAULT_REFERENCE_CURRENCY,
+            "a malformed persisted code falls back to the default on read"
+        );
     }
 
     #[test]
