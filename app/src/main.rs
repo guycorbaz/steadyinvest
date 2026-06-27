@@ -464,9 +464,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .apply_provider_refresh(outcome.study_id, &fetched);
                             match applied {
                                 Ok(report) => {
-                                    // Name the recompute cause (FR29): price / fundamentals / both,
-                                    // or "no change" when an idempotent re-fetch moved nothing.
-                                    studies.set_notice(state::refresh_notice(report).into());
+                                    // Name the recompute cause (FR29) and, after an annual update
+                                    // (Story 3.6), the re-validation scope ("N à revérifier").
+                                    studies.set_notice(state::refresh_summary(report).into());
                                     render_open();
                                 }
                                 Err(message) => studies.set_notice(message.into()),

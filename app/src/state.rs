@@ -111,6 +111,9 @@ pub const MSG_REFRESH_NOCHANGE: &str = "Aucun changement ; les données sont dé
 pub const MSG_REFRESH_PRICE: &str = "Recalculé : prix actualisés.";
 pub const MSG_REFRESH_INPUT: &str = "Recalculé : données fondamentales actualisées.";
 pub const MSG_REFRESH_BOTH: &str = "Recalculé : prix et données fondamentales actualisés.";
+/// Annual-update change-visibility clause (Story 3.6, FR3/Journey-2b) — appended to the refresh
+/// notice when a re-fetch reset `✓` cells to `?`, naming the re-validation scope. `{n}` is the count.
+pub const MSG_REFRESH_REVALIDATE: &str = "{n} cellule(s) à revérifier.";
 
 /// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
@@ -177,6 +180,19 @@ pub fn refresh_notice(report: RefreshReport) -> &'static str {
         // fundamentals wording rather than claim "no change". Unreachable in this story.
         (false, false) => MSG_REFRESH_INPUT,
     }
+}
+
+/// The full post-refresh notice (Story 3.6): the cause line ([`refresh_notice`]) plus, when this
+/// refresh reset `✓` cells to `?`, the re-validation-scope clause ("N cellule(s) à revérifier") — so
+/// an annual update tells the user *what to re-check*, not just *what moved*. With `revalidate == 0`
+/// it is exactly [`refresh_notice`] (no regression on the common path).
+pub fn refresh_summary(report: RefreshReport) -> String {
+    let cause = refresh_notice(report);
+    if report.revalidate == 0 {
+        return cause.to_string();
+    }
+    let revalidate = MSG_REFRESH_REVALIDATE.replace("{n}", &report.revalidate.to_string());
+    format!("{cause} · {revalidate}")
 }
 
 /// Classify a provider/ingestion failure into its neutral, cause-named notice (Story 3.5, FR24).
@@ -249,6 +265,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_PRICE,
     MSG_REFRESH_INPUT,
     MSG_REFRESH_BOTH,
+    MSG_REFRESH_REVALIDATE,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -1395,6 +1412,8 @@ pub struct RefreshReport {
     pub filled: usize,
     /// Manual cells whose divergent provider value was preserved alongside (Story 3.4).
     pub reconciled: usize,
+    /// Cells this refresh reset `✓ → ?` — the re-validation scope of an annual update (Story 3.6).
+    pub revalidate: usize,
     pub cause: RefreshCause,
 }
 
@@ -1405,6 +1424,7 @@ impl RefreshReport {
             updated: self.updated + other.updated,
             filled: self.filled + other.filled,
             reconciled: self.reconciled + other.reconciled,
+            revalidate: self.revalidate + other.revalidate,
             cause: self.cause.merge(other.cause),
         }
     }
@@ -1509,13 +1529,33 @@ enum CellRefresh {
     Reconciled,
 }
 
-/// Refresh one **required** load-bearing cell (Story 3.3). Branches on the current cell:
+/// Refresh one **required** load-bearing cell. Returns `(outcome, demoted)` where `demoted` is `true`
+/// iff this refresh reset the cell's `Review::Validated → ToReview` (Story 3.6: the count of cells the
+/// user must re-verify after an annual update). The demotion itself is the existing
+/// `Cell::edited`/`reconcile` rule — this wrapper only observes the `✓ → ?` transition around the
+/// in-place mutation done by [`refresh_cell_inner`].
+fn refresh_cell(
+    cell: &mut Cell,
+    value: Option<Decimal>,
+    provenance: &Provenance,
+) -> (CellRefresh, bool) {
+    let was_validated = cell.review == Review::Validated;
+    let outcome = refresh_cell_inner(cell, value, provenance);
+    let demoted = was_validated && cell.review == Review::ToReview;
+    (outcome, demoted)
+}
+
+/// The branching that actually mutates the cell (Story 3.3):
 /// - empty (gap) → fill from the provider, whatever the skeleton source;
-/// - present + `Source::Manual` → skip (manual wins);
+/// - present + `Source::Manual` → reconcile (manual wins, divergent provider value preserved, 3.4);
 /// - present + provider/derived → re-stamp via [`Cell::edited`] **only when the value changed** (a
 ///   divergent value auto-demotes a `✓` and is `Current`; an equal value is a true no-op). A
 ///   provider that returns no value for an existing cell keeps the last-known value (FR23 spirit).
-fn refresh_cell(cell: &mut Cell, value: Option<Decimal>, provenance: &Provenance) -> CellRefresh {
+fn refresh_cell_inner(
+    cell: &mut Cell,
+    value: Option<Decimal>,
+    provenance: &Provenance,
+) -> CellRefresh {
     // A deliberate "not available" decision (FR19) is a user gesture, NOT a gap — never refilled by a
     // refresh (it would silently flip the accepted-blank back to a provider value). Checked before the
     // empty-cell gap-fill, because an N/A-accepted cell also carries `value: None`.
@@ -1568,20 +1608,20 @@ fn refresh_cell(cell: &mut Cell, value: Option<Decimal>, provenance: &Provenance
 /// Refresh one **optional** cell slot (same semantics as [`refresh_cell`]; an absent slot is a gap).
 /// Any present slot — including a value-less `ToFill` or `NotAvailableAccepted` cell — delegates to
 /// [`refresh_cell`] so the N/A-accepted skip and the manual-skip rules apply uniformly; only a truly
-/// absent (`None`) slot is filled directly.
+/// absent (`None`) slot is filled directly. Returns `(outcome, demoted)` like [`refresh_cell`].
 fn refresh_optional(
     slot: &mut Option<Cell>,
     value: Option<Decimal>,
     provenance: &Provenance,
-) -> CellRefresh {
+) -> (CellRefresh, bool) {
     match slot {
         Some(cell) => refresh_cell(cell, value, provenance),
         None => match value {
             Some(v) => {
                 *slot = Some(provider_cell(Some(v), provenance));
-                CellRefresh::Filled
+                (CellRefresh::Filled, false)
             }
-            None => CellRefresh::Unchanged,
+            None => (CellRefresh::Unchanged, false),
         },
     }
 }
@@ -1591,28 +1631,35 @@ fn refresh_optional(
 /// feeds the recompute). Field names drive [`refresh::classify_field`] (no parallel list).
 fn refresh_year(yd: &mut YearData, cy: &CanonicalYear, provenance: &Provenance) -> RefreshReport {
     let mut report = RefreshReport::default();
-    let mut account = |outcome: CellRefresh, field: &str| match outcome {
-        CellRefresh::Updated => {
-            report.updated += 1;
-            report.cause = report
-                .cause
-                .merge(crate::viewmodel::refresh::classify_field(field));
+    let mut account = |(outcome, demoted): (CellRefresh, bool), field: &str| {
+        // Story 3.6: a cell this refresh reset `✓ → ?` is one the user must re-verify after the
+        // annual update — the re-validation scope, independent of the value-change tally below.
+        if demoted {
+            report.revalidate += 1;
         }
-        CellRefresh::Filled => {
-            report.filled += 1;
-            report.cause = report
-                .cause
-                .merge(crate::viewmodel::refresh::classify_field(field));
+        match outcome {
+            CellRefresh::Updated => {
+                report.updated += 1;
+                report.cause = report
+                    .cause
+                    .merge(crate::viewmodel::refresh::classify_field(field));
+            }
+            CellRefresh::Filled => {
+                report.filled += 1;
+                report.cause = report
+                    .cause
+                    .merge(crate::viewmodel::refresh::classify_field(field));
+            }
+            CellRefresh::Reconciled => {
+                report.reconciled += 1;
+                // A reconciled divergence can degrade the verdict (a demoted load-bearing ✓) — feed
+                // the cause so the recompute notice names what moved.
+                report.cause = report
+                    .cause
+                    .merge(crate::viewmodel::refresh::classify_field(field));
+            }
+            CellRefresh::Skipped | CellRefresh::Unchanged => {}
         }
-        CellRefresh::Reconciled => {
-            report.reconciled += 1;
-            // A reconciled divergence can degrade the verdict (a demoted load-bearing ✓) — feed the
-            // cause so the recompute notice names what moved.
-            report.cause = report
-                .cause
-                .merge(crate::viewmodel::refresh::classify_field(field));
-        }
-        CellRefresh::Skipped | CellRefresh::Unchanged => {}
     };
     // Required load-bearing cells (disjoint &mut borrows of distinct struct fields).
     account(refresh_cell(&mut yd.sales, cy.sales, provenance), "sales");
@@ -2582,6 +2629,186 @@ mod tests {
             year_2020.high_price.freshness,
             Freshness::Current,
             "a year the successful fetch omitted still recovers from stale (outage over)"
+        );
+    }
+
+    // ── Story 3.6 — annual update journey ──
+
+    #[test]
+    fn revalidate_counts_only_demoted_validated_cells() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x80, "2026-06-27T13:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        // Validate every high_price; leave the rest unvalidated.
+        for y in 0..years.len() {
+            state.set_review(id, y, "a", Review::Validated).unwrap();
+        }
+        // Refresh: high_price 100 → 200 diverges (demotes the 5 validated ✓); eps/sales/low unchanged.
+        let report = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 200, 50, "annual"))
+            .unwrap();
+        assert_eq!(
+            report.revalidate, 5,
+            "the 5 validated high_price cells that diverged are the re-validation scope"
+        );
+        // A second identical refresh demotes nothing (already ? + value agrees) → revalidate 0.
+        let again = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 200, 50, "annual"))
+            .unwrap();
+        assert_eq!(again.revalidate, 0, "an agreeing re-fetch demotes nothing");
+    }
+
+    #[test]
+    fn refresh_summary_appends_the_revalidate_clause_only_when_needed() {
+        let no_demote = RefreshReport {
+            updated: 1,
+            cause: crate::viewmodel::refresh::RefreshCause {
+                price: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            refresh_summary(no_demote),
+            refresh_notice(no_demote),
+            "with no demotions the summary is exactly the cause notice (no regression)"
+        );
+        let with_demote = RefreshReport {
+            revalidate: 3,
+            ..no_demote
+        };
+        let summary = refresh_summary(with_demote);
+        assert!(summary.starts_with(refresh_notice(with_demote)));
+        assert!(
+            summary.contains("3 cellule(s) à revérifier"),
+            "the re-validation scope is named: {summary}"
+        );
+    }
+
+    /// The Journey-2b ritual end-to-end through the real rails: reopen a saved validated study, re-fetch
+    /// new annual data, and confirm manual + judgment preserved, changed ✓ → ?, unchanged ✓ kept, the
+    /// re-validation count correct, and the projection extends. (AC1, AC2, AC3, AC4)
+    #[test]
+    fn the_annual_update_journey_preserves_manual_and_judgment_and_demotes_only_what_moved() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x81, "2026-06-27T13:30:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+
+        // A saved study: provider-fetched, with a MANUAL override on year-0 sales, fully validated.
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        state
+            .edit_cell(id, 0, entry::FIELD_SALES, Some(und_money(5000)))
+            .unwrap();
+        for y in 0..years.len() {
+            for field in [
+                entry::FIELD_SALES,
+                entry::FIELD_HIGH,
+                entry::FIELD_LOW,
+                entry::FIELD_EPS,
+            ] {
+                state.set_review(id, y, field, Review::Validated).unwrap();
+            }
+        }
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+            ("current_price", 60),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+        let judgment_before = state.get_study(id).unwrap().judgment;
+
+        // A year later: the annual report lands. high_price 100 → 200 (diverges, provider cells);
+        // sales 1000 (year-0 sales is held manually at 5000 → diverges → reconcile); eps/low agree.
+        let report = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 200, 50, "annual-2027"))
+            .unwrap();
+
+        let study = state.get_study(id).unwrap();
+        // AC1 — the manual value stands (never overwritten); the judgment is untouched.
+        let y0 = &study.years[0];
+        assert_eq!(
+            y0.sales.value,
+            Some(und_money(5000)),
+            "manual sales preserved"
+        );
+        assert_eq!(y0.sales.source, Source::Manual);
+        assert_eq!(
+            y0.sales.pending.as_ref().map(|p| p.value),
+            Some(Some(und_money(1000))),
+            "the divergent provider sales is preserved alongside (Story 3.4)"
+        );
+        assert_eq!(study.judgment, judgment_before, "judgment lines preserved");
+        // AC2 — a changed validated provider cell is now ?; an unchanged one keeps ✓.
+        assert_eq!(y0.high_price.review, Review::ToReview, "changed high ✓ → ?");
+        assert_eq!(y0.high_price.value, Some(und_money(200)));
+        assert_eq!(y0.eps.review, Review::Validated, "unchanged eps keeps ✓");
+        assert_eq!(
+            y0.sales.review,
+            Review::ToReview,
+            "diverged manual sales → ?"
+        );
+        // AC3 — the re-validation scope: 5 high_price + the 1 manual sales = 6.
+        assert_eq!(report.revalidate, 6, "only what moved needs re-validation");
+        assert!(refresh_summary(report).contains("6 cellule(s) à revérifier"));
+
+        // AC4 — extend the projection: the new fiscal year row appends, prior years intact.
+        let max_before = study.years.iter().map(|y| y.year).max().unwrap();
+        state.extend_history(id).unwrap();
+        let extended = state.get_study(id).unwrap();
+        assert_eq!(
+            extended.years.iter().map(|y| y.year).max().unwrap(),
+            max_before + 1,
+            "the projection extends by one fiscal year"
+        );
+        assert_eq!(
+            extended.years[0].sales.value,
+            Some(und_money(5000)),
+            "extending leaves the existing years intact"
+        );
+    }
+
+    /// AC5 — the "unlock all → re-fetch" path: after unlocking, a refresh demotes nothing (nothing
+    /// was ✓) and the manual values are still preserved.
+    #[test]
+    fn unlock_all_then_refresh_demotes_nothing_and_preserves_manual() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x82, "2026-06-27T14:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        state
+            .edit_cell(id, 0, entry::FIELD_SALES, Some(und_money(5000)))
+            .unwrap();
+        for y in 0..years.len() {
+            state.set_review(id, y, "a", Review::Validated).unwrap();
+        }
+        // Unlock the whole study, THEN refresh with divergent data.
+        state.unlock_all(id, &UnlockScope::Study).unwrap();
+        let report = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 200, 50, "annual"))
+            .unwrap();
+        assert_eq!(
+            report.revalidate, 0,
+            "nothing was ✓ after unlock → no demotions to re-validate"
+        );
+        assert_eq!(
+            state.get_study(id).unwrap().years[0].sales.value,
+            Some(und_money(5000)),
+            "the manual value is still preserved after unlock + refresh"
         );
     }
 

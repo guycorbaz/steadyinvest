@@ -605,10 +605,11 @@ mod tests {
         // notices (saved/deleted/testing/ok/invalid/forbidden/keychain-unavailable). Story 3.3 retires
         // MSG_PROVIDER_DONE (folded into the refresh path) and adds the four refresh-cause notices
         // (no-change / price / input / both): net 34 − 1 + 4 = 37. Story 3.5 adds the three
-        // graceful-failure cause notices (offline / quota / no-data): 37 + 3 = 40.
+        // graceful-failure cause notices (offline / quota / no-data): 37 + 3 = 40. Story 3.6 adds
+        // the annual-update re-validation-scope clause (MSG_REFRESH_REVALIDATE): 40 + 1 = 41.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            40,
+            41,
             "state.rs message inventory changed — register the new notice"
         );
     }

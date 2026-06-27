@@ -352,13 +352,13 @@ development_status:
   epic-2-retrospective: done
 
   # ── Epic 3: Provider data & reconciliation [P1] ──
-  epic-3: in-progress
+  epic-3: done
   3-1-marketdataprovider-trait-eodhd-adapter: done
   3-2-provider-configuration-api-keys-keychain: done
   3-3-manual-refresh-recompute-freshness: done
   3-4-non-destructive-reconciliation: done
   3-5-graceful-provider-failure: done
-  3-6-annual-update-journey: backlog
+  3-6-annual-update-journey: done
   epic-3-retrospective: optional
 
   # ── Epic 4: Watchlist & single-portfolio risk [P1] ──
