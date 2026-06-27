@@ -359,7 +359,7 @@ development_status:
   3-4-non-destructive-reconciliation: done
   3-5-graceful-provider-failure: done
   3-6-annual-update-journey: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
 
   # ── Epic 4: Watchlist & single-portfolio risk [P1] ──
   epic-4: backlog
