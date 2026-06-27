@@ -44,6 +44,19 @@ fn materialized_years(study: &Study) -> Vec<YearData> {
     }
 }
 
+/// The cell's pending provider divergence as a formatted display value (Story 3.4, FR22), revealed
+/// on demand beside the source/timestamp. `""` when there is no pending — the common case. The two
+/// values are never merged: this is the *provider's* number, shown alongside the live manual value.
+fn pending_value(cell: Option<&Cell>, format: NumberFormat) -> String {
+    match cell
+        .and_then(|c| c.pending.as_ref())
+        .and_then(|p| p.value.as_ref())
+    {
+        Some(money) => format_amount(&money.to_string(), format),
+        None => String::new(),
+    }
+}
+
 /// The cell's freshness timestamp as a display date (the `YYYY-MM-DD` prefix of the RFC3339
 /// provenance timestamp), revealed on demand (Story 3.3, FR18). Only a **present** cell carries a
 /// meaningful as-of; a gap (or an empty/sentinel timestamp) yields `""` so the screen hides it.
@@ -91,6 +104,9 @@ fn editable_cell(
         // source (the attention-hierarchy rule: provenance is a murmur, never an always-on column).
         // Only a present cell carries a meaningful "as-of"; a gap reveals nothing.
         timestamp: provenance_date(cell).into(),
+        // Story 3.4 (FR22) — a divergent provider value preserved alongside a manual value, revealed
+        // on demand. "" when there is no pending divergence (the common case).
+        pending: pending_value(cell, format).into(),
         // The tri-state review tag crosses as an enum-derived string (Story 2.5) — "none" draws no
         // marker, "to-review" the ? glyph, "validated" the ✓ check. Never a float / 0/1/2.
         review: entry::review_str(cell).into(),
@@ -252,6 +268,7 @@ mod tests {
                 Coverage::ToFill
             },
             provenance: provenance(),
+            pending: None,
         }
     }
 

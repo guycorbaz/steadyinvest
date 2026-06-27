@@ -564,9 +564,10 @@ mod tests {
         // fixture data are never scanned. Story 3.2 adds the Réglages provider/key panel (provider chips,
         // key status + placeholder, save/delete/test action labels); the API key value is user data,
         // NEVER scanned (NFR-S1). Story 3.3 adds the focused cell's freshness as-of caption ("Mis à
-        // jour le {}"), revealed beside the source. Keep the floor strict against a broken scan.
+        // jour le {}"). Story 3.4 adds the reconciliation reveal + resolve controls ("Fournisseur :
+        // {}", "Accepter (fournisseur)", "Ignorer (fournisseur)"). Keep the floor strict against a broken scan.
         assert!(
-            total >= 224,
+            total >= 227,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

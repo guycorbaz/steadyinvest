@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 
 use rust_decimal::Decimal;
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review, Source,
-    Study, Timestamp, YearData,
+    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, PendingProvider, Provenance,
+    Review, Source, Study, Timestamp, YearData,
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use steadyinvest_persistence::{Error as PersistError, Journal, StudySummary};
@@ -473,6 +473,16 @@ impl JournalState {
         self.history.undo.len()
     }
 
+    /// The journal's current logical version — test-only, to prove a true no-op writes nothing
+    /// (Story 3.4: a resolve with no pending must not bump the version / append an FR51 revision).
+    #[cfg(test)]
+    pub fn logical_version(&self) -> u64 {
+        self.journal
+            .as_ref()
+            .and_then(|j| j.logical_version().ok())
+            .unwrap_or(0)
+    }
+
     /// Step the open study **back** to the snapshot before the last mutation (FR32). Returns
     /// `Ok(true)` when a step was taken (the caller re-reads + re-renders), `Ok(false)` when the
     /// undo stack is empty. The restore is a real, guarded `put_study` of the whole prior `Study`.
@@ -749,6 +759,19 @@ impl JournalState {
         entry::get_cell(year, field).map(|cell| cell.review)
     }
 
+    /// The cell's current pending provider divergence, if any (Story 3.4) — lets the resolve actions
+    /// short-circuit to a true no-op (no journal write) when there is nothing to reconcile.
+    fn current_pending(
+        &self,
+        study_id: Uuid,
+        year_index: usize,
+        field: &str,
+    ) -> Option<PendingProvider> {
+        let study = self.get_study(study_id)?;
+        let year = study.years.get(year_index)?;
+        entry::get_cell(year, field).and_then(|cell| cell.pending)
+    }
+
     /// Set a cell's **review tag only** (Story 2.5, FR20): a review-only change that preserves the
     /// value, coverage, source, freshness and provenance verbatim — it does NOT route through
     /// [`Cell::edited`] (which would re-stamp source/freshness from a fresh provenance and re-derive
@@ -770,6 +793,57 @@ impl JournalState {
     ) -> Result<(), String> {
         self.mutate_cell(study_id, year_index, field, move |base, _provenance| Cell {
             review,
+            // Re-validating reconciles a pending divergence (Story 3.4 AC4): the kept value stands
+            // and the "provider differs" annotation clears. A non-✓ review leaves any pending intact.
+            pending: if review == Review::Validated {
+                None
+            } else {
+                base.pending.clone()
+            },
+            ..base
+        })
+    }
+
+    /// Resolve a pending divergence by **accepting the provider value** (Story 3.4, AC4): the cell
+    /// takes its pending provider value through the edit rail (→ `Source::Provider`,
+    /// `Review::ToReview` so it is re-checked, pending cleared by `edited`). A neutral no-op if there
+    /// is no pending. Routed through the atomic `mutate_cell` rail (guards, undo).
+    pub fn accept_provider_value(
+        &mut self,
+        study_id: Uuid,
+        year_index: usize,
+        field: &str,
+    ) -> Result<(), String> {
+        // True no-op when there is nothing to reconcile (no journal write, no undo step).
+        let Some(pending) = self.current_pending(study_id, year_index, field) else {
+            return Ok(());
+        };
+        // A pending with no value (only representable by a future caller — the refresh path never
+        // produces one) would BLANK the manual value; treat it as keep-manual instead (never destroy).
+        if pending.value.is_none() {
+            return self.keep_manual_value(study_id, year_index, field);
+        }
+        self.mutate_cell(study_id, year_index, field, move |base, _provenance| {
+            base.edited(pending.value, pending.provenance)
+        })
+    }
+
+    /// Resolve a pending divergence by **keeping the manual value** (Story 3.4, AC4): the live value
+    /// stands; only the pending "provider differs" annotation is cleared (the `✓` was already demoted
+    /// to `?` by the divergence — keep-manual just dismisses the annotation, leaving the review as-is
+    /// for the user to re-validate). A neutral no-op if there is no pending.
+    pub fn keep_manual_value(
+        &mut self,
+        study_id: Uuid,
+        year_index: usize,
+        field: &str,
+    ) -> Result<(), String> {
+        // True no-op when there is no pending to dismiss (no journal write, no undo step).
+        if self.current_pending(study_id, year_index, field).is_none() {
+            return Ok(());
+        }
+        self.mutate_cell(study_id, year_index, field, |base, _provenance| Cell {
+            pending: None,
             ..base
         })
     }
@@ -1232,6 +1306,8 @@ pub fn created_at_date(ts: &Timestamp) -> String {
 pub struct RefreshReport {
     pub updated: usize,
     pub filled: usize,
+    /// Manual cells whose divergent provider value was preserved alongside (Story 3.4).
+    pub reconciled: usize,
     pub cause: RefreshCause,
 }
 
@@ -1241,13 +1317,15 @@ impl RefreshReport {
         RefreshReport {
             updated: self.updated + other.updated,
             filled: self.filled + other.filled,
+            reconciled: self.reconciled + other.reconciled,
             cause: self.cause.merge(other.cause),
         }
     }
 
-    /// Whether the refresh changed anything (filled a gap or updated a provider value).
+    /// Whether the refresh changed anything (filled a gap, updated a provider value, or reconciled a
+    /// divergent manual cell — any of which can move the verdict).
     pub fn changed(self) -> bool {
-        self.updated + self.filled > 0
+        self.updated + self.filled + self.reconciled > 0
     }
 }
 
@@ -1265,6 +1343,8 @@ fn provider_cell(value: Option<Decimal>, provenance: &Provenance) -> Cell {
             Coverage::ToFill
         },
         provenance: provenance.clone(),
+        // A fresh provider cell carries no pending divergence (it IS the provider value).
+        pending: None,
     }
 }
 
@@ -1285,8 +1365,7 @@ fn empty_provider_year(year: i32, provenance: &Provenance) -> YearData {
 
 /// What a single cell's refresh did — drives the per-year tally + cause classification.
 enum CellRefresh {
-    /// A present `Source::Manual` value — left untouched (manual wins; Story 3.4 owns the divergent
-    /// dual-value case).
+    /// A cell left untouched (a `NotAvailableAccepted` decision — never refilled or reconciled).
     Skipped,
     /// No change (an equal re-fetch, or the provider has no value for this cell).
     Unchanged,
@@ -1294,6 +1373,9 @@ enum CellRefresh {
     Filled,
     /// A present provider/derived value changed and was re-stamped.
     Updated,
+    /// A present **manual** value diverged from the provider: the manual value stands, the divergent
+    /// provider value is preserved alongside (pending), and a `✓` demoted (Story 3.4, FR22).
+    Reconciled,
 }
 
 /// Refresh one **required** load-bearing cell (Story 3.3). Branches on the current cell:
@@ -1317,7 +1399,21 @@ fn refresh_cell(cell: &mut Cell, value: Option<Decimal>, provenance: &Provenance
             None => CellRefresh::Unchanged,
         }
     } else if cell.source == Source::Manual {
-        CellRefresh::Skipped
+        // Non-destructive reconciliation (Story 3.4, FR22/NFR-R4): the manual value wins and is
+        // never overwritten. A divergent provider value is preserved ALONGSIDE (pending) and demotes
+        // a `✓`; an agreeing fetch clears any stale pending. A provider with no value is no contradiction.
+        match value {
+            Some(v) => {
+                let reconciled = cell.reconcile(Some(Money::from(v)), provenance.clone());
+                if reconciled == *cell {
+                    CellRefresh::Unchanged
+                } else {
+                    *cell = reconciled;
+                    CellRefresh::Reconciled
+                }
+            }
+            None => CellRefresh::Unchanged,
+        }
     } else {
         match value {
             Some(v) => {
@@ -1370,6 +1466,14 @@ fn refresh_year(yd: &mut YearData, cy: &CanonicalYear, provenance: &Provenance) 
         }
         CellRefresh::Filled => {
             report.filled += 1;
+            report.cause = report
+                .cause
+                .merge(crate::viewmodel::refresh::classify_field(field));
+        }
+        CellRefresh::Reconciled => {
+            report.reconciled += 1;
+            // A reconciled divergence can degrade the verdict (a demoted load-bearing ✓) — feed the
+            // cause so the recompute notice names what moved.
             report.cause = report
                 .cause
                 .merge(crate::viewmodel::refresh::classify_field(field));
@@ -1873,6 +1977,245 @@ mod tests {
                 Verdict::Provisional(_)
             ),
             "a demoted load-bearing input degrades Full → Provisional in the same frame"
+        );
+    }
+
+    // ── Story 3.4 — non-destructive reconciliation ──
+
+    /// Set up a study with a single manual, validated high_price cell that the provider will
+    /// diverge from. Returns (state, id, years).
+    fn study_with_validated_manual_high(
+        dir: &TempDir,
+        seed: u128,
+        manual_high: i64,
+    ) -> (JournalState, Uuid, Vec<i32>) {
+        let mut state = undo_state(dir, seed, "2026-06-27T10:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        // Manual high_price on year 0 (materializes the grid), then validate it.
+        state
+            .edit_cell(id, 0, entry::FIELD_HIGH, Some(und_money(manual_high)))
+            .unwrap();
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::Validated)
+            .unwrap();
+        let years: Vec<i32> = state
+            .get_study(id)
+            .unwrap()
+            .years
+            .iter()
+            .map(|y| y.year)
+            .collect();
+        (state, id, years)
+    }
+
+    /// A divergent refresh of a validated MANUAL cell: the manual value stands, the provider value is
+    /// preserved alongside (pending), and the `✓` demotes to `?` — never merged. (AC1, AC2, AC3)
+    #[test]
+    fn refresh_reconciles_a_divergent_manual_cell_non_destructively() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, years) = study_with_validated_manual_high(&dir, 0x60, 999);
+
+        // Provider diverges on high_price (100 ≠ 999).
+        let report = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "recon"))
+            .unwrap();
+        assert!(
+            report.reconciled >= 1,
+            "the manual divergence is reconciled"
+        );
+        assert!(report.changed(), "a reconciliation is a change");
+
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(high.value, Some(und_money(999)), "manual value stands");
+        assert_eq!(high.source, Source::Manual);
+        assert_eq!(high.review, Review::ToReview, "the ✓ demotes on divergence");
+        let pending = high
+            .pending
+            .as_ref()
+            .expect("the provider value is preserved");
+        assert_eq!(pending.value, Some(und_money(100)));
+        assert_eq!(pending.provenance.source, Source::Provider);
+    }
+
+    /// An agreeing refresh on a manual cell records no pending and keeps `✓` — and an identical
+    /// re-run is a no-op (idempotency, no phantom undo step). (AC1)
+    #[test]
+    fn refresh_agreement_on_a_manual_cell_keeps_validation_and_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, years) = study_with_validated_manual_high(&dir, 0x61, 100);
+
+        // Provider AGREES with the manual high_price (100 == 100).
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "agree"))
+            .unwrap();
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(high.review, Review::Validated, "agreement keeps ✓");
+        assert!(high.pending.is_none(), "no divergence → no pending");
+
+        let depth = state.undo_depth();
+        // Re-run the same agreeing refresh — a true no-op.
+        let report = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "agree"))
+            .unwrap();
+        assert_eq!(report.reconciled, 0);
+        assert_eq!(
+            state.undo_depth(),
+            depth,
+            "an agreeing re-refresh records no phantom undo step"
+        );
+    }
+
+    /// Accept-provider resolution: the cell takes the pending provider value (Source::Provider,
+    /// Review::ToReview, pending cleared). (AC4)
+    #[test]
+    fn accept_provider_value_takes_the_pending_and_clears_it() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, years) = study_with_validated_manual_high(&dir, 0x62, 999);
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "recon"))
+            .unwrap();
+
+        state
+            .accept_provider_value(id, 0, entry::FIELD_HIGH)
+            .unwrap();
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(
+            high.value,
+            Some(und_money(100)),
+            "the provider value is taken"
+        );
+        assert_eq!(high.source, Source::Provider);
+        assert_eq!(high.review, Review::ToReview, "re-check the accepted value");
+        assert!(high.pending.is_none(), "the pending is cleared");
+    }
+
+    /// Keep-manual resolution: the manual value stands, only the pending is dismissed. (AC4)
+    #[test]
+    fn keep_manual_value_dismisses_the_pending_only() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, years) = study_with_validated_manual_high(&dir, 0x63, 999);
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "recon"))
+            .unwrap();
+
+        state.keep_manual_value(id, 0, entry::FIELD_HIGH).unwrap();
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(high.value, Some(und_money(999)), "manual value stands");
+        assert_eq!(high.source, Source::Manual);
+        assert!(high.pending.is_none(), "the pending is dismissed");
+    }
+
+    /// Re-validating a cell with a pending clears the pending (the user reconciled). (AC4)
+    #[test]
+    fn revalidating_a_cell_clears_its_pending() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, years) = study_with_validated_manual_high(&dir, 0x64, 999);
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "recon"))
+            .unwrap();
+        // The divergence demoted it to ?; the user re-validates their kept value.
+        state
+            .set_review(id, 0, entry::FIELD_HIGH, Review::Validated)
+            .unwrap();
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_eq!(high.review, Review::Validated);
+        assert!(high.pending.is_none(), "re-validating clears the pending");
+    }
+
+    /// AC6 guard: the engine ignores `pending` — a cell carrying a pending yields the SAME frame as
+    /// the same cell with `pending = None`.
+    #[test]
+    fn the_engine_ignores_a_pending_divergence() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, years) = study_with_validated_manual_high(&dir, 0x65, 999);
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "recon"))
+            .unwrap();
+        let mut with_pending = state.get_study(id).unwrap();
+        assert!(
+            with_pending.years[0].high_price.pending.is_some(),
+            "precondition: a pending exists"
+        );
+        let frame_with = engine::build_snapshot(&with_pending).expect("normalizes");
+
+        // Strip the pending and rebuild — the verdict frame must be identical.
+        with_pending.years[0].high_price.pending = None;
+        let frame_without = engine::build_snapshot(&with_pending).expect("normalizes");
+        assert_eq!(
+            frame_with.verdict(),
+            frame_without.verdict(),
+            "the engine reads only the live value, never `pending`"
+        );
+    }
+
+    /// A pending divergence survives a journal close + reopen (AC5 — NFR-R4 "preserved").
+    #[test]
+    fn a_pending_divergence_survives_reopen() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, years) = study_with_validated_manual_high(&dir, 0x66, 999);
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "recon"))
+            .unwrap();
+        drop(state);
+
+        // Reopen the journal from disk and confirm the pending is intact.
+        let reopened = open_state(&dir.path().join("journal.db"));
+        let high = reopened.get_study(id).unwrap().years[0].high_price.clone();
+        assert_eq!(
+            high.value,
+            Some(und_money(999)),
+            "manual value survives reopen"
+        );
+        assert_eq!(high.review, Review::ToReview);
+        let pending = high.pending.expect("the pending survives reopen");
+        assert_eq!(pending.value, Some(und_money(100)));
+    }
+
+    /// accept/keep on a cell with NO pending is a true no-op — no undo step, no journal write
+    /// (the resolve buttons can linger; re-clicking them must not churn the journal). (review fix)
+    #[test]
+    fn accept_or_keep_with_no_pending_is_a_true_noop() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, _years) = study_with_validated_manual_high(&dir, 0x67, 999);
+        let depth = state.undo_depth();
+        let version = state.logical_version();
+
+        state
+            .accept_provider_value(id, 0, entry::FIELD_HIGH)
+            .unwrap();
+        state.keep_manual_value(id, 0, entry::FIELD_HIGH).unwrap();
+
+        assert_eq!(state.undo_depth(), depth, "no pending → no undo step");
+        assert_eq!(
+            state.logical_version(),
+            version,
+            "no pending → no journal revision (no phantom logical_version bump)"
+        );
+    }
+
+    /// A repeated DIVERGENT refresh (same provider value, a later fetch timestamp) is idempotent —
+    /// the pending is not re-stamped, so no phantom undo step accrues. (review fix)
+    #[test]
+    fn a_repeated_divergent_refresh_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id, years) = study_with_validated_manual_high(&dir, 0x68, 999);
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "fetch-a"))
+            .unwrap();
+        let depth = state.undo_depth();
+
+        // Re-fetch the SAME divergent value with a DIFFERENT digest (a later fetch) — a no-op.
+        let report = state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 100, 50, "fetch-b"))
+            .unwrap();
+        assert_eq!(
+            report.reconciled, 0,
+            "the same divergence is not re-reconciled"
+        );
+        assert_eq!(
+            state.undo_depth(),
+            depth,
+            "a repeated divergence records no phantom undo step"
         );
     }
 

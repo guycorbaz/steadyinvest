@@ -87,6 +87,7 @@ fn cell() -> impl Strategy<Value = Cell> {
                 review,
                 coverage,
                 provenance,
+                pending: None,
             },
         )
 }

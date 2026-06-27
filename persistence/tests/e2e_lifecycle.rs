@@ -42,6 +42,7 @@ fn cell(value: Option<&str>) -> Cell {
             timestamp: ts("2026-06-12T08:00:00Z"),
             hash_of_dependencies: "deadbeef".to_string(),
         },
+        pending: None,
     }
 }
 

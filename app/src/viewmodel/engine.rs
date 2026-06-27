@@ -940,6 +940,7 @@ mod tests {
             review: Review::Validated,
             coverage: Coverage::Present,
             provenance: prov(),
+            pending: None,
         }
     }
 

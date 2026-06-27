@@ -332,6 +332,26 @@ export component StudyScreen inherits Rectangle {
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
                 }
+                // Story 3.4 (FR22) — the focused cell's pending provider divergence + the two resolve
+                // controls. A manual value and a divergent provider value are shown side by side
+                // (never merged); the user accepts the provider value or keeps the manual one.
+                if Studies.active-pending != "": HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    Text {
+                        text: @tr("Fournisseur : {}", Studies.active-pending);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    ActionButton {
+                        label: @tr("Accepter (fournisseur)");
+                        clicked => { Studies.accept-provider(Studies.active-year, Studies.active-field); }
+                    }
+                    ActionButton {
+                        label: @tr("Ignorer (fournisseur)");
+                        clicked => { Studies.keep-manual(Studies.active-year, Studies.active-field); }
+                    }
+                }
                 // Story 2.7 — the focused cell's plausibility fact, revealed on demand (mirrors the
                 // source caption). Keyboard-reachable (NFR-U2), no animation (AC5). "" hides it.
                 Text {

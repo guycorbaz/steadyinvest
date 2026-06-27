@@ -54,6 +54,7 @@ fn validated_cell(value: &str) -> Cell {
             timestamp: Timestamp("2026-06-10T00:00:00Z".to_string()),
             hash_of_dependencies: "seed0001".to_string(),
         },
+        pending: None,
     }
 }
 

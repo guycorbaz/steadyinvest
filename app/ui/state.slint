@@ -44,6 +44,7 @@ export struct GridCellState {
     stale: bool,          // freshness == Stale (the ~60% murmur); current is the silent default
     source: string,       // "manuel" | "fournisseur" | "calculé" — revealed on demand; "" when none
     timestamp: string,    // freshness as-of date (YYYY-MM-DD), revealed on demand; "" for a gap (Story 3.3)
+    pending: string,      // a divergent provider value preserved alongside a manual one; "" when none (Story 3.4)
     review: string,       // "none" | "to-review" | "validated" — the tri-state trust marker (Story 2.5)
     editable: bool,       // true for a raw input cell; false for a computed/derived slot
     year-index: int,      // row address (0-based, into the materialized year window)
@@ -291,6 +292,13 @@ export global Studies {
     // The focused cell's freshness as-of date, revealed on demand beside the source (Story 3.3,
     // FR18) — "" hides it (a gap has no as-of). NOT an always-on per-cell badge.
     in-out property <string> active-timestamp;
+    // The focused cell's pending provider divergence, revealed on demand (Story 3.4, FR22) — ""
+    // hides it (no divergence). When non-empty, the resolve controls (accept/keep) are offered.
+    in-out property <string> active-pending;
+    // Resolve a pending divergence on the (year-index, field) cell (Story 3.4, AC4). `accept-provider`
+    // takes the provider value; `keep-manual` keeps the manual value and dismisses the pending.
+    callback accept-provider(int, string);
+    callback keep-manual(int, string);
     // ── Story 2.7 — the focused cell's plausibility fact, revealed on demand (mirrors active-source).
     //    The already-resolved human-readable warning text ("" hides it); set on focus from the cell's
     //    `warning-key` via `Warnings.text(...)`. Keyboard-reachable (NFR-U2), no animation (AC5).

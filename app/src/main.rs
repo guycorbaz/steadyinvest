@@ -875,6 +875,78 @@ fn main() -> Result<(), slint::PlatformError> {
             });
     }
 
+    // Story 3.4 — resolve a pending provider divergence (FR22, AC4): accept the provider value, or
+    // keep the manual value and dismiss the pending. Both mirror the `on_set_review` rail.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>()
+            .on_accept_provider(move |year_index, field| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let format = config.borrow().number_format;
+                let result = journal_state.borrow_mut().accept_provider_value(
+                    id,
+                    year_index.max(0) as usize,
+                    field.as_str(),
+                );
+                match result {
+                    Ok(()) => {
+                        studies.set_notice(SharedString::new());
+                        // The divergence is resolved — hide the reveal + resolve controls (the
+                        // reveal is set only on focus, so clear it explicitly here).
+                        studies.set_active_pending(SharedString::new());
+                        if let Some(study) = journal_state.borrow().get_study(id) {
+                            push_form(&ui, &journal_state.borrow(), &study, format);
+                        }
+                    }
+                    Err(message) => studies.set_notice(message.into()),
+                }
+            });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Studies>()
+            .on_keep_manual(move |year_index, field| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let format = config.borrow().number_format;
+                let result = journal_state.borrow_mut().keep_manual_value(
+                    id,
+                    year_index.max(0) as usize,
+                    field.as_str(),
+                );
+                match result {
+                    Ok(()) => {
+                        studies.set_notice(SharedString::new());
+                        // The divergence is dismissed — hide the reveal + resolve controls.
+                        studies.set_active_pending(SharedString::new());
+                        if let Some(study) = journal_state.borrow().get_study(id) {
+                            push_form(&ui, &journal_state.borrow(), &study, format);
+                        }
+                    }
+                    Err(message) => studies.set_notice(message.into()),
+                }
+            });
+    }
+
     // A value edit was attempted on a soft-locked (✓) cell: raise the neutral notice (the value is
     // never mutated — the refusal is enforced both here and in `state::edit_cell`).
     {

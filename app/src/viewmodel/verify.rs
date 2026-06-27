@@ -209,6 +209,7 @@ fn present_cell(value: Money, provenance: &Provenance) -> Cell {
         review: Review::None,
         coverage: Coverage::Present,
         provenance: provenance.clone(),
+        pending: None,
     }
 }
 

@@ -105,6 +105,7 @@ pub fn tofill_cell(provenance: Provenance) -> Cell {
         review: Review::None,
         coverage: Coverage::ToFill,
         provenance,
+        pending: None,
     }
 }
 

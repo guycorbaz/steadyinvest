@@ -47,6 +47,7 @@ mod tests {
             review: Review::Validated,
             coverage: Coverage::Present,
             provenance: provenance(Source::Manual),
+            pending: None,
         }
     }
 
