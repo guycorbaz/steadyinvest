@@ -519,12 +519,17 @@ export global Prefs {
     // The single global reference currency the portfolio is read in, mirrored from
     // AppConfig.reference_currency (a 3-letter ISO-4217 code: "CHF" | "EUR" | "USD" | "GBP" | …).
     in-out property <string> reference-currency: "CHF";
+    // ── Story 4.5 — default trailing-stop percentage (FR42/FR63 thresholds) ──
+    // Mirrored from AppConfig.default_trailing_stop_pct ("" when none); the per-holding set-stop
+    // control pre-fills it.
+    in-out property <string> default-trailing-stop-pct;
     // User intents — handled in Rust (apply + persist).
     callback theme-selected(string); // "dark" | "light"
     callback label-set-selected(string); // "naic" | "neutral"
     callback number-format-selected(string); // "comma" | "point"
     callback provider-selected(string); // "eodhd" | "none"
     callback reference-currency-selected(string); // "CHF" | "EUR" | "USD" | "GBP" | …
+    callback default-trailing-stop-pct-changed(string); // "" clears; else a percent in (0,100)
     // The key travels ONE WAY into Rust as a call argument — never stored in an `in-out` property
     // that could round-trip back out to config/UI (NFR-S1).
     callback key-saved(string);
@@ -566,6 +571,13 @@ export struct HoldingRow {
     current-price: string,
     stale: bool,
     as-of: string,
+    // Story 4.5 (FR42): the trailing stop. `has-stop` is false when none is set; `stop-pct` /
+    // `stop-level` are display strings; `stop-breached` is true when the current price ≤ the stop
+    // level (a neutral fact — no action; the sell/raise-stop sheet is Story 4.7).
+    has-stop: bool,
+    stop-pct: string,
+    stop-level: string,
+    stop-breached: bool,
 }
 
 // The single-portfolio holdings register (Story 4.3, FR36). Rows are built/ordered by Rust; intents
@@ -587,4 +599,6 @@ export global Holdings {
     callback remove-holding(string); // id
     // Story 4.4 (FR40): user-initiated price refresh for every linked holding (off the UI thread).
     callback refresh-prices();
+    // Story 4.5 (FR42): set/clear a holding's trailing-stop percentage (id, pct — "" clears).
+    callback set-trailing-stop(string, string);
 }

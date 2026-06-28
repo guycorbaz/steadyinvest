@@ -574,9 +574,11 @@ mod tests {
         // Story 4.4 adds the holdings price-refresh button + per-row zone marker ("◆ {}" ×3) + the
         // "no linked study" hint + the present-price fact + the freshness murmurs (périmé / à jour le
         // {}): net +8 = 262. Issue #52 adds the in-flight button label ("Rafraîchissement…"): +1 = 263.
-        // Keep the floor strict against a broken scan.
+        // Story 4.5 adds the per-holding trailing-stop column (stop fact + "◆ sous le stop" + the
+        // "Seuil %" field + définir/mettre-à-jour/retirer actions) and the Réglages default-% panel
+        // (title + "Pourcentage (0–100)" + enregistrer/effacer): net +10 = 273. Keep the floor strict.
         assert!(
-            total >= 263,
+            total >= 273,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

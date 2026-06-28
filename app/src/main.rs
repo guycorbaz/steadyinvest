@@ -279,6 +279,23 @@ fn refresh_holdings(
                 ),
                 None => (String::new(), String::new(), String::new()),
             };
+            // Story 4.5 (FR42): the trailing stop. `stop_breached` is a neutral fact — current price
+            // ≤ the ratcheted level — computed only when both are known (no action; that's Story 4.7).
+            let stop_level_dec = h
+                .trailing_stop_level
+                .as_deref()
+                .and_then(|s| rust_decimal::Decimal::from_str_exact(s).ok());
+            let current_price_dec = study
+                .as_ref()
+                .and_then(|s| s.judgment.current_price)
+                .map(|m| m.as_decimal());
+            let stop_breached = match (stop_level_dec, current_price_dec) {
+                (Some(level), Some(price)) => steadyinvest_core::risk::stop_breached(level, price),
+                _ => false,
+            };
+            let stop_level_display = stop_level_dec
+                .map(|l| viewmodel::format::format_scaled(l, DisplayField::Price, format))
+                .unwrap_or_default();
             HoldingRow {
                 id: h.id.to_string().into(),
                 ticker: h.security_ticker.clone().into(),
@@ -290,6 +307,10 @@ fn refresh_holdings(
                 current_price: current_price.into(),
                 stale: f.stale,
                 as_of: f.as_of.unwrap_or_default().into(),
+                has_stop: h.trailing_stop_pct.is_some(),
+                stop_pct: h.trailing_stop_pct.clone().unwrap_or_default().into(),
+                stop_level: stop_level_display.into(),
+                stop_breached,
             }
         })
         .collect();
@@ -598,6 +619,13 @@ fn main() -> Result<(), slint::PlatformError> {
         prefs.set_reference_currency(currency.clone().into());
         ui.global::<Holdings>()
             .set_reference_currency(currency.into());
+        // Story 4.5 (FR42): mirror the default trailing-stop % (validated; "" when none) so the
+        // set-stop control pre-fills it.
+        prefs.set_default_trailing_stop_pct(
+            cfg.default_trailing_stop_pct_or_none()
+                .unwrap_or_default()
+                .into(),
+        );
 
         // Best-effort restore BEFORE show to minimise the visible jump; the authoritative
         // restore happens again right after show() below — before the window is mapped, winit
@@ -718,6 +746,11 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .apply_holding_price(outcome.study_id, price)
                             {
                                 Ok(()) => {
+                                    // Story 4.5 (FR42): ratchet every same-ticker holding's stop level
+                                    // up against the fresh price (a falling price writes nothing).
+                                    let _ = journal_state
+                                        .borrow_mut()
+                                        .ratchet_trailing_stops_for_study(outcome.study_id, price);
                                     let now = display_timestamp(&journal_state.borrow().now());
                                     holding_freshness.borrow_mut().insert(
                                         key,
@@ -1093,6 +1126,31 @@ fn main() -> Result<(), slint::PlatformError> {
             holdings.set_refreshing(true);
             holdings.set_notice(state::MSG_HOLDINGS_REFRESHING.into());
         });
+    }
+    // ── Story 4.5 (FR42) — set / clear a holding's trailing-stop percentage. ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
+        ui.global::<Holdings>()
+            .on_set_trailing_stop(move |id, pct| {
+                let ui = ui_weak.unwrap();
+                let Ok(id) = Uuid::parse_str(&id) else {
+                    return;
+                };
+                let result = journal_state
+                    .borrow_mut()
+                    .set_holding_trailing_stop(id, &pct);
+                let format = config.borrow().number_format;
+                apply_holdings_result(
+                    &ui,
+                    &journal_state.borrow(),
+                    result,
+                    &holding_freshness.borrow(),
+                    format,
+                );
+            });
     }
     // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and
     // the persisted per-study fold/regime view-state is restored (default = Entry + all open).
@@ -2218,6 +2276,34 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.global::<Prefs>().set_reference_currency(value.clone());
                 // Re-label the holdings amounts immediately (no conversion — Epic 4 is single-currency).
                 ui.global::<Holdings>().set_reference_currency(value);
+            });
+    }
+    // ── Story 4.5 (FR42/FR63) — the default trailing-stop %. "" clears; else validate (0,100). ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(&config);
+        let path = config_path.clone();
+        ui.global::<Prefs>()
+            .on_default_trailing_stop_pct_changed(move |value| {
+                let value = value.trim();
+                // Empty clears the default; otherwise ignore a malformed percent (parse-guard).
+                let stored = if value.is_empty() {
+                    None
+                } else if config::is_valid_trailing_stop_pct(value) {
+                    Some(value.to_string())
+                } else {
+                    return;
+                };
+                let ui = ui_weak.unwrap();
+                config.borrow_mut().default_trailing_stop_pct = stored;
+                persist(path.as_ref(), &config.borrow());
+                ui.global::<Prefs>().set_default_trailing_stop_pct(
+                    config
+                        .borrow()
+                        .default_trailing_stop_pct_or_none()
+                        .unwrap_or_default()
+                        .into(),
+                );
             });
     }
     // ── Story 3.2 — provider selection + key management (FR25/FR63) ──
