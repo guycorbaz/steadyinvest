@@ -3,19 +3,25 @@
 //! Enum dispatch ([`Provider`]) keeps `MarketDataProvider`'s `async fn` usable without `dyn`
 //! (native async-fn-in-trait is not dyn-compatible) and without an `async-trait` dependency.
 
+use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 use steadyinvest_core::normalize::{normalize, CanonicalFinancials, RawFinancials};
 
 use crate::error::{IngestionError, ProviderError};
-use crate::provider::MarketDataProvider;
+use crate::provider::{MarketDataProvider, RawFetch};
 
 /// The normalized result of a fetch plus the **dependency digest** (#21): a SHA-256 over the
 /// provider + ticker + the value-normalized canonical decimals. The app stamps this into each
 /// provider cell's `provenance.hash_of_dependencies`, replacing the manual `"manual"` placeholder.
+///
+/// `latest_price` (Story 4.4) is the present market price (the latest `/eod` close), used to fill
+/// `judgment.current_price` so the §4 zone recomputes — it is **not** part of the canonical calc and
+/// is deliberately **excluded** from `digest` (a moving close must not churn the dependency hash).
 #[derive(Debug, Clone)]
 pub struct FetchedFinancials {
     pub canonical: CanonicalFinancials,
     pub digest: String,
+    pub latest_price: Option<Decimal>,
 }
 
 /// Concrete providers, dispatched by enum so the `async fn` trait needs no `dyn`/`async-trait`.
@@ -30,7 +36,7 @@ impl MarketDataProvider for Provider {
         &self,
         ticker: &str,
         api_key: Option<&str>,
-    ) -> Result<RawFinancials, ProviderError> {
+    ) -> Result<RawFetch, ProviderError> {
         match self {
             Provider::Eodhd(p) => p.fetch_fundamentals(ticker, api_key).await,
             Provider::Fake(p) => p.fetch_fundamentals(ticker, api_key).await,
@@ -38,16 +44,24 @@ impl MarketDataProvider for Provider {
     }
 }
 
-/// Fetch a ticker, normalize it through `core`, and compute the dependency digest.
+/// Fetch a ticker, normalize it through `core`, and compute the dependency digest. The latest price
+/// (Story 4.4) rides through alongside the canonical result, untouched by `normalize`.
 pub async fn fetch_canonical(
     provider: &Provider,
     ticker: &str,
     api_key: Option<&str>,
 ) -> Result<FetchedFinancials, IngestionError> {
-    let raw = provider.fetch_fundamentals(ticker, api_key).await?;
-    let canonical = normalize(raw)?;
+    let RawFetch {
+        financials,
+        latest_price,
+    } = provider.fetch_fundamentals(ticker, api_key).await?;
+    let canonical = normalize(financials)?;
     let digest = dependency_digest(ticker, &canonical);
-    Ok(FetchedFinancials { canonical, digest })
+    Ok(FetchedFinancials {
+        canonical,
+        digest,
+        latest_price,
+    })
 }
 
 /// SHA-256 hex over `"eodhd:{ticker}"` + each canonical year's value-normalized decimals (so
@@ -86,14 +100,30 @@ pub fn dependency_digest(ticker: &str, canonical: &CanonicalFinancials) -> Strin
 }
 
 /// A canned, offline provider for tests (`app` and `ingestion`): returns a fixed `RawFinancials`
-/// or a fixed [`ProviderError`], ignoring the ticker/key.
+/// (+ an optional latest price, Story 4.4) or a fixed [`ProviderError`], ignoring the ticker/key.
 pub struct FakeProvider {
     result: Result<RawFinancials, ProviderError>,
+    latest_price: Option<Decimal>,
 }
 
 impl FakeProvider {
+    /// A fake with no latest price (the pre-4.4 shape — existing callers keep `latest_price = None`).
     pub fn returning(result: Result<RawFinancials, ProviderError>) -> Self {
-        FakeProvider { result }
+        FakeProvider {
+            result,
+            latest_price: None,
+        }
+    }
+
+    /// A fake that also reports a latest market price (Story 4.4 — drives the §4 zone in app tests).
+    pub fn returning_with_price(
+        result: Result<RawFinancials, ProviderError>,
+        latest_price: Option<Decimal>,
+    ) -> Self {
+        FakeProvider {
+            result,
+            latest_price,
+        }
     }
 }
 
@@ -102,8 +132,11 @@ impl MarketDataProvider for FakeProvider {
         &self,
         _ticker: &str,
         _api_key: Option<&str>,
-    ) -> Result<RawFinancials, ProviderError> {
-        self.result.clone()
+    ) -> Result<RawFetch, ProviderError> {
+        self.result.clone().map(|financials| RawFetch {
+            financials,
+            latest_price: self.latest_price,
+        })
     }
 }
 
@@ -172,5 +205,31 @@ mod tests {
             err,
             IngestionError::Provider(ProviderError::InvalidOrAbsentKey)
         ));
+    }
+
+    #[tokio::test]
+    async fn fetch_canonical_threads_the_fake_latest_price_without_touching_the_digest() {
+        // Story 4.4: a settable `latest_price` rides `fetch_canonical` → `FetchedFinancials`,
+        // untouched by `normalize` and EXCLUDED from the dependency digest (a moving close must not
+        // churn the hash). Exercises `FakeProvider::returning_with_price` end-to-end.
+        let price = Decimal::from(42);
+        let with_price = Provider::Fake(FakeProvider::returning_with_price(
+            Ok(raw("100")),
+            Some(price),
+        ));
+        let fetched = fetch_canonical(&with_price, "AAPL.US", Some("key"))
+            .await
+            .unwrap();
+        assert_eq!(fetched.latest_price, Some(price));
+
+        // The default fake carries no price → `None` (the pre-4.4 shape).
+        let no_price = Provider::Fake(FakeProvider::returning(Ok(raw("100"))));
+        let plain = fetch_canonical(&no_price, "AAPL.US", Some("key"))
+            .await
+            .unwrap();
+        assert_eq!(plain.latest_price, None);
+
+        // Same canonical financials → same digest, regardless of `latest_price`.
+        assert_eq!(fetched.digest, plain.digest);
     }
 }

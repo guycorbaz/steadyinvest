@@ -8,9 +8,21 @@
 //! as the 3.1 interim) and passed as `Option<&str>` — `None` for keyless providers. A provider
 //! never reads a key from disk, the journal, or the environment itself.
 
+use rust_decimal::Decimal;
 use steadyinvest_core::normalize::RawFinancials;
 
 use crate::error::ProviderError;
+
+/// What an adapter returns (Story 4.4): the `core` [`RawFinancials`] **plus** the present market
+/// price — the **latest `/eod` close**, if the provider supplies one. The latest price is a present
+/// market fact for the §4 zone marker (FR40), **not** an SSG calc input, so it rides this
+/// ingestion-owned wrapper and is **never** added to `core`'s `RawFinancials`/`CanonicalFinancials`
+/// (the method fingerprint stays frozen). `None` when the provider exposes no current price.
+#[derive(Debug, Clone)]
+pub struct RawFetch {
+    pub financials: RawFinancials,
+    pub latest_price: Option<Decimal>,
+}
 
 /// A source of raw annual fundamentals + prices for a security.
 ///
@@ -22,10 +34,11 @@ use crate::error::ProviderError;
 // future is unnecessary — suppress the advisory lint rather than desugar to `impl Future + Send`.
 #[allow(async_fn_in_trait)]
 pub trait MarketDataProvider: Send + Sync {
-    /// Fetch a ticker's raw annual series. `api_key` is `None` for keyless providers.
+    /// Fetch a ticker's raw annual series + its latest price. `api_key` is `None` for keyless
+    /// providers. Returns a [`RawFetch`] (the `core` `RawFinancials` + the latest-close market price).
     async fn fetch_fundamentals(
         &self,
         ticker: &str,
         api_key: Option<&str>,
-    ) -> Result<RawFinancials, ProviderError>;
+    ) -> Result<RawFetch, ProviderError>;
 }

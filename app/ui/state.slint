@@ -556,6 +556,16 @@ export struct HoldingRow {
     ticker: string,
     quantity: string,
     purchase-price: string,
+    // Story 4.4 (FR40): the auto-matched study's zone + freshness. `linked` is false when no saved
+    // study matches the ticker (neutral "no study" state). `zone` is the key crossed from Rust
+    // ("buy"/"neutral"/"sell"/"" — "" shows "—", outside the band or undefined). `current-price` and
+    // `as-of` are display strings; `stale` marks a failed/older last refresh.
+    linked: bool,
+    study-link: string,
+    zone: string,
+    current-price: string,
+    stale: bool,
+    as-of: string,
 }
 
 // The single-portfolio holdings register (Story 4.3, FR36). Rows are built/ordered by Rust; intents
@@ -572,4 +582,6 @@ export global Holdings {
     // id, ticker, quantity, purchase-price → written?
     callback edit-holding(string, string, string, string) -> bool;
     callback remove-holding(string); // id
+    // Story 4.4 (FR40): user-initiated price refresh for every linked holding (off the UI thread).
+    callback refresh-prices();
 }

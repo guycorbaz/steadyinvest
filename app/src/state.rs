@@ -129,6 +129,12 @@ pub const MSG_HOLDING_INVALID_NUMBER: &str =
 pub const MSG_HOLDING_INVALID_TICKER: &str =
     "Le symbole est vide ; aucune position n'a été enregistrée.";
 
+/// Holdings price-refresh copy (Story 4.4, FR40) — fact-stating, posture-gated. Set when a manual
+/// "refresh prices" begins, or when no holding is linked to a saved study (nothing to refresh).
+pub const MSG_HOLDINGS_REFRESHING: &str = "Rafraîchissement des prix en cours.";
+pub const MSG_HOLDINGS_REFRESH_NONE: &str =
+    "Aucune position liée à une étude ; il n'y a aucun prix à rafraîchir.";
+
 /// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
 pub const MSG_KEY_SAVED: &str =
@@ -283,6 +289,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_WATCH_NO_STUDY,
     MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_INVALID_TICKER,
+    MSG_HOLDINGS_REFRESHING,
+    MSG_HOLDINGS_REFRESH_NONE,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -518,6 +526,13 @@ impl JournalState {
     /// True when the open journal is read-only (newer-schema file).
     pub fn is_read_only(&self) -> bool {
         self.read_only
+    }
+
+    /// The app's "now" from the injected [`Clock`] (ADD15) — the single wall-clock source. Used by
+    /// the holdings price-refresh (Story 4.4) to stamp the transient per-ticker `as_of` freshness,
+    /// so tests pin it deterministically via the `FixedClock` double.
+    pub fn now(&self) -> Timestamp {
+        self.clock.now()
     }
 
     // ── Undo/redo (Story 2.9) ──
@@ -979,6 +994,9 @@ impl JournalState {
     ) -> Result<RefreshReport, String> {
         let provenance = self.provider_provenance(fetched.digest.clone());
         let years: Vec<CanonicalYear> = fetched.canonical.years.clone();
+        // Story 4.4 (AC2/AC6): the latest `/eod` close is the present market price for the §4 zone.
+        // `None` for a provider with no current price → `current_price` left untouched (pre-4.4 shape).
+        let latest_price = fetched.latest_price;
         let report = std::cell::Cell::new(RefreshReport::default());
         let report_ref = &report;
         self.mutate_study(study_id, move |study| {
@@ -1007,6 +1025,14 @@ impl JournalState {
                 if let Some(yd) = study.years.iter_mut().find(|y| y.year == cy.year) {
                     acc = acc.merge(refresh_year(yd, cy, &provenance));
                 }
+            }
+            // Story 4.4 (AC2/AC6): fill `current_price` from the latest close — a present *market
+            // fact*, not a user-owned judgment (the forecast high/low EPS + P/E stay strictly manual,
+            // FR33-safe). Written in the SAME mutation so the §4 zone recomputes in one undo step.
+            // `mutate_study`'s `before != study` guard persists/records this even when no yearly cell
+            // moved (a price-only refresh). `None` → unchanged.
+            if let Some(price) = latest_price {
+                study.judgment.current_price = Some(Money::from(price));
             }
             report_ref.set(acc);
         })?;
@@ -2051,6 +2077,16 @@ mod tests {
         FetchedFinancials {
             canonical: normalize(raw).expect("the test raw normalizes"),
             digest: digest.to_string(),
+            latest_price: None,
+        }
+    }
+
+    /// A normalized provider result that also carries a latest `/eod` close (Story 4.4) — drives the
+    /// §4 zone recompute deterministically in `apply_provider_refresh` tests.
+    fn fetched_with_price(years: &[i32], latest_price: i64) -> FetchedFinancials {
+        FetchedFinancials {
+            latest_price: Some(rust_decimal::Decimal::new(latest_price, 0)),
+            ..fetched_for(years)
         }
     }
 
@@ -3216,6 +3252,103 @@ mod tests {
         // No current price → no defined zone → not in the buy zone.
         state.set_judgment_field(id, "current_price", None).unwrap();
         assert!(!engine::study_in_buy_zone(&state.get_study(id).unwrap()));
+    }
+
+    // ── Story 4.4 — manual price refresh fills current_price from the latest close ──
+
+    #[test]
+    fn provider_refresh_fills_current_price_from_latest_close_and_moves_the_zone() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x4C, "2026-06-27T16:00:00Z");
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        // Provider-fill the yearly cells, then a complete forecast band — but NO current_price yet, so
+        // the §4 zone is undefined (band ≈ [low 60, high 160]; buy third ≈ [60, 93]).
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+        assert!(
+            state
+                .get_study(id)
+                .unwrap()
+                .judgment
+                .current_price
+                .is_none(),
+            "no current_price yet → no defined zone"
+        );
+        assert!(!engine::study_in_buy_zone(&state.get_study(id).unwrap()));
+
+        // A refresh carrying a latest close of 70 sets current_price (a market fact, AC6) and the buy
+        // third ≈ [60, 93] now brackets it → in the buy zone, verdict-independent.
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&years, 70))
+            .unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().judgment.current_price,
+            Some(und_money(70)),
+            "the latest /eod close fills current_price"
+        );
+        assert!(
+            engine::study_in_buy_zone(&state.get_study(id).unwrap()),
+            "current_price 70 sits in the buy third → in the buy zone"
+        );
+
+        // A later refresh with no latest price (the pre-4.4 shape) leaves current_price untouched.
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        assert_eq!(
+            state.get_study(id).unwrap().judgment.current_price,
+            Some(und_money(70)),
+            "latest_price = None must not clear the last-known current_price"
+        );
+    }
+
+    #[test]
+    fn study_zone_reports_the_full_buy_neutral_sell_zone_for_holdings() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x4D, "2026-06-27T16:00:00Z");
+        let id = state.create_study("ROG", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+        // Band ≈ [60, 160]; thirds: buy ≤ ~93, neutral ~93–127, sell ≥ ~127. The holdings register
+        // reads the FULL zone (Achat/Neutre/Vente), not just "in the buy zone".
+        let zone =
+            |st: &JournalState| engine::zone_key(engine::study_zone(&st.get_study(id).unwrap()));
+        assert_eq!(zone(&state), "", "no current_price yet → undefined zone");
+        for (price, expected) in [(70, "buy"), (110, "neutral"), (150, "sell")] {
+            state
+                .set_judgment_field(id, "current_price", Some(und_money(price)))
+                .unwrap();
+            assert_eq!(zone(&state), expected, "current_price {price}");
+        }
+        // A price outside `[forecast_low, forecast_high]` has no defined zone (the register shows "—").
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(300)))
+            .unwrap();
+        assert_eq!(zone(&state), "", "a price above the band → no zone");
     }
 
     // ── Story 4.3 — holdings register (single-portfolio CRUD + decimal validation) ──
