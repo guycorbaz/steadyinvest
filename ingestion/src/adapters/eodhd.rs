@@ -10,6 +10,7 @@
 //! follows EODHD's documented structure — the manual run confirms fidelity to a live response.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -31,7 +32,7 @@ impl EodhdProvider {
     /// A provider against the live EODHD API.
     pub fn new() -> Self {
         EodhdProvider {
-            http: Client::new(),
+            http: build_client(),
             base_url: DEFAULT_BASE_URL.to_string(),
         }
     }
@@ -39,7 +40,7 @@ impl EodhdProvider {
     /// A provider against an arbitrary base URL (a mock server in an integration test).
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         EodhdProvider {
-            http: Client::new(),
+            http: build_client(),
             base_url: base_url.into(),
         }
     }
@@ -75,6 +76,20 @@ impl EodhdProvider {
         }
         Err(classify_status(status.as_u16(), ticker))
     }
+}
+
+/// The shared `reqwest` client with sane timeouts (#39). Without these, a hung connection never
+/// resolves, so the off-thread fetch/key-test never returns and the UI latches "Récupération…" /
+/// "Test… en cours" with no recovery. A connect + overall-request bound guarantees every job
+/// terminates (as a `Network` error on timeout — cause-named by Story 3.5). Falls back to the
+/// default client if the builder fails (only on a TLS-backend init error — same panic surface as
+/// `Client::new()`).
+fn build_client() -> Client {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("the reqwest client builds with timeouts")
 }
 
 impl Default for EodhdProvider {
