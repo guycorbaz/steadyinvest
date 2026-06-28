@@ -619,10 +619,10 @@ mod tests {
         // 4.1 adds the watchlist "no study for this ticker" notice (MSG_WATCH_NO_STUDY): 41 + 1 = 42.
         // Story 4.3 adds the two holdings-register validation notices (invalid number / empty
         // symbol): 42 + 2 = 44. Story 4.4 adds the two holdings price-refresh notices (refreshing /
-        // nothing-linked): 44 + 2 = 46.
+        // nothing-linked): 44 + 2 = 46. Story 4.5 adds the trailing-stop validation notice: 46 + 1 = 47.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            46,
+            47,
             "state.rs message inventory changed — register the new notice"
         );
     }
