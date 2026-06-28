@@ -45,8 +45,9 @@ export component PortfolioScreen inherits Rectangle {
         HorizontalLayout {
             alignment: start;
             ActionButton {
-                label: @tr("Rafraîchir les prix");
-                enabled: !Holdings.read-only && Holdings.holding-count > 0;
+                // Disabled while a refresh is in flight (issue #52) — no double-click duplicate jobs.
+                label: Holdings.refreshing ? @tr("Rafraîchissement…") : @tr("Rafraîchir les prix");
+                enabled: !Holdings.read-only && Holdings.holding-count > 0 && !Holdings.refreshing;
                 clicked => { Holdings.refresh-prices(); }
             }
         }

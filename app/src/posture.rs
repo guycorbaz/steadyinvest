@@ -573,9 +573,10 @@ mod tests {
         // facts) and the Réglages reference-currency panel (title + CHF/EUR/USD/GBP chips): net +16.
         // Story 4.4 adds the holdings price-refresh button + per-row zone marker ("◆ {}" ×3) + the
         // "no linked study" hint + the present-price fact + the freshness murmurs (périmé / à jour le
-        // {}): net +8 = 262. Keep the floor strict against a broken scan.
+        // {}): net +8 = 262. Issue #52 adds the in-flight button label ("Rafraîchissement…"): +1 = 263.
+        // Keep the floor strict against a broken scan.
         assert!(
-            total >= 262,
+            total >= 263,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

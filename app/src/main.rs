@@ -221,6 +221,22 @@ fn display_timestamp(ts: &steadyinvest_contract::Timestamp) -> String {
     s.get(..16).unwrap_or(s).replacen('T', " ", 1)
 }
 
+/// Drop transient freshness entries for tickers no longer held by ANY holding (issue #51). Called
+/// after every holdings mutation: a removed (or ticker-edited-away) holding's stale `as_of` must not
+/// resurface if that ticker is later re-added, and the map must not grow unbounded. Keyed by
+/// upper-cased ticker — the same join as `study_id_for_ticker`. A ticker still held by a *sibling*
+/// holding legitimately keeps its entry (the freshness is the ticker's, shared across its rows).
+fn retain_held_freshness(freshness: &Rc<RefCell<HoldingFreshnessMap>>, state: &JournalState) {
+    let held: std::collections::HashSet<String> = state
+        .list_holdings()
+        .iter()
+        .map(|h| h.security_ticker.to_uppercase())
+        .collect();
+    freshness
+        .borrow_mut()
+        .retain(|ticker, _| held.contains(ticker));
+}
+
 /// Rebuild the holdings register from the journal (Story 4.3, FR36). Reference-currency labelling is
 /// set separately (from app-config, on startup + on change) — a holdings mutation doesn't touch it.
 /// Story 4.4 (FR40): each row also carries its auto-matched study's §4 zone (neutral key) + present
@@ -558,6 +574,10 @@ fn main() -> Result<(), slint::PlatformError> {
     // only). Populated by the off-thread refresh outcomes; read when rebuilding the register.
     let holding_freshness: Rc<RefCell<HoldingFreshnessMap>> =
         Rc::new(RefCell::new(HoldingFreshnessMap::new()));
+    // Issue #52 — outstanding holdings-refresh jobs in flight. Set to the enqueued count when a
+    // refresh starts; each outcome decrements it; the button is disabled (`Holdings.refreshing`)
+    // until it returns to zero, so a double-click can't enqueue duplicate jobs.
+    let refresh_pending: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
 
     let ui = MainWindow::new()?;
 
@@ -616,6 +636,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let current_study = Rc::clone(&current_study);
         let config = Rc::clone(&config);
         let holding_freshness = Rc::clone(&holding_freshness);
+        let refresh_pending = Rc::clone(&refresh_pending);
         fetch::set_outcome_handler(move |outcome| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
@@ -752,6 +773,15 @@ fn main() -> Result<(), slint::PlatformError> {
                         &holding_freshness.borrow(),
                         format,
                     );
+                    // One job resolved — clear the in-flight latch when the batch is fully drained,
+                    // re-enabling the refresh button (issue #52).
+                    {
+                        let mut pending = refresh_pending.borrow_mut();
+                        *pending = pending.saturating_sub(1);
+                        if *pending == 0 {
+                            ui.global::<Holdings>().set_refreshing(false);
+                        }
+                    }
                 }
                 fetch::WorkerOutcome::TestKey(result) => {
                     // The key test (Story 3.2): a verdict, not study data. Surface it as the
@@ -940,6 +970,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     .add_holding(&ticker, &quantity, &price);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
+                retain_held_freshness(&holding_freshness, &journal_state.borrow());
                 apply_holdings_result(
                     &ui,
                     &journal_state.borrow(),
@@ -967,6 +998,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     .update_holding(id, &ticker, &quantity, &price);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
+                retain_held_freshness(&holding_freshness, &journal_state.borrow());
                 apply_holdings_result(
                     &ui,
                     &journal_state.borrow(),
@@ -989,6 +1021,7 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             let result = journal_state.borrow_mut().delete_holding(id);
             let format = config.borrow().number_format;
+            retain_held_freshness(&holding_freshness, &journal_state.borrow());
             apply_holdings_result(
                 &ui,
                 &journal_state.borrow(),
@@ -1007,6 +1040,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let journal_state = Rc::clone(&journal_state);
         let config = Rc::clone(&config);
         let fetch_tx = fetch_tx.clone();
+        let refresh_pending = Rc::clone(&refresh_pending);
         ui.global::<Holdings>().on_refresh_prices(move || {
             let ui = ui_weak.unwrap();
             let holdings = ui.global::<Holdings>();
@@ -1034,14 +1068,30 @@ fn main() -> Result<(), slint::PlatformError> {
                 holdings.set_notice(state::MSG_PROVIDER_NO_KEY.into());
                 return;
             }
-            holdings.set_notice(state::MSG_HOLDINGS_REFRESHING.into());
+            // Count only jobs the worker actually accepted — if the worker is gone, don't latch
+            // `refreshing` (which would disable the button for the rest of the session). (Issue #52.)
+            let mut enqueued = 0usize;
             for (study_id, ticker) in jobs {
-                let _ = fetch_tx.send(fetch::WorkerJob::RefreshHolding(fetch::FetchRequest {
-                    study_id,
-                    ticker,
-                    api_key: api_key.clone(),
-                }));
+                if fetch_tx
+                    .send(fetch::WorkerJob::RefreshHolding(fetch::FetchRequest {
+                        study_id,
+                        ticker,
+                        api_key: api_key.clone(),
+                    }))
+                    .is_ok()
+                {
+                    enqueued += 1;
+                }
             }
+            if enqueued == 0 {
+                return;
+            }
+            // Latch the in-flight state: the button is disabled while `refreshing` (no double-click
+            // → no duplicate jobs). The outcome handler decrements the pending count and clears the
+            // flag when the last job resolves. No race — outcomes are marshalled to THIS (UI) thread.
+            *refresh_pending.borrow_mut() = enqueued;
+            holdings.set_refreshing(true);
+            holdings.set_notice(state::MSG_HOLDINGS_REFRESHING.into());
         });
     }
     // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and

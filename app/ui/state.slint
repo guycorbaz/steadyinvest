@@ -577,6 +577,9 @@ export global Holdings {
     in-out property <bool> read-only;
     in-out property <string> notice;
     in-out property <string> reference-currency: "CHF";
+    // Story 4.4 / issue #52: true while a price refresh is in flight — disables the refresh button
+    // so a double-click can't enqueue duplicate jobs. Cleared when the last job's outcome arrives.
+    in-out property <bool> refreshing;
     // ticker, quantity, purchase-price → written? (so the form keeps the user's input on refusal)
     callback add-holding(string, string, string) -> bool;
     // id, ticker, quantity, purchase-price → written?
