@@ -13,7 +13,9 @@ pub mod fetch;
 pub mod provider;
 
 pub use error::{IngestionError, ProviderError};
-pub use fetch::{dependency_digest, fetch_canonical, FakeProvider, FetchedFinancials, Provider};
+pub use fetch::{
+    dependency_digest, fetch_canonical, fetch_price, FakeProvider, FetchedFinancials, Provider,
+};
 pub use provider::MarketDataProvider;
 
 // Re-export the canonical types callers need to stamp cells, so `app` need not also reach into

@@ -1039,6 +1039,18 @@ impl JournalState {
         Ok(report.get())
     }
 
+    /// Set a study's `current_price` from a price-only holdings refresh (Story 4.4 / issue #50): the
+    /// latest `/eod` close, fetched WITHOUT `/fundamentals` (so it works on the free EODHD tier). A
+    /// present **market fact** (not a user-owned judgment — FR33-safe; the forecast high/low EPS + P/E
+    /// stay manual), written through the atomic [`Self::mutate_study`] rail so the §4 zone recomputes
+    /// and it is one undo step. Unlike [`Self::apply_provider_refresh`], it touches ONLY
+    /// `current_price` — never the yearly provider cells (the holding refresh is price-led).
+    pub fn apply_holding_price(&mut self, study_id: Uuid, price: Decimal) -> Result<(), String> {
+        self.mutate_study(study_id, move |study| {
+            study.judgment.current_price = Some(Money::from(price));
+        })
+    }
+
     /// Flag the open study's **provider-sourced** cells `Freshness::Stale` after a failed (or
     /// empty) refresh (Story 3.5, FR23/NFR-R1). Only the **freshness** axis moves — `value`, `source`,
     /// `review`, `coverage`, `provenance`, and any Story-3.4 `pending` are all retained (last-known
@@ -3349,6 +3361,48 @@ mod tests {
             .set_judgment_field(id, "current_price", Some(und_money(300)))
             .unwrap();
         assert_eq!(zone(&state), "", "a price above the band → no zone");
+    }
+
+    #[test]
+    fn apply_holding_price_sets_current_price_only_and_moves_the_zone() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x4E, "2026-06-27T16:00:00Z");
+        let id = state.create_study("ROG", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+        // Snapshot the yearly cells to prove the price-only refresh (issue #50) leaves them untouched.
+        let before_years = state.get_study(id).unwrap().years.clone();
+
+        state
+            .apply_holding_price(id, rust_decimal::Decimal::new(70, 0))
+            .unwrap();
+
+        let after = state.get_study(id).unwrap();
+        assert_eq!(
+            after.judgment.current_price,
+            Some(und_money(70)),
+            "the price-only fill sets current_price"
+        );
+        assert_eq!(
+            after.years, before_years,
+            "a price-only holding refresh must NOT touch the yearly provider cells"
+        );
+        assert!(
+            engine::study_in_buy_zone(&after),
+            "price 70 sits in the buy third → the zone recomputes"
+        );
     }
 
     // ── Story 4.3 — holdings register (single-portfolio CRUD + decimal validation) ──

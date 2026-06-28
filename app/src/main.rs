@@ -689,21 +689,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     let format = config.borrow().number_format;
                     let key = outcome.ticker.to_uppercase();
                     match outcome.result {
-                        // The holding refresh is PRICE-led: "fresh" means the present price arrived.
-                        // A transport-success with NO `latest_price` (empty `/eod`, or a
-                        // fundamentals-only payload) is therefore "no data" — flag `périmé` with the
-                        // neutral notice and keep the last-known zone (AC4); never stamp "à jour"
-                        // when the price the user asked to refresh did not come back. (Review F2.)
-                        Ok(fetched) if fetched.latest_price.is_none() => {
-                            holdings.set_notice(state::MSG_PROVIDER_NO_DATA.into());
-                            mark_holding_stale(&holding_freshness, &key);
-                        }
-                        Ok(fetched) => {
-                            let applied = journal_state
+                        // The price arrived: fill `current_price` (price-only — never the yearly
+                        // cells, issue #50) so the §4 zone recomputes, and stamp a fresh `as_of`.
+                        Ok(Some(price)) => {
+                            match journal_state
                                 .borrow_mut()
-                                .apply_provider_refresh(outcome.study_id, &fetched);
-                            match applied {
-                                Ok(_) => {
+                                .apply_holding_price(outcome.study_id, price)
+                            {
+                                Ok(()) => {
                                     let now = display_timestamp(&journal_state.borrow().now());
                                     holding_freshness.borrow_mut().insert(
                                         key,
@@ -728,6 +721,13 @@ fn main() -> Result<(), slint::PlatformError> {
                                     mark_holding_stale(&holding_freshness, &key);
                                 }
                             }
+                        }
+                        // Transport-success but the provider exposed no current close → "no data":
+                        // flag `périmé`, keep the last-known zone (AC4); never stamp "à jour" when the
+                        // price the user asked to refresh did not come back.
+                        Ok(None) => {
+                            holdings.set_notice(state::MSG_PROVIDER_NO_DATA.into());
+                            mark_holding_stale(&holding_freshness, &key);
                         }
                         Err(error) => {
                             holdings.set_notice(state::provider_failure_notice(&error).into());

@@ -110,6 +110,22 @@ impl MarketDataProvider for EodhdProvider {
             latest_price,
         })
     }
+
+    async fn fetch_latest_price(
+        &self,
+        ticker: &str,
+        api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError> {
+        // Issue #50: hit ONLY `/eod` (no `/fundamentals`) — works on the free EODHD tier, which
+        // allows EOD but 403s fundamentals. The series is `order=a`, so the last bar is the latest.
+        let token = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
+        let eod_url = format!(
+            "{}/eod/{ticker}?api_token={token}&period=d&fmt=json&order=a",
+            self.base_url
+        );
+        let prices = self.get_json(&eod_url, ticker).await?;
+        Ok(latest_eod_close(&prices))
+    }
 }
 
 /// The most recent close from the daily EOD array (Story 4.4). The series is requested `order=a`

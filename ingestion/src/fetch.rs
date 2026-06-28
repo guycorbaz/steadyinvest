@@ -42,6 +42,17 @@ impl MarketDataProvider for Provider {
             Provider::Fake(p) => p.fetch_fundamentals(ticker, api_key).await,
         }
     }
+
+    async fn fetch_latest_price(
+        &self,
+        ticker: &str,
+        api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError> {
+        match self {
+            Provider::Eodhd(p) => p.fetch_latest_price(ticker, api_key).await,
+            Provider::Fake(p) => p.fetch_latest_price(ticker, api_key).await,
+        }
+    }
 }
 
 /// Fetch a ticker, normalize it through `core`, and compute the dependency digest. The latest price
@@ -62,6 +73,17 @@ pub async fn fetch_canonical(
         digest,
         latest_price,
     })
+}
+
+/// Fetch ONLY the latest market price (issue #50) — the holdings price-refresh path. No
+/// `/fundamentals`, no `normalize`, no digest: just the present `/eod` close, so it works on plans
+/// where fundamentals are forbidden but EOD is allowed (the free EODHD tier).
+pub async fn fetch_price(
+    provider: &Provider,
+    ticker: &str,
+    api_key: Option<&str>,
+) -> Result<Option<Decimal>, IngestionError> {
+    Ok(provider.fetch_latest_price(ticker, api_key).await?)
 }
 
 /// SHA-256 hex over `"eodhd:{ticker}"` + each canonical year's value-normalized decimals (so
@@ -137,6 +159,15 @@ impl MarketDataProvider for FakeProvider {
             financials,
             latest_price: self.latest_price,
         })
+    }
+
+    async fn fetch_latest_price(
+        &self,
+        _ticker: &str,
+        _api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError> {
+        // Mirror the canned result's success/failure, handing back the configured latest price.
+        self.result.clone().map(|_| self.latest_price)
     }
 }
 
@@ -231,5 +262,29 @@ mod tests {
 
         // Same canonical financials → same digest, regardless of `latest_price`.
         assert_eq!(fetched.digest, plain.digest);
+    }
+
+    #[tokio::test]
+    async fn fetch_price_returns_the_latest_price_and_mirrors_provider_errors() {
+        // Issue #50: the price-only path returns the latest close (no fundamentals/normalize/digest).
+        let price = Decimal::from(42);
+        let ok = Provider::Fake(FakeProvider::returning_with_price(
+            Ok(raw("100")),
+            Some(price),
+        ));
+        assert_eq!(
+            fetch_price(&ok, "AAPL.US", Some("k")).await.unwrap(),
+            Some(price)
+        );
+
+        // A provider failure (e.g. an unauthenticated request) propagates as an IngestionError.
+        let err = Provider::Fake(FakeProvider::returning_with_price(
+            Err(ProviderError::InvalidOrAbsentKey),
+            Some(price),
+        ));
+        assert!(matches!(
+            fetch_price(&err, "AAPL.US", None).await.unwrap_err(),
+            IngestionError::Provider(ProviderError::InvalidOrAbsentKey)
+        ));
     }
 }

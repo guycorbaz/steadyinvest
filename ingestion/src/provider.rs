@@ -41,4 +41,16 @@ pub trait MarketDataProvider: Send + Sync {
         ticker: &str,
         api_key: Option<&str>,
     ) -> Result<RawFetch, ProviderError>;
+
+    /// Fetch ONLY the latest market price — the latest `/eod` close — with **no** `/fundamentals`
+    /// request (issue #50). The holdings price refresh (Story 4.4) is price-led: it needs the present
+    /// price, not the annual series, so it must not pay for (or be blocked by) fundamentals. This is
+    /// what makes the refresh work on plans where EOD is allowed but fundamentals are forbidden (the
+    /// free EODHD tier 403s `/fundamentals`). `None` when the provider exposes no current price / the
+    /// series is empty.
+    async fn fetch_latest_price(
+        &self,
+        ticker: &str,
+        api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError>;
 }

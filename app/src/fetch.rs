@@ -16,8 +16,10 @@
 use std::cell::RefCell;
 use std::sync::mpsc;
 
+use rust_decimal::Decimal;
 use steadyinvest_ingestion::{
-    adapters::eodhd::EodhdProvider, fetch_canonical, FetchedFinancials, IngestionError, Provider,
+    adapters::eodhd::EodhdProvider, fetch_canonical, fetch_price, FetchedFinancials,
+    IngestionError, Provider,
 };
 use uuid::Uuid;
 
@@ -39,26 +41,32 @@ pub struct TestKeyRequest {
 /// A job for the worker thread.
 pub enum WorkerJob {
     Fetch(FetchRequest),
-    /// A holdings price-refresh fetch (Story 4.4): the SAME provider fetch as [`Self::Fetch`], routed
-    /// to the holdings surface (current_price + per-ticker freshness), not the open study screen.
+    /// A holdings PRICE refresh (Story 4.4 / issue #50): a price-only `/eod` fetch (no
+    /// `/fundamentals`), routed to the holdings surface, not the open study screen.
     RefreshHolding(FetchRequest),
     TestKey(TestKeyRequest),
 }
 
 /// A study-data fetch result, marshalled back to the UI thread. `Send` (no `Rc`, no Slint handle).
-/// `ticker` rides back so the holdings refresh (Story 4.4) can key its transient per-ticker freshness
-/// map without a second lookup (the study screen arm ignores it).
 pub struct FetchOutcome {
     pub study_id: Uuid,
-    pub ticker: String,
     pub result: Result<FetchedFinancials, IngestionError>,
+}
+
+/// A holdings price-refresh result (Story 4.4 / issue #50): the latest `/eod` close only — no
+/// fundamentals. `ticker` rides back so the holdings surface keys its transient per-ticker freshness
+/// map; `None` price means the provider exposed no current close.
+pub struct HoldingPriceOutcome {
+    pub study_id: Uuid,
+    pub ticker: String,
+    pub result: Result<Option<Decimal>, IngestionError>,
 }
 
 /// What the worker produces, marshalled back to the UI thread.
 pub enum WorkerOutcome {
     Fetch(FetchOutcome),
     /// A holdings price-refresh result (Story 4.4) — routed to the holdings surface, not the study.
-    HoldingFetch(FetchOutcome),
+    HoldingFetch(HoldingPriceOutcome),
     /// Key-test verdict: `Ok` = the provider accepted the key; `Err` carries the cause.
     TestKey(Result<(), IngestionError>),
 }
@@ -108,19 +116,18 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                         ));
                         WorkerOutcome::Fetch(FetchOutcome {
                             study_id: req.study_id,
-                            ticker: req.ticker,
                             result,
                         })
                     }
                     WorkerJob::RefreshHolding(req) => {
-                        // Same provider fetch as the study path; the outcome is routed to the
-                        // holdings surface (Story 4.4) — current_price + per-ticker freshness.
-                        let result = runtime.block_on(fetch_canonical(
+                        // Issue #50: a PRICE-ONLY `/eod` fetch (no `/fundamentals`) so the holdings
+                        // refresh works on the free EODHD tier; routed to the holdings surface.
+                        let result = runtime.block_on(fetch_price(
                             &provider,
                             &req.ticker,
                             req.api_key.as_deref(),
                         ));
-                        WorkerOutcome::HoldingFetch(FetchOutcome {
+                        WorkerOutcome::HoldingFetch(HoldingPriceOutcome {
                             study_id: req.study_id,
                             ticker: req.ticker,
                             result,

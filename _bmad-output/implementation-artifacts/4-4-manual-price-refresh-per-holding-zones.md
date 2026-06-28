@@ -1,6 +1,6 @@
 # Story 4.4: Manual price refresh & per-holding zones
 
-Status: review (3-layer ACCEPT-WITH-FINDINGS 2026-06-28; 4 patches applied, 4 deferred→#50/#51/#52; awaiting Guy's on-display GO/NO-GO + commit/push)
+Status: review (3-layer ACCEPT-WITH-FINDINGS 2026-06-28; 4 patches applied; #50 free-plan fix landed on-branch; #51/#52 deferred; awaiting Guy's on-display GO/NO-GO)
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -48,7 +48,9 @@ so that I read my portfolio against my own studies on data I refreshed deliberat
 
 ### Review Findings
 
-3-layer adversarial review (Blind Hunter / Edge Case Hunter / Acceptance Auditor), 2026-06-28. Acceptance verdict: **ACCEPT-WITH-FINDINGS** — AC1 ✅ · AC2 ⚠️ (functionally fails on the free EODHD plan it was scoped for; passes with demo/paid key + FakeProvider) · AC3 ✅ · AC4 ✅ · AC5 ✅ · AC6 ✅. No CRITICAL/REJECT. 4 patches applied, 4 deferred (tracked as GitHub issues), 2 dismissed.
+3-layer adversarial review (Blind Hunter / Edge Case Hunter / Acceptance Auditor), 2026-06-28. Acceptance verdict: **ACCEPT-WITH-FINDINGS** — AC1 ✅ · AC2 ✅ (the free-plan gap was the HIGH finding; **now fixed on this branch** — see issue #50 below) · AC3 ✅ · AC4 ✅ · AC5 ✅ · AC6 ✅. No CRITICAL/REJECT. 4 patches applied, 3 deferred (tracked as GitHub issues), 1 resolved-on-branch (#50), 2 dismissed.
+
+**Resolved on this branch (post-review, follow-up #50):** the holdings refresh now uses a **price-only `/eod` fetch** (`MarketDataProvider::fetch_latest_price` + `fetch::fetch_price`, no `/fundamentals`) and a focused `state::apply_holding_price` (sets ONLY `current_price`, never the yearly cells). This makes the refresh work on the **free EODHD tier** (EOD allowed, fundamentals 403) and also resolves the dismissed "holding refresh touches fundamentals cells" finding. +2 tests (`ingestion::fetch::fetch_price`, `state::apply_holding_price`). Workspace 492 tests green.
 
 **Patches (applied this review):**
 - [x] [Review][Patch] Holding freshness keyed off the price, not fundamentals years — a refresh with no `latest_price` (empty `/eod` / fundamentals-only) no longer stamps "à jour"; a valid `/eod` close with empty fundamentals is no longer discarded `[app/src/main.rs HoldingFetch arm]`
@@ -57,11 +59,11 @@ so that I read my portfolio against my own studies on data I refreshed deliberat
 - [x] [Review][Patch] `FakeProvider::returning_with_price` was dead code + Task 1's `latest_price` round-trip test was missing — added a `fetch_canonical` round-trip test (also re-asserts digest exclusion) `[ingestion/src/fetch.rs]`
 
 **Deferred (tracked as GitHub issues, not patched):**
-- [x] [Review][Defer] Holdings refresh doesn't work on the FREE EODHD plan — reuses the coupled fundamentals+eod fetch, which 403s on `/fundamentals` before reaching `/eod` (degrades to `périmé`, AC4-correct). Faithful fix = a price-only `/eod` fetch path → **issue #50**
+- [x] [Review][Resolved] Holdings refresh didn't work on the FREE EODHD plan (reused the coupled fundamentals+eod fetch which 403s on `/fundamentals`) → **FIXED on this branch** via the price-only `/eod` path (issue **#50** — closed)
 - [x] [Review][Defer] Freshness map never pruned on holding delete / ticker edit (re-added ticker shows old freshness; session-bounded growth) → **issue #51**
 - [x] [Review][Defer] "Rafraîchir les prix" button not disabled while a refresh is in flight (double-click enqueues duplicate jobs) + the negligible stale-captured-`study_id` mid-flight race → **issue #52**
 
-**Dismissed:** the EODHD last-bar ordering assumption (verified safe — `eod_url` pins `&order=a`); the holding refresh also touching fundamentals cells (spec-directed — Task 2 reuses `apply_provider_refresh`).
+**Dismissed:** the EODHD last-bar ordering assumption (verified safe — `eod_url` pins `&order=a`). (The "holding refresh touches fundamentals cells" observation was dismissed as spec-directed, then resolved anyway by the #50 price-only path above.)
 
 ## Dev Notes
 
