@@ -4,7 +4,7 @@
 // persist + re-render).
 
 import { Tokens } from "../tokens.slint";
-import { Holdings, HoldingRow } from "../state.slint";
+import { Holdings, HoldingRow, Labels } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { TextField } from "../components/text_field.slint";
 
@@ -39,6 +39,17 @@ export component PortfolioScreen inherits Rectangle {
             text: @tr("Devise de référence : {} (modifiable dans Réglages)", Holdings.reference-currency);
             color: Tokens.text-mid;
             font-size: Tokens.font-caption;
+        }
+
+        // ── Manual price refresh (Story 4.4, FR40) — user-initiated; never background-polled. ──
+        HorizontalLayout {
+            alignment: start;
+            ActionButton {
+                // Disabled while a refresh is in flight (issue #52) — no double-click duplicate jobs.
+                label: Holdings.refreshing ? @tr("Rafraîchissement…") : @tr("Rafraîchir les prix");
+                enabled: !Holdings.read-only && Holdings.holding-count > 0 && !Holdings.refreshing;
+                clicked => { Holdings.refresh-prices(); }
+            }
         }
 
         // ── Add / edit a holding ──
@@ -100,7 +111,7 @@ export component PortfolioScreen inherits Rectangle {
         for row[index] in Holdings.rows: Rectangle {
             background: Tokens.surface-alt;
             border-radius: Tokens.radius;
-            height: 44px;
+            height: 64px;
             HorizontalLayout {
                 padding-left: Tokens.space-12;
                 padding-right: Tokens.space-12;
@@ -123,6 +134,41 @@ export component PortfolioScreen inherits Rectangle {
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
+                }
+                // ── Story 4.4 (FR40): the matched study's zone + present price + freshness. The zone
+                // marker is NEUTRAL ink + a glyph — never a buy/hold/sell hue (those stay geofenced to
+                // the open study's §4 zone bar, Story 4.2 rule). A holding with no linked study shows a
+                // neutral "no study" hint and no zone. ──
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: !row.linked ? @tr("Aucune étude liée")
+                            : row.zone == "buy" ? @tr("◆ {}", Labels.zone-buy)
+                            : row.zone == "neutral" ? @tr("◆ {}", Labels.zone-hold)
+                            : row.zone == "sell" ? @tr("◆ {}", Labels.zone-sell)
+                            : "—";
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    if row.linked && row.current-price != "": Text {
+                        text: @tr("Prix actuel : {} {}", row.current-price, Holdings.reference-currency);
+                        color: Tokens.text-high;
+                        font-family: Tokens.font-numeric;
+                        font-size: Tokens.font-caption;
+                    }
+                    // Freshness murmur (Story 3.3/3.5 vocabulary): "périmé" after a failed/older refresh,
+                    // else "à jour le {}" once a successful refresh has stamped an as-of timestamp.
+                    if row.linked && row.stale: Text {
+                        text: @tr("◦ périmé");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    if row.linked && !row.stale && row.as-of != "": Text {
+                        text: @tr("à jour le {}", row.as-of);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
                 }
                 ActionButton {
                     label: @tr("Modifier");

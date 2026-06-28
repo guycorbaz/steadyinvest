@@ -247,9 +247,19 @@ pub fn build_snapshot(study: &Study) -> Result<StudySnapshot, NormalizeError> {
 /// `[forecast_low, forecast_high]` (a price *below* the band is therefore silent, by design: the
 /// §4 zone is only defined inside the band; cf. issue tracker for the below-band UX question).
 pub fn study_in_buy_zone(study: &Study) -> bool {
+    study_zone(study) == Some(Zone::Buy)
+}
+
+/// A study's §4 present-price [`Zone`] (Story 4.4, FR40), or `None` when undefined — no
+/// `current_price`, a degenerate band, a price **outside** `[forecast_low, forecast_high]`, or a
+/// study that does not normalize. The full-zone generalization of [`study_in_buy_zone`] (the
+/// holdings register shows Achat/Neutre/Vente, not just "in the buy zone"); the same
+/// presentation-only read of `core::ssg`'s risk-reward output — verdict-independent, never altering
+/// the verdict. Pair with [`zone_key`] to cross the localized key to `.slint`.
+pub fn study_zone(study: &Study) -> Option<Zone> {
     build_snapshot(study)
-        .map(|snapshot| snapshot.outputs().risk_reward.present_price_zone == Some(Zone::Buy))
-        .unwrap_or(false)
+        .ok()
+        .and_then(|snapshot| snapshot.outputs().risk_reward.present_price_zone)
 }
 
 // ── Plausibility surfacing (Story 2.7) — map the engine's two finding sets to UI cell addresses ──
@@ -408,7 +418,7 @@ fn fmt_ud(ud: &UpsideDownside, format: NumberFormat) -> String {
 
 /// The present-price zone key crossed to `.slint` (`Labels` resolves the localized noun): "buy" |
 /// "neutral" | "sell" | "" (outside range / unknown).
-fn zone_key(zone: Option<Zone>) -> &'static str {
+pub fn zone_key(zone: Option<Zone>) -> &'static str {
     match zone {
         Some(Zone::Buy) => "buy",
         Some(Zone::Neutral) => "neutral",

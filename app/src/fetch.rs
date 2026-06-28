@@ -16,8 +16,10 @@
 use std::cell::RefCell;
 use std::sync::mpsc;
 
+use rust_decimal::Decimal;
 use steadyinvest_ingestion::{
-    adapters::eodhd::EodhdProvider, fetch_canonical, FetchedFinancials, IngestionError, Provider,
+    adapters::eodhd::EodhdProvider, fetch_canonical, fetch_price, FetchedFinancials,
+    IngestionError, Provider,
 };
 use uuid::Uuid;
 
@@ -39,6 +41,9 @@ pub struct TestKeyRequest {
 /// A job for the worker thread.
 pub enum WorkerJob {
     Fetch(FetchRequest),
+    /// A holdings PRICE refresh (Story 4.4 / issue #50): a price-only `/eod` fetch (no
+    /// `/fundamentals`), routed to the holdings surface, not the open study screen.
+    RefreshHolding(FetchRequest),
     TestKey(TestKeyRequest),
 }
 
@@ -48,9 +53,20 @@ pub struct FetchOutcome {
     pub result: Result<FetchedFinancials, IngestionError>,
 }
 
+/// A holdings price-refresh result (Story 4.4 / issue #50): the latest `/eod` close only — no
+/// fundamentals. `ticker` rides back so the holdings surface keys its transient per-ticker freshness
+/// map; `None` price means the provider exposed no current close.
+pub struct HoldingPriceOutcome {
+    pub study_id: Uuid,
+    pub ticker: String,
+    pub result: Result<Option<Decimal>, IngestionError>,
+}
+
 /// What the worker produces, marshalled back to the UI thread.
 pub enum WorkerOutcome {
     Fetch(FetchOutcome),
+    /// A holdings price-refresh result (Story 4.4) — routed to the holdings surface, not the study.
+    HoldingFetch(HoldingPriceOutcome),
     /// Key-test verdict: `Ok` = the provider accepted the key; `Err` carries the cause.
     TestKey(Result<(), IngestionError>),
 }
@@ -100,6 +116,20 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                         ));
                         WorkerOutcome::Fetch(FetchOutcome {
                             study_id: req.study_id,
+                            result,
+                        })
+                    }
+                    WorkerJob::RefreshHolding(req) => {
+                        // Issue #50: a PRICE-ONLY `/eod` fetch (no `/fundamentals`) so the holdings
+                        // refresh works on the free EODHD tier; routed to the holdings surface.
+                        let result = runtime.block_on(fetch_price(
+                            &provider,
+                            &req.ticker,
+                            req.api_key.as_deref(),
+                        ));
+                        WorkerOutcome::HoldingFetch(HoldingPriceOutcome {
+                            study_id: req.study_id,
+                            ticker: req.ticker,
                             result,
                         })
                     }

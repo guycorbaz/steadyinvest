@@ -189,18 +189,108 @@ fn apply_watch_result(ui: &MainWindow, state: &JournalState, result: Result<(), 
     refresh_watchlist(ui, state);
 }
 
+/// Transient (NOT persisted) per-ticker price-refresh freshness for the holdings register (Story
+/// 4.4, FR40): the outcome of the last manual refresh. Keyed by **upper-cased** ticker so it joins
+/// the case-insensitive `study_id_for_ticker` match; rebuilt each session (display-time only — no
+/// schema change). `as_of` is the display stamp of the last *successful* refresh.
+#[derive(Clone, Default)]
+struct HoldingFreshness {
+    stale: bool,
+    as_of: Option<String>,
+}
+type HoldingFreshnessMap = std::collections::HashMap<String, HoldingFreshness>;
+
+/// Flag a holding's transient freshness `stale` (Story 4.4, AC4) after a failed / no-data refresh,
+/// **preserving** the last successful `as_of` so the row still states when it was last fresh while
+/// keeping its last-known zone visibly marked stale — never a fresh-looking wrong zone.
+fn mark_holding_stale(freshness: &Rc<RefCell<HoldingFreshnessMap>>, key: &str) {
+    let prev = freshness.borrow().get(key).and_then(|f| f.as_of.clone());
+    freshness.borrow_mut().insert(
+        key.to_string(),
+        HoldingFreshness {
+            stale: true,
+            as_of: prev,
+        },
+    );
+}
+
+/// A compact display form of an RFC3339 timestamp for the holdings freshness caption (Story 4.4):
+/// `YYYY-MM-DD HH:MM` (drop seconds + zone; the journal stores the full RFC3339 string).
+fn display_timestamp(ts: &steadyinvest_contract::Timestamp) -> String {
+    let s = &ts.0;
+    s.get(..16).unwrap_or(s).replacen('T', " ", 1)
+}
+
+/// Drop transient freshness entries for tickers no longer held by ANY holding (issue #51). Called
+/// after every holdings mutation: a removed (or ticker-edited-away) holding's stale `as_of` must not
+/// resurface if that ticker is later re-added, and the map must not grow unbounded. Keyed by
+/// upper-cased ticker — the same join as `study_id_for_ticker`. A ticker still held by a *sibling*
+/// holding legitimately keeps its entry (the freshness is the ticker's, shared across its rows).
+fn retain_held_freshness(freshness: &Rc<RefCell<HoldingFreshnessMap>>, state: &JournalState) {
+    let held: std::collections::HashSet<String> = state
+        .list_holdings()
+        .iter()
+        .map(|h| h.security_ticker.to_uppercase())
+        .collect();
+    freshness
+        .borrow_mut()
+        .retain(|ticker, _| held.contains(ticker));
+}
+
 /// Rebuild the holdings register from the journal (Story 4.3, FR36). Reference-currency labelling is
 /// set separately (from app-config, on startup + on change) — a holdings mutation doesn't touch it.
-fn refresh_holdings(ui: &MainWindow, state: &JournalState) {
+/// Story 4.4 (FR40): each row also carries its auto-matched study's §4 zone (neutral key) + present
+/// price + transient freshness, so the register shows Achat/Neutre/Vente + à jour/périmé per holding.
+fn refresh_holdings(
+    ui: &MainWindow,
+    state: &JournalState,
+    freshness: &HoldingFreshnessMap,
+    format: NumberFormat,
+) {
+    use steadyinvest_core::rounding::DisplayField;
     let holdings = ui.global::<Holdings>();
     let items = state.list_holdings();
     let rows: Vec<HoldingRow> = items
         .iter()
-        .map(|h| HoldingRow {
-            id: h.id.to_string().into(),
-            ticker: h.security_ticker.clone().into(),
-            quantity: h.quantity.clone().into(),
-            purchase_price: h.purchase_price.clone().into(),
+        .map(|h| {
+            // Auto-match the holding to the most-recent saved study of the SAME ticker (the watchlist
+            // rule); `None` → a neutral "no linked study" row, never an error.
+            let study = state
+                .study_id_for_ticker(&h.security_ticker)
+                .and_then(|sid| state.get_study(sid));
+            let f = freshness
+                .get(&h.security_ticker.to_uppercase())
+                .cloned()
+                .unwrap_or_default();
+            let (zone, current_price, study_link) = match &study {
+                Some(s) => (
+                    viewmodel::engine::zone_key(viewmodel::engine::study_zone(s)).to_string(),
+                    s.judgment
+                        .current_price
+                        .map(|p| {
+                            viewmodel::format::format_scaled(
+                                p.as_decimal(),
+                                DisplayField::Price,
+                                format,
+                            )
+                        })
+                        .unwrap_or_default(),
+                    s.security_ticker.clone(),
+                ),
+                None => (String::new(), String::new(), String::new()),
+            };
+            HoldingRow {
+                id: h.id.to_string().into(),
+                ticker: h.security_ticker.clone().into(),
+                quantity: h.quantity.clone().into(),
+                purchase_price: h.purchase_price.clone().into(),
+                linked: study.is_some(),
+                study_link: study_link.into(),
+                zone: zone.into(),
+                current_price: current_price.into(),
+                stale: f.stale,
+                as_of: f.as_of.unwrap_or_default().into(),
+            }
         })
         .collect();
     holdings.set_holding_count(items.len() as i32);
@@ -209,13 +299,19 @@ fn refresh_holdings(ui: &MainWindow, state: &JournalState) {
 }
 
 /// Surface a holdings write's outcome (neutral notice on refusal) and re-render the register.
-fn apply_holdings_result(ui: &MainWindow, state: &JournalState, result: Result<(), String>) {
+fn apply_holdings_result(
+    ui: &MainWindow,
+    state: &JournalState,
+    result: Result<(), String>,
+    freshness: &HoldingFreshnessMap,
+    format: NumberFormat,
+) {
     let holdings = ui.global::<Holdings>();
     match result {
         Ok(()) => holdings.set_notice(SharedString::new()),
         Err(message) => holdings.set_notice(message.into()),
     }
-    refresh_holdings(ui, state);
+    refresh_holdings(ui, state, freshness, format);
 }
 
 /// Link a watchlist entry to a saved study of the SAME ticker (the most recent), or a neutral
@@ -474,6 +570,15 @@ fn main() -> Result<(), slint::PlatformError> {
     let compare_study: Rc<RefCell<Option<steadyinvest_contract::Study>>> =
         Rc::new(RefCell::new(None));
 
+    // Story 4.4 — transient per-ticker holdings price-refresh freshness (NOT persisted; display-time
+    // only). Populated by the off-thread refresh outcomes; read when rebuilding the register.
+    let holding_freshness: Rc<RefCell<HoldingFreshnessMap>> =
+        Rc::new(RefCell::new(HoldingFreshnessMap::new()));
+    // Issue #52 — outstanding holdings-refresh jobs in flight. Set to the enqueued count when a
+    // refresh starts; each outcome decrements it; the button is disabled (`Holdings.refreshing`)
+    // until it returns to zero, so a double-click can't enqueue duplicate jobs.
+    let refresh_pending: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
+
     let ui = MainWindow::new()?;
 
     // Initial state, pushed before the window shows: no flash, no restart needed later.
@@ -510,7 +615,12 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         refresh_studies(&ui, &journal_state.borrow());
         refresh_watchlist(&ui, &journal_state.borrow());
-        refresh_holdings(&ui, &journal_state.borrow());
+        refresh_holdings(
+            &ui,
+            &journal_state.borrow(),
+            &holding_freshness.borrow(),
+            config.borrow().number_format,
+        );
         if let Some(notice) = &startup_notice {
             ui.global::<Studies>().set_notice(notice.clone().into());
         }
@@ -525,6 +635,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let journal_state = Rc::clone(&journal_state);
         let current_study = Rc::clone(&current_study);
         let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
+        let refresh_pending = Rc::clone(&refresh_pending);
         fetch::set_outcome_handler(move |outcome| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
@@ -586,6 +698,88 @@ fn main() -> Result<(), slint::PlatformError> {
                                 .borrow_mut()
                                 .mark_provider_stale(outcome.study_id);
                             render_open();
+                        }
+                    }
+                }
+                fetch::WorkerOutcome::HoldingFetch(outcome) => {
+                    // Story 4.4 (FR40): a holdings price-refresh result → the holdings surface (NOT
+                    // the study screen). Success fills `current_price` (the §4 zone recomputes) +
+                    // stamps a fresh `as_of`; a failure / no-data flags the ticker `périmé`, keeping
+                    // its last-known zone visibly stale (AC4) — never a fresh-looking wrong zone.
+                    let holdings = ui.global::<Holdings>();
+                    let format = config.borrow().number_format;
+                    let key = outcome.ticker.to_uppercase();
+                    match outcome.result {
+                        // The price arrived: fill `current_price` (price-only — never the yearly
+                        // cells, issue #50) so the §4 zone recomputes, and stamp a fresh `as_of`.
+                        Ok(Some(price)) => {
+                            match journal_state
+                                .borrow_mut()
+                                .apply_holding_price(outcome.study_id, price)
+                            {
+                                Ok(()) => {
+                                    let now = display_timestamp(&journal_state.borrow().now());
+                                    holding_freshness.borrow_mut().insert(
+                                        key,
+                                        HoldingFreshness {
+                                            stale: false,
+                                            as_of: Some(now),
+                                        },
+                                    );
+                                    // Clear ONLY the in-progress banner — don't wipe a sibling
+                                    // ticker's failure notice that resolved earlier. (Review F4.)
+                                    if holdings.get_notice().as_str()
+                                        == state::MSG_HOLDINGS_REFRESHING
+                                    {
+                                        holdings.set_notice(SharedString::new());
+                                    }
+                                }
+                                // The study vanished / went read-only between enqueue and outcome:
+                                // surface the cause AND flag the ticker stale, like the other failure
+                                // arms (don't leave it falsely fresh). (Review F3.)
+                                Err(message) => {
+                                    holdings.set_notice(message.into());
+                                    mark_holding_stale(&holding_freshness, &key);
+                                }
+                            }
+                        }
+                        // Transport-success but the provider exposed no current close → "no data":
+                        // flag `périmé`, keep the last-known zone (AC4); never stamp "à jour" when the
+                        // price the user asked to refresh did not come back.
+                        Ok(None) => {
+                            holdings.set_notice(state::MSG_PROVIDER_NO_DATA.into());
+                            mark_holding_stale(&holding_freshness, &key);
+                        }
+                        Err(error) => {
+                            holdings.set_notice(state::provider_failure_notice(&error).into());
+                            mark_holding_stale(&holding_freshness, &key);
+                        }
+                    }
+                    // Re-render the open study too (a holding may BE the open study — its §4 zone bar
+                    // must reflect the just-filled current_price), then rebuild the register.
+                    if current_study
+                        .borrow()
+                        .as_deref()
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                        == Some(outcome.study_id)
+                    {
+                        if let Some(study) = journal_state.borrow().get_study(outcome.study_id) {
+                            push_form(&ui, &journal_state.borrow(), &study, format);
+                        }
+                    }
+                    refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        format,
+                    );
+                    // One job resolved — clear the in-flight latch when the batch is fully drained,
+                    // re-enabling the refresh button (issue #52).
+                    {
+                        let mut pending = refresh_pending.borrow_mut();
+                        *pending = pending.saturating_sub(1);
+                        if *pending == 0 {
+                            ui.global::<Holdings>().set_refreshing(false);
                         }
                     }
                 }
@@ -766,6 +960,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
         ui.global::<Holdings>()
             .on_add_holding(move |ticker, quantity, price| {
                 let ui = ui_weak.unwrap();
@@ -773,7 +969,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     .borrow_mut()
                     .add_holding(&ticker, &quantity, &price);
                 let written = result.is_ok();
-                apply_holdings_result(&ui, &journal_state.borrow(), result);
+                let format = config.borrow().number_format;
+                retain_held_freshness(&holding_freshness, &journal_state.borrow());
+                apply_holdings_result(
+                    &ui,
+                    &journal_state.borrow(),
+                    result,
+                    &holding_freshness.borrow(),
+                    format,
+                );
                 // Report whether the holding was written so the UI keeps the user's input on refusal.
                 written
             });
@@ -781,6 +985,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
         ui.global::<Holdings>()
             .on_edit_holding(move |id, ticker, quantity, price| {
                 let ui = ui_weak.unwrap();
@@ -791,20 +997,101 @@ fn main() -> Result<(), slint::PlatformError> {
                     .borrow_mut()
                     .update_holding(id, &ticker, &quantity, &price);
                 let written = result.is_ok();
-                apply_holdings_result(&ui, &journal_state.borrow(), result);
+                let format = config.borrow().number_format;
+                retain_held_freshness(&holding_freshness, &journal_state.borrow());
+                apply_holdings_result(
+                    &ui,
+                    &journal_state.borrow(),
+                    result,
+                    &holding_freshness.borrow(),
+                    format,
+                );
                 written
             });
     }
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
         ui.global::<Holdings>().on_remove_holding(move |id| {
             let ui = ui_weak.unwrap();
             let Ok(id) = Uuid::parse_str(&id) else {
                 return;
             };
             let result = journal_state.borrow_mut().delete_holding(id);
-            apply_holdings_result(&ui, &journal_state.borrow(), result);
+            let format = config.borrow().number_format;
+            retain_held_freshness(&holding_freshness, &journal_state.borrow());
+            apply_holdings_result(
+                &ui,
+                &journal_state.borrow(),
+                result,
+                &holding_freshness.borrow(),
+                format,
+            );
+        });
+    }
+    // ── Story 4.4 (FR40) — manual price refresh for every linked holding, off the UI thread. One
+    // job per UNIQUE linked ticker (reusing the Epic-3 worker); holdings with no matching study are
+    // skipped. Only ever user-initiated (FR65 — no background polling). Outcomes route to the
+    // holdings surface via `WorkerOutcome::HoldingFetch` (the transient-freshness handler above). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let fetch_tx = fetch_tx.clone();
+        let refresh_pending = Rc::clone(&refresh_pending);
+        ui.global::<Holdings>().on_refresh_prices(move || {
+            let ui = ui_weak.unwrap();
+            let holdings = ui.global::<Holdings>();
+            let jobs: Vec<(Uuid, String)> = {
+                let state = journal_state.borrow();
+                let mut seen = std::collections::HashSet::new();
+                state
+                    .list_holdings()
+                    .into_iter()
+                    .filter_map(|h| {
+                        state
+                            .study_id_for_ticker(&h.security_ticker)
+                            .map(|sid| (sid, h.security_ticker))
+                    })
+                    .filter(|(_, ticker)| seen.insert(ticker.to_uppercase()))
+                    .collect()
+            };
+            if jobs.is_empty() {
+                holdings.set_notice(state::MSG_HOLDINGS_REFRESH_NONE.into());
+                return;
+            }
+            let provider_choice = config.borrow().preferred_provider;
+            let api_key = resolve_provider_key(provider_choice);
+            if provider_choice.requires_key() && api_key.is_none() {
+                holdings.set_notice(state::MSG_PROVIDER_NO_KEY.into());
+                return;
+            }
+            // Count only jobs the worker actually accepted — if the worker is gone, don't latch
+            // `refreshing` (which would disable the button for the rest of the session). (Issue #52.)
+            let mut enqueued = 0usize;
+            for (study_id, ticker) in jobs {
+                if fetch_tx
+                    .send(fetch::WorkerJob::RefreshHolding(fetch::FetchRequest {
+                        study_id,
+                        ticker,
+                        api_key: api_key.clone(),
+                    }))
+                    .is_ok()
+                {
+                    enqueued += 1;
+                }
+            }
+            if enqueued == 0 {
+                return;
+            }
+            // Latch the in-flight state: the button is disabled while `refreshing` (no double-click
+            // → no duplicate jobs). The outcome handler decrements the pending count and clears the
+            // flag when the last job resolves. No race — outcomes are marshalled to THIS (UI) thread.
+            *refresh_pending.borrow_mut() = enqueued;
+            holdings.set_refreshing(true);
+            holdings.set_notice(state::MSG_HOLDINGS_REFRESHING.into());
         });
     }
     // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and

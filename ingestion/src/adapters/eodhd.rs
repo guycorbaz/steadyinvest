@@ -17,7 +17,7 @@ use serde_json::Value;
 use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear, SplitEvent};
 
 use crate::error::ProviderError;
-use crate::provider::MarketDataProvider;
+use crate::provider::{MarketDataProvider, RawFetch};
 
 const DEFAULT_BASE_URL: &str = "https://eodhd.com/api";
 
@@ -88,7 +88,7 @@ impl MarketDataProvider for EodhdProvider {
         &self,
         ticker: &str,
         api_key: Option<&str>,
-    ) -> Result<RawFinancials, ProviderError> {
+    ) -> Result<RawFetch, ProviderError> {
         // EODHD requires a token; `demo` works only for AAPL.US. A keyless request is unauthenticated.
         let token = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
         let fundamentals_url = format!(
@@ -101,8 +101,40 @@ impl MarketDataProvider for EodhdProvider {
         );
         let fundamentals = self.get_json(&fundamentals_url, ticker).await?;
         let prices = self.get_json(&eod_url, ticker).await?;
-        map_eodhd(&fundamentals, &prices, ticker)
+        let financials = map_eodhd(&fundamentals, &prices, ticker)?;
+        // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
+        // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
+        let latest_price = latest_eod_close(&prices);
+        Ok(RawFetch {
+            financials,
+            latest_price,
+        })
     }
+
+    async fn fetch_latest_price(
+        &self,
+        ticker: &str,
+        api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError> {
+        // Issue #50: hit ONLY `/eod` (no `/fundamentals`) — works on the free EODHD tier, which
+        // allows EOD but 403s fundamentals. The series is `order=a`, so the last bar is the latest.
+        let token = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
+        let eod_url = format!(
+            "{}/eod/{ticker}?api_token={token}&period=d&fmt=json&order=a",
+            self.base_url
+        );
+        let prices = self.get_json(&eod_url, ticker).await?;
+        Ok(latest_eod_close(&prices))
+    }
+}
+
+/// The most recent close from the daily EOD array (Story 4.4). The series is requested `order=a`
+/// (ascending), so the **last** bar is today's; we read its `close` (raw — comparable to the §4
+/// forecast band, which is in present price terms). `None` when the array is empty/missing.
+pub fn latest_eod_close(prices: &Value) -> Option<Decimal> {
+    let bars = prices.as_array()?;
+    let last = bars.last()?;
+    dec(last.get("close"))
 }
 
 /// HTTP status → cause-named [`ProviderError`]. (403 is handled in `get_json` with the body, so it
@@ -305,4 +337,32 @@ fn dec(v: Option<&Value>) -> Option<Decimal> {
 /// Leading `YYYY` of a `"YYYY-MM-DD"` date key → fiscal year.
 fn year_of_date_key(key: &str) -> Option<i32> {
     key.get(0..4)?.parse::<i32>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn latest_eod_close_reads_the_last_bar_in_ascending_order() {
+        // `/eod?order=a` → ascending; the LAST bar is the most recent close (the present price for
+        // the §4 zone marker, Story 4.4). Parsed exactly — never via `f64`.
+        let prices = json!([
+            { "date": "2026-06-25", "close": "101.5" },
+            { "date": "2026-06-26", "close": "103.25" },
+        ]);
+        assert_eq!(
+            latest_eod_close(&prices),
+            Some(Decimal::from_str_exact("103.25").unwrap())
+        );
+    }
+
+    #[test]
+    fn latest_eod_close_is_none_when_the_series_is_empty_or_malformed() {
+        assert_eq!(latest_eod_close(&json!([])), None);
+        assert_eq!(latest_eod_close(&json!({})), None);
+        // Last bar present but no `close` field → no price, not a zero.
+        assert_eq!(latest_eod_close(&json!([{ "date": "2026-06-26" }])), None);
+    }
 }
