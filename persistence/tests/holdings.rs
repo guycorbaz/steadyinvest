@@ -212,3 +212,59 @@ fn holdings_survive_reopen() {
     assert_eq!(items[0].quantity, "10");
     assert_eq!(items[0].purchase_price, "95.40");
 }
+
+#[test]
+fn set_trailing_stop_round_trips_is_idempotent_and_clears() {
+    // Story 4.5 (FR42): the trailing-stop pct + ratcheted level persist together, a no-op set bumps
+    // no version (C4), the level can ratchet up, and None/None clears the stop.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let id = add_at(&mut journal, "NESN", "10", "100", 0);
+    let v0 = journal.logical_version().unwrap();
+
+    journal
+        .set_trailing_stop(id, Some("15"), Some("85"))
+        .unwrap();
+    let v1 = journal.logical_version().unwrap();
+    assert!(v1 > v0, "setting a stop bumps the version");
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(h.trailing_stop_pct.as_deref(), Some("15"));
+    assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+
+    journal
+        .set_trailing_stop(id, Some("15"), Some("85"))
+        .unwrap();
+    assert_eq!(
+        journal.logical_version().unwrap(),
+        v1,
+        "an identical set is a no-op (no version bump)"
+    );
+
+    journal
+        .set_trailing_stop(id, Some("15"), Some("90"))
+        .unwrap();
+    assert!(journal.logical_version().unwrap() > v1, "a ratchet bumps");
+    assert_eq!(
+        journal.list_holdings(portfolio_id()).unwrap()[0]
+            .trailing_stop_level
+            .as_deref(),
+        Some("90")
+    );
+
+    journal.set_trailing_stop(id, None, None).unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert!(
+        h.trailing_stop_pct.is_none() && h.trailing_stop_level.is_none(),
+        "None/None clears the stop"
+    );
+
+    let v = journal.logical_version().unwrap();
+    journal
+        .set_trailing_stop(Uuid::from_u128(0xDEAD), Some("10"), Some("9"))
+        .unwrap();
+    assert_eq!(
+        journal.logical_version().unwrap(),
+        v,
+        "an absent id is an idempotent no-op"
+    );
+}

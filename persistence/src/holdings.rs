@@ -40,6 +40,10 @@ pub struct HoldingItem {
     pub quantity: String,
     pub purchase_price: String,
     pub trailing_stop_pct: Option<String>,
+    /// The ratcheted trailing-stop **level** (a price, Story 4.5 / FR42) — `None` when no stop set.
+    /// Persisted (v3 column) because the ratchet's high-water mark can't be re-derived from the
+    /// latest price alone. The app computes it via `core::risk::ratchet_trailing_stop`.
+    pub trailing_stop_level: Option<String>,
     pub created_at: Timestamp,
 }
 
@@ -139,6 +143,7 @@ impl Journal {
             quantity: quantity.to_string(),
             purchase_price: purchase_price.to_string(),
             trailing_stop_pct: None,
+            trailing_stop_level: None,
             created_at: created_at.clone(),
         })
     }
@@ -148,7 +153,7 @@ impl Journal {
     pub fn list_holdings(&self, portfolio_id: Uuid) -> Result<Vec<HoldingItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
-                    trailing_stop_pct, created_at
+                    trailing_stop_pct, trailing_stop_level, created_at
              FROM holdings WHERE portfolio_id = ?1 ORDER BY created_at, id",
         )?;
         let rows = stmt.query_map(rusqlite::params![portfolio_id.to_string()], |r| {
@@ -159,20 +164,30 @@ impl Journal {
                 r.get::<_, String>(3)?,
                 r.get::<_, String>(4)?,
                 r.get::<_, Option<String>>(5)?,
-                r.get::<_, String>(6)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, String>(7)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id_text, portfolio_text, security_ticker, quantity, purchase_price, stop, created) =
-                row?;
+            let (
+                id_text,
+                portfolio_text,
+                security_ticker,
+                quantity,
+                purchase_price,
+                stop_pct,
+                stop_level,
+                created,
+            ) = row?;
             out.push(HoldingItem {
                 id: parse_uuid(&id_text, "holdings.id")?,
                 portfolio_id: parse_uuid(&portfolio_text, "holdings.portfolio_id")?,
                 security_ticker,
                 quantity,
                 purchase_price,
-                trailing_stop_pct: stop,
+                trailing_stop_pct: stop_pct,
+                trailing_stop_level: stop_level,
                 created_at: Timestamp(created),
             });
         }
@@ -196,6 +211,35 @@ impl Journal {
              WHERE id = ?1
                AND (security_ticker IS NOT ?2 OR quantity IS NOT ?3 OR purchase_price IS NOT ?4)",
             rusqlite::params![id.to_string(), security_ticker, quantity, purchase_price],
+        )?;
+        if changed > 0 {
+            tx.execute(
+                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
+                [],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Set (or clear) a holding's trailing-stop **parameter + ratcheted level** (Story 4.5, FR42).
+    /// Both fields are written together — the app computes the ratcheted `level` from `pct` via
+    /// `core::risk::ratchet_trailing_stop`; `None`/`None` clears the stop. A no-op (identical values,
+    /// NULL-safe via `IS NOT`) writes nothing and bumps no version (C4 — avoidable writes are
+    /// suppressed under Synology sync); an absent id is an idempotent no-op success.
+    pub fn set_trailing_stop(
+        &mut self,
+        id: Uuid,
+        pct: Option<&str>,
+        level: Option<&str>,
+    ) -> Result<()> {
+        self.check_writable()?;
+        let tx = self.conn.transaction()?;
+        let changed = tx.execute(
+            "UPDATE holdings SET trailing_stop_pct = ?2, trailing_stop_level = ?3
+             WHERE id = ?1
+               AND (trailing_stop_pct IS NOT ?2 OR trailing_stop_level IS NOT ?3)",
+            rusqlite::params![id.to_string(), pct, level],
         )?;
         if changed > 0 {
             tx.execute(
