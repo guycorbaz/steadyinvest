@@ -221,7 +221,26 @@ fn map_splits(fundamentals: &Value) -> Vec<SplitEvent> {
 
 /// EODHD writes split ratios as decimals ("4.000000"); take the integer part.
 fn parse_split_part(s: &str) -> Option<u32> {
-    s.trim().split('.').next()?.parse::<u32>().ok()
+    // #37: a real split ratio is a positive WHOLE number (e.g. "4.000000/1.000000"). Be strict so a
+    // malformed part is REJECTED (the split is dropped, never silently mis-applied) rather than
+    // floored: reject a leading sign and any non-zero fractional remainder — the old `split('.')`
+    // truncation parsed "4.9" as 4 and `u32::parse` accepted a leading "+".
+    let s = s.trim();
+    if s.starts_with('+') || s.starts_with('-') {
+        return None;
+    }
+    let mut parts = s.split('.');
+    let integer = parts.next()?;
+    if let Some(fraction) = parts.next() {
+        // A fractional remainder is allowed ONLY if it is all zeros ("4.000000"); else reject.
+        if fraction.bytes().any(|b| b != b'0') {
+            return None;
+        }
+    }
+    if parts.next().is_some() {
+        return None; // more than one '.' → malformed
+    }
+    integer.parse::<u32>().ok()
 }
 
 /// Reduce the daily EOD array into per-year max(high) and min(low).
@@ -283,8 +302,13 @@ fn obj(v: Option<&Value>) -> &serde_json::Map<String, Value> {
 
 /// The row of a `{date: {...}}` yearly map whose date key falls in fiscal year `y`.
 fn year_row(map: &serde_json::Map<String, Value>, y: i32) -> Option<&Value> {
+    // #37: when two keys fall in the same fiscal year (a fiscal-year-end change or a restated
+    // period), pick the row with the **latest** date key — the most recent / restated figures win.
+    // `YYYY-MM-DD` keys sort lexicographically = chronologically, so the `max` key is the latest date
+    // (previously `find` took the first match = the lexicographically-smallest = OLDEST date).
     map.iter()
-        .find(|(k, _)| year_of_date_key(k) == Some(y))
+        .filter(|(k, _)| year_of_date_key(k) == Some(y))
+        .max_by(|(a, _), (b, _)| a.cmp(b))
         .map(|(_, v)| v)
 }
 
@@ -305,4 +329,50 @@ fn dec(v: Option<&Value>) -> Option<Decimal> {
 /// Leading `YYYY` of a `"YYYY-MM-DD"` date key → fiscal year.
 fn year_of_date_key(key: &str) -> Option<i32> {
     key.get(0..4)?.parse::<i32>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_split_part_accepts_whole_numbers_and_rejects_malformed_ratios() {
+        // Real EODHD ratio shapes parse; malformed parts are REJECTED (the split is dropped), never
+        // floored or sign-accepted (#37).
+        assert_eq!(parse_split_part("4"), Some(4));
+        assert_eq!(parse_split_part("4.000000"), Some(4));
+        assert_eq!(parse_split_part(" 7 "), Some(7));
+        assert_eq!(parse_split_part("4.9"), None, "no longer floored to 4");
+        assert_eq!(parse_split_part("+4"), None, "leading sign rejected");
+        assert_eq!(parse_split_part("-4"), None);
+        assert_eq!(parse_split_part("1.2.3"), None);
+        assert_eq!(parse_split_part("abc"), None);
+        assert_eq!(parse_split_part(""), None);
+    }
+
+    #[test]
+    fn year_row_picks_the_latest_date_in_a_duplicated_fiscal_year() {
+        // Two keys in 2023 (a restated period / fiscal-year-end change): the LATEST date wins (#37).
+        let m = json!({
+            "2023-03-31": { "v": "old" },
+            "2023-12-31": { "v": "restated" },
+            "2022-12-31": { "v": "prior" },
+        });
+        let obj = m.as_object().unwrap();
+        assert_eq!(
+            year_row(obj, 2023)
+                .and_then(|r| r.get("v"))
+                .and_then(Value::as_str),
+            Some("restated"),
+            "the most recent same-year row wins"
+        );
+        assert_eq!(
+            year_row(obj, 2022)
+                .and_then(|r| r.get("v"))
+                .and_then(Value::as_str),
+            Some("prior")
+        );
+        assert!(year_row(obj, 2021).is_none());
+    }
 }
