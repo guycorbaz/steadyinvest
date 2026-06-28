@@ -296,6 +296,14 @@ fn refresh_holdings(
             let stop_level_display = stop_level_dec
                 .map(|l| viewmodel::format::format_scaled(l, DisplayField::Price, format))
                 .unwrap_or_default();
+            // The margin above the stop (AC4 neutral fact) — only when a stop + price are known and
+            // the price is NOT at/below the stop (a breach shows "◆ sous le stop" instead).
+            let stop_distance = match (stop_level_dec, current_price_dec) {
+                (Some(level), Some(price)) if price > level => {
+                    viewmodel::format::format_scaled(price - level, DisplayField::Price, format)
+                }
+                _ => String::new(),
+            };
             HoldingRow {
                 id: h.id.to_string().into(),
                 ticker: h.security_ticker.clone().into(),
@@ -311,6 +319,7 @@ fn refresh_holdings(
                 stop_pct: h.trailing_stop_pct.clone().unwrap_or_default().into(),
                 stop_level: stop_level_display.into(),
                 stop_breached,
+                stop_distance: stop_distance.into(),
             }
         })
         .collect();

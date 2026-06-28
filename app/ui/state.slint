@@ -578,6 +578,8 @@ export struct HoldingRow {
     stop-pct: string,
     stop-level: string,
     stop-breached: bool,
+    // The current price's margin above the stop level (display string; "" when breached or unknown).
+    stop-distance: string,
 }
 
 // The single-portfolio holdings register (Story 4.3, FR36). Rows are built/ordered by Rust; intents

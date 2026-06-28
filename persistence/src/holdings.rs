@@ -194,9 +194,11 @@ impl Journal {
         Ok(out)
     }
 
-    /// Edit a holding's ticker, quantity and/or purchase price (FR36). `trailing_stop_pct` is
-    /// untouched (Story 4.5). A no-op (identical values) writes nothing and bumps no version. An
-    /// absent id is a no-op success (idempotent).
+    /// Edit a holding's ticker, quantity and/or purchase price (FR36). Changing the **ticker** clears
+    /// the trailing stop (Story 4.5 review): a stop level seeded from the OLD security would otherwise
+    /// persist against the NEW one and — being ratchet-up-only — could show a permanent false breach.
+    /// Editing only quantity/price leaves the stop intact. A no-op (identical values) writes nothing
+    /// and bumps no version. An absent id is a no-op success (idempotent).
     pub fn update_holding(
         &mut self,
         id: Uuid,
@@ -206,8 +208,12 @@ impl Journal {
     ) -> Result<()> {
         self.check_writable()?;
         let tx = self.conn.transaction()?;
+        // The `CASE … security_ticker IS NOT ?2` reads the OLD ticker (SET exprs see pre-update row),
+        // so the stop clears only when the ticker actually changes.
         let changed = tx.execute(
-            "UPDATE holdings SET security_ticker = ?2, quantity = ?3, purchase_price = ?4
+            "UPDATE holdings SET security_ticker = ?2, quantity = ?3, purchase_price = ?4,
+                    trailing_stop_pct = CASE WHEN security_ticker IS NOT ?2 THEN NULL ELSE trailing_stop_pct END,
+                    trailing_stop_level = CASE WHEN security_ticker IS NOT ?2 THEN NULL ELSE trailing_stop_level END
              WHERE id = ?1
                AND (security_ticker IS NOT ?2 OR quantity IS NOT ?3 OR purchase_price IS NOT ?4)",
             rusqlite::params![id.to_string(), security_ticker, quantity, purchase_price],

@@ -860,10 +860,13 @@ impl JournalState {
     }
 
     /// Set (or clear) a holding's trailing-stop percentage (Story 4.5, FR42). An empty `pct_input`
-    /// clears the stop. Otherwise the pct is validated to `(0, 100)` and the ratcheted **level** is
-    /// computed (`core::risk`) from the *reference price* — the matched study's `current_price` if
-    /// known, else the holding's `purchase_price` — and the prior level (so an explicit set still
-    /// ratchets up only, never down). Both pct + level persist together (idempotent). Guarded.
+    /// clears the stop. Otherwise the pct is validated to `(0, 100)` and the level is **seeded fresh**
+    /// from the *reference price* — the matched study's `current_price` if known, else the holding's
+    /// `purchase_price` — so the user's chosen pct wins (they may tighten OR loosen the stop). The
+    /// ratchet-up-only rule (FR42) governs the **automatic** price-driven trailing
+    /// ([`Self::ratchet_trailing_stops_for_study`]), NOT an explicit re-parametrisation — folding the
+    /// prior level here would make the displayed pct and level inconsistent (review finding). Both
+    /// pct + level persist together (idempotent). Guarded.
     pub fn set_holding_trailing_stop(
         &mut self,
         holding_id: Uuid,
@@ -896,11 +899,9 @@ impl JournalState {
             .map(|m| m.as_decimal())
             .or_else(|| Decimal::from_str_exact(&holding.purchase_price).ok())
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
-        let prior = holding
-            .trailing_stop_level
-            .as_deref()
-            .and_then(|s| Decimal::from_str_exact(s).ok());
-        let level = steadyinvest_core::risk::ratchet_trailing_stop(prior, reference_price, pct);
+        // Seed fresh (no prior level) — an explicit set is the user redefining the stop, not an
+        // automatic ratchet, so it may move the level down as well as up.
+        let level = steadyinvest_core::risk::ratchet_trailing_stop(None, reference_price, pct);
         // Normalize (drop trailing zeros) so the stored string is canonical — re-computing the same
         // value yields the same string, which keeps the persistence no-op idempotency guard honest.
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
@@ -3555,6 +3556,14 @@ mod tests {
         let h = state.list_holdings().into_iter().next().unwrap();
         assert_eq!(h.trailing_stop_pct.as_deref(), Some("15"));
         assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+
+        // Review fix: an EXPLICIT re-set seeds FRESH (the user's pct wins) — a looser 50% LOWERS the
+        // level to 100 × (1 − 0.50) = 50, even though 50 < the prior 85 (ratchet-up-only governs only
+        // the automatic refresh path, not an explicit re-parametrisation).
+        state.set_holding_trailing_stop(id, "50").unwrap();
+        let h = state.list_holdings().into_iter().next().unwrap();
+        assert_eq!(h.trailing_stop_pct.as_deref(), Some("50"));
+        assert_eq!(h.trailing_stop_level.as_deref(), Some("50"));
 
         // An empty pct clears the stop (both fields → None).
         state.set_holding_trailing_stop(id, "").unwrap();

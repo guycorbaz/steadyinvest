@@ -189,6 +189,11 @@ export component PortfolioScreen inherits Rectangle {
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;
                     }
+                    if row.has-stop && !row.stop-breached && row.stop-distance != "": Text {
+                        text: @tr("à {} {} au-dessus", row.stop-distance, Holdings.reference-currency);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
                     HorizontalLayout {
                         spacing: Tokens.space-8;
                         TextField {

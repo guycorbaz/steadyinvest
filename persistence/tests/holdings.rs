@@ -268,3 +268,35 @@ fn set_trailing_stop_round_trips_is_idempotent_and_clears() {
         "an absent id is an idempotent no-op"
     );
 }
+
+#[test]
+fn changing_a_holdings_ticker_clears_its_trailing_stop_but_qty_price_edits_keep_it() {
+    // Story 4.5 review: a stop level is seeded from a security's price/cost; on a TICKER change it
+    // would persist (ratchet-up-only) against the new security → a false breach. So a ticker edit
+    // clears the stop; editing only quantity/price leaves it intact.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let id = add_at(&mut journal, "NESN", "10", "100", 0);
+    journal
+        .set_trailing_stop(id, Some("15"), Some("85"))
+        .unwrap();
+
+    // Edit only quantity + price (same ticker) → the stop is kept.
+    journal.update_holding(id, "NESN", "12", "110").unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(
+        h.trailing_stop_pct.as_deref(),
+        Some("15"),
+        "qty/price edit keeps the stop"
+    );
+    assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+
+    // Change the ticker → the stop clears (both fields NULL).
+    journal.update_holding(id, "ROG", "12", "110").unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(h.security_ticker, "ROG");
+    assert!(
+        h.trailing_stop_pct.is_none() && h.trailing_stop_level.is_none(),
+        "a ticker change clears the now-stale stop"
+    );
+}

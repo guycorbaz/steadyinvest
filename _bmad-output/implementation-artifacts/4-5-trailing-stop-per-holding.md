@@ -13,7 +13,7 @@ So that I define my own capital-protection threshold and it never loosens on its
 ## Acceptance Criteria
 
 1. **AC1 — Set / clear a per-holding trailing stop (%).** On the Portefeuille register, each holding gets a control to set a trailing-stop **percentage** (e.g. `15` = 15 %), validated as an exact decimal in `(0, 100)`; an empty value clears the stop. The value persists to `holdings.trailing_stop_pct` (the column already exists, NULL until now). Invalid input → a neutral notice, nothing written (mirrors the 4.3 amount validation). (FR42)
-2. **AC2 — The stop level ratchets UP only, never down.** The persisted stop **level** (a price) is `max(prior_level, reference_price × (1 − pct/100))`, recomputed (a) when the pct is set/changed and (b) on every holdings price refresh (Story 4.4). A falling price never lowers the level; a rising price raises it. The ratchet math is a **pure `core::risk` function** (exact decimal, deterministic). `reference_price` = the linked study's `current_price` when known, else the holding's `purchase_price`. (FR42)
+2. **AC2 — The stop level ratchets UP only on the AUTOMATIC trailing.** On every holdings price refresh (Story 4.4) the persisted stop **level** (a price) becomes `max(prior_level, reference_price × (1 − pct/100))` — a falling price never lowers it; a rising price raises it. An **explicit** user set/change of the pct, by contrast, **seeds the level fresh** (`reference_price × (1 − pct/100)`, no prior fold) — the user's chosen parameter wins and may tighten OR loosen the stop (review fix — folding the prior on an explicit set made the displayed pct and level inconsistent and trapped the user). The ratchet math is a **pure `core::risk` function** (exact decimal, deterministic). `reference_price` = the linked study's `current_price` when known, else the holding's `purchase_price`. (FR42)
 3. **AC3 — Persist the ratcheted level (schema v2→v3).** A new `holdings.trailing_stop_level TEXT` column (NULL when no stop set) holds the ratcheted price, so the ratchet survives restarts (the high-water-mark can't be re-derived from the latest price alone). This is the project's **second** migration: `PRAGMA user_version 2 → 3`, `ALTER TABLE holdings ADD COLUMN trailing_stop_level TEXT`. `contract::SCHEMA_VERSION` stays unchanged (holdings is a normalized table, not a blob). No new `v3.db` corpus — a forward-migration test proves NFR-R3.
 4. **AC4 — Neutral stop display.** Each holding with a stop set shows, as **neutral facts** (ink + glyph, never a saturated hue, never an action verb — FR13): the stop level (labelled with the reference currency), and a neutral state — `sous le stop` (current price ≤ stop level) vs the distance above it. A holding with no stop shows nothing extra. The display is recomputed each render; **no alert, no action sheet** (the sell / raise-stop action sheet is Story 4.7).
 5. **AC5 — Configurable default % in Settings (FR63 thresholds).** Réglages exposes a **default trailing-stop %** (append-only `AppConfig` field, validate-on-read, like `reference_currency`). When the user opens the set-stop control with no existing value, it pre-fills the default. Changing the default does not retroactively touch existing holdings.
@@ -39,6 +39,20 @@ So that I define my own capital-protection threshold and it never loosens on its
   - [x] Réglages: a default trailing-stop % field (validate, persist, mirror on startup) beside the reference-currency picker.
   - [x] Posture: register new `MSG_*`, bump the exact `USER_FACING_MESSAGES` count; bump the `@tr` floor by the exact number of new literals (probe empirically).
 - [x] **Task 5 — Gates (AC6)** — run all gates `--locked` (fmt, clippy -D, test --workspace, deny) + smoke launch. **Confirm `core::ssg` re-diffs clean** (method fingerprint / golden / determinism green — the new `core::risk` is additive and the SSG calc is untouched). `Cargo.lock`/`deny.toml` unchanged (no new dep).
+
+### Review Findings
+
+3-layer adversarial review (Blind / Edge / Acceptance), 2026-06-28. Verdict: **ACCEPT-WITH-FINDINGS** — AC1 ✅ · AC2 ✅ · AC3 ✅ · AC4 ✅ (the missing distance-above fact was added) · AC5 ✅ · AC6 ✅. 3 patches applied, 1 deferred (issue), rest dismissed.
+
+**Patches (applied this review):**
+- [x] [Review][Patch] Explicit set seeds the level FRESH (no prior fold) — the user can tighten or loosen; only the automatic refresh ratchets up-only. Fixes the pct/level inconsistency + the "can't loosen" trap (Blind+Edge MED). `[app/src/state.rs]` (+test: a looser re-set lowers the level)
+- [x] [Review][Patch] Changing a holding's ticker clears its trailing stop — a level seeded from the OLD security would persist (ratchet-up-only) against the NEW one and show a permanent false breach (Edge HIGH). `[persistence/src/holdings.rs]` (+test: ticker change clears; qty/price edit keeps)
+- [x] [Review][Patch] Added the AC4 "à {} au-dessus" distance-above neutral fact (Acceptance MED — specified element was missing). `[app/ui/state.slint, app/src/main.rs, portfolio.slint]` (@tr floor 273→274)
+
+**Deferred (tracked):**
+- [x] [Review][Defer] Per-row stop-draft Slint two-way-binding can go stale after a rows rebuild → **issue #58**
+
+**Dismissed:** Réglages default-% silently ignores a malformed pct (matches the existing reference-currency/provider parse-guard pattern); the refresh-path ratchet swallows a write error (self-heals next refresh, best-effort secondary to the price fill); a `purchase_price = "0"` holding seeds a `0` stop (degenerate; self-heals on a real price); whitespace-only input clears the stop (clear-on-empty is the intended mechanism; the explicit "Retirer le stop" button exists); a non-existent-id set returns MSG_HOLDING_INVALID_STOP (not UI-reachable).
 
 ## Dev Notes
 

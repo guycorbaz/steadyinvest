@@ -576,9 +576,10 @@ mod tests {
         // {}): net +8 = 262. Issue #52 adds the in-flight button label ("Rafraîchissement…"): +1 = 263.
         // Story 4.5 adds the per-holding trailing-stop column (stop fact + "◆ sous le stop" + the
         // "Seuil %" field + définir/mettre-à-jour/retirer actions) and the Réglages default-% panel
-        // (title + "Pourcentage (0–100)" + enregistrer/effacer): net +10 = 273. Keep the floor strict.
+        // (title + "Pourcentage (0–100)" + enregistrer/effacer): net +10 = 273. The 4.5 review adds
+        // the "à {} {} au-dessus" distance-above fact (AC4): +1 = 274. Keep the floor strict.
         assert!(
-            total >= 273,
+            total >= 274,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
