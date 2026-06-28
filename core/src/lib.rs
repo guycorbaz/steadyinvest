@@ -17,6 +17,8 @@ pub mod method;
 pub mod method_version;
 pub mod normalize;
 pub mod quality_flags;
+/// Portfolio risk overlay (FR42–48) — decoupled from the SSG engine; see [`risk`].
+pub mod risk;
 pub mod rounding;
 pub mod ssg;
 pub mod verdict;
