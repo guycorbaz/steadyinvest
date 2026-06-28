@@ -367,7 +367,7 @@ development_status:
   4-2-neutral-buy-zone-alerts: done
   4-3-single-portfolio-holdings-register: done
   4-4-manual-price-refresh-per-holding-zones: done
-  4-5-trailing-stop-per-holding: in-progress
+  4-5-trailing-stop-per-holding: review
   4-6-simple-capital-at-risk: backlog
   4-7-neutral-sell-stop-triggers-manual-actions: backlog
   epic-4-retrospective: optional

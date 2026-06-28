@@ -1,6 +1,6 @@
 # Story 4.5: Trailing stop per holding (ratchet-up only)
 
-Status: ready-for-dev
+Status: review (dev complete 2026-06-28 — 5/5 tasks; workspace 507 tests, fmt/clippy -D/deny green; core::ssg fingerprint intact; awaiting 3-layer review + GO/NO-GO)
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -21,24 +21,24 @@ So that I define my own capital-protection threshold and it never loosens on its
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — `core::risk`: the ratchet-up-only formula (AC2, AC6)** — NEW `core/src/risk/mod.rs` (+ `pub mod risk;` in `core/src/lib.rs`)
-  - [ ] `pub fn ratchet_trailing_stop(prior_level: Option<Decimal>, reference_price: Decimal, pct: Decimal) -> Decimal` = `max(prior_level.unwrap_or(MIN), reference_price * (1 - pct/100))`; exact `rust_decimal` math, no `f64`; `pct` assumed already validated `(0,100)`. Ratchet-up-only by construction (the `max` with the prior level).
-  - [ ] (optional helper) `pub fn stop_breached(stop_level: Decimal, current_price: Decimal) -> bool` = `current_price <= stop_level` — a pure state, used by the display.
-  - [ ] Unit tests: a rising reference price raises the level; a falling price leaves it unchanged (the ratchet); first-set (prior `None`) seeds from the reference; exact-decimal scale preserved; pct at the edges. **Does NOT touch `core::ssg` / `core::method` — method fingerprint + golden + serde corpus stay green** (assert by re-running those gates).
-- [ ] **Task 2 — Persistence: the v2→v3 migration + `trailing_stop_level` CRUD (AC1, AC3)** — `persistence/src/{migrations,schema,holdings}.rs`
-  - [ ] Migration registry: add the v2→v3 step `ALTER TABLE holdings ADD COLUMN trailing_stop_level TEXT` (reuse the `migrate_to_v2` pattern; `PRAGMA user_version` 2→3). Keep `migrate_to_v2` intact. The harness already exercises a two-step registry (`fake_v2`/`TWO_STEP_REGISTRY`) — extend to three steps.
-  - [ ] `HoldingItem` gains `trailing_stop_level: Option<String>`; `add_holding` leaves both stop fields NULL; SELECTs read the new column; a focused `set_trailing_stop(holding_id, pct: Option<String>, level: Option<String>)` writes both (the rail computes them). Preserve every Story-4.3 idempotency no-op guard (a no-op set must not bump `logical_version` — C4 Synology-sync lesson).
-  - [ ] Tests: forward-migrate a v2 journal → v3 (column present, existing rows get NULL, NFR-R3); set/clear the stop round-trips; idempotent re-set is a no-op.
-- [ ] **Task 3 — App state: the set-stop rail + ratchet-on-refresh (AC1, AC2, AC5)** — `app/src/state.rs`
-  - [ ] `set_holding_trailing_stop(holding_id, pct_input: &str)` — validate the pct as an exact decimal in `(0,100)` (empty → clear both fields); on set, compute the initial level via `core::risk::ratchet_trailing_stop(prior_level, reference_price, pct)` where `reference_price` = the matched study's `current_price` (via `study_id_for_ticker` + `get_study`) else `purchase_price`; persist pct + level through the holdings rail. 1–2 new `MSG_*` (invalid pct).
-  - [ ] Ratchet-on-refresh: when a holdings price refresh lands a new `current_price` (Story 4.4's `apply_holding_price` path), for each holding of that ticker with a stop set, ratchet `trailing_stop_level` and persist. (Thread it so the refresh updates the stop in the same surface.)
-  - [ ] `AppConfig.default_trailing_stop_pct: Option<String>` (append-only `#[serde(default)]`, validate-on-read) + accessor.
-- [ ] **Task 4 — App main + Slint: per-row stop control + neutral display + Settings default (AC1, AC4, AC5)** — `app/src/main.rs`, `app/ui/{state.slint, screens/portfolio.slint, screens/settings.slint}`
-  - [ ] `HoldingRow` gains `stop-level: string`, `stop-pct: string`, `stop-breached: bool` (+ a `has-stop: bool`). `Holdings` global gains a `set-trailing-stop(id, pct)` callback. `refresh_holdings` fills the stop fields (level formatted + breach state from `core::risk`).
-  - [ ] Portefeuille row: a compact set-stop control (a small field + apply, pre-filled with the default %) and the neutral stop facts (`stop : {} {currency}` + `sous le stop` / `à {} au-dessus`). Glyphs inside `@tr`; neutral ink; **no action verb, no hue** (geofenced). Keep the 4.3/4.4 register + zone/freshness columns intact.
-  - [ ] Réglages: a default trailing-stop % field (validate, persist, mirror on startup) beside the reference-currency picker.
-  - [ ] Posture: register new `MSG_*`, bump the exact `USER_FACING_MESSAGES` count; bump the `@tr` floor by the exact number of new literals (probe empirically).
-- [ ] **Task 5 — Gates (AC6)** — run all gates `--locked` (fmt, clippy -D, test --workspace, deny) + smoke launch. **Confirm `core::ssg` re-diffs clean** (method fingerprint / golden / determinism green — the new `core::risk` is additive and the SSG calc is untouched). `Cargo.lock`/`deny.toml` unchanged (no new dep).
+- [x] **Task 1 — `core::risk`: the ratchet-up-only formula (AC2, AC6)** — NEW `core/src/risk/mod.rs` (+ `pub mod risk;` in `core/src/lib.rs`)
+  - [x] `pub fn ratchet_trailing_stop(prior_level: Option<Decimal>, reference_price: Decimal, pct: Decimal) -> Decimal` = `max(prior_level.unwrap_or(MIN), reference_price * (1 - pct/100))`; exact `rust_decimal` math, no `f64`; `pct` assumed already validated `(0,100)`. Ratchet-up-only by construction (the `max` with the prior level).
+  - [x] (optional helper) `pub fn stop_breached(stop_level: Decimal, current_price: Decimal) -> bool` = `current_price <= stop_level` — a pure state, used by the display.
+  - [x] Unit tests: a rising reference price raises the level; a falling price leaves it unchanged (the ratchet); first-set (prior `None`) seeds from the reference; exact-decimal scale preserved; pct at the edges. **Does NOT touch `core::ssg` / `core::method` — method fingerprint + golden + serde corpus stay green** (assert by re-running those gates).
+- [x] **Task 2 — Persistence: the v2→v3 migration + `trailing_stop_level` CRUD (AC1, AC3)** — `persistence/src/{migrations,schema,holdings}.rs`
+  - [x] Migration registry: add the v2→v3 step `ALTER TABLE holdings ADD COLUMN trailing_stop_level TEXT` (reuse the `migrate_to_v2` pattern; `PRAGMA user_version` 2→3). Keep `migrate_to_v2` intact. The harness already exercises a two-step registry (`fake_v2`/`TWO_STEP_REGISTRY`) — extend to three steps.
+  - [x] `HoldingItem` gains `trailing_stop_level: Option<String>`; `add_holding` leaves both stop fields NULL; SELECTs read the new column; a focused `set_trailing_stop(holding_id, pct: Option<String>, level: Option<String>)` writes both (the rail computes them). Preserve every Story-4.3 idempotency no-op guard (a no-op set must not bump `logical_version` — C4 Synology-sync lesson).
+  - [x] Tests: forward-migrate a v2 journal → v3 (column present, existing rows get NULL, NFR-R3); set/clear the stop round-trips; idempotent re-set is a no-op.
+- [x] **Task 3 — App state: the set-stop rail + ratchet-on-refresh (AC1, AC2, AC5)** — `app/src/state.rs`
+  - [x] `set_holding_trailing_stop(holding_id, pct_input: &str)` — validate the pct as an exact decimal in `(0,100)` (empty → clear both fields); on set, compute the initial level via `core::risk::ratchet_trailing_stop(prior_level, reference_price, pct)` where `reference_price` = the matched study's `current_price` (via `study_id_for_ticker` + `get_study`) else `purchase_price`; persist pct + level through the holdings rail. 1–2 new `MSG_*` (invalid pct).
+  - [x] Ratchet-on-refresh: when a holdings price refresh lands a new `current_price` (Story 4.4's `apply_holding_price` path), for each holding of that ticker with a stop set, ratchet `trailing_stop_level` and persist. (Thread it so the refresh updates the stop in the same surface.)
+  - [x] `AppConfig.default_trailing_stop_pct: Option<String>` (append-only `#[serde(default)]`, validate-on-read) + accessor.
+- [x] **Task 4 — App main + Slint: per-row stop control + neutral display + Settings default (AC1, AC4, AC5)** — `app/src/main.rs`, `app/ui/{state.slint, screens/portfolio.slint, screens/settings.slint}`
+  - [x] `HoldingRow` gains `stop-level: string`, `stop-pct: string`, `stop-breached: bool` (+ a `has-stop: bool`). `Holdings` global gains a `set-trailing-stop(id, pct)` callback. `refresh_holdings` fills the stop fields (level formatted + breach state from `core::risk`).
+  - [x] Portefeuille row: a compact set-stop control (a small field + apply, pre-filled with the default %) and the neutral stop facts (`stop : {} {currency}` + `sous le stop` / `à {} au-dessus`). Glyphs inside `@tr`; neutral ink; **no action verb, no hue** (geofenced). Keep the 4.3/4.4 register + zone/freshness columns intact.
+  - [x] Réglages: a default trailing-stop % field (validate, persist, mirror on startup) beside the reference-currency picker.
+  - [x] Posture: register new `MSG_*`, bump the exact `USER_FACING_MESSAGES` count; bump the `@tr` floor by the exact number of new literals (probe empirically).
+- [x] **Task 5 — Gates (AC6)** — run all gates `--locked` (fmt, clippy -D, test --workspace, deny) + smoke launch. **Confirm `core::ssg` re-diffs clean** (method fingerprint / golden / determinism green — the new `core::risk` is additive and the SSG calc is untouched). `Cargo.lock`/`deny.toml` unchanged (no new dep).
 
 ## Dev Notes
 
