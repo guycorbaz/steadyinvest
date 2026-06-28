@@ -1156,6 +1156,27 @@ impl JournalState {
         field: &str,
         review: Review,
     ) -> Result<(), String> {
+        // #47: a value-less cell may be flagged `?` (a gap to fill) but must NEVER be `✓`-validated.
+        // Validating "nothing" — an existing to-fill cell OR a never-touched optional column that this
+        // call would materialize as an empty gap — is degenerate: a later refresh gap-fills it and
+        // `provider_cell` resets the review to `None`, so the `✓` vanishes `Validated → None` (NOT
+        // `→ ToReview`), silently dropping the badge and escaping the Story-3.6 re-validate count.
+        // Refuse it as a neutral no-op (no journal write, no undo step); `?`/`none` stay allowed.
+        if review == Review::Validated {
+            let value_present = self
+                .get_study(study_id)
+                .and_then(|study| {
+                    study
+                        .years
+                        .get(year_index)
+                        .and_then(|year| entry::get_cell(year, field))
+                        .map(|cell| cell.value.is_some())
+                })
+                .unwrap_or(false);
+            if !value_present {
+                return Ok(());
+            }
+        }
         self.mutate_cell(study_id, year_index, field, move |base, _provenance| Cell {
             review,
             // Re-validating reconciles a pending divergence (Story 3.4 AC4): the kept value stands
@@ -4160,6 +4181,47 @@ mod tests {
         assert_eq!(cell.review, Review::ToReview);
         assert_eq!(cell.value, None, "a reviewed gap holds no value — never 0");
         assert_eq!(cell.coverage, Coverage::ToFill);
+    }
+
+    #[test]
+    fn an_empty_cell_cannot_be_validated_issue_47() {
+        // #47: validating a value-less cell must be refused (a neutral no-op) — otherwise a later
+        // refresh gap-fills it, resets the review to None, and the ✓ vanishes silently (escaping the
+        // ✓→? re-validate count). `?` on a gap stays allowed (flag a column to fill).
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("journal.db");
+        let (mut state, id) = study_with_entry(&path);
+
+        // A never-touched optional column: `?` materializes a to-fill gap (allowed)…
+        state
+            .set_review(id, 2, entry::FIELD_DIVIDEND, Review::ToReview)
+            .unwrap();
+        // …but `✓` on the still-empty cell is refused — review stays `?`, value stays None.
+        state
+            .set_review(id, 2, entry::FIELD_DIVIDEND, Review::Validated)
+            .unwrap();
+        let cell = open_state(&path).get_study(id).unwrap().years[2]
+            .dividend_per_share
+            .clone()
+            .expect("the gap cell exists");
+        assert_eq!(
+            cell.review,
+            Review::ToReview,
+            "an empty cell cannot reach ✓ — the validate is a no-op"
+        );
+        assert_eq!(cell.value, None, "still no value — never materialized to 0");
+
+        // Validating a never-touched column (cell does not exist yet) is likewise refused: it must
+        // not materialize a Validated empty gap (the same bug, via materialization).
+        state
+            .set_review(id, 1, entry::FIELD_DIVIDEND, Review::Validated)
+            .unwrap();
+        assert!(
+            open_state(&path).get_study(id).unwrap().years[1]
+                .dividend_per_share
+                .is_none(),
+            "validating a never-touched empty column materializes nothing"
+        );
     }
 
     #[test]
