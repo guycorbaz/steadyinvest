@@ -577,9 +577,10 @@ mod tests {
         // Story 4.5 adds the per-holding trailing-stop column (stop fact + "◆ sous le stop" + the
         // "Seuil %" field + définir/mettre-à-jour/retirer actions) and the Réglages default-% panel
         // (title + "Pourcentage (0–100)" + enregistrer/effacer): net +10 = 273. The 4.5 review adds
-        // the "à {} {} au-dessus" distance-above fact (AC4): +1 = 274. Keep the floor strict.
+        // the "à {} {} au-dessus" distance-above fact (AC4): +1 = 274. Story 4.6 adds the capital-at-
+        // risk header fact (with + without the "% du capital investi" clause): +2 = 276. Floor strict.
         assert!(
-            total >= 274,
+            total >= 276,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

@@ -594,6 +594,10 @@ export global Holdings {
     // Story 4.4 / issue #52: true while a price refresh is in flight — disables the refresh button
     // so a double-click can't enqueue duplicate jobs. Cleared when the last job's outcome arrives.
     in-out property <bool> refreshing;
+    // Story 4.6 (FR43): the portfolio's capital-at-risk figure + its share of invested capital, both
+    // already-formatted display strings ("0" when none; `capital-at-risk-pct` is "" when invested=0).
+    in-out property <string> capital-at-risk;
+    in-out property <string> capital-at-risk-pct;
     // ticker, quantity, purchase-price → written? (so the form keeps the user's input on refusal)
     callback add-holding(string, string, string) -> bool;
     // id, ticker, quantity, purchase-price → written?

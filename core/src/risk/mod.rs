@@ -49,6 +49,36 @@ pub fn stop_breached(stop_level: Decimal, current_price: Decimal) -> bool {
     current_price <= stop_level
 }
 
+/// One position's inputs to the portfolio risk sums (Story 4.6, FR43): its average cost, its
+/// trailing-stop level (`None` when no stop is set), and its quantity. All exact [`Decimal`].
+#[derive(Debug, Clone, Copy)]
+pub struct PositionRisk {
+    pub avg_cost: Decimal,
+    pub stop: Option<Decimal>,
+    pub quantity: Decimal,
+}
+
+/// The portfolio's **capital-at-risk** (Story 4.6, FR43 — the Appendix-A formula):
+/// `Σ (avg_cost − stop) × quantity` over positions whose stop is **set** and **≤ avg_cost**. A
+/// position with no stop, or whose stop has ratcheted **above** cost, contributes **0** (its
+/// capital-loss risk is gone). `≥ 0` by construction (the `stop ≤ avg_cost` guard means every summed
+/// term is non-negative). Single-currency — the caller sums one reference currency (no FX, Epic 4).
+pub fn capital_at_risk(positions: &[PositionRisk]) -> Decimal {
+    positions
+        .iter()
+        .filter_map(|p| {
+            let stop = p.stop?;
+            (stop <= p.avg_cost).then(|| (p.avg_cost - stop) * p.quantity)
+        })
+        .sum()
+}
+
+/// Total invested capital `Σ avg_cost × quantity` (Story 4.6) — the denominator for capital-at-risk
+/// as a percentage. `0` for an empty portfolio (the caller omits the percent then).
+pub fn total_invested(positions: &[PositionRisk]) -> Decimal {
+    positions.iter().map(|p| p.avg_cost * p.quantity).sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +131,57 @@ mod tests {
         );
         assert!(stop_breached(d(100), d(99)));
         assert!(!stop_breached(d(100), d(101)));
+    }
+
+    fn pos(cost: i64, stop: Option<i64>, qty: i64) -> PositionRisk {
+        PositionRisk {
+            avg_cost: d(cost),
+            stop: stop.map(d),
+            quantity: d(qty),
+        }
+    }
+
+    #[test]
+    fn capital_at_risk_sums_only_below_cost_stops() {
+        let portfolio = [
+            pos(100, Some(85), 10), // stop below cost → (100−85)×10 = 150
+            pos(50, Some(60), 20),  // stop ABOVE cost → 0 (risk gone)
+            pos(30, None, 100),     // no stop → 0
+            pos(40, Some(40), 5),   // stop == cost → (40−40)×5 = 0
+        ];
+        assert_eq!(capital_at_risk(&portfolio), d(150));
+    }
+
+    #[test]
+    fn capital_at_risk_is_non_negative_and_zero_when_empty_or_all_protected() {
+        assert_eq!(capital_at_risk(&[]), d(0));
+        assert_eq!(
+            capital_at_risk(&[pos(10, Some(20), 5), pos(10, None, 5)]),
+            d(0),
+            "all stops above cost (or absent) → 0, never negative"
+        );
+    }
+
+    #[test]
+    fn total_invested_sums_cost_times_quantity() {
+        assert_eq!(
+            total_invested(&[pos(100, Some(85), 10), pos(50, None, 4)]),
+            d(1200) // 100×10 + 50×4
+        );
+        assert_eq!(total_invested(&[]), d(0));
+    }
+
+    #[test]
+    fn capital_at_risk_preserves_exact_decimal_scale() {
+        // (100.50 − 90.25) × 3 = 30.75 — exact.
+        let p = PositionRisk {
+            avg_cost: Decimal::from_str_exact("100.50").unwrap(),
+            stop: Some(Decimal::from_str_exact("90.25").unwrap()),
+            quantity: d(3),
+        };
+        assert_eq!(
+            capital_at_risk(&[p]),
+            Decimal::from_str_exact("30.75").unwrap()
+        );
     }
 }
