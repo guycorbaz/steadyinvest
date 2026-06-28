@@ -129,6 +129,11 @@ pub const MSG_HOLDING_INVALID_NUMBER: &str =
 pub const MSG_HOLDING_INVALID_TICKER: &str =
     "Le symbole est vide ; aucune position n'a été enregistrée.";
 
+/// Trailing-stop copy (Story 4.5, FR42) — fact-stating, posture-gated. Raised when a trailing-stop
+/// percentage is not a number strictly between 0 and 100; nothing is written.
+pub const MSG_HOLDING_INVALID_STOP: &str =
+    "Le seuil suiveur doit être un pourcentage entre 0 et 100 ; rien n'a été enregistré.";
+
 /// Holdings price-refresh copy (Story 4.4, FR40) — fact-stating, posture-gated. Set when a manual
 /// "refresh prices" begins, or when no holding is linked to a saved study (nothing to refresh).
 pub const MSG_HOLDINGS_REFRESHING: &str = "Rafraîchissement des prix en cours.";
@@ -289,6 +294,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_WATCH_NO_STUDY,
     MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_INVALID_TICKER,
+    MSG_HOLDING_INVALID_STOP,
     MSG_HOLDINGS_REFRESHING,
     MSG_HOLDINGS_REFRESH_NONE,
     MSG_KEY_SAVED,
@@ -851,6 +857,106 @@ impl JournalState {
         }
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal.delete_holding(id).map_err(watch_error)
+    }
+
+    /// Set (or clear) a holding's trailing-stop percentage (Story 4.5, FR42). An empty `pct_input`
+    /// clears the stop. Otherwise the pct is validated to `(0, 100)` and the level is **seeded fresh**
+    /// from the *reference price* — the matched study's `current_price` if known, else the holding's
+    /// `purchase_price` — so the user's chosen pct wins (they may tighten OR loosen the stop). The
+    /// ratchet-up-only rule (FR42) governs the **automatic** price-driven trailing
+    /// ([`Self::ratchet_trailing_stops_for_study`]), NOT an explicit re-parametrisation — folding the
+    /// prior level here would make the displayed pct and level inconsistent (review finding). Both
+    /// pct + level persist together (idempotent). Guarded.
+    pub fn set_holding_trailing_stop(
+        &mut self,
+        holding_id: Uuid,
+        pct_input: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let pct_input = pct_input.trim();
+        if pct_input.is_empty() {
+            // Clear the stop (both fields → NULL).
+            let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+            return journal
+                .set_trailing_stop(holding_id, None, None)
+                .map_err(watch_error);
+        }
+        let pct = Decimal::from_str_exact(pct_input)
+            .ok()
+            .filter(|p| p.is_sign_positive() && !p.is_zero() && *p < Decimal::ONE_HUNDRED)
+            .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
+        let holding = self
+            .list_holdings()
+            .into_iter()
+            .find(|h| h.id == holding_id)
+            .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
+        let reference_price = self
+            .study_id_for_ticker(&holding.security_ticker)
+            .and_then(|sid| self.get_study(sid))
+            .and_then(|s| s.judgment.current_price)
+            .map(|m| m.as_decimal())
+            .or_else(|| Decimal::from_str_exact(&holding.purchase_price).ok())
+            .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
+        // Seed fresh (no prior level) — an explicit set is the user redefining the stop, not an
+        // automatic ratchet, so it may move the level down as well as up.
+        let level = steadyinvest_core::risk::ratchet_trailing_stop(None, reference_price, pct);
+        // Normalize (drop trailing zeros) so the stored string is canonical — re-computing the same
+        // value yields the same string, which keeps the persistence no-op idempotency guard honest.
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .set_trailing_stop(
+                holding_id,
+                Some(&pct.normalize().to_string()),
+                Some(&level.normalize().to_string()),
+            )
+            .map_err(watch_error)
+    }
+
+    /// Ratchet the trailing-stop level of every holding of `study_id`'s ticker against a fresh price
+    /// (Story 4.5, FR42) — called after a holdings price refresh fills the study's `current_price`
+    /// ([`Self::apply_holding_price`]). Only holdings that **have** a stop set are touched; the
+    /// `core::risk` ratchet (and the persistence no-op guard) ensure a falling price writes nothing.
+    pub fn ratchet_trailing_stops_for_study(
+        &mut self,
+        study_id: Uuid,
+        price: Decimal,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Ok(()); // a read-only refresh simply doesn't ratchet — never an error
+        }
+        let Some(ticker) = self.get_study(study_id).map(|s| s.security_ticker) else {
+            return Ok(());
+        };
+        let targets: Vec<(Uuid, Decimal, Option<Decimal>)> = self
+            .list_holdings()
+            .into_iter()
+            .filter(|h| h.security_ticker.eq_ignore_ascii_case(&ticker))
+            .filter_map(|h| {
+                let pct = h
+                    .trailing_stop_pct
+                    .as_deref()
+                    .and_then(|s| Decimal::from_str_exact(s).ok())?;
+                let prior = h
+                    .trailing_stop_level
+                    .as_deref()
+                    .and_then(|s| Decimal::from_str_exact(s).ok());
+                Some((h.id, pct, prior))
+            })
+            .collect();
+        for (id, pct, prior) in targets {
+            let level = steadyinvest_core::risk::ratchet_trailing_stop(prior, price, pct);
+            let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+            journal
+                .set_trailing_stop(
+                    id,
+                    Some(&pct.normalize().to_string()),
+                    Some(&level.normalize().to_string()),
+                )
+                .map_err(watch_error)?;
+        }
+        Ok(())
     }
 
     /// Archive a study (Story 2.12, FR54): flip `status` to `"archived"` so it leaves the default
@@ -3423,6 +3529,80 @@ mod tests {
         assert!(
             engine::study_in_buy_zone(&after),
             "price 70 sits in the buy third → the zone recomputes"
+        );
+    }
+
+    // ── Story 4.5 — trailing stop per holding (validate, seed, ratchet) ──
+
+    #[test]
+    fn set_holding_trailing_stop_validates_seeds_from_purchase_price_and_clears() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x55, "2026-06-28T10:00:00Z");
+        state.add_holding("NESN", "10", "100").unwrap();
+        let id = state.list_holdings()[0].id;
+
+        // Out-of-range / non-numeric pct → refused, nothing written.
+        for bad in ["0", "100", "150", "-5", "abc", "1.2.3"] {
+            assert_eq!(
+                state.set_holding_trailing_stop(id, bad),
+                Err(MSG_HOLDING_INVALID_STOP.to_string()),
+                "pct {bad:?} is refused"
+            );
+        }
+        assert!(state.list_holdings()[0].trailing_stop_pct.is_none());
+
+        // No linked study → the level seeds from the purchase price 100: 100 × (1 − 0.15) = 85.
+        state.set_holding_trailing_stop(id, "15").unwrap();
+        let h = state.list_holdings().into_iter().next().unwrap();
+        assert_eq!(h.trailing_stop_pct.as_deref(), Some("15"));
+        assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+
+        // Review fix: an EXPLICIT re-set seeds FRESH (the user's pct wins) — a looser 50% LOWERS the
+        // level to 100 × (1 − 0.50) = 50, even though 50 < the prior 85 (ratchet-up-only governs only
+        // the automatic refresh path, not an explicit re-parametrisation).
+        state.set_holding_trailing_stop(id, "50").unwrap();
+        let h = state.list_holdings().into_iter().next().unwrap();
+        assert_eq!(h.trailing_stop_pct.as_deref(), Some("50"));
+        assert_eq!(h.trailing_stop_level.as_deref(), Some("50"));
+
+        // An empty pct clears the stop (both fields → None).
+        state.set_holding_trailing_stop(id, "").unwrap();
+        let h = state.list_holdings().into_iter().next().unwrap();
+        assert!(h.trailing_stop_pct.is_none() && h.trailing_stop_level.is_none());
+    }
+
+    #[test]
+    fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x56, "2026-06-28T10:00:00Z");
+        // A holding linked to a study of the same ticker (so the ratchet keys on the study's price).
+        let study = state.create_study("NESN", "CHF").unwrap();
+        state.add_holding("NESN", "10", "100").unwrap();
+        let id = state.list_holdings()[0].id;
+        // Seed a 20% stop → level 80 (from purchase 100, no current_price yet).
+        state.set_holding_trailing_stop(id, "20").unwrap();
+        assert_eq!(
+            state.list_holdings()[0].trailing_stop_level.as_deref(),
+            Some("80")
+        );
+
+        // A refresh to 150 ratchets the level up: 150 × 0.80 = 120.
+        state
+            .ratchet_trailing_stops_for_study(study, Decimal::from(150))
+            .unwrap();
+        assert_eq!(
+            state.list_holdings()[0].trailing_stop_level.as_deref(),
+            Some("120")
+        );
+
+        // A refresh to a LOWER 90 leaves the level at 120 (ratchet-up only).
+        state
+            .ratchet_trailing_stops_for_study(study, Decimal::from(90))
+            .unwrap();
+        assert_eq!(
+            state.list_holdings()[0].trailing_stop_level.as_deref(),
+            Some("120"),
+            "a falling price never lowers the stop"
         );
     }
 

@@ -39,6 +39,17 @@ pub(crate) fn migrate_to_v2(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration step 3 (Story 4.5, FR42): a holding carries a **ratcheted trailing-stop level** — the
+/// stop price that ratchets up only. The v1 `holdings` table had `trailing_stop_pct` (the parameter)
+/// but no level; the level cannot be re-derived from the latest price alone (it loses the high-water
+/// mark), so it must be persisted. Add a **nullable** `trailing_stop_level` (NULL when no stop set).
+/// Like v2: a metadata-only `ADD COLUMN`, forward-safe (an existing v2 journal gains the column on
+/// open with NULL on every row), and `DDL_V1` stays frozen.
+pub(crate) fn migrate_to_v3(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch("ALTER TABLE holdings ADD COLUMN trailing_stop_level TEXT")?;
+    Ok(())
+}
+
 /// The complete v1 DDL. Frozen once shipped — schema changes go through new migration steps.
 const DDL_V1: &str = "
     -- Journal identity (ADD6): one row, journal_id (UUID) + monotonic logical_version.
@@ -189,8 +200,8 @@ mod tests {
         let conn = v1_connection();
         assert_eq!(
             migrations::user_version(&conn).expect("user_version reads"),
-            2,
-            "the registry migrates a fresh DB to v2"
+            3,
+            "the registry migrates a fresh DB to the latest version (v3)"
         );
         assert!(
             column_names(&conn, "watchlist_items").contains(&"study_id".to_string()),
@@ -199,6 +210,28 @@ mod tests {
         // The v1 columns are untouched (additive migration).
         for col in ["id", "security_ticker", "position", "created_at"] {
             assert!(column_names(&conn, "watchlist_items").contains(&col.to_string()));
+        }
+    }
+
+    #[test]
+    fn v3_adds_the_holdings_trailing_stop_level_column() {
+        // Story 4.5 (FR42): the v3 migration gives `holdings` a nullable `trailing_stop_level`.
+        let conn = v1_connection();
+        assert!(
+            column_names(&conn, "holdings").contains(&"trailing_stop_level".to_string()),
+            "v3 added holdings.trailing_stop_level"
+        );
+        // The v1 holdings columns are untouched (additive migration).
+        for col in [
+            "id",
+            "portfolio_id",
+            "security_ticker",
+            "quantity",
+            "purchase_price",
+            "trailing_stop_pct",
+            "created_at",
+        ] {
+            assert!(column_names(&conn, "holdings").contains(&col.to_string()));
         }
     }
 

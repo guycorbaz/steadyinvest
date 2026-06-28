@@ -236,6 +236,37 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
+            // Story 4.5 (FR42/FR63) — the default trailing-stop percentage the per-holding set-stop
+            // control pre-fills. A threshold, not advice; empty = no default.
+            stop-panel := SettingsPanel {
+                title: @tr("Seuil suiveur par défaut");
+                property <string> draft: Prefs.default-trailing-stop-pct;
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    TextField {
+                        placeholder: @tr("Pourcentage (0–100)");
+                        text <=> stop-panel.draft;
+                        width: 200px;
+                    }
+                    ActionButton {
+                        label: @tr("Enregistrer");
+                        enabled: true;
+                        clicked => { Prefs.default-trailing-stop-pct-changed(stop-panel.draft); }
+                    }
+                    ActionButton {
+                        label: @tr("Effacer");
+                        enabled: Prefs.default-trailing-stop-pct != "";
+                        clicked => {
+                            stop-panel.draft = "";
+                            Prefs.default-trailing-stop-pct-changed("");
+                        }
+                    }
+                }
+            }
+
             SettingsPanel {
                 title: @tr("Format des nombres");
 

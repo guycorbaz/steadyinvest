@@ -574,9 +574,12 @@ mod tests {
         // Story 4.4 adds the holdings price-refresh button + per-row zone marker ("◆ {}" ×3) + the
         // "no linked study" hint + the present-price fact + the freshness murmurs (périmé / à jour le
         // {}): net +8 = 262. Issue #52 adds the in-flight button label ("Rafraîchissement…"): +1 = 263.
-        // Keep the floor strict against a broken scan.
+        // Story 4.5 adds the per-holding trailing-stop column (stop fact + "◆ sous le stop" + the
+        // "Seuil %" field + définir/mettre-à-jour/retirer actions) and the Réglages default-% panel
+        // (title + "Pourcentage (0–100)" + enregistrer/effacer): net +10 = 273. The 4.5 review adds
+        // the "à {} {} au-dessus" distance-above fact (AC4): +1 = 274. Keep the floor strict.
         assert!(
-            total >= 263,
+            total >= 274,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -619,10 +622,10 @@ mod tests {
         // 4.1 adds the watchlist "no study for this ticker" notice (MSG_WATCH_NO_STUDY): 41 + 1 = 42.
         // Story 4.3 adds the two holdings-register validation notices (invalid number / empty
         // symbol): 42 + 2 = 44. Story 4.4 adds the two holdings price-refresh notices (refreshing /
-        // nothing-linked): 44 + 2 = 46.
+        // nothing-linked): 44 + 2 = 46. Story 4.5 adds the trailing-stop validation notice: 46 + 1 = 47.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            46,
+            47,
             "state.rs message inventory changed — register the new notice"
         );
     }

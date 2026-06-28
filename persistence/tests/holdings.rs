@@ -212,3 +212,91 @@ fn holdings_survive_reopen() {
     assert_eq!(items[0].quantity, "10");
     assert_eq!(items[0].purchase_price, "95.40");
 }
+
+#[test]
+fn set_trailing_stop_round_trips_is_idempotent_and_clears() {
+    // Story 4.5 (FR42): the trailing-stop pct + ratcheted level persist together, a no-op set bumps
+    // no version (C4), the level can ratchet up, and None/None clears the stop.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let id = add_at(&mut journal, "NESN", "10", "100", 0);
+    let v0 = journal.logical_version().unwrap();
+
+    journal
+        .set_trailing_stop(id, Some("15"), Some("85"))
+        .unwrap();
+    let v1 = journal.logical_version().unwrap();
+    assert!(v1 > v0, "setting a stop bumps the version");
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(h.trailing_stop_pct.as_deref(), Some("15"));
+    assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+
+    journal
+        .set_trailing_stop(id, Some("15"), Some("85"))
+        .unwrap();
+    assert_eq!(
+        journal.logical_version().unwrap(),
+        v1,
+        "an identical set is a no-op (no version bump)"
+    );
+
+    journal
+        .set_trailing_stop(id, Some("15"), Some("90"))
+        .unwrap();
+    assert!(journal.logical_version().unwrap() > v1, "a ratchet bumps");
+    assert_eq!(
+        journal.list_holdings(portfolio_id()).unwrap()[0]
+            .trailing_stop_level
+            .as_deref(),
+        Some("90")
+    );
+
+    journal.set_trailing_stop(id, None, None).unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert!(
+        h.trailing_stop_pct.is_none() && h.trailing_stop_level.is_none(),
+        "None/None clears the stop"
+    );
+
+    let v = journal.logical_version().unwrap();
+    journal
+        .set_trailing_stop(Uuid::from_u128(0xDEAD), Some("10"), Some("9"))
+        .unwrap();
+    assert_eq!(
+        journal.logical_version().unwrap(),
+        v,
+        "an absent id is an idempotent no-op"
+    );
+}
+
+#[test]
+fn changing_a_holdings_ticker_clears_its_trailing_stop_but_qty_price_edits_keep_it() {
+    // Story 4.5 review: a stop level is seeded from a security's price/cost; on a TICKER change it
+    // would persist (ratchet-up-only) against the new security → a false breach. So a ticker edit
+    // clears the stop; editing only quantity/price leaves it intact.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let id = add_at(&mut journal, "NESN", "10", "100", 0);
+    journal
+        .set_trailing_stop(id, Some("15"), Some("85"))
+        .unwrap();
+
+    // Edit only quantity + price (same ticker) → the stop is kept.
+    journal.update_holding(id, "NESN", "12", "110").unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(
+        h.trailing_stop_pct.as_deref(),
+        Some("15"),
+        "qty/price edit keeps the stop"
+    );
+    assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+
+    // Change the ticker → the stop clears (both fields NULL).
+    journal.update_holding(id, "ROG", "12", "110").unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(h.security_ticker, "ROG");
+    assert!(
+        h.trailing_stop_pct.is_none() && h.trailing_stop_level.is_none(),
+        "a ticker change clears the now-stale stop"
+    );
+}

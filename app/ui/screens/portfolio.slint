@@ -4,7 +4,7 @@
 // persist + re-render).
 
 import { Tokens } from "../tokens.slint";
-import { Holdings, HoldingRow, Labels } from "../state.slint";
+import { Holdings, HoldingRow, Labels, Prefs } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { TextField } from "../components/text_field.slint";
 
@@ -108,10 +108,13 @@ export component PortfolioScreen inherits Rectangle {
         }
 
         // ── The register ──
-        for row[index] in Holdings.rows: Rectangle {
+        for row[index] in Holdings.rows: hrow := Rectangle {
+            // Per-row draft for the trailing-stop % field (Story 4.5): pre-filled with the holding's
+            // current stop, or the Réglages default when none is set yet.
+            property <string> stop-draft: row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
             background: Tokens.surface-alt;
             border-radius: Tokens.radius;
-            height: 64px;
+            height: 96px;
             HorizontalLayout {
                 padding-left: Tokens.space-12;
                 padding-right: Tokens.space-12;
@@ -168,6 +171,46 @@ export component PortfolioScreen inherits Rectangle {
                         text: @tr("à jour le {}", row.as-of);
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;
+                    }
+                }
+                // ── Story 4.5 (FR42): the trailing stop — a neutral fact + a set/clear control. The
+                // stop never carries a hue (geofenced); a breach is a neutral fact, never an action
+                // (the sell/raise-stop sheet is Story 4.7). ──
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    if row.has-stop: Text {
+                        text: @tr("Stop {}% : {} {}", row.stop-pct, row.stop-level, Holdings.reference-currency);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    if row.has-stop && row.stop-breached: Text {
+                        text: @tr("◆ sous le stop");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    if row.has-stop && !row.stop-breached && row.stop-distance != "": Text {
+                        text: @tr("à {} {} au-dessus", row.stop-distance, Holdings.reference-currency);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        TextField {
+                            placeholder: @tr("Seuil %");
+                            text <=> hrow.stop-draft;
+                            horizontal-stretch: 1;
+                        }
+                        ActionButton {
+                            label: row.has-stop ? @tr("Mettre à jour") : @tr("Définir le stop");
+                            enabled: !Holdings.read-only && hrow.stop-draft != "";
+                            clicked => { Holdings.set-trailing-stop(row.id, hrow.stop-draft); }
+                        }
+                        if row.has-stop: ActionButton {
+                            label: @tr("Retirer le stop");
+                            enabled: !Holdings.read-only;
+                            clicked => { Holdings.set-trailing-stop(row.id, ""); }
+                        }
                     }
                 }
                 ActionButton {

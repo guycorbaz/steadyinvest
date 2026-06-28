@@ -94,6 +94,21 @@ pub struct AppConfig {
     /// [`AppConfig::reference_currency_or_default`] so a damaged on-disk value falls back.
     #[serde(default = "default_reference_currency")]
     pub reference_currency: String,
+    /// The default trailing-stop **percentage** the set-stop control pre-fills (Story 4.5, FR42/FR63
+    /// thresholds). `None` = no default. Lives in app-config (ADD7 — outside the journal). Append-only
+    /// `#[serde(default)]` (Option → `None`): a pre-4.5 config loads fine. Read it through
+    /// [`AppConfig::default_trailing_stop_pct_or_none`] so a damaged on-disk value is ignored.
+    #[serde(default)]
+    pub default_trailing_stop_pct: Option<String>,
+}
+
+/// Whether `s` is a well-formed trailing-stop percentage: an exact decimal strictly inside `(0, 100)`
+/// (Story 4.5). A 0 %/100 %/negative/garbage value is rejected (a 0 % stop is meaningless; a ≥100 %
+/// stop would put the level at/below zero).
+pub fn is_valid_trailing_stop_pct(s: &str) -> bool {
+    rust_decimal::Decimal::from_str_exact(s.trim())
+        .ok()
+        .is_some_and(|p| p > rust_decimal::Decimal::ZERO && p < rust_decimal::Decimal::ONE_HUNDRED)
 }
 
 /// serde default for [`AppConfig::reference_currency`] (a free function — `#[serde(default = …)]`
@@ -122,6 +137,7 @@ impl Default for AppConfig {
             study_view_state: BTreeMap::new(),
             preferred_provider: ProviderChoice::default(),
             reference_currency: default_reference_currency(),
+            default_trailing_stop_pct: None,
         }
     }
 }
@@ -136,6 +152,15 @@ impl AppConfig {
         } else {
             DEFAULT_REFERENCE_CURRENCY.to_string()
         }
+    }
+
+    /// The persisted default trailing-stop percentage if well-formed (Story 4.5), else `None` — a
+    /// damaged on-disk value must not pre-fill a malformed percent (validate before trust).
+    pub fn default_trailing_stop_pct_or_none(&self) -> Option<String> {
+        self.default_trailing_stop_pct
+            .as_deref()
+            .filter(|s| is_valid_trailing_stop_pct(s))
+            .map(str::to_string)
     }
 
     /// Persisted window size if it is sane, the default size otherwise (a 0×0 or absurd value
@@ -256,6 +281,7 @@ mod tests {
             )]),
             preferred_provider: ProviderChoice::None,
             reference_currency: "EUR".to_string(),
+            default_trailing_stop_pct: Some("15".to_string()),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
