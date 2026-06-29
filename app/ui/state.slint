@@ -595,7 +595,8 @@ export global Holdings {
     // so a double-click can't enqueue duplicate jobs. Cleared when the last job's outcome arrives.
     in-out property <bool> refreshing;
     // Story 4.6 (FR43): the portfolio's capital-at-risk figure + its share of invested capital, both
-    // already-formatted display strings ("0" when none; `capital-at-risk-pct` is "" when invested=0).
+    // already-formatted display strings (the figure is "0.00" at the Price scale when none;
+    // `capital-at-risk-pct` is "" when invested=0, else a locale-formatted 1-dp percent).
     in-out property <string> capital-at-risk;
     in-out property <string> capital-at-risk-pct;
     // ticker, quantity, purchase-price → written? (so the form keeps the user's input on refusal)

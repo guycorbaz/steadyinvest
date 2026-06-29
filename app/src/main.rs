@@ -334,10 +334,13 @@ fn refresh_holdings(
         viewmodel::format::format_scaled(car, DisplayField::Price, format).into(),
     );
     let pct = if invested > rust_decimal::Decimal::ZERO {
-        (car / invested * rust_decimal::Decimal::from(100))
-            .round_dp(1)
-            .normalize()
-            .to_string()
+        // Format the percent through the same locale-aware path as the figure (Percent = 1 dp), so a
+        // comma-preset display doesn't mix separators (e.g. "1 234,57 CHF (12,5 %)", not "(12.5 %)").
+        viewmodel::format::format_scaled(
+            car / invested * rust_decimal::Decimal::from(100),
+            DisplayField::Percent,
+            format,
+        )
     } else {
         String::new()
     };

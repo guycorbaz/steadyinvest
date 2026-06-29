@@ -1,6 +1,6 @@
 # Story 4.6: Simple capital-at-risk
 
-Status: review (dev complete 2026-06-28 — 4/4 tasks; workspace 513 tests, fmt/clippy -D/deny green; core::ssg fingerprint intact; no migration/contract change)
+Status: done (3-layer review 2026-06-29 — 4/4 ACs satisfied; 2 patches applied [locale percent + doc comment], 2 deferred → GitHub, 3 dismissed; workspace 515 tests, fmt/clippy -D green; core::ssg fingerprint intact; no migration/contract change)
 
 ## Story
 
@@ -53,3 +53,14 @@ The **single** capital-at-risk figure (vs purchase price) + its share of investe
 
 ### Manual on-display GO/NO-GO (Guy)
 Set stops on two holdings (one stop below cost, one ratcheted above cost) → the figure equals only the below-cost holding's `(cost−stop)×qty`; the above-cost one adds nothing; an un-stopped holding adds nothing; the % matches `÷ Σ cost×qty`; a price refresh that ratchets a stop updates the figure; an empty portfolio shows `0`.
+
+### Review Findings (3-layer adversarial — 2026-06-29)
+
+3 layers (Blind Hunter / Edge Case Hunter / Acceptance Auditor). All 4 ACs satisfied (no migration / contract / dep change; `core::ssg` intact; `@tr` floor +2 exact). 0 decision-needed, 2 patch, 2 defer, 3 dismissed.
+
+- [x] [Review][Patch] Percent display is not locale-aware — figure uses `format_scaled` (comma under FR preset) but the percent uses `.round_dp(1).normalize().to_string()` (always `.`), so a French-preset display reads `1 234,57 CHF (12.5 %)`. Use the existing `format_scaled(car/invested*100, DisplayField::Percent, format)` (scale 1 dp, locale-aware) for the non-empty branch; keep the `""`-on-invested=0 branch. [app/src/main.rs:336-344]
+- [x] [Review][Patch] Doc comment inaccuracy — `capital-at-risk` is `"0.00"` (Price scale) when none, not `"0"` as the comment claims. Fix the comment. [app/ui/state.slint:597]
+- [x] [Review][Defer] Decimal overflow → panic on unbounded manual qty/price — `(avg_cost−stop)×quantity` / `.sum()` panic if a product/sum exceeds `Decimal::MAX` (~7.9e28); `validate_holding_amounts` checks sign only, never magnitude, so an absurd persisted row crashes the Portefeuille on every render. Pre-existing write-side validation gap; unrealistic trigger but crash-class. [app/src/state.rs:1837 validate_holding_amounts] — deferred → GitHub #60
+- [x] [Review][Defer] `0,0 % du capital investi` shown when no stop is set — spec-compliant (AC3: no-at-risk → 0, % omitted only when invested=0) but can read as "no downside exposure". Product/UX question for Guy. [app/src/main.rs:336-344] — deferred → GitHub #61 (product decision)
+
+Dismissed (3, noise/handled): malformed-field skip drops position from both sums (defensive parse is intentional per Dev Notes); malformed stop → treated as no-stop (validated on write); negative qty/stop (qty>0 + stop≥0 enforced on write).
