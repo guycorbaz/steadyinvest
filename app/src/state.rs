@@ -775,6 +775,35 @@ impl JournalState {
         })
     }
 
+    /// The portfolio's **capital-at-risk** + **total invested** (Story 4.6, FR43) — a pure read over
+    /// the holdings, summed in the single reference currency (no FX, Epic 4). Each holding maps to a
+    /// `core::risk::PositionRisk` (avg_cost = `purchase_price`, stop = `trailing_stop_level`,
+    /// qty = `quantity`); a holding whose persisted TEXT decimals don't parse is skipped (defensive —
+    /// they always parse on write). Returns `(capital_at_risk, total_invested)`, both `≥ 0`.
+    pub fn portfolio_capital_at_risk(&self) -> (Decimal, Decimal) {
+        let positions: Vec<steadyinvest_core::risk::PositionRisk> = self
+            .list_holdings()
+            .into_iter()
+            .filter_map(|h| {
+                let avg_cost = Decimal::from_str_exact(&h.purchase_price).ok()?;
+                let quantity = Decimal::from_str_exact(&h.quantity).ok()?;
+                let stop = h
+                    .trailing_stop_level
+                    .as_deref()
+                    .and_then(|s| Decimal::from_str_exact(s).ok());
+                Some(steadyinvest_core::risk::PositionRisk {
+                    avg_cost,
+                    stop,
+                    quantity,
+                })
+            })
+            .collect();
+        (
+            steadyinvest_core::risk::capital_at_risk(&positions),
+            steadyinvest_core::risk::total_invested(&positions),
+        )
+    }
+
     /// Ensure the single default portfolio exists and return it (FR36, single-portfolio). Lazily
     /// created with an injected id/timestamp (ADD15) on first use; idempotent thereafter. The id/
     /// timestamp are minted **only when the portfolio is absent** — so a repeat add doesn't burn an
@@ -3603,6 +3632,34 @@ mod tests {
             state.list_holdings()[0].trailing_stop_level.as_deref(),
             Some("120"),
             "a falling price never lowers the stop"
+        );
+    }
+
+    // ── Story 4.6 — simple capital-at-risk (the portfolio downside figure) ──
+
+    #[test]
+    fn portfolio_capital_at_risk_sums_below_cost_stops_and_invested() {
+        let dir = TempDir::new().unwrap();
+        // `watch_state` uses a SEQUENTIAL idgen — two holdings get distinct ids (a FixedIdGen would
+        // collide on the second insert).
+        let mut state = watch_state(&dir, 0x570);
+        state.add_holding("NESN", "10", "100").unwrap();
+        state.add_holding("ROG", "20", "50").unwrap();
+        let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
+        // NESN: a 15% stop with no study → level 85 (below cost 100) → (100−85)×10 = 150.
+        state.set_holding_trailing_stop(ids[0], "15").unwrap();
+        // ROG: no stop → contributes 0 to capital-at-risk (but to invested).
+
+        let (car, invested) = state.portfolio_capital_at_risk();
+        assert_eq!(
+            car,
+            Decimal::from(150),
+            "only the below-cost stop contributes"
+        );
+        assert_eq!(
+            invested,
+            Decimal::from(100 * 10 + 50 * 20),
+            "invested = Σ cost × qty"
         );
     }
 

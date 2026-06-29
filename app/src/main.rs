@@ -326,6 +326,25 @@ fn refresh_holdings(
     holdings.set_holding_count(items.len() as i32);
     holdings.set_rows(ModelRc::new(VecModel::from(rows)));
     holdings.set_read_only(state.is_read_only());
+
+    // Story 4.6 (FR43): the portfolio capital-at-risk figure + its share of invested capital,
+    // recomputed with the register (so a price refresh → stop ratchet → CaR all flow through here).
+    let (car, invested) = state.portfolio_capital_at_risk();
+    holdings.set_capital_at_risk(
+        viewmodel::format::format_scaled(car, DisplayField::Price, format).into(),
+    );
+    let pct = if invested > rust_decimal::Decimal::ZERO {
+        // Format the percent through the same locale-aware path as the figure (Percent = 1 dp), so a
+        // comma-preset display doesn't mix separators (e.g. "1 234,57 CHF (12,5 %)", not "(12.5 %)").
+        viewmodel::format::format_scaled(
+            car / invested * rust_decimal::Decimal::from(100),
+            DisplayField::Percent,
+            format,
+        )
+    } else {
+        String::new()
+    };
+    holdings.set_capital_at_risk_pct(pct.into());
 }
 
 /// Surface a holdings write's outcome (neutral notice on refusal) and re-render the register.

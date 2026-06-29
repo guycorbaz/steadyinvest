@@ -41,6 +41,17 @@ export component PortfolioScreen inherits Rectangle {
             font-size: Tokens.font-caption;
         }
 
+        // Story 4.6 (FR43): the portfolio's capital-at-risk — a neutral fact (no hue, no action). The
+        // "% du capital investi" clause is dropped when nothing is invested.
+        Text {
+            text: Holdings.capital-at-risk-pct != ""
+                ? @tr("Capital à risque : {} {} ({} % du capital investi)", Holdings.capital-at-risk, Holdings.reference-currency, Holdings.capital-at-risk-pct)
+                : @tr("Capital à risque : {} {}", Holdings.capital-at-risk, Holdings.reference-currency);
+            color: Tokens.text-high;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-caption;
+        }
+
         // ── Manual price refresh (Story 4.4, FR40) — user-initiated; never background-polled. ──
         HorizontalLayout {
             alignment: start;
