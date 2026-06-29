@@ -898,11 +898,12 @@ impl JournalState {
     /// from the active register. Writes one SELL transaction — `quantity` = the holding's; `unit_price`
     /// = the matched study's `current_price` (the market fact, Story 4.4) if known, else the holding's
     /// `purchase_price`; `fees` = 0 (the fees workflow is Epic 6); `currency` = the caller's reference
-    /// currency (FR63); `rationale` = the optional trimmed reason (`None` when blank) — then
-    /// **soft-deletes** the holding (`mark_sold`, not a hard delete: the sell transaction's FK must
-    /// keep a live referent, so the record survives; the holding just leaves the register). The full
-    /// ledger (partial sells, cost basis) stays Epic 6 / Story 6.3. Guarded (read-only / no-journal /
-    /// save-failure → a neutral notice); an absent (or already-sold) id is refused.
+    /// currency (FR63); `rationale` = the optional trimmed reason (`None` when blank). The sell row and
+    /// the holding's **soft delete** are written **atomically** in one `record_sell` transaction — not
+    /// a hard delete (the sell transaction's FK must keep a live referent, so the record survives; the
+    /// holding just leaves the register via `sold_at`). The full ledger (partial sells, cost basis)
+    /// stays Epic 6 / Story 6.3. Guarded (read-only / no-journal / save-failure → a neutral notice); an
+    /// absent (or already-sold) id is refused.
     pub fn sell_holding(
         &mut self,
         holding_id: Uuid,
@@ -940,8 +941,8 @@ impl JournalState {
                 rationale,
                 &now,
             )
-            .map_err(watch_error)?;
-        journal.mark_sold(holding_id, &now).map_err(watch_error)
+            .map(|_| ())
+            .map_err(watch_error)
     }
 
     /// Set (or clear) a holding's trailing-stop percentage (Story 4.5, FR42). An empty `pct_input`

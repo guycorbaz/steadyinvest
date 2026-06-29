@@ -123,7 +123,8 @@ export component PortfolioScreen inherits Rectangle {
             // Per-row draft for the trailing-stop % field (Story 4.5): pre-filled with the holding's
             // current stop, or the Réglages default when none is set yet.
             property <string> stop-draft: row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
-            // Per-row draft for an optional sell rationale (Story 4.7) — captured with the Vendre action.
+            // Per-row draft for an optional sell rationale (Story 4.7) — captured with the
+            // "Enregistrer une vente" action.
             property <string> sell-rationale;
             background: Tokens.surface-alt;
             border-radius: Tokens.radius;

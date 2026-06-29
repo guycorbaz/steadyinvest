@@ -1110,6 +1110,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             };
             let result = journal_state.borrow_mut().delete_holding(id);
+            // The holding is gone — drop any dismiss entry so the session set can't grow unbounded
+            // (mirrors the sell path). `id.to_string()` is the same canonical key the rows use.
+            holding_dismissed.borrow_mut().remove(&id.to_string());
             let format = config.borrow().number_format;
             retain_held_freshness(&holding_freshness, &journal_state.borrow());
             apply_holdings_result(

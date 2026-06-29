@@ -278,27 +278,6 @@ impl Journal {
         tx.commit()?;
         Ok(())
     }
-
-    /// Mark a holding **sold** (Story 4.7, FR46/FR47) — a soft delete. Stamps `sold_at` so the
-    /// holding leaves the active register (`list_holdings` filters `sold_at IS NULL`) while staying in
-    /// the table to satisfy its sell transaction's FK. Idempotent: stamps only a still-held holding
-    /// (`sold_at IS NULL`), so a repeat (or an absent id) writes nothing and bumps no version.
-    pub fn mark_sold(&mut self, id: Uuid, sold_at: &Timestamp) -> Result<()> {
-        self.check_writable()?;
-        let tx = self.conn.transaction()?;
-        let marked = tx.execute(
-            "UPDATE holdings SET sold_at = ?2 WHERE id = ?1 AND sold_at IS NULL",
-            rusqlite::params![id.to_string(), sold_at.0],
-        )?;
-        if marked > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
-    }
 }
 
 fn parse_uuid(text: &str, field: &str) -> Result<Uuid> {

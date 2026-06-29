@@ -1,6 +1,6 @@
 # Story 4.7: Neutral sell / stop triggers with manual actions
 
-Status: review (dev complete 2026-06-29 — 5/5 tasks; workspace 522 tests, fmt/clippy -D/deny green; core::ssg fingerprint/determinism/golden intact; migration v3→v4 [transactions kind/rationale + holdings sold_at]; contract/Cargo.lock/deny.toml unchanged)
+Status: done (3-layer review 2026-06-29 — 4/4 ACs satisfied; 4 patches applied [atomic single-tx sell + 3 minor], 1 dismissed; workspace 522 tests, fmt/clippy -D/deny green; core::ssg intact; migration v3→v4; contract/Cargo.lock/deny.toml unchanged)
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -122,6 +122,18 @@ Claude Opus 4.8 (1M context) — `claude-opus-4-8[1m]`
 - `app/ui/state.slint` (M) — `HoldingRow.trigger-kind` / `dismissed`; `sell-holding` / `dismiss-trigger` callbacks
 - `app/ui/screens/portfolio.slint` (M) — the neutral inline trigger panel + `sell-rationale` draft
 
+### Review Findings (3-layer adversarial — 2026-06-29)
+
+3 layers (Blind / Edge / Acceptance). All 4 ACs satisfied (stop-priority pure & tested; `core::ssg` decoupled; `@tr` +6 exact; MSG +1; non-banned label; v3→v4; SCHEMA_VERSION/Cargo.lock/deny.toml unchanged). 0 decision-needed, 4 patch, 1 dismissed.
+
+- [x] [Review][Patch] Non-atomic sell → orphan SELL row + double-sell on retry — `record_sell` committed its own tx, then `mark_sold` a separate tx; a failure/crash in the window left a SELL row with the holding still active (re-sellable, double version bump). Folded both into ONE transaction in `record_sell` (INSERT sell + UPDATE sold_at + single version bump); dropped `mark_sold` and the second call in `sell_holding`. [persistence/src/transactions.rs, holdings.rs; app/src/state.rs] — MED
+- [x] [Review][Patch] Dismiss-set entry leaks on Retirer — `on_remove_holding` didn't prune `holding_dismissed` (the sell path did). Harmless (UUIDs not reused) but an unbounded session leak; added the prune. [app/src/main.rs]
+- [x] [Review][Patch] Stale doc comment — `record_sell` doc said the caller removes the holding via `delete_holding`; it's `mark_sold`/now folded-in. Corrected. [persistence/src/transactions.rs]
+- [x] [Review][Patch] Stale Slint comment — "captured with the Vendre action" → "Enregistrer une vente". [app/ui/screens/portfolio.slint]
+
+Dismissed (1): placeholder `?3` reuse in the INSERT — verified correct (SQLite numbered params may repeat; 9 values for ?1..?9).
+
 ### Change Log
 
 - 2026-06-29 — Story 4.7 dev complete (5/5 tasks). Neutral sell/stop triggers + stop-priority (FR46/FR47); narrow v3→v4 migration; soft-delete on sell; workspace 522 tests green.
+- 2026-06-29 — 3-layer review: 4 patches applied (atomic single-tx sell; dismiss prune on remove; 2 doc/comment fixes). All 4 ACs satisfied; 1 dismissed.

@@ -58,6 +58,16 @@ fn record_sell_writes_a_sell_row_with_its_rationale() {
     assert_eq!(row.fees, "0");
     assert_eq!(row.currency, "CHF");
     assert_eq!(row.rationale.as_deref(), Some("stop touché, je sécurise"));
+
+    // The same `record_sell` transaction also retired the holding (atomic soft-delete) — it leaves
+    // the active register but stays a live FK referent for the sell row above.
+    assert!(
+        journal
+            .list_holdings(Uuid::from_u128(0x9001))
+            .expect("list holdings")
+            .is_empty(),
+        "the sold holding no longer appears in the active register"
+    );
 }
 
 #[test]

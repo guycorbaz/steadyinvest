@@ -36,11 +36,14 @@ pub struct TransactionItem {
 }
 
 impl Journal {
-    /// Record one **SELL** transaction (Story 4.7, FR46/FR47): the user chose to sell on a neutral
-    /// trigger. Inserts a `kind = "sell"` row carrying the holding's quantity, the sale `unit_price`,
-    /// `fees` (0 in Epic 4 — the fees workflow is Epic 6), the reference `currency` (FR63), and an
-    /// optional `rationale`. Always a write (a sale is an event) → bumps the logical version. The
-    /// caller is expected to then remove the holding from the active register (`delete_holding`).
+    /// Record one **SELL** and retire its holding **atomically** (Story 4.7, FR46/FR47): the user
+    /// chose to sell on a neutral trigger. In a **single transaction**, inserts a `kind = "sell"` row
+    /// (the holding's quantity, the sale `unit_price`, `fees` = 0 in Epic 4, the reference `currency`
+    /// FR63, an optional `rationale`) **and** soft-deletes the holding (stamps `holdings.sold_at`, so
+    /// it leaves the active register while staying a live FK referent for the sell row), then bumps the
+    /// logical version once. One transaction is essential: a separate INSERT-then-mark would leave a
+    /// committed sell row with the holding still active (re-sellable) if the second write failed —
+    /// especially on a sync-sensitive store. The full ledger (partial sells, cost basis) is Epic 6.
     #[allow(clippy::too_many_arguments)]
     pub fn record_sell(
         &mut self,
@@ -71,6 +74,12 @@ impl Journal {
                 KIND_SELL,
                 rationale,
             ],
+        )?;
+        // Soft-delete the holding in the SAME transaction (atomic with the sell row). `sold_at IS
+        // NULL` guards a re-sell: a holding already retired is not stamped twice.
+        tx.execute(
+            "UPDATE holdings SET sold_at = ?2 WHERE id = ?1 AND sold_at IS NULL",
+            rusqlite::params![holding_id.to_string(), now.0],
         )?;
         tx.execute(
             "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
