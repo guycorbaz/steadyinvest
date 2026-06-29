@@ -13,6 +13,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rust_decimal = { workspace = true }
 uuid = { workspace = true }
+sha2 = { workspace = true }                     # export integrity hash (Story 5.2, FR59)
 
 [dev-dependencies]
 proptest = { workspace = true }

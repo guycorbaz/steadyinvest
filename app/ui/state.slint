@@ -328,6 +328,9 @@ export global Studies {
     // user's typed input on a recoverable refusal (blank field / read-only / save failure).
     callback create-study(string, string) -> bool; // ticker, native-currency → written?
     callback open-study(string); // row id (stringified UUID)
+    // Story 5.2 (FR59): export one study to a portable file (id) / import a study from a file path.
+    callback export-study(string);
+    callback import-study(string);
     // Fold/regime view-state intents (Story 2.3) — Rust mutates `AppConfig.study_view_state` and
     // persists (validate→mutate→persist, the 2.2 Prefs pattern), then pushes `folds`/`regime` back.
     callback toggle-fold(int, bool); // section index (0..4), open

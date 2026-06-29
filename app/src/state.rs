@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 
 use rust_decimal::Decimal;
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, PendingProvider, Provenance,
-    Review, Source, Study, Timestamp, YearData,
+    Cell, Coverage, ForecastLowOption, Freshness, ImportError, Judgment, Money, PendingProvider,
+    Provenance, Review, Source, Study, Timestamp, YearData,
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use steadyinvest_persistence::{
@@ -144,6 +144,18 @@ pub const MSG_HOLDINGS_REFRESH_NONE: &str =
 /// records a sell from a neutral trigger: the sell is journalled and the holding leaves the register.
 pub const MSG_HOLDING_SOLD: &str =
     "La vente a été enregistrée ; la position a été retirée du portefeuille.";
+
+/// Study export/import copy (Story 5.2, FR59) — fact-stating, posture-gated. The export envelope is
+/// the portable data contract + schema_version + integrity hash; import verifies both before saving.
+pub const MSG_STUDY_EXPORTED: &str = "L'étude a été exportée.";
+pub const MSG_STUDY_IMPORTED: &str = "L'étude a été importée.";
+pub const MSG_EXPORT_MISSING: &str = "L'étude est introuvable ; rien n'a été exporté.";
+pub const MSG_IMPORT_INTEGRITY: &str =
+    "Le fichier ne correspond pas à son empreinte d'intégrité ; il a peut-être été altéré. Rien n'a été importé.";
+pub const MSG_IMPORT_VERSION: &str =
+    "Le fichier provient d'une version incompatible du format ; rien n'a été importé.";
+pub const MSG_IMPORT_MALFORMED: &str =
+    "Le fichier n'est pas un export d'étude valide ; rien n'a été importé.";
 
 /// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
@@ -303,6 +315,12 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDINGS_REFRESHING,
     MSG_HOLDINGS_REFRESH_NONE,
     MSG_HOLDING_SOLD,
+    MSG_STUDY_EXPORTED,
+    MSG_STUDY_IMPORTED,
+    MSG_EXPORT_MISSING,
+    MSG_IMPORT_INTEGRITY,
+    MSG_IMPORT_VERSION,
+    MSG_IMPORT_MALFORMED,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -1128,6 +1146,38 @@ impl JournalState {
         match journal.put_study(&study) {
             Ok(()) => Ok(id),
             // The newer-schema guard can also fire here (defense in depth); name it neutrally.
+            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
+            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+        }
+    }
+
+    /// Export one study to its portable envelope JSON (Story 5.2, FR59) — the serialized data
+    /// contract + `schema_version` + integrity hash (NOT a raw `.db`). A pure read; the caller writes
+    /// the string to a user-chosen file. Guarded: no journal / missing id → a neutral notice.
+    pub fn export_study(&self, id: Uuid) -> Result<String, String> {
+        let study = self.get_study(id).ok_or(MSG_EXPORT_MISSING.to_string())?;
+        Ok(steadyinvest_contract::to_export_json(&study))
+    }
+
+    /// Import a study from its portable envelope JSON (Story 5.2, FR59/NFR-R5): verify integrity +
+    /// `schema_version`, then persist. The study's **own id is preserved** (a re-import of the same
+    /// study updates in place, never duplicates); its `journal_id` is **rebound to this journal** so a
+    /// study seeded/shared from another journal joins the current one (identity = the study id). Each
+    /// [`ImportError`] maps to a neutral notice; nothing is written on a rejection. Guarded.
+    pub fn import_study(&mut self, json: &str) -> Result<Uuid, String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let mut study = steadyinvest_contract::from_export_json(json).map_err(|e| match e {
+            ImportError::Integrity => MSG_IMPORT_INTEGRITY.to_string(),
+            ImportError::Version { .. } => MSG_IMPORT_VERSION.to_string(),
+            ImportError::Malformed(_) => MSG_IMPORT_MALFORMED.to_string(),
+        })?;
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        study.journal_id = journal.id();
+        let id = study.id;
+        match journal.put_study(&study) {
+            Ok(()) => Ok(id),
             Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
             Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
         }
@@ -2348,6 +2398,72 @@ mod tests {
         assert_eq!(
             sales.provenance.hash_of_dependencies, "deadbeefcafe",
             "the real fetch digest replaces the manual placeholder (#21)"
+        );
+    }
+
+    // ── Story 5.2 — export / import a single study ──
+
+    #[test]
+    fn export_import_round_trips_an_equal_study_preserving_identity() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x520);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let original = state.get_study(id).expect("the study exists");
+
+        let envelope = state.export_study(id).expect("export succeeds");
+        state.delete_study(id).expect("delete the study");
+        assert!(
+            state.get_study(id).is_none(),
+            "the study is gone before import"
+        );
+
+        let imported_id = state.import_study(&envelope).expect("import succeeds");
+        assert_eq!(imported_id, id, "the study id is preserved on round-trip");
+        assert_eq!(
+            state.get_study(id).expect("the study is back"),
+            original,
+            "export → import yields an equal study"
+        );
+
+        // A second import of the same envelope is an idempotent update, not a duplicate.
+        state
+            .import_study(&envelope)
+            .expect("re-import updates in place");
+        assert_eq!(state.list_studies().len(), 1, "no duplicate study");
+    }
+
+    #[test]
+    fn export_of_a_missing_study_is_a_neutral_refusal() {
+        let dir = TempDir::new().unwrap();
+        let state = watch_state(&dir, 0x521);
+        assert_eq!(
+            state.export_study(Uuid::from_u128(0xDEAD)),
+            Err(MSG_EXPORT_MISSING.to_string())
+        );
+    }
+
+    #[test]
+    fn import_maps_each_rejection_to_its_neutral_notice_and_writes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x522);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let good = state.export_study(id).unwrap();
+
+        // Tamper → integrity refusal.
+        let tampered = good.replacen("NESN", "ROG0", 1);
+        assert_eq!(
+            state.import_study(&tampered),
+            Err(MSG_IMPORT_INTEGRITY.to_string())
+        );
+        // Garbage → malformed refusal.
+        assert_eq!(
+            state.import_study("not an envelope"),
+            Err(MSG_IMPORT_MALFORMED.to_string())
+        );
+        assert_eq!(
+            state.list_studies().len(),
+            1,
+            "a rejected import wrote nothing"
         );
     }
 

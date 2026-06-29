@@ -17,14 +17,16 @@
 //! `non_exhaustive` / `serde(other)` on the domain enums.
 
 pub mod cell;
+pub mod export;
 pub mod money;
 pub mod provenance;
 pub mod study;
 pub mod versioning;
 
-// Portfolio / FX / export types arrive with their epics (Epic 4/6 portfolio & FX, Epic 5 export).
+// Portfolio / FX types arrive with their epics (Epic 4/6 portfolio & FX).
 
 pub use cell::{Cell, Coverage, Freshness, PendingProvider, Review, Source};
+pub use export::{from_export_json, to_export_json, ImportError, StudyExport};
 pub use money::Money;
 pub use provenance::{Provenance, Timestamp};
 pub use study::{ForecastLowOption, Judgment, Study, YearData};
