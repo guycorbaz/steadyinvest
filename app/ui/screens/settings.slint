@@ -157,6 +157,50 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
+            // ── Story 5.3 (FR60) — export / import the WHOLE journal as a portable, versioned,
+            // integrity-checked file. Path-based for now (the native picker is Story 5.5). Export
+            // writes to the OS data dir's exports/ folder; import verifies + applies atomically. ──
+            SettingsPanel {
+                title: @tr("Journal complet");
+
+                Text {
+                    text: @tr("Exporter ou importer l'ensemble du journal (études, valeurs suivies, portefeuille) dans un fichier portable et vérifié.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ActionButton {
+                        label: @tr("Exporter le journal");
+                        clicked => { Prefs.export-journal(); }
+                    }
+                }
+
+                journalpath := TextField {
+                    placeholder: @tr("Chemin du fichier à importer");
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ActionButton {
+                        label: @tr("Importer un journal");
+                        clicked => { Prefs.import-journal(journalpath.text); }
+                    }
+                }
+
+                if Prefs.journal-status != "": Text {
+                    text: Prefs.journal-status;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+
             SettingsPanel {
                 title: @tr("Thème");
 

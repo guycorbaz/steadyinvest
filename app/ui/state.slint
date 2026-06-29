@@ -526,6 +526,14 @@ export global Prefs {
     // Mirrored from AppConfig.default_trailing_stop_pct ("" when none); the per-holding set-stop
     // control pre-fills it.
     in-out property <string> default-trailing-stop-pct;
+    // ── Story 5.3 — whole-journal export / import (FR60) ──
+    // The latest neutral outcome of an export/import (with counts on a successful import), set by Rust.
+    in-out property <string> journal-status;
+    // The path to import a whole-journal envelope from (path-based; the native picker is Story 5.5).
+    in-out property <string> journal-import-path;
+    // User intents — handled in Rust (export reads the journal; import verifies + applies atomically).
+    callback export-journal();
+    callback import-journal(string); // path to a whole-journal envelope file
     // User intents — handled in Rust (apply + persist).
     callback theme-selected(string); // "dark" | "light"
     callback label-set-selected(string); // "naic" | "neutral"

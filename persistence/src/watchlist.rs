@@ -13,11 +13,13 @@
 
 use crate::error::{Error, Result};
 use crate::journal::Journal;
+use serde::{Deserialize, Serialize};
 use steadyinvest_contract::Timestamp;
 use uuid::Uuid;
 
 /// One watchlist row (FR34). `study_id` is the optional soft link to a saved study (its buy zone).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Serialize`/`Deserialize` so the whole-journal export (Story 5.3) carries it verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WatchItem {
     pub id: Uuid,
     pub security_ticker: String,

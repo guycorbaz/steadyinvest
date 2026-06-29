@@ -582,9 +582,11 @@ mod tests {
         // the neutral trigger panel — the two trigger facts (stop / sell-zone), the rationale
         // placeholder, and the Enregistrer-une-vente / Relever-le-stop / Ignorer actions: +6 = 282.
         // Story 5.2 adds the dashboard export/import controls (Exporter + the import path placeholder +
-        // "Importer une étude"): +3 = 285. Floor strict.
+        // "Importer une étude"): +3 = 285. Story 5.3 adds the Réglages whole-journal panel (title
+        // "Journal complet", the explanatory caption, "Exporter le journal", the import path
+        // placeholder, "Importer un journal"): +5 = 290. Floor strict.
         assert!(
-            total >= 285,
+            total >= 290,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -631,10 +633,12 @@ mod tests {
         // Story 4.7 adds the recorded-sell confirmation (MSG_HOLDING_SOLD): 47 + 1 = 48. Story 5.2
         // adds the study export/import notices (exported / imported / updated / export-missing +
         // integrity / version / malformed import refusals): 48 + 7 = 55 (the "updated" notice was
-        // added by the 5.2 review — surface an overwrite distinctly).
+        // added by the 5.2 review — surface an overwrite distinctly). Story 5.3 adds the two
+        // whole-journal notices (MSG_JOURNAL_EXPORTED + the MSG_JOURNAL_IMPORTED count template); the
+        // integrity / version / malformed import refusals are reused from 5.2: 55 + 2 = 57.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            55,
+            57,
             "state.rs message inventory changed — register the new notice"
         );
     }

@@ -18,11 +18,13 @@
 
 use crate::error::{Error, Result};
 use crate::journal::Journal;
+use serde::{Deserialize, Serialize};
 use steadyinvest_contract::Timestamp;
 use uuid::Uuid;
 
-/// The single portfolio (FR36). Multi-portfolio (FR37) is Epic 6.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The single portfolio (FR36). Multi-portfolio (FR37) is Epic 6. `Serialize`/`Deserialize` so the
+/// whole-journal export (Story 5.3) carries it verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortfolioItem {
     pub id: Uuid,
     pub name: String,
@@ -32,7 +34,8 @@ pub struct PortfolioItem {
 /// One holding row (FR36): a security, a quantity and a purchase price in the single reference
 /// currency. `quantity`/`purchase_price` are the canonical decimal **TEXT** spellings (parsed and
 /// validated by the app before they reach here). `trailing_stop_pct` is Story 4.5's (NULL here).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Serialize`/`Deserialize` so the whole-journal export (Story 5.3) carries it verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HoldingItem {
     pub id: Uuid,
     pub portfolio_id: Uuid,
@@ -44,6 +47,11 @@ pub struct HoldingItem {
     /// Persisted (v3 column) because the ratchet's high-water mark can't be re-derived from the
     /// latest price alone. The app computes it via `core::risk::ratchet_trailing_stop`.
     pub trailing_stop_level: Option<String>,
+    /// The soft-delete marker (Story 4.7 / FR47): `Some(timestamp)` when the holding was sold and
+    /// retired from the active register, `None` when still held. The active-register reads
+    /// ([`Journal::list_holdings`]) filter it out, but the whole-journal export (Story 5.3) must carry
+    /// it — a sold holding stays a live FK referent for its sell transaction.
+    pub sold_at: Option<String>,
     pub created_at: Timestamp,
 }
 
@@ -144,8 +152,85 @@ impl Journal {
             purchase_price: purchase_price.to_string(),
             trailing_stop_pct: None,
             trailing_stop_level: None,
+            sold_at: None,
             created_at: created_at.clone(),
         })
+    }
+
+    /// Every portfolio row, ordered by `id` (deterministic). Single-portfolio in v1 (FR36), but the
+    /// whole-journal export (Story 5.3) reads them generically.
+    pub fn list_portfolios(&self) -> Result<Vec<PortfolioItem>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, created_at FROM portfolios ORDER BY id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id_text, name, created_at) = row?;
+            out.push(PortfolioItem {
+                id: parse_uuid(&id_text, "portfolios.id")?,
+                name,
+                created_at: Timestamp(created_at),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Every holding in the journal **including soft-deleted (sold) ones**, ordered by `created_at`
+    /// then `id` (deterministic). Unlike [`Self::list_holdings`] (the active register, which filters
+    /// `sold_at IS NULL`), this is the **complete** read the whole-journal export needs (Story 5.3): a
+    /// sold holding must be carried so its sell transaction keeps a live FK referent on import.
+    pub fn list_all_holdings(&self) -> Result<Vec<HoldingItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
+                    trailing_stop_pct, trailing_stop_level, sold_at, created_at
+             FROM holdings ORDER BY created_at, id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, Option<String>>(7)?,
+                r.get::<_, String>(8)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (
+                id_text,
+                portfolio_text,
+                security_ticker,
+                quantity,
+                purchase_price,
+                stop_pct,
+                stop_level,
+                sold_at,
+                created,
+            ) = row?;
+            out.push(HoldingItem {
+                id: parse_uuid(&id_text, "holdings.id")?,
+                portfolio_id: parse_uuid(&portfolio_text, "holdings.portfolio_id")?,
+                security_ticker,
+                quantity,
+                purchase_price,
+                trailing_stop_pct: stop_pct,
+                trailing_stop_level: stop_level,
+                sold_at,
+                created_at: Timestamp(created),
+            });
+        }
+        Ok(out)
     }
 
     /// Every **active** holding in a portfolio, ordered by `created_at` then `id` (deterministic) —
@@ -191,6 +276,7 @@ impl Journal {
                 purchase_price,
                 trailing_stop_pct: stop_pct,
                 trailing_stop_level: stop_level,
+                sold_at: None,
                 created_at: Timestamp(created),
             });
         }
