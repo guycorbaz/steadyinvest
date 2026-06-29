@@ -1,3 +1,8 @@
+# Limit parallel compilation jobs to keep the machine responsive
+# (default would be one per core = 32 here).
+[build]
+jobs = 8
+
 # Use the mold linker on Linux for faster link times.
 # gcc >= 12.1 supports -fuse-ld=mold natively (here: gcc 15.2).
 [target.x86_64-unknown-linux-gnu]
