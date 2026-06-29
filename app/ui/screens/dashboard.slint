@@ -23,6 +23,7 @@ component StudyListRow inherits Rectangle {
     callback archive();
     callback unarchive();
     callback delete-study();
+    callback export-study();
 
     accessible-role: button;
     accessible-label: root.entry.ticker;
@@ -89,6 +90,12 @@ component StudyListRow inherits Rectangle {
         if root.entry.status == "archived": ActionButton {
             label: @tr("Réactiver");
             clicked => { root.unarchive(); }
+        }
+        // Story 5.2 (FR59): export this study as a portable file (data contract + schema_version +
+        // integrity hash). Its own TouchArea consumes the click, so it never opens the row.
+        ActionButton {
+            label: @tr("Exporter");
+            clicked => { root.export-study(); }
         }
         ActionButton {
             label: @tr("Supprimer");
@@ -309,6 +316,28 @@ export component DashboardScreen inherits Rectangle {
                     }
                     delete-study => {
                         Studies.request-study-action("delete", studyrow.id);
+                    }
+                    export-study => {
+                        Studies.export-study(studyrow.id);
+                    }
+                }
+            }
+
+            // ── Story 5.2 (FR59): import a study from a portable export file (path-based — the native
+            // file picker is Story 5.5). The envelope's integrity + schema_version are verified before
+            // anything is written. ──
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+                import-path := TextField {
+                    placeholder: @tr("Chemin du fichier d'étude à importer");
+                    horizontal-stretch: 1;
+                }
+                ActionButton {
+                    label: @tr("Importer une étude");
+                    enabled: !Studies.read-only && import-path.text != "";
+                    clicked => {
+                        Studies.import-study(import-path.text);
+                        import-path.text = "";
                     }
                 }
             }

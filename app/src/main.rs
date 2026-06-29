@@ -241,6 +241,20 @@ fn retain_held_freshness(freshness: &Rc<RefCell<HoldingFreshnessMap>>, state: &J
 /// set separately (from app-config, on startup + on change) — a holdings mutation doesn't touch it.
 /// Story 4.4 (FR40): each row also carries its auto-matched study's §4 zone (neutral key) + present
 /// price + transient freshness, so the register shows Achat/Neutre/Vente + à jour/périmé per holding.
+/// Write a study's export envelope to a file (Story 5.2, FR59) and return its path. The file lands in
+/// an `exports/` folder under the OS data dir — **never** beside the live journal DB (ADD7/8
+/// sync-safety; the native picker + a user-chosen sync target is Story 5.5). Named by the study id
+/// (stable, unique). `app` owns the file I/O — `contract` only produced the string.
+fn write_study_export(id: Uuid, json: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = directories::ProjectDirs::from("", "", "steadyinvest")
+        .map(|d| d.data_dir().join("exports"))
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no OS data directory"))?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("study-{id}.json"));
+    std::fs::write(&path, json)?;
+    Ok(path)
+}
+
 fn refresh_holdings(
     ui: &MainWindow,
     state: &JournalState,
@@ -966,6 +980,48 @@ fn main() -> Result<(), slint::PlatformError> {
                 // Report whether a study was written so the UI keeps the user's input on refusal.
                 written
             });
+    }
+
+    // ── Story 5.2 (FR59) — export / import a single study as a portable file. The envelope is the
+    // serialized data contract + schema_version + integrity hash (NOT a raw .db); `contract` owns the
+    // envelope, `app` owns the file I/O. Path-based for now — the native picker is Story 5.5. ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Studies>().on_export_study(move |id| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Ok(uuid) = Uuid::parse_str(&id) else {
+                return;
+            };
+            let notice = match journal_state.borrow().export_study(uuid) {
+                Ok(json) => match write_study_export(uuid, &json) {
+                    Ok(path) => format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
+                    Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
+                },
+                Err(message) => message,
+            };
+            studies.set_notice(notice.into());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Studies>().on_import_study(move |path| {
+            let ui = ui_weak.unwrap();
+            let notice = match std::fs::read_to_string(path.as_str()) {
+                Ok(json) => match journal_state.borrow_mut().import_study(&json) {
+                    // Surface an overwrite of a pre-existing study distinctly from a fresh import.
+                    Ok((_id, true)) => state::MSG_STUDY_UPDATED.to_string(),
+                    Ok((_id, false)) => state::MSG_STUDY_IMPORTED.to_string(),
+                    Err(message) => message,
+                },
+                // An unreadable path is the malformed/unreadable case — a neutral refusal, no panic.
+                Err(_) => state::MSG_IMPORT_MALFORMED.to_string(),
+            };
+            ui.global::<Studies>().set_notice(notice.into());
+            refresh_studies(&ui, &journal_state.borrow());
+        });
     }
 
     // ── Watchlist intents (Story 4.1, FR34) ── add / remove / move / link / unlink, each persisted

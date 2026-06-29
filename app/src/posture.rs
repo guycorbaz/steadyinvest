@@ -581,9 +581,10 @@ mod tests {
         // risk header fact (with + without the "% du capital investi" clause): +2 = 276. Story 4.7 adds
         // the neutral trigger panel — the two trigger facts (stop / sell-zone), the rationale
         // placeholder, and the Enregistrer-une-vente / Relever-le-stop / Ignorer actions: +6 = 282.
-        // Floor strict.
+        // Story 5.2 adds the dashboard export/import controls (Exporter + the import path placeholder +
+        // "Importer une étude"): +3 = 285. Floor strict.
         assert!(
-            total >= 282,
+            total >= 285,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -627,10 +628,13 @@ mod tests {
         // Story 4.3 adds the two holdings-register validation notices (invalid number / empty
         // symbol): 42 + 2 = 44. Story 4.4 adds the two holdings price-refresh notices (refreshing /
         // nothing-linked): 44 + 2 = 46. Story 4.5 adds the trailing-stop validation notice: 46 + 1 = 47.
-        // Story 4.7 adds the recorded-sell confirmation (MSG_HOLDING_SOLD): 47 + 1 = 48.
+        // Story 4.7 adds the recorded-sell confirmation (MSG_HOLDING_SOLD): 47 + 1 = 48. Story 5.2
+        // adds the study export/import notices (exported / imported / updated / export-missing +
+        // integrity / version / malformed import refusals): 48 + 7 = 55 (the "updated" notice was
+        // added by the 5.2 review — surface an overwrite distinctly).
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            48,
+            55,
             "state.rs message inventory changed — register the new notice"
         );
     }
