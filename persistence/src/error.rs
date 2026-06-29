@@ -73,6 +73,35 @@ pub enum Error {
         #[source]
         source: Box<Error>,
     },
+
+    /// A whole-journal import file did not match its integrity fingerprint — corrupt or incomplete
+    /// (Story 5.3, NFR-R5). Nothing was applied.
+    #[error("the import file does not match its integrity fingerprint (corrupt or incomplete); nothing was applied")]
+    ImportIntegrity,
+
+    /// A whole-journal import file was written under a `schema_version` this build does not support
+    /// (Story 5.3). Nothing was applied — no silent coercion.
+    #[error(
+        "the import file was written under an incompatible format version (found {found}, \
+         this build supports {supported}); nothing was applied"
+    )]
+    ImportVersion { found: u32, supported: u32 },
+
+    /// A whole-journal import file is not a valid export envelope, or its payload is not a valid
+    /// journal snapshot (Story 5.3). Nothing was applied.
+    #[error("the import file is not a valid journal export: {detail}; nothing was applied")]
+    ImportMalformed { detail: String },
+}
+
+impl From<steadyinvest_contract::ImportError> for Error {
+    fn from(e: steadyinvest_contract::ImportError) -> Self {
+        use steadyinvest_contract::ImportError as Ie;
+        match e {
+            Ie::Integrity => Error::ImportIntegrity,
+            Ie::Version { found, supported } => Error::ImportVersion { found, supported },
+            Ie::Malformed(detail) => Error::ImportMalformed { detail },
+        }
+    }
 }
 
 impl From<serde_json::Error> for Error {
@@ -177,6 +206,14 @@ mod tests {
                     detail: "x".to_string(),
                 }),
             },
+            Error::ImportIntegrity,
+            Error::ImportVersion {
+                found: 9,
+                supported: 1,
+            },
+            Error::ImportMalformed {
+                detail: "expected value at line 1 column 2".to_string(),
+            },
         ]
     }
 
@@ -193,10 +230,13 @@ mod tests {
                 | Error::NewerJournalSchema { .. }
                 | Error::NewerRowSchema { .. }
                 | Error::JournalIdentityMismatch { .. }
-                | Error::Migration { .. } => {}
+                | Error::Migration { .. }
+                | Error::ImportIntegrity
+                | Error::ImportVersion { .. }
+                | Error::ImportMalformed { .. } => {}
             }
         }
-        assert_eq!(sample_errors().len(), 8, "one sample per variant");
+        assert_eq!(sample_errors().len(), 11, "one sample per variant");
     }
 
     #[test]

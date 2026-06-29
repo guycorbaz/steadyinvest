@@ -28,9 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Slint Linux deps
+      - name: Install Slint Linux deps + mold linker
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-03-27 (pinned by SHA)

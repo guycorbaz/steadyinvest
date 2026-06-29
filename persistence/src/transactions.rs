@@ -13,6 +13,7 @@
 
 use crate::error::Result;
 use crate::journal::Journal;
+use serde::{Deserialize, Serialize};
 use steadyinvest_contract::Timestamp;
 use uuid::Uuid;
 
@@ -21,7 +22,8 @@ pub const KIND_SELL: &str = "sell";
 
 /// One recorded transaction row. Story 4.7 only writes/read-backs sells; the decimal fields are the
 /// canonical TEXT spellings. `rationale` is the optional free-text reason (`None` when blank).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Serialize`/`Deserialize` so the whole-journal export (Story 5.3) carries it verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransactionItem {
     pub id: Uuid,
     pub holding_id: Uuid,
@@ -98,6 +100,59 @@ impl Journal {
             rationale: rationale.map(str::to_string),
             created_at: now.clone(),
         })
+    }
+
+    /// Every transaction in the journal, oldest first (deterministic: `occurred_at` then `id`) —
+    /// across all holdings. The whole-journal export (Story 5.3) reads the complete ledger; per-holding
+    /// reads use [`Self::list_transactions`].
+    pub fn list_all_transactions(&self) -> Result<Vec<TransactionItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, holding_id, occurred_at, quantity, unit_price, fees, currency,
+                    kind, rationale, created_at
+             FROM transactions ORDER BY occurred_at, id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, Option<String>>(7)?,
+                r.get::<_, Option<String>>(8)?,
+                r.get::<_, String>(9)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (
+                id_text,
+                holding_text,
+                occurred,
+                quantity,
+                unit_price,
+                fees,
+                currency,
+                kind,
+                rationale,
+                created,
+            ) = row?;
+            out.push(TransactionItem {
+                id: parse_uuid(&id_text, "transactions.id")?,
+                holding_id: parse_uuid(&holding_text, "transactions.holding_id")?,
+                occurred_at: Timestamp(occurred),
+                quantity,
+                unit_price,
+                fees,
+                currency,
+                kind,
+                rationale,
+                created_at: Timestamp(created),
+            });
+        }
+        Ok(out)
     }
 
     /// Every transaction recorded against a holding, oldest first (deterministic: `occurred_at` then

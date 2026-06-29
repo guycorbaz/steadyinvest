@@ -20,7 +20,8 @@ use steadyinvest_contract::{
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use steadyinvest_persistence::{
-    Error as PersistError, HoldingItem, Journal, PortfolioItem, StudySummary, WatchItem,
+    Error as PersistError, HoldingItem, ImportSummary, Journal, PortfolioItem, StudySummary,
+    WatchItem,
 };
 use uuid::Uuid;
 
@@ -158,6 +159,31 @@ pub const MSG_IMPORT_VERSION: &str =
     "Le fichier provient d'une version incompatible du format ; rien n'a été importé.";
 pub const MSG_IMPORT_MALFORMED: &str =
     "Le fichier n'est pas un export d'étude valide ; rien n'a été importé.";
+
+/// Whole-journal export/import copy (Story 5.3, FR60) — fact-stating, posture-gated. The export is the
+/// portable data contract for the entire journal + schema_version + (journal_id, version) + integrity
+/// hash; import verifies both before applying, atomically (never partially). The integrity/version/
+/// malformed rejections reuse the single-study [`MSG_IMPORT_INTEGRITY`]/[`MSG_IMPORT_VERSION`]/
+/// [`MSG_IMPORT_MALFORMED`] notices (same taxonomy).
+pub const MSG_JOURNAL_EXPORTED: &str = "Le journal a été exporté.";
+/// Substitution template (the const is posture-scanned; [`journal_imported_message`] fills it). The
+/// trailing `(source : journal {jid}, version {ver})` clause surfaces the imported file's identity so
+/// the user sees whether it is the **same** journal (an update) or a **foreign** seed (AC3).
+pub const MSG_JOURNAL_IMPORTED: &str =
+    "Le journal a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s). (source : journal {jid}, version {ver})";
+
+/// The neutral outcome of a whole-journal import, with per-entity counts **and the source journal
+/// identity** (a `{n}`-substitution of [`MSG_JOURNAL_IMPORTED`] so the scanned const and the runtime
+/// string stay one source — the `unlock_confirm_message` pattern).
+pub fn journal_imported_message(summary: &ImportSummary) -> String {
+    MSG_JOURNAL_IMPORTED
+        .replace("{studies}", &summary.studies.to_string())
+        .replace("{watch}", &summary.watch_items.to_string())
+        .replace("{holdings}", &summary.holdings.to_string())
+        .replace("{txns}", &summary.transactions.to_string())
+        .replace("{jid}", &summary.source_journal_id.to_string())
+        .replace("{ver}", &summary.source_logical_version.to_string())
+}
 
 /// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
@@ -324,6 +350,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_IMPORT_INTEGRITY,
     MSG_IMPORT_VERSION,
     MSG_IMPORT_MALFORMED,
+    MSG_JOURNAL_EXPORTED,
+    MSG_JOURNAL_IMPORTED,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -559,6 +587,12 @@ impl JournalState {
     /// True when the open journal is read-only (newer-schema file).
     pub fn is_read_only(&self) -> bool {
         self.read_only
+    }
+
+    /// The open journal's identity (UUID), or `None` when no journal is open. Used to name a
+    /// whole-journal export file (Story 5.3).
+    pub fn journal_id(&self) -> Option<Uuid> {
+        self.journal.as_ref().map(|j| j.id())
     }
 
     /// The app's "now" from the injected [`Clock`] (ADD15) — the single wall-clock source. Used by
@@ -1203,6 +1237,38 @@ impl JournalState {
             self.set_study_status(id, "active")?;
         }
         Ok((id, overwrote))
+    }
+
+    /// Export the **whole journal** to its portable envelope JSON (Story 5.3, FR60) — the serialized
+    /// data contract for every entity + `schema_version` + `(journal_id, logical_version)` + integrity
+    /// hash (NOT a raw `.db`). A pure read; the caller writes the string to a user-chosen file.
+    /// Guarded: no journal → a neutral notice.
+    pub fn export_journal(&self) -> Result<String, String> {
+        let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .export_journal()
+            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))
+    }
+
+    /// Import a **whole journal** from its portable envelope JSON (Story 5.3, FR60/NFR-R5): verify
+    /// integrity + `schema_version`, then apply **every entity atomically** (all-or-nothing, never
+    /// partially). Entities are upserted by id (a re-import updates in place); studies are rebound to
+    /// this journal. Returns an [`ImportSummary`] of what was applied; the caller surfaces the counts.
+    /// Each rejection maps to a neutral notice (reusing the single-study integrity/version/malformed
+    /// copy); nothing is written on a rejection. Guarded (read-only / no journal).
+    pub fn import_journal(&mut self, text: &str) -> Result<ImportSummary, String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        let summary = journal.import_journal(text).map_err(|error| match error {
+            PersistError::ImportIntegrity => MSG_IMPORT_INTEGRITY.to_string(),
+            PersistError::ImportVersion { .. } => MSG_IMPORT_VERSION.to_string(),
+            PersistError::ImportMalformed { .. } => MSG_IMPORT_MALFORMED.to_string(),
+            PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
+            other => format!("{MSG_SAVE_FAILED} {other}"),
+        })?;
+        Ok(summary)
     }
 
     /// Build the manual [`Provenance`] for an edit (Story 2.4): `source = Manual`, `timestamp` from
@@ -2517,6 +2583,77 @@ mod tests {
             1,
             "a rejected import wrote nothing"
         );
+    }
+
+    // ── Story 5.3 — export / import the whole journal ──
+
+    #[test]
+    fn journal_export_import_round_trips_into_a_fresh_journal() {
+        // Populate journal A with a study, a linked watchlist row and a holding.
+        let dir_a = TempDir::new().unwrap();
+        let mut state_a = watch_state(&dir_a, 0x530);
+        let study_id = state_a.create_study("NESN", "CHF").unwrap();
+        state_a.add_watch_item("NESN", Some(study_id)).unwrap();
+        state_a.add_holding("NESN", "10", "100.00").unwrap();
+        let envelope = state_a.export_journal().expect("export succeeds");
+
+        // Import into a fresh, empty journal B (a different dir → a different journal_id).
+        let dir_b = TempDir::new().unwrap();
+        let mut state_b = watch_state(&dir_b, 0x531);
+        assert!(state_b.list_studies().is_empty(), "B starts empty");
+        let summary = state_b.import_journal(&envelope).expect("import succeeds");
+
+        assert_eq!(summary.studies, 1);
+        assert_eq!(summary.watch_items, 1);
+        assert_eq!(summary.holdings, 1);
+        assert_eq!(state_b.list_studies().len(), 1, "the study landed in B");
+        assert_eq!(state_b.list_watch_items().len(), 1, "the watch row landed");
+        assert_eq!(state_b.list_holdings().len(), 1, "the holding landed");
+        // The study's journal_id is rebound to B (seed semantics), id preserved.
+        assert!(state_b.get_study(study_id).is_some(), "study id preserved");
+    }
+
+    #[test]
+    fn journal_import_maps_each_rejection_to_its_neutral_notice_and_writes_nothing() {
+        let dir_a = TempDir::new().unwrap();
+        let mut state_a = watch_state(&dir_a, 0x532);
+        state_a.create_study("NESN", "CHF").unwrap();
+        let good = state_a.export_journal().unwrap();
+
+        let dir_b = TempDir::new().unwrap();
+        let mut state_b = watch_state(&dir_b, 0x533);
+
+        let tampered = good.replacen("NESN", "ROG0", 1);
+        assert_eq!(
+            state_b.import_journal(&tampered),
+            Err(MSG_IMPORT_INTEGRITY.to_string())
+        );
+        assert_eq!(
+            state_b.import_journal("not an envelope"),
+            Err(MSG_IMPORT_MALFORMED.to_string())
+        );
+        assert!(
+            state_b.list_studies().is_empty(),
+            "a rejected whole-journal import wrote nothing"
+        );
+    }
+
+    #[test]
+    fn journal_imported_message_fills_the_counts() {
+        let summary = ImportSummary {
+            source_journal_id: Uuid::from_u128(1),
+            source_logical_version: 7,
+            studies: 3,
+            watch_items: 2,
+            portfolios: 1,
+            holdings: 5,
+            transactions: 4,
+        };
+        let msg = journal_imported_message(&summary);
+        assert!(msg.contains("3 étude"));
+        assert!(msg.contains("2 valeur"));
+        assert!(msg.contains("5 ligne"));
+        assert!(msg.contains("4 mouvement"));
     }
 
     #[test]

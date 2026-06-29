@@ -39,8 +39,10 @@ pub enum ImportError {
     Malformed(String),
 }
 
-/// Lowercase-hex SHA-256 of `bytes` (no `hex` crate dependency — formatted inline).
-fn sha256_hex(bytes: &[u8]) -> String {
+/// Lowercase-hex SHA-256 of `bytes` (no `hex` crate dependency — formatted inline). `pub` so the
+/// whole-journal export (Story 5.3, `persistence`) reuses the one hashing implementation rather than
+/// duplicating it.
+pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {

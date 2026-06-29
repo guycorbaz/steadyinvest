@@ -5506,7 +5506,9 @@ name = "steadyinvest-persistence"
 version = "0.1.0"
 dependencies = [
  "rusqlite",
+ "serde",
  "serde_json",
+ "sha2 0.11.0",
  "steadyinvest-contract",
  "tempfile",
  "thiserror 2.0.18",

@@ -255,6 +255,20 @@ fn write_study_export(id: Uuid, json: &str) -> std::io::Result<std::path::PathBu
     Ok(path)
 }
 
+/// Write the whole-journal export envelope to a file (Story 5.3, FR60) and return its path. Like the
+/// single-study export, it lands in the `exports/` folder under the OS data dir — **never** beside the
+/// live journal DB (ADD7/8 sync-safety; the native picker + a user-chosen sync target is Story 5.5).
+/// Named by the journal id (stable, unique). `app` owns the file I/O.
+fn write_journal_export(journal_id: Uuid, json: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = directories::ProjectDirs::from("", "", "steadyinvest")
+        .map(|d| d.data_dir().join("exports"))
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no OS data directory"))?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("journal-{journal_id}.json"));
+    std::fs::write(&path, json)?;
+    Ok(path)
+}
+
 fn refresh_holdings(
     ui: &MainWindow,
     state: &JournalState,
@@ -1021,6 +1035,63 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             ui.global::<Studies>().set_notice(notice.into());
             refresh_studies(&ui, &journal_state.borrow());
+        });
+    }
+
+    // ── Story 5.3 (FR60) — export / import the WHOLE journal as a portable file. Scales the 5.2
+    // envelope to every entity + the (journal_id, version, hash) identity tuple; import verifies and
+    // applies atomically (never partially). Path-based for now — the native picker is Story 5.5. The
+    // actions live in Réglages (the Prefs global). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Prefs>().on_export_journal(move || {
+            let ui = ui_weak.unwrap();
+            let state = journal_state.borrow();
+            let notice = match state.export_journal() {
+                Ok(json) => match state.journal_id() {
+                    Some(jid) => match write_journal_export(jid, &json) {
+                        Ok(path) => format!("{} {}", state::MSG_JOURNAL_EXPORTED, path.display()),
+                        Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
+                    },
+                    None => state::MSG_NO_JOURNAL.to_string(),
+                },
+                Err(message) => message,
+            };
+            ui.global::<Prefs>().set_journal_status(notice.into());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
+        ui.global::<Prefs>().on_import_journal(move |path| {
+            let ui = ui_weak.unwrap();
+            let notice = match std::fs::read_to_string(path.as_str()) {
+                Ok(json) => match journal_state.borrow_mut().import_journal(&json) {
+                    Ok(summary) => state::journal_imported_message(&summary),
+                    Err(message) => message,
+                },
+                // An unreadable path is the malformed/unreadable case — a neutral refusal, no panic.
+                Err(_) => state::MSG_IMPORT_MALFORMED.to_string(),
+            };
+            ui.global::<Prefs>().set_journal_status(notice.into());
+            // A whole-journal import can touch every surface — re-render them all (dashboard,
+            // watchlist, portfolio). Prune any stale per-holding freshness for tickers no longer held.
+            let state = journal_state.borrow();
+            let format = config.borrow().number_format;
+            retain_held_freshness(&holding_freshness, &state);
+            refresh_studies(&ui, &state);
+            refresh_watchlist(&ui, &state);
+            refresh_holdings(
+                &ui,
+                &state,
+                &holding_freshness.borrow(),
+                &holding_dismissed.borrow(),
+                format,
+            );
         });
     }
 

@@ -40,6 +40,31 @@
 
 generated: 2026-06-09
 last_updated: 2026-06-29
+# 2026-06-29: story 5-3 created (export/import the WHOLE journal, FR60) → ready-for-dev. Scope decided
+#             with Guy = ALL journaled entities (faithful FR60), not studies-only: studies (full) +
+#             watchlist + portfolio(s) + holdings (incl. soft-deleted/sold) + sell transactions, in one
+#             versioned envelope carrying (journal_id, logical_version, schema_version, SHA-256 hash).
+#             REUSES the 5.2 envelope pattern scaled to the journal. Import = ATOMIC merge/seed into the
+#             current journal (upsert by id, foreign journal_id/portfolio_id rebound) in ONE transaction —
+#             never partially applied (NFR-R5); destructive REPLACE/restore stays Story 5.4. Envelope lives
+#             in `persistence` (only layer that sees all entity types; contract must not depend on it);
+#             borrows `contract::export::sha256_hex` (made pub) + reuses `ImportError`. New code: serde
+#             derives on WatchItem/PortfolioItem/HoldingItem/TransactionItem; persistence::export
+#             (JournalSnapshot+JournalExport+export_journal/import_journal+ImportSummary) + read-all helpers
+#             (list_portfolios, list_all_holdings [UNFILTERED — sold holdings carry their sell-tx FK],
+#             list_all_transactions, full-studies read); app export_journal/import_journal rails + path-based
+#             UI (native picker = 5.5). KEY EDGES flagged: atomicity rollback test, sold-holding export,
+#             FK insert order. sha2 → persistence/Cargo.toml (+1 lock edge, no new package; deny.toml intact).
+#             NO core::ssg change, NO migration, NO SCHEMA_VERSION bump. @tr floor 285, MSG inventory 55
+#             (reuse 5.2 MSG_IMPORT_*). Provider-INDEPENDENT (proceeds now; D2 still open).
+# 2026-06-29: story 5-3 dev complete + 3-layer review → done. 6/6 tasks; 4/4 ACs. 3-layer review (no
+#             CRIT/HIGH): 6 patches applied (surface imported (journal_id,version) per AC3; portfolio-
+#             inserted guard fixes phantom version bump + count; watchlist repack on merge; serde
+#             deny_unknown_fields rejects future-format files; per-study schema_version gate; fail-closed
+#             export on missing blob), 1 deferred → #65 (older-file version arbitration = Story 5.4
+#             restore territory). NOT committed/merged yet (branch story-5.3-export-import-whole-journal).
+#             Workspace 546 tests; fmt/clippy -D/deny green; launch 124. @tr 290, MSG inventory 57,
+#             persistence error inventory 11. Cargo.lock +2 edges (serde+sha2, no new package).
 # 2026-06-14: story 2-7 created (low-confidence & plausibility surfacing) → ready-for-dev. app-only SURFACING
 #             story (no detection — engine already computes both): (a) carries an explicit "Historique insuffisant
 #             — confiance réduite" label onto the verdict badge + sticky bar from verdict.low_confidence() (<5
@@ -376,7 +401,7 @@ development_status:
   epic-5: in-progress
   5-1-reopen-confront-past-judgment-vs-reality: ready-for-dev
   5-2-export-import-single-study: done
-  5-3-export-import-whole-journal: backlog
+  5-3-export-import-whole-journal: done
   5-4-restore-from-backup: backlog
   5-5-journal-location-recent-journals-sync-safety: backlog
   5-6-pdf-export-of-study: backlog

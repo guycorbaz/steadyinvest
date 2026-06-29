@@ -26,7 +26,7 @@ pub mod versioning;
 // Portfolio / FX types arrive with their epics (Epic 4/6 portfolio & FX).
 
 pub use cell::{Cell, Coverage, Freshness, PendingProvider, Review, Source};
-pub use export::{from_export_json, to_export_json, ImportError, StudyExport};
+pub use export::{from_export_json, sha256_hex, to_export_json, ImportError, StudyExport};
 pub use money::Money;
 pub use provenance::{Provenance, Timestamp};
 pub use study::{ForecastLowOption, Judgment, Study, YearData};
