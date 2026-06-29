@@ -1,0 +1,4 @@
+# Use the mold linker on Linux for faster link times.
+# gcc >= 12.1 supports -fuse-ld=mold natively (here: gcc 15.2).
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
