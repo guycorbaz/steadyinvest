@@ -50,6 +50,26 @@ pub(crate) fn migrate_to_v3(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration step 4 (Story 4.7, FR46/FR47): recording a sell. Two facets:
+/// - `transactions.kind` (buy/sell discriminator) + `transactions.rationale` (a 4.7-specific
+///   free-text reason, absent from FR39's fields) — the persisted **sell record**.
+/// - `holdings.sold_at` — a **soft-delete** marker. A sold holding leaves the active register but is
+///   **not** hard-deleted: its `transactions.holding_id` FK must keep pointing at a live row, so the
+///   record survives. `list_holdings` (the register + capital-at-risk source) filters `sold_at IS
+///   NULL`; a `NULL` here means still held.
+///
+/// All three are **nullable** `ADD COLUMN`s (existing v1–v3 rows read NULL), metadata-only,
+/// forward-safe, and `DDL_V1` stays frozen. The full buy/sell ledger (partial sells, weighted-average
+/// cost basis, edit/delete) remains Epic 6 / Story 6.3 — 4.7 writes a single SELL row + a soft delete.
+pub(crate) fn migrate_to_v4(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE transactions ADD COLUMN kind TEXT;
+         ALTER TABLE transactions ADD COLUMN rationale TEXT;
+         ALTER TABLE holdings ADD COLUMN sold_at TEXT;",
+    )?;
+    Ok(())
+}
+
 /// The complete v1 DDL. Frozen once shipped — schema changes go through new migration steps.
 const DDL_V1: &str = "
     -- Journal identity (ADD6): one row, journal_id (UUID) + monotonic logical_version.
@@ -200,8 +220,8 @@ mod tests {
         let conn = v1_connection();
         assert_eq!(
             migrations::user_version(&conn).expect("user_version reads"),
-            3,
-            "the registry migrates a fresh DB to the latest version (v3)"
+            4,
+            "the registry migrates a fresh DB to the latest version (v4)"
         );
         assert!(
             column_names(&conn, "watchlist_items").contains(&"study_id".to_string()),

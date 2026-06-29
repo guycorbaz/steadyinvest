@@ -79,6 +79,31 @@ pub fn total_invested(positions: &[PositionRisk]) -> Decimal {
     positions.iter().map(|p| p.avg_cost * p.quantity).sum()
 }
 
+/// Which neutral trigger a holding fires (Story 4.7, FR46/FR47). The app surfaces the fact and
+/// offers manual actions — it **never acts on its own**.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriggerKind {
+    /// The current price has reached or fallen through the trailing stop (Story 4.5).
+    Stop,
+    /// The matched study's present price is in its Sell zone (Story 4.4 / `core::ssg` §4).
+    Sell,
+}
+
+/// The neutral trigger state for one holding (Story 4.7, FR46/FR47): given whether its trailing
+/// stop is breached and whether it is in its Sell zone, return which trigger (if any) fires. **The
+/// stop takes priority over the Sell zone** — when both hold, the result is [`TriggerKind::Stop`].
+/// This is the **isolated, testable FR47 business rule** (stop-loss priority); keep it a pure
+/// boolean function so the priority never leaks into UI conditionals. Neither condition → `None`.
+pub fn trigger_state(stop_breached: bool, in_sell_zone: bool) -> Option<TriggerKind> {
+    if stop_breached {
+        Some(TriggerKind::Stop) // FR47: the stop wins, even when also in the Sell zone.
+    } else if in_sell_zone {
+        Some(TriggerKind::Sell)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,5 +208,28 @@ mod tests {
             capital_at_risk(&[p]),
             Decimal::from_str_exact("30.75").unwrap()
         );
+    }
+
+    // ── Story 4.7 — the neutral trigger state + the FR47 stop-priority rule ──
+
+    #[test]
+    fn no_trigger_when_neither_breached_nor_in_sell_zone() {
+        assert_eq!(trigger_state(false, false), None);
+    }
+
+    #[test]
+    fn a_breached_stop_fires_the_stop_trigger() {
+        assert_eq!(trigger_state(true, false), Some(TriggerKind::Stop));
+    }
+
+    #[test]
+    fn the_sell_zone_alone_fires_the_sell_trigger() {
+        assert_eq!(trigger_state(false, true), Some(TriggerKind::Sell));
+    }
+
+    #[test]
+    fn stop_priority_over_sell_zone() {
+        // FR47 — when both conditions hold, the stop-loss takes priority over the Sell zone.
+        assert_eq!(trigger_state(true, true), Some(TriggerKind::Stop));
     }
 }
