@@ -1011,7 +1011,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let ui = ui_weak.unwrap();
             let notice = match std::fs::read_to_string(path.as_str()) {
                 Ok(json) => match journal_state.borrow_mut().import_study(&json) {
-                    Ok(_id) => state::MSG_STUDY_IMPORTED.to_string(),
+                    // Surface an overwrite of a pre-existing study distinctly from a fresh import.
+                    Ok((_id, true)) => state::MSG_STUDY_UPDATED.to_string(),
+                    Ok((_id, false)) => state::MSG_STUDY_IMPORTED.to_string(),
                     Err(message) => message,
                 },
                 // An unreadable path is the malformed/unreadable case — a neutral refusal, no panic.

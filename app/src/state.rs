@@ -149,9 +149,11 @@ pub const MSG_HOLDING_SOLD: &str =
 /// the portable data contract + schema_version + integrity hash; import verifies both before saving.
 pub const MSG_STUDY_EXPORTED: &str = "L'étude a été exportée.";
 pub const MSG_STUDY_IMPORTED: &str = "L'étude a été importée.";
+pub const MSG_STUDY_UPDATED: &str =
+    "L'étude existait déjà ; elle a été mise à jour depuis le fichier.";
 pub const MSG_EXPORT_MISSING: &str = "L'étude est introuvable ; rien n'a été exporté.";
 pub const MSG_IMPORT_INTEGRITY: &str =
-    "Le fichier ne correspond pas à son empreinte d'intégrité ; il a peut-être été altéré. Rien n'a été importé.";
+    "Le fichier ne correspond pas à son empreinte d'intégrité (fichier corrompu ou incomplet) ; rien n'a été importé.";
 pub const MSG_IMPORT_VERSION: &str =
     "Le fichier provient d'une version incompatible du format ; rien n'a été importé.";
 pub const MSG_IMPORT_MALFORMED: &str =
@@ -317,6 +319,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDING_SOLD,
     MSG_STUDY_EXPORTED,
     MSG_STUDY_IMPORTED,
+    MSG_STUDY_UPDATED,
     MSG_EXPORT_MISSING,
     MSG_IMPORT_INTEGRITY,
     MSG_IMPORT_VERSION,
@@ -1162,9 +1165,12 @@ impl JournalState {
     /// Import a study from its portable envelope JSON (Story 5.2, FR59/NFR-R5): verify integrity +
     /// `schema_version`, then persist. The study's **own id is preserved** (a re-import of the same
     /// study updates in place, never duplicates); its `journal_id` is **rebound to this journal** so a
-    /// study seeded/shared from another journal joins the current one (identity = the study id). Each
-    /// [`ImportError`] maps to a neutral notice; nothing is written on a rejection. Guarded.
-    pub fn import_study(&mut self, json: &str) -> Result<Uuid, String> {
+    /// study seeded/shared from another journal joins the current one (identity = the study id).
+    /// Returns `(id, overwrote_existing)` — an import onto a pre-existing id **updates** it, which the
+    /// caller surfaces distinctly (AC3); an overwrite onto an **archived** study also reactivates it,
+    /// so an imported study is never silently left hidden. Each [`ImportError`] maps to a neutral
+    /// notice; nothing is written on a rejection. Guarded.
+    pub fn import_study(&mut self, json: &str) -> Result<(Uuid, bool), String> {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
@@ -1173,14 +1179,30 @@ impl JournalState {
             ImportError::Version { .. } => MSG_IMPORT_VERSION.to_string(),
             ImportError::Malformed(_) => MSG_IMPORT_MALFORMED.to_string(),
         })?;
+        let id = study.id;
+        // Detect a pre-existing study with this id (and whether it is currently archived/hidden) so
+        // the import is surfaced as an UPDATE, not a silent clobber (AC3 review finding).
+        let existing_archived = self
+            .list_studies()
+            .into_iter()
+            .find(|s| s.id == id)
+            .map(|s| (true, s.status == "archived"));
+        let overwrote = existing_archived.is_some();
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         study.journal_id = journal.id();
-        let id = study.id;
         match journal.put_study(&study) {
-            Ok(()) => Ok(id),
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Ok(()) => {}
+            Err(PersistError::NewerJournalSchema { .. }) => {
+                return Err(MSG_READ_ONLY_WRITE.to_string())
+            }
+            Err(error) => return Err(format!("{MSG_SAVE_FAILED} {error}")),
         }
+        // `put_study`'s upsert does not touch `status`; an imported study must be visible, so an
+        // overwrite onto an archived id is reactivated.
+        if existing_archived == Some((true, true)) {
+            self.set_study_status(id, "active")?;
+        }
+        Ok((id, overwrote))
     }
 
     /// Build the manual [`Provenance`] for an edit (Story 2.4): `source = Manual`, `timestamp` from
@@ -2417,19 +2439,49 @@ mod tests {
             "the study is gone before import"
         );
 
-        let imported_id = state.import_study(&envelope).expect("import succeeds");
+        let (imported_id, overwrote) = state.import_study(&envelope).expect("import succeeds");
         assert_eq!(imported_id, id, "the study id is preserved on round-trip");
+        assert!(
+            !overwrote,
+            "a fresh import (the study was deleted) is not an overwrite"
+        );
         assert_eq!(
             state.get_study(id).expect("the study is back"),
             original,
             "export → import yields an equal study"
         );
 
-        // A second import of the same envelope is an idempotent update, not a duplicate.
-        state
+        // A second import of the same envelope is an idempotent update, surfaced as an overwrite.
+        let (_id, overwrote_again) = state
             .import_study(&envelope)
             .expect("re-import updates in place");
+        assert!(
+            overwrote_again,
+            "re-import onto an existing id is surfaced as an overwrite"
+        );
         assert_eq!(state.list_studies().len(), 1, "no duplicate study");
+    }
+
+    #[test]
+    fn importing_onto_an_archived_study_reactivates_it() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x523);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let envelope = state.export_study(id).unwrap();
+        state.archive_study(id).expect("archive the study");
+        assert_eq!(
+            state.list_studies()[0].status,
+            "archived",
+            "the study is hidden before re-import"
+        );
+
+        let (_id, overwrote) = state.import_study(&envelope).expect("re-import succeeds");
+        assert!(overwrote, "re-import onto the archived id is an overwrite");
+        assert_eq!(
+            state.list_studies()[0].status,
+            "active",
+            "an imported study is reactivated, never left silently hidden"
+        );
     }
 
     #[test]

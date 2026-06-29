@@ -1,6 +1,6 @@
 # Story 5.2: Export / import a single study
 
-Status: review (dev complete 2026-06-29 — 5/5 tasks; workspace 530 tests, fmt/clippy -D/deny green; core::ssg intact; NO migration, SCHEMA_VERSION stays 1, deny.toml unchanged; Cargo.lock +1 edge only [workspace sha2 added to contract — no new package])
+Status: done (3-layer review 2026-06-29 — 4/4 ACs satisfied; 3 patches applied [surface overwrite + reactivate archived; soften integrity wording; harden version consistency], 1 deferred → #63; workspace 532 tests, fmt/clippy -D/deny green; core::ssg intact; NO migration, SCHEMA_VERSION stays 1, deny.toml unchanged; Cargo.lock +1 edge [workspace sha2, no new package])
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -122,6 +122,16 @@ Claude Opus 4.8 (1M context) — `claude-opus-4-8[1m]`
 - `app/ui/state.slint` (M) — `Studies.export-study` / `import-study` callbacks
 - `app/ui/screens/dashboard.slint` (M) — per-row Exporter action + import path field/button
 
+### Review Findings (3-layer adversarial — 2026-06-29)
+
+3 layers (Blind / Edge / Acceptance). All 4 ACs satisfied (@tr +3, MSG +6 exact; no core/migration/SCHEMA_VERSION; Cargo.lock +1 edge + path-based UI disclosed & acceptable). 0 decision-needed, 3 patch, 1 deferred, dismissals (journal_id rebind accepted; hash determinism CONFIRMED — no maps in Study; unreadable→malformed within intent).
+
+- [x] [Review][Patch] Import silently overwrites a study at the same id (AC3 "surfaced" gap) — `import_study` returned a generic "importée" for both new and overwrite; AC3 requires surfacing the overwrite. Now returns `(id, overwrote)`; main.rs shows a distinct `MSG_STUDY_UPDATED` on overwrite. **+ corollary:** an overwrite onto an *archived* id now reactivates the study (it was staying hidden despite "importée"). [app/src/state.rs, main.rs] — MED
+- [x] [Review][Patch] "Tamper/altéré" wording overstates the unkeyed SHA-256 (it's a corruption check, not a signature) — reframed the `export.rs` docstrings + `MSG_IMPORT_INTEGRITY` to "corruption/incomplete". [contract/src/export.rs, app/src/state.rs]
+- [x] [Review][Patch] Version gate trusted the envelope field, not the embedded `study.schema_version` — `from_export_json` now rejects an envelope whose declared version disagrees with the deserialized study's. [contract/src/export.rs]
+- [x] [Review][Defer] Exporting a newer-/corrupt-schema study reports "introuvable" instead of a version/unreadable cause (`get_study` swallows the error → None). Future-build-only trigger; cosmetic-but-contradictory. Deferred → **GitHub #63**. [app/src/state.rs]
+
 ### Change Log
 
 - 2026-06-29 — Story 5.2 dev complete (5/5 tasks). Portable single-study export/import (contract envelope + schema_version + SHA-256 integrity hash); identity-preserving round-trip; path-based UI (native picker deferred to 5.5). Workspace 530 tests green; no core/migration/SCHEMA_VERSION change.
+- 2026-06-29 — 3-layer review: 3 patches applied (surface overwrite + reactivate archived; soften integrity wording; harden version consistency), 1 deferred (export newer-schema message). 4/4 ACs satisfied.

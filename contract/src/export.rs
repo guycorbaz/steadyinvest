@@ -7,10 +7,11 @@
 //! `contract` surface stays serde + `rust_decimal` + `sha2`, no reading or writing of files.
 //!
 //! Round-trip: [`to_export_json`] → [`from_export_json`] yields an **equal** [`Study`] (identity
-//! preserved — the `id` is part of the serialized study). Import **verifies** the hash (rejects
-//! tamper/corruption) and the `schema_version` (rejects an unknown/newer version — a migration hook
-//! is structured via [`ImportError::Version`], but with `SCHEMA_VERSION == 1` only the equal case
-//! accepts; nothing is silently coerced).
+//! preserved — the `id` is part of the serialized study). Import **verifies** the hash (a
+//! **corruption check** — the unkeyed SHA-256 catches a truncated/garbled/hand-edited file; it is
+//! NOT a signature, so it is not tamper-proof against a deliberate re-hash) and the `schema_version`
+//! (rejects an unknown/newer version — a migration hook is structured via [`ImportError::Version`],
+//! but with `SCHEMA_VERSION == 1` only the equal case accepts; nothing is silently coerced).
 
 use crate::study::Study;
 use crate::versioning::SCHEMA_VERSION;
@@ -30,7 +31,7 @@ pub struct StudyExport {
 /// generic shape detail) — NFR-S1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportError {
-    /// The recomputed hash does not match the envelope's — tamper or corruption.
+    /// The recomputed hash does not match the envelope's — the file is corrupt or incomplete.
     Integrity,
     /// The envelope's `schema_version` is not the one this build supports (no silent coercion).
     Version { found: u32, supported: u32 },
@@ -79,7 +80,17 @@ pub fn from_export_json(text: &str) -> Result<Study, ImportError> {
             supported: SCHEMA_VERSION,
         });
     }
-    serde_json::from_str(&envelope.payload).map_err(|e| ImportError::Malformed(e.to_string()))
+    let study: Study = serde_json::from_str(&envelope.payload)
+        .map_err(|e| ImportError::Malformed(e.to_string()))?;
+    // The envelope's `schema_version` must agree with the study it wraps (an honest export sets both
+    // from `study.schema_version`). A disagreement means a hand-crafted/inconsistent envelope.
+    if study.schema_version != envelope.schema_version {
+        return Err(ImportError::Malformed(format!(
+            "envelope schema_version {} disagrees with the study's {}",
+            envelope.schema_version, study.schema_version
+        )));
+    }
+    Ok(study)
 }
 
 #[cfg(test)]
@@ -169,6 +180,25 @@ mod tests {
                 supported: SCHEMA_VERSION,
             })
         );
+    }
+
+    #[test]
+    fn an_envelope_version_disagreeing_with_its_study_is_malformed() {
+        // A hash-valid envelope whose declared schema_version matches SCHEMA_VERSION (so the version
+        // gate passes) but whose embedded study carries a DIFFERENT schema_version is inconsistent.
+        let mut study = sample();
+        study.schema_version = SCHEMA_VERSION + 7;
+        let payload = serde_json::to_string(&study).unwrap();
+        let envelope = StudyExport {
+            schema_version: SCHEMA_VERSION,
+            integrity_hash: sha256_hex(payload.as_bytes()),
+            payload,
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert!(matches!(
+            from_export_json(&json),
+            Err(ImportError::Malformed(_))
+        ));
     }
 
     #[test]

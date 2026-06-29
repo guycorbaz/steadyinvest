@@ -629,11 +629,12 @@ mod tests {
         // symbol): 42 + 2 = 44. Story 4.4 adds the two holdings price-refresh notices (refreshing /
         // nothing-linked): 44 + 2 = 46. Story 4.5 adds the trailing-stop validation notice: 46 + 1 = 47.
         // Story 4.7 adds the recorded-sell confirmation (MSG_HOLDING_SOLD): 47 + 1 = 48. Story 5.2
-        // adds the six study export/import notices (exported / imported / export-missing +
-        // integrity / version / malformed import refusals): 48 + 6 = 54.
+        // adds the study export/import notices (exported / imported / updated / export-missing +
+        // integrity / version / malformed import refusals): 48 + 7 = 55 (the "updated" notice was
+        // added by the 5.2 review — surface an overwrite distinctly).
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            54,
+            55,
             "state.rs message inventory changed — register the new notice"
         );
     }

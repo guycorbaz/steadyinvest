@@ -375,7 +375,7 @@ development_status:
   # ── Epic 5: Cumulative memory & portability [P1] ──
   epic-5: in-progress
   5-1-reopen-confront-past-judgment-vs-reality: ready-for-dev
-  5-2-export-import-single-study: review
+  5-2-export-import-single-study: done
   5-3-export-import-whole-journal: backlog
   5-4-restore-from-backup: backlog
   5-5-journal-location-recent-journals-sync-safety: backlog
