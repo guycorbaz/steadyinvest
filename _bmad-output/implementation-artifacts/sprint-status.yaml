@@ -370,7 +370,7 @@ development_status:
   4-5-trailing-stop-per-holding: done
   4-6-simple-capital-at-risk: done
   4-7-neutral-sell-stop-triggers-manual-actions: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
 
   # ── Epic 5: Cumulative memory & portability [P1] ──
   epic-5: backlog
