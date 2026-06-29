@@ -16,10 +16,12 @@ mod journal;
 mod migrations;
 mod schema;
 mod studies;
+mod transactions;
 mod watchlist;
 
 pub use error::{Error, Result};
 pub use holdings::{HoldingItem, PortfolioItem};
 pub use journal::Journal;
 pub use studies::StudySummary;
+pub use transactions::{TransactionItem, KIND_SELL};
 pub use watchlist::WatchItem;

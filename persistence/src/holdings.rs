@@ -148,13 +148,16 @@ impl Journal {
         })
     }
 
-    /// Every holding in a portfolio, ordered by `created_at` then `id` (deterministic) — the
-    /// register's list. (No `position` column: holdings are not user-reordered in 4.3.)
+    /// Every **active** holding in a portfolio, ordered by `created_at` then `id` (deterministic) —
+    /// the register's list. (No `position` column: holdings are not user-reordered in 4.3.) A holding
+    /// sold on a neutral trigger (Story 4.7) has a non-NULL `sold_at` and is **excluded** here — it
+    /// stays in the table so its sell transaction's FK keeps a live referent, but it leaves the
+    /// active register (and the capital-at-risk source, which reads this list).
     pub fn list_holdings(&self, portfolio_id: Uuid) -> Result<Vec<HoldingItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
                     trailing_stop_pct, trailing_stop_level, created_at
-             FROM holdings WHERE portfolio_id = ?1 ORDER BY created_at, id",
+             FROM holdings WHERE portfolio_id = ?1 AND sold_at IS NULL ORDER BY created_at, id",
         )?;
         let rows = stmt.query_map(rusqlite::params![portfolio_id.to_string()], |r| {
             Ok((

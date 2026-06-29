@@ -123,10 +123,14 @@ export component PortfolioScreen inherits Rectangle {
             // Per-row draft for the trailing-stop % field (Story 4.5): pre-filled with the holding's
             // current stop, or the Réglages default when none is set yet.
             property <string> stop-draft: row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
+            // Per-row draft for an optional sell rationale (Story 4.7) — captured with the
+            // "Enregistrer une vente" action.
+            property <string> sell-rationale;
             background: Tokens.surface-alt;
             border-radius: Tokens.radius;
-            height: 96px;
-            HorizontalLayout {
+            min-height: 96px;
+            VerticalLayout {
+              HorizontalLayout {
                 padding-left: Tokens.space-12;
                 padding-right: Tokens.space-12;
                 spacing: Tokens.space-12;
@@ -244,6 +248,46 @@ export component PortfolioScreen inherits Rectangle {
                         Holdings.remove-holding(row.id);
                     }
                 }
+              }
+              // ── Story 4.7 (FR46/FR47): the neutral trigger + its manual actions. Shown only while the
+              // holding fires a trigger and the user hasn't dismissed it. Neutral ink, no hue — the app
+              // never auto-acts: Vendre / Relever le stop / Ignorer are each an explicit user choice. The
+              // stop trigger takes priority over the Sell zone (the kind is decided in core::risk). ──
+              if row.trigger-kind != "" && !row.dismissed: HorizontalLayout {
+                  padding-left: Tokens.space-12;
+                  padding-right: Tokens.space-12;
+                  padding-bottom: Tokens.space-8;
+                  spacing: Tokens.space-8;
+                  Text {
+                      text: row.trigger-kind == "stop"
+                          ? @tr("Le prix a atteint votre stop.")
+                          : @tr("Le prix est dans la zone de vente.");
+                      color: Tokens.text-high;
+                      font-size: Tokens.font-caption;
+                      vertical-alignment: center;
+                      horizontal-stretch: 1;
+                  }
+                  TextField {
+                      placeholder: @tr("Raison (facultative)");
+                      text <=> hrow.sell-rationale;
+                      horizontal-stretch: 1;
+                  }
+                  ActionButton {
+                      label: @tr("Enregistrer une vente");
+                      enabled: !Holdings.read-only;
+                      clicked => { Holdings.sell-holding(row.id, hrow.sell-rationale); }
+                  }
+                  ActionButton {
+                      label: @tr("Relever le stop");
+                      enabled: !Holdings.read-only && hrow.stop-draft != "";
+                      clicked => { Holdings.set-trailing-stop(row.id, hrow.stop-draft); }
+                  }
+                  ActionButton {
+                      label: @tr("Ignorer");
+                      enabled: true;
+                      clicked => { Holdings.dismiss-trigger(row.id); }
+                  }
+              }
             }
         }
     }

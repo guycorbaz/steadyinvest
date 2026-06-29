@@ -140,6 +140,11 @@ pub const MSG_HOLDINGS_REFRESHING: &str = "Rafraîchissement des prix en cours."
 pub const MSG_HOLDINGS_REFRESH_NONE: &str =
     "Aucune position liée à une étude ; il n'y a aucun prix à rafraîchir.";
 
+/// Recorded-sell copy (Story 4.7, FR46/FR47) — fact-stating, posture-gated. Set when the user
+/// records a sell from a neutral trigger: the sell is journalled and the holding leaves the register.
+pub const MSG_HOLDING_SOLD: &str =
+    "La vente a été enregistrée ; la position a été retirée du portefeuille.";
+
 /// Provider configuration & keychain copy (Story 3.2, FR25/FR63) — fact-stating, posture-gated. The
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
 pub const MSG_KEY_SAVED: &str =
@@ -297,6 +302,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDING_INVALID_STOP,
     MSG_HOLDINGS_REFRESHING,
     MSG_HOLDINGS_REFRESH_NONE,
+    MSG_HOLDING_SOLD,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -886,6 +892,57 @@ impl JournalState {
         }
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal.delete_holding(id).map_err(watch_error)
+    }
+
+    /// Record a **sell** chosen on a neutral trigger (Story 4.7, FR46/FR47) and remove the holding
+    /// from the active register. Writes one SELL transaction — `quantity` = the holding's; `unit_price`
+    /// = the matched study's `current_price` (the market fact, Story 4.4) if known, else the holding's
+    /// `purchase_price`; `fees` = 0 (the fees workflow is Epic 6); `currency` = the caller's reference
+    /// currency (FR63); `rationale` = the optional trimmed reason (`None` when blank). The sell row and
+    /// the holding's **soft delete** are written **atomically** in one `record_sell` transaction — not
+    /// a hard delete (the sell transaction's FK must keep a live referent, so the record survives; the
+    /// holding just leaves the register via `sold_at`). The full ledger (partial sells, cost basis)
+    /// stays Epic 6 / Story 6.3. Guarded (read-only / no-journal / save-failure → a neutral notice); an
+    /// absent (or already-sold) id is refused.
+    pub fn sell_holding(
+        &mut self,
+        holding_id: Uuid,
+        rationale: &str,
+        currency: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let holding = self
+            .list_holdings()
+            .into_iter()
+            .find(|h| h.id == holding_id)
+            .ok_or(MSG_SAVE_FAILED.to_string())?;
+        // The sale price: the matched study's current market price if known, else the cost basis.
+        let unit_price = self
+            .study_id_for_ticker(&holding.security_ticker)
+            .and_then(|sid| self.get_study(sid))
+            .and_then(|s| s.judgment.current_price)
+            .map(|m| m.as_decimal().to_string())
+            .unwrap_or_else(|| holding.purchase_price.clone());
+        let rationale = rationale.trim();
+        let rationale = (!rationale.is_empty()).then_some(rationale);
+        let id = self.idgen.new_id();
+        let now = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .record_sell(
+                id,
+                holding_id,
+                &holding.quantity,
+                &unit_price,
+                "0",
+                currency,
+                rationale,
+                &now,
+            )
+            .map(|_| ())
+            .map_err(watch_error)
     }
 
     /// Set (or clear) a holding's trailing-stop percentage (Story 4.5, FR42). An empty `pct_input`
@@ -3661,6 +3718,49 @@ mod tests {
             Decimal::from(100 * 10 + 50 * 20),
             "invested = Σ cost × qty"
         );
+    }
+
+    // ── Story 4.7 — recorded sell on a neutral trigger ──
+
+    #[test]
+    fn sell_holding_records_the_sell_and_drops_it_from_the_register() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x470);
+        state.add_holding("NESN", "10", "100").unwrap();
+        state.add_holding("ROG", "20", "50").unwrap();
+        let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
+        // NESN gets a 15% stop (no study) → level 85, below cost 100 → CaR 150 before the sell.
+        state.set_holding_trailing_stop(ids[0], "15").unwrap();
+        assert_eq!(state.portfolio_capital_at_risk().0, Decimal::from(150));
+
+        state
+            .sell_holding(ids[0], "  stop touché  ", "CHF")
+            .expect("the sell records");
+
+        let remaining: Vec<_> = state
+            .list_holdings()
+            .iter()
+            .map(|h| h.security_ticker.clone())
+            .collect();
+        assert_eq!(remaining, vec!["ROG".to_string()], "NESN left the register");
+        assert_eq!(
+            state.portfolio_capital_at_risk().0,
+            Decimal::ZERO,
+            "the only at-risk holding is gone → capital-at-risk drops to 0"
+        );
+    }
+
+    #[test]
+    fn sell_holding_refuses_an_absent_id() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x471);
+        state.add_holding("NESN", "10", "100").unwrap();
+        let ghost = Uuid::from_u128(0xDEAD);
+        assert!(
+            state.sell_holding(ghost, "", "CHF").is_err(),
+            "selling a non-existent holding is refused, nothing written"
+        );
+        assert_eq!(state.list_holdings().len(), 1, "the register is untouched");
     }
 
     // ── Story 4.3 — holdings register (single-portfolio CRUD + decimal validation) ──

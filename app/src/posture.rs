@@ -578,9 +578,12 @@ mod tests {
         // "Seuil %" field + définir/mettre-à-jour/retirer actions) and the Réglages default-% panel
         // (title + "Pourcentage (0–100)" + enregistrer/effacer): net +10 = 273. The 4.5 review adds
         // the "à {} {} au-dessus" distance-above fact (AC4): +1 = 274. Story 4.6 adds the capital-at-
-        // risk header fact (with + without the "% du capital investi" clause): +2 = 276. Floor strict.
+        // risk header fact (with + without the "% du capital investi" clause): +2 = 276. Story 4.7 adds
+        // the neutral trigger panel — the two trigger facts (stop / sell-zone), the rationale
+        // placeholder, and the Enregistrer-une-vente / Relever-le-stop / Ignorer actions: +6 = 282.
+        // Floor strict.
         assert!(
-            total >= 276,
+            total >= 282,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -624,9 +627,10 @@ mod tests {
         // Story 4.3 adds the two holdings-register validation notices (invalid number / empty
         // symbol): 42 + 2 = 44. Story 4.4 adds the two holdings price-refresh notices (refreshing /
         // nothing-linked): 44 + 2 = 46. Story 4.5 adds the trailing-stop validation notice: 46 + 1 = 47.
+        // Story 4.7 adds the recorded-sell confirmation (MSG_HOLDING_SOLD): 47 + 1 = 48.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            47,
+            48,
             "state.rs message inventory changed — register the new notice"
         );
     }

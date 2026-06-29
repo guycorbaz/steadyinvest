@@ -580,6 +580,11 @@ export struct HoldingRow {
     stop-breached: bool,
     // The current price's margin above the stop level (display string; "" when breached or unknown).
     stop-distance: string,
+    // Story 4.7 (FR46/FR47): the neutral trigger this holding fires — "stop" (breached, takes
+    // priority), "sell" (in its Sell zone), or "" (none). `dismissed` is true while the user has
+    // hidden this trigger's action panel for the session (transient; never persisted).
+    trigger-kind: string,
+    dismissed: bool,
 }
 
 // The single-portfolio holdings register (Story 4.3, FR36). Rows are built/ordered by Rust; intents
@@ -608,4 +613,8 @@ export global Holdings {
     callback refresh-prices();
     // Story 4.5 (FR42): set/clear a holding's trailing-stop percentage (id, pct — "" clears).
     callback set-trailing-stop(string, string);
+    // Story 4.7 (FR46/FR47): record a sell on a neutral trigger (id, rationale — rationale optional);
+    // the app never auto-sells. Dismiss hides a trigger's action panel for the session (id).
+    callback sell-holding(string, string);
+    callback dismiss-trigger(string);
 }

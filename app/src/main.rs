@@ -245,6 +245,7 @@ fn refresh_holdings(
     ui: &MainWindow,
     state: &JournalState,
     freshness: &HoldingFreshnessMap,
+    dismissed: &std::collections::HashSet<String>,
     format: NumberFormat,
 ) {
     use steadyinvest_core::rounding::DisplayField;
@@ -304,8 +305,20 @@ fn refresh_holdings(
                 }
                 _ => String::new(),
             };
+            // Story 4.7 (FR46/FR47): the neutral trigger — the stop takes priority over the Sell
+            // zone. The kind is computed in `core::risk` from the very same `stop_breached` + zone the
+            // row already carries (no second source of truth); the per-row action panel is geofenced
+            // to a still-shown (not dismissed) trigger.
+            let trigger_kind =
+                match steadyinvest_core::risk::trigger_state(stop_breached, zone == "sell") {
+                    Some(steadyinvest_core::risk::TriggerKind::Stop) => "stop",
+                    Some(steadyinvest_core::risk::TriggerKind::Sell) => "sell",
+                    None => "",
+                };
+            let id_text = h.id.to_string();
+            let dismissed = dismissed.contains(&id_text);
             HoldingRow {
-                id: h.id.to_string().into(),
+                id: id_text.into(),
                 ticker: h.security_ticker.clone().into(),
                 quantity: h.quantity.clone().into(),
                 purchase_price: h.purchase_price.clone().into(),
@@ -320,6 +333,8 @@ fn refresh_holdings(
                 stop_level: stop_level_display.into(),
                 stop_breached,
                 stop_distance: stop_distance.into(),
+                trigger_kind: trigger_kind.into(),
+                dismissed,
             }
         })
         .collect();
@@ -353,6 +368,7 @@ fn apply_holdings_result(
     state: &JournalState,
     result: Result<(), String>,
     freshness: &HoldingFreshnessMap,
+    dismissed: &std::collections::HashSet<String>,
     format: NumberFormat,
 ) {
     let holdings = ui.global::<Holdings>();
@@ -360,7 +376,7 @@ fn apply_holdings_result(
         Ok(()) => holdings.set_notice(SharedString::new()),
         Err(message) => holdings.set_notice(message.into()),
     }
-    refresh_holdings(ui, state, freshness, format);
+    refresh_holdings(ui, state, freshness, dismissed, format);
 }
 
 /// Link a watchlist entry to a saved study of the SAME ticker (the most recent), or a neutral
@@ -623,6 +639,11 @@ fn main() -> Result<(), slint::PlatformError> {
     // only). Populated by the off-thread refresh outcomes; read when rebuilding the register.
     let holding_freshness: Rc<RefCell<HoldingFreshnessMap>> =
         Rc::new(RefCell::new(HoldingFreshnessMap::new()));
+
+    // Story 4.7 — holding ids whose neutral-trigger action panel the user has dismissed this session
+    // (transient; never persisted — a dismissed trigger re-appears next launch if still firing).
+    let holding_dismissed: Rc<RefCell<std::collections::HashSet<String>>> =
+        Rc::new(RefCell::new(std::collections::HashSet::new()));
     // Issue #52 — outstanding holdings-refresh jobs in flight. Set to the enqueued count when a
     // refresh starts; each outcome decrements it; the button is disabled (`Holdings.refreshing`)
     // until it returns to zero, so a double-click can't enqueue duplicate jobs.
@@ -675,6 +696,7 @@ fn main() -> Result<(), slint::PlatformError> {
             &ui,
             &journal_state.borrow(),
             &holding_freshness.borrow(),
+            &holding_dismissed.borrow(),
             config.borrow().number_format,
         );
         if let Some(notice) = &startup_notice {
@@ -692,6 +714,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let current_study = Rc::clone(&current_study);
         let config = Rc::clone(&config);
         let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
         let refresh_pending = Rc::clone(&refresh_pending);
         fetch::set_outcome_handler(move |outcome| {
             let Some(ui) = ui_weak.upgrade() else {
@@ -832,6 +855,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         &ui,
                         &journal_state.borrow(),
                         &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
                         format,
                     );
                     // One job resolved — clear the in-flight latch when the batch is fully drained,
@@ -1023,6 +1047,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let journal_state = Rc::clone(&journal_state);
         let config = Rc::clone(&config);
         let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
         ui.global::<Holdings>()
             .on_add_holding(move |ticker, quantity, price| {
                 let ui = ui_weak.unwrap();
@@ -1037,6 +1062,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     &journal_state.borrow(),
                     result,
                     &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
                     format,
                 );
                 // Report whether the holding was written so the UI keeps the user's input on refusal.
@@ -1048,6 +1074,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let journal_state = Rc::clone(&journal_state);
         let config = Rc::clone(&config);
         let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
         ui.global::<Holdings>()
             .on_edit_holding(move |id, ticker, quantity, price| {
                 let ui = ui_weak.unwrap();
@@ -1065,6 +1092,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     &journal_state.borrow(),
                     result,
                     &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
                     format,
                 );
                 written
@@ -1075,12 +1103,16 @@ fn main() -> Result<(), slint::PlatformError> {
         let journal_state = Rc::clone(&journal_state);
         let config = Rc::clone(&config);
         let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
         ui.global::<Holdings>().on_remove_holding(move |id| {
             let ui = ui_weak.unwrap();
             let Ok(id) = Uuid::parse_str(&id) else {
                 return;
             };
             let result = journal_state.borrow_mut().delete_holding(id);
+            // The holding is gone — drop any dismiss entry so the session set can't grow unbounded
+            // (mirrors the sell path). `id.to_string()` is the same canonical key the rows use.
+            holding_dismissed.borrow_mut().remove(&id.to_string());
             let format = config.borrow().number_format;
             retain_held_freshness(&holding_freshness, &journal_state.borrow());
             apply_holdings_result(
@@ -1088,6 +1120,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 &journal_state.borrow(),
                 result,
                 &holding_freshness.borrow(),
+                &holding_dismissed.borrow(),
                 format,
             );
         });
@@ -1161,6 +1194,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let journal_state = Rc::clone(&journal_state);
         let config = Rc::clone(&config);
         let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
         ui.global::<Holdings>()
             .on_set_trailing_stop(move |id, pct| {
                 let ui = ui_weak.unwrap();
@@ -1176,9 +1210,78 @@ fn main() -> Result<(), slint::PlatformError> {
                     &journal_state.borrow(),
                     result,
                     &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
                     format,
                 );
             });
+    }
+    // ── Story 4.7 (FR46/FR47) — record a sell on a neutral trigger / dismiss a trigger's panel. The
+    // app never auto-acts: it only persists a sell the user explicitly chose, or hides a trigger. ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
+        ui.global::<Holdings>()
+            .on_sell_holding(move |id, rationale| {
+                let ui = ui_weak.unwrap();
+                let Ok(uuid) = Uuid::parse_str(&id) else {
+                    return;
+                };
+                let currency = config.borrow().reference_currency_or_default();
+                let result = journal_state
+                    .borrow_mut()
+                    .sell_holding(uuid, &rationale, &currency);
+                // The holding is gone on success — drop any stale dismiss entry so the id can't leak.
+                if result.is_ok() {
+                    holding_dismissed.borrow_mut().remove(id.as_str());
+                }
+                let format = config.borrow().number_format;
+                retain_held_freshness(&holding_freshness, &journal_state.borrow());
+                // A neutral confirmation on success; the guarded refusal notice otherwise.
+                let result = result.map(|()| {
+                    ui.global::<Holdings>()
+                        .set_notice(state::MSG_HOLDING_SOLD.into());
+                });
+                if result.is_ok() {
+                    refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                } else {
+                    apply_holdings_result(
+                        &ui,
+                        &journal_state.borrow(),
+                        result,
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                }
+            });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
+        ui.global::<Holdings>().on_dismiss_trigger(move |id| {
+            let ui = ui_weak.unwrap();
+            holding_dismissed.borrow_mut().insert(id.to_string());
+            let format = config.borrow().number_format;
+            refresh_holdings(
+                &ui,
+                &journal_state.borrow(),
+                &holding_freshness.borrow(),
+                &holding_dismissed.borrow(),
+                format,
+            );
+        });
     }
     // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and
     // the persisted per-study fold/regime view-state is restored (default = Entry + all open).
