@@ -132,6 +132,12 @@ pub struct AppConfig {
     /// path (back-compat); the front of this list mirrors it.
     #[serde(default)]
     pub recent_journals: Vec<RecentJournal>,
+    /// The last-selected **active portfolio** id (Story 6.1, FR37), as a UUID string. Lives in
+    /// app-config (ADD7 — outside the journal). Append-only `#[serde(default)]` (Option → `None`): a
+    /// pre-6.1 config loads fine and follows the first portfolio. A stale/garbage id is ignored by
+    /// `JournalState::active_portfolio` (it validates against the live list).
+    #[serde(default)]
+    pub active_portfolio_id: Option<String>,
 }
 
 /// Whether `s` is a well-formed trailing-stop percentage: an exact decimal strictly inside `(0, 100)`
@@ -171,6 +177,7 @@ impl Default for AppConfig {
             reference_currency: default_reference_currency(),
             default_trailing_stop_pct: None,
             recent_journals: Vec::new(),
+            active_portfolio_id: None,
         }
     }
 }
@@ -353,6 +360,7 @@ mod tests {
                 journal_id: "11111111-1111-1111-1111-111111111111".to_string(),
                 last_seen_version: 12,
             }],
+            active_portfolio_id: Some("22222222-2222-2222-2222-222222222222".to_string()),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);

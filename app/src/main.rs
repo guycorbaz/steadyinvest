@@ -402,6 +402,25 @@ fn refresh_holdings(
         String::new()
     };
     holdings.set_capital_at_risk_pct(pct.into());
+
+    // Story 6.1 (FR37): the portfolio selector + the active id (the register above is the active
+    // portfolio's holdings). Pushed here so every holdings re-render keeps the selector in sync.
+    let portfolios: Vec<PortfolioRow> = state
+        .list_portfolios()
+        .iter()
+        .map(|p| PortfolioRow {
+            id: p.id.to_string().into(),
+            name: p.name.clone().into(),
+        })
+        .collect();
+    holdings.set_portfolios(ModelRc::new(VecModel::from(portfolios)));
+    holdings.set_active_portfolio_id(
+        state
+            .active_portfolio_id()
+            .map(|id| id.to_string())
+            .unwrap_or_default()
+            .into(),
+    );
 }
 
 /// Surface a holdings write's outcome (neutral notice on refusal) and re-render the register.
@@ -797,6 +816,18 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     }
     let journal_state = Rc::new(RefCell::new(journal_state));
+
+    // Story 6.1 (FR37): restore the last-selected active portfolio from app-config. A stale/garbage
+    // id is ignored by `set_active_portfolio` (it validates against the live list → falls back to the
+    // first), so this is safe across a journal switch or a deleted portfolio.
+    if let Some(id) = config
+        .borrow()
+        .active_portfolio_id
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok())
+    {
+        journal_state.borrow_mut().set_active_portfolio(id);
+    }
 
     // The id (stringified UUID) of the study whose form is currently open, so the fold/regime
     // callbacks know which `study_view_state` entry to mutate. `None` = the dashboard list view.
@@ -1650,6 +1681,79 @@ fn main() -> Result<(), slint::PlatformError> {
                 // Report whether the holding was written so the UI keeps the user's input on refusal.
                 written
             });
+    }
+
+    // ── Story 6.1 (FR37): multiple-portfolio intents — select / add / rename / delete. The active
+    // portfolio id is persisted to AppConfig (ADD7, outside the journal); each refresh re-renders the
+    // selector + the active portfolio's register. The deletes are guarded (neutral notices). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let config_path = config_path.clone();
+        let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
+        let js_for_change = Rc::clone(&journal_state);
+        let on_portfolio_change = move |result: Result<(), String>| {
+            let ui = ui_weak.unwrap();
+            // Persist the (possibly changed) active portfolio id outside the journal.
+            let active = js_for_change
+                .borrow()
+                .active_portfolio_id()
+                .map(|id| id.to_string());
+            config.borrow_mut().active_portfolio_id = active;
+            persist(config_path.as_ref(), &config.borrow());
+            let format = config.borrow().number_format;
+            apply_holdings_result(
+                &ui,
+                &js_for_change.borrow(),
+                result,
+                &holding_freshness.borrow(),
+                &holding_dismissed.borrow(),
+                format,
+            );
+        };
+        let h = ui.global::<Holdings>();
+        {
+            let journal_state = Rc::clone(&journal_state);
+            let on_change = on_portfolio_change.clone();
+            h.on_select_portfolio(move |id| {
+                if let Ok(id) = Uuid::parse_str(&id) {
+                    journal_state.borrow_mut().set_active_portfolio(id);
+                }
+                on_change(Ok(()));
+            });
+        }
+        {
+            let journal_state = Rc::clone(&journal_state);
+            let on_change = on_portfolio_change.clone();
+            h.on_add_portfolio(move |name| {
+                let result = journal_state.borrow_mut().add_portfolio(&name).map(|_| ());
+                on_change(result);
+            });
+        }
+        {
+            let journal_state = Rc::clone(&journal_state);
+            let on_change = on_portfolio_change.clone();
+            h.on_rename_portfolio(move |id, name| {
+                let result = match Uuid::parse_str(&id) {
+                    Ok(id) => journal_state.borrow_mut().rename_portfolio(id, &name),
+                    Err(_) => Ok(()),
+                };
+                on_change(result);
+            });
+        }
+        {
+            let journal_state = Rc::clone(&journal_state);
+            let on_change = on_portfolio_change;
+            h.on_delete_portfolio(move |id| {
+                let result = match Uuid::parse_str(&id) {
+                    Ok(id) => journal_state.borrow_mut().delete_portfolio(id),
+                    Err(_) => Ok(()),
+                };
+                on_change(result);
+            });
+        }
     }
     {
         let ui_weak = ui.as_weak();

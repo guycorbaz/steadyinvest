@@ -3,9 +3,10 @@
 //! Scales the single-study envelope (Story 5.2, `contract::export`) up to the **entire journal**: a
 //! versioned, integrity-checked JSON file carrying the journal identity tuple `(journal_id,
 //! logical_version, hash)` plus **every journaled entity** — studies (with their lifecycle status),
-//! watchlist items, the portfolio, holdings (**including soft-deleted/sold ones** — a sold holding
-//! stays a live FK referent for its sell transaction) and sell transactions. **Not** a raw `.db`
-//! copy (architecture §"Export / backup format").
+//! watchlist items, **all portfolios** (Story 6.1 — each holding keeps its own `portfolio_id`),
+//! holdings (**including soft-deleted/sold ones** — a sold holding stays a live FK referent for its
+//! sell transaction) and sell transactions. **Not** a raw `.db` copy (architecture §"Export / backup
+//! format").
 //!
 //! - [`Journal::export_journal`] reads the complete journal into a [`JournalSnapshot`], wraps it in an
 //!   envelope, and hashes the canonical payload (reusing the **one** hashing implementation,
@@ -190,32 +191,29 @@ impl Journal {
 
         let tx = self.conn.transaction()?;
 
-        // Resolve the single target portfolio (FR36): an existing one wins (merge into it); otherwise
-        // adopt the imported portfolio, preserving its id. Extra imported portfolios (none expected in
-        // single-portfolio v1) are not created — multi-portfolio is Epic 6.
-        let existing_portfolio: Option<String> = tx
-            .query_row("SELECT id FROM portfolios ORDER BY id LIMIT 1", [], |r| {
-                r.get(0)
-            })
-            .optional()?;
-        // Track whether a portfolio row was actually **inserted** (a fresh seed), distinct from one
-        // that merely already existed — so the version bump and the summary count reflect real writes,
-        // not mere existence.
-        let mut portfolio_inserted = false;
-        let target_portfolio_id: Option<Uuid> = match existing_portfolio {
-            Some(id_text) => Some(parse_uuid(&id_text, "portfolios.id")?),
-            None => match snapshot.portfolios.first() {
-                Some(p) => {
-                    tx.execute(
-                        "INSERT INTO portfolios (id, name, created_at) VALUES (?1, ?2, ?3)",
-                        rusqlite::params![p.id.to_string(), p.name, p.created_at.0],
-                    )?;
-                    portfolio_inserted = true;
-                    Some(p.id)
-                }
-                None => None,
-            },
-        };
+        // Portfolios — seed/merge by id (Story 6.1, FR37: many portfolios). Each imported portfolio is
+        // upserted under its OWN id (a same-id portfolio updates its name/created_at; a new id inserts),
+        // so the multi-portfolio structure is preserved and holdings keep their own `portfolio_id`. We
+        // pre-check existence per id so the summary counts true **inserts**, not mere updates.
+        let mut portfolio_inserted = 0usize;
+        for p in &snapshot.portfolios {
+            let existed = tx
+                .query_row(
+                    "SELECT 1 FROM portfolios WHERE id = ?1",
+                    rusqlite::params![p.id.to_string()],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            tx.execute(
+                "INSERT INTO portfolios (id, name, created_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, created_at = excluded.created_at",
+                rusqlite::params![p.id.to_string(), p.name, p.created_at.0],
+            )?;
+            if !existed {
+                portfolio_inserted += 1;
+            }
+        }
 
         // Studies — rebind journal_id (blob + column) and restore the lifecycle status. Unlike
         // `put_study`'s upsert, we DO update `status` here: the export carried it, so a round-trip
@@ -257,15 +255,19 @@ impl Journal {
             )?;
         }
 
-        // Holdings — attach to the resolved single portfolio (FR36). Inserted before transactions so
-        // the `transactions.holding_id` FK has a live referent.
+        // Holdings — attach to their OWN portfolio (Story 6.1, FR37). The set of portfolio ids just
+        // upserted; a holding pointing at a portfolio absent from the snapshot is a **malformed**
+        // snapshot — caught here as the neutral [`Error::ImportMalformed`] (the whole import rolls
+        // back) rather than leaking a raw FK error to the user. Inserted before transactions so the
+        // `transactions.holding_id` FK also has a live referent.
+        let portfolio_ids: std::collections::HashSet<Uuid> =
+            snapshot.portfolios.iter().map(|p| p.id).collect();
         for h in &snapshot.holdings {
-            let Some(portfolio_id) = target_portfolio_id else {
-                // A holding without any portfolio to attach to is a malformed snapshot.
+            if !portfolio_ids.contains(&h.portfolio_id) {
                 return Err(Error::ImportMalformed {
-                    detail: "a holding has no portfolio to attach to".to_string(),
+                    detail: "a holding references a portfolio absent from the snapshot".to_string(),
                 });
-            };
+            }
             tx.execute(
                 "INSERT INTO holdings
                      (id, portfolio_id, security_ticker, quantity, purchase_price,
@@ -282,7 +284,7 @@ impl Journal {
                      created_at = excluded.created_at",
                 rusqlite::params![
                     h.id.to_string(),
-                    portfolio_id.to_string(),
+                    h.portfolio_id.to_string(),
                     h.security_ticker,
                     h.quantity,
                     h.purchase_price,
@@ -357,13 +359,15 @@ impl Journal {
         // One heartbeat bump for the whole import act (an explicit user action, not a phantom write).
         // Only when the file actually **wrote** something — an empty snapshot, or an empty snapshot
         // merged into a journal that already has a portfolio, is a true no-op (no phantom revision on a
-        // sync-sensitive store). `portfolio_inserted` (a real INSERT), NOT `target_portfolio_id.is_some`
-        // (mere existence), is the portfolio signal here.
+        // sync-sensitive store). Any non-empty entity set is a write here — the portfolio upserts
+        // included (a same-id `ON CONFLICT DO UPDATE` rewrites the row, e.g. a renamed portfolio), so
+        // a portfolios-only snapshot still bumps (NFR-R2), consistent with studies/holdings. An empty
+        // snapshot is the true no-op.
         let applied = !snapshot.studies.is_empty()
             || !snapshot.watch_items.is_empty()
             || !snapshot.holdings.is_empty()
             || !snapshot.transactions.is_empty()
-            || portfolio_inserted;
+            || !snapshot.portfolios.is_empty();
         if applied {
             tx.execute(
                 "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
@@ -377,9 +381,9 @@ impl Journal {
             source_logical_version: snapshot.logical_version,
             studies: snapshot.studies.len(),
             watch_items: snapshot.watch_items.len(),
-            // The count of portfolios the import actually **created** (0 when merging holdings into an
-            // existing portfolio, 1 on a fresh seed) — not mere existence.
-            portfolios: portfolio_inserted as usize,
+            // The count of portfolios the import actually **created** (new ids), not mere existence:
+            // a same-id portfolio that was updated in place does not count.
+            portfolios: portfolio_inserted,
             holdings: snapshot.holdings.len(),
             transactions: snapshot.transactions.len(),
         })
@@ -402,12 +406,6 @@ fn repack_watchlist_positions(tx: &rusqlite::Transaction<'_>) -> Result<()> {
         )?;
     }
     Ok(())
-}
-
-fn parse_uuid(text: &str, field: &str) -> Result<Uuid> {
-    Uuid::parse_str(text).map_err(|e| Error::CorruptPayload {
-        detail: format!("{field} {text:?} is not a valid UUID: {e}"),
-    })
 }
 
 #[cfg(test)]
@@ -678,6 +676,62 @@ mod tests {
         assert_eq!(b.list_watch_items().unwrap().len(), 0);
         assert!(b.first_portfolio().unwrap().is_none());
         assert_eq!(b.logical_version().unwrap(), before_version);
+    }
+
+    #[test]
+    fn a_holding_referencing_an_absent_portfolio_is_neutral_malformed_not_a_raw_fk_error() {
+        // Story 6.1 review (MED): a holding whose portfolio_id is not in `snapshot.portfolios` is a
+        // MALFORMED snapshot — caught as the neutral `ImportMalformed`, never a raw FK leak. The whole
+        // import still rolls back (atomic).
+        let (_da, a) = populated_journal();
+        let mut snapshot = a.journal_snapshot().unwrap();
+        snapshot.holdings[0].portfolio_id = Uuid::from_u128(0xDEAD); // points at no portfolio
+        let envelope = snapshot_to_envelope_json(&snapshot).unwrap();
+
+        let (_db, mut b) = empty_journal("b.db", 0xB0B);
+        let before = b.logical_version().unwrap();
+        match b.import_journal(&envelope) {
+            Err(Error::ImportMalformed { .. }) => {}
+            other => panic!("expected a neutral ImportMalformed, got {other:?}"),
+        }
+        assert_eq!(b.list_all_holdings().unwrap().len(), 0, "nothing applied");
+        assert_eq!(
+            b.logical_version().unwrap(),
+            before,
+            "no version bump on a refused import"
+        );
+    }
+
+    #[test]
+    fn a_name_only_portfolio_update_on_import_bumps_the_version() {
+        // Story 6.1 review (MED / NFR-R2): re-importing a same-id portfolio whose only delta is its
+        // name is a real write (ON CONFLICT DO UPDATE), so it must bump the version — even when the
+        // snapshot carries no studies/holdings.
+        let (_da, mut a) = empty_journal("a.db", 0xA0A);
+        let pid = Uuid::from_u128(0xB1);
+        a.add_portfolio(pid, "Banque A", &ts("2026-06-10T00:00:00Z"))
+            .unwrap();
+        let envelope = a.export_journal().unwrap(); // a portfolios-only snapshot
+
+        let (_db, mut b) = empty_journal("b.db", 0xB0B);
+        b.add_portfolio(pid, "Banque B", &ts("2026-06-10T00:00:00Z"))
+            .unwrap(); // same id, different name
+        let before = b.logical_version().unwrap();
+        let summary = b.import_journal(&envelope).unwrap();
+        assert_eq!(
+            summary.portfolios, 0,
+            "the existing id is updated, not inserted"
+        );
+        assert_eq!(
+            b.logical_version().unwrap(),
+            before + 1,
+            "a name-only portfolio update is a real write → it bumps (NFR-R2)"
+        );
+        assert_eq!(
+            b.list_portfolios().unwrap()[0].name,
+            "Banque A",
+            "the name was updated"
+        );
     }
 
     #[test]

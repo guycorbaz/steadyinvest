@@ -593,9 +593,11 @@ mod tests {
         // = 306. Story 5.1 adds the dashboard "Confronter" action + the confront overlay (title, the
         // "Décision du {}" caption, the neutral empty state, the "Estimation haute/basse : {}" + "Trait
         // clair : cours réel" legend, "Fermer"): +8 = 314. Story 5.6 adds the dashboard "Exporter PDF"
-        // row action: +1 = 315. Floor strict.
+        // row action: +1 = 315. Story 6.1 adds the Portefeuille multi-portfolio controls (the add-name
+        // placeholder + "Ajouter un portefeuille", the rename placeholder + "Renommer", "Supprimer le
+        // portefeuille"): +5 = 320. Floor strict.
         assert!(
-            total >= 315,
+            total >= 320,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -650,10 +652,11 @@ mod tests {
         // clauses [stale / foreign]): 57 + 10 = 67. Story 5.5 adds the journal-location notices
         // (opened, created, open-failed, locked-elsewhere, lock-reclaimable, sync-folder warning, the
         // stale-version template): 67 + 7 = 74. Story 7.4 adds the "no provider selected" fetch notice
-        // (MSG_PROVIDER_NONE): 74 + 1 = 75.
+        // (MSG_PROVIDER_NONE): 74 + 1 = 75. Story 6.1 adds the three multiple-portfolio notices
+        // (invalid name + the two guarded-delete refusals: has-holdings / last): 75 + 3 = 78.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            75,
+            78,
             "state.rs message inventory changed — register the new notice"
         );
     }
