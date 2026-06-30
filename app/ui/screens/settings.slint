@@ -201,6 +201,75 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
+            // ── Story 5.4 (FR61) — backup / restore the raw .db. Validation runs BEFORE any overwrite
+            // and a stale/foreign restore is gated behind the confirm banel — never applied silently. ──
+            SettingsPanel {
+                title: @tr("Sauvegarde & restauration");
+
+                Text {
+                    text: @tr("Créer une copie de sauvegarde du journal, ou restaurer le journal depuis une sauvegarde (le fichier est vérifié avant tout remplacement).");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ActionButton {
+                        label: @tr("Créer une sauvegarde");
+                        clicked => { Prefs.create-backup(); }
+                    }
+                }
+
+                restorepath := TextField {
+                    placeholder: @tr("Chemin de la sauvegarde à restaurer");
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ActionButton {
+                        label: @tr("Restaurer");
+                        clicked => { Prefs.request-restore(restorepath.text); }
+                    }
+                }
+
+                // Confirm banner — revealed only while a restore is parked (the backup's identity +
+                // version + stale/foreign warning). Confirm replaces the live journal; cancel discards.
+                if Prefs.restore-confirm != "": VerticalLayout {
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: Prefs.restore-confirm;
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-caption;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+
+                        ActionButton {
+                            label: @tr("Confirmer la restauration");
+                            clicked => { Prefs.confirm-restore(); }
+                        }
+                        ActionButton {
+                            label: @tr("Annuler");
+                            clicked => { Prefs.cancel-restore(); }
+                        }
+                    }
+                }
+
+                if Prefs.restore-status != "": Text {
+                    text: Prefs.restore-status;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+
             SettingsPanel {
                 title: @tr("Thème");
 

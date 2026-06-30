@@ -584,9 +584,11 @@ mod tests {
         // Story 5.2 adds the dashboard export/import controls (Exporter + the import path placeholder +
         // "Importer une étude"): +3 = 285. Story 5.3 adds the Réglages whole-journal panel (title
         // "Journal complet", the explanatory caption, "Exporter le journal", the import path
-        // placeholder, "Importer un journal"): +5 = 290. Floor strict.
+        // placeholder, "Importer un journal"): +5 = 290. Story 5.4 adds the Réglages backup/restore
+        // panel (title "Sauvegarde & restauration", the caption, "Créer une sauvegarde", the restore
+        // path placeholder, "Restaurer", "Confirmer la restauration", "Annuler"): +7 = 297. Floor strict.
         assert!(
-            total >= 290,
+            total >= 297,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -635,10 +637,13 @@ mod tests {
         // integrity / version / malformed import refusals): 48 + 7 = 55 (the "updated" notice was
         // added by the 5.2 review — surface an overwrite distinctly). Story 5.3 adds the two
         // whole-journal notices (MSG_JOURNAL_EXPORTED + the MSG_JOURNAL_IMPORTED count template); the
-        // integrity / version / malformed import refusals are reused from 5.2: 55 + 2 = 57.
+        // integrity / version / malformed import refusals are reused from 5.2: 55 + 2 = 57. Story 5.4
+        // adds the backup/restore notices (backup-created, restore-done/failed, 4 restore refusals
+        // [integrity / newer-schema / not-a-journal / unreadable], the confirm template + 2 reason
+        // clauses [stale / foreign]): 57 + 10 = 67.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            57,
+            67,
             "state.rs message inventory changed — register the new notice"
         );
     }
