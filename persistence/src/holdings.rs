@@ -364,6 +364,111 @@ impl Journal {
         tx.commit()?;
         Ok(())
     }
+
+    // ── Story 6.1 — multiple portfolios (FR37). The CRUD Story 4.3 deferred; the table + the
+    // `holdings.portfolio_id` FK were frozen in v1, so this is typed CRUD, no migration. ──
+
+    /// Add a named portfolio (FR37) — "one per bank/account". Inserts the row and bumps the logical
+    /// version. (Unlike [`Self::ensure_portfolio`], which is the single-portfolio bootstrap, this
+    /// always inserts — the caller mints a fresh id.)
+    pub fn add_portfolio(
+        &mut self,
+        id: Uuid,
+        name: &str,
+        created_at: &Timestamp,
+    ) -> Result<PortfolioItem> {
+        self.check_writable()?;
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO portfolios (id, name, created_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![id.to_string(), name, created_at.0],
+        )?;
+        tx.execute(
+            "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(PortfolioItem {
+            id,
+            name: name.to_string(),
+            created_at: created_at.clone(),
+        })
+    }
+
+    /// Rename a portfolio (FR37). Idempotent: a rename to the **identical** name (or an absent id)
+    /// writes nothing and bumps **nothing** (the Epic-3 C4 no-op guard). Returns whether a row changed.
+    pub fn rename_portfolio(&mut self, id: Uuid, name: &str) -> Result<bool> {
+        self.check_writable()?;
+        let tx = self.conn.transaction()?;
+        // `name = ?2 AND name <> ?2` via the WHERE clause makes an identical-name rename a true no-op.
+        let changed = tx.execute(
+            "UPDATE portfolios SET name = ?2 WHERE id = ?1 AND name <> ?2",
+            rusqlite::params![id.to_string(), name],
+        )?;
+        if changed > 0 {
+            tx.execute(
+                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
+                [],
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed > 0)
+    }
+
+    /// Delete a portfolio (FR37), **guarded** so the register can never be left inconsistent:
+    /// - refuses while ANY holding row (active *or* sold) still references it — the `holdings.
+    ///   portfolio_id` FK would otherwise orphan a holding (and its sell transactions), the 4.7
+    ///   FK lesson read up front;
+    /// - refuses deleting the **last** portfolio — the register always keeps at least one.
+    ///
+    /// Returns a typed business [`DeletePortfolioOutcome`] for the two refusals (no panic, no raw FK
+    /// error surfaced); only [`DeletePortfolioOutcome::Deleted`] writes + bumps the version.
+    pub fn delete_portfolio(&mut self, id: Uuid) -> Result<DeletePortfolioOutcome> {
+        self.check_writable()?;
+        let holdings: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM holdings WHERE portfolio_id = ?1",
+            rusqlite::params![id.to_string()],
+            |r| r.get(0),
+        )?;
+        if holdings > 0 {
+            return Ok(DeletePortfolioOutcome::HasHoldings);
+        }
+        let total: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM portfolios", [], |r| r.get(0))?;
+        if total <= 1 {
+            return Ok(DeletePortfolioOutcome::LastPortfolio);
+        }
+        let tx = self.conn.transaction()?;
+        let removed = tx.execute(
+            "DELETE FROM portfolios WHERE id = ?1",
+            rusqlite::params![id.to_string()],
+        )?;
+        if removed > 0 {
+            tx.execute(
+                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
+                [],
+            )?;
+            tx.commit()?;
+            Ok(DeletePortfolioOutcome::Deleted)
+        } else {
+            // Absent id — a true no-op (no row, no bump).
+            tx.commit()?;
+            Ok(DeletePortfolioOutcome::Deleted)
+        }
+    }
+}
+
+/// The result of a guarded [`Journal::delete_portfolio`] — the deletion happened, or it was refused
+/// for a named, neutral reason (never a panic, never an orphaned holding FK).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeletePortfolioOutcome {
+    /// The portfolio was removed (or the id was absent — a no-op deletion).
+    Deleted,
+    /// Refused: holdings (active or sold) still reference this portfolio.
+    HasHoldings,
+    /// Refused: it is the last portfolio; the register keeps at least one.
+    LastPortfolio,
 }
 
 fn parse_uuid(text: &str, field: &str) -> Result<Uuid> {

@@ -20,8 +20,9 @@ use steadyinvest_contract::{
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use steadyinvest_persistence::{
-    clear_lock, inspect_backup, lock_is_stale, restore_journal_file, Error as PersistError,
-    HoldingItem, ImportSummary, Journal, JournalMode, PortfolioItem, StudySummary, WatchItem,
+    clear_lock, inspect_backup, lock_is_stale, restore_journal_file, DeletePortfolioOutcome,
+    Error as PersistError, HoldingItem, ImportSummary, Journal, JournalMode, PortfolioItem,
+    StudySummary, WatchItem,
 };
 use uuid::Uuid;
 
@@ -149,6 +150,14 @@ pub const MSG_HOLDINGS_REFRESH_NONE: &str =
 /// records a sell from a neutral trigger: the sell is journalled and the holding leaves the register.
 pub const MSG_HOLDING_SOLD: &str =
     "La vente a été enregistrée ; la position a été retirée du portefeuille.";
+
+/// Multiple-portfolio copy (Story 6.1, FR37) — fact-stating, posture-gated. The name guard, and the
+/// two guarded-delete refusals (the register never orphans a holding nor drops its last portfolio).
+pub const MSG_PORTFOLIO_INVALID_NAME: &str =
+    "Le nom du portefeuille est vide ; aucun portefeuille n'a été créé.";
+pub const MSG_PORTFOLIO_HAS_HOLDINGS: &str =
+    "Ce portefeuille contient un historique de positions ; il n'a pas été supprimé.";
+pub const MSG_PORTFOLIO_LAST: &str = "C'est le dernier portefeuille ; il n'a pas été supprimé.";
 
 /// Study export/import copy (Story 5.2, FR59) — fact-stating, posture-gated. The export envelope is
 /// the portable data contract + schema_version + integrity hash; import verifies both before saving.
@@ -409,6 +418,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDINGS_REFRESHING,
     MSG_HOLDINGS_REFRESH_NONE,
     MSG_HOLDING_SOLD,
+    MSG_PORTFOLIO_INVALID_NAME,
+    MSG_PORTFOLIO_HAS_HOLDINGS,
+    MSG_PORTFOLIO_LAST,
     MSG_STUDY_EXPORTED,
     MSG_STUDY_IMPORTED,
     MSG_STUDY_UPDATED,
@@ -558,6 +570,10 @@ pub struct JournalState {
     /// A validated backup parked awaiting confirmation (Story 5.4): a restore is **never applied
     /// silently** (FR61) — `request_restore` parks the candidate, `confirm_restore` applies it.
     pending_restore: Option<PendingRestore>,
+    /// The user-selected **active** portfolio (Story 6.1, FR37). `None` = use the first portfolio
+    /// (deterministic). `main.rs` loads it from / persists it to `AppConfig.active_portfolio_id`; it
+    /// is in-memory here (validated against the live portfolio list by [`Self::active_portfolio`]).
+    active_portfolio_id: Option<Uuid>,
 }
 
 /// How a candidate backup compares to the current journal (Story 5.4, AC2).
@@ -704,6 +720,7 @@ impl JournalState {
                                 idgen,
                                 history: UndoHistory::default(),
                                 pending_restore: None,
+                                active_portfolio_id: None,
                             },
                             read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                         );
@@ -739,6 +756,7 @@ impl JournalState {
                     idgen,
                     history: UndoHistory::default(),
                     pending_restore: None,
+                    active_portfolio_id: None,
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
             );
@@ -767,6 +785,7 @@ impl JournalState {
                         idgen,
                         history: UndoHistory::default(),
                         pending_restore: None,
+                        active_portfolio_id: None,
                     },
                     read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                 )
@@ -782,6 +801,7 @@ impl JournalState {
                         idgen,
                         history: UndoHistory::default(),
                         pending_restore: None,
+                        active_portfolio_id: None,
                     },
                     Some(format!("{MSG_SAVE_FAILED} {error}")),
                 )
@@ -1033,21 +1053,117 @@ impl JournalState {
             .map_err(watch_error)
     }
 
-    // ── Holdings register (Story 4.3, FR36) ──
+    // ── Story 6.1 — multiple portfolios (FR37): the active-portfolio rails ──
 
-    /// The single portfolio's holdings, ordered by creation. Empty when no journal / no portfolio
+    /// Every portfolio, ordered deterministically (Story 6.1). Empty when no journal / none yet.
+    pub fn list_portfolios(&self) -> Vec<PortfolioItem> {
+        self.journal
+            .as_ref()
+            .and_then(|j| j.list_portfolios().ok())
+            .unwrap_or_default()
+    }
+
+    /// The **active** portfolio (Story 6.1): the user-selected one when it still exists, else the
+    /// first (deterministic). `None` only when no portfolio exists yet. A pure read.
+    pub fn active_portfolio(&self) -> Option<PortfolioItem> {
+        let portfolios = self.list_portfolios();
+        if let Some(id) = self.active_portfolio_id {
+            if let Some(p) = portfolios.iter().find(|p| p.id == id) {
+                return Some(p.clone());
+            }
+        }
+        portfolios.into_iter().next()
+    }
+
+    /// The active portfolio id (for `main.rs` to persist into `AppConfig`). `None` = no portfolio yet.
+    pub fn active_portfolio_id(&self) -> Option<Uuid> {
+        self.active_portfolio().map(|p| p.id)
+    }
+
+    /// Select the active portfolio (Story 6.1). Accepts only an id that currently exists (a stale id
+    /// is ignored → the getter falls back to the first). In-memory; `main.rs` persists it.
+    pub fn set_active_portfolio(&mut self, id: Uuid) {
+        if self.list_portfolios().iter().any(|p| p.id == id) {
+            self.active_portfolio_id = Some(id);
+        }
+    }
+
+    /// Add a named portfolio (Story 6.1, FR37) — "one per bank/account". Validates the name (non-empty)
+    /// in the app layer; id/timestamp from the injected sources (ADD15). A fresh portfolio becomes the
+    /// active one. Guarded (read-only / no-journal / save-failure → a neutral notice).
+    pub fn add_portfolio(&mut self, name: &str) -> Result<Uuid, String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(MSG_PORTFOLIO_INVALID_NAME.to_string());
+        }
+        let id = self.idgen.new_id();
+        let created_at = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .add_portfolio(id, name, &created_at)
+            .map_err(watch_error)?;
+        self.active_portfolio_id = Some(id);
+        Ok(id)
+    }
+
+    /// Rename a portfolio (Story 6.1). Same name guard. A no-op (identical name) writes nothing.
+    pub fn rename_portfolio(&mut self, id: Uuid, name: &str) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(MSG_PORTFOLIO_INVALID_NAME.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .rename_portfolio(id, name)
+            .map(|_| ())
+            .map_err(watch_error)
+    }
+
+    /// Delete a portfolio (Story 6.1), surfacing the persistence guards as neutral refusals: a
+    /// portfolio with holdings, or the last portfolio, is **not** removed. On a real delete that drops
+    /// the active selection, the active id is cleared → the getter falls back to the first.
+    pub fn delete_portfolio(&mut self, id: Uuid) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        match journal.delete_portfolio(id).map_err(watch_error)? {
+            DeletePortfolioOutcome::Deleted => {
+                if self.active_portfolio_id == Some(id) {
+                    self.active_portfolio_id = None;
+                }
+                Ok(())
+            }
+            DeletePortfolioOutcome::HasHoldings => Err(MSG_PORTFOLIO_HAS_HOLDINGS.to_string()),
+            DeletePortfolioOutcome::LastPortfolio => Err(MSG_PORTFOLIO_LAST.to_string()),
+        }
+    }
+
+    /// The active portfolio, creating the default one if the journal has none yet (the add-holding
+    /// path). Mints an id/timestamp **only** when no portfolio exists (ADD15).
+    fn active_portfolio_or_default(&mut self) -> Result<PortfolioItem, String> {
+        if let Some(p) = self.active_portfolio() {
+            return Ok(p);
+        }
+        self.ensure_default_portfolio()
+    }
+
+    // ── Holdings register (Story 4.3, FR36 — scoped to the active portfolio since Story 6.1) ──
+
+    /// The **active** portfolio's holdings, ordered by creation. Empty when no journal / no portfolio
     /// exists yet. A pure read — it never creates the portfolio (that happens on the first add).
     pub fn list_holdings(&self) -> Vec<HoldingItem> {
         let Some(journal) = self.journal.as_ref() else {
             return Vec::new();
         };
-        let portfolio = match journal.first_portfolio() {
-            Ok(Some(p)) => p,
-            Ok(None) => return Vec::new(),
-            Err(error) => {
-                tracing::warn!("first_portfolio failed: {error}");
-                return Vec::new();
-            }
+        let Some(portfolio) = self.active_portfolio() else {
+            return Vec::new();
         };
         journal.list_holdings(portfolio.id).unwrap_or_else(|error| {
             tracing::warn!("list_holdings failed: {error}");
@@ -1119,7 +1235,7 @@ impl JournalState {
             return Err(MSG_HOLDING_INVALID_TICKER.to_string());
         }
         let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
-        let portfolio_id = self.ensure_default_portfolio()?.id;
+        let portfolio_id = self.active_portfolio_or_default()?.id;
         let id = self.idgen.new_id();
         let created_at = self.clock.now();
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
@@ -3262,6 +3378,49 @@ mod tests {
     }
 
     #[test]
+    fn multiple_portfolios_round_trip_through_the_whole_journal_export() {
+        // Story 6.1 / AC4: more than one portfolio must survive the 5.3 export/import unchanged.
+        let dir_a = TempDir::new().unwrap();
+        let mut state_a = watch_state(&dir_a, 0x612);
+        state_a.add_holding("NESN", "10", "100").unwrap(); // creates + fills the default portfolio
+        let pf2 = state_a.add_portfolio("PostFinance").unwrap();
+        state_a.add_holding("ROG", "5", "248").unwrap(); // lands in the active (PostFinance)
+        assert_eq!(state_a.list_portfolios().len(), 2);
+        let envelope = state_a.export_journal().expect("export succeeds");
+
+        let dir_b = TempDir::new().unwrap();
+        let mut state_b = watch_state(&dir_b, 0x613);
+        state_b.import_journal(&envelope).expect("import succeeds");
+
+        let names: Vec<_> = state_b
+            .list_portfolios()
+            .into_iter()
+            .map(|p| p.name)
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "PostFinance"),
+            "the second portfolio round-trips, got {names:?}"
+        );
+        assert_eq!(
+            state_b.list_portfolios().len(),
+            2,
+            "both portfolios land in B"
+        );
+        // The PostFinance holding is reachable when that portfolio is active.
+        state_b.set_active_portfolio(pf2);
+        let active: Vec<_> = state_b
+            .list_holdings()
+            .iter()
+            .map(|h| h.security_ticker.clone())
+            .collect();
+        assert_eq!(
+            active,
+            ["ROG"],
+            "the holding stays in its portfolio across the round-trip"
+        );
+    }
+
+    #[test]
     fn journal_import_maps_each_rejection_to_its_neutral_notice_and_writes_nothing() {
         let dir_a = TempDir::new().unwrap();
         let mut state_a = watch_state(&dir_a, 0x532);
@@ -4982,6 +5141,80 @@ mod tests {
             invested,
             Decimal::from(100 * 10 + 50 * 20),
             "invested = Σ cost × qty"
+        );
+    }
+
+    // ── Story 6.1 — multiple portfolios (FR37) ──
+
+    #[test]
+    fn adding_a_portfolio_makes_it_active_and_scopes_the_register() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x610);
+        // The first holding lazily creates the default portfolio (the active one).
+        state.add_holding("NESN", "10", "100").unwrap();
+        let default_id = state.active_portfolio().expect("a default portfolio").id;
+        assert_eq!(state.list_holdings().len(), 1);
+
+        // A new portfolio becomes active; its register is empty until something lands in it.
+        let bank2 = state.add_portfolio("PostFinance").unwrap();
+        assert_eq!(
+            state.active_portfolio().unwrap().id,
+            bank2,
+            "the new one is active"
+        );
+        assert!(
+            state.list_holdings().is_empty(),
+            "the new portfolio starts empty"
+        );
+
+        // A holding added now lands in the active (PostFinance), not the default.
+        state.add_holding("ROG", "5", "248").unwrap();
+        let active_tickers: Vec<_> = state
+            .list_holdings()
+            .iter()
+            .map(|h| h.security_ticker.clone())
+            .collect();
+        assert_eq!(
+            active_tickers,
+            ["ROG"],
+            "the active register shows only PostFinance"
+        );
+
+        // Switching back surfaces the default portfolio's holdings again.
+        state.set_active_portfolio(default_id);
+        let back: Vec<_> = state
+            .list_holdings()
+            .iter()
+            .map(|h| h.security_ticker.clone())
+            .collect();
+        assert_eq!(back, ["NESN"], "switching active re-scopes the register");
+    }
+
+    #[test]
+    fn deleting_a_portfolio_is_guarded_and_reselects() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x611);
+        state.add_holding("NESN", "10", "100").unwrap(); // creates + fills the default
+        let default_id = state.active_portfolio().unwrap().id;
+        let bank2 = state.add_portfolio("PostFinance").unwrap(); // empty, now active
+
+        // The default has a holding → deleting it is refused (FK never orphaned).
+        assert_eq!(
+            state.delete_portfolio(default_id),
+            Err(MSG_PORTFOLIO_HAS_HOLDINGS.to_string())
+        );
+        // The empty active portfolio deletes; the active selection falls back to the first.
+        state.delete_portfolio(bank2).unwrap();
+        assert_eq!(state.list_portfolios().len(), 1);
+        assert_eq!(
+            state.active_portfolio().unwrap().id,
+            default_id,
+            "deleting the active one reselects a remaining portfolio"
+        );
+        // Now only the holding-bearing default remains → it can't be deleted either.
+        assert_eq!(
+            state.delete_portfolio(default_id),
+            Err(MSG_PORTFOLIO_HAS_HOLDINGS.to_string())
         );
     }
 

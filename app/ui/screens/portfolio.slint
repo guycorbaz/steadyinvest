@@ -4,8 +4,9 @@
 // persist + re-render).
 
 import { Tokens } from "../tokens.slint";
-import { Holdings, HoldingRow, Labels, Prefs } from "../state.slint";
+import { Holdings, HoldingRow, PortfolioRow, Labels, Prefs } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
+import { ChoiceChip } from "../components/choice_chip.slint";
 import { TextField } from "../components/text_field.slint";
 
 export component PortfolioScreen inherits Rectangle {
@@ -14,6 +15,9 @@ export component PortfolioScreen inherits Rectangle {
     property <string> draft-quantity;
     property <string> draft-price;
     property <string> editing-id;
+    // Story 6.1 (FR37): draft names for adding / renaming a portfolio.
+    property <string> draft-portfolio-name;
+    property <string> draft-rename;
 
     function reset-draft() {
         root.draft-ticker = "";
@@ -32,6 +36,63 @@ export component PortfolioScreen inherits Rectangle {
             color: Tokens.text-high;
             font-size: Tokens.font-h2;
             font-weight: Tokens.weight-semibold;
+        }
+
+        // ── Story 6.1 (FR37): multiple portfolios — one per bank/account. The selector picks the
+        //    active one; the register below shows its holdings. Add / rename / delete are guarded. ──
+        // A horizontal Flickable so many portfolios scroll rather than clip off the window edge.
+        if Holdings.portfolios.length > 1: Flickable {
+            height: Tokens.row-height + Tokens.space-8;
+            viewport-width: chips.preferred-width;
+            viewport-height: self.height;
+            chips := HorizontalLayout {
+                spacing: Tokens.space-8;
+                alignment: start;
+                for p in Holdings.portfolios: ChoiceChip {
+                    label: p.name;
+                    selected: p.id == Holdings.active-portfolio-id;
+                    activated => { Holdings.select-portfolio(p.id); }
+                }
+            }
+        }
+        // Add a portfolio (name field). Disabled read-only or when the name is blank.
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            add-name := TextField {
+                placeholder: @tr("Nom du portefeuille (ex. UBS — compte titres)");
+                text <=> root.draft-portfolio-name;
+                horizontal-stretch: 1;
+            }
+            ActionButton {
+                label: @tr("Ajouter un portefeuille");
+                enabled: !Holdings.read-only && root.draft-portfolio-name != "";
+                clicked => {
+                    Holdings.add-portfolio(root.draft-portfolio-name);
+                    root.draft-portfolio-name = "";
+                }
+            }
+        }
+        // Rename / delete the active portfolio (the guards surface neutral notices on refusal).
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            rename-field := TextField {
+                placeholder: @tr("Renommer le portefeuille actif");
+                text <=> root.draft-rename;
+                horizontal-stretch: 1;
+            }
+            ActionButton {
+                label: @tr("Renommer");
+                enabled: !Holdings.read-only && root.draft-rename != "" && Holdings.active-portfolio-id != "";
+                clicked => {
+                    Holdings.rename-portfolio(Holdings.active-portfolio-id, root.draft-rename);
+                    root.draft-rename = "";
+                }
+            }
+            ActionButton {
+                label: @tr("Supprimer le portefeuille");
+                enabled: !Holdings.read-only && Holdings.active-portfolio-id != "";
+                clicked => { Holdings.delete-portfolio(Holdings.active-portfolio-id); }
+            }
         }
 
         // The reference currency the amounts are read in (FR63) — set in Réglages. A fact, not a control.

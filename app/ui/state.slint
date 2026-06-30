@@ -623,6 +623,13 @@ export global Confront {
 
 // One holding in the single portfolio (Story 4.3, FR36). Amounts cross as already-formatted display
 // strings (never a float/Decimal); `quantity`/`purchase-price` are the canonical decimal spellings.
+// One portfolio in the selector (Story 6.1, FR37) — "one per bank/account". `id` is the stringified
+// UUID, `name` the user's label. The active one is `Holdings.active-portfolio-id`.
+export struct PortfolioRow {
+    id: string,
+    name: string,
+}
+
 export struct HoldingRow {
     id: string,
     ticker: string,
@@ -684,4 +691,12 @@ export global Holdings {
     // the app never auto-sells. Dismiss hides a trigger's action panel for the session (id).
     callback sell-holding(string, string);
     callback dismiss-trigger(string);
+    // ── Story 6.1 (FR37): multiple portfolios. The list + the active id; the register above shows the
+    //    active portfolio's holdings. Add/rename/delete are guarded (neutral notices on refusal). ──
+    in-out property <[PortfolioRow]> portfolios;
+    in-out property <string> active-portfolio-id;
+    callback select-portfolio(string);          // id → make active
+    callback add-portfolio(string);             // name
+    callback rename-portfolio(string, string);  // id, name
+    callback delete-portfolio(string);          // id
 }

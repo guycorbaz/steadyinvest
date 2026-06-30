@@ -300,3 +300,117 @@ fn changing_a_holdings_ticker_clears_its_trailing_stop_but_qty_price_edits_keep_
         "a ticker change clears the now-stale stop"
     );
 }
+
+// ── Story 6.1 — multiple portfolios (FR37) ──
+
+use steadyinvest_persistence::DeletePortfolioOutcome;
+
+fn pid(n: u128) -> Uuid {
+    Uuid::from_u128(0x6100 + n)
+}
+
+#[test]
+fn add_and_list_portfolios_in_deterministic_order() {
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    journal
+        .add_portfolio(pid(1), "UBS — compte titres", &ts("2026-06-30T09:00:00Z"))
+        .unwrap();
+    journal
+        .add_portfolio(pid(2), "PostFinance", &ts("2026-06-30T09:01:00Z"))
+        .unwrap();
+    let names: Vec<_> = journal
+        .list_portfolios()
+        .unwrap()
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+    assert_eq!(
+        names,
+        ["UBS — compte titres", "PostFinance"],
+        "ordered by id"
+    );
+}
+
+#[test]
+fn rename_bumps_once_identical_rename_is_a_no_op() {
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    journal
+        .add_portfolio(pid(1), "UBS", &ts("2026-06-30T09:00:00Z"))
+        .unwrap();
+    let v0 = journal.logical_version().unwrap();
+    assert!(journal.rename_portfolio(pid(1), "UBS Switzerland").unwrap());
+    let v1 = journal.logical_version().unwrap();
+    assert_eq!(v1, v0 + 1, "a real rename bumps once");
+    // Identical name → no-op, no bump (C4).
+    assert!(!journal.rename_portfolio(pid(1), "UBS Switzerland").unwrap());
+    assert_eq!(
+        journal.logical_version().unwrap(),
+        v1,
+        "identical rename is a true no-op"
+    );
+    assert_eq!(
+        journal.list_portfolios().unwrap()[0].name,
+        "UBS Switzerland"
+    );
+}
+
+#[test]
+fn delete_is_guarded_against_holdings_and_the_last_portfolio() {
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    // `add_at` ensures the default `portfolio_id()` and puts a holding in it.
+    add(&mut journal, "NESN", "10", "95.40");
+    let default_pid = portfolio_id();
+    journal
+        .add_portfolio(pid(1), "PostFinance", &ts("2026-06-30T09:00:00Z"))
+        .unwrap();
+
+    // The default portfolio has a holding → refused (FK never orphaned).
+    assert_eq!(
+        journal.delete_portfolio(default_pid).unwrap(),
+        DeletePortfolioOutcome::HasHoldings
+    );
+    assert_eq!(
+        journal.list_portfolios().unwrap().len(),
+        2,
+        "nothing deleted"
+    );
+
+    // The empty, non-last portfolio deletes + bumps.
+    let v0 = journal.logical_version().unwrap();
+    assert_eq!(
+        journal.delete_portfolio(pid(1)).unwrap(),
+        DeletePortfolioOutcome::Deleted
+    );
+    assert_eq!(
+        journal.logical_version().unwrap(),
+        v0 + 1,
+        "a real delete bumps once"
+    );
+    assert_eq!(journal.list_portfolios().unwrap().len(), 1);
+
+    // Now only the (holding-bearing) default remains → deleting it is refused as HasHoldings
+    // BEFORE the last-portfolio check (the holding guard runs first).
+    assert_eq!(
+        journal.delete_portfolio(default_pid).unwrap(),
+        DeletePortfolioOutcome::HasHoldings
+    );
+}
+
+#[test]
+fn delete_last_empty_portfolio_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    // One empty portfolio, no holdings.
+    journal
+        .add_portfolio(pid(1), "Only", &ts("2026-06-30T09:00:00Z"))
+        .unwrap();
+    assert_eq!(
+        journal.delete_portfolio(pid(1)).unwrap(),
+        DeletePortfolioOutcome::LastPortfolio,
+        "the register keeps at least one portfolio"
+    );
+    assert_eq!(journal.list_portfolios().unwrap().len(), 1);
+}
