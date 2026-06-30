@@ -24,21 +24,11 @@
 
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
-use steadyinvest_contract::{
-    Cell, ForecastLowOption as CForecastLowOption, Judgment, Money, Study,
-};
-use steadyinvest_core::normalize::{
-    self, CanonicalFinancials, CanonicalYear, Finding, NormalizeError, PlausibilityKey, RawAmount,
-    RawFinancials, RawYear, YearUsability,
-};
+use steadyinvest_contract::{ForecastLowOption as CForecastLowOption, Money, Study};
+use steadyinvest_core::normalize::{Finding, PlausibilityKey};
 use steadyinvest_core::rounding::DisplayField;
-use steadyinvest_core::ssg::{
-    CalcFinding, ForecastLowOption, JudgmentInputs, QuarterlyObservations, SsgOutputs, Trend,
-    UpsideDownside, Zone,
-};
-use steadyinvest_core::verdict::{
-    GateState, GatedInput, InputGates, OpenGate, StudySnapshot, Verdict, YearGates,
-};
+use steadyinvest_core::ssg::{CalcFinding, SsgOutputs, Trend, UpsideDownside, Zone};
+use steadyinvest_core::verdict::{GateState, GatedInput, OpenGate, StudySnapshot, Verdict};
 
 use crate::viewmodel::entry;
 use crate::viewmodel::form::EMPTY_SLOT;
@@ -48,196 +38,16 @@ use crate::{
     ScenarioCompareState, ScenarioOutcome, TraceState, VerdictState, ZoneBarState,
 };
 
-// ── contract → core mapping (pure, unit-tested, no I/O) ──
-
-/// One `Cell.value` → an optional [`RawAmount`] in the study's native currency. An absent cell value
-/// stays `None` — never coerced to `0` (the project's most-repeated rail).
-fn raw_amount(cell: &Cell, currency: &str) -> Option<RawAmount> {
-    cell.value.map(|m| RawAmount {
-        value: m.as_decimal(),
-        currency: currency.to_string(),
-    })
-}
-
-/// `contract::Study` → [`RawFinancials`]: one [`RawYear`] per study year. The four load-bearing
-/// cells (`sales/eps/high_price/low_price`) and the three optional cells (`dividend_per_share/
-/// pre_tax_profit/book_value_per_share`) map by name; the period/fiscal/`net_profit`/`tax_rate`
-/// inputs the manual contract does not carry stay `None` (v1: PTP is taken directly from its cell,
-/// never grossed up). `splits: vec![]` — v1 manual entry records no split events.
-pub fn to_raw_financials(study: &Study) -> RawFinancials {
-    let currency = study.native_currency.as_str();
-    let years = study
-        .years
-        .iter()
-        .map(|y| RawYear {
-            sales: raw_amount(&y.sales, currency),
-            eps: raw_amount(&y.eps, currency),
-            high_price: raw_amount(&y.high_price, currency),
-            low_price: raw_amount(&y.low_price, currency),
-            dividend_per_share: y
-                .dividend_per_share
-                .as_ref()
-                .and_then(|c| raw_amount(c, currency)),
-            pre_tax_profit: y
-                .pre_tax_profit
-                .as_ref()
-                .and_then(|c| raw_amount(c, currency)),
-            book_value_per_share: y
-                .book_value_per_share
-                .as_ref()
-                .and_then(|c| raw_amount(c, currency)),
-            ..RawYear::empty(y.year)
-        })
-        .collect();
-    RawFinancials {
-        native_currency: study.native_currency.clone(),
-        years,
-        splits: Vec::new(),
-    }
-}
-
-/// `Option<Money>` → `Option<Decimal>` (the judgment-input rail). `None` stays `None`.
-fn money_dec(value: Option<Money>) -> Option<Decimal> {
-    value.map(Money::as_decimal)
-}
-
-/// `contract::ForecastLowOption` → [`ForecastLowOption`] **by name** (a `match`, never an `as`-cast,
-/// so a future variant cannot silently mis-map — recorded glue).
-pub fn to_forecast_low_option(option: CForecastLowOption) -> ForecastLowOption {
-    match option {
-        CForecastLowOption::AvgLowPeTimesEps => ForecastLowOption::AvgLowPeTimesEps,
-        CForecastLowOption::AvgLowPriceLast5y => ForecastLowOption::AvgLowPriceLast5y,
-        CForecastLowOption::RecentSevereLow => ForecastLowOption::RecentSevereLow,
-        CForecastLowOption::DividendSupported => ForecastLowOption::DividendSupported,
-    }
-}
-
-/// `contract::Judgment` → [`JudgmentInputs`]: each `Option<Money>` → `Option<Decimal>`; the option
-/// enum glued by name.
-pub fn to_judgment_inputs(judgment: &Judgment) -> JudgmentInputs {
-    JudgmentInputs {
-        estimated_high_eps: money_dec(judgment.estimated_high_eps),
-        estimated_low_eps: money_dec(judgment.estimated_low_eps),
-        projected_sales_growth_pct: money_dec(judgment.projected_sales_growth_pct),
-        projected_eps_growth_pct: money_dec(judgment.projected_eps_growth_pct),
-        judged_avg_high_pe: money_dec(judgment.judged_avg_high_pe),
-        judged_avg_low_pe: money_dec(judgment.judged_avg_low_pe),
-        forecast_low_option: to_forecast_low_option(judgment.forecast_low_option),
-        recent_severe_low: money_dec(judgment.recent_severe_low),
-        current_price: money_dec(judgment.current_price),
-        present_full_year_dividend: money_dec(judgment.present_full_year_dividend),
-    }
-}
-
-/// v1 manual study carries no quarterly data → [`QuarterlyObservations::empty`] (current P/E /
-/// relative value are honestly `unknown`; quarterly capture is a later story / Epic 3).
-pub fn to_observations(_study: &Study) -> QuarterlyObservations {
-    QuarterlyObservations::empty()
-}
-
-/// One data `Cell` → [`GateState`]: `None` (absent cell) → `Missing`; `(Validated, Current)` →
-/// `ValidatedFresh`; `(Validated, Stale)` → `Stale`; anything else (present but `review ≠ ✓`) →
-/// `NotValidated`.
-pub fn cell_to_gate_state(cell: Option<&Cell>) -> GateState {
-    use steadyinvest_contract::{Freshness, Review};
-    match cell {
-        None => GateState::Missing,
-        Some(c) => match (c.review, c.freshness) {
-            (Review::Validated, Freshness::Current) => GateState::ValidatedFresh,
-            (Review::Validated, Freshness::Stale) => GateState::Stale,
-            _ => GateState::NotValidated,
-        },
-    }
-}
-
-/// A judgment input value → [`GateState`] (recorded interpretation, AC 6): `None` → `Missing`;
-/// `Some` → `ValidatedFresh` (a deliberately-typed personal judgment is validated-fresh by the act
-/// of entry — it is the user's own number, not provider data awaiting sign-off).
-pub fn judgment_to_gate_state(value: Option<Money>) -> GateState {
-    match value {
-        None => GateState::Missing,
-        Some(_) => GateState::ValidatedFresh,
-    }
-}
-
-/// Build [`InputGates`]: one [`YearGates`] per **usable** year (filter `canonical.years` on
-/// [`YearUsability::Usable`], read the matching study year's four load-bearing cells), plus the five
-/// load-bearing judgment gates — exactly the pinned catalogs, in catalog order.
-pub fn to_input_gates(study: &Study, canonical: &CanonicalFinancials) -> InputGates {
-    let year_gates = canonical
-        .years
-        .iter()
-        .filter(|cy| cy.usability == YearUsability::Usable)
-        .filter_map(|cy| {
-            let year = study.years.iter().find(|y| y.year == cy.year)?;
-            // LOAD_BEARING_YEAR_FIELDS order: sales, eps, high_price, low_price.
-            let states = [
-                cell_to_gate_state(Some(&year.sales)),
-                cell_to_gate_state(Some(&year.eps)),
-                cell_to_gate_state(Some(&year.high_price)),
-                cell_to_gate_state(Some(&year.low_price)),
-            ];
-            Some(YearGates::new(cy.year, states))
-        })
-        .collect();
-    let j = &study.judgment;
-    // LOAD_BEARING_JUDGMENT_INPUTS order: estimated_high_eps, estimated_low_eps, judged_avg_high_pe,
-    // judged_avg_low_pe, current_price.
-    let judgment_gates = [
-        judgment_to_gate_state(j.estimated_high_eps),
-        judgment_to_gate_state(j.estimated_low_eps),
-        judgment_to_gate_state(j.judged_avg_high_pe),
-        judgment_to_gate_state(j.judged_avg_low_pe),
-        judgment_to_gate_state(j.current_price),
-    ];
-    InputGates::new(year_gates, judgment_gates)
-}
-
-/// One coherent engine frame (Story 2.7): the immutable [`StudySnapshot`] **and** the input-shape
-/// plausibility findings that `normalize` raised for the SAME mapped inputs. [`StudySnapshot::new`]
-/// consumes `&CanonicalFinancials` without re-exposing its `.findings`, so they are cloned off the
-/// canonical BEFORE the move — the verdict and the cell warnings then descend from one normalize, no
-/// drift (the coherence invariant Story 2.6 established for outputs/verdict, extended to findings).
-pub struct StudyFrame {
-    pub snapshot: StudySnapshot,
-    /// The input-shape findings (`split_series_break` / `currency_mismatch` /
-    /// `fiscal_period_misalignment`) on `CanonicalFinancials`; the calc-time findings live on
-    /// `snapshot.outputs().findings`.
-    pub plausibility: Vec<Finding>,
-    /// The canonical per-year series (sorted ascending), cloned off the canonical BEFORE the
-    /// `StudySnapshot::new` move — the §1 growth chart (Story 2.8) plots these (`sales` / `eps` /
-    /// `high_price`), and they descend from the SAME single `normalize` as the verdict and the
-    /// warnings (no second pass, no frame drift).
-    pub series: Vec<CanonicalYear>,
-}
-
-/// The single construction path: `Study` → raw → `normalize` → `StudySnapshot::new` once, returning
-/// the snapshot together with the input-shape findings (Story 2.7). A [`NormalizeError`] surfaces to
-/// the caller (a neutral notice in `state.rs`) — never `unwrap`/`.ok()`. **Normalizes exactly once**
-/// (no second pass that could drift from the frame that produced the verdict).
-pub fn build_frame(study: &Study) -> Result<StudyFrame, NormalizeError> {
-    let raw = to_raw_financials(study);
-    let canonical = normalize::normalize(raw)?;
-    let judgment = to_judgment_inputs(&study.judgment);
-    let observations = to_observations(study);
-    let gates = to_input_gates(study, &canonical);
-    // Clone the input-shape findings AND the per-year series off the canonical before the `new(...)`
-    // move consumes it — both descend from this one `normalize`, so the chart, the warnings and the
-    // verdict share a single coherent frame (no second normalize, the Story-2.7 invariant).
-    let plausibility = canonical.findings.clone();
-    let series = canonical.years.clone();
-    Ok(StudyFrame {
-        snapshot: StudySnapshot::new(&canonical, &judgment, &observations, gates),
-        plausibility,
-        series,
-    })
-}
-
-/// The snapshot-only view of [`build_frame`] — the Story-2.6 call shape, preserved for the callers
-/// that need only the snapshot (`state::snapshot_for`, the adapter tests). Normalizes once.
-pub fn build_snapshot(study: &Study) -> Result<StudySnapshot, NormalizeError> {
-    build_frame(study).map(|frame| frame.snapshot)
-}
+// ── contract → core construction (relocated to `report::form` in Story 5.6) ──
+//
+// The `Study → core` mapping + the single `build_frame`/`build_snapshot` construction now live in
+// the `report` crate (which depends only on `core` + `contract`) so the live form here and the PDF
+// there share ONE construction — no second `normalize`, no drift. Re-exported so every existing
+// `crate::viewmodel::engine::…` call-site resolves unchanged; the FORMAT functions below stay here.
+// Only the names `app` references in non-test code are re-exported; the rest of the mapping is
+// `report::form`-internal (consumed by `build_frame` there). `money_dec` is used by the formatting
+// functions below; the `Study → snapshot` construction by every form/chart/state caller.
+pub use steadyinvest_report::form::{build_frame, build_snapshot, money_dec, StudyFrame};
 
 /// Whether a study's current price sits in its §4 **buy zone** (Story 4.2, FR35). A presentation-only
 /// read of the existing `core::ssg` risk-reward output — it never alters the verdict and is
@@ -936,9 +746,16 @@ pub const USER_FACING_LABELS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    // The `contract → core` mapping moved to `report::form` (Story 5.6); these tests still exercise
+    // the app's view of the construction through the re-located functions' canonical path.
     use steadyinvest_contract::{
         Cell, Coverage, ForecastLowOption as CFlo, Freshness, Judgment, Provenance, Review, Source,
         Timestamp, YearData,
+    };
+    use steadyinvest_core::normalize;
+    use steadyinvest_report::form::{
+        cell_to_gate_state, judgment_to_gate_state, to_forecast_low_option, to_judgment_inputs,
+        to_observations, to_raw_financials,
     };
     use uuid::Uuid;
 
