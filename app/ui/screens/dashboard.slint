@@ -24,6 +24,7 @@ component StudyListRow inherits Rectangle {
     callback unarchive();
     callback delete-study();
     callback export-study();
+    callback export-study-pdf();
     callback confront-study();
 
     accessible-role: button;
@@ -97,6 +98,12 @@ component StudyListRow inherits Rectangle {
         ActionButton {
             label: @tr("Exporter");
             clicked => { root.export-study(); }
+        }
+        // Story 5.6 (FR52): export this study's faithful, neutral, greyscale PDF. Its own TouchArea
+        // consumes the click, so it never opens the row.
+        ActionButton {
+            label: @tr("Exporter PDF");
+            clicked => { root.export-study-pdf(); }
         }
         // Story 5.1 (FR50): reopen this study's recorded §4 forecast band beside the security's actual
         // close trajectory since the decision. Read-only — its own TouchArea consumes the click.
@@ -326,6 +333,9 @@ export component DashboardScreen inherits Rectangle {
                     }
                     export-study => {
                         Studies.export-study(studyrow.id);
+                    }
+                    export-study-pdf => {
+                        Studies.export-study-pdf(studyrow.id);
                     }
                     confront-study => {
                         Confront.request(studyrow.id);

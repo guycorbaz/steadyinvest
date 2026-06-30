@@ -353,6 +353,8 @@ export global Studies {
     // Story 5.2 (FR59): export one study to a portable file (id) / import a study from a file path.
     callback export-study(string);
     callback import-study(string);
+    // Story 5.6 (FR52): export one study's faithful, neutral, greyscale PDF (id).
+    callback export-study-pdf(string);
     // Fold/regime view-state intents (Story 2.3) — Rust mutates `AppConfig.study_view_state` and
     // persists (validate→mutate→persist, the 2.2 Prefs pattern), then pushes `folds`/`regime` back.
     callback toggle-fold(int, bool); // section index (0..4), open

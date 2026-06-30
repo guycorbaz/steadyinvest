@@ -256,6 +256,19 @@ fn write_study_export(id: Uuid, json: &str) -> std::io::Result<std::path::PathBu
     Ok(path)
 }
 
+/// Write a study's faithful PDF to a file (Story 5.6, FR52) and return its path. Same `exports/`
+/// folder + naming discipline as the JSON export — never beside the live journal (ADD7/8). `app` owns
+/// the I/O; `report` produced the bytes from `core`/`contract` alone.
+fn write_study_pdf(id: Uuid, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    let dir = directories::ProjectDirs::from("", "", "steadyinvest")
+        .map(|d| d.data_dir().join("exports"))
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no OS data directory"))?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("study-{id}.pdf"));
+    std::fs::write(&path, bytes)?;
+    Ok(path)
+}
+
 /// Write the whole-journal export envelope to a file (Story 5.3, FR60) and return its path. Like the
 /// single-study export, it lands in the `exports/` folder under the OS data dir — **never** beside the
 /// live journal DB (ADD7/8 sync-safety; the native picker + a user-chosen sync target is Story 5.5).
@@ -1183,6 +1196,32 @@ fn main() -> Result<(), slint::PlatformError> {
                     Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
                 },
                 Err(message) => message,
+            };
+            studies.set_notice(notice.into());
+        });
+    }
+    {
+        // Story 5.6 (FR52): export a study's faithful, neutral, greyscale PDF via the `report` crate
+        // (UI-independent, from `core`/`contract`). Path-based like the JSON export; the native save
+        // picker is a later refinement. Read-only — rendering writes no journal.
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Studies>().on_export_study_pdf(move |id| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Ok(uuid) = Uuid::parse_str(&id) else {
+                return;
+            };
+            let notice = match journal_state.borrow().get_study(uuid) {
+                Some(study) => match steadyinvest_report::render_study_pdf(&study) {
+                    Ok(bytes) => match write_study_pdf(uuid, &bytes) {
+                        Ok(path) => format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
+                        Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
+                    },
+                    // The study does not compute as entered — a neutral refusal, no panic, no leak.
+                    Err(_) => state::MSG_SAVE_FAILED.to_string(),
+                },
+                None => state::MSG_SAVE_FAILED.to_string(),
             };
             studies.set_notice(notice.into());
         });

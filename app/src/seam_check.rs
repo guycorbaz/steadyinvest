@@ -148,7 +148,7 @@ mod tests {
 
         study.years[4].high_price.freshness = Freshness::Stale;
         assert_eq!(
-            engine::cell_to_gate_state(Some(&study.years[4].high_price)),
+            steadyinvest_report::form::cell_to_gate_state(Some(&study.years[4].high_price)),
             GateState::Stale,
             "a validated-but-stale cell maps to the Stale gate"
         );

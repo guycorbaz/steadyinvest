@@ -404,7 +404,7 @@ development_status:
   5-3-export-import-whole-journal: done
   5-4-restore-from-backup: done
   5-5-journal-location-recent-journals-sync-safety: done
-  5-6-pdf-export-of-study: backlog
+  5-6-pdf-export-of-study: done
   epic-5-retrospective: optional
 
   # ── Epic 6: Multi-portfolio, multi-currency & full risk overlay [P2] (story outlines) ──

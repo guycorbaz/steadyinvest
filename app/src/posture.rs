@@ -592,9 +592,10 @@ mod tests {
         // le verrou et ouvrir"): +8 = 305. Story 7.4 adds the Réglages "Twelve Data" provider chip: +1
         // = 306. Story 5.1 adds the dashboard "Confronter" action + the confront overlay (title, the
         // "Décision du {}" caption, the neutral empty state, the "Estimation haute/basse : {}" + "Trait
-        // clair : cours réel" legend, "Fermer"): +8 = 314. Floor strict.
+        // clair : cours réel" legend, "Fermer"): +8 = 314. Story 5.6 adds the dashboard "Exporter PDF"
+        // row action: +1 = 315. Floor strict.
         assert!(
-            total >= 314,
+            total >= 315,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

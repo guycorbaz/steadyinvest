@@ -11,4 +11,10 @@ description = "UI-independent PDF/print of the faithful, neutral, grayscale-safe
 [dependencies]
 steadyinvest-core = { workspace = true }
 steadyinvest-contract = { workspace = true }
-# A PDF backend (printpdf/genpdf) is added in Story 5.6 when the report layout is implemented.
+rust_decimal = { workspace = true }   # exact decimals on the Study → core mapping (no f64)
+# Write-only PDF backend (Story 5.6, FR52): precise coordinate control for the faithful SSG grid,
+# pure-Rust, minimal deps (bitflags/itoa/memchr/ryu), no PDF parser → no untrusted-parse advisory.
+pdf-writer = { workspace = true }
+
+[dev-dependencies]
+uuid = { workspace = true }   # fixture study ids in the renderer tests
