@@ -590,9 +590,11 @@ mod tests {
         // adds the Réglages journal-location panel (title "Emplacement du journal", "Journal actuel :",
         // "Ouvrir un journal…", "Créer un journal…", "Journaux récents", "(actuel)", "Ouvrir", "Lever
         // le verrou et ouvrir"): +8 = 305. Story 7.4 adds the Réglages "Twelve Data" provider chip: +1
-        // = 306. Floor strict.
+        // = 306. Story 5.1 adds the dashboard "Confronter" action + the confront overlay (title, the
+        // "Décision du {}" caption, the neutral empty state, the "Estimation haute/basse : {}" + "Trait
+        // clair : cours réel" legend, "Fermer"): +8 = 314. Floor strict.
         assert!(
-            total >= 306,
+            total >= 314,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

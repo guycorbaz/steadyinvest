@@ -1207,6 +1207,32 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ── Story 5.1 (FR50) — confront a saved study: reopen its recorded §4 forecast band beside the
+    // security's actual close trajectory since the decision. Read-only — `confront()` never writes; it
+    // reads the cached `price_history` closes the price refreshes have been accumulating. ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        ui.global::<Confront>().on_request(move |id| {
+            let ui = ui_weak.unwrap();
+            let confront = ui.global::<Confront>();
+            let Ok(uuid) = Uuid::parse_str(&id) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            let view = journal_state.borrow().confront(uuid);
+            confront.set_state(viewmodel::chart::confront_chart(&view, format));
+            confront.set_open(true);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        ui.global::<Confront>().on_dismiss(move || {
+            ui_weak.unwrap().global::<Confront>().set_open(false);
+        });
+    }
+
     // ── Story 5.3 (FR60) — export / import the WHOLE journal as a portable file. Scales the 5.2
     // envelope to every entity + the (journal_id, version, hash) identity tuple; import verifies and
     // applies atomically (never partially). Path-based for now — the native picker is Story 5.5. The

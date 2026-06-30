@@ -15,6 +15,7 @@ mod export;
 mod holdings;
 mod journal;
 mod migrations;
+mod price_history;
 mod restore;
 mod schema;
 mod studies;

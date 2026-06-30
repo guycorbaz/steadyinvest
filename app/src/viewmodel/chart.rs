@@ -37,6 +37,9 @@ const AXIS_TICKS: [i32; 8] = [1, 2, 5, 10, 20, 50, 100, 200];
 const FAN_RATES: [i32; 6] = [5, 10, 15, 20, 25, 30];
 /// The per-share display scale the dragged est-high-EPS value snaps to (2 dp).
 const EPS_DRAG_SCALE: u32 = 2;
+/// Half-size (viewbox px) of the confront single-close marker box — drawn when there's exactly one
+/// cached close, since a lone point can't form a visible polyline (Story 5.1).
+const CONFRONT_MARKER: f32 = 4.0;
 
 /// Map a value on the 1→200 semi-log axis to a viewbox-y (0 = top, `CHART_H` = bottom). Values are
 /// clamped to `[1, 200]` before the `log10`, so an off-axis figure pins to an edge rather than
@@ -203,6 +206,95 @@ pub fn unavailable() -> GrowthChartState {
         judgment_x: CHART_W,
         judgment_y: -1.0,
         judgment_label: Default::default(),
+    }
+}
+
+// ── Story 5.1 — the confront overlay geometry (recorded band vs actual trajectory) ──
+
+use crate::state::ConfrontView;
+use crate::ConfrontState;
+
+/// Build the confront chart (Story 5.1, FR50): the security's **actual** close trajectory since the
+/// decision as a polyline, overlaid on the study's **recorded** §4 forecast band (a shaded rectangle).
+/// Both are `Path` `commands` strings on a shared **linear price** viewbox (NOT the §1 semi-log axis —
+/// confront plots absolute prices). No zones (UX-DR10), neutral. `available == false` → an empty state.
+pub fn confront_chart(view: &ConfrontView, format: NumberFormat) -> ConfrontState {
+    if !view.available {
+        return ConfrontState {
+            available: false,
+            chart_w: CHART_W,
+            chart_h: CHART_H,
+            actual_commands: Default::default(),
+            band_commands: Default::default(),
+            high_label: Default::default(),
+            low_label: Default::default(),
+            decision_date: view.decision_date.clone().into(),
+        };
+    }
+    let high = view.forecast_high.and_then(|d| d.to_f64()).unwrap_or(0.0);
+    let low = view.forecast_low.and_then(|d| d.to_f64()).unwrap_or(0.0);
+    let actuals: Vec<f64> = view.actual.iter().filter_map(|(_, c)| c.to_f64()).collect();
+
+    // Price range = the band plus the actual closes, with a 5 % margin so nothing pins to an edge.
+    let mut lo = low.min(high);
+    let mut hi = low.max(high);
+    for v in &actuals {
+        lo = lo.min(*v);
+        hi = hi.max(*v);
+    }
+    let margin = ((hi - lo).abs() * 0.05).max(0.01);
+    lo -= margin;
+    hi += margin;
+    let span = (hi - lo).max(f64::MIN_POSITIVE);
+    let y_of = |price: f64| -> f32 { (f64::from(CHART_H) * (1.0 - (price - lo) / span)) as f32 };
+
+    // Actual trajectory. The x-axis is spread evenly by index (oldest → newest), NOT by calendar
+    // time — closes plot equidistantly regardless of weekend/holiday gaps (a known MVP limitation;
+    // no date ticks are drawn). A lone close can't form a polyline (a bare `MoveTo` renders nothing),
+    // so the single-point case draws a small visible marker box at the right edge (the "now" anchor)
+    // instead of an invisible line.
+    let n = actuals.len();
+    let actual_cmd = if n == 1 {
+        let cx = CHART_W - 2.0 * CONFRONT_MARKER; // inset so the box can't clip the right edge
+        let cy = y_of(actuals[0]);
+        let m = CONFRONT_MARKER;
+        format!(
+            "M {l:.1} {t:.1} L {r:.1} {t:.1} L {r:.1} {b:.1} L {l:.1} {b:.1} Z",
+            l = cx - m,
+            r = cx + m,
+            t = cy - m,
+            b = cy + m,
+        )
+    } else {
+        let denom = (n - 1) as f64;
+        let mut cmd = String::with_capacity(n * 16);
+        for (i, v) in actuals.iter().enumerate() {
+            let x = ((i as f64 / denom) * f64::from(CHART_W)) as f32;
+            let y = y_of(*v);
+            cmd.push_str(if i == 0 { "M " } else { "L " });
+            cmd.push_str(&format!("{x:.1} {y:.1} "));
+        }
+        cmd
+    };
+
+    // Recorded band: a filled rectangle from forecast_high (top) to forecast_low (bottom).
+    let hy = y_of(high.max(low));
+    let ly = y_of(high.min(low));
+    let band_cmd = format!(
+        "M 0 {hy:.1} L {w:.1} {hy:.1} L {w:.1} {ly:.1} L 0 {ly:.1} Z",
+        w = CHART_W
+    );
+
+    let label = |d: rust_decimal::Decimal| format_scaled(d, DisplayField::Price, format);
+    ConfrontState {
+        available: true,
+        chart_w: CHART_W,
+        chart_h: CHART_H,
+        actual_commands: actual_cmd.into(),
+        band_commands: band_cmd.into(),
+        high_label: view.forecast_high.map(label).unwrap_or_default().into(),
+        low_label: view.forecast_low.map(label).unwrap_or_default().into(),
+        decision_date: view.decision_date.clone().into(),
     }
 }
 
@@ -444,6 +536,82 @@ mod tests {
             zone.confidence.as_str(),
             "withheld",
             "a missing load-bearing input keeps the zone bar non-full during a drag (FR12)"
+        );
+    }
+
+    // ── Story 5.1 — the confront overlay geometry ──
+
+    fn confront_view(
+        available: bool,
+        high: Option<&str>,
+        low: Option<&str>,
+        closes: &[(&str, &str)],
+    ) -> crate::state::ConfrontView {
+        crate::state::ConfrontView {
+            available,
+            decision_date: "2026-03-09".to_string(),
+            forecast_high: high.map(money).map(|m| m.as_decimal()),
+            forecast_low: low.map(money).map(|m| m.as_decimal()),
+            horizon_years: steadyinvest_core::method::FORECAST_HORIZON_YEARS,
+            actual: closes
+                .iter()
+                .map(|(d, c)| (d.to_string(), money(c).as_decimal()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn confront_chart_unavailable_is_a_calm_empty_state() {
+        let view = confront_view(false, None, None, &[]);
+        let state = confront_chart(&view, NumberFormat::Comma);
+        assert!(!state.available);
+        assert!(state.actual_commands.is_empty(), "no trajectory is drawn");
+        assert!(state.band_commands.is_empty(), "no band is drawn");
+        assert!(
+            state.chart_w > 0.0 && state.chart_h > 0.0,
+            "geometry is constant"
+        );
+        assert_eq!(state.decision_date.as_str(), "2026-03-09");
+    }
+
+    #[test]
+    fn confront_chart_draws_a_polyline_and_band_for_multiple_closes() {
+        let view = confront_view(
+            true,
+            Some("120"),
+            Some("80"),
+            &[
+                ("2026-03-10", "100"),
+                ("2026-04-10", "108"),
+                ("2026-05-10", "95"),
+            ],
+        );
+        let state = confront_chart(&view, NumberFormat::Comma);
+        assert!(state.available);
+        assert!(
+            state.actual_commands.starts_with("M ") && state.actual_commands.contains("L "),
+            "three closes form a polyline (one MoveTo then LineTos), got {}",
+            state.actual_commands
+        );
+        assert!(
+            !state.band_commands.is_empty(),
+            "the recorded band is drawn"
+        );
+        assert_eq!(state.high_label.as_str(), "120");
+        assert_eq!(state.low_label.as_str(), "80");
+    }
+
+    /// Review fix (MED): a lone cached close must render a VISIBLE marker, not a bare `MoveTo` (which
+    /// Slint draws as nothing). This is the common case — one refresh → one close.
+    #[test]
+    fn confront_chart_single_close_draws_a_visible_marker_not_a_bare_move() {
+        let view = confront_view(true, Some("120"), Some("80"), &[("2026-03-10", "100")]);
+        let state = confront_chart(&view, NumberFormat::Comma);
+        assert!(state.available);
+        assert!(
+            state.actual_commands.contains('Z') && state.actual_commands.contains("L "),
+            "a single close draws a closed marker box (not an invisible lone MoveTo), got {}",
+            state.actual_commands
         );
     }
 

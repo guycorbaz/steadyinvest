@@ -1,0 +1,130 @@
+// The confront overlay (Story 5.1, FR50) — a read-only modal that reopens a saved study's recorded
+// §4 forecast band beside the security's ACTUAL close trajectory since the decision. The band is a
+// faint neutral rectangle (forecast_low → forecast_high); the trajectory is the bright actor line.
+// No zone hues (UX-DR10): the comparison reads by position, never by colour. Computed in
+// `viewmodel/chart.rs` and crossed as `Path` `commands` strings against the shared linear-price
+// viewbox; `available == false` shows a calm empty state (not enough recorded closes yet).
+//
+// Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()` (UX-DR29).
+
+import { Tokens } from "../tokens.slint";
+import { Confront } from "../state.slint";
+import { ActionButton } from "action_button.slint";
+
+export component ConfrontOverlay inherits Rectangle {
+    // A dimming scrim over the whole window; a background TouchArea dismisses on an outside click.
+    background: Tokens.bg.with-alpha(0.72);
+
+    scrim := TouchArea {
+        clicked => { Confront.dismiss(); }
+    }
+
+    // The card — its own TouchArea swallows clicks so they never reach the scrim behind it.
+    Rectangle {
+        width: min(640px, parent.width - 2 * Tokens.space-32);
+        height: card.preferred-height;
+        background: Tokens.surface;
+        border-width: Tokens.border;
+        border-color: Tokens.separator;
+        border-radius: Tokens.radius;
+
+        TouchArea { /* swallow clicks inside the card */ }
+
+        card := VerticalLayout {
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
+
+            Text {
+                text: @tr("Confrontation — l'estimation enregistrée face au cours réel");
+                color: Tokens.text-high;
+                font-size: Tokens.font-h2;
+                font-weight: Tokens.weight-semibold;
+                wrap: word-wrap;
+            }
+            Text {
+                text: @tr("Décision du {}", Confront.state.decision-date);
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+            }
+
+            // ── Calm empty state: not enough recorded closes (or no forecast band) to compare yet. ──
+            if !Confront.state.available: Rectangle {
+                height: 160px;
+                background: Tokens.surface-alt;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+                border-radius: Tokens.radius;
+                Text {
+                    text: @tr("Pas encore de cours enregistrés depuis la décision. Les cours se mémorisent au fil des actualisations de prix.");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    width: parent.width - 2 * Tokens.space-24;
+                }
+            }
+
+            // ── The chart: the recorded band (faint fill) under the actual trajectory (bright line). ──
+            if Confront.state.available: Rectangle {
+                height: 320px;
+                background: Tokens.surface;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+                border-radius: Tokens.radius;
+                clip: true;
+
+                // The recorded §4 forecast band — a neutral filled rectangle, no zone hue (UX-DR10).
+                Path {
+                    commands: Confront.state.band-commands;
+                    fill: Tokens.text-low.with-alpha(0.14);
+                    stroke: Tokens.text-low;
+                    stroke-width: Tokens.chart-stroke-thin;
+                    viewbox-width: Confront.state.chart-w;
+                    viewbox-height: Confront.state.chart-h;
+                }
+                // The actual close trajectory — the protagonist (brightest, thickest).
+                Path {
+                    commands: Confront.state.actual-commands;
+                    stroke: Tokens.text-high;
+                    stroke-width: Tokens.chart-stroke;
+                    viewbox-width: Confront.state.chart-w;
+                    viewbox-height: Confront.state.chart-h;
+                }
+            }
+
+            // Legend: the recorded band bounds (forecast high / low) as plain numerics.
+            if Confront.state.available: HorizontalLayout {
+                spacing: Tokens.space-24;
+                Text {
+                    text: @tr("Estimation haute : {}", Confront.state.high-label);
+                    color: Tokens.text-mid;
+                    font-family: Tokens.font-numeric;
+                    font-size: Tokens.font-caption;
+                }
+                Text {
+                    text: @tr("Estimation basse : {}", Confront.state.low-label);
+                    color: Tokens.text-mid;
+                    font-family: Tokens.font-numeric;
+                    font-size: Tokens.font-caption;
+                }
+                Text {
+                    text: @tr("Trait clair : cours réel");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                    horizontal-stretch: 1;
+                    horizontal-alignment: right;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                ActionButton {
+                    label: @tr("Fermer");
+                    clicked => { Confront.dismiss(); }
+                }
+            }
+        }
+    }
+}
