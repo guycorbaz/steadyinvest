@@ -91,6 +91,16 @@ pub enum Error {
     /// journal snapshot (Story 5.3). Nothing was applied.
     #[error("the import file is not a valid journal export: {detail}; nothing was applied")]
     ImportMalformed { detail: String },
+
+    /// The journal is already open in another instance (Story 5.5, ADD6 single-instance lock): its
+    /// lock sidecar is held by process `pid`. The open did not happen.
+    #[error("this journal is already open in another instance (process {pid}); it was not opened")]
+    LockHeld { pid: u32 },
+
+    /// The single-instance lock sidecar could not be acquired or released for a reason other than it
+    /// already being held (Story 5.5) — e.g. the directory is not writable.
+    #[error("the journal lock could not be managed: {detail}")]
+    Lock { detail: String },
 }
 
 impl From<steadyinvest_contract::ImportError> for Error {
@@ -214,6 +224,10 @@ mod tests {
             Error::ImportMalformed {
                 detail: "expected value at line 1 column 2".to_string(),
             },
+            Error::LockHeld { pid: 4321 },
+            Error::Lock {
+                detail: "the directory is not writable".to_string(),
+            },
         ]
     }
 
@@ -233,10 +247,12 @@ mod tests {
                 | Error::Migration { .. }
                 | Error::ImportIntegrity
                 | Error::ImportVersion { .. }
-                | Error::ImportMalformed { .. } => {}
+                | Error::ImportMalformed { .. }
+                | Error::LockHeld { .. }
+                | Error::Lock { .. } => {}
             }
         }
-        assert_eq!(sample_errors().len(), 11, "one sample per variant");
+        assert_eq!(sample_errors().len(), 13, "one sample per variant");
     }
 
     #[test]

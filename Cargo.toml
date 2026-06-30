@@ -62,6 +62,12 @@ tracing = "0.1"
 # openssl/aws-lc) — consistent with the reqwest/rustls `ring` posture. Needs a running D-Bus secret
 # agent at runtime → app handles its absence gracefully (AC6).
 keyring = { version = "3", default-features = false, features = ["async-secret-service", "crypto-rust", "async-io"] }
+# Native file dialogs for the journal-location picker (Story 5.5, FR66). The `xdg-portal` backend
+# (ashpd over zbus — already in the tree via keyring) avoids a GTK3 *system* build dependency. The
+# `async-std` runtime feature (NOT `tokio`): rfd's SYNC dialogs are called from the Slint UI thread,
+# which is NOT a tokio runtime — with the `tokio` feature, zbus's I/O would have no reactor on that
+# thread and panic/hang. `async-std`'s global executor drives the portal I/O from any thread.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 directories = "6"
 uuid = { version = "1", features = ["v4", "serde"] }
 # RFC3339 UTC wall clock for the app's injected `Clock` (ADD15). `clock` feature only — no civil

@@ -35,6 +35,14 @@ export struct WatchRow {
     in-buy-zone: bool, // the linked study's current price is in its §4 buy zone (Story 4.2, FR35)
 }
 
+// One entry of the recent-journals list (Story 5.5). `path` is the open key; `name` is a short label;
+// `current` marks the journal that is open right now.
+export struct RecentJournalRow {
+    path: string,
+    name: string,
+    current: bool,
+}
+
 // The non-collapsible header identity block of the faithful SSG form (Story 2.3). Every field is an
 // already-formatted display string built by `app/src/viewmodel/form.rs` — never a float/Decimal.
 export struct FormHeader {
@@ -544,6 +552,19 @@ export global Prefs {
     callback request-restore(string); // path to a backup .db → validate + (maybe) park for confirm
     callback confirm-restore();
     callback cancel-restore();
+    // ── Story 5.5 — journal location, recent journals & sync-safety (FR66) ──
+    // The current journal's path (display) + the recent-journals list, set by Rust.
+    in-out property <string> journal-current-path;
+    in-out property <[RecentJournalRow]> recent-journals;
+    // The latest neutral location outcome (opened / created / failed / sync-warning / stale), set by Rust.
+    in-out property <string> journal-location-status;
+    // When non-empty, a stale-lock blocked an open: the path that can be reclaimed (offer a button).
+    in-out property <string> journal-reclaim-path;
+    // User intents — native dialogs + the rails run in Rust.
+    callback pick-and-open-journal();   // rfd open .db → open_journal
+    callback pick-and-create-journal(); // rfd save .db → create_journal
+    callback open-recent(string);       // path → open_journal
+    callback reclaim-and-open(string);  // path → clear a stale lock + open
     // User intents — handled in Rust (apply + persist).
     callback theme-selected(string); // "dark" | "light"
     callback label-set-selected(string); // "naic" | "neutral"

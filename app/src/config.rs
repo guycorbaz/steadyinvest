@@ -55,8 +55,34 @@ impl Default for StudyViewState {
     }
 }
 
+/// One entry in the recent-journals list (Story 5.5, FR66/ADD7). The **pointer** is `(journal_id,
+/// last_seen_version)` — not just a path: the path is where to reopen, the identity + last-seen
+/// logical version let the app detect a journal that regressed on disk ("you saw vN, this is vM" —
+/// the stale-detection #65 / the 5.4 review wanted). Lives in app-config, NEVER inside the journal.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RecentJournal {
+    pub path: PathBuf,
+    /// The journal's identity (stringified UUID) — distinguishes a moved/copied journal from a
+    /// different one at a reused path.
+    pub journal_id: String,
+    /// The monotonic `logical_version` the app last saw for this journal (updated on every clean
+    /// open/close). A lower on-disk version on reopen surfaces the neutral stale notice.
+    pub last_seen_version: u64,
+}
+
+/// How many recent journals to remember (most-recent-first, de-duplicated by path).
+const RECENT_JOURNALS_CAP: usize = 8;
+
+/// A de-dupe key for a journal path (Story 5.5): the canonicalized path when it exists (resolves
+/// symlinks / `.` / `..` / a NAS alias), else the raw path (a recent entry whose file was moved/deleted
+/// still de-dupes by its literal path).
+fn canonical_key(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Everything the app remembers across launches. Later stories append fields
-/// (fold/regime state in 2.3, provider prefs in 3.2) — append-only, defaults required.
+/// (fold/regime state in 2.3, provider prefs in 3.2, recent journals in 5.5) — append-only,
+/// defaults required.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -100,6 +126,12 @@ pub struct AppConfig {
     /// [`AppConfig::default_trailing_stop_pct_or_none`] so a damaged on-disk value is ignored.
     #[serde(default)]
     pub default_trailing_stop_pct: Option<String>,
+    /// The recent-journals list (Story 5.5, FR66), most-recent-first. Each entry carries the
+    /// `(journal_id, last_seen_version)` pointer for stale detection. Append-only `#[serde(default)]`:
+    /// a pre-5.5 config loads with an empty list. The `journal_path` field above stays the last-used
+    /// path (back-compat); the front of this list mirrors it.
+    #[serde(default)]
+    pub recent_journals: Vec<RecentJournal>,
 }
 
 /// Whether `s` is a well-formed trailing-stop percentage: an exact decimal strictly inside `(0, 100)`
@@ -138,6 +170,7 @@ impl Default for AppConfig {
             preferred_provider: ProviderChoice::default(),
             reference_currency: default_reference_currency(),
             default_trailing_stop_pct: None,
+            recent_journals: Vec::new(),
         }
     }
 }
@@ -152,6 +185,39 @@ impl AppConfig {
         } else {
             DEFAULT_REFERENCE_CURRENCY.to_string()
         }
+    }
+
+    /// Record a journal as the most-recently-used (Story 5.5): move it to the front of
+    /// `recent_journals`, de-duplicating by **canonical** path (so the same journal reached via two
+    /// path spellings is one entry), refresh its `(journal_id, last_seen_version)` pointer, and cap the
+    /// list. Also mirrors `journal_path` (the last-used path, back-compat). Idempotent re-records keep
+    /// the list stable apart from the refreshed pointer.
+    pub fn record_recent(&mut self, path: &Path, journal_id: &str, last_seen_version: u64) {
+        let key = canonical_key(path);
+        self.recent_journals
+            .retain(|r| canonical_key(&r.path) != key);
+        self.recent_journals.insert(
+            0,
+            RecentJournal {
+                path: path.to_path_buf(),
+                journal_id: journal_id.to_string(),
+                last_seen_version,
+            },
+        );
+        self.recent_journals.truncate(RECENT_JOURNALS_CAP);
+        self.journal_path = Some(path.to_path_buf());
+    }
+
+    /// The `(journal_id, last_seen_version)` recorded for the journal at `path` (Story 5.5), if any —
+    /// for the stale-on-reopen check. The caller compares the **`journal_id`** too (a *different*
+    /// journal placed at a reused path must not trigger a spurious "older than you saw" notice).
+    /// Matched by canonical path.
+    pub fn last_seen_for(&self, path: &Path) -> Option<(&str, u64)> {
+        let key = canonical_key(path);
+        self.recent_journals
+            .iter()
+            .find(|r| canonical_key(&r.path) == key)
+            .map(|r| (r.journal_id.as_str(), r.last_seen_version))
     }
 
     /// The persisted default trailing-stop percentage if well-formed (Story 4.5), else `None` — a
@@ -282,6 +348,11 @@ mod tests {
             preferred_provider: ProviderChoice::None,
             reference_currency: "EUR".to_string(),
             default_trailing_stop_pct: Some("15".to_string()),
+            recent_journals: vec![RecentJournal {
+                path: PathBuf::from("/tmp/steadyinvest/journal.db"),
+                journal_id: "11111111-1111-1111-1111-111111111111".to_string(),
+                last_seen_version: 12,
+            }],
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
@@ -563,6 +634,84 @@ mod tests {
         };
         save(&path, &config).unwrap();
         assert_eq!(load(&path).config.journal_path, config.journal_path);
+    }
+
+    #[test]
+    fn record_recent_moves_to_front_dedupes_caps_and_mirrors_journal_path() {
+        let mut c = AppConfig::default();
+        // Record three distinct journals.
+        c.record_recent(Path::new("/a/journal.db"), "id-a", 3);
+        c.record_recent(Path::new("/b/journal.db"), "id-b", 7);
+        c.record_recent(Path::new("/c/journal.db"), "id-c", 1);
+        assert_eq!(c.recent_journals.len(), 3);
+        assert_eq!(c.recent_journals[0].path, PathBuf::from("/c/journal.db"));
+        assert_eq!(c.journal_path, Some(PathBuf::from("/c/journal.db")));
+
+        // Re-recording an existing one moves it to the front + refreshes its pointer, no duplicate.
+        c.record_recent(Path::new("/a/journal.db"), "id-a", 9);
+        assert_eq!(c.recent_journals.len(), 3, "no duplicate entry");
+        assert_eq!(c.recent_journals[0].path, PathBuf::from("/a/journal.db"));
+        assert_eq!(
+            c.last_seen_for(Path::new("/a/journal.db")),
+            Some(("id-a", 9))
+        );
+        assert_eq!(c.last_seen_for(Path::new("/unknown.db")), None);
+
+        // Cap at RECENT_JOURNALS_CAP, most-recent-first.
+        for i in 0..20 {
+            c.record_recent(Path::new(&format!("/x{i}/journal.db")), "id-x", i);
+        }
+        assert_eq!(c.recent_journals.len(), RECENT_JOURNALS_CAP);
+        assert_eq!(
+            c.recent_journals[0].path,
+            PathBuf::from("/x19/journal.db"),
+            "most recent first"
+        );
+    }
+
+    #[test]
+    fn last_seen_for_returns_the_journal_id_so_a_reused_path_can_be_distinguished() {
+        // Review patch (E4/F3): the stale check must compare journal_id, not just path+version.
+        let mut c = AppConfig::default();
+        c.record_recent(Path::new("/a/journal.db"), "id-old", 12);
+        // A different journal placed at the same path carries a different id; the caller compares it.
+        assert_eq!(
+            c.last_seen_for(Path::new("/a/journal.db")),
+            Some(("id-old", 12))
+        );
+        let (jid, _) = c.last_seen_for(Path::new("/a/journal.db")).unwrap();
+        assert_ne!(jid, "id-new", "a different journal_id is distinguishable");
+    }
+
+    #[test]
+    fn old_config_without_recent_journals_loads_with_an_empty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        // A pre-5.5 config file: no `recent_journals` field.
+        std::fs::write(
+            &path,
+            r#"{ "window_width": 1280, "theme": "light", "journal_path": "/x/journal.db" }"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert!(
+            loaded.config.recent_journals.is_empty(),
+            "the new field defaults to an empty list"
+        );
+        assert_eq!(
+            loaded.config.journal_path,
+            Some(PathBuf::from("/x/journal.db"))
+        );
+    }
+
+    #[test]
+    fn recent_journals_round_trip_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        let mut config = AppConfig::default();
+        config.record_recent(Path::new("/a/journal.db"), "id-a", 5);
+        save(&path, &config).unwrap();
+        assert_eq!(load(&path).config.recent_journals, config.recent_journals);
     }
 
     #[test]

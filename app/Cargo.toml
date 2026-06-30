@@ -45,6 +45,9 @@ arboard = { workspace = true }
 # is the ONLY crate that touches it — the key is injected into `ingestion`, never read there
 # (FR63 / architecture invariant).
 keyring = { workspace = true }
+# Native OS file dialogs for the journal-location picker (Story 5.5, FR66) — open/create/pick a
+# journal `.db` + directory. xdg-portal backend (no GTK system dep; reuses zbus from keyring).
+rfd = { workspace = true }
 
 [dev-dependencies]
 # Config tests write to temp paths only — never the real config dir.

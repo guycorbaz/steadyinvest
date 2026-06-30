@@ -24,7 +24,7 @@ mod watchlist;
 pub use error::{Error, Result};
 pub use export::{ImportSummary, JournalExport, JournalSnapshot, StudyRecord};
 pub use holdings::{HoldingItem, PortfolioItem};
-pub use journal::Journal;
+pub use journal::{clear_lock, lock_is_stale, Journal, JournalMode};
 pub use restore::{inspect_backup, restore_journal_file, BackupInfo};
 pub use studies::StudySummary;
 pub use transactions::{TransactionItem, KIND_SELL};

@@ -11,7 +11,7 @@ use steadyinvest_contract::{
     Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review, Source,
     Study, Timestamp, YearData, SCHEMA_VERSION,
 };
-use steadyinvest_persistence::{Error, Journal};
+use steadyinvest_persistence::{clear_lock, lock_is_stale, Error, Journal, JournalMode};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -296,12 +296,103 @@ fn failed_create_leaves_no_file_behind() {
     let path = dir.path().join("no-such-subdir").join("journal.db");
     let err = Journal::create(&path, Uuid::from_u128(0xA), &ts(JOURNAL_TS))
         .expect_err("create in a missing directory fails");
-    assert!(matches!(err, Error::Sqlite(_)), "got {err:?}");
+    // The single-instance lock (Story 5.5) is acquired first, so a missing parent directory now
+    // surfaces as `Lock` (the lock sidecar can't be created) rather than `Sqlite` (the DB open) —
+    // either is a clean "create failed" with no file left behind.
+    assert!(
+        matches!(err, Error::Sqlite(_) | Error::Lock { .. }),
+        "got {err:?}"
+    );
     assert!(!path.exists(), "a failed create left a file behind");
+    let mut lock = path.as_os_str().to_os_string();
+    lock.push("-lock");
+    assert!(
+        !std::path::Path::new(&lock).exists(),
+        "a failed create left a lock sidecar behind"
+    );
 
     // And a create that failed cannot block a later, correct retry at the same path.
     std::fs::create_dir_all(path.parent().expect("parent")).expect("dir creates");
     drop(Journal::create(&path, Uuid::from_u128(0xA), &ts(JOURNAL_TS)).expect("retry succeeds"));
+}
+
+#[test]
+fn the_single_instance_lock_allows_same_process_reopen() {
+    // Story 5.5 (ADD6): single-instance = single OS PROCESS. A same-process re-open (same pid AND
+    // start-time) is allowed (SQLite coordinates intra-process); the lock releases on the owning drop.
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.db");
+    let first = Journal::create(&path, Uuid::from_u128(0xA), &ts(JOURNAL_TS)).expect("create");
+    // Same process, same start-time → a re-open is allowed (the "reopen in a new session" test idiom).
+    drop(Journal::open(&path).expect("a same-process re-open is allowed"));
+    // The live, same-process lock is NOT stale (it must not be reclaimed out from under us).
+    assert!(
+        !lock_is_stale(&path),
+        "a live same-process lock is not stale"
+    );
+    drop(first);
+    // After the owner drops, the sidecar is gone → no lock, a fresh open succeeds.
+    drop(Journal::open(&path).expect("open after the owner dropped"));
+}
+
+#[test]
+fn a_reused_or_crashed_pid_lock_is_stale_and_reclaimable() {
+    // Story 5.5: a lock with THIS pid but a DIFFERENT start-time models a crashed prior run whose pid
+    // was reused (the start-time qualifier defeats PID recycling). It is stale + refused + reclaimable.
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.db");
+    drop(Journal::create(&path, Uuid::from_u128(0xA), &ts(JOURNAL_TS)).expect("create"));
+    let mut lock = path.as_os_str().to_os_string();
+    lock.push("-lock");
+    // Our own PID, but start-time 1 (never the real one) → not the live owner → stale.
+    std::fs::write(&lock, format!("{} 1", std::process::id())).expect("forge a reused-pid lock");
+    assert!(
+        lock_is_stale(&path),
+        "a pid with a mismatched start-time is stale"
+    );
+    assert!(matches!(Journal::open(&path), Err(Error::LockHeld { .. })));
+    clear_lock(&path).expect("reclaim");
+    assert!(!lock_is_stale(&path), "no lock left to be stale");
+    drop(Journal::open(&path).expect("open after reclaiming"));
+}
+
+#[test]
+fn an_unparseable_lock_is_stale_and_reclaimable() {
+    // Story 5.5: an empty/garbled lock (e.g. a failed PID write) is treated as stale, not a permanent
+    // self-lockout.
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.db");
+    drop(Journal::create(&path, Uuid::from_u128(0xA), &ts(JOURNAL_TS)).expect("create"));
+    let mut lock = path.as_os_str().to_os_string();
+    lock.push("-lock");
+    std::fs::write(&lock, "not a pid").expect("write a garbled lock");
+    assert!(lock_is_stale(&path), "an unparseable lock is reclaimable");
+    clear_lock(&path).expect("reclaim");
+    drop(Journal::open(&path).expect("open after reclaiming"));
+}
+
+#[test]
+fn delete_mode_opens_without_a_wal_sidecar() {
+    // Story 5.5 (ADD8): the sync-safe DELETE mode leaves no -wal beside the live .db.
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.db");
+    let mut journal = Journal::create_with_mode(
+        &path,
+        Uuid::from_u128(0xA),
+        &ts(JOURNAL_TS),
+        JournalMode::Delete,
+    )
+    .expect("create in DELETE mode");
+    // A write that would produce a WAL frame under WAL mode.
+    journal
+        .ensure_portfolio(Uuid::from_u128(0xB), "P", &ts(JOURNAL_TS))
+        .expect("a write");
+    let mut wal = path.as_os_str().to_os_string();
+    wal.push("-wal");
+    assert!(
+        !std::path::Path::new(&wal).exists(),
+        "DELETE mode leaves no -wal sidecar"
+    );
 }
 
 #[test]
