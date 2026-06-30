@@ -20,8 +20,8 @@ use steadyinvest_contract::{
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use steadyinvest_persistence::{
-    Error as PersistError, HoldingItem, ImportSummary, Journal, PortfolioItem, StudySummary,
-    WatchItem,
+    inspect_backup, restore_journal_file, Error as PersistError, HoldingItem, ImportSummary,
+    Journal, PortfolioItem, StudySummary, WatchItem,
 };
 use uuid::Uuid;
 
@@ -171,6 +171,44 @@ pub const MSG_JOURNAL_EXPORTED: &str = "Le journal a été exporté.";
 /// the user sees whether it is the **same** journal (an update) or a **foreign** seed (AC3).
 pub const MSG_JOURNAL_IMPORTED: &str =
     "Le journal a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s). (source : journal {jid}, version {ver})";
+
+/// Backup / restore copy (Story 5.4, FR61) — fact-stating, posture-gated. The backup/restore unit is
+/// the raw `.db`; a restore validates integrity + schema-version + identity BEFORE any overwrite and
+/// is never applied silently (a stale/foreign restore is gated behind a confirm).
+pub const MSG_BACKUP_CREATED: &str = "La sauvegarde du journal a été créée.";
+pub const MSG_RESTORE_DONE: &str = "Le journal a été restauré depuis la sauvegarde.";
+pub const MSG_RESTORE_FAILED: &str = "La restauration a échoué ; le journal n'a pas été remplacé.";
+pub const MSG_RESTORE_INTEGRITY: &str =
+    "Le fichier de sauvegarde est corrompu (échec du contrôle d'intégrité) ; rien n'a été restauré.";
+pub const MSG_RESTORE_NEWER_SCHEMA: &str =
+    "La sauvegarde provient d'une version plus récente de l'application ; cette version ne sait pas la lire ; rien n'a été restauré.";
+pub const MSG_RESTORE_NOT_A_JOURNAL: &str =
+    "Le fichier n'est pas un journal valide ; rien n'a été restauré.";
+pub const MSG_RESTORE_UNREADABLE: &str =
+    "Le fichier de sauvegarde est illisible ; rien n'a été restauré.";
+/// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
+pub const MSG_RESTORE_CONFIRM: &str =
+    "Restaurer depuis cette sauvegarde (journal {jid}, version {ver}) ? {reason}Le journal actuel sera remplacé.";
+pub const MSG_RESTORE_REASON_STALE: &str =
+    "Cette sauvegarde (version {b}) est plus ancienne que le journal actuel (version {c}). ";
+pub const MSG_RESTORE_REASON_FOREIGN: &str = "Cette sauvegarde appartient à un autre journal. ";
+
+/// The neutral confirm prompt for a restore (a `{n}`-substitution of [`MSG_RESTORE_CONFIRM`] +
+/// per-verdict reason clause), surfacing the backup's `(journal_id, version)` and the stale/foreign
+/// warning so a restore is never applied silently (FR61).
+pub fn restore_confirm_message(assessment: &RestoreAssessment) -> String {
+    let reason = match assessment.verdict {
+        RestoreVerdict::StaleOlder { backup, current } => MSG_RESTORE_REASON_STALE
+            .replace("{b}", &backup.to_string())
+            .replace("{c}", &current.to_string()),
+        RestoreVerdict::ForeignJournal => MSG_RESTORE_REASON_FOREIGN.to_string(),
+        _ => String::new(),
+    };
+    MSG_RESTORE_CONFIRM
+        .replace("{jid}", &assessment.journal_id.to_string())
+        .replace("{ver}", &assessment.logical_version.to_string())
+        .replace("{reason}", &reason)
+}
 
 /// The neutral outcome of a whole-journal import, with per-entity counts **and the source journal
 /// identity** (a `{n}`-substitution of [`MSG_JOURNAL_IMPORTED`] so the scanned const and the runtime
@@ -352,6 +390,16 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_IMPORT_MALFORMED,
     MSG_JOURNAL_EXPORTED,
     MSG_JOURNAL_IMPORTED,
+    MSG_BACKUP_CREATED,
+    MSG_RESTORE_DONE,
+    MSG_RESTORE_FAILED,
+    MSG_RESTORE_INTEGRITY,
+    MSG_RESTORE_NEWER_SCHEMA,
+    MSG_RESTORE_NOT_A_JOURNAL,
+    MSG_RESTORE_UNREADABLE,
+    MSG_RESTORE_CONFIRM,
+    MSG_RESTORE_REASON_STALE,
+    MSG_RESTORE_REASON_FOREIGN,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -472,6 +520,51 @@ pub struct JournalState {
     idgen: Box<dyn IdGen>,
     /// Undo/redo history for the currently-open study (Story 2.9). Reset on open.
     history: UndoHistory,
+    /// A validated backup parked awaiting confirmation (Story 5.4): a restore is **never applied
+    /// silently** (FR61) — `request_restore` parks the candidate, `confirm_restore` applies it.
+    pending_restore: Option<PendingRestore>,
+}
+
+/// How a candidate backup compares to the current journal (Story 5.4, AC2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreVerdict {
+    /// Same journal, backup version ≥ current — a safe forward restore.
+    Ok,
+    /// Same journal, backup is **older** than the current journal.
+    StaleOlder { backup: u64, current: u64 },
+    /// A backup belonging to a **different** journal.
+    ForeignJournal,
+    /// The backup was written by a schema **newer** than this build supports (hard refusal).
+    NewerSchema { found: i64, supported: u32 },
+    /// `PRAGMA integrity_check` failed (hard refusal).
+    IntegrityFailed,
+}
+
+/// A backup assessed against the current journal (Story 5.4) — the backup's surfaced identity plus the
+/// verdict that gates the confirm flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreAssessment {
+    pub journal_id: Uuid,
+    pub logical_version: u64,
+    pub verdict: RestoreVerdict,
+}
+
+impl RestoreAssessment {
+    /// A hard refusal (newer schema / failed integrity) offers **no** confirm — only the soft verdicts
+    /// (Ok / StaleOlder / ForeignJournal) park a pending restore the user can confirm.
+    fn is_confirmable(&self) -> bool {
+        matches!(
+            self.verdict,
+            RestoreVerdict::Ok | RestoreVerdict::StaleOlder { .. } | RestoreVerdict::ForeignJournal
+        )
+    }
+}
+
+/// A validated backup parked awaiting an explicit confirm (Story 5.4). Only the path is needed to
+/// apply — the assessment was already surfaced to the user by `request_restore`.
+#[derive(Debug, Clone)]
+struct PendingRestore {
+    backup_path: PathBuf,
 }
 
 impl JournalState {
@@ -497,6 +590,7 @@ impl JournalState {
                                 clock,
                                 idgen,
                                 history: UndoHistory::default(),
+                                pending_restore: None,
                             },
                             read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                         );
@@ -531,6 +625,7 @@ impl JournalState {
                     clock,
                     idgen,
                     history: UndoHistory::default(),
+                    pending_restore: None,
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
             );
@@ -558,6 +653,7 @@ impl JournalState {
                         clock,
                         idgen,
                         history: UndoHistory::default(),
+                        pending_restore: None,
                     },
                     read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                 )
@@ -572,6 +668,7 @@ impl JournalState {
                         clock,
                         idgen,
                         history: UndoHistory::default(),
+                        pending_restore: None,
                     },
                     Some(format!("{MSG_SAVE_FAILED} {error}")),
                 )
@@ -1271,6 +1368,209 @@ impl JournalState {
         Ok(summary)
     }
 
+    /// Create a raw `.db` backup of the live journal (Story 5.4, FR61) — checkpoint the WAL so the copy
+    /// is self-contained, then copy the file to `data_dir/backups/journal-<id>-v<version>.db`. Returns
+    /// the written path (the caller surfaces it). Guarded: no journal → a neutral notice.
+    pub fn create_backup(&self) -> Result<PathBuf, String> {
+        let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
+        let live = self.path.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .checkpoint()
+            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        let version = journal
+            .logical_version()
+            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        let dir = directories::ProjectDirs::from("", "", "steadyinvest")
+            .map(|d| d.data_dir().join("backups"))
+            .ok_or(MSG_NO_DATA_DIR.to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        // Key the filename on (id, version, timestamp) so two backups never silently overwrite each
+        // other — a same-version backup (e.g. one taken right after a restore) keeps its own file. The
+        // timestamp is filesystem-safe (no `:`).
+        let stamp = self.clock.now().0.replace(':', "");
+        let dest = dir.join(format!("journal-{}-v{version}-{stamp}.db", journal.id()));
+        std::fs::copy(live, &dest).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        Ok(dest)
+    }
+
+    /// Assess a candidate backup `.db` against the current journal and **park** it for confirmation
+    /// (Story 5.4, AC1/AC2). Validates read-only (integrity + schema-version + identity), never
+    /// touching the live journal. A soft verdict (Ok / StaleOlder / ForeignJournal) parks a pending
+    /// restore and returns the assessment for the UI to surface + confirm; a hard refusal (corrupt /
+    /// newer-schema / unreadable / not-a-journal) parks nothing and returns the neutral cause. FR61:
+    /// nothing is applied here.
+    pub fn request_restore(&mut self, backup_path: &str) -> Result<RestoreAssessment, String> {
+        self.pending_restore = None;
+        let info = inspect_backup(backup_path).map_err(|error| match error {
+            PersistError::CorruptJournalMeta { .. } => MSG_RESTORE_NOT_A_JOURNAL.to_string(),
+            _ => MSG_RESTORE_UNREADABLE.to_string(),
+        })?;
+
+        let verdict = if !info.integrity_ok {
+            RestoreVerdict::IntegrityFailed
+        } else if info.is_newer_schema() {
+            RestoreVerdict::NewerSchema {
+                found: info.file_user_version,
+                supported: info.supported_version,
+            }
+        } else {
+            match self.journal.as_ref() {
+                // No journal open → nothing to clash with; a forward restore.
+                None => RestoreVerdict::Ok,
+                Some(journal) if journal.id() != info.journal_id => RestoreVerdict::ForeignJournal,
+                Some(journal) => {
+                    let current = journal
+                        .logical_version()
+                        .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+                    if info.logical_version < current {
+                        RestoreVerdict::StaleOlder {
+                            backup: info.logical_version,
+                            current,
+                        }
+                    } else {
+                        RestoreVerdict::Ok
+                    }
+                }
+            }
+        };
+
+        let assessment = RestoreAssessment {
+            journal_id: info.journal_id,
+            logical_version: info.logical_version,
+            verdict: verdict.clone(),
+        };
+
+        if assessment.is_confirmable() {
+            self.pending_restore = Some(PendingRestore {
+                backup_path: PathBuf::from(backup_path),
+            });
+            Ok(assessment)
+        } else {
+            // A hard refusal — surface the cause, park nothing (confirm can't fire).
+            Err(match verdict {
+                RestoreVerdict::IntegrityFailed => MSG_RESTORE_INTEGRITY.to_string(),
+                RestoreVerdict::NewerSchema { .. } => MSG_RESTORE_NEWER_SCHEMA.to_string(),
+                _ => MSG_RESTORE_UNREADABLE.to_string(),
+            })
+        }
+    }
+
+    /// Apply the parked restore (Story 5.4, AC3) **safely**: re-validate the file at confirm time
+    /// (TOCTOU — the parked path may have changed), checkpoint + snapshot the live journal, swap the
+    /// file **atomically** (temp + rename, so a failure leaves the live journal intact), reopen, reset
+    /// undo. If the restored file will not open, **roll back to the snapshot** so the user's original
+    /// journal is never lost. A restore of the journal **onto itself** is a no-op. A neutral no-op
+    /// error if nothing is parked.
+    pub fn confirm_restore(&mut self) -> Result<(), String> {
+        let pending = self
+            .pending_restore
+            .take()
+            .ok_or(MSG_RESTORE_FAILED.to_string())?;
+        let live = self.path.clone().ok_or(MSG_NO_JOURNAL.to_string())?;
+
+        // Restoring the journal onto itself is a no-op — the live journal already IS this content (and
+        // it sidesteps the `fs::copy`-onto-itself truncation hazard). The live handle stays open.
+        if same_file_path(&live, &pending.backup_path) {
+            return Ok(());
+        }
+
+        // Re-validate at confirm time: the file may have changed since `request_restore` parked it. A
+        // now-corrupt / newer-schema / unreadable backup is refused **without touching** the live
+        // journal — the "validate BEFORE overwrite" guarantee (FR61) holds against TOCTOU.
+        let info = inspect_backup(&pending.backup_path).map_err(|error| match error {
+            PersistError::CorruptJournalMeta { .. } => MSG_RESTORE_NOT_A_JOURNAL.to_string(),
+            _ => MSG_RESTORE_UNREADABLE.to_string(),
+        })?;
+        if !info.integrity_ok {
+            return Err(MSG_RESTORE_INTEGRITY.to_string());
+        }
+        if info.is_newer_schema() {
+            return Err(MSG_RESTORE_NEWER_SCHEMA.to_string());
+        }
+
+        // Checkpoint the live journal so its `.db` is self-contained, then drop the handle (one
+        // connection per Journal — swapping over an open file is unsafe) and snapshot it for rollback.
+        if let Some(journal) = self.journal.as_ref() {
+            let _ = journal.checkpoint();
+        }
+        self.journal = None;
+        let snapshot = path_with_suffix(&live, "-prerestore");
+        let have_snapshot = std::fs::copy(&live, &snapshot).is_ok();
+
+        // Atomic swap — a failure leaves the live file untouched, so the original survives.
+        if let Err(error) = restore_journal_file(&live, &pending.backup_path) {
+            let _ = std::fs::remove_file(&snapshot);
+            self.reopen_live(&live);
+            return Err(format!("{MSG_RESTORE_FAILED} {error}"));
+        }
+
+        match Journal::open(&live) {
+            Ok(journal) => {
+                let _ = std::fs::remove_file(&snapshot);
+                self.read_only = journal.is_read_only();
+                self.journal = Some(journal);
+                self.reset_undo();
+                Ok(())
+            }
+            Err(error) => {
+                // The swap succeeded but the restored file will not open — roll the snapshot back so
+                // the user's original journal is not lost, then reopen it.
+                if have_snapshot {
+                    let _ = restore_journal_file(&live, &snapshot);
+                }
+                let _ = std::fs::remove_file(&snapshot);
+                self.reopen_live(&live);
+                Err(format!("{MSG_RESTORE_FAILED} {error}"))
+            }
+        }
+    }
+
+    /// Discard a parked restore (Story 5.4) — no write.
+    pub fn cancel_restore(&mut self) {
+        self.pending_restore = None;
+    }
+
+    /// Test-only: whether a restore is currently parked awaiting confirmation (Story 5.4).
+    #[cfg(test)]
+    fn has_pending_restore(&self) -> bool {
+        self.pending_restore.is_some()
+    }
+
+    /// Best-effort reopen of the live journal at `path` (used to recover after a failed restore swap so
+    /// the app is never left journal-less).
+    fn reopen_live(&mut self, path: &Path) {
+        match Journal::open(path) {
+            Ok(journal) => {
+                self.read_only = journal.is_read_only();
+                self.journal = Some(journal);
+            }
+            Err(error) => {
+                tracing::warn!("could not reopen journal after a failed restore: {error}");
+                self.journal = None;
+            }
+        }
+    }
+}
+
+/// Whether two paths point at the **same file** (Story 5.4) — canonicalized to resolve symlinks /
+/// relative components / a NAS path that aliases the live journal; falls back to a raw comparison when
+/// a path cannot be canonicalized (e.g. it does not exist).
+fn same_file_path(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
+    }
+}
+
+/// Append a suffix to a path's file name (e.g. `journal.db` → `journal.db-prerestore`) — used for the
+/// pre-restore snapshot sibling file.
+fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut s = path.as_os_str().to_os_string();
+    s.push(suffix);
+    PathBuf::from(s)
+}
+
+impl JournalState {
     /// Build the manual [`Provenance`] for an edit (Story 2.4): `source = Manual`, `timestamp` from
     /// the injected [`Clock`] (ADD15 — never a scattered wall clock). For a manually-entered **leaf**
     /// input there is no app-side per-cell version counter and no upstream dependency digest, so v1
@@ -2654,6 +2954,152 @@ mod tests {
         assert!(msg.contains("2 valeur"));
         assert!(msg.contains("5 ligne"));
         assert!(msg.contains("4 mouvement"));
+    }
+
+    // ── Story 5.4 — restore from backup ──
+
+    /// Create a standalone backup journal at `dir/<name>` with a chosen identity + an optional study,
+    /// then drop the handle (so it is a static file to inspect/restore).
+    fn make_backup(dir: &TempDir, name: &str, jid: u128, with_study: bool) {
+        let path = dir.path().join(name);
+        let mut j = Journal::create(
+            &path,
+            Uuid::from_u128(jid),
+            &Timestamp("2026-06-20T00:00:00Z".to_string()),
+        )
+        .unwrap();
+        if with_study {
+            let s = Study::new(
+                Uuid::from_u128(0xDA7A),
+                Uuid::from_u128(jid),
+                "ROG",
+                "CHF",
+                empty_judgment(),
+                Timestamp("2026-06-20T00:00:00Z".to_string()),
+            );
+            j.put_study(&s).unwrap();
+        }
+        drop(j);
+    }
+
+    #[test]
+    fn request_restore_classifies_a_foreign_backup_and_parks_it() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x540); // live journal_id = 0xC0FFEE
+        make_backup(&dir, "foreign.db", 0xBEEF, true);
+        let assessment = state
+            .request_restore(dir.path().join("foreign.db").to_str().unwrap())
+            .unwrap();
+        assert_eq!(assessment.verdict, RestoreVerdict::ForeignJournal);
+        assert_eq!(assessment.journal_id, Uuid::from_u128(0xBEEF));
+        assert!(
+            state.has_pending_restore(),
+            "a confirmable restore is parked"
+        );
+    }
+
+    #[test]
+    fn request_restore_flags_an_older_same_journal_backup_as_stale() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x541);
+        // Advance the live journal so it is newer than a fresh same-id backup (version 0).
+        state.create_study("NESN", "CHF").unwrap();
+        make_backup(&dir, "old.db", 0xC0FFEE, false); // same id, version 0
+        let assessment = state
+            .request_restore(dir.path().join("old.db").to_str().unwrap())
+            .unwrap();
+        assert!(
+            matches!(assessment.verdict, RestoreVerdict::StaleOlder { backup: 0, current } if current >= 1),
+            "an older same-journal backup is StaleOlder, got {:?}",
+            assessment.verdict
+        );
+        // The confirm prompt surfaces the identity + the stale warning.
+        let prompt = restore_confirm_message(&assessment);
+        assert!(prompt.contains("plus ancienne"));
+    }
+
+    #[test]
+    fn request_restore_refuses_a_non_journal_file_and_parks_nothing() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x542);
+        let garbage = dir.path().join("notjournal.txt");
+        std::fs::write(&garbage, b"definitely not a sqlite journal").unwrap();
+        let result = state.request_restore(garbage.to_str().unwrap());
+        assert!(result.is_err(), "a non-journal file is refused");
+        assert!(
+            !state.has_pending_restore(),
+            "a hard refusal parks no pending restore (confirm cannot fire)"
+        );
+    }
+
+    #[test]
+    fn confirm_restore_swaps_the_live_journal_then_cancel_clears() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x543); // live id 0xC0FFEE, empty
+        assert!(state.list_studies().is_empty());
+        make_backup(&dir, "src.db", 0xBEEF, true); // foreign backup carrying one study
+
+        // Cancel path: park then cancel → nothing applied.
+        state
+            .request_restore(dir.path().join("src.db").to_str().unwrap())
+            .unwrap();
+        state.cancel_restore();
+        assert!(!state.has_pending_restore());
+        assert!(state.list_studies().is_empty(), "cancel applied nothing");
+
+        // Confirm path: park then confirm → the live journal becomes the backup.
+        state
+            .request_restore(dir.path().join("src.db").to_str().unwrap())
+            .unwrap();
+        state.confirm_restore().unwrap();
+        assert_eq!(
+            state.journal_id(),
+            Some(Uuid::from_u128(0xBEEF)),
+            "the live journal is now the restored backup"
+        );
+        assert_eq!(
+            state.list_studies().len(),
+            1,
+            "the backup's study is now live"
+        );
+        assert!(!state.has_pending_restore(), "pending cleared");
+    }
+
+    #[test]
+    fn restoring_the_journal_onto_itself_is_a_safe_no_op() {
+        // Review CRITICAL: fs::copy(live, live) truncates to 0 bytes — the same-path guard must make a
+        // self-restore a no-op that loses nothing.
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x544);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let live_path = dir.path().join("journal.db");
+        state.request_restore(live_path.to_str().unwrap()).unwrap();
+        state.confirm_restore().unwrap();
+        assert_eq!(state.journal_id(), Some(Uuid::from_u128(0xC0FFEE)));
+        assert!(state.get_study(id).is_some(), "the study was not zeroed");
+    }
+
+    #[test]
+    fn confirm_re_validates_and_refuses_a_tampered_backup_without_touching_the_journal() {
+        // Review HIGH (TOCTOU): a backup validated at request time but replaced before confirm must be
+        // re-checked — and a now-garbage file refused without overwriting the live journal.
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x545); // live id 0xC0FFEE, empty
+        let backup = dir.path().join("src.db");
+        make_backup(&dir, "src.db", 0xBEEF, true);
+        state.request_restore(backup.to_str().unwrap()).unwrap(); // ForeignJournal, parked
+        std::fs::write(&backup, b"no longer a journal").unwrap(); // tamper after validation
+        let result = state.confirm_restore();
+        assert!(
+            result.is_err(),
+            "the re-validation refuses the tampered file"
+        );
+        assert_eq!(
+            state.journal_id(),
+            Some(Uuid::from_u128(0xC0FFEE)),
+            "the live journal was not overwritten"
+        );
+        assert!(state.list_studies().is_empty(), "nothing was applied");
     }
 
     #[test]

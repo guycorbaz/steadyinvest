@@ -157,6 +157,22 @@ impl Journal {
         self.newer_file_version.is_some()
     }
 
+    /// Checkpoint the WAL into the main database file and truncate it (`PRAGMA
+    /// wal_checkpoint(TRUNCATE)`), so a plain file copy of the `.db` is **self-contained** — no
+    /// recently-committed data left stranded in a `-wal` sidecar (Story 5.4 `create_backup`). A
+    /// read-safe operation that changes no logical data. A no-op on a read-only handle (nothing to
+    /// checkpoint there).
+    pub fn checkpoint(&self) -> Result<()> {
+        // A read-only handle (for any reason) cannot checkpoint — a no-op rather than a hard error, so
+        // backing up a read-only journal still works (it just copies the main `.db`).
+        if self.is_read_only() {
+            return Ok(());
+        }
+        self.conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
     /// API-level write gate (defense in depth on top of `SQLITE_OPEN_READ_ONLY`): every mutating
     /// method calls this first.
     pub(crate) fn check_writable(&self) -> Result<()> {

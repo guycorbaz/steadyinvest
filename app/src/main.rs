@@ -1095,6 +1095,91 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // ── Story 5.4 (FR61) — backup / restore the raw .db. Create a self-contained .db backup; validate
+    // a candidate backup (integrity + schema-version + identity) BEFORE any overwrite, surface its
+    // (journal_id, version) + a stale/foreign warning, and apply only on explicit confirm (never
+    // silently). Path-based for now — the native picker is Story 5.5. ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Prefs>().on_create_backup(move || {
+            let ui = ui_weak.unwrap();
+            let notice = match journal_state.borrow().create_backup() {
+                Ok(path) => format!("{} {}", state::MSG_BACKUP_CREATED, path.display()),
+                Err(message) => message,
+            };
+            ui.global::<Prefs>().set_restore_status(notice.into());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Prefs>().on_request_restore(move |path| {
+            let ui = ui_weak.unwrap();
+            let prefs = ui.global::<Prefs>();
+            match journal_state.borrow_mut().request_restore(path.as_str()) {
+                // A confirmable restore is parked — reveal the confirm banner with the identity/warning.
+                Ok(assessment) => {
+                    prefs.set_restore_confirm(state::restore_confirm_message(&assessment).into());
+                    prefs.set_restore_status("".into());
+                }
+                // A hard refusal — show the cause, no banner.
+                Err(message) => {
+                    prefs.set_restore_confirm("".into());
+                    prefs.set_restore_status(message.into());
+                }
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        let config = Rc::clone(&config);
+        let holding_freshness = Rc::clone(&holding_freshness);
+        let holding_dismissed = Rc::clone(&holding_dismissed);
+        let current_study = Rc::clone(&current_study);
+        ui.global::<Prefs>().on_confirm_restore(move || {
+            let ui = ui_weak.unwrap();
+            let result = journal_state.borrow_mut().confirm_restore();
+            let prefs = ui.global::<Prefs>();
+            prefs.set_restore_confirm("".into());
+            // A successful restore replaces the whole journal — close any open study editor first so a
+            // stale in-memory form can't be saved back into the restored journal (an old study_id would
+            // otherwise be written into the new journal).
+            if result.is_ok() {
+                *current_study.borrow_mut() = None;
+                ui.global::<Studies>().set_study_open(false);
+            }
+            let notice = match result {
+                Ok(()) => state::MSG_RESTORE_DONE.to_string(),
+                Err(message) => message,
+            };
+            prefs.set_restore_status(notice.into());
+            // The whole journal changed — re-render every surface.
+            let state = journal_state.borrow();
+            let format = config.borrow().number_format;
+            retain_held_freshness(&holding_freshness, &state);
+            refresh_studies(&ui, &state);
+            refresh_watchlist(&ui, &state);
+            refresh_holdings(
+                &ui,
+                &state,
+                &holding_freshness.borrow(),
+                &holding_dismissed.borrow(),
+                format,
+            );
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&journal_state);
+        ui.global::<Prefs>().on_cancel_restore(move || {
+            let ui = ui_weak.unwrap();
+            journal_state.borrow_mut().cancel_restore();
+            ui.global::<Prefs>().set_restore_confirm("".into());
+        });
+    }
+
     // ── Watchlist intents (Story 4.1, FR34) ── add / remove / move / link / unlink, each persisted
     // then re-rendered with a neutral notice on refusal. The link callbacks attach/clear a
     // same-ticker saved study (its buy zone — the seam Story 4.2 reads).

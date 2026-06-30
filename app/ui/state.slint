@@ -534,6 +534,16 @@ export global Prefs {
     // User intents — handled in Rust (export reads the journal; import verifies + applies atomically).
     callback export-journal();
     callback import-journal(string); // path to a whole-journal envelope file
+    // ── Story 5.4 — backup / restore of the raw .db (FR61) ──
+    // Latest neutral backup/restore outcome (set by Rust).
+    in-out property <string> restore-status;
+    // The confirm prompt for a parked restore — non-empty reveals the confirm banner (the backup's
+    // (journal_id, version) + stale/foreign warning). A restore is never applied silently.
+    in-out property <string> restore-confirm;
+    callback create-backup();
+    callback request-restore(string); // path to a backup .db → validate + (maybe) park for confirm
+    callback confirm-restore();
+    callback cancel-restore();
     // User intents — handled in Rust (apply + persist).
     callback theme-selected(string); // "dark" | "light"
     callback label-set-selected(string); // "naic" | "neutral"

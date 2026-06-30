@@ -59,3 +59,8 @@ _Throwaway spike (GO). These apply to the **Epic 2 production grid** (Stories 2.
 ## Deferred from: code review of story-5.3 (2026-06-29)
 
 - **Whole-journal import of an older file has no version arbitration** — `import_journal` is an identity-preserving merge (upsert by id) with no version check. Re-importing an OLDER envelope after local changes resurrects a sold holding (`sold_at` → NULL while a SELL transaction still references it — a contradictory ledger) and un-archives a study, silently losing local lifecycle state. Deferred → **GitHub #65**: this is Story 5.4 (restore-from-backup, FR61) territory — integrity + version-compatibility checks BEFORE overwrite, surfacing a stale backup ("you saw v57, this is v41"). The envelope already carries `(journal_id, logical_version)` and `import_journal` returns `source_logical_version`, so 5.4 has the inputs. [persistence/src/export.rs import_journal — holdings `sold_at = excluded.sold_at`, studies `status = excluded.status`]
+
+## Deferred from: code review of story-5.4 (2026-06-30)
+
+- **Un-checkpointed external backup can silently drop -wal data** — `inspect_backup` (immutable=1) + `restore_journal_file` (main-file-only) ignore a backup's sibling `-wal`. A hand-rolled raw copy of a live journal without its `-wal` loses WAL-resident commits silently. App-made backups checkpoint first (safe). Deferred → **GitHub #67**. [persistence/src/restore.rs]
+- **Backups land in the default data dir, not beside a user-selected journal** — `create_backup` writes to `ProjectDirs.data_dir()/backups`, ignoring `self.path`. Moot today (the journal IS at the default path); becomes relevant once **Story 5.5** adds user-selectable journal location — backups should then follow the journal. [app/src/state.rs create_backup]
