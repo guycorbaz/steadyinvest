@@ -398,14 +398,14 @@ development_status:
   epic-4-retrospective: done
 
   # ── Epic 5: Cumulative memory & portability [P1] ──
-  epic-5: in-progress
+  epic-5: done
   5-1-reopen-confront-past-judgment-vs-reality: done
   5-2-export-import-single-study: done
   5-3-export-import-whole-journal: done
   5-4-restore-from-backup: done
   5-5-journal-location-recent-journals-sync-safety: done
   5-6-pdf-export-of-study: done
-  epic-5-retrospective: optional
+  epic-5-retrospective: done
 
   # ── Epic 6: Multi-portfolio, multi-currency & full risk overlay [P2] (story outlines) ──
   epic-6: backlog
