@@ -13,9 +13,30 @@
 use crate::error::{Error, Result};
 use crate::migrations;
 use rusqlite::{Connection, OpenFlags};
-use std::path::Path;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use steadyinvest_contract::Timestamp;
 use uuid::Uuid;
+
+/// The SQLite rollback-journal mode a journal file is opened with (Story 5.5, ADD8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JournalMode {
+    /// `journal_mode=WAL` — the default; fast, but a `-wal`/`-shm` sidecar makes a file-sync of the
+    /// live `.db` corruption-prone (the Synology risk).
+    Wal,
+    /// `journal_mode=DELETE` — sync-safe: no persistent `-wal` sidecar, so a live `.db` placed in a
+    /// detected sync folder will not corrupt under file-level sync (ADD8).
+    Delete,
+}
+
+impl JournalMode {
+    fn pragma(self) -> &'static str {
+        match self {
+            JournalMode::Wal => "WAL",
+            JournalMode::Delete => "DELETE",
+        }
+    }
+}
 
 /// An open journal: one SQLite connection plus the journal's identity. Single connection per
 /// `Journal` is enough for this headless story (the mutex-guarded write connection + WAL
@@ -27,6 +48,145 @@ pub struct Journal {
     /// `Some(file_user_version)` when the file is newer than this build's latest migration:
     /// the journal is read-only (NFR-R3) and write methods fail with the cause-named error.
     newer_file_version: Option<i64>,
+    /// The single-instance lock guard (Story 5.5, ADD6). Dropping the `Journal` (close / switch /
+    /// exit) drops this, releasing the lock. Declared **after** `conn` so the connection closes first.
+    _lock: JournalLock,
+}
+
+/// An RAII guard over a journal's single-instance lock sidecar (`…-lock`). The **owning** guard
+/// removes the sidecar on `Drop`, releasing the lock (Story 5.5, ADD6). A non-owning guard (a
+/// same-process re-open) leaves the sidecar for the owner to clean up. Best-effort: a removal failure
+/// is not reported (the process is exiting / switching; a leftover lock is reclaimable via
+/// [`lock_is_stale`]).
+#[derive(Debug)]
+struct JournalLock {
+    path: PathBuf,
+    /// `true` for the handle that created the sidecar; `false` for a same-PID re-open that found it
+    /// already held by this process (single-instance = single OS process — SQLite coordinates the
+    /// intra-process connections itself, so a second *process* is what the lock guards against).
+    owns: bool,
+}
+
+impl Drop for JournalLock {
+    fn drop(&mut self) {
+        if self.owns {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// The lock sidecar path for a journal (`<path>-lock`) — distinct from the SQLite `-wal`/`-shm`.
+fn lock_path_for(path: &Path) -> PathBuf {
+    let mut p = path.as_os_str().to_os_string();
+    p.push("-lock");
+    PathBuf::from(p)
+}
+
+/// The `(pid, start_time)` recorded in a lock sidecar, if it parses (Story 5.5). The start-time
+/// qualifies the PID against reuse: a crashed owner's PID reassigned to an unrelated process has a
+/// different start-time, so the lock is correctly seen as stale rather than "still held".
+fn read_lock(lock_path: &Path) -> Option<(u32, u64)> {
+    let text = std::fs::read_to_string(lock_path).ok()?;
+    let mut parts = text.split_whitespace();
+    let pid = parts.next()?.parse::<u32>().ok()?;
+    let start_time = parts.next()?.parse::<u64>().ok()?;
+    Some((pid, start_time))
+}
+
+/// A process's start-time in clock ticks (Linux `/proc/<pid>/stat`, field 22). `None` when the process
+/// does not exist (or `/proc` is unreadable). The `comm` field (field 2) may contain spaces/parens, so
+/// parsing starts **after the last `)`** — field 22 is then index 19 of the remaining whitespace-split.
+fn process_start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = stat.rsplit_once(')')?.1;
+    after_comm.split_whitespace().nth(19)?.parse::<u64>().ok()
+}
+
+/// Whether a recorded `(pid, start_time)` names a process that is **currently alive as that same
+/// process** (PID present AND its start-time matches what the lock recorded) — defeating PID reuse.
+fn lock_owner_is_live(pid: u32, start_time: u64) -> bool {
+    process_start_time(pid) == Some(start_time)
+}
+
+/// Acquire the single-instance lock by **atomically** creating the `…-lock` sidecar (`create_new` —
+/// fails if it already exists). Records `(pid, start_time)`. A sidecar held by a **live** other process
+/// → [`Error::LockHeld`]; a sidecar from this same process instance → a non-owning re-entry; a stale
+/// sidecar (crashed/PID-reused owner) → also [`Error::LockHeld`] but [`lock_is_stale`] reports it
+/// reclaimable. A lock-file IO failure on a **read-only** location is non-fatal: the open proceeds
+/// without a lock (a journal that cannot be locked also cannot be double-written — the read-only case).
+fn acquire_lock(path: &Path) -> Result<JournalLock> {
+    let lock_path = lock_path_for(path);
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)
+    {
+        Ok(mut file) => {
+            let pid = std::process::id();
+            let start = process_start_time(pid).unwrap_or(0);
+            let _ = write!(file, "{pid} {start}");
+            Ok(JournalLock {
+                path: lock_path,
+                owns: true,
+            })
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let us = (std::process::id(), process_start_time(std::process::id()));
+            match read_lock(&lock_path) {
+                // The SAME process instance (pid + start-time) re-opening — allowed (non-owning guard;
+                // SQLite coordinates intra-process connections). A reused PID has a different start-time.
+                Some((pid, start)) if us.1 == Some(start) && us.0 == pid => Ok(JournalLock {
+                    path: lock_path,
+                    owns: false,
+                }),
+                // A genuinely live other instance → refused.
+                Some((pid, start)) if lock_owner_is_live(pid, start) => {
+                    Err(Error::LockHeld { pid })
+                }
+                // Stale (crashed / PID-reused / unparseable) → refused here, but reclaimable.
+                other => Err(Error::LockHeld {
+                    pid: other.map(|(p, _)| p).unwrap_or(0),
+                }),
+            }
+        }
+        // A read-only directory / media cannot hold a lock — proceed lock-less (a read-only journal
+        // cannot be double-written, so single-instance write-protection is moot). Best-effort.
+        Err(_) => Ok(JournalLock {
+            path: lock_path,
+            owns: false,
+        }),
+    }
+}
+
+/// Whether the journal's lock sidecar is **stale** — present but NOT held by a live process as
+/// recorded (a crashed run, a reused PID, or an unparseable/empty sidecar) (Story 5.5). A missing lock
+/// is not stale (nothing to reclaim). Used to offer a reclaim without ever stealing a live lock.
+pub fn lock_is_stale(path: impl AsRef<Path>) -> bool {
+    let lock_path = lock_path_for(path.as_ref());
+    if !lock_path.exists() {
+        return false;
+    }
+    match read_lock(&lock_path) {
+        Some((pid, start)) => !lock_owner_is_live(pid, start),
+        None => true, // unparseable / empty → reclaimable
+    }
+}
+
+/// Remove a journal's lock sidecar (Story 5.5) — to **reclaim** a stale lock before re-opening. The
+/// caller is expected to have confirmed staleness via [`lock_is_stale`] (this does not check). A
+/// missing sidecar is a success (idempotent).
+pub fn clear_lock(path: impl AsRef<Path>) -> Result<()> {
+    let lock_path = lock_path_for(path.as_ref());
+    match std::fs::remove_file(&lock_path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(Error::Lock {
+            detail: format!(
+                "the lock at {} could not be cleared: {e}",
+                lock_path.display()
+            ),
+        }),
+    }
 }
 
 impl Journal {
@@ -43,15 +203,27 @@ impl Journal {
         journal_id: Uuid,
         created_at: &Timestamp,
     ) -> Result<Self> {
+        Self::create_with_mode(path, journal_id, created_at, JournalMode::Wal)
+    }
+
+    /// Create a new journal at `path` with a chosen [`JournalMode`] (Story 5.5) — `Delete` for a
+    /// sync-folder location (ADD8). Acquires the single-instance lock first.
+    pub fn create_with_mode(
+        path: impl AsRef<Path>,
+        journal_id: Uuid,
+        created_at: &Timestamp,
+        mode: JournalMode,
+    ) -> Result<Self> {
         let path = path.as_ref();
         if path.exists() {
             return Err(Error::JournalExists(path.to_path_buf()));
         }
-        let result = Self::create_at(path, journal_id, created_at);
+        let result = Self::create_at(path, journal_id, created_at, mode);
         if result.is_err() {
             // Best-effort cleanup — removal failure stays unreported on purpose: the create
             // error already carries the actual cause, and the file is in /the caller's/ chosen
-            // location where a leftover is recoverable by hand.
+            // location where a leftover is recoverable by hand. (The lock guard, if it was acquired,
+            // already released on the failed-result drop.)
             for suffix in ["", "-wal", "-shm"] {
                 let mut sidecar = path.as_os_str().to_os_string();
                 sidecar.push(suffix);
@@ -61,14 +233,22 @@ impl Journal {
         result
     }
 
-    fn create_at(path: &Path, journal_id: Uuid, created_at: &Timestamp) -> Result<Self> {
+    fn create_at(
+        path: &Path,
+        journal_id: Uuid,
+        created_at: &Timestamp,
+        mode: JournalMode,
+    ) -> Result<Self> {
+        // Acquire the lock BEFORE opening — a second instance is refused before touching the file. A
+        // failure anywhere below drops this guard, releasing the lock.
+        let lock = acquire_lock(path)?;
         let mut conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        apply_read_write_pragmas(&conn)?;
+        apply_read_write_pragmas(&conn, mode)?;
         migrations::run_pending(&mut conn, migrations::REGISTRY)?;
         conn.execute(
             "INSERT INTO journal_meta (id, journal_id, logical_version, created_at)
@@ -79,6 +259,7 @@ impl Journal {
             conn,
             id: journal_id,
             newer_file_version: None,
+            _lock: lock,
         })
     }
 
@@ -90,7 +271,16 @@ impl Journal {
     /// connection-local pragmas apply, no migration runs, and write methods return the
     /// cause-named error while reads keep working.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_mode(path, JournalMode::Wal)
+    }
+
+    /// Open an existing journal with a chosen [`JournalMode`] (Story 5.5) — `Delete` for a sync-folder
+    /// location (ADD8). Acquires the single-instance lock first.
+    pub fn open_with_mode(path: impl AsRef<Path>, mode: JournalMode) -> Result<Self> {
         let path = path.as_ref();
+        // Lock before touching the file — a second instance is refused up front. Any error below drops
+        // this guard, releasing the lock.
+        let lock = acquire_lock(path)?;
         // No CREATE flag: opening a missing file is an error, never a silent empty journal.
         let mut conn = Connection::open_with_flags(
             path,
@@ -112,6 +302,7 @@ impl Journal {
                 conn,
                 id,
                 newer_file_version: Some(file_version),
+                _lock: lock,
             });
         }
 
@@ -120,12 +311,13 @@ impl Journal {
         // foreign SQLite database, or any non-journal file — must fail without ever writing
         // our schema into it. Every real journal has `journal_meta` from migration 1 onward.
         let id = read_journal_id(&conn)?;
-        apply_read_write_pragmas(&conn)?;
+        apply_read_write_pragmas(&conn, mode)?;
         migrations::run_pending(&mut conn, migrations::REGISTRY)?;
         Ok(Journal {
             conn,
             id,
             newer_file_version: None,
+            _lock: lock,
         })
     }
 
@@ -193,11 +385,17 @@ fn apply_connection_local_pragmas(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Full pragma set for read-write handles. `journal_mode=WAL` is persistent in the DB file.
-fn apply_read_write_pragmas(conn: &Connection) -> Result<()> {
+/// Full pragma set for read-write handles. The `journal_mode` (WAL or the sync-safe DELETE, Story 5.5)
+/// is persistent in the DB file; `synchronous=NORMAL` pairs with WAL, `FULL` is safer for DELETE on a
+/// sync target.
+fn apply_read_write_pragmas(conn: &Connection, mode: JournalMode) -> Result<()> {
     apply_connection_local_pragmas(conn)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "journal_mode", mode.pragma())?;
+    let synchronous = match mode {
+        JournalMode::Wal => "NORMAL",
+        JournalMode::Delete => "FULL",
+    };
+    conn.pragma_update(None, "synchronous", synchronous)?;
     Ok(())
 }
 

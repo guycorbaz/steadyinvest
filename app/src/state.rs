@@ -20,8 +20,8 @@ use steadyinvest_contract::{
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use steadyinvest_persistence::{
-    inspect_backup, restore_journal_file, Error as PersistError, HoldingItem, ImportSummary,
-    Journal, PortfolioItem, StudySummary, WatchItem,
+    clear_lock, inspect_backup, lock_is_stale, restore_journal_file, Error as PersistError,
+    HoldingItem, ImportSummary, Journal, JournalMode, PortfolioItem, StudySummary, WatchItem,
 };
 use uuid::Uuid;
 
@@ -192,6 +192,29 @@ pub const MSG_RESTORE_CONFIRM: &str =
 pub const MSG_RESTORE_REASON_STALE: &str =
     "Cette sauvegarde (version {b}) est plus ancienne que le journal actuel (version {c}). ";
 pub const MSG_RESTORE_REASON_FOREIGN: &str = "Cette sauvegarde appartient à un autre journal. ";
+
+/// Journal-location copy (Story 5.5, FR66) — fact-stating, posture-gated. The location picker, recent
+/// journals, single-instance lock and sync-folder safety.
+pub const MSG_JOURNAL_OPENED: &str = "Le journal a été ouvert.";
+pub const MSG_JOURNAL_CREATED: &str = "Le nouveau journal a été créé et ouvert.";
+pub const MSG_JOURNAL_OPEN_FAILED: &str = "Le journal n'a pas pu être ouvert.";
+pub const MSG_JOURNAL_LOCKED: &str =
+    "Ce journal est déjà ouvert dans une autre fenêtre ou un autre processus ; il n'a pas été ouvert.";
+pub const MSG_JOURNAL_LOCK_RECLAIMABLE: &str =
+    "Ce journal porte un verrou laissé par une session interrompue ; le verrou peut être levé.";
+pub const MSG_SYNC_FOLDER_WARNING: &str =
+    "Ce dossier est synchronisé : le journal est ouvert en mode sûr (sans fichier annexe). Un journal en local avec des sauvegardes versionnées dans ce dossier reste l'approche recommandée.";
+/// Substitution template (the const is posture-scanned; [`journal_stale_message`] fills it).
+pub const MSG_JOURNAL_STALE: &str =
+    "Ce journal semble plus ancien que ce que vous aviez vu (vu version {seen}, ici version {here}).";
+
+/// The neutral stale-on-reopen notice (Story 5.5) — a `{n}`-substitution of [`MSG_JOURNAL_STALE`]
+/// surfacing the last-seen vs on-disk versions, so a regressed journal is flagged (not blocked).
+pub fn journal_stale_message(seen: u64, here: u64) -> String {
+    MSG_JOURNAL_STALE
+        .replace("{seen}", &seen.to_string())
+        .replace("{here}", &here.to_string())
+}
 
 /// The neutral confirm prompt for a restore (a `{n}`-substitution of [`MSG_RESTORE_CONFIRM`] +
 /// per-verdict reason clause), surfacing the backup's `(journal_id, version)` and the stale/foreign
@@ -400,6 +423,13 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_RESTORE_CONFIRM,
     MSG_RESTORE_REASON_STALE,
     MSG_RESTORE_REASON_FOREIGN,
+    MSG_JOURNAL_OPENED,
+    MSG_JOURNAL_CREATED,
+    MSG_JOURNAL_OPEN_FAILED,
+    MSG_JOURNAL_LOCKED,
+    MSG_JOURNAL_LOCK_RECLAIMABLE,
+    MSG_SYNC_FOLDER_WARNING,
+    MSG_JOURNAL_STALE,
     MSG_KEY_SAVED,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
@@ -567,6 +597,59 @@ struct PendingRestore {
     backup_path: PathBuf,
 }
 
+/// The result of opening/creating/switching a journal (Story 5.5) — the identity + version the caller
+/// records in the recent-journals pointer, and whether a sync-folder warning applies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenOutcome {
+    pub journal_id: Uuid,
+    pub logical_version: u64,
+    /// `true` when the journal lives in a detected sync folder and was opened in the sync-safe
+    /// (`DELETE`) mode — the UI surfaces the warning + the recommended pattern (ADD8).
+    pub sync_warning: bool,
+}
+
+/// Whether `path` (a journal file or its directory) lives in a **detected sync folder** (Story 5.5,
+/// ADD8) — a path component matches a known consumer-sync provider, case-insensitively. A heuristic,
+/// not an exhaustive list; a false negative just means the default WAL mode (no worse than today).
+pub fn is_sync_folder(path: &Path) -> bool {
+    const SYNC_MARKERS: &[&str] = &[
+        "synologydrive",
+        "synology drive",
+        "cloudstation",
+        "dropbox",
+        "onedrive",
+        "icloud",
+        "mobile documents", // macOS iCloud Drive
+        "google drive",
+        "googledrive",
+        "nextcloud",
+        "owncloud",
+    ];
+    // Canonicalize first (resolve a symlink / mount like `~/sync → ~/Dropbox`, the form most likely in
+    // practice) — scanning only the literal path would miss it. Falls back to the best-resolving
+    // ancestor (the file itself may not exist yet on a create), then the literal path.
+    let resolved = std::fs::canonicalize(path)
+        .or_else(|_| {
+            path.parent()
+                .map_or_else(|| Err(()), |p| std::fs::canonicalize(p).map_err(|_| ()))
+        })
+        .unwrap_or_else(|_| path.to_path_buf());
+    resolved.components().any(|c| {
+        let name = c.as_os_str().to_string_lossy().to_lowercase();
+        SYNC_MARKERS.iter().any(|m| name.contains(m))
+    })
+}
+
+/// The [`JournalMode`] to open a journal at `path` with (Story 5.5): the sync-safe `Delete` in a
+/// detected sync folder (no `-wal` to corrupt under file-level sync), else the default `Wal`.
+fn sync_mode_for(path: &Path) -> JournalMode {
+    if is_sync_folder(path) {
+        JournalMode::Delete
+    } else {
+        JournalMode::Wal
+    }
+}
+
 impl JournalState {
     /// Open the last-used journal (`configured`, from app-config) or, failing that, open/create the
     /// default journal in the OS data dir. Returns the state plus an optional neutral startup notice
@@ -579,7 +662,14 @@ impl JournalState {
         // 1) A configured journal that exists on disk → open it.
         if let Some(path) = configured {
             if path.exists() {
-                match Journal::open(path) {
+                // Story 5.5: a STALE lock (left by a crashed prior run — no live owner) on the
+                // configured journal is auto-reclaimed at startup, so a post-crash relaunch reopens the
+                // user's own journal rather than failing `LockHeld` and orphaning it onto the default. A
+                // LIVE lock (a genuine second instance) is not stale → left intact → the open refuses.
+                if lock_is_stale(path) {
+                    let _ = clear_lock(path);
+                }
+                match Journal::open_with_mode(path, sync_mode_for(path)) {
                     Ok(journal) => {
                         let read_only = journal.is_read_only();
                         return (
@@ -632,7 +722,7 @@ impl JournalState {
         };
 
         let result = if path.exists() {
-            Journal::open(&path)
+            Journal::open_with_mode(&path, sync_mode_for(&path))
         } else {
             if let Some(parent) = path.parent() {
                 if let Err(error) = std::fs::create_dir_all(parent) {
@@ -690,6 +780,15 @@ impl JournalState {
     /// whole-journal export file (Story 5.3).
     pub fn journal_id(&self) -> Option<Uuid> {
         self.journal.as_ref().map(|j| j.id())
+    }
+
+    /// The open journal's monotonic `logical_version`, or `0` when no journal is open / unreadable
+    /// (Story 5.5) — for the recent-journals last-seen pointer.
+    pub fn logical_version_or_zero(&self) -> u64 {
+        self.journal
+            .as_ref()
+            .and_then(|j| j.logical_version().ok())
+            .unwrap_or(0)
     }
 
     /// The app's "now" from the injected [`Clock`] (ADD15) — the single wall-clock source. Used by
@@ -1369,8 +1468,9 @@ impl JournalState {
     }
 
     /// Create a raw `.db` backup of the live journal (Story 5.4, FR61) — checkpoint the WAL so the copy
-    /// is self-contained, then copy the file to `data_dir/backups/journal-<id>-v<version>.db`. Returns
-    /// the written path (the caller surfaces it). Guarded: no journal → a neutral notice.
+    /// is self-contained, then copy the file to a `backups/` folder **beside the journal** (Story 5.5 —
+    /// so backups follow a user-selected location; falls back to the OS data dir if the journal has no
+    /// parent). Returns the written path (the caller surfaces it). Guarded: no journal → a neutral notice.
     pub fn create_backup(&self) -> Result<PathBuf, String> {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         let live = self.path.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
@@ -1380,9 +1480,17 @@ impl JournalState {
         let version = journal
             .logical_version()
             .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
-        let dir = directories::ProjectDirs::from("", "", "steadyinvest")
-            .map(|d| d.data_dir().join("backups"))
-            .ok_or(MSG_NO_DATA_DIR.to_string())?;
+        // Story 5.5: backups live beside the journal (a `backups/` sibling of the `.db`), so a
+        // user-selected location keeps its backups together. Fall back to the OS data dir only if the
+        // journal path has no parent (degenerate).
+        let dir = match live.parent() {
+            // A real parent directory (an absolute journal path) → backups sit beside the journal.
+            Some(parent) if !parent.as_os_str().is_empty() => parent.join("backups"),
+            // A bare/relative path with no real parent → the OS data dir (never the process CWD).
+            _ => directories::ProjectDirs::from("", "", "steadyinvest")
+                .map(|d| d.data_dir().join("backups"))
+                .ok_or(MSG_NO_DATA_DIR.to_string())?,
+        };
         std::fs::create_dir_all(&dir).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
         // Key the filename on (id, version, timestamp) so two backups never silently overwrite each
         // other — a same-version backup (e.g. one taken right after a restore) keeps its own file. The
@@ -1391,6 +1499,137 @@ impl JournalState {
         let dest = dir.join(format!("journal-{}-v{version}-{stamp}.db", journal.id()));
         std::fs::copy(live, &dest).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
         Ok(dest)
+    }
+
+    /// Close the current journal cleanly (Story 5.5): checkpoint its WAL, then drop the handle — which
+    /// releases its single-instance lock. The `path` is left as-is (the caller sets the new one).
+    fn close_current(&mut self) {
+        if let Some(journal) = self.journal.as_ref() {
+            let _ = journal.checkpoint();
+        }
+        self.journal = None;
+    }
+
+    /// Open an already-opened journal at `path` into `self` with the given mode, replacing the current
+    /// journal (Story 5.5). Records identity/version, resets undo. Maps the lock/open failures to
+    /// neutral notices. The caller is responsible for having closed/saved the previous journal.
+    fn adopt_open(&mut self, path: &Path, mode: JournalMode) -> Result<OpenOutcome, String> {
+        match Journal::open_with_mode(path, mode) {
+            Ok(journal) => {
+                let logical_version = journal
+                    .logical_version()
+                    .map_err(|error| format!("{MSG_JOURNAL_OPEN_FAILED} {error}"))?;
+                let outcome = OpenOutcome {
+                    journal_id: journal.id(),
+                    logical_version,
+                    sync_warning: matches!(mode, JournalMode::Delete),
+                };
+                self.read_only = journal.is_read_only();
+                self.journal = Some(journal);
+                self.path = Some(path.to_path_buf());
+                self.reset_undo();
+                self.pending_restore = None;
+                Ok(outcome)
+            }
+            Err(PersistError::LockHeld { .. }) => Err(MSG_JOURNAL_LOCKED.to_string()),
+            Err(error) => Err(format!("{MSG_JOURNAL_OPEN_FAILED} {error}")),
+        }
+    }
+
+    /// Re-acquire the previous journal after a failed open/create, so the app is never journal-less
+    /// (Story 5.5) — best-effort (mirrors the Story 5.4 `reopen_live` discipline).
+    fn restore_previous(&mut self, prev: Option<PathBuf>) {
+        if let Some(prev) = prev {
+            let mode = sync_mode_for(&prev);
+            let _ = self.adopt_open(&prev, mode);
+        }
+    }
+
+    /// Open a journal at `path`, switching away from the current one (Story 5.5, AC1). Closes the
+    /// current journal cleanly first (checkpoint + release its lock), opens the target with the
+    /// sync-folder-appropriate [`JournalMode`], and returns an [`OpenOutcome`] (identity, version,
+    /// whether a sync-folder warning applies). A failed open leaves the **previous** journal open
+    /// (never journal-less). The caller records the recent entry + persists app-config + re-renders.
+    pub fn open_journal(&mut self, path: &Path) -> Result<OpenOutcome, String> {
+        // Re-selecting the journal that is already open is a no-op — closing + reopening it would
+        // pointlessly wipe the undo history. Return the current identity without touching anything.
+        if let Some(current) = self.path.clone() {
+            if self.journal.is_some() && same_file_path(&current, path) {
+                return Ok(OpenOutcome {
+                    journal_id: self.journal_id().unwrap_or_else(Uuid::nil),
+                    logical_version: self.logical_version_or_zero(),
+                    sync_warning: matches!(sync_mode_for(path), JournalMode::Delete),
+                });
+            }
+        }
+        let prev = self.path.clone();
+        self.close_current();
+        match self.adopt_open(path, sync_mode_for(path)) {
+            Ok(outcome) => Ok(outcome),
+            Err(notice) => {
+                self.restore_previous(prev);
+                Err(notice)
+            }
+        }
+    }
+
+    /// Create a new journal at `dir/<name>.db` and switch to it (Story 5.5, AC1). Closes the current
+    /// journal cleanly first; mints the identity + creation time from the injected sources (ADD15);
+    /// uses the sync-folder-appropriate mode. A failed create leaves the previous journal open.
+    pub fn create_journal(&mut self, dir: &Path, name: &str) -> Result<OpenOutcome, String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(MSG_JOURNAL_OPEN_FAILED.to_string());
+        }
+        let file_name = if trimmed.ends_with(".db") {
+            trimmed.to_string()
+        } else {
+            format!("{trimmed}.db")
+        };
+        let path = dir.join(file_name);
+        let mode = sync_mode_for(dir);
+        let prev = self.path.clone();
+        self.close_current();
+        let id = self.idgen.new_id();
+        let created_at = self.clock.now();
+        match Journal::create_with_mode(&path, id, &created_at, mode) {
+            Ok(journal) => {
+                let logical_version = journal.logical_version().unwrap_or(0);
+                let outcome = OpenOutcome {
+                    journal_id: journal.id(),
+                    logical_version,
+                    sync_warning: matches!(mode, JournalMode::Delete),
+                };
+                self.read_only = journal.is_read_only();
+                self.journal = Some(journal);
+                self.path = Some(path);
+                self.reset_undo();
+                self.pending_restore = None;
+                Ok(outcome)
+            }
+            Err(PersistError::JournalExists(_)) => {
+                self.restore_previous(prev);
+                Err(MSG_JOURNAL_OPEN_FAILED.to_string())
+            }
+            Err(PersistError::LockHeld { .. }) => {
+                self.restore_previous(prev);
+                Err(MSG_JOURNAL_LOCKED.to_string())
+            }
+            Err(error) => {
+                self.restore_previous(prev);
+                Err(format!("{MSG_JOURNAL_OPEN_FAILED} {error}"))
+            }
+        }
+    }
+
+    /// Reclaim a **stale** single-instance lock at `path` (a lock left by a crashed run) and open the
+    /// journal (Story 5.5, AC3). Only clears the lock when it is actually stale — never steals a live
+    /// instance's lock.
+    pub fn reclaim_and_open(&mut self, path: &Path) -> Result<OpenOutcome, String> {
+        if lock_is_stale(path) {
+            let _ = clear_lock(path);
+        }
+        self.open_journal(path)
     }
 
     /// Assess a candidate backup `.db` against the current journal and **park** it for confirmation
@@ -1504,7 +1743,7 @@ impl JournalState {
             return Err(format!("{MSG_RESTORE_FAILED} {error}"));
         }
 
-        match Journal::open(&live) {
+        match Journal::open_with_mode(&live, sync_mode_for(&live)) {
             Ok(journal) => {
                 let _ = std::fs::remove_file(&snapshot);
                 self.read_only = journal.is_read_only();
@@ -1539,7 +1778,7 @@ impl JournalState {
     /// Best-effort reopen of the live journal at `path` (used to recover after a failed restore swap so
     /// the app is never left journal-less).
     fn reopen_live(&mut self, path: &Path) {
-        match Journal::open(path) {
+        match Journal::open_with_mode(path, sync_mode_for(path)) {
             Ok(journal) => {
                 self.read_only = journal.is_read_only();
                 self.journal = Some(journal);
@@ -3100,6 +3339,121 @@ mod tests {
             "the live journal was not overwritten"
         );
         assert!(state.list_studies().is_empty(), "nothing was applied");
+    }
+
+    // ── Story 5.5 — journal location, recent journals & sync-safety ──
+
+    #[test]
+    fn is_sync_folder_matches_known_providers_and_rejects_a_plain_path() {
+        assert!(is_sync_folder(Path::new(
+            "/home/g/SynologyDrive/journal.db"
+        )));
+        assert!(is_sync_folder(Path::new("/home/g/Dropbox/sub/journal.db")));
+        assert!(is_sync_folder(Path::new("/home/g/OneDrive/journal.db")));
+        assert!(is_sync_folder(Path::new(
+            "/Users/g/Library/Mobile Documents/journal.db"
+        )));
+        assert!(!is_sync_folder(Path::new(
+            "/home/g/.local/share/steadyinvest/journal.db"
+        )));
+    }
+
+    #[test]
+    fn open_and_create_journal_switch_between_journals() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x550); // journal A at dir/journal.db (id 0xC0FFEE)
+        let id_in_a = state.create_study("NESN", "CHF").unwrap();
+
+        // Create a second journal in a subdir → switches to it (empty).
+        let sub = dir.path().join("other");
+        std::fs::create_dir_all(&sub).unwrap();
+        let outcome = state.create_journal(&sub, "second").unwrap();
+        assert!(
+            state.list_studies().is_empty(),
+            "the new journal B is empty"
+        );
+        assert_eq!(state.journal_id(), Some(outcome.journal_id));
+        assert!(
+            !outcome.sync_warning,
+            "a plain temp dir is not a sync folder"
+        );
+
+        // Open journal A back → its study is there (a clean switch round-trip).
+        let path_a = dir.path().join("journal.db");
+        state.open_journal(&path_a).unwrap();
+        assert!(
+            state.get_study(id_in_a).is_some(),
+            "switched back to journal A"
+        );
+    }
+
+    #[test]
+    fn open_journal_failure_leaves_the_previous_journal_open() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x551);
+        state.create_study("NESN", "CHF").unwrap();
+
+        // A journal held by a foreign, live process (forged lock with PID 1 = init).
+        let sub = dir.path().join("locked");
+        std::fs::create_dir_all(&sub).unwrap();
+        let locked = sub.join("j.db");
+        drop(
+            Journal::create(
+                &locked,
+                Uuid::from_u128(0xBEEF),
+                &Timestamp("2026-06-20T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+        let mut lock = locked.as_os_str().to_os_string();
+        lock.push("-lock");
+        std::fs::write(&lock, "1").unwrap();
+
+        let result = state.open_journal(&locked);
+        assert_eq!(result, Err(MSG_JOURNAL_LOCKED.to_string()));
+        // The previous journal stayed open with its study (never journal-less).
+        assert_eq!(
+            state.list_studies().len(),
+            1,
+            "the previous journal stayed open after a refused switch"
+        );
+    }
+
+    #[test]
+    fn journal_stale_message_surfaces_both_versions() {
+        let msg = journal_stale_message(57, 41);
+        assert!(msg.contains("57"));
+        assert!(msg.contains("41"));
+    }
+
+    #[test]
+    fn create_backup_lands_beside_the_journal() {
+        // Review patch (5.4 deferral): backups follow the journal's location.
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x552); // journal at dir/journal.db
+        state.create_study("NESN", "CHF").unwrap();
+        let backup = state.create_backup().unwrap();
+        assert_eq!(
+            backup.parent().unwrap(),
+            dir.path().join("backups"),
+            "the backup sits in a backups/ folder beside the journal"
+        );
+        assert!(backup.exists());
+    }
+
+    #[test]
+    fn reopening_the_currently_open_journal_is_a_no_op() {
+        // Review patch (E7): re-selecting the open journal must not close+reopen (which would wipe undo).
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x553);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let path = dir.path().join("journal.db");
+        let outcome = state.open_journal(&path).unwrap();
+        assert_eq!(outcome.journal_id, Uuid::from_u128(0xC0FFEE));
+        assert!(
+            state.get_study(id).is_some(),
+            "the journal stayed open, study intact"
+        );
     }
 
     #[test]

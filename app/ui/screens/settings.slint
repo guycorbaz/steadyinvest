@@ -4,7 +4,7 @@
 // swap and render in the numeric font, digits stacked to show tabular figures.
 
 import { Tokens } from "../tokens.slint";
-import { Labels, Prefs, Verify } from "../state.slint";
+import { Labels, Prefs, Verify, RecentJournalRow } from "../state.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { TextField } from "../components/text_field.slint";
@@ -89,6 +89,73 @@ export component SettingsScreen inherits Rectangle {
                 color: Tokens.text-high;
                 font-size: Tokens.font-h2;
                 font-weight: Tokens.weight-semibold;
+            }
+
+            // ── Story 5.5 (FR66) — journal location, recent journals, single-instance lock &
+            // sync-safety. Native dialogs pick the file/dir; switching is never journal-less. ──
+            SettingsPanel {
+                title: @tr("Emplacement du journal");
+
+                Text {
+                    text: @tr("Journal actuel :") + " " + Prefs.journal-current-path;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ActionButton {
+                        label: @tr("Ouvrir un journal…");
+                        clicked => { Prefs.pick-and-open-journal(); }
+                    }
+                    ActionButton {
+                        label: @tr("Créer un journal…");
+                        clicked => { Prefs.pick-and-create-journal(); }
+                    }
+                }
+
+                // Recent journals — most-recent-first; the current one is marked and not re-openable.
+                if Prefs.recent-journals.length > 0: Text {
+                    text: @tr("Journaux récents");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                }
+                for row in Prefs.recent-journals: HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: row.name + (row.current ? " " + @tr("(actuel)") : "");
+                        color: row.current ? Tokens.text-high : Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    if !row.current: ActionButton {
+                        label: @tr("Ouvrir");
+                        clicked => { Prefs.open-recent(row.path); }
+                    }
+                }
+
+                // A stale lock blocked an open → offer to reclaim it.
+                if Prefs.journal-reclaim-path != "": HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    ActionButton {
+                        label: @tr("Lever le verrou et ouvrir");
+                        clicked => { Prefs.reclaim-and-open(Prefs.journal-reclaim-path); }
+                    }
+                }
+
+                if Prefs.journal-location-status != "": Text {
+                    text: Prefs.journal-location-status;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
             }
 
             // ── Story 3.2 — Fournisseur de données & clé API (FR25/FR63). No wizard: configured

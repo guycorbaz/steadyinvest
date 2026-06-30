@@ -586,9 +586,12 @@ mod tests {
         // "Journal complet", the explanatory caption, "Exporter le journal", the import path
         // placeholder, "Importer un journal"): +5 = 290. Story 5.4 adds the Réglages backup/restore
         // panel (title "Sauvegarde & restauration", the caption, "Créer une sauvegarde", the restore
-        // path placeholder, "Restaurer", "Confirmer la restauration", "Annuler"): +7 = 297. Floor strict.
+        // path placeholder, "Restaurer", "Confirmer la restauration", "Annuler"): +7 = 297. Story 5.5
+        // adds the Réglages journal-location panel (title "Emplacement du journal", "Journal actuel :",
+        // "Ouvrir un journal…", "Créer un journal…", "Journaux récents", "(actuel)", "Ouvrir", "Lever
+        // le verrou et ouvrir"): +8 = 305. Floor strict.
         assert!(
-            total >= 297,
+            total >= 305,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -640,10 +643,12 @@ mod tests {
         // integrity / version / malformed import refusals are reused from 5.2: 55 + 2 = 57. Story 5.4
         // adds the backup/restore notices (backup-created, restore-done/failed, 4 restore refusals
         // [integrity / newer-schema / not-a-journal / unreadable], the confirm template + 2 reason
-        // clauses [stale / foreign]): 57 + 10 = 67.
+        // clauses [stale / foreign]): 57 + 10 = 67. Story 5.5 adds the journal-location notices
+        // (opened, created, open-failed, locked-elsewhere, lock-reclaimable, sync-folder warning, the
+        // stale-version template): 67 + 7 = 74.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            67,
+            74,
             "state.rs message inventory changed — register the new notice"
         );
     }
