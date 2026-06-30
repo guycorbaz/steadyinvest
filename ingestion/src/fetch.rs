@@ -27,8 +27,22 @@ pub struct FetchedFinancials {
 /// Concrete providers, dispatched by enum so the `async fn` trait needs no `dyn`/`async-trait`.
 pub enum Provider {
     Eodhd(crate::adapters::eodhd::EodhdProvider),
+    /// Twelve Data (Story 7.4) — the price-led second source.
+    TwelveData(crate::adapters::twelvedata::TwelveDataProvider),
     /// A deterministic, offline test double (kept in the public API so `app` tests can use it).
     Fake(FakeProvider),
+}
+
+impl Provider {
+    /// A stable provenance tag for the dependency digest (Story 7.4) — distinguishes which provider a
+    /// fetched value came from, so two sources never collide on an identical ticker/value set.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Provider::Eodhd(_) => "eodhd",
+            Provider::TwelveData(_) => "twelvedata",
+            Provider::Fake(_) => "fake",
+        }
+    }
 }
 
 impl MarketDataProvider for Provider {
@@ -39,6 +53,7 @@ impl MarketDataProvider for Provider {
     ) -> Result<RawFetch, ProviderError> {
         match self {
             Provider::Eodhd(p) => p.fetch_fundamentals(ticker, api_key).await,
+            Provider::TwelveData(p) => p.fetch_fundamentals(ticker, api_key).await,
             Provider::Fake(p) => p.fetch_fundamentals(ticker, api_key).await,
         }
     }
@@ -50,6 +65,7 @@ impl MarketDataProvider for Provider {
     ) -> Result<Option<Decimal>, ProviderError> {
         match self {
             Provider::Eodhd(p) => p.fetch_latest_price(ticker, api_key).await,
+            Provider::TwelveData(p) => p.fetch_latest_price(ticker, api_key).await,
             Provider::Fake(p) => p.fetch_latest_price(ticker, api_key).await,
         }
     }
@@ -67,7 +83,7 @@ pub async fn fetch_canonical(
         latest_price,
     } = provider.fetch_fundamentals(ticker, api_key).await?;
     let canonical = normalize(financials)?;
-    let digest = dependency_digest(ticker, &canonical);
+    let digest = dependency_digest(provider.tag(), ticker, &canonical);
     Ok(FetchedFinancials {
         canonical,
         digest,
@@ -86,11 +102,18 @@ pub async fn fetch_price(
     Ok(provider.fetch_latest_price(ticker, api_key).await?)
 }
 
-/// SHA-256 hex over `"eodhd:{ticker}"` + each canonical year's value-normalized decimals (so
-/// `"3.0"` and `"3"` hash identically — `Money`/`Decimal` value equality, not byte equality).
-pub fn dependency_digest(ticker: &str, canonical: &CanonicalFinancials) -> String {
+/// SHA-256 hex over `"{provider_tag}:{ticker}"` + each canonical year's value-normalized decimals (so
+/// `"3.0"` and `"3"` hash identically — `Money`/`Decimal` value equality, not byte equality). The
+/// provider tag (Story 7.4) keeps two providers' digests distinct for the same ticker/values, so the
+/// data's provenance is honest and a provider switch is observable as a dependency change.
+pub fn dependency_digest(
+    provider_tag: &str,
+    ticker: &str,
+    canonical: &CanonicalFinancials,
+) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"eodhd:");
+    hasher.update(provider_tag.as_bytes());
+    hasher.update(b":");
     hasher.update(ticker.as_bytes());
     for year in &canonical.years {
         hasher.update(year.year.to_le_bytes());

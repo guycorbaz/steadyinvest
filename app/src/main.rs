@@ -1111,6 +1111,10 @@ fn main() -> Result<(), slint::PlatformError> {
             // fallback for environments that have no running secret agent (AC5/AC6). A keyless
             // provider fetches with no key; a key-requiring provider with no key found is refused.
             let provider_choice = config.borrow().preferred_provider;
+            if provider_choice == ProviderChoice::None {
+                studies.set_notice(state::MSG_PROVIDER_NONE.into());
+                return;
+            }
             let api_key = resolve_provider_key(provider_choice);
             if provider_choice.requires_key() && api_key.is_none() {
                 studies.set_notice(state::MSG_PROVIDER_NO_KEY.into());
@@ -1123,6 +1127,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     study_id,
                     ticker,
                     api_key,
+                    provider: provider_choice,
                 }))
                 .is_err()
             {
@@ -1669,6 +1674,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             let provider_choice = config.borrow().preferred_provider;
+            if provider_choice == ProviderChoice::None {
+                holdings.set_notice(state::MSG_PROVIDER_NONE.into());
+                return;
+            }
             let api_key = resolve_provider_key(provider_choice);
             if provider_choice.requires_key() && api_key.is_none() {
                 holdings.set_notice(state::MSG_PROVIDER_NO_KEY.into());
@@ -1683,6 +1692,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         study_id,
                         ticker,
                         api_key: api_key.clone(),
+                        provider: provider_choice,
                     }))
                     .is_ok()
                 {
@@ -3023,7 +3033,10 @@ fn main() -> Result<(), slint::PlatformError> {
             // Off the UI thread: a minimal live fetch whose verdict returns via the outcome handler.
             prefs.set_provider_status(state::MSG_KEY_TESTING.into());
             if fetch_tx
-                .send(fetch::WorkerJob::TestKey(fetch::TestKeyRequest { api_key }))
+                .send(fetch::WorkerJob::TestKey(fetch::TestKeyRequest {
+                    api_key,
+                    provider,
+                }))
                 .is_err()
             {
                 prefs.set_provider_status(

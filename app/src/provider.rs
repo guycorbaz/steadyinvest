@@ -16,6 +16,8 @@ pub enum ProviderChoice {
     /// EODHD (Story 3.1). Requires an API key.
     #[default]
     Eodhd,
+    /// Twelve Data (Story 7.4) — the price-led second source. Requires an API key.
+    TwelveData,
     /// No provider configured, or a keyless provider — the fetch path passes no key.
     None,
 }
@@ -27,6 +29,7 @@ impl ProviderChoice {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "eodhd" => Some(ProviderChoice::Eodhd),
+            "twelvedata" => Some(ProviderChoice::TwelveData),
             "none" => Some(ProviderChoice::None),
             _ => None,
         }
@@ -36,6 +39,7 @@ impl ProviderChoice {
     pub fn wire(self) -> &'static str {
         match self {
             ProviderChoice::Eodhd => "eodhd",
+            ProviderChoice::TwelveData => "twelvedata",
             ProviderChoice::None => "none",
         }
     }
@@ -43,7 +47,7 @@ impl ProviderChoice {
     /// Whether a fetch with this provider needs an API key. A keyless/none provider does not, so
     /// the absence of a stored key is not an error for it (AC3).
     pub fn requires_key(self) -> bool {
-        matches!(self, ProviderChoice::Eodhd)
+        matches!(self, ProviderChoice::Eodhd | ProviderChoice::TwelveData)
     }
 }
 
@@ -58,7 +62,11 @@ mod tests {
 
     #[test]
     fn parse_round_trips_with_wire() {
-        for choice in [ProviderChoice::Eodhd, ProviderChoice::None] {
+        for choice in [
+            ProviderChoice::Eodhd,
+            ProviderChoice::TwelveData,
+            ProviderChoice::None,
+        ] {
             assert_eq!(ProviderChoice::parse(choice.wire()), Some(choice));
         }
     }
@@ -82,8 +90,15 @@ mod tests {
     }
 
     #[test]
-    fn only_eodhd_requires_a_key() {
+    fn keyed_providers_require_a_key_none_does_not() {
         assert!(ProviderChoice::Eodhd.requires_key());
+        assert!(ProviderChoice::TwelveData.requires_key());
         assert!(!ProviderChoice::None.requires_key());
+    }
+
+    #[test]
+    fn twelvedata_wire_drives_its_keychain_slot() {
+        // The keychain slot is `provider:{wire}`, so the new variant gets its own slot for free.
+        assert_eq!(ProviderChoice::TwelveData.wire(), "twelvedata");
     }
 }

@@ -18,24 +18,35 @@ use std::sync::mpsc;
 
 use rust_decimal::Decimal;
 use steadyinvest_ingestion::{
-    adapters::eodhd::EodhdProvider, fetch_canonical, fetch_price, FetchedFinancials,
-    IngestionError, Provider,
+    adapters::eodhd::EodhdProvider, adapters::twelvedata::TwelveDataProvider, fetch_canonical,
+    fetch_price, FetchedFinancials, IngestionError, Provider,
 };
 use uuid::Uuid;
 
-/// The cheap, always-available ticker used to validate a key (works under EODHD's `demo` key too).
-const KEY_TEST_TICKER: &str = "AAPL.US";
+use crate::provider::ProviderChoice;
 
-/// A study-data fetch enqueued from the UI thread (Story 3.1).
+/// The cheap, always-available ticker used to validate a key, per provider (the symbol convention
+/// differs: EODHD `AAPL.US`, Twelve Data the bare `AAPL`).
+fn key_test_ticker(provider: ProviderChoice) -> &'static str {
+    match provider {
+        ProviderChoice::TwelveData => "AAPL",
+        _ => "AAPL.US",
+    }
+}
+
+/// A study-data fetch enqueued from the UI thread (Story 3.1). `provider` (Story 7.4) selects the
+/// adapter the worker routes to.
 pub struct FetchRequest {
     pub study_id: Uuid,
     pub ticker: String,
     pub api_key: Option<String>,
+    pub provider: ProviderChoice,
 }
 
 /// A key-validation request (Story 3.2): a minimal live fetch whose data is discarded.
 pub struct TestKeyRequest {
     pub api_key: Option<String>,
+    pub provider: ProviderChoice,
 }
 
 /// A job for the worker thread.
@@ -103,14 +114,20 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                 .enable_all()
                 .build()
                 .expect("the fetch worker tokio runtime builds");
-            // One provider (and its `reqwest::Client` connection pool) reused across all jobs —
-            // `Client::new()` is expensive and meant to be shared (review P2).
-            let provider = Provider::Eodhd(EodhdProvider::new());
+            // Both providers (each with its `reqwest::Client` connection pool) built once and reused
+            // across jobs — `Client::new()` is expensive and meant to be shared (review P2). Each job
+            // selects the adapter for its configured `ProviderChoice` (Story 7.4).
+            let eodhd = Provider::Eodhd(EodhdProvider::new());
+            let twelvedata = Provider::TwelveData(TwelveDataProvider::new());
+            let select = |choice: ProviderChoice| match choice {
+                ProviderChoice::TwelveData => &twelvedata,
+                _ => &eodhd,
+            };
             while let Ok(job) = rx.recv() {
                 let outcome = match job {
                     WorkerJob::Fetch(req) => {
                         let result = runtime.block_on(fetch_canonical(
-                            &provider,
+                            select(req.provider),
                             &req.ticker,
                             req.api_key.as_deref(),
                         ));
@@ -120,10 +137,10 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                         })
                     }
                     WorkerJob::RefreshHolding(req) => {
-                        // Issue #50: a PRICE-ONLY `/eod` fetch (no `/fundamentals`) so the holdings
-                        // refresh works on the free EODHD tier; routed to the holdings surface.
+                        // Issue #50: a PRICE-ONLY fetch (no fundamentals) so the holdings refresh works
+                        // on a free tier; routed to the holdings surface. Twelve Data uses `/price`.
                         let result = runtime.block_on(fetch_price(
-                            &provider,
+                            select(req.provider),
                             &req.ticker,
                             req.api_key.as_deref(),
                         ));
@@ -134,11 +151,12 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                         })
                     }
                     WorkerJob::TestKey(req) => {
-                        // A minimal live fetch; the data is discarded — only the verdict matters.
+                        // A minimal live fetch; the data is discarded — only the verdict matters. The
+                        // test ticker follows the provider's symbol convention.
                         let result = runtime
                             .block_on(fetch_canonical(
-                                &provider,
-                                KEY_TEST_TICKER,
+                                select(req.provider),
+                                key_test_ticker(req.provider),
                                 req.api_key.as_deref(),
                             ))
                             .map(|_| ());

@@ -174,15 +174,20 @@ export component SettingsScreen inherits Rectangle {
                         activated => { Prefs.provider-selected("eodhd"); }
                     }
                     ChoiceChip {
+                        label: @tr("Twelve Data");
+                        selected: Prefs.provider == "twelvedata";
+                        activated => { Prefs.provider-selected("twelvedata"); }
+                    }
+                    ChoiceChip {
                         label: @tr("Aucun (sans clé)");
                         selected: Prefs.provider == "none";
                         activated => { Prefs.provider-selected("none"); }
                     }
                 }
 
-                // Key status + entry + actions only matter for a key-requiring provider — a keyless
-                // "none" provider shows no key status at all (F13).
-                if Prefs.provider == "eodhd": VerticalLayout {
+                // Key status + entry + actions only matter for a key-requiring provider (EODHD or
+                // Twelve Data) — a keyless "none" provider shows no key status at all (F13).
+                if Prefs.provider != "none": VerticalLayout {
                     spacing: Tokens.space-8;
 
                     Text {
