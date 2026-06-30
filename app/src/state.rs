@@ -93,6 +93,10 @@ pub const MSG_DEMO_UNAVAILABLE: &str = "L'étude de démonstration est indisponi
 /// own neutral message (already banned-verb-gated in `ingestion::error`).
 pub const MSG_PROVIDER_NO_KEY: &str =
     "Aucune clé fournisseur n'est configurée ; la récupération n'a pas eu lieu.";
+/// Shown when the chosen provider is "Aucun" (Story 7.4 review) — distinct from a missing key, so the
+/// user is told there is no provider to fetch from rather than a misleading "invalid key".
+pub const MSG_PROVIDER_NONE: &str =
+    "Aucun fournisseur de données n'est sélectionné ; la récupération n'a pas eu lieu.";
 pub const MSG_PROVIDER_FETCHING: &str = "Récupération des données du fournisseur en cours.";
 pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause}";
 
@@ -387,6 +391,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_VERIFY_DEVIATIONS,
     MSG_DEMO_UNAVAILABLE,
     MSG_PROVIDER_NO_KEY,
+    MSG_PROVIDER_NONE,
     MSG_PROVIDER_FETCHING,
     MSG_PROVIDER_FAILED,
     MSG_PROVIDER_OFFLINE,

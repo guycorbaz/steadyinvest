@@ -421,11 +421,11 @@ development_status:
   epic-6-retrospective: optional
 
   # ── Epic 7: Comparison, health review, screening & reports [P3] (story outlines) ──
-  epic-7: backlog
+  epic-7: in-progress
   7-1-company-comparison: backlog
   7-2-portfolio-health-review: backlog
   7-3-discovery-screening-quick-screen: backlog
-  7-4-additional-provider-adapters: backlog
+  7-4-additional-provider-adapters: done
   7-5-pdf-print-other-forms: backlog
   epic-7-retrospective: optional
 

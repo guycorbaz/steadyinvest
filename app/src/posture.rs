@@ -589,9 +589,10 @@ mod tests {
         // path placeholder, "Restaurer", "Confirmer la restauration", "Annuler"): +7 = 297. Story 5.5
         // adds the Réglages journal-location panel (title "Emplacement du journal", "Journal actuel :",
         // "Ouvrir un journal…", "Créer un journal…", "Journaux récents", "(actuel)", "Ouvrir", "Lever
-        // le verrou et ouvrir"): +8 = 305. Floor strict.
+        // le verrou et ouvrir"): +8 = 305. Story 7.4 adds the Réglages "Twelve Data" provider chip: +1
+        // = 306. Floor strict.
         assert!(
-            total >= 305,
+            total >= 306,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -645,10 +646,11 @@ mod tests {
         // [integrity / newer-schema / not-a-journal / unreadable], the confirm template + 2 reason
         // clauses [stale / foreign]): 57 + 10 = 67. Story 5.5 adds the journal-location notices
         // (opened, created, open-failed, locked-elsewhere, lock-reclaimable, sync-folder warning, the
-        // stale-version template): 67 + 7 = 74.
+        // stale-version template): 67 + 7 = 74. Story 7.4 adds the "no provider selected" fetch notice
+        // (MSG_PROVIDER_NONE): 74 + 1 = 75.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            74,
+            75,
             "state.rs message inventory changed — register the new notice"
         );
     }
