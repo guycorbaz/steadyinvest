@@ -8,7 +8,7 @@
 // Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
 import { Tokens } from "../tokens.slint";
-import { Labels, Studies, StudyRow } from "../state.slint";
+import { Labels, Studies, StudyRow, Confront } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
@@ -24,6 +24,7 @@ component StudyListRow inherits Rectangle {
     callback unarchive();
     callback delete-study();
     callback export-study();
+    callback confront-study();
 
     accessible-role: button;
     accessible-label: root.entry.ticker;
@@ -96,6 +97,12 @@ component StudyListRow inherits Rectangle {
         ActionButton {
             label: @tr("Exporter");
             clicked => { root.export-study(); }
+        }
+        // Story 5.1 (FR50): reopen this study's recorded §4 forecast band beside the security's actual
+        // close trajectory since the decision. Read-only — its own TouchArea consumes the click.
+        ActionButton {
+            label: @tr("Confronter");
+            clicked => { root.confront-study(); }
         }
         ActionButton {
             label: @tr("Supprimer");
@@ -319,6 +326,9 @@ export component DashboardScreen inherits Rectangle {
                     }
                     export-study => {
                         Studies.export-study(studyrow.id);
+                    }
+                    confront-study => {
+                        Confront.request(studyrow.id);
                     }
                 }
             }

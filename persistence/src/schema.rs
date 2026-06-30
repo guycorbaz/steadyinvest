@@ -70,6 +70,30 @@ pub(crate) fn migrate_to_v4(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration step 5 (Story 5.1, FR50/ADD13): a **post-decision price-history cache**. Confront mode
+/// overlays a study's recorded projection on the security's *actual* close trajectory since the
+/// decision — which needs dated closes per ticker, sourced via the Epic-3/4 refresh (the `/eod`/`/price`
+/// path) and stored here. This is the project's **first NEW table since the v1 DDL** (the Epic-4 tables
+/// were pre-provisioned; `price_history` was not), so it is a `CREATE TABLE` step rather than an `ADD
+/// COLUMN`. `close` is a TEXT decimal (NFR-C1 — never REAL). The UNIQUE `(security_ticker, close_date)`
+/// index makes `upsert_closes` an idempotent append (INSERT OR IGNORE). Retention = append-on-refresh,
+/// keep-all (a confront window is decision-date → now; pruning is a later concern).
+pub(crate) fn migrate_to_v5(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE price_history (
+             id              TEXT PRIMARY KEY,
+             security_ticker TEXT NOT NULL,
+             close_date      TEXT NOT NULL,
+             close           TEXT NOT NULL,
+             source          TEXT NOT NULL,
+             created_at      TEXT NOT NULL
+         );
+         CREATE UNIQUE INDEX idx_price_history_ticker_date
+             ON price_history(security_ticker, close_date);",
+    )?;
+    Ok(())
+}
+
 /// The complete v1 DDL. Frozen once shipped — schema changes go through new migration steps.
 const DDL_V1: &str = "
     -- Journal identity (ADD6): one row, journal_id (UUID) + monotonic logical_version.
@@ -186,7 +210,9 @@ mod tests {
     }
 
     #[test]
-    fn v1_creates_exactly_the_eight_architecture_tables() {
+    fn the_registry_creates_exactly_the_architecture_tables() {
+        // v1 froze 8 tables; Story 5.1 (v5) adds `price_history` (the first NEW table since v1). The
+        // full registry therefore yields 9. A drift here is a migration-step change, not an edit.
         let conn = v1_connection();
         assert_eq!(
             table_names(&conn),
@@ -196,11 +222,12 @@ mod tests {
                 "journal_meta",
                 "judgments",
                 "portfolios",
+                "price_history",
                 "studies",
                 "transactions",
                 "watchlist_items",
             ],
-            "hybrid schema v1 table set drifted — that is a migration-step change, not an edit"
+            "hybrid schema table set drifted — that is a migration-step change, not an edit"
         );
     }
 
@@ -220,8 +247,8 @@ mod tests {
         let conn = v1_connection();
         assert_eq!(
             migrations::user_version(&conn).expect("user_version reads"),
-            4,
-            "the registry migrates a fresh DB to the latest version (v4)"
+            5,
+            "the registry migrates a fresh DB to the latest version (v5)"
         );
         assert!(
             column_names(&conn, "watchlist_items").contains(&"study_id".to_string()),
@@ -285,14 +312,16 @@ mod tests {
     fn naming_conventions_hold() {
         let conn = v1_connection();
 
-        // Entity tables are snake_case plural; journal_meta is the mandated singleton exception.
+        // Entity tables are snake_case plural; `journal_meta` (the singleton) and `price_history` (a
+        // mass noun — a history *of* closes, Story 5.1) are the mandated exceptions.
+        const NON_PLURAL: &[&str] = &["journal_meta", "price_history"];
         for table in table_names(&conn) {
             assert_eq!(
                 table,
                 table.to_lowercase(),
                 "table {table} is not snake_case"
             );
-            if table != "journal_meta" {
+            if !NON_PLURAL.contains(&table.as_str()) {
                 assert!(
                     table.ends_with('s'),
                     "entity table {table} is not plural (Naming Patterns)"

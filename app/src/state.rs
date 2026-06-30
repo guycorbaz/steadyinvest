@@ -602,6 +602,24 @@ struct PendingRestore {
     backup_path: PathBuf,
 }
 
+/// The read-only confront view (Story 5.1, FR50/ADD13): the study's **recorded projection band**
+/// (forecast high/low over the horizon, anchored at the decision) + the security's **actual** close
+/// trajectory since the decision, for the overlay. `available` is false (neutral empty state) when
+/// there is no cached post-decision close or the study has no forecast band.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfrontView {
+    pub available: bool,
+    /// The decision date (`study.created_at`, `YYYY-MM-DD`) the band is anchored at.
+    pub decision_date: String,
+    /// The recorded §4 forecast band bounds (read-only from the stored judgment — no verdict recompute).
+    pub forecast_high: Option<Decimal>,
+    pub forecast_low: Option<Decimal>,
+    /// The projection horizon (`core::method::FORECAST_HORIZON_YEARS`).
+    pub horizon_years: u32,
+    /// The actual close trajectory since the decision, oldest-first: `(date, close)`.
+    pub actual: Vec<(String, Decimal)>,
+}
+
 /// The result of opening/creating/switching a journal (Story 5.5) — the identity + version the caller
 /// records in the recent-journals pointer, and whether a sync-folder warning applies.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1910,6 +1928,12 @@ impl JournalState {
             }
             report_ref.set(acc);
         })?;
+        // Story 5.1: cache the latest close into the price-history trajectory (confront's source).
+        if let Some(price) = latest_price {
+            if let Some(study) = self.get_study(study_id) {
+                self.cache_close(&study.security_ticker, price);
+            }
+        }
         Ok(report.get())
     }
 
@@ -1922,7 +1946,87 @@ impl JournalState {
     pub fn apply_holding_price(&mut self, study_id: Uuid, price: Decimal) -> Result<(), String> {
         self.mutate_study(study_id, move |study| {
             study.judgment.current_price = Some(Money::from(price));
-        })
+        })?;
+        // Story 5.1: cache the close into the price-history trajectory (confront's source). Keyed by
+        // the study's ticker + today's date; idempotent (one point per ticker/day).
+        if let Some(study) = self.get_study(study_id) {
+            self.cache_close(&study.security_ticker, price);
+        }
+        Ok(())
+    }
+
+    /// Build the read-only **confront** view for a saved study (Story 5.1, FR50/ADD13): its recorded
+    /// projection band overlaid on the security's actual close trajectory since the decision. Strictly
+    /// read-only — reads the stored `Study` + the price-history cache and renders; it writes nothing
+    /// and bumps no `logical_version`. The §4 forecast band is a **deterministic rebuild from the
+    /// frozen stored judgment** (the SSG engine is pure — `build_snapshot` reproduces the decision-time
+    /// bounds bit-for-bit, and `forecast_high/low` are invariant to `current_price`); the study persists
+    /// only judgment inputs, so re-deriving is the faithful — and only — way to recover the recorded
+    /// band, not a re-decision. `available` is false (neutral empty state) when there is no cached
+    /// post-decision close or the study has no forecast band.
+    pub fn confront(&self, study_id: Uuid) -> ConfrontView {
+        let empty = |decision_date: String| ConfrontView {
+            available: false,
+            decision_date,
+            forecast_high: None,
+            forecast_low: None,
+            horizon_years: steadyinvest_core::method::FORECAST_HORIZON_YEARS,
+            actual: Vec::new(),
+        };
+        let Some(study) = self.get_study(study_id) else {
+            return empty(String::new());
+        };
+        let decision_date: String = study.created_at.0.chars().take(10).collect();
+
+        // Recorded projection band — read-only snapshot from the stored judgment (no recompute of the
+        // verdict, no mutation): the §4 forecast bounds the study implied at the decision.
+        let (forecast_high, forecast_low) = engine::build_snapshot(&study)
+            .ok()
+            .map(|s| {
+                let rr = &s.outputs().risk_reward;
+                (rr.forecast_high, rr.forecast_low)
+            })
+            .unwrap_or((None, None));
+
+        // Actual trajectory since the decision, oldest-first, from the price-history cache.
+        let actual: Vec<(String, Decimal)> = self
+            .journal
+            .as_ref()
+            .and_then(|j| j.closes_since(&study.security_ticker, &decision_date).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(date, close)| Decimal::from_str_exact(&close).ok().map(|d| (date, d)))
+            .collect();
+
+        let available = !actual.is_empty() && forecast_high.is_some() && forecast_low.is_some();
+        ConfrontView {
+            available,
+            decision_date,
+            forecast_high,
+            forecast_low,
+            horizon_years: steadyinvest_core::method::FORECAST_HORIZON_YEARS,
+            actual,
+        }
+    }
+
+    /// Append a close to the price-history cache (Story 5.1): `(ticker, today, price)` from a refresh.
+    /// One point per ticker/day (dedup by the unique index); the close is the canonical decimal TEXT.
+    /// A no-op when no journal is open. `source = "provider"` (v1; the per-provider tag is a later
+    /// refinement). The confront overlay reads this back via `closes_since`.
+    ///
+    /// KNOWN LIMITATION (tracked as issue #72): the close is keyed by the **refresh date**, not
+    /// the provider's real EOD session date — `fetch_latest_price` returns only the price (Decimal), and
+    /// carrying the session date would expand the `MarketDataProvider` surface, which Story 5.1's AC4
+    /// forbids ("no new provider surface"). So a weekend/holiday refresh stamps the prior session's
+    /// close under today, and a same-day re-fetch is first-wins (`INSERT OR IGNORE`). The trajectory's
+    /// x-axis is therefore ordinal ("nth recorded close"), good enough for the MVP confront overlay.
+    fn cache_close(&mut self, ticker: &str, price: Decimal) {
+        let now = self.now();
+        let date: String = now.0.chars().take(10).collect(); // YYYY-MM-DD prefix
+        let close = price.normalize().to_string();
+        if let Some(journal) = self.journal.as_mut() {
+            let _ = journal.upsert_closes(ticker, &[(&date, &close, "provider")], &now);
+        }
     }
 
     /// Flag the open study's **provider-sourced** cells `Freshness::Stale` after a failed (or
@@ -3444,6 +3548,57 @@ mod tests {
             "the backup sits in a backups/ folder beside the journal"
         );
         assert!(backup.exists());
+    }
+
+    // ── Story 5.1 — confront (price-history cache + read-only overlay) ──
+
+    #[test]
+    fn a_refresh_caches_a_close_that_confront_reads_back() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x510); // FixedClock 2026-06-27
+        let id = state.create_study("NESN", "CHF").unwrap();
+        // A holdings price refresh caches today's close into the price-history trajectory.
+        state
+            .apply_holding_price(id, Decimal::from_str_exact("104.50").unwrap())
+            .unwrap();
+        let view = state.confront(id);
+        assert_eq!(
+            view.actual,
+            vec![(
+                "2026-06-27".to_string(),
+                Decimal::from_str_exact("104.5").unwrap()
+            )],
+            "confront reads back the cached post-decision close"
+        );
+        assert_eq!(view.decision_date, "2026-06-27");
+    }
+
+    #[test]
+    fn confront_is_unavailable_with_no_cached_closes() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x511);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let view = state.confront(id);
+        assert!(!view.available, "no cached closes → neutral empty state");
+        assert!(view.actual.is_empty());
+    }
+
+    #[test]
+    fn confront_does_not_bump_the_version_read_only() {
+        let dir = TempDir::new().unwrap();
+        let mut state = watch_state(&dir, 0x512);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_holding_price(id, Decimal::from_str_exact("104.50").unwrap())
+            .unwrap();
+        let before = state.logical_version_or_zero();
+        let _ = state.confront(id);
+        let _ = state.confront(id);
+        assert_eq!(
+            state.logical_version_or_zero(),
+            before,
+            "confront is strictly read-only — no journal write, no version bump"
+        );
     }
 
     #[test]

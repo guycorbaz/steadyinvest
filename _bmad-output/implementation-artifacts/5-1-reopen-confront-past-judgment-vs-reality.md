@@ -1,6 +1,6 @@
 # Story 5.1: Reopen & confront a past judgment vs reality
 
-Status: ready-for-dev
+Status: done
 
 <!-- ⚠️ GATED on Epic-4 retro action D2 (provider decision) for LIVE data. Dev-able headless via
      fixtures/FakeProvider; the on-display GO/NO-GO with Guy's real data waits on D2. -->
@@ -23,24 +23,24 @@ so that I learn from my own past judgments.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — `persistence`: the price-history cache + migration v4→v5 (AC1, AC3)** — `persistence/src/{schema.rs, migrations.rs, price_history.rs}`
-  - [ ] `schema::migrate_to_v5` = `CREATE TABLE price_history (id TEXT PK, security_ticker TEXT NOT NULL, close_date TEXT NOT NULL, close TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL)` + `CREATE UNIQUE INDEX idx_price_history_ticker_date ON price_history(security_ticker, close_date)` (dedup). Register `(5, migrate_to_v5)` in `REGISTRY`; shift the fake-future step v5→v6; forward-migration test for v5; bump `readonly_newer` `supported` 4→5; update the registry-doc comment.
-  - [ ] New `persistence/src/price_history.rs`: `upsert_closes(ticker, &[(date, close, source)])` (INSERT OR IGNORE on the unique index → idempotent append; bumps `logical_version` only when rows actually land — the C4 no-op guard) + `closes_since(ticker, since_date) -> Vec<(date, close)>` (ordered by date). Exact-decimal TEXT.
-  - [ ] Integration test: upsert closes (with a duplicate date → ignored), `closes_since` returns the ordered window; a re-upsert of identical rows bumps no version.
+- [x] **Task 1 — `persistence`: the price-history cache + migration v4→v5 (AC1, AC3)** — `persistence/src/{schema.rs, migrations.rs, price_history.rs}`
+  - [x] `schema::migrate_to_v5` = `CREATE TABLE price_history (id TEXT PK, security_ticker TEXT NOT NULL, close_date TEXT NOT NULL, close TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL)` + `CREATE UNIQUE INDEX idx_price_history_ticker_date ON price_history(security_ticker, close_date)` (dedup). Register `(5, migrate_to_v5)` in `REGISTRY`; shift the fake-future step v5→v6; forward-migration test for v5; bump `readonly_newer` `supported` 4→5; update the registry-doc comment.
+  - [x] New `persistence/src/price_history.rs`: `upsert_closes(ticker, &[(date, close, source)])` (INSERT OR IGNORE on the unique index → idempotent append; bumps `logical_version` only when rows actually land — the C4 no-op guard) + `closes_since(ticker, since_date) -> Vec<(date, close)>` (ordered by date). Exact-decimal TEXT.
+  - [x] Integration test: upsert closes (with a duplicate date → ignored), `closes_since` returns the ordered window; a re-upsert of identical rows bumps no version.
 
-- [ ] **Task 2 — App: populate the cache via the Story-4.4 refresh path (AC1, AC4)** — `app/src/{state.rs, main.rs}`
-  - [ ] On a holdings/study price refresh (the existing `ingestion` `/eod` path, Story 4.4), also persist the returned close(s) into `price_history` for the ticker (the refresh already fetches the latest close; specify whether to backfill a series or append the latest — **append the latest close per refresh** for v1, since the free `/eod` returns a series the adapter can map; a fuller backfill is a later refinement). Provider-gated: with `FakeProvider`/fixtures the series is deterministic for tests.
-  - [ ] Test: a fake refresh writes the close(s) into `price_history`; `closes_since(decision_date)` reflects them.
+- [x] **Task 2 — App: populate the cache via the Story-4.4 refresh path (AC1, AC4)** — `app/src/{state.rs, main.rs}`
+  - [x] On a holdings/study price refresh (the existing `ingestion` `/eod` path, Story 4.4), also persist the returned close(s) into `price_history` for the ticker (the refresh already fetches the latest close; specify whether to backfill a series or append the latest — **append the latest close per refresh** for v1, since the free `/eod` returns a series the adapter can map; a fuller backfill is a later refinement). Provider-gated: with `FakeProvider`/fixtures the series is deterministic for tests.
+  - [x] Test: a fake refresh writes the close(s) into `price_history`; `closes_since(decision_date)` reflects them.
 
-- [ ] **Task 3 — App state: the confront read (AC2, AC3)** — `app/src/state.rs`
-  - [ ] `confront(&self, study_id) -> ConfrontView` (read-only): read the `Study`; derive the **recorded projection band** from its stored judgment/outputs (forecast-high/low over `FORECAST_HORIZON_YEARS`, anchored at `created_at`) — reuse a read-only `core::ssg::growth` helper, NO recompute of the verdict; read `price_history::closes_since(ticker, study.created_at)`; return the band geometry + the actual close series (+ an `available: bool` empty-state flag). Pure read — no journal write.
-  - [ ] Test: a study with cached post-decision closes yields a band + an actual series; a study with none yields `available = false`.
+- [x] **Task 3 — App state: the confront read (AC2, AC3)** — `app/src/state.rs`
+  - [x] `confront(&self, study_id) -> ConfrontView` (read-only): read the `Study`; derive the **recorded projection band** from its stored judgment/outputs (forecast-high/low over `FORECAST_HORIZON_YEARS`, anchored at `created_at`) — reuse a read-only `core::ssg::growth` helper, NO recompute of the verdict; read `price_history::closes_since(ticker, study.created_at)`; return the band geometry + the actual close series (+ an `available: bool` empty-state flag). Pure read — no journal write.
+  - [x] Test: a study with cached post-decision closes yields a band + an actual series; a study with none yields `available = false`.
 
-- [ ] **Task 4 — main.rs + Slint: the confront overlay (AC2, AC3)** — `app/src/main.rs`, `app/ui/`
-  - [ ] A "confront" entry on a saved study (reopen mode) that pushes the `ConfrontView` into a native Slint chart (Path for the recorded band + the actual trajectory line; reuse the §1 growth-chart drawing primitives — no zones on this chart, UX-DR10). Neutral empty state when `available == false`. Read-only — opening confront writes nothing.
-  - [ ] Posture: any new `MSG_*` registered + count bumped; `@tr` floor bumped by the exact number of new literals.
+- [x] **Task 4 — main.rs + Slint: the confront overlay (AC2, AC3)** — `app/src/main.rs`, `app/ui/`
+  - [x] A "confront" entry on a saved study (reopen mode) that pushes the `ConfrontView` into a native Slint chart (Path for the recorded band + the actual trajectory line; reuse the §1 growth-chart drawing primitives — no zones on this chart, UX-DR10). Neutral empty state when `available == false`. Read-only — opening confront writes nothing.
+  - [x] Posture: any new `MSG_*` registered + count bumped; `@tr` floor bumped by the exact number of new literals.
 
-- [ ] **Task 5 — Gates (AC4)** — fmt, clippy `-D`, `test --workspace`, `deny` + smoke. Confirm `core::ssg` re-diffs clean (fingerprint/golden/determinism green); **no `contract` change, no new dep** (`Cargo.lock`/`deny.toml` unchanged); migration **v4→v5 only** (`user_version` latest = 5, `SCHEMA_VERSION` stays 1); `@tr` floor + `USER_FACING_MESSAGES` inventory bumped exactly. **Headless** GO via `FakeProvider`/fixtures; live GO/NO-GO deferred to the D2 provider decision.
+- [x] **Task 5 — Gates (AC4)** — fmt, clippy `-D`, `test --workspace`, `deny` + smoke. Confirm `core::ssg` re-diffs clean (fingerprint/golden/determinism green); **no `contract` change, no new dep** (`Cargo.lock`/`deny.toml` unchanged); migration **v4→v5 only** (`user_version` latest = 5, `SCHEMA_VERSION` stays 1); `@tr` floor + `USER_FACING_MESSAGES` inventory bumped exactly. **Headless** GO via `FakeProvider`/fixtures; live GO/NO-GO deferred to the D2 provider decision.
 
 ## Dev Notes
 
@@ -90,11 +90,37 @@ With fixtures/demo (AAPL.US): open a saved study in confront → the recorded fo
 ## Dev Agent Record
 
 ### Agent Model Used
+Claude Opus 4.8 (1M context).
 
 ### Debug Log References
+Gates green: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features --locked -D warnings`, `cargo test --workspace --locked` (**587 tests**), `cargo deny check` (advisories/bans/licenses/sources ok), smoke `timeout cargo run -p steadyinvest-app` (exit 124).
 
 ### Completion Notes List
+- **AC1 — price-history cache + migration v4→v5.** `persistence/src/price_history.rs`: `upsert_closes` (`INSERT OR IGNORE`, dedup by `(security_ticker, close_date)` via a unique index, deterministic `id = "{ticker}:{date}"` — no injected UUID, ADD15) + `closes_since(ticker, since_date)` (ordered window, lexical `>=` on `YYYY-MM-DD` = chronological). `schema::migrate_to_v5` creates the table; `REGISTRY` gains `(5, migrate_to_v5)`; the fake-future test shifted v5→v6; `readonly_newer` `supported` 4→5. Close is exact-decimal **TEXT** (NFR-C1). `SCHEMA_VERSION` stays 1.
+- **AC2 — confront overlay.** `state::confront(study_id) -> ConfrontView` (read-only): band re-derived deterministically from the **frozen stored judgment** via `engine::build_snapshot` (the only faithful path — the `Study` blob persists inputs only, not outputs; the SSG engine is pure so the decision-time band reproduces bit-for-bit and is invariant to `current_price`), actual trajectory from `closes_since`. Native Slint overlay (`app/ui/components/confront_overlay.slint`): a faint neutral band rectangle under the bright actual-trajectory line (NO zone hues — UX-DR10), wired via a `Confront` global + a "Confronter" row action. Neutral empty state when `available == false`.
+- **AC3 — strictly read-only.** `confront()` writes nothing and bumps no `logical_version` (test `confront_does_not_bump_the_version_read_only`). The cache write (`upsert_closes`) touches **only** `price_history` — see the review fix below.
+- **AC4 — guardrails.** `git diff main` on `core/`, `contract/`, `Cargo.lock`, `deny.toml` is **empty** (no core/contract change, no new dependency). Migration v4→v5 only. 8 new FR13-neutral `@tr` strings; posture `@tr` floor 306→314; no new `MSG_*` (confront surfaces no notices, inventory stays 75).
+- **3-layer adversarial review (Blind Hunter / Edge Case Hunter / Acceptance Auditor) — 4 patches, 1 defer:**
+  - **MED (patch, both finders):** a single cached close rendered an invisible bare `MoveTo`. `confront_chart` now draws a visible marker box for the `n == 1` case (the common single-refresh case). Locked by `confront_chart_single_close_draws_a_visible_marker_not_a_bare_move`.
+  - **MED→design (patch, Auditor AC3-PARTIAL):** `upsert_closes` no longer bumps `logical_version`. The cache is local, reconstructible, and **excluded from the export `JournalSnapshot`**; bumping the identity counter on a price refresh would desync version-from-exported-content. It is now the only writer that doesn't bump — making AC3 ("touches only price_history") literally true. Test rewritten: `caching_closes_never_bumps_the_journal_identity_version`.
+  - **LOW (patch):** `confront()` doc clarified (deterministic rebuild from the frozen study, not a re-decision).
+  - **LOW (patch):** posture floor bumped + Story 5.1 narrative line (gate kept strict).
+  - **MED deferred → issue #72:** closes are keyed by the **refresh date**, not the provider's real EOD session date (and same-day is first-wins). Fixing requires expanding the `MarketDataProvider` surface, which AC4 forbids — documented as a known limitation in `cache_close`; the x-axis is ordinal for the MVP.
 
 ### File List
+- `persistence/src/price_history.rs` (NEW) — the cache (`upsert_closes` / `closes_since`).
+- `persistence/src/schema.rs` — `migrate_to_v5` + table-count / naming-exception tests.
+- `persistence/src/migrations.rs` — `REGISTRY (5, …)`; fake-future v5→v6; v5 assertions.
+- `persistence/src/lib.rs` — `mod price_history;`.
+- `persistence/tests/readonly_newer.rs` — `supported: 5`.
+- `app/src/state.rs` — `ConfrontView`, `confront()`, `cache_close()` (+ hooks in `apply_holding_price` / `apply_provider_refresh`).
+- `app/src/viewmodel/chart.rs` — `confront_chart()` (+ single-close marker) + confront tests.
+- `app/src/main.rs` — `Confront::on_request` / `on_dismiss` wiring.
+- `app/src/posture.rs` — `@tr` floor 306→314.
+- `app/ui/state.slint` — `ConfrontState` struct + `Confront` global.
+- `app/ui/components/confront_overlay.slint` (NEW) — the native overlay.
+- `app/ui/app.slint` — mount + re-export of the overlay/global.
+- `app/ui/screens/dashboard.slint` — the "Confronter" row action.
 
 ### Change Log
+- 2026-06-30 — Story 5.1 implemented (confront: recorded §4 band vs actual close trajectory; `price_history` cache, migration v4→v5). 3-layer review: 4 patches applied, 1 defer (#72). 587 tests; all gates green. Status → done.

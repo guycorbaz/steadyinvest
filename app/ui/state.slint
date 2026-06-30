@@ -154,6 +154,20 @@ export struct GrowthChartState {
     judgment-label: string,             // formatted est. high EPS caption ("" when unset)
 }
 
+// The confront overlay geometry (Story 5.1) — the recorded §4 forecast band (a shaded rectangle) and
+// the security's actual close trajectory since the decision (a polyline), both Path `commands` on a
+// shared linear-price viewbox. `available == false` → a neutral empty state.
+export struct ConfrontState {
+    available: bool,
+    chart-w: float,
+    chart-h: float,
+    actual-commands: string,            // the actual close trajectory polyline
+    band-commands: string,              // the recorded forecast band rectangle
+    high-label: string,                 // formatted forecast-high bound
+    low-label: string,                  // formatted forecast-low bound
+    decision-date: string,
+}
+
 // §2 computed results: per-year PTP%/ROE% (aligned with year-headers), the 5-yr averages + trends.
 export struct MgmtComputed {
     ptp: [string],
@@ -594,6 +608,15 @@ export global Watchlist {
     callback move-watch(string, bool); // id, up?
     callback link-watch(string); // id → link to a same-ticker study
     callback unlink-watch(string); // id
+}
+
+// The confront overlay (Story 5.1, FR50): reopen a saved study to compare its recorded §4 forecast
+// band against the security's actual close trajectory since the decision. Read-only — never mutates.
+export global Confront {
+    in-out property <bool> open: false;          // is the overlay showing?
+    in-out property <ConfrontState> state;       // the geometry to draw (or an empty state)
+    callback request(string);                     // study id → host computes the ConfrontState
+    callback dismiss();
 }
 
 // One holding in the single portfolio (Story 4.3, FR36). Amounts cross as already-formatted display
