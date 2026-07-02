@@ -69,6 +69,19 @@ impl MarketDataProvider for Provider {
             Provider::Fake(p) => p.fetch_latest_price(ticker, api_key).await,
         }
     }
+
+    async fn fetch_fx_rate(
+        &self,
+        base: &str,
+        quote: &str,
+        api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError> {
+        match self {
+            Provider::Eodhd(p) => p.fetch_fx_rate(base, quote, api_key).await,
+            Provider::TwelveData(p) => p.fetch_fx_rate(base, quote, api_key).await,
+            Provider::Fake(p) => p.fetch_fx_rate(base, quote, api_key).await,
+        }
+    }
 }
 
 /// Fetch a ticker, normalize it through `core`, and compute the dependency digest. The latest price
@@ -100,6 +113,19 @@ pub async fn fetch_price(
     api_key: Option<&str>,
 ) -> Result<Option<Decimal>, IngestionError> {
     Ok(provider.fetch_latest_price(ticker, api_key).await?)
+}
+
+/// Fetch the latest BASE→QUOTE exchange rate (Story 6.5, FR28) — the FX sibling of [`fetch_price`],
+/// with the same error-conversion shape. User-initiated only (FR65). Each adapter spells the pair
+/// in its own symbol convention and reuses its latest-price wire path; `Ok(None)` when the provider
+/// has no quote for the pair (never an inverted-pair guess — the app refuses honestly instead).
+pub async fn fetch_fx_rate(
+    provider: &Provider,
+    base: &str,
+    quote: &str,
+    api_key: Option<&str>,
+) -> Result<Option<Decimal>, IngestionError> {
+    Ok(provider.fetch_fx_rate(base, quote, api_key).await?)
 }
 
 /// SHA-256 hex over `"{provider_tag}:{ticker}"` + each canonical year's value-normalized decimals (so
@@ -149,6 +175,9 @@ pub fn dependency_digest(
 pub struct FakeProvider {
     result: Result<RawFinancials, ProviderError>,
     latest_price: Option<Decimal>,
+    /// The canned BASE→QUOTE rate `fetch_fx_rate` reports (Story 6.5) — `None` = "no quote for the
+    /// pair", the honest provider answer; the canned `result`'s error still wins.
+    fx_rate: Option<Decimal>,
 }
 
 impl FakeProvider {
@@ -157,6 +186,7 @@ impl FakeProvider {
         FakeProvider {
             result,
             latest_price: None,
+            fx_rate: None,
         }
     }
 
@@ -168,7 +198,15 @@ impl FakeProvider {
         FakeProvider {
             result,
             latest_price,
+            fx_rate: None,
         }
+    }
+
+    /// Give the fake a canned FX rate (Story 6.5 — drives the fx-refresh path in `app` tests).
+    /// Builder-style so the existing constructors stay untouched.
+    pub fn with_fx_rate(mut self, fx_rate: Option<Decimal>) -> Self {
+        self.fx_rate = fx_rate;
+        self
     }
 }
 
@@ -191,6 +229,17 @@ impl MarketDataProvider for FakeProvider {
     ) -> Result<Option<Decimal>, ProviderError> {
         // Mirror the canned result's success/failure, handing back the configured latest price.
         self.result.clone().map(|_| self.latest_price)
+    }
+
+    async fn fetch_fx_rate(
+        &self,
+        _base: &str,
+        _quote: &str,
+        _api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError> {
+        // Mirror the canned result's success/failure, handing back the configured FX rate
+        // (`None` = the provider has no quote for the pair).
+        self.result.clone().map(|_| self.fx_rate)
     }
 }
 
@@ -285,6 +334,35 @@ mod tests {
 
         // Same canonical financials → same digest, regardless of `latest_price`.
         assert_eq!(fetched.digest, plain.digest);
+    }
+
+    #[tokio::test]
+    async fn fetch_fx_rate_dispatches_and_mirrors_provider_errors() {
+        // Story 6.5: the FX sibling of `fetch_price` — the enum dispatch + the wrapper's
+        // error-conversion shape, driven through the fake.
+        let rate = Decimal::from_str_exact("0.9312").unwrap();
+        let ok = Provider::Fake(FakeProvider::returning(Ok(raw("100"))).with_fx_rate(Some(rate)));
+        assert_eq!(
+            fetch_fx_rate(&ok, "EUR", "CHF", Some("k")).await.unwrap(),
+            Some(rate)
+        );
+
+        // A fake without a canned rate = the provider has no quote for the pair → Ok(None).
+        let none = Provider::Fake(FakeProvider::returning(Ok(raw("100"))));
+        assert_eq!(
+            fetch_fx_rate(&none, "EUR", "CHF", Some("k")).await.unwrap(),
+            None
+        );
+
+        // A provider failure propagates as an IngestionError, exactly like `fetch_price`.
+        let err = Provider::Fake(
+            FakeProvider::returning(Err(ProviderError::InvalidOrAbsentKey))
+                .with_fx_rate(Some(rate)),
+        );
+        assert!(matches!(
+            fetch_fx_rate(&err, "EUR", "CHF", None).await.unwrap_err(),
+            IngestionError::Provider(ProviderError::InvalidOrAbsentKey)
+        ));
     }
 
     #[tokio::test]

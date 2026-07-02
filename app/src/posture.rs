@@ -611,9 +611,11 @@ mod tests {
         // template, the Réglages withholding panel title + placeholder + the Enregistrer reuse):
         // +9 = 346. Its review adds the on-form dividend-semantics caption (the « Frais (vide =
         // 0) » placeholder is a buy/sell fact, so the dividend meaning is stated on the form):
-        // +1 = 347. Floor strict.
+        // +1 = 347. Story 6.5 adds the FX panel (the Taux de change title, the empty state, the
+        // date-source template, the two refresh labels, the three manual-entry placeholders, the
+        // Enregistrer le taux action): +9 = 356. Floor strict.
         assert!(
-            total >= 347,
+            total >= 356,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -676,9 +678,13 @@ mod tests {
         // the ledger-backed direct-edit refusal (MSG_LEDGER_BACKED): 85 + 1 = 86. Story 6.4 adds
         // the two dividend notices (recorded + the withholding-exceeds-gross refusal): 86 + 2 = 88;
         // its review adds the retired-holding scope refusal (MSG_DIVIDEND_RETIRED): 88 + 1 = 89.
+        // Story 6.5 adds the six FX notices (recorded, invalid-rate, same-currency, refreshing,
+        // the refreshed-count template, no-pairs): 89 + 6 = 95; its review adds three more
+        // (journal-changed-in-flight, invalid-currency [a currency problem must not be reported
+        // as a rate problem], future-date): 95 + 3 = 98.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            89,
+            98,
             "state.rs message inventory changed — register the new notice"
         );
     }

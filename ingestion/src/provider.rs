@@ -53,4 +53,20 @@ pub trait MarketDataProvider: Send + Sync {
         ticker: &str,
         api_key: Option<&str>,
     ) -> Result<Option<Decimal>, ProviderError>;
+
+    /// Fetch the latest BASE→QUOTE exchange rate (Story 6.5, FR28) — how many units of `quote` one
+    /// unit of `base` buys. **User-initiated only** (FR65: never background-polled); the app calls
+    /// this from the « Actualiser les taux » action, once per foreign currency actually in use.
+    ///
+    /// Each adapter spells the pair in its own symbol convention (Twelve Data `"{base}/{quote}"` on
+    /// `/price`; EODHD `"{base}{quote}.FOREX"` on `/eod` — the #70 per-provider-symbol class) and
+    /// **delegates to its own latest-price path**, because an FX quote is the same wire shape as an
+    /// equity's latest price. Returns `Ok(None)` when the provider has no quote for the pair —
+    /// never an inverted-pair guess. Same NFR-S1 discipline as every fetch (key never in errors).
+    async fn fetch_fx_rate(
+        &self,
+        base: &str,
+        quote: &str,
+        api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError>;
 }

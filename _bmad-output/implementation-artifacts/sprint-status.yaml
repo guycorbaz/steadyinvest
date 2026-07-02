@@ -413,7 +413,7 @@ development_status:
   6-2-multi-currency-holdings: done
   6-3-transaction-ledger-partial-sells-weighted-average-cost-basis: done
   6-4-dividends-gross-study-net-reinvestable: done
-  6-5-fx-acquisition-consolidation: backlog
+  6-5-fx-acquisition-consolidation: done
   6-6-capital-at-risk-per-currency-bank-global: backlog
   6-7-concentration-check-diversify-by-size: backlog
   6-8-replacement-candidate-surfacing-on-sell: backlog

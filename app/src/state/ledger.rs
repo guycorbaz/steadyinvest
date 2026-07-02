@@ -82,7 +82,7 @@ impl OwnedEntry {
 /// Normalize the user's transaction date (FR39's "date") to the stored RFC3339 spelling.
 /// `""` defaults to today (the injected clock's date); otherwise a plausible `YYYY-MM-DD` is
 /// required and stored as midnight UTC so it orders correctly against full timestamps.
-fn normalize_event_date(input: &str, now_rfc3339: &str) -> Result<String, String> {
+pub(super) fn normalize_event_date(input: &str, now_rfc3339: &str) -> Result<String, String> {
     let trimmed = input.trim();
     let date = if trimmed.is_empty() {
         now_rfc3339.get(..10).unwrap_or_default().to_string()

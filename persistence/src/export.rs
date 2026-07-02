@@ -22,6 +22,7 @@
 //! neither is part of the v1 snapshot; the current judgment travels inside each [`Study`] blob.
 
 use crate::error::{Error, Result};
+use crate::fx::FxRateItem;
 use crate::holdings::{HoldingItem, PortfolioItem};
 use crate::journal::Journal;
 use crate::transactions::TransactionItem;
@@ -60,6 +61,13 @@ pub struct JournalSnapshot {
     pub portfolios: Vec<PortfolioItem>,
     pub holdings: Vec<HoldingItem>,
     pub transactions: Vec<TransactionItem>,
+    /// The dated, source-aware FX rates (Story 6.5, FR28). `#[serde(default)]` +
+    /// `skip_serializing_if` is the deliberate #78 additive rail: an OLD file (no array) imports
+    /// fine into this build; an EMPTY store exports WITHOUT the array (so a pre-6.5 build still
+    /// reads a no-FX export); a file that DOES carry rates is a typed rejection on an old build
+    /// (`deny_unknown_fields` above) — never a silent drop.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fx_rates: Vec<FxRateItem>,
 }
 
 /// The on-disk whole-journal export envelope. `payload` is the canonical serialized
@@ -88,6 +96,7 @@ pub struct ImportSummary {
     pub portfolios: usize,
     pub holdings: usize,
     pub transactions: usize,
+    pub fx_rates: usize,
 }
 
 /// Serialize a snapshot into its envelope JSON. The hash is taken over the **payload** (the snapshot
@@ -164,6 +173,7 @@ impl Journal {
             portfolios: self.list_portfolios()?,
             holdings: self.list_all_holdings()?,
             transactions: self.list_all_transactions()?,
+            fx_rates: self.list_fx_rates()?,
         })
     }
 
@@ -369,6 +379,67 @@ impl Journal {
             crate::watchlist::repack_positions(&tx)?;
         }
 
+        // FX rates (Story 6.5, FR28) — 2026-07-02 review (HIGH): the upsert is keyed by the
+        // NATURAL key `(base, quote, rate_date, source)`, exactly like the live writer — an
+        // id-keyed upsert would let a MERGE (two machines minting different ids for the same
+        // dated rate) plant natural-key duplicates the writer can never repair and the
+        // arbitration then mis-picks. Rows are validated first (the manual form's invariants —
+        // a foreign file must not plant states the live path refuses, the 6.1 precedent).
+        for r in &snapshot.fx_rates {
+            // Shape-only validation (this layer stays calc-agnostic — no decimal parser here):
+            // digits with at most one dot, and at least one non-zero digit ⇒ a positive decimal.
+            let rate_ok = !r.rate.is_empty()
+                && r.rate.chars().all(|c| c.is_ascii_digit() || c == '.')
+                && r.rate.matches('.').count() <= 1
+                && r.rate.chars().any(|c| ('1'..='9').contains(&c));
+            let date_ok = r.rate_date.len() == 10
+                && r.rate_date.as_bytes()[4] == b'-'
+                && r.rate_date.as_bytes()[7] == b'-';
+            let pair_ok = r.base_currency != r.quote_currency
+                && !r.base_currency.is_empty()
+                && !r.quote_currency.is_empty();
+            if !rate_ok || !date_ok || !pair_ok {
+                return Err(Error::ImportMalformed {
+                    detail: "an fx rate row is not a valid dated positive rate".to_string(),
+                });
+            }
+            let existing: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM fx_rates
+                     WHERE base_currency = ?1 AND quote_currency = ?2
+                       AND rate_date = ?3 AND source = ?4
+                     ORDER BY id LIMIT 1",
+                    rusqlite::params![r.base_currency, r.quote_currency, r.rate_date, r.source],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match existing {
+                Some(existing_id) => {
+                    tx.execute(
+                        "UPDATE fx_rates SET rate = ?2, created_at = ?3
+                          WHERE id = ?1 AND (rate IS NOT ?2 OR created_at IS NOT ?3)",
+                        rusqlite::params![existing_id, r.rate, r.created_at.0],
+                    )?;
+                }
+                None => {
+                    tx.execute(
+                        "INSERT INTO fx_rates
+                             (id, base_currency, quote_currency, rate, rate_date, source, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        rusqlite::params![
+                            r.id.to_string(),
+                            r.base_currency,
+                            r.quote_currency,
+                            r.rate,
+                            r.rate_date,
+                            r.source,
+                            r.created_at.0,
+                        ],
+                    )?;
+                }
+            }
+        }
+
         // One heartbeat bump for the whole import act (an explicit user action, not a phantom write).
         // Only when the file actually **wrote** something — an empty snapshot, or an empty snapshot
         // merged into a journal that already has a portfolio, is a true no-op (no phantom revision on a
@@ -380,7 +451,8 @@ impl Journal {
             || !snapshot.watch_items.is_empty()
             || !snapshot.holdings.is_empty()
             || !snapshot.transactions.is_empty()
-            || !snapshot.portfolios.is_empty();
+            || !snapshot.portfolios.is_empty()
+            || !snapshot.fx_rates.is_empty();
         if applied {
             bump_logical_version(&tx)?;
         }
@@ -390,6 +462,7 @@ impl Journal {
             source_journal_id: snapshot.journal_id,
             source_logical_version: snapshot.logical_version,
             studies: snapshot.studies.len(),
+            fx_rates: snapshot.fx_rates.len(),
             watch_items: snapshot.watch_items.len(),
             // The count of portfolios the import actually **created** (new ids), not mere existence:
             // a same-id portfolio that was updated in place does not count.

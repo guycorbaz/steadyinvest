@@ -10,10 +10,12 @@
 //! clock. A journal file written by a newer schema opens **read-only** with a neutral,
 //! cause-named error on writes (NFR-R3). Epic 5 added whole-journal export/import (`export`),
 //! raw-file backup/restore (`restore`), the sync-folder guard + single-instance lock
-//! (`journal`), and the local price-history cache (`price_history`).
+//! (`journal`), and the local price-history cache (`price_history`). Epic 6 added the dated,
+//! source-aware FX-rate store (`fx`, Story 6.5, FR28).
 
 mod error;
 mod export;
+mod fx;
 mod holdings;
 mod journal;
 mod migrations;
@@ -27,6 +29,7 @@ mod watchlist;
 
 pub use error::{Error, Result};
 pub use export::{ImportSummary, JournalExport, JournalSnapshot, StudyRecord};
+pub use fx::FxRateItem;
 pub use holdings::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
 pub use journal::{clear_lock, lock_is_stale, Journal, JournalMode};
 pub use restore::{inspect_backup, restore_journal_file, BackupInfo};

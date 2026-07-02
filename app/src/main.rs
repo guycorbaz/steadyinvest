@@ -218,6 +218,8 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         refresh_studies(&ui, &journal_state.borrow());
         refresh_watchlist(&ui, &journal_state.borrow());
+        // Story 6.5 (FR28): the stored FX rates for the Réglages panel.
+        wiring::fx::push_fx_rates(&ui, &journal_state.borrow());
         refresh_holdings(
             &ui,
             &journal_state.borrow(),
@@ -277,6 +279,7 @@ fn main() -> Result<(), slint::PlatformError> {
     wiring::cells::wire_cells(&ui, &session);
     wiring::judgment::wire_judgment(&ui, &session);
     wiring::prefs::wire_prefs(&ui, &session);
+    wiring::fx::wire_fx(&ui, &session);
 
     // show() → re-apply the size from inside the running event loop → run: before the window
     // is mapped winit has no scale factor yet and misapplies a physical size (observed on

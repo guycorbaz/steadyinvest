@@ -35,6 +35,25 @@ export struct WatchRow {
     in-buy-zone: bool, // the linked study's current price is in its §4 buy zone (Story 4.2, FR35)
 }
 
+// One stored exchange rate (Story 6.5, FR28): dated + source-aware, BASE → QUOTE (the reference
+// currency). `rate` is the exact TEXT spelling; display strings built in Rust.
+export struct FxRateRow {
+    pair: string,      // "EUR → CHF"
+    rate: string,
+    date: string,      // AAAA-MM-JJ
+    source: string,    // "manuel" | provider wire name
+}
+
+// Story 6.5 (FR28): the FX-rates surface — stored rates + the two acquisition paths (provider
+// refresh, user-initiated only; manual entry). NO conversion happens here (consolidation = 6.6).
+export global Fx {
+    in-out property <[FxRateRow]> rates;
+    in-out property <bool> refreshing;
+    in-out property <string> notice;
+    callback refresh-rates();                     // provider fetch for the foreign currencies in use
+    callback add-rate(string, string, string) -> bool; // base, rate, date ("" = today) → recorded?
+}
+
 // One entry of the recent-journals list (Story 5.5). `path` is the open key; `name` is a short label;
 // `current` marks the journal that is open right now.
 export struct RecentJournalRow {

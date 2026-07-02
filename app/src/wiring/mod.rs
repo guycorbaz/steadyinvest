@@ -8,6 +8,7 @@
 
 pub(crate) mod cells;
 pub(crate) mod fetch;
+pub(crate) mod fx;
 pub(crate) mod holdings;
 pub(crate) mod journal;
 pub(crate) mod judgment;

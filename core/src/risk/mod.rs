@@ -4,13 +4,16 @@
 //! golden corpus / determinism gates are unaffected by this module.
 //!
 //! Story 4.5 (FR42) opens it with the **trailing-stop** primitive: a stop level that **ratchets up
-//! only**; Story 6.3 (FR39) adds the [`ledger`] weighted-average cost-basis derivation. All math is
-//! exact [`Decimal`] — never `f64`.
+//! only**; Story 6.3 (FR39) adds the [`ledger`] weighted-average cost-basis derivation; Story 6.5
+//! (FR28) adds the [`fx`] consolidation-only conversion primitive. All math is exact [`Decimal`]
+//! — never `f64`.
 
 use rust_decimal::Decimal;
 
+mod fx;
 mod ledger;
 
+pub use fx::convert;
 pub use ledger::{
     derive_position, net_dividend_cash, LedgerError, LedgerEvent, LedgerEventKind, PositionBasis,
 };

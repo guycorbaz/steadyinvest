@@ -165,6 +165,39 @@ pub const MSG_DIVIDEND_WITHHOLDING: &str =
 pub const MSG_DIVIDEND_RETIRED: &str =
     "La position est retirée du portefeuille ; le dividende n'a pas été enregistré.";
 
+/// FX-rates copy (Story 6.5, FR28) — fact-stating, posture-gated. Rates are dated + source-aware,
+/// refreshed MANUALLY; conversion happens only at the consolidation views (Story 6.6).
+pub const MSG_FX_RECORDED: &str = "Le taux de change a été enregistré.";
+pub const MSG_FX_INVALID_RATE: &str =
+    "Le taux doit être un nombre strictement positif ; rien n'a été enregistré.";
+pub const MSG_FX_SAME_CURRENCY: &str =
+    "La devise de base est identique à la devise de référence ; rien n'a été enregistré.";
+pub const MSG_FX_REFRESHING: &str = "Actualisation des taux de change en cours.";
+/// `{n}` is replaced with the count of pairs whose rate landed; `{t}` with the requested total.
+pub const MSG_FX_REFRESHED: &str = "{n}/{t} taux actualisés.";
+/// Raised when no foreign currency is in use — there is no pair to refresh.
+pub const MSG_FX_NO_PAIRS: &str =
+    "Aucune devise étrangère au portefeuille ; il n'y a aucun taux à actualiser.";
+/// Raised when the journal changed while a rates refresh was in flight — the fetched rates were
+/// discarded, never written into the newly-opened journal (2026-07-02 review).
+pub const MSG_FX_JOURNAL_CHANGED: &str =
+    "Le journal a changé pendant l'actualisation ; les taux n'ont pas été enregistrés.";
+/// Raised when the manual base currency is not one of the supported set (a CURRENCY problem, not
+/// a rate problem — 2026-07-02 review); nothing is written.
+pub const MSG_FX_INVALID_CURRENCY: &str =
+    "La devise doit faire partie des devises prises en charge ; rien n'a été enregistré.";
+/// Raised when the manual rate date lies in the future — a future-dated rate would win the
+/// "latest" arbitration until that day arrives; nothing is written.
+pub const MSG_FX_FUTURE_DATE: &str =
+    "La date est postérieure à aujourd'hui ; rien n'a été enregistré.";
+
+/// Substitute the counts into [`MSG_FX_REFRESHED`].
+pub fn fx_refreshed_message(landed: usize, total: usize) -> String {
+    MSG_FX_REFRESHED
+        .replace("{n}", &landed.to_string())
+        .replace("{t}", &total.to_string())
+}
+
 /// Multiple-portfolio copy (Story 6.1, FR37) — fact-stating, posture-gated. The name guard, and the
 /// two guarded-delete refusals (the register never orphans a holding nor drops its last portfolio).
 pub const MSG_PORTFOLIO_INVALID_NAME: &str =
@@ -443,6 +476,15 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_DIVIDEND_RECORDED,
     MSG_DIVIDEND_WITHHOLDING,
     MSG_DIVIDEND_RETIRED,
+    MSG_FX_RECORDED,
+    MSG_FX_INVALID_RATE,
+    MSG_FX_SAME_CURRENCY,
+    MSG_FX_REFRESHING,
+    MSG_FX_REFRESHED,
+    MSG_FX_NO_PAIRS,
+    MSG_FX_JOURNAL_CHANGED,
+    MSG_FX_INVALID_CURRENCY,
+    MSG_FX_FUTURE_DATE,
     MSG_PORTFOLIO_INVALID_NAME,
     MSG_PORTFOLIO_HAS_HOLDINGS,
     MSG_PORTFOLIO_LAST,

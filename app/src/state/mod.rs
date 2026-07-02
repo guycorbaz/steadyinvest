@@ -38,6 +38,7 @@ use crate::clock::{Clock, IdGen};
 mod cells;
 mod confront;
 mod export_import;
+mod fx;
 mod holdings;
 mod journal_io;
 mod ledger;
