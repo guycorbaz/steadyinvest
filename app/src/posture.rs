@@ -601,9 +601,13 @@ mod tests {
         // The 6.2 review then unified the Réglages reference-currency chips on the pushed
         // SUPPORTED_CURRENCIES model (a `for` over plain codes — currency codes are not
         // translatable copy), retiring the four hardcoded @tr("CHF"/"EUR"/"USD"/"GBP") chips:
-        // −4 = 318. Floor strict.
+        // −4 = 318. Story 6.3 adds the transaction-ledger surface (the Transactions toggle pair,
+        // the sell-quantity placeholder, the ledger empty state, the Achat/Vente row nouns + the
+        // qty×price and Frais templates, the row Modifier/Supprimer, the five form placeholders,
+        // the record/update/abandon action labels): +18 = 336. Its review adds the ledger-form
+        // « Enregistrer une vente » (a second occurrence of the 4.7 label): +1 = 337. Floor strict.
         assert!(
-            total >= 318,
+            total >= 337,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -661,9 +665,12 @@ mod tests {
         // (MSG_PROVIDER_NONE): 74 + 1 = 75. Story 6.1 adds the three multiple-portfolio notices
         // (invalid name + the two guarded-delete refusals: has-holdings / last): 75 + 3 = 78. Story 6.2
         // adds the unsupported-holding-currency notice (MSG_HOLDING_INVALID_CURRENCY): 78 + 1 = 79.
+        // Story 6.3 adds the six transaction-ledger notices (buy-recorded, partial-sold, updated,
+        // deleted, the over-sell refusal, the invalid-date refusal): 79 + 6 = 85; its review adds
+        // the ledger-backed direct-edit refusal (MSG_LEDGER_BACKED): 85 + 1 = 86.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            79,
+            86,
             "state.rs message inventory changed — register the new notice"
         );
     }

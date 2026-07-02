@@ -31,5 +31,5 @@ pub use holdings::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
 pub use journal::{clear_lock, lock_is_stale, Journal, JournalMode};
 pub use restore::{inspect_backup, restore_journal_file, BackupInfo};
 pub use studies::StudySummary;
-pub use transactions::{TransactionItem, KIND_SELL};
+pub use transactions::{LedgerEntry, TransactionItem, KIND_BUY, KIND_SELL};
 pub use watchlist::WatchItem;

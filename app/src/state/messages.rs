@@ -131,6 +131,27 @@ pub const MSG_HOLDINGS_REFRESH_NONE: &str =
 pub const MSG_HOLDING_SOLD: &str =
     "La vente a été enregistrée ; la position a été retirée du portefeuille.";
 
+/// Transaction-ledger copy (Story 6.3, FR39) — fact-stating, posture-gated. The ledger records buys
+/// and (partial) sells; the position's quantity and weighted-average cost derive from it.
+pub const MSG_LEDGER_BUY_RECORDED: &str = "L'achat a été enregistré.";
+pub const MSG_LEDGER_PARTIAL_SOLD: &str =
+    "La vente partielle a été enregistrée ; la position reste au portefeuille.";
+pub const MSG_LEDGER_UPDATED: &str = "La transaction a été mise à jour.";
+pub const MSG_LEDGER_DELETED: &str = "La transaction a été supprimée.";
+/// Raised when a (possibly edited/backdated) sell would exceed the quantity held at that point of
+/// the history — the ledger never goes negative; nothing is written.
+pub const MSG_LEDGER_OVERSELL: &str =
+    "La quantité dépasse la quantité détenue à cette date ; rien n'a été enregistré.";
+/// Raised when the transaction date is not a plausible AAAA-MM-JJ; nothing is written.
+pub const MSG_LEDGER_INVALID_DATE: &str =
+    "La date doit être au format AAAA-MM-JJ ; rien n'a été enregistré.";
+/// Raised when the register's direct edit tries to change the quantity, price or currency of a
+/// holding whose position derives from its transaction ledger (2026-07-02 review, HIGH): a direct
+/// aggregate rewrite would silently desynchronize it from the recorded history — the ledger is the
+/// place to correct the position.
+pub const MSG_LEDGER_BACKED: &str =
+    "La quantité, le prix et la devise de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
+
 /// Multiple-portfolio copy (Story 6.1, FR37) — fact-stating, posture-gated. The name guard, and the
 /// two guarded-delete refusals (the register never orphans a holding nor drops its last portfolio).
 pub const MSG_PORTFOLIO_INVALID_NAME: &str =
@@ -399,6 +420,13 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDINGS_REFRESHING,
     MSG_HOLDINGS_REFRESH_NONE,
     MSG_HOLDING_SOLD,
+    MSG_LEDGER_BUY_RECORDED,
+    MSG_LEDGER_PARTIAL_SOLD,
+    MSG_LEDGER_UPDATED,
+    MSG_LEDGER_DELETED,
+    MSG_LEDGER_OVERSELL,
+    MSG_LEDGER_INVALID_DATE,
+    MSG_LEDGER_BACKED,
     MSG_PORTFOLIO_INVALID_NAME,
     MSG_PORTFOLIO_HAS_HOLDINGS,
     MSG_PORTFOLIO_LAST,

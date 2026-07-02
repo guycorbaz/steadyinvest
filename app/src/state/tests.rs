@@ -2180,7 +2180,7 @@ fn sell_holding_records_the_sell_and_drops_it_from_the_register() {
     );
 
     state
-        .sell_holding(ids[0], "  stop touché  ", "CHF")
+        .sell_holding(ids[0], "", "  stop touché  ", "CHF")
         .expect("the sell records");
 
     let remaining: Vec<_> = state
@@ -2208,19 +2208,28 @@ fn sell_holding_stamps_the_holdings_own_currency_not_the_reference() {
     state.add_holding("AAPL", "5", "150", "USD").unwrap();
     let id = state.list_holdings()[0].id;
 
-    state.sell_holding(id, "", "CHF").expect("the sell records");
+    state
+        .sell_holding(id, "", "", "CHF")
+        .expect("the sell records");
 
+    // Story 6.3: the first ledger mutation also materializes the opening BUY row (AC5), so the
+    // ledger holds opening + sell — both in the holding's own currency.
     let transactions = state
         .journal
         .as_ref()
         .unwrap()
         .list_all_transactions()
         .unwrap();
-    assert_eq!(transactions.len(), 1);
-    assert_eq!(
-        transactions[0].currency, "USD",
-        "the SELL row carries the holding's own currency, not the CHF reference"
+    assert_eq!(transactions.len(), 2, "opening buy + the sell");
+    assert!(
+        transactions.iter().all(|t| t.currency == "USD"),
+        "every ledger row carries the holding's own currency, not the CHF reference"
     );
+    let sell = transactions
+        .iter()
+        .find(|t| t.kind.as_deref() == Some("sell"))
+        .expect("the sell row");
+    assert_eq!(sell.quantity, "5", "a whole-position sell");
 }
 
 #[test]
@@ -2230,10 +2239,394 @@ fn sell_holding_refuses_an_absent_id() {
     state.add_holding("NESN", "10", "100", "CHF").unwrap();
     let ghost = Uuid::from_u128(0xDEAD);
     assert!(
-        state.sell_holding(ghost, "", "CHF").is_err(),
+        state.sell_holding(ghost, "", "", "CHF").is_err(),
         "selling a non-existent holding is refused, nothing written"
     );
     assert_eq!(state.list_holdings().len(), 1, "the register is untouched");
+}
+
+// ── Story 6.3 — transaction ledger, partial sells, weighted-average cost basis (FR39) ──
+
+#[test]
+fn a_buy_on_a_legacy_holding_materializes_the_opening_once_and_re_averages() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x630);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+
+    // First buy: 10 @ 110, fees 10 → opening (10 @ 100) materialized + buy → 20 @ 105.5.
+    state
+        .record_buy_for(id, "2026-07-01", "10", "110", "10", "", "CHF")
+        .expect("the buy records");
+    let ledger = state.holding_ledger(id);
+    assert_eq!(ledger.len(), 2, "opening buy + the recorded buy");
+    assert!(
+        ledger
+            .iter()
+            .all(|t| t.kind.as_deref() == Some("buy") && t.currency == "CHF"),
+        "both rows are buys in the holding's currency"
+    );
+    // (10×100 + 10×110 + 10) / 20 = 105.5 — Appendix A, fees INCLUDED.
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "20");
+    assert_eq!(
+        holding.purchase_price, "105.5",
+        "weighted-average, fees included"
+    );
+
+    // Second buy: NO re-seed of the opening (a buy row already exists).
+    state
+        .record_buy_for(id, "2026-07-02", "20", "100", "0", "", "CHF")
+        .expect("the second buy records");
+    let ledger = state.holding_ledger(id);
+    assert_eq!(ledger.len(), 3, "no second opening row");
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "40");
+    // (20×105.5 + 20×100) / 40 = 102.75.
+    assert_eq!(holding.purchase_price, "102.75");
+}
+
+#[test]
+fn a_partial_sell_reduces_the_quantity_and_keeps_the_holding_active() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x631);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+
+    let notice = state
+        .sell_holding(id, "4", "prise partielle", "CHF")
+        .expect("the partial sell records");
+    assert_eq!(notice, MSG_LEDGER_PARTIAL_SOLD);
+
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .expect("still in the register");
+    assert_eq!(holding.quantity, "6", "reduced, not retired");
+    assert_eq!(holding.purchase_price, "100", "a sell never re-averages");
+    assert!(holding.sold_at.is_none());
+
+    // Selling the rest retires it (the 4.7 flow) with the whole-position notice.
+    let notice = state
+        .sell_holding(id, "6", "", "CHF")
+        .expect("the closing sell records");
+    assert_eq!(notice, MSG_HOLDING_SOLD);
+    assert!(
+        !state.list_holdings().iter().any(|h| h.id == id),
+        "the emptied position left the register"
+    );
+}
+
+#[test]
+fn an_over_sell_is_refused_neutrally_and_writes_nothing() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x632);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+
+    assert_eq!(
+        state.sell_holding(id, "11", "", "CHF"),
+        Err(MSG_LEDGER_OVERSELL.to_string())
+    );
+    assert!(
+        state.holding_ledger(id).is_empty(),
+        "the refusal materialized nothing"
+    );
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "10", "the register is untouched");
+}
+
+#[test]
+fn deleting_the_retiring_sell_un_retires_the_holding() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x633);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .sell_holding(id, "", "", "CHF")
+        .expect("the sell records");
+    assert!(!state.list_holdings().iter().any(|h| h.id == id));
+
+    let sell_id = state
+        .holding_ledger(id)
+        .iter()
+        .find(|t| t.kind.as_deref() == Some("sell"))
+        .expect("the sell row")
+        .id;
+    state
+        .delete_transaction_for(id, sell_id, "CHF")
+        .expect("the delete applies");
+
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .expect("the holding is back in the register");
+    assert_eq!(holding.quantity, "10", "the restored opening position");
+    assert_eq!(holding.purchase_price, "100");
+    assert!(holding.sold_at.is_none(), "un-retired");
+}
+
+#[test]
+fn an_edit_that_makes_history_impossible_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x634);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .sell_holding(id, "4", "", "CHF")
+        .expect("the partial sell records");
+    let sell_id = state
+        .holding_ledger(id)
+        .iter()
+        .find(|t| t.kind.as_deref() == Some("sell"))
+        .unwrap()
+        .id;
+
+    // Editing the sell to 11 would exceed the 10 ever held → neutral refusal, nothing changed.
+    assert_eq!(
+        state.update_transaction_for(id, sell_id, "", "11", "100", "0", "", "CHF"),
+        Err(MSG_LEDGER_OVERSELL.to_string())
+    );
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "6", "the aggregate is untouched");
+
+    // A legal edit applies and re-derives the aggregate: the sell becomes 2 → 8 held.
+    state
+        .update_transaction_for(id, sell_id, "2026-07-02", "2", "100", "0", "raison", "CHF")
+        .expect("the edit applies");
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "8");
+}
+
+#[test]
+fn ledger_writes_are_refused_on_a_read_only_journal() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x635);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state.read_only = true;
+    assert_eq!(
+        state.record_buy_for(id, "", "1", "1", "", "", "CHF"),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+    assert_eq!(
+        state.sell_holding(id, "1", "", "CHF"),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+    assert_eq!(
+        state.delete_transaction_for(id, Uuid::from_u128(1), "CHF"),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+}
+
+#[test]
+fn a_bad_date_or_amount_on_a_buy_is_refused_neutrally() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x636);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    assert_eq!(
+        state.record_buy_for(id, "02/07/2026", "1", "1", "", "", "CHF"),
+        Err(MSG_LEDGER_INVALID_DATE.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "0", "1", "", "", "CHF"),
+        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "1", "-1", "", "", "CHF"),
+        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+    );
+    assert!(state.holding_ledger(id).is_empty(), "nothing materialized");
+}
+
+// ── Story 6.3 review patches (2026-07-02) ──
+
+#[test]
+fn deleting_the_opening_buy_that_sells_depend_on_is_refused_not_reinvented() {
+    // Review CRITICAL: the opening must NEVER be re-seeded from the derived aggregate. With a
+    // sell in the ledger, deleting the opening buy is an impossible history → neutral refusal,
+    // nothing changed (previously: a phantom 6@100 opening appeared and the position dropped to 2).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x63A);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .sell_holding(id, "4", "", "CHF")
+        .expect("the partial sell records");
+    let opening_id = state
+        .holding_ledger(id)
+        .iter()
+        .find(|t| t.kind.as_deref() == Some("buy"))
+        .expect("the materialized opening")
+        .id;
+
+    assert_eq!(
+        state.delete_transaction_for(id, opening_id, "CHF"),
+        Err(MSG_LEDGER_OVERSELL.to_string()),
+        "deleting the only buy the sell depends on refuses"
+    );
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "6", "nothing changed");
+    assert_eq!(state.holding_ledger(id).len(), 2, "both rows survive");
+}
+
+#[test]
+fn a_ledger_backed_holding_refuses_direct_quantity_price_currency_edits() {
+    // Review HIGH: once the aggregate is derived from the ledger, the 4.3 register edit must not
+    // desynchronize it. Ticker-only edits stay allowed (not ledger-derived).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x63B);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "2026-07-01", "10", "110", "0", "", "CHF")
+        .expect("the buy records");
+
+    assert_eq!(
+        state.update_holding(id, "NESN", "4", "105", "CHF"),
+        Err(MSG_LEDGER_BACKED.to_string()),
+        "a direct quantity edit is refused"
+    );
+    let stored = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(stored.quantity, "20", "aggregate untouched");
+    // A ticker-only edit (identical amounts/currency) still applies.
+    state
+        .update_holding(
+            id,
+            "NESN.SW",
+            &stored.quantity,
+            &stored.purchase_price,
+            "CHF",
+        )
+        .expect("a ticker-only edit is fine");
+    assert_eq!(state.list_holdings()[0].security_ticker, "NESN.SW");
+}
+
+#[test]
+fn a_ledger_form_sell_records_the_explicit_price_and_fees() {
+    // Review decision (FR39 to the letter): the ledger-form sell carries the user's own price,
+    // date and fees — unlike the trigger sell (study price, fees 0).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x63C);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+
+    let notice = state
+        .record_sell_for(id, "2026-07-01", "4", "123.45", "9.90", "allègement", "CHF")
+        .expect("the ledger sell records");
+    assert_eq!(notice, MSG_LEDGER_PARTIAL_SOLD);
+
+    let sell = state
+        .holding_ledger(id)
+        .into_iter()
+        .find(|t| t.kind.as_deref() == Some("sell"))
+        .expect("the sell row");
+    assert_eq!(
+        sell.unit_price, "123.45",
+        "the explicit price, not the study's"
+    );
+    assert_eq!(sell.fees, "9.90");
+    assert_eq!(sell.occurred_at.0, "2026-07-01T00:00:00Z");
+    assert_eq!(sell.rationale.as_deref(), Some("allègement"));
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "6");
+    assert_eq!(holding.purchase_price, "100", "a sell never re-averages");
+}
+
+#[test]
+fn impossible_calendar_dates_are_refused() {
+    // Review MED: Feb 30 / Apr 31 / year 0000 must refuse (the copy promises AAAA-MM-JJ réel).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x63D);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    for bad in ["2026-02-30", "2026-04-31", "0000-01-01", "2026-13-01"] {
+        assert_eq!(
+            state.record_buy_for(id, bad, "1", "1", "", "", "CHF"),
+            Err(MSG_LEDGER_INVALID_DATE.to_string()),
+            "{bad} must refuse"
+        );
+    }
+    // A real leap day passes.
+    state
+        .record_buy_for(id, "2024-02-29", "1", "1", "", "", "CHF")
+        .expect("a leap day is a real date");
+}
+
+#[test]
+fn editing_only_the_rationale_of_a_legacy_sell_keeps_its_timestamp() {
+    // Review MED: a legacy 4.7 sell carries a wall-clock occurred_at; an edit that leaves the
+    // visible DATE unchanged must keep the stamp verbatim (no silent same-day reorder).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x63E);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    // A 4.7-style whole-position sell (wall-clock occurred_at, no ledger materialization).
+    let sell_id = Uuid::from_u128(0x47);
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .record_sell(
+            sell_id,
+            id,
+            "10",
+            "120",
+            "0",
+            "CHF",
+            None,
+            &Timestamp("2026-06-27T15:00:00Z".to_string()),
+        )
+        .unwrap();
+
+    state
+        .update_transaction_for(id, sell_id, "2026-06-27", "10", "120", "0", "raison", "CHF")
+        .expect("the rationale edit applies");
+    let row = state
+        .holding_ledger(id)
+        .into_iter()
+        .find(|t| t.id == sell_id)
+        .unwrap();
+    assert_eq!(
+        row.occurred_at.0, "2026-06-27T15:00:00Z",
+        "the wall-clock stamp survives a same-date edit"
+    );
+    assert_eq!(row.rationale.as_deref(), Some("raison"));
 }
 
 // ── Story 4.3 — holdings register (single-portfolio CRUD + decimal validation) ──
