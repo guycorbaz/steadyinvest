@@ -654,3 +654,90 @@ fn a_failing_fk_on_record_buy_applies_nothing() {
     );
     assert_eq!(version(&journal), before, "no bump");
 }
+
+#[test]
+fn record_dividend_inserts_one_row_one_bump_and_touches_nothing_else() {
+    // Story 6.4 (FR41): a dividend is a CASH row — the aggregate (quantity/purchase_price) and the
+    // retired state (sold_at) stay exactly as the buy/sell replay left them.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    let before = version(&journal);
+
+    let row = journal
+        .record_dividend(
+            hid,
+            &entry(0xD1F, "2026-07-01T00:00:00Z", "10", "3", "10.5"),
+            &ts("2026-07-02T09:00:00Z"),
+        )
+        .expect("the dividend records");
+    assert_eq!(row.kind.as_deref(), Some("dividend"));
+
+    let rows = journal.list_transactions(hid).expect("list reads");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].kind.as_deref(), Some("dividend"));
+    assert_eq!(rows[0].quantity, "10", "shares paid on");
+    assert_eq!(rows[0].unit_price, "3", "gross per share");
+    assert_eq!(rows[0].fees, "10.5", "withholding retained");
+    let holding = holding_row(&journal, hid);
+    assert_eq!(holding.quantity, "10", "position untouched");
+    assert_eq!(holding.purchase_price, "100", "basis untouched");
+    assert!(holding.sold_at.is_none(), "retired state untouched");
+    assert_eq!(version(&journal), before + 1, "exactly one bump");
+}
+
+#[test]
+fn a_dividend_row_edits_and_deletes_through_the_generic_writers() {
+    // The 6.3 update/delete writers are kind-agnostic: the kind survives an edit (not editable),
+    // and each applied mutation bumps once.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    let row = journal
+        .record_dividend(
+            hid,
+            &entry(0xD2F, "2026-07-01T00:00:00Z", "10", "3", "10.5"),
+            &ts("2026-07-02T09:00:00Z"),
+        )
+        .unwrap();
+    let before = version(&journal);
+
+    // Edit the withholding (the aggregate passed back is the unchanged one — no-op on holdings).
+    let applied = journal
+        .update_transaction(
+            row.id,
+            hid,
+            None,
+            "2026-07-01T00:00:00Z",
+            "10",
+            "3",
+            "0",
+            Some("brut, pas de retenue"),
+            "10",
+            "100",
+            None,
+            &ts("2026-07-02T10:00:00Z"),
+        )
+        .expect("the dividend edit applies");
+    assert!(applied);
+    let rows = journal.list_transactions(hid).unwrap();
+    assert_eq!(rows[0].kind.as_deref(), Some("dividend"), "kind survives");
+    assert_eq!(rows[0].fees, "0");
+    assert_eq!(version(&journal), before + 1, "one bump for the edit");
+
+    // Delete it (aggregate unchanged).
+    let deleted = journal
+        .delete_transaction(
+            row.id,
+            hid,
+            None,
+            "10",
+            "100",
+            None,
+            &ts("2026-07-02T11:00:00Z"),
+        )
+        .expect("the dividend delete applies");
+    assert!(deleted);
+    assert!(journal.list_transactions(hid).unwrap().is_empty());
+    assert_eq!(version(&journal), before + 2, "one bump for the delete");
+}

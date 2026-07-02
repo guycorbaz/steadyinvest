@@ -11,7 +11,9 @@ use rust_decimal::Decimal;
 
 mod ledger;
 
-pub use ledger::{derive_position, LedgerError, LedgerEvent, LedgerEventKind, PositionBasis};
+pub use ledger::{
+    derive_position, net_dividend_cash, LedgerError, LedgerEvent, LedgerEventKind, PositionBasis,
+};
 
 /// The ratcheted trailing-stop **level** (a price) after observing `reference_price` (Story 4.5,
 /// FR42). The candidate level is `reference_price × (1 − pct/100)`; the returned level is the

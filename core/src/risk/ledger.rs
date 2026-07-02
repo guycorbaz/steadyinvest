@@ -16,27 +16,34 @@
 
 use rust_decimal::Decimal;
 
-/// What a ledger row does to the position (mirrors the persistence `kind` column: `"buy"`/`"sell"`).
+/// What a ledger row does to the position (mirrors the persistence `kind` column:
+/// `"buy"`/`"sell"`/`"dividend"`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LedgerEventKind {
     /// Adds `quantity` at `unit_price` (+ `fees`) and re-averages the cost basis.
     Buy,
     /// Removes `quantity`; the remaining basis is unchanged.
     Sell,
+    /// A **cash** event (Story 6.4, FR41), not a position event: `quantity` shares paid
+    /// `unit_price` gross per share, `fees` = the withholding retained at source. Leaves the
+    /// position untouched in [`derive_position`]; its cash is folded by [`net_dividend_cash`].
+    Dividend,
 }
 
-/// One buy/sell event, already parsed to exact decimals by the caller (the app validates and
-/// parses the canonical TEXT spellings; nothing here touches strings).
+/// One buy/sell/dividend event, already parsed to exact decimals by the caller (the app validates
+/// and parses the canonical TEXT spellings; nothing here touches strings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LedgerEvent {
-    /// Buy or sell.
+    /// Buy, sell or dividend.
     pub kind: LedgerEventKind,
-    /// The transacted quantity — must be strictly positive.
+    /// The transacted quantity (shares paid, for a dividend) — must be strictly positive.
     pub quantity: Decimal,
-    /// The per-unit price — must be non-negative. Ignored for the basis on a sell.
+    /// The per-unit price (the **gross dividend per share**, for a dividend) — must be
+    /// non-negative. Ignored for the basis on a sell.
     pub unit_price: Decimal,
     /// Transaction fees — must be non-negative. Folded into the basis on a buy (Appendix A);
-    /// ignored for the basis on a sell.
+    /// ignored for the basis on a sell; the **withholding retained at source** on a dividend
+    /// (may not exceed the gross — [`net_dividend_cash`] refuses).
     pub fees: Decimal,
 }
 
@@ -140,9 +147,44 @@ pub fn derive_position(
                 // avg_cost unchanged: a sell removes units at the running average; the basis of
                 // what remains is the same weighted average (Appendix A).
             }
+            LedgerEventKind::Dividend => {
+                // A CASH event (Story 6.4): validated like every event (above), but the position
+                // is untouched — neither quantity nor basis moves. The cash side is
+                // [`net_dividend_cash`]'s.
+            }
         }
     }
     Ok(position)
+}
+
+/// The **net reinvestable cash** of a ledger's dividend events (Story 6.4, FR41 / Appendix A):
+/// Σ (`quantity × unit_price − fees`) over [`LedgerEventKind::Dividend`] rows — gross minus the
+/// withholding retained at source. Non-dividend events are ignored. Checked exact [`Decimal`]
+/// throughout — no panic on any input; a withholding **exceeding its gross** is a typed
+/// [`LedgerError::NegativeAmount`] (cash received is never negative), as are negative inputs.
+pub fn net_dividend_cash(events: &[LedgerEvent]) -> Result<Decimal, LedgerError> {
+    let mut total = Decimal::ZERO;
+    for event in events {
+        if !matches!(event.kind, LedgerEventKind::Dividend) {
+            continue;
+        }
+        if !event.quantity.is_sign_positive() || event.quantity.is_zero() {
+            return Err(LedgerError::NonPositiveQuantity);
+        }
+        if event.unit_price.is_sign_negative() || event.fees.is_sign_negative() {
+            return Err(LedgerError::NegativeAmount);
+        }
+        let gross = event
+            .quantity
+            .checked_mul(event.unit_price)
+            .ok_or(LedgerError::Overflow)?;
+        let net = gross.checked_sub(event.fees).ok_or(LedgerError::Overflow)?;
+        if net.is_sign_negative() {
+            return Err(LedgerError::NegativeAmount);
+        }
+        total = total.checked_add(net).ok_or(LedgerError::Overflow)?;
+    }
+    Ok(total)
 }
 
 #[cfg(test)]
@@ -269,20 +311,82 @@ mod tests {
         assert_eq!(p, Err(LedgerError::Overflow), "q × p beyond Decimal range");
     }
 
+    fn dividend(q: &str, p: &str, f: &str) -> LedgerEvent {
+        LedgerEvent {
+            kind: LedgerEventKind::Dividend,
+            quantity: dec(q),
+            unit_price: dec(p),
+            fees: dec(f),
+        }
+    }
+
+    #[test]
+    fn a_dividend_leaves_the_position_untouched() {
+        // Story 6.4 (FR41): a cash event, not a position event.
+        let with = derive_position(
+            None,
+            &[
+                buy("10", "100", "0"),
+                dividend("10", "3", "10.5"),
+                sell("4"),
+            ],
+        )
+        .unwrap();
+        let without = derive_position(None, &[buy("10", "100", "0"), sell("4")]).unwrap();
+        assert_eq!(with, without, "quantity and basis are dividend-blind");
+    }
+
+    #[test]
+    fn net_dividend_cash_folds_gross_minus_withholding() {
+        // 10 shares × 3 gross − 10.50 withheld (35 %) = 19.50; a second gross-only payment adds 5.
+        let events = [
+            buy("10", "100", "0"),
+            dividend("10", "3", "10.5"),
+            dividend("5", "1", "0"),
+            sell("4"),
+        ];
+        assert_eq!(net_dividend_cash(&events).unwrap(), dec("24.5"));
+        // No dividends → zero, not an error.
+        assert_eq!(
+            net_dividend_cash(&[buy("1", "1", "0")]).unwrap(),
+            Decimal::ZERO
+        );
+    }
+
+    #[test]
+    fn a_withholding_exceeding_the_gross_is_a_typed_refusal() {
+        assert_eq!(
+            net_dividend_cash(&[dividend("10", "3", "30.01")]),
+            Err(LedgerError::NegativeAmount),
+            "cash received is never negative"
+        );
+        // Invalid dividend amounts refuse in the position derivation too (validated like every event).
+        assert_eq!(
+            derive_position(None, &[dividend("0", "3", "0")]),
+            Err(LedgerError::NonPositiveQuantity)
+        );
+    }
+
     proptest! {
         /// The derivation is total (never panics), deterministic, and any Ok position is
-        /// non-negative in quantity — for arbitrary small-magnitude decimal event streams.
+        /// non-negative in quantity — for arbitrary small-magnitude decimal event streams over
+        /// all three kinds (Story 6.4 adds dividends). The net-cash fold shares the totality/
+        /// determinism/non-negativity guarantees.
         #[test]
         fn derivation_is_total_deterministic_and_never_negative(
             events in proptest::collection::vec(
-                (any::<bool>(), 1u64..10_000, 0u64..1_000_000, 0u64..10_000),
+                (0u8..3, 1u64..10_000, 0u64..1_000_000, 0u64..10_000),
                 0..12,
             )
         ) {
             let events: Vec<LedgerEvent> = events
                 .into_iter()
-                .map(|(is_buy, q, p, f)| LedgerEvent {
-                    kind: if is_buy { LedgerEventKind::Buy } else { LedgerEventKind::Sell },
+                .map(|(kind, q, p, f)| LedgerEvent {
+                    kind: match kind {
+                        0 => LedgerEventKind::Buy,
+                        1 => LedgerEventKind::Sell,
+                        _ => LedgerEventKind::Dividend,
+                    },
                     // Scale to fractional spellings so division exercises non-integers.
                     quantity: Decimal::new(q as i64, 2),
                     unit_price: Decimal::new(p as i64, 2),
@@ -295,6 +399,11 @@ mod tests {
             if let Ok(p) = a {
                 prop_assert!(!p.quantity.is_sign_negative(), "never a negative position");
                 prop_assert!(!p.avg_cost.is_sign_negative(), "never a negative basis");
+            }
+            let c = net_dividend_cash(&events);
+            prop_assert_eq!(c, net_dividend_cash(&events), "cash fold deterministic");
+            if let Ok(cash) = c {
+                prop_assert!(!cash.is_sign_negative(), "net cash never negative");
             }
         }
     }

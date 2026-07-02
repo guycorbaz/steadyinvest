@@ -199,6 +199,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 .unwrap_or_default()
                 .into(),
         );
+        // Story 6.4 (FR41): mirror the default dividend withholding rate (always a value; 35 = CH).
+        prefs.set_withholding_rate_pct(cfg.withholding_rate_pct_or_default().into());
 
         // Best-effort restore BEFORE show to minimise the visible jump; the authoritative
         // restore happens again right after show() below — before the window is mapped, winit

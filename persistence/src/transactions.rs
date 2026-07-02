@@ -34,6 +34,11 @@ pub const KIND_SELL: &str = "sell";
 /// a pre-6.3 holding (AC5).
 pub const KIND_BUY: &str = "buy";
 
+/// The `kind` value of a dividend row (Story 6.4, FR41) — a **cash** event: `quantity` = the shares
+/// it was paid on, `unit_price` = the gross dividend per share, `fees` = the withholding retained at
+/// source (net = quantity × unit_price − fees). Never moves the position.
+pub const KIND_DIVIDEND: &str = "dividend";
+
 /// One ledger row to write (Story 6.3, FR39) — all decimals are the canonical TEXT spellings the
 /// app validated; `occurred_at` is the caller-normalized RFC3339 event date (FR39's "date",
 /// distinct from the row's `created_at` clock stamp).
@@ -349,6 +354,26 @@ impl Journal {
         }
         tx.commit()?;
         Ok(true)
+    }
+
+    /// Record one **DIVIDEND** (Story 6.4, FR41): a single `kind = "dividend"` row + one version
+    /// bump, in one transaction. Uniquely among the ledger writers this carries **no holding
+    /// aggregate** and **no opening parameter**: a dividend is a cash event that moves neither the
+    /// position (`quantity`/`purchase_price` stay what the buy/sell replay derived) nor the
+    /// retired state (`sold_at` untouched — a dividend arriving after a sale is normal). Column
+    /// semantics per [`KIND_DIVIDEND`]; amounts validated by the app (canonical TEXT — NFR-C1).
+    pub fn record_dividend(
+        &mut self,
+        holding_id: Uuid,
+        entry: &LedgerEntry,
+        now: &Timestamp,
+    ) -> Result<TransactionItem> {
+        self.check_writable()?;
+        let tx = self.conn.transaction()?;
+        insert_ledger_row(&tx, holding_id, entry, KIND_DIVIDEND, now)?;
+        bump_logical_version(&tx)?;
+        tx.commit()?;
+        Ok(entry.to_item(holding_id, KIND_DIVIDEND, now))
     }
 
     /// Delete a ledger row and rewrite the recomputed holding aggregate **atomically** (Story 6.3,

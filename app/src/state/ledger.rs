@@ -42,13 +42,15 @@ use rust_decimal::Decimal;
 use steadyinvest_core::risk::{
     derive_position, LedgerError, LedgerEvent, LedgerEventKind, PositionBasis,
 };
-use steadyinvest_persistence::{HoldingItem, LedgerEntry, TransactionItem, KIND_BUY};
+use steadyinvest_persistence::{
+    HoldingItem, LedgerEntry, TransactionItem, KIND_BUY, KIND_DIVIDEND,
+};
 use uuid::Uuid;
 
 use super::{
-    effective_currency, watch_error, JournalState, MSG_HOLDING_INVALID_NUMBER, MSG_HOLDING_SOLD,
-    MSG_LEDGER_INVALID_DATE, MSG_LEDGER_OVERSELL, MSG_LEDGER_PARTIAL_SOLD, MSG_NO_JOURNAL,
-    MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
+    effective_currency, watch_error, JournalState, MSG_DIVIDEND_RETIRED, MSG_DIVIDEND_WITHHOLDING,
+    MSG_HOLDING_INVALID_NUMBER, MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_OVERSELL,
+    MSG_LEDGER_PARTIAL_SOLD, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
 };
 
 /// An owned ledger-row draft — the borrow-free twin of [`LedgerEntry`] (which borrows), so the
@@ -162,6 +164,7 @@ struct Candidate {
 fn event_of(item: &TransactionItem) -> Result<LedgerEvent, String> {
     let kind = match item.kind.as_deref() {
         Some(KIND_BUY) => LedgerEventKind::Buy,
+        Some(KIND_DIVIDEND) => LedgerEventKind::Dividend,
         Some("sell") | None => LedgerEventKind::Sell,
         Some(_) => return Err(MSG_SAVE_FAILED.to_string()),
     };
@@ -207,6 +210,8 @@ fn candidate_of_owned(
 /// doc — and fold them through the pure core derivation, mapping the typed [`LedgerError`]s to the
 /// neutral notices.
 fn replay(mut candidates: Vec<Candidate>) -> Result<PositionBasis, String> {
+    // Dividends rank WITH buys (rank 0) on a full tie — position-irrelevant either way (a
+    // dividend is a cash no-op in `derive_position`), pinned here for determinism (Story 6.4).
     let sell_rank = |c: &Candidate| matches!(c.event.kind, LedgerEventKind::Sell) as u8;
     candidates.sort_by(|a, b| {
         a.occurred_at
@@ -487,6 +492,149 @@ impl JournalState {
         })
     }
 
+    /// Record a **dividend** (Story 6.4, FR41): a cash row on the holding's ledger — `quantity`
+    /// shares paid `per_share_gross` each, minus the `withholding_input` retained at source. An
+    /// **empty** withholding auto-computes `gross × withholding_rate_pct / 100` (the Réglages
+    /// default, 35 = CH impôt anticipé); an explicit value — including `0` — overrides. The study
+    /// side stays GROSS (method fidelity — untouched); the net feeds
+    /// [`Self::portfolio_reinvestable_cash_by_currency`]. Position and retired state are untouched
+    /// by construction (no aggregate, no opening materialization — a dividend carries no position
+    /// information). Currency = the holding's own (FR28). Guarded; a withholding exceeding the
+    /// gross refuses neutrally ([`MSG_DIVIDEND_WITHHOLDING`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_dividend_for(
+        &mut self,
+        holding_id: Uuid,
+        date_input: &str,
+        quantity: &str,
+        per_share_gross: &str,
+        withholding_input: &str,
+        rationale: &str,
+        reference_currency: &str,
+        withholding_rate_pct: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        // v1 entry point: an ACTIVE holding (the ledger panel lives in the register; the
+        // sold-positions surface is #84 — the panel READ still counts sold holdings' dividends).
+        // A retired holding refuses with its own factual notice, not a fake save failure (review).
+        let holding = self
+            .any_holding(holding_id)
+            .map_err(|_| MSG_SAVE_FAILED.to_string())?;
+        if holding.sold_at.is_some() {
+            return Err(MSG_DIVIDEND_RETIRED.to_string());
+        }
+        // An EMPTY quantity defaults to the whole current position (AC4's prefill, done at the
+        // rail — the record-date position may differ, so an explicit value overrides).
+        let quantity = quantity.trim();
+        let quantity = if quantity.is_empty() {
+            holding.quantity.as_str()
+        } else {
+            quantity
+        };
+        let qty = Decimal::from_str_exact(quantity)
+            .ok()
+            .filter(|q| q.is_sign_positive() && !q.is_zero())
+            .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+        let gross_per_share = Decimal::from_str_exact(per_share_gross.trim())
+            .ok()
+            .filter(|p| !p.is_sign_negative())
+            .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+        let gross = qty
+            .checked_mul(gross_per_share)
+            .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+        let withholding_input = withholding_input.trim();
+        let withholding = if withholding_input.is_empty() {
+            // The Appendix-A default: gross × rate, rounded to 2 decimals (money amounts at the
+            // currency's minor unit — the exact-decimal posture is about never LOSING precision,
+            // not inventing sub-centime cash no statement will match). The rate comes
+            // pre-validated ([0, 100]) from `AppConfig::withholding_rate_pct_or_default`.
+            let rate = Decimal::from_str_exact(withholding_rate_pct.trim())
+                .map_err(|_| MSG_HOLDING_INVALID_NUMBER.to_string())?;
+            gross
+                .checked_mul(rate)
+                .and_then(|w| w.checked_div(Decimal::ONE_HUNDRED))
+                .map(|w| w.round_dp(2))
+                .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
+        } else {
+            Decimal::from_str_exact(withholding_input)
+                .ok()
+                .filter(|w| !w.is_sign_negative())
+                .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
+        };
+        if withholding > gross {
+            return Err(MSG_DIVIDEND_WITHHOLDING.to_string());
+        }
+        let now = self.clock.now();
+        let occurred_at = normalize_event_date(date_input, &now.0)?;
+        let rationale = rationale.trim();
+        let entry = OwnedEntry {
+            id: self.idgen.new_id(),
+            occurred_at,
+            quantity: qty.normalize().to_string(),
+            unit_price: gross_per_share.normalize().to_string(),
+            fees: withholding.normalize().to_string(),
+            currency: effective_currency(&holding, reference_currency),
+            rationale: (!rationale.is_empty()).then(|| rationale.to_string()),
+        };
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .record_dividend(holding_id, &entry.as_entry(), &now)
+            .map(|_| ())
+            .map_err(watch_error)
+    }
+
+    /// The active portfolio's **net reinvestable dividend cash**, grouped per stamped currency
+    /// (Story 6.4, FR41 / AC3): Σ (gross − retenue) over the dividend rows of ALL the portfolio's
+    /// holdings — **including sold ones** (cash received does not evaporate when the position
+    /// later closes). Folded **per row** through the pure
+    /// [`steadyinvest_core::risk::net_dividend_cash`] (2026-07-02 review: a single invalid row —
+    /// corrupt, imported, or over-withheld — is SKIPPED; it must never blank its whole currency
+    /// bucket). Deterministic order; NO cross-currency total (FX is Story 6.5); a bucket whose
+    /// dividends net to exactly zero still shows (a fully-withheld dividend is a recorded fact).
+    pub fn portfolio_reinvestable_cash_by_currency(
+        &self,
+        reference_currency: &str,
+    ) -> Vec<(String, Decimal)> {
+        use std::collections::BTreeMap;
+        let Some(journal) = self.journal.as_ref() else {
+            return Vec::new();
+        };
+        let Some(portfolio) = self.active_portfolio() else {
+            return Vec::new();
+        };
+        let holdings = journal.list_all_holdings().unwrap_or_default();
+        let mut by_ccy: BTreeMap<String, Decimal> = BTreeMap::new();
+        for holding in holdings.iter().filter(|h| h.portfolio_id == portfolio.id) {
+            for row in self.holding_ledger(holding.id) {
+                if row.kind.as_deref() != Some(KIND_DIVIDEND) {
+                    continue;
+                }
+                // Per-ROW fold + skip on any typed error: defensive — one bad row (unparseable,
+                // over-withheld via import, …) must not erase the bucket's valid cash.
+                let Ok(event) = event_of(&row) else {
+                    continue;
+                };
+                let Ok(net) = steadyinvest_core::risk::net_dividend_cash(&[event]) else {
+                    continue;
+                };
+                // Group by the ROW's stamped currency (it is the fact recorded at payment time);
+                // the reference only coalesces a legacy NULL-currency holding's rows. (At that
+                // legacy boundary the capital-at-risk panel coalesces LIVE while this one keeps
+                // the stamp — a documented, deliberate asymmetry: cash is a dated fact.)
+                let currency = if row.currency.is_empty() {
+                    effective_currency(holding, reference_currency)
+                } else {
+                    row.currency.clone()
+                };
+                let bucket = by_ccy.entry(currency).or_insert(Decimal::ZERO);
+                *bucket = bucket.checked_add(net).unwrap_or(*bucket);
+            }
+        }
+        by_ccy.into_iter().collect()
+    }
+
     /// Edit a ledger row (Story 6.3, FR39): date, quantity, unit price, fees, rationale — never
     /// its `kind` (the row's identity) nor its `currency` (pinned to the holding's, FR28). The
     /// whole ledger is replayed with the edit applied; an impossible history (over-sell at any
@@ -526,34 +674,70 @@ impl JournalState {
         } else {
             normalized
         };
-        let opening = self.opening_for(&holding, &rows, reference_currency);
-
-        let mut candidates = Vec::with_capacity(rows.len() + 1);
-        for row in &rows {
-            if row.id == transaction_id {
-                let kind = match row.kind.as_deref() {
-                    Some(KIND_BUY) => LedgerEventKind::Buy,
-                    _ => LedgerEventKind::Sell,
-                };
-                let edited = OwnedEntry {
-                    id: row.id,
-                    occurred_at: occurred_at.clone(),
-                    quantity: qty.clone(),
-                    unit_price: price.clone(),
-                    fees: fees.clone(),
-                    currency: row.currency.clone(),
-                    rationale: None,
-                };
-                candidates.push(candidate_of_owned(&edited, kind, &row.created_at.0)?);
-            } else {
-                candidates.push(candidate_of(row)?);
+        // The record-path invariant holds on EDIT too (2026-07-02 review, HIGH): a dividend's
+        // withholding (the fees column) may never exceed its gross — the panel's per-row skip
+        // would otherwise silently drop the row's cash, and "net" would read negative.
+        if target.kind.as_deref() == Some(KIND_DIVIDEND) {
+            let q = Decimal::from_str_exact(&qty).map_err(|_| MSG_HOLDING_INVALID_NUMBER)?;
+            let p = Decimal::from_str_exact(&price).map_err(|_| MSG_HOLDING_INVALID_NUMBER)?;
+            let f = Decimal::from_str_exact(&fees).map_err(|_| MSG_HOLDING_INVALID_NUMBER)?;
+            let gross = q
+                .checked_mul(p)
+                .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+            if f > gross {
+                return Err(MSG_DIVIDEND_WITHHOLDING.to_string());
             }
         }
-        if let Some(op) = &opening {
-            candidates.push(candidate_of_owned(op, LedgerEventKind::Buy, &now.0)?);
-        }
-        let basis = replay(candidates)?;
-        let retired_at = self.retired_at_for(&basis, &holding, &now.0);
+        // A ledger holding ONLY dividend rows derives NO position from its rows (2026-07-02
+        // review, MED): editing a cash row must neither materialize a phantom opening « Achat »
+        // nor replay the (empty) position math — the stored aggregate and retired state pass
+        // through untouched. With position rows present, the full 6.3 replay applies.
+        let has_position_rows = rows
+            .iter()
+            .any(|r| r.kind.as_deref() != Some(KIND_DIVIDEND));
+        let (opening, new_quantity, new_avg_cost, retired_at) = if has_position_rows {
+            let opening = self.opening_for(&holding, &rows, reference_currency);
+            let mut candidates = Vec::with_capacity(rows.len() + 1);
+            for row in &rows {
+                if row.id == transaction_id {
+                    let kind = match row.kind.as_deref() {
+                        Some(KIND_BUY) => LedgerEventKind::Buy,
+                        Some(KIND_DIVIDEND) => LedgerEventKind::Dividend,
+                        _ => LedgerEventKind::Sell,
+                    };
+                    let edited = OwnedEntry {
+                        id: row.id,
+                        occurred_at: occurred_at.clone(),
+                        quantity: qty.clone(),
+                        unit_price: price.clone(),
+                        fees: fees.clone(),
+                        currency: row.currency.clone(),
+                        rationale: None,
+                    };
+                    candidates.push(candidate_of_owned(&edited, kind, &row.created_at.0)?);
+                } else {
+                    candidates.push(candidate_of(row)?);
+                }
+            }
+            if let Some(op) = &opening {
+                candidates.push(candidate_of_owned(op, LedgerEventKind::Buy, &now.0)?);
+            }
+            let basis = replay(candidates)?;
+            let retired_at = self.retired_at_for(&basis, &holding, &now.0);
+            (
+                opening,
+                basis.quantity.normalize().to_string(),
+                basis.avg_cost.normalize().to_string(),
+                retired_at,
+            )
+        } else {
+            (
+                None,
+                holding.quantity.clone(),
+                holding.purchase_price.clone(),
+                holding.sold_at.clone(),
+            )
+        };
 
         let rationale = rationale.trim();
         let rationale = (!rationale.is_empty()).then_some(rationale);
@@ -568,8 +752,8 @@ impl JournalState {
                 &price,
                 &fees,
                 rationale,
-                &basis.quantity.normalize().to_string(),
-                &basis.avg_cost.normalize().to_string(),
+                &new_quantity,
+                &new_avg_cost,
                 retired_at.as_deref(),
                 &now,
             )
@@ -603,22 +787,41 @@ impl JournalState {
             return Err(MSG_SAVE_FAILED.to_string());
         }
         let now = self.clock.now();
-        // Opening from the CURRENT rows (pre-delete): if a buy row exists, the aggregate is
-        // derived and can never stand in for the opening again. (Deleting a 4.7-legacy holding's
-        // only sell: current rows hold no buy → the opening materializes and restores the
-        // position — the un-retire path.)
-        let opening = self.opening_for(&holding, &rows, reference_currency);
-
-        let mut candidates: Vec<Candidate> = rows
+        // A dividend-only ledger derives no position (2026-07-02 review, MED): deleting a cash
+        // row must neither materialize a phantom opening nor rewrite the aggregate/retired state
+        // — they pass through untouched. Otherwise: opening from the CURRENT rows (pre-delete —
+        // if a buy row exists, the aggregate is derived and can never stand in for the opening
+        // again; deleting a 4.7-legacy holding's only sell materializes the opening and restores
+        // the position, the un-retire path).
+        let has_position_rows = rows
             .iter()
-            .filter(|r| r.id != transaction_id)
-            .map(candidate_of)
-            .collect::<Result<_, _>>()?;
-        if let Some(op) = &opening {
-            candidates.push(candidate_of_owned(op, LedgerEventKind::Buy, &now.0)?);
-        }
-        let basis = replay(candidates)?;
-        let retired_at = self.retired_at_for(&basis, &holding, &now.0);
+            .any(|r| r.kind.as_deref() != Some(KIND_DIVIDEND));
+        let (opening, new_quantity, new_avg_cost, retired_at) = if has_position_rows {
+            let opening = self.opening_for(&holding, &rows, reference_currency);
+            let mut candidates: Vec<Candidate> = rows
+                .iter()
+                .filter(|r| r.id != transaction_id)
+                .map(candidate_of)
+                .collect::<Result<_, _>>()?;
+            if let Some(op) = &opening {
+                candidates.push(candidate_of_owned(op, LedgerEventKind::Buy, &now.0)?);
+            }
+            let basis = replay(candidates)?;
+            let retired_at = self.retired_at_for(&basis, &holding, &now.0);
+            (
+                opening,
+                basis.quantity.normalize().to_string(),
+                basis.avg_cost.normalize().to_string(),
+                retired_at,
+            )
+        } else {
+            (
+                None,
+                holding.quantity.clone(),
+                holding.purchase_price.clone(),
+                holding.sold_at.clone(),
+            )
+        };
 
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         let applied = journal
@@ -626,8 +829,8 @@ impl JournalState {
                 transaction_id,
                 holding_id,
                 opening.as_ref().map(OwnedEntry::as_entry).as_ref(),
-                &basis.quantity.normalize().to_string(),
-                &basis.avg_cost.normalize().to_string(),
+                &new_quantity,
+                &new_avg_cost,
                 retired_at.as_deref(),
                 &now,
             )
