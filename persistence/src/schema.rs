@@ -94,6 +94,19 @@ pub(crate) fn migrate_to_v5(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration step 6 (Story 6.2, FR38): a holding carries the **currency it is denominated in**. The
+/// v1 `holdings` table stored amounts implicitly in the single reference currency (FR36); multi-
+/// currency holdings (FR38) need the currency stored per row. Add a **nullable** `currency` — the
+/// persistence layer stays currency-agnostic and does **not** backfill (it can't know the app's
+/// reference currency), so an existing row reads `NULL` and the app interprets that as "a pre-6.2
+/// holding = the reference currency" at the read boundary. Amounts are never mixed/converted here
+/// (FR28); this only records the native currency. Like v2–v5: a metadata-only `ADD COLUMN`, forward-
+/// safe (existing v1–v5 rows read `NULL`), and `DDL_V1` stays frozen.
+pub(crate) fn migrate_to_v6(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch("ALTER TABLE holdings ADD COLUMN currency TEXT")?;
+    Ok(())
+}
+
 /// The complete v1 DDL. Frozen once shipped — schema changes go through new migration steps.
 const DDL_V1: &str = "
     -- Journal identity (ADD6): one row, journal_id (UUID) + monotonic logical_version.
@@ -247,8 +260,8 @@ mod tests {
         let conn = v1_connection();
         assert_eq!(
             migrations::user_version(&conn).expect("user_version reads"),
-            5,
-            "the registry migrates a fresh DB to the latest version (v5)"
+            6,
+            "the registry migrates a fresh DB to the latest version (v6)"
         );
         assert!(
             column_names(&conn, "watchlist_items").contains(&"study_id".to_string()),
@@ -280,6 +293,33 @@ mod tests {
         ] {
             assert!(column_names(&conn, "holdings").contains(&col.to_string()));
         }
+    }
+
+    #[test]
+    fn v6_adds_the_holdings_currency_column() {
+        // Story 6.2 (FR38): the v6 migration gives `holdings` a nullable `currency`. Additive —
+        // existing rows read NULL (a pre-6.2 holding = the reference currency, coalesced by the app).
+        let conn = v1_connection();
+        assert!(
+            column_names(&conn, "holdings").contains(&"currency".to_string()),
+            "v6 added holdings.currency"
+        );
+        // The v1–v4 holdings columns are untouched (additive migration).
+        for col in [
+            "id",
+            "portfolio_id",
+            "security_ticker",
+            "quantity",
+            "purchase_price",
+            "trailing_stop_pct",
+            "trailing_stop_level",
+            "sold_at",
+            "created_at",
+        ] {
+            assert!(column_names(&conn, "holdings").contains(&col.to_string()));
+        }
+        // The new column is nullable (an ADD COLUMN with no default): a fresh journal's holdings, if
+        // any, would read NULL — proven here structurally via table_info (the column exists, no NOT NULL).
     }
 
     #[test]

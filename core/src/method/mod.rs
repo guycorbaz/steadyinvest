@@ -145,6 +145,31 @@ pub const BANNED_VERBS_FR: [&str; 10] = [
     "il faut",
 ];
 
+/// Case-insensitive **whole-word** match of `needle` in `haystack` — the matcher of the FR13
+/// posture gates (banned-verb checks over emitted strings, here and in the downstream crates'
+/// neutrality tests). A word boundary is any non-alphanumeric character (or the string edge), so
+/// `_` IS a boundary: `"buy_top"` contains the word `"buy"` — which is why the spec-§6-exempt
+/// zone-derived nouns must be excluded from an inventory before matching, never mixed in.
+/// Multi-word needles (e.g. `"ought to"`) match verbatim with the same boundary rule.
+pub fn contains_word(haystack: &str, needle: &str) -> bool {
+    let h = haystack.to_lowercase();
+    let n = needle.to_lowercase();
+    h.match_indices(&n).any(|(i, _)| {
+        let before_ok = i == 0
+            || !h[..i]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_alphanumeric());
+        let after = i + n.len();
+        let after_ok = after == h.len()
+            || !h[after..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric());
+        before_ok && after_ok
+    })
+}
+
 /// All display field groups, in a fixed order (for the fingerprint).
 const DISPLAY_FIELDS: [DisplayField; 6] = [
     DisplayField::Price,
@@ -219,11 +244,7 @@ pub fn method_fingerprint() -> String {
 
     let mut hasher = Sha256::new();
     hasher.update(p.join("\n").as_bytes());
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    crate::hex_sha256(hasher)
 }
 
 #[cfg(test)]
@@ -240,6 +261,37 @@ mod tests {
             method_fingerprint(),
             EXPECTED,
             "method definition changed — bump METHOD_VERSION and regenerate this snapshot"
+        );
+    }
+
+    /// Fingerprint-exhaustiveness tie: the `match` below is exhaustive with NO wildcard, so
+    /// adding a [`DisplayField`] variant is a compile error here until `DISPLAY_FIELDS` (and
+    /// hence the fingerprint input) is revisited. Same intent as the exhaustive destructuring
+    /// in `verdict::inputs_digest`.
+    #[test]
+    fn display_fields_list_covers_every_variant() {
+        // Exhaustive, wildcard-free match — the compile-time tie.
+        for field in DISPLAY_FIELDS {
+            match field {
+                DisplayField::Price
+                | DisplayField::PerShare
+                | DisplayField::PeRatio
+                | DisplayField::Percent
+                | DisplayField::Ratio
+                | DisplayField::LargeMonetary => {}
+            }
+        }
+        // 6 entries, all distinct ⇒ all 6 variants are present exactly once.
+        for (i, a) in DISPLAY_FIELDS.iter().enumerate() {
+            assert!(
+                !DISPLAY_FIELDS[i + 1..].contains(a),
+                "duplicate DISPLAY_FIELDS entry: {a:?}"
+            );
+        }
+        assert_eq!(
+            DISPLAY_FIELDS.len(),
+            6,
+            "one entry per DisplayField variant"
         );
     }
 

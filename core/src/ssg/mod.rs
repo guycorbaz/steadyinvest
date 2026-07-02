@@ -226,7 +226,7 @@ mod tests {
     /// framework is UI-side (Story 2.14); this is the engine's cheap gate.
     #[test]
     fn engine_emitted_strings_contain_no_banned_verbs() {
-        use crate::method::{BANNED_VERBS_EN, BANNED_VERBS_FR};
+        use crate::method::{contains_word, BANNED_VERBS_EN, BANNED_VERBS_FR};
         use crate::normalize::PlausibilityKey;
 
         let zone_labels: Vec<&str> = [Zone::Buy, Zone::Neutral, Zone::Sell]
@@ -259,25 +259,6 @@ mod tests {
             "current_pe",
             "forecast_low",
         ]);
-
-        let contains_word = |haystack: &str, needle: &str| {
-            let h = haystack.to_lowercase();
-            let n = needle.to_lowercase();
-            h.match_indices(&n).any(|(i, _)| {
-                let before_ok = i == 0
-                    || !h[..i]
-                        .chars()
-                        .next_back()
-                        .is_some_and(|c| c.is_alphanumeric());
-                let after = i + n.len();
-                let after_ok = after == h.len()
-                    || !h[after..]
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_alphanumeric());
-                before_ok && after_ok
-            })
-        };
 
         for s in emitted {
             assert!(

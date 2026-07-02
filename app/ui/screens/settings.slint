@@ -4,7 +4,7 @@
 // swap and render in the numeric font, digits stacked to show tabular figures.
 
 import { Tokens } from "../tokens.slint";
-import { Labels, Prefs, Verify, RecentJournalRow } from "../state.slint";
+import { Holdings, Labels, Prefs, Verify, RecentJournalRow } from "../state.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { TextField } from "../components/text_field.slint";
@@ -398,25 +398,13 @@ export component SettingsScreen inherits Rectangle {
                     alignment: start;
                     spacing: Tokens.space-8;
 
-                    ChoiceChip {
-                        label: @tr("CHF");
-                        selected: Prefs.reference-currency == "CHF";
-                        activated => { Prefs.reference-currency-selected("CHF"); }
-                    }
-                    ChoiceChip {
-                        label: @tr("EUR");
-                        selected: Prefs.reference-currency == "EUR";
-                        activated => { Prefs.reference-currency-selected("EUR"); }
-                    }
-                    ChoiceChip {
-                        label: @tr("USD");
-                        selected: Prefs.reference-currency == "USD";
-                        activated => { Prefs.reference-currency-selected("USD"); }
-                    }
-                    ChoiceChip {
-                        label: @tr("GBP");
-                        selected: Prefs.reference-currency == "GBP";
-                        activated => { Prefs.reference-currency-selected("GBP"); }
+                    // One source of truth (Story 6.2): the same allow-list the holding-currency
+                    // picker renders (pushed from Rust's config::SUPPORTED_CURRENCIES), so the
+                    // reference picker can never offer a code a holding could not carry.
+                    for c in Holdings.supported-currencies: ChoiceChip {
+                        label: c;
+                        selected: Prefs.reference-currency == c;
+                        activated => { Prefs.reference-currency-selected(c); }
                     }
                 }
             }

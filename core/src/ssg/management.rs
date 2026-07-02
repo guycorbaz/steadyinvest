@@ -15,7 +15,9 @@ use rust_decimal::Decimal;
 
 /// `numerator / denominator × 100` with the §9 denominator rule: denominator present and ≤ 0
 /// ⇒ `None` + `negative_or_zero_denominator` on `denominator_name`; either input absent ⇒
-/// `None` without a finding (missing data is insufficiency, not implausibility).
+/// `None` without a finding (missing data is insufficiency, not implausibility). The absence
+/// check runs FIRST: with no numerator there is no ratio to find implausible, so a missing
+/// numerator wins over a non-positive denominator — insufficiency, silently.
 fn ratio_pct(
     numerator: Option<Decimal>,
     denominator: Option<Decimal>,
@@ -23,6 +25,7 @@ fn ratio_pct(
     year: i32,
     findings: &mut Vec<CalcFinding>,
 ) -> Option<Decimal> {
+    let numerator = numerator?;
     let denominator = denominator?;
     if denominator <= Decimal::ZERO {
         findings.push(CalcFinding {
@@ -32,7 +35,7 @@ fn ratio_pct(
         });
         return None;
     }
-    numerator?
+    numerator
         .checked_div(denominator)?
         .checked_mul(Decimal::ONE_HUNDRED)
 }
@@ -198,6 +201,31 @@ mod tests {
         assert!(
             quiet.is_empty(),
             "absent inputs must not raise findings: {quiet:?}"
+        );
+    }
+
+    /// A missing numerator wins over a non-positive denominator: with no numerator there is
+    /// no ratio to find implausible — insufficiency (`None`, no finding), not implausibility.
+    #[test]
+    fn missing_numerator_wins_over_non_positive_denominator() {
+        let mut findings = Vec::new();
+        assert_eq!(
+            ratio_pct(None, Some(Decimal::ZERO), "sales", 2024, &mut findings),
+            None
+        );
+        assert_eq!(
+            ratio_pct(
+                None,
+                Some(d(-5, 0)),
+                "book_value_per_share",
+                2025,
+                &mut findings
+            ),
+            None
+        );
+        assert!(
+            findings.is_empty(),
+            "a missing numerator must not raise a denominator finding: {findings:?}"
         );
     }
 

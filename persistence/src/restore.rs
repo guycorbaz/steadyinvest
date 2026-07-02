@@ -143,15 +143,17 @@ pub fn restore_journal_file(live_path: &Path, backup_path: &Path) -> Result<()> 
     // Copy into the temp first; a failure here leaves the live file untouched.
     if let Err(e) = std::fs::copy(backup_path, &incoming) {
         let _ = std::fs::remove_file(&incoming);
-        return Err(Error::CorruptJournalMeta {
-            detail: format!("the backup could not be staged for restore: {e}"),
+        return Err(Error::Restore {
+            detail: format!("the copy did not complete: {e}"),
         });
     }
-    // Atomic replace.
+    // Atomic replace. (No explicit fsync of the temp before the rename: on a crash between the two,
+    // ext4's rename heuristics flush the data; the worst case on other filesystems is an empty/short
+    // live file, recovered by re-running the restore — the validated backup itself is never touched.)
     if let Err(e) = std::fs::rename(&incoming, live_path) {
         let _ = std::fs::remove_file(&incoming);
-        return Err(Error::CorruptJournalMeta {
-            detail: format!("the staged backup could not replace the journal: {e}"),
+        return Err(Error::Restore {
+            detail: format!("the staged file did not replace the journal: {e}"),
         });
     }
     for suffix in ["-wal", "-shm"] {

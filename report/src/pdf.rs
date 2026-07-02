@@ -715,7 +715,11 @@ mod tests {
             .windows(7)
             .position(|w| w == b"/Count ")
             .expect("a page tree with a /Count");
-        let n = bytes[count_pos + 7] - b'0';
+        // Read every digit (a ≥10-page study must not be misread as its first digit).
+        let n: u32 = bytes[count_pos + 7..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .fold(0, |acc, b| acc * 10 + u32::from(b - b'0'));
         assert!(n >= 2, "56 years must paginate to >1 page, got /Count {n}");
     }
 

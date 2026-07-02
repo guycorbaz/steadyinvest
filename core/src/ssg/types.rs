@@ -39,12 +39,15 @@ pub struct JudgmentInputs {
     /// Judged future EPS growth, percent per year (FR6) — feeds the estimated-high-EPS
     /// derivation when the direct value is absent, and the §5 yearly EPS projection.
     pub projected_eps_growth_pct: Option<Decimal>,
+    /// Judged future average high P/E (spec §4).
     pub judged_avg_high_pe: Option<Decimal>,
+    /// Judged future average low P/E (spec §4).
     pub judged_avg_low_pe: Option<Decimal>,
     /// Which §4 forecast-low option the user selected.
     pub forecast_low_option: ForecastLowOption,
     /// Option (c) input: a recent severe market low.
     pub recent_severe_low: Option<Decimal>,
+    /// The security's current price — the zone/verdict anchor.
     pub current_price: Option<Decimal>,
     /// Present full-year dividend per share (§4 option (d) numerator, §5 present yield).
     pub present_full_year_dividend: Option<Decimal>,
@@ -93,9 +96,13 @@ impl JudgmentInputs {
 pub struct QuarterlyObservations {
     /// The last 4 quarterly EPS; their sum is the TTM EPS (current P/E denominator, spec §3).
     pub ttm_quarterly_eps: Option<[Decimal; 4]>,
+    /// The latest reported quarter's sales.
     pub latest_quarter_sales: Option<Decimal>,
+    /// The latest reported quarter's EPS.
     pub latest_quarter_eps: Option<Decimal>,
+    /// Sales of the same quarter one year earlier.
     pub year_ago_quarter_sales: Option<Decimal>,
+    /// EPS of the same quarter one year earlier.
     pub year_ago_quarter_eps: Option<Decimal>,
 }
 
@@ -120,14 +127,23 @@ impl QuarterlyObservations {
 /// GitHub issue (Story 1.8 method interpretations), never a silent omission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QualityFlagKey {
+    /// §2: the pre-tax-profit-on-sales trend is declining.
     PtpTrendDeclining,
+    /// §2: the return-on-equity trend is declining.
     RoeTrendDeclining,
+    /// §2: the latest ROE is below `roe_low_pct()` (10%).
     RoeLow,
+    /// §1: the EPS CAGR is strictly below the sales CAGR.
     EpsLagsSales,
+    /// §2: the judged future high P/E exceeds `high_pe_aggressive()` (20).
     ProjectedHighPeAggressive,
+    /// §2: the judged future high P/E exceeds `high_pe_implausible()` (25).
     ProjectedHighPeImplausible,
+    /// §4: the upside/downside ratio is below `ud_target()` (3.0).
     UdBelowTarget,
+    /// §4: the upside/downside ratio exceeds `ud_extreme()` (15.0).
     UdExtreme,
+    /// §3: the relative value is at/above `relative_value_ceiling_pct()` (100).
     RelativeValueHigh,
 }
 
@@ -184,8 +200,11 @@ pub struct CalcFinding {
 /// 5-year trend of a §2 ratio vs its 5-year average (spec §2, ±`trend_even_band_pp()`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Trend {
+    /// The recent ratio is above the 5-year average, beyond the even band.
     Up,
+    /// The recent ratio is within ±`trend_even_band_pp()` of the 5-year average.
     Even,
+    /// The recent ratio is below the 5-year average, beyond the even band.
     Down,
 }
 
@@ -193,8 +212,11 @@ pub enum Trend {
 /// them from the banned-verb posture gate) — they are nouns, not imperatives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Zone {
+    /// The lower third of the forecast range `[forecast_low, buy_top]`.
     Buy,
+    /// The middle third `(buy_top, neutral_top]`.
     Neutral,
+    /// The upper third `(neutral_top, forecast_high]`.
     Sell,
 }
 
@@ -226,7 +248,9 @@ pub enum UpsideDownside {
 /// measured miss.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CriterionFact {
+    /// Measured, and the comparison holds.
     Met,
+    /// Measured, and the comparison does not hold.
     Unmet,
     /// The criterion's input is `unknown` — unmet by insufficiency, not by measurement.
     UnmetByInsufficiency,
@@ -273,6 +297,7 @@ pub struct GrowthOutputs {
 /// One year's §2 ratios. `None` = unknown (missing input or §9-excluded denominator).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YearRatios {
+    /// The reported fiscal year.
     pub year: i32,
     /// `pre_tax_profit / sales × 100`.
     pub ptp_pct: Option<Decimal>,
@@ -288,19 +313,23 @@ pub struct ManagementOutputs {
     pub per_year: Vec<YearRatios>,
     /// Mean over the last-5-usable-years window, excluding years whose ratio is unknown.
     pub avg_ptp_pct: Option<Decimal>,
+    /// Mean ROE over the window, excluding unknown years.
     pub avg_roe_pct: Option<Decimal>,
     /// The latest usable year's ratio — the "recent" side of the trend comparison, and the
     /// `roe_low` flag input.
     pub latest_ptp_pct: Option<Decimal>,
+    /// The latest usable year's ROE.
     pub latest_roe_pct: Option<Decimal>,
     /// Latest usable year's ratio vs the 5-yr average, ±`trend_even_band_pp()`.
     pub ptp_trend: Option<Trend>,
+    /// Latest usable year's ROE vs the 5-yr average, same band.
     pub roe_trend: Option<Trend>,
 }
 
 /// One year's §3 valuation figures (inside the last-5-usable-years window).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YearValuation {
+    /// The reported fiscal year.
     pub year: i32,
     /// `high_price / eps`.
     pub high_pe: Option<Decimal>,
@@ -319,15 +348,17 @@ pub struct ValuationOutputs {
     pub per_year: Vec<YearValuation>,
     /// Means over the window, excluding `unknown` years (spec §9).
     pub avg_high_pe: Option<Decimal>,
+    /// Mean low P/E over the window, excluding unknown years.
     pub avg_low_pe: Option<Decimal>,
     /// `(avg_high_pe + avg_low_pe) / 2`.
     pub avg_pe: Option<Decimal>,
+    /// Mean payout percentage over the window, excluding unknown years.
     pub avg_payout_pct: Option<Decimal>,
     /// The §4 option-(d) divisor.
     pub avg_high_yield_pct: Option<Decimal>,
     /// Mean of the window's low prices (§4 option (b)).
     pub avg_low_price: Option<Decimal>,
-    /// Σ of the 4 quarterly EPS observations.
+    /// Σ of the 4 quarterly EPS observations (checked — an overflowing sum is `None`).
     pub ttm_eps: Option<Decimal>,
     /// `current_price / ttm_eps`; TTM EPS ≤ 0 ⇒ `None` (spec §9).
     pub current_pe: Option<Decimal>,
@@ -340,9 +371,13 @@ pub struct ValuationOutputs {
 /// `(buy_top, neutral_top]`, Sell `(neutral_top, forecast_high]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZoneBounds {
+    /// The bottom of the forecast range (and of the Buy zone).
     pub forecast_low: Decimal,
+    /// The top of the Buy zone (`forecast_low` + one third of the range).
     pub buy_top: Decimal,
+    /// The top of the Neutral zone (`forecast_low` + two thirds of the range).
     pub neutral_top: Decimal,
+    /// The top of the forecast range (and of the Sell zone).
     pub forecast_high: Decimal,
 }
 
@@ -359,6 +394,7 @@ pub struct RiskRewardOutputs {
     /// `None` when the current price is outside `[forecast_low, forecast_high]` or the zones
     /// are unknown.
     pub present_price_zone: Option<Zone>,
+    /// The §4 upside/downside ratio as a typed state.
     pub upside_downside: UpsideDownside,
 }
 
@@ -387,10 +423,15 @@ pub struct ReturnOutputs {
 /// [`crate::rounding`] — the engine calls none of it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SsgOutputs {
+    /// §1 growth outputs.
     pub growth: GrowthOutputs,
+    /// §2 management outputs.
     pub management: ManagementOutputs,
+    /// §3 price–earnings-history outputs.
     pub valuation: ValuationOutputs,
+    /// §4 risk & reward outputs.
     pub risk_reward: RiskRewardOutputs,
+    /// §5 five-year-potential outputs.
     pub returns: ReturnOutputs,
     /// Raised flags in pinned-catalog order ([`QualityFlagKey::ALL`]); a flag is never raised
     /// on an `unknown` metric (unknown ≠ a comparison result).
@@ -403,6 +444,7 @@ pub struct SsgOutputs {
     pub findings: Vec<CalcFinding>,
     /// `usable_years < USABLE_YEARS_FLOOR` (FR8) — computation still ran on available data.
     pub low_confidence: bool,
+    /// The neutral verdict facts (FR13).
     pub verdict_facts: VerdictFacts,
 }
 

@@ -8,7 +8,9 @@
 //!
 //! Identity and time are **caller-supplied** (ADD15): nothing here calls `Uuid::new_v4()` or a
 //! clock. A journal file written by a newer schema opens **read-only** with a neutral,
-//! cause-named error on writes (NFR-R3). Export/import/backup and sync-guard are Epic 5.
+//! cause-named error on writes (NFR-R3). Epic 5 added whole-journal export/import (`export`),
+//! raw-file backup/restore (`restore`), the sync-folder guard + single-instance lock
+//! (`journal`), and the local price-history cache (`price_history`).
 
 mod error;
 mod export;
@@ -20,6 +22,7 @@ mod restore;
 mod schema;
 mod studies;
 mod transactions;
+mod util;
 mod watchlist;
 
 pub use error::{Error, Result};

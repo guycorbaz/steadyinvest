@@ -11,13 +11,13 @@
 //! is thin and validated by a manual GO/NO-GO with a real key (no network in CI).
 
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde_json::Value;
 use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear};
 
+use crate::adapters::common::{self, build_client, cap_detail, dec, reduce_high_low};
 use crate::error::ProviderError;
 use crate::provider::{MarketDataProvider, RawFetch};
 
@@ -46,43 +46,16 @@ impl TwelveDataProvider {
         }
     }
 
+    /// [`common::get_json`] (NFR-S1 key hygiene + HTTP-status classification, incl. the 403 body
+    /// detail) followed by the Twelve-Data-specific step: many errors arrive as a **200 body**
+    /// (`{"status":"error",…}`), so the body is classified before being treated as data.
     async fn get_json(&self, url: &str, ticker: &str) -> Result<Value, ProviderError> {
-        // NFR-S1: the URL carries `?apikey=…`; `reqwest::Error`'s Display can include the URL, so
-        // `.without_url()` is MANDATORY before stringifying — otherwise the key would leak into a
-        // user-facing notice.
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| ProviderError::Network {
-                detail: e.without_url().to_string(),
-            })?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(http_status_error(status.as_u16(), ticker));
-        }
-        let body = resp
-            .json::<Value>()
-            .await
-            .map_err(|e| ProviderError::Parse {
-                detail: e.without_url().to_string(),
-            })?;
-        // Twelve Data signals many errors in the 200 body — classify it before treating it as data.
+        let body = common::get_json(&self.http, url, ticker).await?;
         if let Some(err) = classify_twelvedata(&body, ticker) {
             return Err(err);
         }
         Ok(body)
     }
-}
-
-/// The shared `reqwest` client with sane timeouts (#39) — a hung connection otherwise latches the UI.
-fn build_client() -> Client {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
-        .build()
-        .expect("the reqwest client builds with timeouts")
 }
 
 impl Default for TwelveDataProvider {
@@ -142,14 +115,11 @@ pub fn classify_twelvedata(body: &Value, ticker: &str) -> Option<ProviderError> 
                 .or_else(|| c.as_str().and_then(|s| s.trim().parse().ok()))
         })
         .unwrap_or(0);
-    let detail: String = body
-        .get("message")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .chars()
-        .take(200)
-        .collect();
+    let detail = cap_detail(
+        body.get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
     Some(match code {
         401 => ProviderError::InvalidOrAbsentKey,
         403 => ProviderError::Forbidden { detail },
@@ -163,25 +133,6 @@ pub fn classify_twelvedata(body: &Value, ticker: &str) -> Option<ProviderError> 
             detail: format!("twelvedata error {code}: {detail}"),
         },
     })
-}
-
-/// HTTP status → cause-named [`ProviderError`] (for the rarer non-200 responses).
-fn http_status_error(status: u16, ticker: &str) -> ProviderError {
-    match status {
-        401 => ProviderError::InvalidOrAbsentKey,
-        403 => ProviderError::Forbidden {
-            detail: String::new(),
-        },
-        404 => ProviderError::TickerNotFound {
-            ticker: ticker.to_string(),
-        },
-        429 => ProviderError::Quota {
-            retry_after_secs: None,
-        },
-        s => ProviderError::Network {
-            detail: format!("provider responded with HTTP status {s}"),
-        },
-    }
 }
 
 /// PURE: the latest close from a `/time_series` body. The series is newest-first by default, so the
@@ -213,7 +164,8 @@ pub fn map_twelvedata(series: &Value, ticker: &str) -> Result<RawFinancials, Pro
         })?
         .to_string();
 
-    let (highs, lows) = reduce_high_low(series);
+    // Per-year high/low reduced from the daily bars (`values[]`, `"datetime"`-keyed).
+    let (highs, lows) = reduce_high_low(series.get("values"), "datetime");
 
     let mut years: BTreeMap<i32, ()> = BTreeMap::new();
     for y in highs.keys().chain(lows.keys()) {
@@ -250,58 +202,6 @@ pub fn map_twelvedata(series: &Value, ticker: &str) -> Result<RawFinancials, Pro
         years,
         splits: Vec::new(),
     })
-}
-
-/// PURE: per-year max(high)/min(low) from the daily `values[]` bars (`datetime` = `"YYYY-MM-DD …"`).
-fn reduce_high_low(series: &Value) -> (BTreeMap<i32, Decimal>, BTreeMap<i32, Decimal>) {
-    let mut highs: BTreeMap<i32, Decimal> = BTreeMap::new();
-    let mut lows: BTreeMap<i32, Decimal> = BTreeMap::new();
-    let Some(bars) = series.get("values").and_then(Value::as_array) else {
-        return (highs, lows);
-    };
-    for bar in bars {
-        let Some(year) = bar
-            .get("datetime")
-            .and_then(Value::as_str)
-            .and_then(year_of_date)
-        else {
-            continue;
-        };
-        if let Some(high) = dec(bar.get("high")) {
-            highs
-                .entry(year)
-                .and_modify(|m| {
-                    if high > *m {
-                        *m = high;
-                    }
-                })
-                .or_insert(high);
-        }
-        if let Some(low) = dec(bar.get("low")) {
-            lows.entry(year)
-                .and_modify(|m| {
-                    if low < *m {
-                        *m = low;
-                    }
-                })
-                .or_insert(low);
-        }
-    }
-    (highs, lows)
-}
-
-/// Parse a string/number JSON value as an exact [`Decimal`] (NFR-C1 — never `f64`).
-fn dec(v: Option<&Value>) -> Option<Decimal> {
-    match v? {
-        Value::String(s) => Decimal::from_str_exact(s.trim()).ok(),
-        Value::Number(n) => Decimal::from_str_exact(&n.to_string()).ok(),
-        _ => None,
-    }
-}
-
-/// Leading `YYYY` of a `"YYYY-MM-DD"` (or `"YYYY-MM-DD HH:MM:SS"`) datetime → fiscal year.
-fn year_of_date(key: &str) -> Option<i32> {
-    key.get(0..4)?.parse::<i32>().ok()
 }
 
 #[cfg(test)]

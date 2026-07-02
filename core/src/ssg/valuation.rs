@@ -112,9 +112,11 @@ pub(super) fn compute(
 
     // Current P/E = current_price / Σ(last 4 quarterly EPS); TTM ≤ 0 ⇒ unknown (spec §9).
     // The TTM denominator finding mirrors the per-year eps rule (recorded interpretation).
-    let ttm_eps = observations
-        .ttm_quarterly_eps
-        .map(|q| q.iter().copied().sum::<Decimal>());
+    // Checked fold: an overflowing sum yields `unknown`, never a panic (house `mean` pattern).
+    let ttm_eps = observations.ttm_quarterly_eps.and_then(|q| {
+        q.iter()
+            .try_fold(Decimal::ZERO, |acc, e| acc.checked_add(*e))
+    });
     let positive_ttm = ttm_eps.filter(|t| {
         let ok = *t > Decimal::ZERO;
         if !ok {

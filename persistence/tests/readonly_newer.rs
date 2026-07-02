@@ -91,7 +91,7 @@ fn newer_file_opens_read_only_reads_work_writes_fail() {
             err,
             Error::NewerJournalSchema {
                 file_user_version: 9,
-                supported: 5,
+                supported: 6,
             }
         ),
         "got {err:?}"

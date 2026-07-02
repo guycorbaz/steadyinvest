@@ -7,7 +7,9 @@
 /// Severity of a methodology quality flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
+    /// Informational — worth a look, no method concern by itself.
     Info,
+    /// A methodology concern the user is expected to weigh.
     Warn,
 }
 
@@ -25,7 +27,9 @@ impl Severity {
 /// plausibility warning and from the user's review tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QualityFlag {
+    /// The pinned catalog key (mirrors the spec's flag table).
     pub key: &'static str,
+    /// The flag's severity.
     pub severity: Severity,
 }
 

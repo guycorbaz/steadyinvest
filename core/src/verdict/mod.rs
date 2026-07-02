@@ -19,183 +19,24 @@
 //! - **content addressing** (ADD9): every derived verdict is stamped with
 //!   `(inputs_hash, METHOD_VERSION)` — `verdict = f(hash(inputs), method_version)` — so a
 //!   prior verdict is detectably orphaned by any input change (invalidation, never a silent
-//!   overwrite).
+//!   overwrite). The digest addresses input **values only** — the gates (review/freshness)
+//!   shape the verdict's integrity state but are deliberately NOT hashed: re-validating or
+//!   refreshing an unchanged value must not orphan the verdict it supports (the `digest`
+//!   submodule owns the frozen encoding).
 //!
-//! Pure calculation (Cardinal Rule): no I/O / UI / SQL / network; exact [`Decimal`] only.
+//! Pure calculation (Cardinal Rule): no I/O / UI / SQL / network; exact
+//! [`rust_decimal::Decimal`] only.
 
-use crate::method::{LOAD_BEARING_JUDGMENT_INPUTS, LOAD_BEARING_YEAR_FIELDS};
+mod digest;
+mod gates;
+
+pub use gates::{GateState, GatedInput, InputGates, OpenGate, YearGates};
+
 use crate::method_version::METHOD_VERSION;
 use crate::normalize::CanonicalFinancials;
 use crate::ssg::VerdictFacts;
-use crate::ssg::{self, ForecastLowOption, JudgmentInputs, QuarterlyObservations, SsgOutputs};
-use rust_decimal::Decimal;
-use sha2::{Digest, Sha256};
-
-/// Gate state of ONE load-bearing input (spec §5) — four neutral, fact-stating cases (FR13).
-///
-/// The verdict is `Full` only when every gate is [`GateState::ValidatedFresh`]; the other three
-/// states each name the §5 degradation fact they stand for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GateState {
-    /// The input is absent (§5 "missing").
-    Missing,
-    /// The input is present but its review state is not ✓ (§5 "not validated (review ≠ ✓)").
-    NotValidated,
-    /// The input is present and validated but stale (§5 "stale").
-    Stale,
-    /// The input is present, validated (✓) and not stale — the only verdict-green state.
-    ValidatedFresh,
-}
-
-impl GateState {
-    /// `true` iff this is the verdict-green state ([`GateState::ValidatedFresh`]).
-    pub const fn is_validated_fresh(self) -> bool {
-        matches!(self, GateState::ValidatedFresh)
-    }
-}
-
-/// Gate states of the four load-bearing fields of ONE usable year, aligned by index with
-/// [`LOAD_BEARING_YEAR_FIELDS`] (the array length is tied to the pinned catalog mechanically).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct YearGates {
-    year: i32,
-    states: [GateState; LOAD_BEARING_YEAR_FIELDS.len()],
-}
-
-impl YearGates {
-    /// Gates of one year; `states[i]` is the gate of `LOAD_BEARING_YEAR_FIELDS[i]`.
-    pub fn new(year: i32, states: [GateState; LOAD_BEARING_YEAR_FIELDS.len()]) -> Self {
-        YearGates { year, states }
-    }
-
-    pub fn year(&self) -> i32 {
-        self.year
-    }
-
-    /// All four states, in pinned-catalog order.
-    pub fn states(&self) -> &[GateState; LOAD_BEARING_YEAR_FIELDS.len()] {
-        &self.states
-    }
-
-    /// The gate of a load-bearing year field looked up by its catalog name; `None` for an
-    /// unknown name (same safe-direction contract as `normalize::canonical_field_present`).
-    pub fn gate(&self, field: &str) -> Option<GateState> {
-        LOAD_BEARING_YEAR_FIELDS
-            .iter()
-            .position(|f| *f == field)
-            .map(|i| self.states[i])
-    }
-}
-
-/// The §5 gates collection: the four load-bearing fields **of each usable year** plus the five
-/// load-bearing judgment inputs — exactly the pinned catalogs, nothing else.
-///
-/// **Caller's mapping duty (spec §5 scoping):** the per-year gates apply to the load-bearing
-/// fields *of the usable years* — callers MUST pass one [`YearGates`] entry per usable year of
-/// the study and none for unusable years (a year missing a load-bearing field is simply not
-/// usable, §4; the [`GateState::Missing`] case is still representable per field as defense in
-/// depth). `core` cannot check this scoping itself: usability lives in
-/// [`CanonicalFinancials`], review/freshness live in the caller's vocabulary.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InputGates {
-    year_gates: Vec<YearGates>,
-    judgment_gates: [GateState; LOAD_BEARING_JUDGMENT_INPUTS.len()],
-}
-
-impl InputGates {
-    /// Build the gates collection; `judgment_gates[i]` is the gate of
-    /// `LOAD_BEARING_JUDGMENT_INPUTS[i]`.
-    ///
-    /// Part of the caller's mapping duty (see the type docs): supply at most ONE
-    /// [`YearGates`] entry per year — on duplicates, [`Self::year_gate`] reads the first
-    /// entry while [`Verdict::open_gates`] reports every entry.
-    pub fn new(
-        year_gates: Vec<YearGates>,
-        judgment_gates: [GateState; LOAD_BEARING_JUDGMENT_INPUTS.len()],
-    ) -> Self {
-        InputGates {
-            year_gates,
-            judgment_gates,
-        }
-    }
-
-    /// Per-usable-year gates, in the order supplied by the caller.
-    pub fn year_gates(&self) -> &[YearGates] {
-        &self.year_gates
-    }
-
-    /// The five judgment gates, in pinned-catalog order.
-    pub fn judgment_gates(&self) -> &[GateState; LOAD_BEARING_JUDGMENT_INPUTS.len()] {
-        &self.judgment_gates
-    }
-
-    /// The gate of a load-bearing judgment input looked up by its catalog name; `None` for an
-    /// unknown name.
-    pub fn judgment_gate(&self, name: &str) -> Option<GateState> {
-        LOAD_BEARING_JUDGMENT_INPUTS
-            .iter()
-            .position(|n| *n == name)
-            .map(|i| self.judgment_gates[i])
-    }
-
-    /// The gate of a load-bearing year field looked up by year + catalog name; `None` when the
-    /// year is not gated (not usable / not supplied) or the name is unknown.
-    pub fn year_gate(&self, year: i32, field: &str) -> Option<GateState> {
-        self.year_gates
-            .iter()
-            .find(|y| y.year == year)
-            .and_then(|y| y.gate(field))
-    }
-
-    /// Every gate that is NOT validated-and-fresh, with the input it names — the queryable
-    /// degradation evidence (FR11/FR12), in catalog order (years in supplied order, fields in
-    /// catalog order, then judgment inputs in catalog order).
-    fn open_gates(&self) -> Vec<OpenGate> {
-        let mut open = Vec::new();
-        for yg in &self.year_gates {
-            for (i, state) in yg.states.iter().enumerate() {
-                if !state.is_validated_fresh() {
-                    open.push(OpenGate {
-                        input: GatedInput::YearField {
-                            year: yg.year,
-                            field: LOAD_BEARING_YEAR_FIELDS[i],
-                        },
-                        state: *state,
-                    });
-                }
-            }
-        }
-        for (i, state) in self.judgment_gates.iter().enumerate() {
-            if !state.is_validated_fresh() {
-                open.push(OpenGate {
-                    input: GatedInput::JudgmentInput {
-                        name: LOAD_BEARING_JUDGMENT_INPUTS[i],
-                    },
-                    state: *state,
-                });
-            }
-        }
-        open
-    }
-}
-
-/// Identifies ONE load-bearing input by its pinned catalog name (FR11 traceability).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GatedInput {
-    /// A per-year load-bearing field ([`LOAD_BEARING_YEAR_FIELDS`]).
-    YearField { year: i32, field: &'static str },
-    /// A load-bearing judgment input ([`LOAD_BEARING_JUDGMENT_INPUTS`]).
-    JudgmentInput { name: &'static str },
-}
-
-/// One queryable reason a verdict is not `Full`: a load-bearing input whose gate is not
-/// validated-and-fresh (FR12 "testably/queryable degraded"). `state` is never
-/// [`GateState::ValidatedFresh`] (by construction in [`InputGates::open_gates`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OpenGate {
-    pub input: GatedInput,
-    pub state: GateState,
-}
+use crate::ssg::{self, JudgmentInputs, QuarterlyObservations, SsgOutputs};
+use digest::inputs_digest;
 
 /// The integrity-**Full** verdict (invariant 2a): the facts rest on all-validated-and-fresh
 /// load-bearing inputs of a not-low-confidence study. **The compiler is the gate** — private
@@ -442,138 +283,11 @@ fn derive_verdict(outputs: &SsgOutputs, gates: &InputGates, inputs_hash: &str) -
     }
 }
 
-/// One encoded `Option<Decimal>` value: scale-normalized decimal string, or the `absent`
-/// sentinel (not a valid decimal spelling, so it can never collide with a value).
-fn enc(value: Option<Decimal>) -> String {
-    match value {
-        Some(v) => v.normalize().to_string(),
-        None => "absent".to_string(),
-    }
-}
-
-/// Deterministic SHA-256 hex digest over a documented, stable encoding of the three engine
-/// inputs (ADD9 content address).
-///
-/// **Encoding (normative for this digest):** newline-joined `name=value` lines, fields in
-/// struct order — every value field of every [`CanonicalFinancials`] year (years in their
-/// canonical ascending order) plus `usable_years`, every [`JudgmentInputs`] field (the
-/// forecast-low option by its snake_case name), and every [`QuarterlyObservations`] field.
-/// Every `Decimal` is [`Decimal::normalize`]d before encoding, so value-equal inputs digest
-/// equal (`"3.0"` = `"3"` — the `contract::provenance` NOTE). Derived per-year `usability`
-/// and the `findings` are NOT encoded: both are pure functions of the encoded values and
-/// would add no discriminating power. No map iteration, no pointer identity — stable across
-/// runs and platforms.
-fn inputs_digest(
-    financials: &CanonicalFinancials,
-    judgment: &JudgmentInputs,
-    observations: &QuarterlyObservations,
-) -> String {
-    let mut lines: Vec<String> = Vec::new();
-    lines.push(format!("usable_years={}", financials.usable_years));
-    for y in &financials.years {
-        lines.push(format!("year={}", y.year));
-        lines.push(format!("sales={}", enc(y.sales)));
-        lines.push(format!("eps={}", enc(y.eps)));
-        lines.push(format!("high_price={}", enc(y.high_price)));
-        lines.push(format!("low_price={}", enc(y.low_price)));
-        lines.push(format!("dividend_per_share={}", enc(y.dividend_per_share)));
-        lines.push(format!("pre_tax_profit={}", enc(y.pre_tax_profit)));
-        lines.push(format!(
-            "book_value_per_share={}",
-            enc(y.book_value_per_share)
-        ));
-    }
-    lines.push(format!(
-        "judgment.estimated_high_eps={}",
-        enc(judgment.estimated_high_eps)
-    ));
-    lines.push(format!(
-        "judgment.estimated_low_eps={}",
-        enc(judgment.estimated_low_eps)
-    ));
-    lines.push(format!(
-        "judgment.projected_sales_growth_pct={}",
-        enc(judgment.projected_sales_growth_pct)
-    ));
-    lines.push(format!(
-        "judgment.projected_eps_growth_pct={}",
-        enc(judgment.projected_eps_growth_pct)
-    ));
-    lines.push(format!(
-        "judgment.judged_avg_high_pe={}",
-        enc(judgment.judged_avg_high_pe)
-    ));
-    lines.push(format!(
-        "judgment.judged_avg_low_pe={}",
-        enc(judgment.judged_avg_low_pe)
-    ));
-    lines.push(format!(
-        "judgment.forecast_low_option={}",
-        forecast_low_option_name(judgment.forecast_low_option)
-    ));
-    lines.push(format!(
-        "judgment.recent_severe_low={}",
-        enc(judgment.recent_severe_low)
-    ));
-    lines.push(format!(
-        "judgment.current_price={}",
-        enc(judgment.current_price)
-    ));
-    lines.push(format!(
-        "judgment.present_full_year_dividend={}",
-        enc(judgment.present_full_year_dividend)
-    ));
-    lines.push(format!(
-        "observations.ttm_quarterly_eps={}",
-        match observations.ttm_quarterly_eps {
-            Some(quarters) => quarters
-                .iter()
-                .map(|q| q.normalize().to_string())
-                .collect::<Vec<_>>()
-                .join("|"),
-            None => "absent".to_string(),
-        }
-    ));
-    lines.push(format!(
-        "observations.latest_quarter_sales={}",
-        enc(observations.latest_quarter_sales)
-    ));
-    lines.push(format!(
-        "observations.latest_quarter_eps={}",
-        enc(observations.latest_quarter_eps)
-    ));
-    lines.push(format!(
-        "observations.year_ago_quarter_sales={}",
-        enc(observations.year_ago_quarter_sales)
-    ));
-    lines.push(format!(
-        "observations.year_ago_quarter_eps={}",
-        enc(observations.year_ago_quarter_eps)
-    ));
-
-    let mut hasher = Sha256::new();
-    hasher.update(lines.join("\n").as_bytes());
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
-/// The snake_case name of a forecast-low option, for the digest encoding (mirrors the
-/// `contract::ForecastLowOption` wire names by convention).
-fn forecast_low_option_name(option: ForecastLowOption) -> &'static str {
-    match option {
-        ForecastLowOption::AvgLowPeTimesEps => "avg_low_pe_times_eps",
-        ForecastLowOption::AvgLowPriceLast5y => "avg_low_price_last_5y",
-        ForecastLowOption::RecentSevereLow => "recent_severe_low",
-        ForecastLowOption::DividendSupported => "dividend_supported",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::method::{LOAD_BEARING_JUDGMENT_INPUTS, LOAD_BEARING_YEAR_FIELDS};
+    use rust_decimal::Decimal;
 
     /// All-green gates over `years` usable years.
     fn green_gates(years: &[i32]) -> InputGates {
@@ -782,7 +496,7 @@ mod tests {
     /// (case-insensitive, whole-word) — same recipe as the 1.8/1.9/1.10 local gates.
     #[test]
     fn verdict_vocabulary_contains_no_banned_verbs() {
-        use crate::method::{BANNED_VERBS_EN, BANNED_VERBS_FR};
+        use crate::method::{contains_word, BANNED_VERBS_EN, BANNED_VERBS_FR};
 
         let vocabulary: [&str; 42] = [
             // Types
@@ -833,25 +547,6 @@ mod tests {
             "judgment",
             "observations",
         ];
-
-        let contains_word = |haystack: &str, needle: &str| {
-            let h = haystack.to_lowercase();
-            let n = needle.to_lowercase();
-            h.match_indices(&n).any(|(i, _)| {
-                let before_ok = i == 0
-                    || !h[..i]
-                        .chars()
-                        .next_back()
-                        .is_some_and(|c| c.is_alphanumeric());
-                let after = i + n.len();
-                let after_ok = after == h.len()
-                    || !h[after..]
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_alphanumeric());
-                before_ok && after_ok
-            })
-        };
 
         for s in vocabulary {
             for banned in BANNED_VERBS_EN.iter().chain(BANNED_VERBS_FR.iter()) {

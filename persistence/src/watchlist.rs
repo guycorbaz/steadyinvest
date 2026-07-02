@@ -11,8 +11,9 @@
 //! journal revisions on a sync-sensitive store). Ids/timestamps come from the app's injected
 //! `IdGen`/`Clock` (ADD15); persistence owns only the `position`.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::journal::Journal;
+use crate::util::{bump_logical_version, parse_uuid};
 use serde::{Deserialize, Serialize};
 use steadyinvest_contract::Timestamp;
 use uuid::Uuid;
@@ -57,10 +58,7 @@ impl Journal {
                 created_at.0,
             ],
         )?;
-        tx.execute(
-            "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-            [],
-        )?;
+        bump_logical_version(&tx)?;
         tx.commit()?;
         Ok(WatchItem {
             id,
@@ -121,10 +119,7 @@ impl Journal {
             rusqlite::params![id_text, security_ticker, study_text],
         )?;
         if changed > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(())
@@ -142,10 +137,7 @@ impl Journal {
         )?;
         if removed > 0 {
             repack_positions(&tx)?;
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(())
@@ -164,10 +156,7 @@ impl Journal {
             )?;
         }
         if moved > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(())
@@ -176,7 +165,7 @@ impl Journal {
 
 /// Re-number every watchlist row to a contiguous `0..n` by current `position` order (after a
 /// delete). Runs inside the caller's transaction.
-fn repack_positions(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+pub(crate) fn repack_positions(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     let ids: Vec<String> = {
         let mut stmt = tx.prepare("SELECT id FROM watchlist_items ORDER BY position, id")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
@@ -189,10 +178,4 @@ fn repack_positions(tx: &rusqlite::Transaction<'_>) -> Result<()> {
         )?;
     }
     Ok(())
-}
-
-fn parse_uuid(text: &str, field: &str) -> Result<Uuid> {
-    Uuid::parse_str(text).map_err(|e| Error::CorruptPayload {
-        detail: format!("{field} {text:?} is not a valid UUID: {e}"),
-    })
 }

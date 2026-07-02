@@ -7,8 +7,9 @@
 //! **Pragmas** on every read-write open/create: `journal_mode=WAL` (persistent in the file),
 //! `synchronous=NORMAL`, `busy_timeout`, `foreign_keys=ON`. The newer-file read-only path applies
 //! only the connection-local ones (`busy_timeout`, `foreign_keys`) and skips the WAL write — a
-//! file mutation that belongs to the read-write path only. Sync-path detection /
-//! `journal_mode=DELETE` switching / single-instance lock are Epic 5 (story 5-5).
+//! file mutation that belongs to the read-write path only. Story 5.5 added the sync-path
+//! `journal_mode=DELETE` switching ([`JournalMode`]) and the single-instance lock sidecar
+//! ([`lock_is_stale`] / [`clear_lock`]) implemented in this module.
 
 use crate::error::{Error, Result};
 use crate::migrations;
