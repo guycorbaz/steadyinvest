@@ -605,9 +605,15 @@ mod tests {
         // the sell-quantity placeholder, the ledger empty state, the Achat/Vente row nouns + the
         // qty×price and Frais templates, the row Modifier/Supprimer, the five form placeholders,
         // the record/update/abandon action labels): +18 = 336. Its review adds the ledger-form
-        // « Enregistrer une vente » (a second occurrence of the 4.7 label): +1 = 337. Floor strict.
+        // « Enregistrer une vente » (a second occurrence of the 4.7 label): +1 = 337. Story 6.4
+        // adds the dividend surface (the Dividende row noun, the Retenue row template, the net
+        // template, « Enregistrer un dividende », the reinvestable-cash header + its amount
+        // template, the Réglages withholding panel title + placeholder + the Enregistrer reuse):
+        // +9 = 346. Its review adds the on-form dividend-semantics caption (the « Frais (vide =
+        // 0) » placeholder is a buy/sell fact, so the dividend meaning is stated on the form):
+        // +1 = 347. Floor strict.
         assert!(
-            total >= 337,
+            total >= 347,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -667,10 +673,12 @@ mod tests {
         // adds the unsupported-holding-currency notice (MSG_HOLDING_INVALID_CURRENCY): 78 + 1 = 79.
         // Story 6.3 adds the six transaction-ledger notices (buy-recorded, partial-sold, updated,
         // deleted, the over-sell refusal, the invalid-date refusal): 79 + 6 = 85; its review adds
-        // the ledger-backed direct-edit refusal (MSG_LEDGER_BACKED): 85 + 1 = 86.
+        // the ledger-backed direct-edit refusal (MSG_LEDGER_BACKED): 85 + 1 = 86. Story 6.4 adds
+        // the two dividend notices (recorded + the withholding-exceeds-gross refusal): 86 + 2 = 88;
+        // its review adds the retired-holding scope refusal (MSG_DIVIDEND_RETIRED): 88 + 1 = 89.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            86,
+            89,
             "state.rs message inventory changed — register the new notice"
         );
     }

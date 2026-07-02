@@ -203,6 +203,20 @@ pub(crate) fn refresh_holdings(
         .collect();
     holdings.set_capital_at_risk_by_currency(ModelRc::new(VecModel::from(car_rows)));
 
+    // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — includes SOLD holdings'
+    // dividends (cash received is cash); recomputed with the register so every ledger mutation and
+    // portfolio switch keeps the panel truthful.
+    let cash_rows: Vec<CapitalAtRiskRow> = state
+        .portfolio_reinvestable_cash_by_currency(&reference_currency)
+        .into_iter()
+        .map(|(currency, net)| CapitalAtRiskRow {
+            currency: currency.into(),
+            amount: viewmodel::format::format_scaled(net, DisplayField::Price, format).into(),
+            pct: SharedString::new(),
+        })
+        .collect();
+    holdings.set_reinvestable_cash(ModelRc::new(VecModel::from(cash_rows)));
+
     // Story 6.1 (FR37): the portfolio selector + the active id (the register above is the active
     // portfolio's holdings). Pushed here so every holdings re-render keeps the selector in sync.
     let portfolios: Vec<PortfolioRow> = state
@@ -242,6 +256,23 @@ pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uui
             fees: t.fees.clone().into(),
             currency: t.currency.clone().into(),
             rationale: t.rationale.clone().unwrap_or_default().into(),
+            // Story 6.4 (FR41): a dividend row also shows its NET (gross − retenue); "" elsewhere
+            // (and on an unparseable row — display only, never a hard error).
+            net: if t.kind.as_deref() == Some(steadyinvest_persistence::KIND_DIVIDEND) {
+                (|| {
+                    let q = rust_decimal::Decimal::from_str_exact(&t.quantity).ok()?;
+                    let p = rust_decimal::Decimal::from_str_exact(&t.unit_price).ok()?;
+                    let f = rust_decimal::Decimal::from_str_exact(&t.fees).ok()?;
+                    let net = q.checked_mul(p)?.checked_sub(f)?;
+                    // Cash received is never negative — an invalid (imported/legacy) row shows
+                    // no net rather than a nonsense figure (2026-07-02 review).
+                    (!net.is_sign_negative()).then(|| net.normalize().to_string())
+                })()
+                .unwrap_or_default()
+                .into()
+            } else {
+                SharedString::new()
+            },
         })
         .collect();
     let holdings = ui.global::<Holdings>();
@@ -725,6 +756,67 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
                 let result = result.map(|notice| {
                     ui.global::<Holdings>().set_notice(notice.into());
+                });
+                if result.is_ok() {
+                    refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                } else {
+                    apply_holdings_result(
+                        &ui,
+                        &journal_state.borrow(),
+                        result,
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                }
+                sync_ledger_panel(&ui, &journal_state.borrow(), uuid);
+                written
+            },
+        );
+    }
+    // Story 6.4 (FR41): a dividend from the ledger form — quantity = shares paid on, the price
+    // field = GROSS per share, the fees field = the withholding ("" auto-computes at the Réglages
+    // default rate). The register re-render refreshes the reinvestable-cash panel.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Holdings>().on_record_dividend(
+            move |id, date, quantity, gross_per_share, withholding, rationale| {
+                let ui = ui_weak.unwrap();
+                let Ok(uuid) = Uuid::parse_str(&id) else {
+                    return false;
+                };
+                let (reference, rate) = {
+                    let cfg = config.borrow();
+                    (
+                        cfg.reference_currency_or_default(),
+                        cfg.withholding_rate_pct_or_default(),
+                    )
+                };
+                let result = journal_state.borrow_mut().record_dividend_for(
+                    uuid,
+                    &date,
+                    &quantity,
+                    &gross_per_share,
+                    &withholding,
+                    &rationale,
+                    &reference,
+                    &rate,
+                );
+                let written = result.is_ok();
+                let format = config.borrow().number_format;
+                let result = result.map(|()| {
+                    ui.global::<Holdings>()
+                        .set_notice(state::MSG_DIVIDEND_RECORDED.into());
                 });
                 if result.is_ok() {
                     refresh_holdings(

@@ -150,6 +150,31 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 );
             });
     }
+    // ── Story 6.4 (FR41) — the default dividend withholding rate. "" resets to the pinned 35. ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(config);
+        let path = config_path.clone();
+        ui.global::<Prefs>()
+            .on_withholding_rate_pct_changed(move |value| {
+                let value = value.trim();
+                // Empty resets to the default; otherwise ignore a malformed/out-of-range percent
+                // (parse-guard — the accessor validates [0, 100]).
+                let stored = if value.is_empty() {
+                    None
+                } else if config::is_valid_withholding_rate_pct(value) {
+                    Some(value.to_string())
+                } else {
+                    return;
+                };
+                let ui = ui_weak.unwrap();
+                config.borrow_mut().withholding_rate_pct = stored;
+                persist(path.as_ref(), &config.borrow());
+                ui.global::<Prefs>().set_withholding_rate_pct(
+                    config.borrow().withholding_rate_pct_or_default().into(),
+                );
+            });
+    }
     // ── Story 3.2 — provider selection + key management (FR25/FR63) ──
     {
         let ui_weak = ui.as_weak();

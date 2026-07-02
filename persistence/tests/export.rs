@@ -349,20 +349,45 @@ fn ledger_buy_and_partial_sell_rows_round_trip_through_export_import() {
     };
     a.record_partial_sell(h.id, None, &sell, "16", &ts("2026-07-02T10:00:00Z"))
         .unwrap();
+    // Story 6.4 (FR41): a dividend row (gross per share 3, withholding 10.5) rides the same export.
+    let dividend = LedgerEntry {
+        id: Uuid::from_u128(0xE3),
+        occurred_at: "2026-07-03T00:00:00Z",
+        quantity: "10",
+        unit_price: "3",
+        fees: "10.5",
+        currency: "CHF",
+        rationale: None,
+    };
+    a.record_dividend(h.id, &dividend, &ts("2026-07-03T09:00:00Z"))
+        .unwrap();
 
     let envelope = a.export_journal().unwrap();
     let (_db, mut b) = empty_journal("b.db", 0xB63);
     let summary = b.import_journal(&envelope).unwrap();
-    assert_eq!(summary.transactions, 3, "opening + buy + sell all carried");
+    assert_eq!(
+        summary.transactions, 4,
+        "opening + buy + sell + dividend all carried"
+    );
 
     let txns = b.list_transactions(h.id).unwrap();
-    assert_eq!(txns.len(), 3);
+    assert_eq!(txns.len(), 4);
     assert_eq!(
         txns.iter()
             .map(|t| t.kind.as_deref().unwrap().to_string())
             .collect::<Vec<_>>(),
-        vec!["buy", "buy", "sell"],
+        vec!["buy", "buy", "sell", "dividend"],
         "kinds and (occurred_at, id) order preserved"
+    );
+    let dividend_back = txns.iter().find(|t| t.id == dividend.id).unwrap();
+    assert_eq!(dividend_back.fees, "10.5", "the withholding round-trips");
+    assert_eq!(
+        dividend_back.currency, "CHF",
+        "the stamped currency round-trips"
+    );
+    assert_eq!(
+        dividend_back.unit_price, "3",
+        "the gross per share round-trips"
     );
     let buy_back = txns.iter().find(|t| t.id == buy.id).unwrap();
     assert_eq!(buy_back.fees, "10", "fees round-trip");

@@ -127,6 +127,24 @@ export component PortfolioScreen inherits Rectangle {
             }
         }
 
+        // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — the study keeps the
+        // gross (method fidelity); this is what is actually available to reinvest after the
+        // withholding at source. No mixed-currency total (FX is Story 6.5). A neutral fact.
+        if Holdings.reinvestable-cash.length > 0: VerticalLayout {
+            spacing: Tokens.space-4;
+            Text {
+                text: @tr("Dividendes nets perçus (réinvestissables) :");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            for cash in Holdings.reinvestable-cash: Text {
+                text: @tr("{} {}", cash.amount, cash.currency);
+                color: Tokens.text-high;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+            }
+        }
+
         // ── Manual price refresh (Story 4.4, FR40) — user-initiated; never background-polled. ──
         HorizontalLayout {
             alignment: start;
@@ -441,7 +459,9 @@ export component PortfolioScreen inherits Rectangle {
                           vertical-alignment: center;
                       }
                       Text {
-                          text: lrow.kind == "buy" ? @tr("Achat") : @tr("Vente");
+                          text: lrow.kind == "buy" ? @tr("Achat")
+                              : lrow.kind == "dividend" ? @tr("Dividende")
+                              : @tr("Vente");
                           color: Tokens.text-high;
                           font-size: Tokens.font-caption;
                           vertical-alignment: center;
@@ -454,8 +474,17 @@ export component PortfolioScreen inherits Rectangle {
                           vertical-alignment: center;
                       }
                       Text {
-                          text: @tr("Frais : {}", lrow.fees);
+                          // On a dividend row the fees column IS the withholding (Story 6.4).
+                          text: lrow.kind == "dividend"
+                              ? @tr("Retenue : {}", lrow.fees) : @tr("Frais : {}", lrow.fees);
                           color: Tokens.text-mid;
+                          font-size: Tokens.font-caption;
+                          vertical-alignment: center;
+                      }
+                      if lrow.net != "": Text {
+                          text: @tr("net {} {}", lrow.net, lrow.currency);
+                          color: Tokens.text-high;
+                          font-family: Tokens.font-numeric;
                           font-size: Tokens.font-caption;
                           vertical-alignment: center;
                       }
@@ -489,10 +518,18 @@ export component PortfolioScreen inherits Rectangle {
                           }
                       }
                   }
-                  // The buy/sell/edit form: records a NEW buy or sell while `txn-editing-id` is
-                  // "", otherwise applies the loaded row's edit (its kind and currency stay what
-                  // they are). The amounts are in the holding's own currency (FR28) — shown
+                  // The buy/sell/dividend/edit form: records a NEW entry while `txn-editing-id`
+                  // is "", otherwise applies the loaded row's edit (its kind and currency stay
+                  // what they are). The amounts are in the holding's own currency (FR28) — shown
                   // read-only beside the fields, never chosen here.
+                  // Story 6.4 (AC4): the dividend semantics of the shared fields, stated ON the
+                  // form (the « Frais (vide = 0) » placeholder is a BUY/SELL fact — for a
+                  // dividend, empty auto-computes the Réglages withholding).
+                  Text {
+                      text: @tr("Dividende : quantité = actions (vide = toute la position) · prix = brut par action · frais = retenue (vide = taux par défaut)");
+                      color: Tokens.text-mid;
+                      font-size: Tokens.font-caption;
+                  }
                   HorizontalLayout {
                       spacing: Tokens.space-8;
                       Text {
@@ -554,6 +591,19 @@ export component PortfolioScreen inherits Rectangle {
                               && hrow.txn-quantity != "" && hrow.txn-price != "";
                           clicked => {
                               if (Holdings.record-sell(row.id, hrow.txn-date, hrow.txn-quantity,
+                                      hrow.txn-price, hrow.txn-fees, hrow.txn-rationale)) {
+                                  hrow.reset-txn-draft();
+                              }
+                          }
+                      }
+                      // Story 6.4 (FR41): a dividend — quantity = shares paid on (empty = the
+                      // whole current position), price field = GROSS per share, fees field =
+                      // retenue ("" = auto at the Réglages rate).
+                      if hrow.txn-editing-id == "": ActionButton {
+                          label: @tr("Enregistrer un dividende");
+                          enabled: !Holdings.read-only && hrow.txn-price != "";
+                          clicked => {
+                              if (Holdings.record-dividend(row.id, hrow.txn-date, hrow.txn-quantity,
                                       hrow.txn-price, hrow.txn-fees, hrow.txn-rationale)) {
                                   hrow.reset-txn-draft();
                               }

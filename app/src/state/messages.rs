@@ -152,6 +152,19 @@ pub const MSG_LEDGER_INVALID_DATE: &str =
 pub const MSG_LEDGER_BACKED: &str =
     "La quantité, le prix et la devise de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
 
+/// Dividend copy (Story 6.4, FR41) — fact-stating, posture-gated. The study keeps the GROSS
+/// dividend (method fidelity); the portfolio's reinvestable cash uses the NET (gross − retenue).
+pub const MSG_DIVIDEND_RECORDED: &str = "Le dividende a été enregistré.";
+/// Raised when the withholding exceeds the gross amount (net cash is never negative); nothing is
+/// written.
+pub const MSG_DIVIDEND_WITHHOLDING: &str =
+    "La retenue dépasse le montant brut du dividende ; rien n'a été enregistré.";
+/// Raised when a dividend is recorded against a RETIRED holding (the v1 entry point is scoped to
+/// the active register — the sold-positions surface is issue #84); nothing is written. A factual
+/// scope statement, not a fake save failure (2026-07-02 review).
+pub const MSG_DIVIDEND_RETIRED: &str =
+    "La position est retirée du portefeuille ; le dividende n'a pas été enregistré.";
+
 /// Multiple-portfolio copy (Story 6.1, FR37) — fact-stating, posture-gated. The name guard, and the
 /// two guarded-delete refusals (the register never orphans a holding nor drops its last portfolio).
 pub const MSG_PORTFOLIO_INVALID_NAME: &str =
@@ -427,6 +440,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_LEDGER_OVERSELL,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
+    MSG_DIVIDEND_RECORDED,
+    MSG_DIVIDEND_WITHHOLDING,
+    MSG_DIVIDEND_RETIRED,
     MSG_PORTFOLIO_INVALID_NAME,
     MSG_PORTFOLIO_HAS_HOLDINGS,
     MSG_PORTFOLIO_LAST,

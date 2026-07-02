@@ -25,6 +25,18 @@ const DEFAULT_WINDOW_HEIGHT: u32 = 720;
 /// 3-letter code; the set is open (the user can pick another in Settings), so this is a `String`,
 /// not an enum — no `contract` type, no migration when the picker grows.
 pub const DEFAULT_REFERENCE_CURRENCY: &str = "CHF";
+
+/// The pinned default dividend withholding rate in percent (Story 6.4, FR41 / PRD Appendix A):
+/// the Swiss impôt anticipé — 35 %. Configurable in Réglages; per-entry override on the form.
+pub const DEFAULT_WITHHOLDING_RATE_PCT: &str = "35";
+
+/// Whether `s` is a well-formed withholding rate: an exact decimal in `[0, 100]` (Story 6.4).
+/// The ONE validation shared by the config accessor and the Réglages handler (the
+/// `is_valid_trailing_stop_pct` precedent — no hand-copied bounds that can drift).
+pub fn is_valid_withholding_rate_pct(s: &str) -> bool {
+    rust_decimal::Decimal::from_str_exact(s)
+        .is_ok_and(|r| !r.is_sign_negative() && r <= rust_decimal::Decimal::ONE_HUNDRED)
+}
 /// Sanity bounds for a persisted size — outside means a damaged value, fall back.
 const MIN_SANE_WINDOW: u32 = 320;
 const MAX_SANE_WINDOW: u32 = 16_384;
@@ -138,6 +150,12 @@ pub struct AppConfig {
     /// `JournalState::active_portfolio` (it validates against the live list).
     #[serde(default)]
     pub active_portfolio_id: Option<String>,
+    /// The default dividend **withholding rate** in percent (Story 6.4, FR41 / Appendix A) — the
+    /// rate the dividend form's empty « Retenue » auto-computes with. `None` = the pinned default
+    /// [`DEFAULT_WITHHOLDING_RATE_PCT`] (35, the CH impôt anticipé). Append-only `#[serde(default)]`;
+    /// read through [`AppConfig::withholding_rate_pct_or_default`] (validate before trust).
+    #[serde(default)]
+    pub withholding_rate_pct: Option<String>,
 }
 
 /// Whether `s` is a well-formed trailing-stop percentage: an exact decimal strictly inside `(0, 100)`
@@ -191,6 +209,7 @@ impl Default for AppConfig {
             default_trailing_stop_pct: None,
             recent_journals: Vec::new(),
             active_portfolio_id: None,
+            withholding_rate_pct: None,
         }
     }
 }
@@ -250,6 +269,20 @@ impl AppConfig {
             .as_deref()
             .filter(|s| is_valid_trailing_stop_pct(s))
             .map(str::to_string)
+    }
+
+    /// The dividend withholding rate in percent (Story 6.4): the persisted value when it is an
+    /// exact decimal in `[0, 100]`, else [`DEFAULT_WITHHOLDING_RATE_PCT`] (35 — CH impôt
+    /// anticipé). A damaged on-disk value must not silently compute a wrong net (validate before
+    /// trust); the returned spelling is TRIMMED so consumers can parse it verbatim (2026-07-02
+    /// review: validating one string and returning another defeated the accessor's purpose).
+    pub fn withholding_rate_pct_or_default(&self) -> String {
+        self.withholding_rate_pct
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| is_valid_withholding_rate_pct(s))
+            .map(str::to_string)
+            .unwrap_or_else(|| DEFAULT_WITHHOLDING_RATE_PCT.to_string())
     }
 
     /// Persisted window size if it is sane, the default size otherwise (a 0×0 or absurd value
@@ -371,6 +404,7 @@ mod tests {
             preferred_provider: ProviderChoice::None,
             reference_currency: "EUR".to_string(),
             default_trailing_stop_pct: Some("15".to_string()),
+            withholding_rate_pct: Some("15".to_string()),
             recent_journals: vec![RecentJournal {
                 path: PathBuf::from("/tmp/steadyinvest/journal.db"),
                 journal_id: "11111111-1111-1111-1111-111111111111".to_string(),

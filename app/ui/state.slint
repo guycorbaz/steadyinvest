@@ -550,6 +550,9 @@ export global Prefs {
     // Mirrored from AppConfig.default_trailing_stop_pct ("" when none); the per-holding set-stop
     // control pre-fills it.
     in-out property <string> default-trailing-stop-pct;
+    // Story 6.4 (FR41): the default dividend withholding rate in percent (mirrors
+    // AppConfig.withholding_rate_pct_or_default — always a value, 35 = CH impôt anticipé).
+    in-out property <string> withholding-rate-pct;
     // ── Story 5.3 — whole-journal export / import (FR60) ──
     // The latest neutral outcome of an export/import (with counts on a successful import), set by Rust.
     in-out property <string> journal-status;
@@ -588,6 +591,7 @@ export global Prefs {
     callback provider-selected(string); // "eodhd" | "none"
     callback reference-currency-selected(string); // "CHF" | "EUR" | "USD" | "GBP" | …
     callback default-trailing-stop-pct-changed(string); // "" clears; else a percent in (0,100)
+    callback withholding-rate-pct-changed(string); // "" resets to 35; else a percent in [0,100]
     // The key travels ONE WAY into Rust as a call argument — never stored in an `in-out` property
     // that could round-trip back out to config/UI (NFR-S1).
     callback key-saved(string);
@@ -651,6 +655,9 @@ export struct LedgerRow {
     fees: string,
     currency: string,
     rationale: string,
+    // Story 6.4 (FR41): the NET amount of a dividend row (gross − retenue), pre-formatted by
+    // Rust; "" on buy/sell rows.
+    net: string,
 }
 
 export struct HoldingRow {
@@ -733,6 +740,11 @@ export global Holdings {
     // Same shape for an ordinary ledger-form SELL (6.3 review decision, FR39): the unit price is
     // the one the user actually obtained — explicit, not the matched study's.
     callback record-sell(string, string, string, string, string, string) -> bool;
+    // Story 6.4 (FR41): a DIVIDEND — id, date, shares paid on, GROSS per share, withholding
+    // ("" = auto at the Réglages default rate; "0" = none), rationale → recorded?
+    callback record-dividend(string, string, string, string, string, string) -> bool;
+    // Story 6.4 (FR41): the NET reinvestable dividend cash per currency (pct unused — "").
+    in-out property <[CapitalAtRiskRow]> reinvestable-cash;
     // transaction id, date, quantity, unit price, fees, rationale → applied? (kind/currency are not editable)
     callback update-transaction(string, string, string, string, string, string) -> bool;
     callback delete-transaction(string); // transaction id

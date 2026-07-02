@@ -2462,6 +2462,277 @@ fn a_bad_date_or_amount_on_a_buy_is_refused_neutrally() {
     assert!(state.holding_ledger(id).is_empty(), "nothing materialized");
 }
 
+// ── Story 6.4 — dividends: gross study, net reinvestable (FR41) ──
+
+#[test]
+fn a_dividend_records_as_cash_and_touches_neither_position_nor_opening() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x640);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+
+    // Explicit withholding (10.50 on a 30 gross).
+    state
+        .record_dividend_for(id, "2026-07-01", "10", "3", "10.5", "acompte", "CHF", "35")
+        .expect("the dividend records");
+
+    let rows = state.holding_ledger(id);
+    assert_eq!(rows.len(), 1, "NO opening materialization for a cash event");
+    assert_eq!(rows[0].kind.as_deref(), Some("dividend"));
+    assert_eq!(rows[0].quantity, "10");
+    assert_eq!(rows[0].unit_price, "3", "gross per share");
+    assert_eq!(rows[0].fees, "10.5", "the withholding");
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "10", "position untouched");
+    assert_eq!(holding.purchase_price, "100", "basis untouched");
+
+    // A later buy still materializes the opening correctly (the dividend is not a buy).
+    state
+        .record_buy_for(id, "2026-07-02", "10", "110", "0", "", "CHF")
+        .expect("the buy records");
+    let kinds: Vec<_> = state
+        .holding_ledger(id)
+        .iter()
+        .map(|t| t.kind.clone().unwrap())
+        .collect();
+    assert_eq!(
+        kinds.iter().filter(|k| *k == "buy").count(),
+        2,
+        "opening + the recorded buy"
+    );
+}
+
+#[test]
+fn an_empty_withholding_auto_computes_at_the_configured_rate() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x641);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+
+    // "" at the default 35 % → 10 × 3 × 0.35 = 10.5.
+    state
+        .record_dividend_for(id, "", "10", "3", "", "", "CHF", "35")
+        .unwrap();
+    // "" at a configured 15 % → 4.5; an explicit 0 overrides entirely.
+    state
+        .record_dividend_for(id, "", "10", "3", "", "", "CHF", "15")
+        .unwrap();
+    state
+        .record_dividend_for(id, "", "10", "3", "0", "", "CHF", "35")
+        .unwrap();
+
+    let fees: Vec<_> = state
+        .holding_ledger(id)
+        .iter()
+        .map(|t| t.fees.clone())
+        .collect();
+    assert_eq!(fees, vec!["10.5", "4.5", "0"]);
+}
+
+#[test]
+fn a_withholding_exceeding_the_gross_refuses_neutrally() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x642);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    assert_eq!(
+        state.record_dividend_for(id, "", "10", "3", "30.01", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_WITHHOLDING.to_string())
+    );
+    assert!(state.holding_ledger(id).is_empty(), "nothing written");
+}
+
+#[test]
+fn reinvestable_cash_groups_per_currency_and_counts_sold_holdings() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x643);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("AAPL", "5", "150", "USD").unwrap();
+    let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
+
+    // CHF: net 19.5 (30 gross − 10.5). USD: net 6 (2×3 gross − 0).
+    state
+        .record_dividend_for(ids[0], "", "10", "3", "", "", "CHF", "35")
+        .unwrap();
+    state
+        .record_dividend_for(ids[1], "", "2", "3", "0", "", "CHF", "35")
+        .unwrap();
+    // Sell the USD position entirely — its dividend cash must SURVIVE in the panel.
+    state.sell_holding(ids[1], "", "", "CHF").unwrap();
+    assert!(
+        !state.list_holdings().iter().any(|h| h.id == ids[1]),
+        "the USD holding is retired"
+    );
+
+    let cash = state.portfolio_reinvestable_cash_by_currency("CHF");
+    assert_eq!(
+        cash,
+        vec![
+            ("CHF".to_string(), Decimal::from_str_exact("19.5").unwrap()),
+            ("USD".to_string(), Decimal::from(6)),
+        ],
+        "per-currency nets, sold holding's dividends included, no mixed total"
+    );
+}
+
+#[test]
+fn a_dividend_on_a_retired_holding_is_refused_at_the_v1_entry_point() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x644);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state.sell_holding(id, "", "", "CHF").unwrap();
+    assert_eq!(
+        state.record_dividend_for(id, "", "10", "3", "", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_RETIRED.to_string()),
+        "a factual scope refusal, not a fake save failure (#84 owns the sold view)"
+    );
+}
+
+// ── Story 6.4 review patches (2026-07-02) ──
+
+#[test]
+fn editing_a_dividends_withholding_beyond_its_gross_is_refused() {
+    // Review HIGH (all three layers): the record-path invariant holds on EDIT too.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x645);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_dividend_for(id, "2026-07-01", "10", "3", "10.5", "", "CHF", "35")
+        .unwrap();
+    let div_id = state.holding_ledger(id)[0].id;
+
+    assert_eq!(
+        state.update_transaction_for(id, div_id, "2026-07-01", "10", "3", "1000", "", "CHF"),
+        Err(MSG_DIVIDEND_WITHHOLDING.to_string()),
+        "the withholding ≤ gross invariant survives the edit rail"
+    );
+    assert_eq!(state.holding_ledger(id)[0].fees, "10.5", "nothing changed");
+}
+
+#[test]
+fn mutating_a_dividend_only_ledger_touches_neither_opening_nor_position() {
+    // Review MED: a cash-row edit/delete on a dividend-only ledger must not fabricate an opening
+    // « Achat » nor rewrite/retire the stored aggregate (the replay would read an empty position).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x646);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_dividend_for(id, "2026-07-01", "10", "3", "0", "", "CHF", "35")
+        .unwrap();
+    let div_id = state.holding_ledger(id)[0].id;
+
+    // Edit the rationale/withholding: still exactly ONE row, position/sold_at untouched.
+    state
+        .update_transaction_for(
+            id,
+            div_id,
+            "2026-07-01",
+            "10",
+            "3",
+            "10.5",
+            "corrigé",
+            "CHF",
+        )
+        .expect("the cash edit applies");
+    assert_eq!(state.holding_ledger(id).len(), 1, "no phantom opening buy");
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .expect("still ACTIVE — a cash edit never retires");
+    assert_eq!(holding.quantity, "10");
+    assert_eq!(holding.purchase_price, "100");
+
+    // Delete it: the ledger is empty again — nothing was fabricated, nothing retired.
+    state
+        .delete_transaction_for(id, div_id, "CHF")
+        .expect("the delete applies");
+    assert!(state.holding_ledger(id).is_empty(), "truly empty again");
+    assert!(
+        state.list_holdings().iter().any(|h| h.id == id),
+        "the holding stays in the register"
+    );
+}
+
+#[test]
+fn a_sell_after_a_dividend_first_ledger_still_materializes_the_opening() {
+    // Review (blind #8): the opening rule keys on buy rows, not "ledger empty" — a pre-existing
+    // dividend row must not suppress the opening when a SELL arrives.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x647);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_dividend_for(id, "2026-07-01", "10", "3", "0", "", "CHF", "35")
+        .unwrap();
+
+    let notice = state
+        .sell_holding(id, "4", "", "CHF")
+        .expect("the partial sell records (no spurious over-sell)");
+    assert_eq!(notice, MSG_LEDGER_PARTIAL_SOLD);
+    let kinds: Vec<_> = state
+        .holding_ledger(id)
+        .iter()
+        .map(|t| t.kind.clone().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"buy".to_string()),
+        "the opening materialized alongside the sell"
+    );
+    let holding = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    assert_eq!(holding.quantity, "6");
+}
+
+#[test]
+fn one_invalid_dividend_row_does_not_erase_its_currency_bucket() {
+    // Review HIGH (panel side): a parseable-but-invalid row (over-withheld — plantable via a
+    // foreign 5.3 import) is skipped PER ROW; the bucket keeps its valid cash.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x648);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_dividend_for(id, "2026-07-01", "10", "3", "10.5", "", "CHF", "35")
+        .unwrap();
+    // Plant an over-withheld row straight at the persistence layer (the import path's freedom).
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .record_dividend(
+            id,
+            &steadyinvest_persistence::LedgerEntry {
+                id: Uuid::from_u128(0xBAD),
+                occurred_at: "2026-07-02T00:00:00Z",
+                quantity: "1",
+                unit_price: "1",
+                fees: "1000",
+                currency: "CHF",
+                rationale: None,
+            },
+            &Timestamp("2026-07-02T09:00:00Z".to_string()),
+        )
+        .unwrap();
+
+    let cash = state.portfolio_reinvestable_cash_by_currency("CHF");
+    assert_eq!(
+        cash,
+        vec![("CHF".to_string(), Decimal::from_str_exact("19.5").unwrap())],
+        "the valid row's net survives; only the invalid ROW is skipped"
+    );
+}
+
 // ── Story 6.3 review patches (2026-07-02) ──
 
 #[test]

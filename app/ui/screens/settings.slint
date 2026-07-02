@@ -440,6 +440,29 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
+            // Story 6.4 (FR41) — the default dividend withholding rate the « Retenue » field
+            // auto-computes with (Appendix A; CH impôt anticipé = 35). A fact, not advice.
+            withholding-panel := SettingsPanel {
+                title: @tr("Retenue à la source par défaut (dividendes)");
+                property <string> draft: Prefs.withholding-rate-pct;
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    TextField {
+                        placeholder: @tr("Pourcentage (0–100, vide = 35)");
+                        text <=> withholding-panel.draft;
+                        width: 200px;
+                    }
+                    ActionButton {
+                        label: @tr("Enregistrer");
+                        enabled: true;
+                        clicked => { Prefs.withholding-rate-pct-changed(withholding-panel.draft); }
+                    }
+                }
+            }
+
             SettingsPanel {
                 title: @tr("Format des nombres");
 
