@@ -22,7 +22,15 @@ fn seed_holding(journal: &mut Journal) -> Uuid {
         .expect("ensure portfolio");
     let hid = Uuid::from_u128(0x9101);
     journal
-        .add_holding(hid, pid, "NESN", "10", "100", &ts("2026-06-29T10:00:00Z"))
+        .add_holding(
+            hid,
+            pid,
+            "NESN",
+            "10",
+            "100",
+            "CHF",
+            &ts("2026-06-29T10:00:00Z"),
+        )
         .expect("add holding");
     hid
 }

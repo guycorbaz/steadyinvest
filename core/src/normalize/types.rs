@@ -14,6 +14,7 @@ use std::fmt;
 /// FX exists only at the future consolidation layer (FR5/NFR-C4), not in `core`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawAmount {
+    /// The reported exact amount.
     pub value: Decimal,
     /// ISO-4217-style reporting currency, compared verbatim to the study's native currency.
     pub currency: String,
@@ -23,6 +24,7 @@ pub struct RawAmount {
 /// it is never coerced to 0 anywhere downstream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawYear {
+    /// The reported fiscal year.
     pub year: i32,
     /// Reported period length in months; `Some(m)` with `m != 12` raises
     /// `fiscal_period_misalignment` (the year still passes through).
@@ -33,9 +35,13 @@ pub struct RawYear {
     pub fiscal_year_end_month: Option<u32>,
     /// Aggregate revenue — share-count independent, never split-adjusted.
     pub sales: Option<RawAmount>,
+    /// Earnings per share — split-adjusted during normalization.
     pub eps: Option<RawAmount>,
+    /// The year's high price — split-adjusted during normalization.
     pub high_price: Option<RawAmount>,
+    /// The year's low price — split-adjusted during normalization.
     pub low_price: Option<RawAmount>,
+    /// Dividend per share — split-adjusted during normalization.
     pub dividend_per_share: Option<RawAmount>,
     /// Directly-reported pre-tax profit (aggregate). When absent, the §2 gross-up derives it
     /// from `net_profit` and `tax_rate`.
@@ -43,9 +49,10 @@ pub struct RawYear {
     /// After-tax net profit (aggregate) — gross-up input only; not part of the canonical output.
     pub net_profit: Option<RawAmount>,
     /// Effective tax rate as a **fraction** in `[0, 1)` (e.g. `0.30` = 30%), matching the spec §2
-    /// formula `pre_tax_profit = net_profit / (1 − tax_rate)`. `tax_rate ≥ 1` makes the derived
-    /// PTP `unknown` (spec §9), never a computed value. Unitless — carries no currency.
+    /// formula `pre_tax_profit = net_profit / (1 − tax_rate)`. A rate outside `[0, 1)` makes the
+    /// derived PTP `unknown` (spec §9), never a computed value. Unitless — carries no currency.
     pub tax_rate: Option<Decimal>,
+    /// Book value per share — split-adjusted during normalization.
     pub book_value_per_share: Option<RawAmount>,
 }
 
@@ -77,7 +84,9 @@ impl RawYear {
 pub struct SplitEvent {
     /// First year reported in POST-split shares; all years strictly before it are rebased.
     pub effective_year: i32,
+    /// New shares per `denominator` old shares.
     pub numerator: u32,
+    /// Old shares the `numerator` new shares replace.
     pub denominator: u32,
 }
 
@@ -99,10 +108,12 @@ pub struct RawFinancials {
 /// ([`crate::method::LOAD_BEARING_YEAR_FIELDS`]) are present in the canonical output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum YearUsability {
+    /// Every load-bearing field is present.
     Usable,
     /// The typed `unknown/insufficient` state: at least one load-bearing field is missing —
     /// the missing fields are NAMED, and the values stay `None` (never coerced to 0).
     Insufficient {
+        /// The missing load-bearing fields, in catalog order.
         missing: Vec<&'static str>,
     },
 }
@@ -114,11 +125,17 @@ pub enum YearUsability {
 /// raised by the engine ([`crate::ssg`], Story 1.8) via its own finding shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlausibilityKey {
+    /// A year-over-year jump suggesting an undeclared split / series break (spec §3).
     SplitSeriesBreak,
+    /// An amount reported in a currency other than the study's native currency.
     CurrencyMismatch,
+    /// A non-12-month period or a shifted fiscal-year-end between consecutive years.
     FiscalPeriodMisalignment,
+    /// A computed ratio outside its plausibility bounds (value still reported).
     OutOfBoundsRatio,
+    /// A ratio's denominator is present but ≤ 0 — the ratio is `unknown` (spec §9).
     NegativeOrZeroDenominator,
+    /// The chosen forecast low is above the current price (spec §4 check).
     LowPriceAboveCurrent,
 }
 
@@ -140,6 +157,7 @@ impl PlausibilityKey {
 /// (the system never silently rewrites the user's data), and findings never block (spec §3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
+    /// The pinned plausibility key.
     pub key: PlausibilityKey,
     /// The reported year the finding is attached to.
     pub year: i32,
@@ -152,17 +170,24 @@ pub struct Finding {
 /// rounding (display-only, [`crate::rounding`]). `None` = unknown/insufficient — NEVER 0.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalYear {
+    /// The reported fiscal year.
     pub year: i32,
     /// Aggregate revenue — never split-adjusted.
     pub sales: Option<Decimal>,
+    /// Earnings per share, in post-split shares.
     pub eps: Option<Decimal>,
+    /// The year's high price, in post-split shares.
     pub high_price: Option<Decimal>,
+    /// The year's low price, in post-split shares.
     pub low_price: Option<Decimal>,
+    /// Dividend per share, in post-split shares.
     pub dividend_per_share: Option<Decimal>,
     /// Direct when reported; else the §2 gross-up `net_profit / (1 − tax_rate)`;
-    /// `tax_rate ≥ 1` or missing inputs ⇒ `None` (spec §9).
+    /// `tax_rate` outside `[0, 1)` or missing inputs ⇒ `None` (spec §9).
     pub pre_tax_profit: Option<Decimal>,
+    /// Book value per share, in post-split shares.
     pub book_value_per_share: Option<Decimal>,
+    /// Whether the year is usable (spec §4: all load-bearing fields present).
     pub usability: YearUsability,
 }
 
@@ -199,9 +224,15 @@ pub struct CanonicalFinancials {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizeError {
     /// The same reported year appears more than once.
-    DuplicateYear { year: i32 },
+    DuplicateYear {
+        /// The duplicated reported year.
+        year: i32,
+    },
     /// A declared split has a zero numerator or denominator.
-    InvalidSplitRatio { effective_year: i32 },
+    InvalidSplitRatio {
+        /// The offending split's effective year.
+        effective_year: i32,
+    },
 }
 
 impl fmt::Display for NormalizeError {

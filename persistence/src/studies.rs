@@ -8,6 +8,7 @@
 
 use crate::error::{Error, Result};
 use crate::journal::Journal;
+use crate::util::bump_logical_version;
 use rusqlite::OptionalExtension;
 use steadyinvest_contract::{Study, Timestamp, SCHEMA_VERSION};
 use uuid::Uuid;
@@ -62,10 +63,7 @@ impl Journal {
                 payload
             ],
         )?;
-        tx.execute(
-            "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-            [],
-        )?;
+        bump_logical_version(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -143,10 +141,7 @@ impl Journal {
         // Only a real change bumps the heartbeat — an absent id is a true no-op (no phantom version
         // drift, which the stale-restore detection / external sync would otherwise see).
         if changed > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(())
@@ -180,10 +175,7 @@ impl Journal {
         // Only a real removal bumps the heartbeat — deleting an absent id is a true no-op (no phantom
         // version drift for the stale-restore detection / external sync to see).
         if removed_study > 0 || removed_judgments > 0 || cleared_links > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(())

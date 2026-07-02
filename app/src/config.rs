@@ -162,6 +162,19 @@ pub fn is_valid_currency_code(code: &str) -> bool {
     code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase())
 }
 
+/// The fixed allow-list of currencies a **holding** can be denominated in (Story 6.2, FR38). Guy's
+/// 2026-07-02 decision: a small fixed set (a guard-rail against typos and codes the price provider
+/// can't serve), not a free 3-letter field. Mirrors the reference-currency picker in Settings; extend
+/// here when a new currency is needed. The holding currency selector renders exactly this set.
+pub const SUPPORTED_CURRENCIES: &[&str] = &["CHF", "EUR", "USD", "GBP", "JPY"];
+
+/// Whether `code` is a currency a holding may be denominated in — i.e. a member of
+/// [`SUPPORTED_CURRENCIES`] (Story 6.2). The app validates a chosen holding currency against this
+/// before it reaches persistence, so a stored holding currency is always one of the allow-list.
+pub fn is_supported_currency(code: &str) -> bool {
+    SUPPORTED_CURRENCIES.contains(&code)
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         AppConfig {
@@ -183,11 +196,14 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    /// The reference currency if the persisted value is well-formed, the default otherwise (a
-    /// damaged/empty code must not produce a blank or malformed currency label — validate before
-    /// trust, the same posture as [`Self::sane_window_size`]).
+    /// The reference currency if the persisted value is a member of [`SUPPORTED_CURRENCIES`], the
+    /// default otherwise (a damaged/empty/off-list code must not produce a blank label — validate
+    /// before trust, the same posture as [`Self::sane_window_size`]). Membership, not just shape
+    /// (Story 6.2): the reference currency is the coalesce fallback for a pre-6.2 NULL-currency
+    /// holding, and a fallback outside the allow-list (a hand-edited config, e.g. `"SEK"`) would
+    /// prefill the holding editor with a currency its picker can't render or re-save.
     pub fn reference_currency_or_default(&self) -> String {
-        if is_valid_currency_code(&self.reference_currency) {
+        if is_supported_currency(&self.reference_currency) {
             self.reference_currency.clone()
         } else {
             DEFAULT_REFERENCE_CURRENCY.to_string()

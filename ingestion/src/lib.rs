@@ -1,7 +1,8 @@
 //! steadyinvest-ingestion — provider-agnostic acquisition layer (FR15, FR21–27).
 //!
 //! This is the **only** crate that performs network I/O. The [`MarketDataProvider`] trait + the
-//! first adapter ([`adapters::eodhd`]) fetch a ticker's raw annual series; [`fetch_canonical`]
+//! adapters ([`adapters::eodhd`], [`adapters::twelvedata`]) fetch a ticker's raw annual series
+//! (or latest price); [`fetch_canonical`]
 //! routes it through `core::normalize` (Epic 1, unchanged) into [`CanonicalFinancials`] plus a
 //! dependency digest. The raw ↔ `contract::Cell` stamping (provenance, source, freshness) is the
 //! caller's job (`app`), which owns the `Clock` and the journal `logical_version`. Keys are

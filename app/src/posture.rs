@@ -595,9 +595,15 @@ mod tests {
         // clair : cours réel" legend, "Fermer"): +8 = 314. Story 5.6 adds the dashboard "Exporter PDF"
         // row action: +1 = 315. Story 6.1 adds the Portefeuille multi-portfolio controls (the add-name
         // placeholder + "Ajouter un portefeuille", the rename placeholder + "Renommer", "Supprimer le
-        // portefeuille"): +5 = 320. Floor strict.
+        // portefeuille"): +5 = 320. Story 6.2 replaces the single capital-at-risk header with the
+        // per-currency block ("Capital à risque par devise :" + the two per-row templates, −2 old
+        // single-total templates) and adds the "Devise :" holding-currency picker label: net +2 = 322.
+        // The 6.2 review then unified the Réglages reference-currency chips on the pushed
+        // SUPPORTED_CURRENCIES model (a `for` over plain codes — currency codes are not
+        // translatable copy), retiring the four hardcoded @tr("CHF"/"EUR"/"USD"/"GBP") chips:
+        // −4 = 318. Floor strict.
         assert!(
-            total >= 320,
+            total >= 318,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -653,10 +659,11 @@ mod tests {
         // (opened, created, open-failed, locked-elsewhere, lock-reclaimable, sync-folder warning, the
         // stale-version template): 67 + 7 = 74. Story 7.4 adds the "no provider selected" fetch notice
         // (MSG_PROVIDER_NONE): 74 + 1 = 75. Story 6.1 adds the three multiple-portfolio notices
-        // (invalid name + the two guarded-delete refusals: has-holdings / last): 75 + 3 = 78.
+        // (invalid name + the two guarded-delete refusals: has-holdings / last): 75 + 3 = 78. Story 6.2
+        // adds the unsupported-holding-currency notice (MSG_HOLDING_INVALID_CURRENCY): 78 + 1 = 79.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            78,
+            79,
             "state.rs message inventory changed — register the new notice"
         );
     }

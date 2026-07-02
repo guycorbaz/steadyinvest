@@ -10,9 +10,9 @@ use rust_decimal::Decimal;
 ///
 /// Precedence: a directly-reported `pre_tax_profit` always wins (spec §9 "prefer a
 /// directly-reported pre-tax profit"). Otherwise the gross-up derives it from `net_profit` and
-/// `tax_rate` — `tax_rate` is a fraction in `[0, 1)`; `tax_rate ≥ 1` means a non-positive
-/// denominator, so the result is **unknown** (`None`, spec §9), never computed and never 0.
-/// All arithmetic is checked: no panic on any input.
+/// `tax_rate` — `tax_rate` is a fraction in `[0, 1)`; any rate outside that range (`≥ 1` is a
+/// non-positive denominator, `< 0` is not a tax rate) makes the result **unknown** (`None`,
+/// spec §9), never computed and never 0. All arithmetic is checked: no panic on any input.
 pub(super) fn canonical_pre_tax_profit(
     pre_tax_profit: Option<Decimal>,
     net_profit: Option<Decimal>,
@@ -23,7 +23,7 @@ pub(super) fn canonical_pre_tax_profit(
     }
     let net = net_profit?;
     let rate = tax_rate?;
-    if rate >= Decimal::ONE {
+    if rate < Decimal::ZERO || rate >= Decimal::ONE {
         return None;
     }
     let denominator = Decimal::ONE.checked_sub(rate)?;
@@ -72,6 +72,15 @@ mod tests {
             canonical_pre_tax_profit(None, Some(d(70, 0)), Some(d(15, 1))),
             None,
             "tax_rate = 1.5 implies a negative denominator — must be unknown (spec §9)"
+        );
+    }
+
+    #[test]
+    fn negative_tax_rate_yields_unknown_never_a_number() {
+        assert_eq!(
+            canonical_pre_tax_profit(None, Some(d(70, 0)), Some(d(-30, 2))),
+            None,
+            "tax_rate = -0.30 is outside [0, 1) — must be unknown, same path as rate ≥ 1"
         );
     }
 

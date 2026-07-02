@@ -5,18 +5,19 @@
 //!   declared splits;
 //! - `/eod/{ticker}` (daily OHLC) → each fiscal year's high/low, reduced from the daily bars.
 //!
-//! The **pure mapping** [`map_eodhd`] (no I/O) is the CI-tested heart; the HTTP layer is thin and
-//! validated by a manual GO/NO-GO with a real key (no network in CI). The assumed JSON shape
-//! follows EODHD's documented structure — the manual run confirms fidelity to a live response.
+//! The **pure mapping** [`map_eodhd`] (no I/O) is the CI-tested heart; the HTTP layer is thin
+//! (shared with Twelve Data via [`crate::adapters::common`]) and validated by a manual GO/NO-GO
+//! with a real key (no network in CI). The assumed JSON shape follows EODHD's documented
+//! structure — the manual run confirms fidelity to a live response.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde_json::Value;
 use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear, SplitEvent};
 
+use crate::adapters::common::{build_client, dec, get_json, reduce_high_low, year_of_date_key};
 use crate::error::ProviderError;
 use crate::provider::{MarketDataProvider, RawFetch};
 
@@ -44,52 +45,6 @@ impl EodhdProvider {
             base_url: base_url.into(),
         }
     }
-
-    async fn get_json(&self, url: &str, ticker: &str) -> Result<Value, ProviderError> {
-        // NFR-S1: the request URL carries `?api_token=…`. `reqwest::Error`'s Display can include the
-        // URL, so `.without_url()` is MANDATORY before stringifying — otherwise the key would leak
-        // into `ProviderError::{Network,Parse}` detail and on into a user-facing notice.
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| ProviderError::Network {
-                detail: e.without_url().to_string(),
-            })?;
-        let status = resp.status();
-        if status.is_success() {
-            return resp
-                .json::<Value>()
-                .await
-                .map_err(|e| ProviderError::Parse {
-                    detail: e.without_url().to_string(),
-                });
-        }
-        // A 403 means the key is valid but the account/plan is not authorized for this resource
-        // (e.g. EODHD's free tier excludes /fundamentals). Surface the provider's own reason — far
-        // more honest than "key invalid" — capped, and key-free (the body never carries the token).
-        if status.as_u16() == 403 {
-            let detail = resp.text().await.unwrap_or_default();
-            let detail: String = detail.trim().chars().take(200).collect();
-            return Err(ProviderError::Forbidden { detail });
-        }
-        Err(classify_status(status.as_u16(), ticker))
-    }
-}
-
-/// The shared `reqwest` client with sane timeouts (#39). Without these, a hung connection never
-/// resolves, so the off-thread fetch/key-test never returns and the UI latches "Récupération…" /
-/// "Test… en cours" with no recovery. A connect + overall-request bound guarantees every job
-/// terminates (as a `Network` error on timeout — cause-named by Story 3.5). Falls back to the
-/// default client if the builder fails (only on a TLS-backend init error — same panic surface as
-/// `Client::new()`).
-fn build_client() -> Client {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
-        .build()
-        .expect("the reqwest client builds with timeouts")
 }
 
 impl Default for EodhdProvider {
@@ -114,8 +69,8 @@ impl MarketDataProvider for EodhdProvider {
             "{}/eod/{ticker}?api_token={token}&period=d&fmt=json&order=a",
             self.base_url
         );
-        let fundamentals = self.get_json(&fundamentals_url, ticker).await?;
-        let prices = self.get_json(&eod_url, ticker).await?;
+        let fundamentals = get_json(&self.http, &fundamentals_url, ticker).await?;
+        let prices = get_json(&self.http, &eod_url, ticker).await?;
         let financials = map_eodhd(&fundamentals, &prices, ticker)?;
         // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
         // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
@@ -138,7 +93,7 @@ impl MarketDataProvider for EodhdProvider {
             "{}/eod/{ticker}?api_token={token}&period=d&fmt=json&order=a",
             self.base_url
         );
-        let prices = self.get_json(&eod_url, ticker).await?;
+        let prices = get_json(&self.http, &eod_url, ticker).await?;
         Ok(latest_eod_close(&prices))
     }
 }
@@ -150,23 +105,6 @@ pub fn latest_eod_close(prices: &Value) -> Option<Decimal> {
     let bars = prices.as_array()?;
     let last = bars.last()?;
     dec(last.get("close"))
-}
-
-/// HTTP status → cause-named [`ProviderError`]. (403 is handled in `get_json` with the body, so it
-/// never reaches here — only 401 maps to an invalid/absent key.)
-fn classify_status(status: u16, ticker: &str) -> ProviderError {
-    match status {
-        401 => ProviderError::InvalidOrAbsentKey,
-        404 => ProviderError::TickerNotFound {
-            ticker: ticker.to_string(),
-        },
-        429 => ProviderError::Quota {
-            retry_after_secs: None,
-        },
-        s => ProviderError::Network {
-            detail: format!("provider responded with HTTP status {s}"),
-        },
-    }
 }
 
 /// PURE: EODHD `/fundamentals` + `/eod` JSON → [`RawFinancials`]. No I/O. Missing fields stay
@@ -188,8 +126,8 @@ pub fn map_eodhd(
     let balance = obj(fundamentals.pointer("/Financials/Balance_Sheet/yearly"));
     let earnings = obj(fundamentals.pointer("/Earnings/Annual"));
 
-    // Per-year high/low reduced from the daily EOD bars.
-    let (highs, lows) = reduce_eod_high_low(prices);
+    // Per-year high/low reduced from the daily EOD bars (root array, `"date"`-keyed).
+    let (highs, lows) = reduce_high_low(Some(prices), "date");
 
     // Union of every fiscal year mentioned by any section, ascending.
     let mut years_set: BTreeMap<i32, ()> = BTreeMap::new();
@@ -290,44 +228,6 @@ fn parse_split_part(s: &str) -> Option<u32> {
     integer.parse::<u32>().ok()
 }
 
-/// Reduce the daily EOD array into per-year max(high) and min(low).
-fn reduce_eod_high_low(prices: &Value) -> (BTreeMap<i32, Decimal>, BTreeMap<i32, Decimal>) {
-    let mut highs: BTreeMap<i32, Decimal> = BTreeMap::new();
-    let mut lows: BTreeMap<i32, Decimal> = BTreeMap::new();
-    let Some(bars) = prices.as_array() else {
-        return (highs, lows);
-    };
-    for bar in bars {
-        let Some(year) = bar
-            .get("date")
-            .and_then(Value::as_str)
-            .and_then(year_of_date_key)
-        else {
-            continue;
-        };
-        if let Some(high) = dec(bar.get("high")) {
-            highs
-                .entry(year)
-                .and_modify(|m| {
-                    if high > *m {
-                        *m = high;
-                    }
-                })
-                .or_insert(high);
-        }
-        if let Some(low) = dec(bar.get("low")) {
-            lows.entry(year)
-                .and_modify(|m| {
-                    if low < *m {
-                        *m = low;
-                    }
-                })
-                .or_insert(low);
-        }
-    }
-    (highs, lows)
-}
-
 /// `totalStockholderEquity / commonStockSharesOutstanding` when both are present and shares ≠ 0.
 fn book_value_per_share(year: Option<&Value>) -> Option<Decimal> {
     let equity = field_dec(year, "totalStockholderEquity")?;
@@ -362,20 +262,6 @@ fn year_row(map: &serde_json::Map<String, Value>, y: i32) -> Option<&Value> {
 /// A named field of an optional row, parsed as a `Decimal` (number or numeric string).
 fn field_dec(row: Option<&Value>, field: &str) -> Option<Decimal> {
     dec(row?.get(field))
-}
-
-/// Parse a `Decimal` from a JSON value that is a number or a numeric string. Never uses `f64`.
-fn dec(v: Option<&Value>) -> Option<Decimal> {
-    match v? {
-        Value::String(s) => Decimal::from_str_exact(s.trim()).ok(),
-        Value::Number(n) => Decimal::from_str_exact(&n.to_string()).ok(),
-        _ => None,
-    }
-}
-
-/// Leading `YYYY` of a `"YYYY-MM-DD"` date key → fiscal year.
-fn year_of_date_key(key: &str) -> Option<i32> {
-    key.get(0..4)?.parse::<i32>().ok()
 }
 
 #[cfg(test)]

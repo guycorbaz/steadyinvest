@@ -13,6 +13,7 @@
 
 use crate::error::Result;
 use crate::journal::Journal;
+use crate::util::{bump_logical_version, parse_uuid};
 use serde::{Deserialize, Serialize};
 use steadyinvest_contract::Timestamp;
 use uuid::Uuid;
@@ -83,10 +84,7 @@ impl Journal {
             "UPDATE holdings SET sold_at = ?2 WHERE id = ?1 AND sold_at IS NULL",
             rusqlite::params![holding_id.to_string(), now.0],
         )?;
-        tx.execute(
-            "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-            [],
-        )?;
+        bump_logical_version(&tx)?;
         tx.commit()?;
         Ok(TransactionItem {
             id,
@@ -206,10 +204,4 @@ impl Journal {
         }
         Ok(out)
     }
-}
-
-fn parse_uuid(text: &str, field: &str) -> Result<Uuid> {
-    Uuid::parse_str(text).map_err(|e| crate::error::Error::CorruptPayload {
-        detail: format!("{field} {text:?} is not a valid UUID: {e}"),
-    })
 }

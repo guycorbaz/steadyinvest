@@ -120,8 +120,11 @@ fn fixture_format_version<'de, D: Deserializer<'de>>(deserializer: D) -> Result<
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GoldenStudy {
+    /// Fixture identity, provenance and version pins.
     pub meta: GoldenMeta,
+    /// The raw pipeline input to replay.
     pub input: GoldenInput,
+    /// The independently hand-computed expected output surface.
     pub expected: ExpectedOutputs,
 }
 
@@ -129,8 +132,11 @@ pub struct GoldenStudy {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GoldenMeta {
+    /// Stable fixture identifier (reported in the [`crate::golden::GoldenReport`]).
     pub id: String,
+    /// Human-readable fixture title.
     pub title: String,
+    /// What scenario the fixture pins.
     pub description: String,
     /// Free-text derivation record (v1): who/when/how the expected values were computed and
     /// how they were cross-checked. NEVER engine output pasted back (the circularity trap).
@@ -138,6 +144,7 @@ pub struct GoldenMeta {
     /// The method version the expected values were derived under; ≠ `METHOD_VERSION` ⇒ the
     /// check fails (a stale golden must be re-validated, never silently replayed).
     pub method_version: String,
+    /// The declared fixture-format version — only [`FIXTURE_FORMAT_VERSION`] parses.
     #[serde(deserialize_with = "fixture_format_version")]
     pub fixture_format_version: u32,
 }
@@ -149,10 +156,15 @@ pub struct GoldenMeta {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GoldenInput {
+    /// The study's native currency (mirrors `RawFinancials::native_currency`).
     pub native_currency: String,
+    /// The raw reported years.
     pub years: Vec<FixtureYear>,
+    /// The declared split events.
     pub splits: Vec<FixtureSplit>,
+    /// The engine's judgment inputs.
     pub judgment: FixtureJudgment,
+    /// The engine's quarterly observations.
     pub quarterly: FixtureQuarterly,
 }
 
@@ -160,8 +172,10 @@ pub struct GoldenInput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixtureAmount {
+    /// The reported exact amount (canonical decimal string).
     #[serde(deserialize_with = "decimal")]
     pub value: Decimal,
+    /// The amount's reporting currency.
     pub currency: String,
 }
 
@@ -170,27 +184,39 @@ pub struct FixtureAmount {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixtureYear {
+    /// The reported fiscal year.
     pub year: i32,
+    /// Mirrors `RawYear::period_months`.
     #[serde(deserialize_with = "nullable")]
     pub period_months: Option<u32>,
+    /// Mirrors `RawYear::fiscal_year_end_month`.
     #[serde(deserialize_with = "nullable")]
     pub fiscal_year_end_month: Option<u32>,
+    /// Mirrors `RawYear::sales`.
     #[serde(deserialize_with = "nullable")]
     pub sales: Option<FixtureAmount>,
+    /// Mirrors `RawYear::eps`.
     #[serde(deserialize_with = "nullable")]
     pub eps: Option<FixtureAmount>,
+    /// Mirrors `RawYear::high_price`.
     #[serde(deserialize_with = "nullable")]
     pub high_price: Option<FixtureAmount>,
+    /// Mirrors `RawYear::low_price`.
     #[serde(deserialize_with = "nullable")]
     pub low_price: Option<FixtureAmount>,
+    /// Mirrors `RawYear::dividend_per_share`.
     #[serde(deserialize_with = "nullable")]
     pub dividend_per_share: Option<FixtureAmount>,
+    /// Mirrors `RawYear::pre_tax_profit`.
     #[serde(deserialize_with = "nullable")]
     pub pre_tax_profit: Option<FixtureAmount>,
+    /// Mirrors `RawYear::net_profit`.
     #[serde(deserialize_with = "nullable")]
     pub net_profit: Option<FixtureAmount>,
+    /// Mirrors `RawYear::tax_rate`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub tax_rate: Option<Decimal>,
+    /// Mirrors `RawYear::book_value_per_share`.
     #[serde(deserialize_with = "nullable")]
     pub book_value_per_share: Option<FixtureAmount>,
 }
@@ -199,8 +225,11 @@ pub struct FixtureYear {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixtureSplit {
+    /// Mirrors `SplitEvent::effective_year`.
     pub effective_year: i32,
+    /// Mirrors `SplitEvent::numerator`.
     pub numerator: u32,
+    /// Mirrors `SplitEvent::denominator`.
     pub denominator: u32,
 }
 
@@ -209,9 +238,13 @@ pub struct FixtureSplit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FixtureForecastLowOption {
+    /// Mirrors `ForecastLowOption::AvgLowPeTimesEps` (option a).
     AvgLowPeTimesEps,
+    /// Mirrors `ForecastLowOption::AvgLowPriceLast5y` (option b).
     AvgLowPriceLast5y,
+    /// Mirrors `ForecastLowOption::RecentSevereLow` (option c).
     RecentSevereLow,
+    /// Mirrors `ForecastLowOption::DividendSupported` (option d).
     DividendSupported,
 }
 
@@ -220,23 +253,33 @@ pub enum FixtureForecastLowOption {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixtureJudgment {
+    /// Mirrors `JudgmentInputs::estimated_high_eps`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub estimated_high_eps: Option<Decimal>,
+    /// Mirrors `JudgmentInputs::estimated_low_eps`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub estimated_low_eps: Option<Decimal>,
+    /// Mirrors `JudgmentInputs::projected_sales_growth_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub projected_sales_growth_pct: Option<Decimal>,
+    /// Mirrors `JudgmentInputs::projected_eps_growth_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub projected_eps_growth_pct: Option<Decimal>,
+    /// Mirrors `JudgmentInputs::judged_avg_high_pe`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub judged_avg_high_pe: Option<Decimal>,
+    /// Mirrors `JudgmentInputs::judged_avg_low_pe`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub judged_avg_low_pe: Option<Decimal>,
+    /// Mirrors `JudgmentInputs::forecast_low_option`.
     pub forecast_low_option: FixtureForecastLowOption,
+    /// Mirrors `JudgmentInputs::recent_severe_low`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub recent_severe_low: Option<Decimal>,
+    /// Mirrors `JudgmentInputs::current_price`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub current_price: Option<Decimal>,
+    /// Mirrors `JudgmentInputs::present_full_year_dividend`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub present_full_year_dividend: Option<Decimal>,
 }
@@ -245,14 +288,19 @@ pub struct FixtureJudgment {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixtureQuarterly {
+    /// Mirrors `QuarterlyObservations::ttm_quarterly_eps`.
     #[serde(deserialize_with = "nullable_decimal_array")]
     pub ttm_quarterly_eps: Option<[Decimal; 4]>,
+    /// Mirrors `QuarterlyObservations::latest_quarter_sales`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub latest_quarter_sales: Option<Decimal>,
+    /// Mirrors `QuarterlyObservations::latest_quarter_eps`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub latest_quarter_eps: Option<Decimal>,
+    /// Mirrors `QuarterlyObservations::year_ago_quarter_sales`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub year_ago_quarter_sales: Option<Decimal>,
+    /// Mirrors `QuarterlyObservations::year_ago_quarter_eps`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub year_ago_quarter_eps: Option<Decimal>,
 }
@@ -356,10 +404,15 @@ impl From<&FixtureQuarterly> for QuarterlyObservations {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedOutputs {
+    /// Expected §1 growth values.
     pub growth: ExpectedGrowth,
+    /// Expected §2 management values.
     pub management: ExpectedManagement,
+    /// Expected §3 valuation values.
     pub valuation: ExpectedValuation,
+    /// Expected §4 risk & reward values.
     pub risk_reward: ExpectedRiskReward,
+    /// Expected §5 return values.
     pub returns: ExpectedReturns,
     /// Raised flags as pinned catalog strings, in raise (catalog) order — compared as an
     /// ordered list.
@@ -367,7 +420,9 @@ pub struct ExpectedOutputs {
     pub quality_flags: Vec<String>,
     /// Calc-time findings, in the engine's fixed pass order.
     pub findings: Vec<ExpectedCalcFinding>,
+    /// The expected FR8 low-confidence state.
     pub low_confidence: bool,
+    /// The expected neutral verdict facts.
     pub verdict_facts: ExpectedVerdictFacts,
     /// Optional: the normalize-side findings (omitted = not asserted). Fixture (b) asserts it
     /// to prove the pipeline runs through `normalize`.
@@ -378,16 +433,22 @@ pub struct ExpectedOutputs {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedGrowth {
+    /// Expected `growth.sales_cagr_pct` (`null` = expected unknown).
     #[serde(deserialize_with = "nullable_decimal")]
     pub sales_cagr_pct: Option<Decimal>,
+    /// Expected `growth.eps_cagr_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub eps_cagr_pct: Option<Decimal>,
+    /// Expected `growth.quarterly_sales_change_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub quarterly_sales_change_pct: Option<Decimal>,
+    /// Expected `growth.quarterly_eps_change_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub quarterly_eps_change_pct: Option<Decimal>,
+    /// Expected `growth.estimated_high_eps`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub estimated_high_eps: Option<Decimal>,
+    /// Expected `growth.estimated_low_eps`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub estimated_low_eps: Option<Decimal>,
 }
@@ -396,9 +457,12 @@ pub struct ExpectedGrowth {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedYearRatios {
+    /// The row's fiscal year.
     pub year: i32,
+    /// Expected per-year `ptp_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub ptp_pct: Option<Decimal>,
+    /// Expected per-year `roe_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub roe_pct: Option<Decimal>,
 }
@@ -407,16 +471,22 @@ pub struct ExpectedYearRatios {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedManagement {
+    /// Expected `management.avg_ptp_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_ptp_pct: Option<Decimal>,
+    /// Expected `management.avg_roe_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_roe_pct: Option<Decimal>,
+    /// Expected `management.latest_ptp_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub latest_ptp_pct: Option<Decimal>,
+    /// Expected `management.latest_roe_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub latest_roe_pct: Option<Decimal>,
+    /// Expected `management.ptp_trend`.
     #[serde(deserialize_with = "nullable")]
     pub ptp_trend: Option<ExpectedTrend>,
+    /// Expected `management.roe_trend`.
     #[serde(deserialize_with = "nullable")]
     pub roe_trend: Option<ExpectedTrend>,
     /// Optional per-year table (omitted = not asserted).
@@ -427,13 +497,18 @@ pub struct ExpectedManagement {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedYearValuation {
+    /// The row's fiscal year.
     pub year: i32,
+    /// Expected per-year `high_pe`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub high_pe: Option<Decimal>,
+    /// Expected per-year `low_pe`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub low_pe: Option<Decimal>,
+    /// Expected per-year `payout_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub payout_pct: Option<Decimal>,
+    /// Expected per-year `high_yield_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub high_yield_pct: Option<Decimal>,
 }
@@ -442,22 +517,31 @@ pub struct ExpectedYearValuation {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedValuation {
+    /// Expected `valuation.avg_high_pe`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_high_pe: Option<Decimal>,
+    /// Expected `valuation.avg_low_pe`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_low_pe: Option<Decimal>,
+    /// Expected `valuation.avg_pe`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_pe: Option<Decimal>,
+    /// Expected `valuation.avg_payout_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_payout_pct: Option<Decimal>,
+    /// Expected `valuation.avg_high_yield_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_high_yield_pct: Option<Decimal>,
+    /// Expected `valuation.avg_low_price`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_low_price: Option<Decimal>,
+    /// Expected `valuation.ttm_eps`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub ttm_eps: Option<Decimal>,
+    /// Expected `valuation.current_pe`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub current_pe: Option<Decimal>,
+    /// Expected `valuation.relative_value_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub relative_value_pct: Option<Decimal>,
     /// Optional per-year table (omitted = not asserted).
@@ -468,12 +552,16 @@ pub struct ExpectedValuation {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedZoneBounds {
+    /// Expected `zones.forecast_low`.
     #[serde(deserialize_with = "decimal")]
     pub forecast_low: Decimal,
+    /// Expected `zones.buy_top`.
     #[serde(deserialize_with = "decimal")]
     pub buy_top: Decimal,
+    /// Expected `zones.neutral_top`.
     #[serde(deserialize_with = "decimal")]
     pub neutral_top: Decimal,
+    /// Expected `zones.forecast_high`.
     #[serde(deserialize_with = "decimal")]
     pub forecast_high: Decimal,
 }
@@ -482,8 +570,11 @@ pub struct ExpectedZoneBounds {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpectedZone {
+    /// Mirrors `Zone::Buy`.
     Buy,
+    /// Mirrors `Zone::Neutral`.
     Neutral,
+    /// Mirrors `Zone::Sell`.
     Sell,
 }
 
@@ -492,8 +583,11 @@ pub enum ExpectedZone {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpectedUpsideDownside {
+    /// A measured ratio (tolerance-compared).
     Ratio(#[serde(deserialize_with = "decimal")] Decimal),
+    /// Mirrors `UpsideDownside::Undefined` (denominator ≤ 0).
     Undefined,
+    /// Mirrors `UpsideDownside::Unknown` (missing input / degenerate range).
     Unknown,
 }
 
@@ -501,14 +595,19 @@ pub enum ExpectedUpsideDownside {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedRiskReward {
+    /// Expected `risk_reward.forecast_high`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub forecast_high: Option<Decimal>,
+    /// Expected `risk_reward.forecast_low`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub forecast_low: Option<Decimal>,
+    /// Expected `risk_reward.zones` (`null` = expected unknown).
     #[serde(deserialize_with = "nullable")]
     pub zones: Option<ExpectedZoneBounds>,
+    /// Expected `risk_reward.present_price_zone`.
     #[serde(deserialize_with = "nullable")]
     pub present_price_zone: Option<ExpectedZone>,
+    /// Expected `risk_reward.upside_downside`.
     pub upside_downside: ExpectedUpsideDownside,
 }
 
@@ -516,16 +615,22 @@ pub struct ExpectedRiskReward {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedReturns {
+    /// Expected `returns.present_yield_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub present_yield_pct: Option<Decimal>,
+    /// Expected `returns.avg_annual_eps`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_annual_eps: Option<Decimal>,
+    /// Expected `returns.avg_annual_dividend`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_annual_dividend: Option<Decimal>,
+    /// Expected `returns.avg_yield_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub avg_yield_pct: Option<Decimal>,
+    /// Expected `returns.projected_appreciation_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub projected_appreciation_pct: Option<Decimal>,
+    /// Expected `returns.projected_total_annualized_return_pct`.
     #[serde(deserialize_with = "nullable_decimal")]
     pub projected_total_annualized_return_pct: Option<Decimal>,
 }
@@ -534,8 +639,11 @@ pub struct ExpectedReturns {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpectedTrend {
+    /// Mirrors `Trend::Up`.
     Up,
+    /// Mirrors `Trend::Even`.
     Even,
+    /// Mirrors `Trend::Down`.
     Down,
 }
 
@@ -543,8 +651,11 @@ pub enum ExpectedTrend {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpectedCriterion {
+    /// Mirrors `CriterionFact::Met`.
     Met,
+    /// Mirrors `CriterionFact::Unmet`.
     Unmet,
+    /// Mirrors `CriterionFact::UnmetByInsufficiency`.
     UnmetByInsufficiency,
 }
 
@@ -552,12 +663,18 @@ pub enum ExpectedCriterion {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedVerdictFacts {
+    /// Expected `verdict_facts.present_price_zone`.
     #[serde(deserialize_with = "nullable")]
     pub present_price_zone: Option<ExpectedZone>,
+    /// Expected `verdict_facts.ud_at_or_above_target`.
     pub ud_at_or_above_target: ExpectedCriterion,
+    /// Expected `verdict_facts.relative_value_below_ceiling`.
     pub relative_value_below_ceiling: ExpectedCriterion,
+    /// Expected `verdict_facts.present_price_in_buy_zone`.
     pub present_price_in_buy_zone: ExpectedCriterion,
+    /// Expected `verdict_facts.appreciation_at_or_above_double`.
     pub appreciation_at_or_above_double: ExpectedCriterion,
+    /// Expected `verdict_facts.quality_value_candidate`.
     pub quality_value_candidate: bool,
 }
 
@@ -565,10 +682,13 @@ pub struct ExpectedVerdictFacts {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedCalcFinding {
+    /// The pinned plausibility key (validated at parse time).
     #[serde(deserialize_with = "plausibility_key")]
     pub key: String,
+    /// The finding's year; `null` for study-level findings.
     #[serde(deserialize_with = "nullable")]
     pub year: Option<i32>,
+    /// The ratio or denominator the finding points at.
     pub context: String,
 }
 
@@ -576,9 +696,12 @@ pub struct ExpectedCalcFinding {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedNormalizeFinding {
+    /// The pinned plausibility key (validated at parse time).
     #[serde(deserialize_with = "plausibility_key")]
     pub key: String,
+    /// The reported year the finding is attached to.
     pub year: i32,
+    /// The field (or period-metadata) name the finding points at.
     pub context: String,
 }
 

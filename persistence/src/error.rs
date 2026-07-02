@@ -101,6 +101,16 @@ pub enum Error {
     /// already being held (Story 5.5) — e.g. the directory is not writable.
     #[error("the journal lock could not be managed: {detail}")]
     Lock { detail: String },
+
+    /// A holding still referenced by transaction rows was not removed — their `holding_id` FK needs
+    /// a live referent (a recorded sale soft-deletes instead; see `Journal::record_sell`).
+    #[error("transaction rows still reference this holding; it was not removed")]
+    HoldingHasTransactions,
+
+    /// A restore-from-backup file operation failed at the staging/swap step (Story 5.4) — e.g. the
+    /// backup could not be copied beside the journal. The live journal is unchanged.
+    #[error("the backup file could not be staged: {detail}; the journal is unchanged")]
+    Restore { detail: String },
 }
 
 impl From<steadyinvest_contract::ImportError> for Error {
@@ -228,6 +238,10 @@ mod tests {
             Error::Lock {
                 detail: "the directory is not writable".to_string(),
             },
+            Error::HoldingHasTransactions,
+            Error::Restore {
+                detail: "the copy failed".to_string(),
+            },
         ]
     }
 
@@ -249,10 +263,12 @@ mod tests {
                 | Error::ImportVersion { .. }
                 | Error::ImportMalformed { .. }
                 | Error::LockHeld { .. }
-                | Error::Lock { .. } => {}
+                | Error::Lock { .. }
+                | Error::HoldingHasTransactions
+                | Error::Restore { .. } => {}
             }
         }
-        assert_eq!(sample_errors().len(), 13, "one sample per variant");
+        assert_eq!(sample_errors().len(), 15, "one sample per variant");
     }
 
     #[test]

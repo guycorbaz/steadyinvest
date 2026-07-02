@@ -35,6 +35,17 @@ pub use verdict::{
 use rust_decimal::{Decimal, MathematicalOps};
 use sha2::{Digest, Sha256};
 
+/// Lowercase-hex rendering of a finalized SHA-256 hasher — the crate's ONE digest formatter
+/// ([`determinism_hash`], `method::method_fingerprint`, `verdict` inputs digest). Byte-for-byte
+/// the pinned format: two hex digits per byte, no separators.
+pub(crate) fn hex_sha256(hasher: Sha256) -> String {
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// A tiny, fixed exact-decimal computation used to prove cross-platform numeric determinism.
 ///
 /// It builds a compound-growth vector `1000 * (1 + 0.15)^n` using `rust_decimal`'s `maths` feature
@@ -73,11 +84,7 @@ pub fn determinism_hash() -> String {
         hasher.update(d.normalize().to_string().as_bytes());
         hasher.update(b"\n");
     }
-    hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    hex_sha256(hasher)
 }
 
 #[cfg(test)]

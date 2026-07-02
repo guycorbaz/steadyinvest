@@ -1,14 +1,17 @@
-//! Holdings storage (Story 4.3, FR36) — the normalized side of the hybrid model.
+//! Holdings and portfolio storage (Stories 4.3/6.1/6.2, FR36/FR37/FR38) — the normalized side of
+//! the hybrid model.
 //!
-//! A holding is **typed columns**, not a serde blob: `id`, a `portfolio_id` FK to the single
-//! portfolio, `security_ticker`, `quantity` and `purchase_price` (exact decimals carried as TEXT,
-//! never REAL — NFR-C1), an optional `trailing_stop_pct` (Story 4.5 owns it; NULL here), and
-//! `created_at`. The `holdings`/`portfolios` DDL was frozen in v1 (Story 1.10) — Story 4.3 adds
-//! typed CRUD on the pre-provisioned schema, **no migration**.
+//! A holding is **typed columns**, not a serde blob: `id`, a `portfolio_id` FK to its portfolio,
+//! `security_ticker`, `quantity` and `purchase_price` (exact decimals carried as TEXT, never REAL —
+//! NFR-C1), an optional `currency` (Story 6.2, v6 column — NULL on pre-6.2 rows), the trailing-stop
+//! pair (`trailing_stop_pct`/`trailing_stop_level`, Story 4.5), the `sold_at` soft-delete marker
+//! (Story 4.7), and `created_at`. The `holdings`/`portfolios` DDL was frozen in v1 (Story 1.10);
+//! Story 6.2 added the single nullable `currency` column via migration v5→v6.
 //!
-//! Single-portfolio (FR36, not FR37): there is one portfolio. [`Journal::ensure_portfolio`] lazily
-//! creates it (idempotent — it never re-inserts or re-bumps when the singleton exists); holdings
-//! attach to it. Multi-portfolio is Epic 6.
+//! Multi-portfolio (FR37, Story 6.1): one portfolio per bank/account. [`Journal::add_portfolio`] /
+//! [`Journal::rename_portfolio`] / [`Journal::delete_portfolio`] manage the list ([`Journal::delete_portfolio`]
+//! refuses a portfolio with any holding — even a sold one — and refuses to delete the last one);
+//! [`Journal::ensure_portfolio`] keeps its 4.3 role of lazily seeding the first portfolio.
 //!
 //! Like the rest of the journal, **every mutating call runs in one transaction that also bumps
 //! `journal_meta.logical_version`** (NFR-R2) — and a no-op (an edit to identical values, a delete
@@ -18,12 +21,13 @@
 
 use crate::error::{Error, Result};
 use crate::journal::Journal;
+use crate::util::{bump_logical_version, parse_uuid};
 use serde::{Deserialize, Serialize};
 use steadyinvest_contract::Timestamp;
 use uuid::Uuid;
 
-/// The single portfolio (FR36). Multi-portfolio (FR37) is Epic 6. `Serialize`/`Deserialize` so the
-/// whole-journal export (Story 5.3) carries it verbatim.
+/// One portfolio (FR36/FR37) — since Story 6.1 the journal holds one per bank/account.
+/// `Serialize`/`Deserialize` so the whole-journal export (Story 5.3) carries it verbatim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortfolioItem {
     pub id: Uuid,
@@ -31,9 +35,9 @@ pub struct PortfolioItem {
     pub created_at: Timestamp,
 }
 
-/// One holding row (FR36): a security, a quantity and a purchase price in the single reference
-/// currency. `quantity`/`purchase_price` are the canonical decimal **TEXT** spellings (parsed and
-/// validated by the app before they reach here). `trailing_stop_pct` is Story 4.5's (NULL here).
+/// One holding row (FR36): a security, a quantity and a purchase price in the holding's own currency.
+/// `quantity`/`purchase_price` are the canonical decimal **TEXT** spellings (parsed and validated by
+/// the app before they reach here). `trailing_stop_pct` is Story 4.5's (NULL here).
 /// `Serialize`/`Deserialize` so the whole-journal export (Story 5.3) carries it verbatim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HoldingItem {
@@ -42,6 +46,12 @@ pub struct HoldingItem {
     pub security_ticker: String,
     pub quantity: String,
     pub purchase_price: String,
+    /// The currency the amounts are denominated in (Story 6.2, FR38) — e.g. `"CHF"`, `"EUR"`. `None`
+    /// on a **pre-6.2 holding** (the v6 `ADD COLUMN` left legacy rows NULL); the persistence layer
+    /// stays currency-agnostic, so the app coalesces `None` to the reference currency at read. New
+    /// writes always carry an explicit currency. Amounts are never mixed/converted (FR28).
+    #[serde(default)]
+    pub currency: Option<String>,
     pub trailing_stop_pct: Option<String>,
     /// The ratcheted trailing-stop **level** (a price, Story 4.5 / FR42) — `None` when no stop set.
     /// Persisted (v3 column) because the ratchet's high-water mark can't be re-derived from the
@@ -75,10 +85,7 @@ impl Journal {
             "INSERT INTO portfolios (id, name, created_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![id.to_string(), name, created_at.0],
         )?;
-        tx.execute(
-            "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-            [],
-        )?;
+        bump_logical_version(&tx)?;
         tx.commit()?;
         Ok(PortfolioItem {
             id,
@@ -112,8 +119,11 @@ impl Journal {
         }
     }
 
-    /// Add a holding to a portfolio (FR36). `trailing_stop_pct` is left NULL (Story 4.5). Bumps the
-    /// logical version. Returns the inserted [`HoldingItem`].
+    /// Add a holding to a portfolio (FR36) in its own `currency` (Story 6.2, FR38 — e.g. `"CHF"`).
+    /// `trailing_stop_pct` is left NULL (Story 4.5). Bumps the logical version. Returns the inserted
+    /// [`HoldingItem`]. The currency is stored verbatim (the app validates it against its allow-list
+    /// before it reaches here); amounts stay native — no FX conversion (FR28).
+    #[allow(clippy::too_many_arguments)]
     pub fn add_holding(
         &mut self,
         id: Uuid,
@@ -121,6 +131,7 @@ impl Journal {
         security_ticker: &str,
         quantity: &str,
         purchase_price: &str,
+        currency: &str,
         created_at: &Timestamp,
     ) -> Result<HoldingItem> {
         self.check_writable()?;
@@ -128,21 +139,19 @@ impl Journal {
         tx.execute(
             "INSERT INTO holdings
                  (id, portfolio_id, security_ticker, quantity, purchase_price,
-                  trailing_stop_pct, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)",
+                  currency, trailing_stop_pct, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7)",
             rusqlite::params![
                 id.to_string(),
                 portfolio_id.to_string(),
                 security_ticker,
                 quantity,
                 purchase_price,
+                currency,
                 created_at.0,
             ],
         )?;
-        tx.execute(
-            "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-            [],
-        )?;
+        bump_logical_version(&tx)?;
         tx.commit()?;
         Ok(HoldingItem {
             id,
@@ -150,6 +159,7 @@ impl Journal {
             security_ticker: security_ticker.to_string(),
             quantity: quantity.to_string(),
             purchase_price: purchase_price.to_string(),
+            currency: Some(currency.to_string()),
             trailing_stop_pct: None,
             trailing_stop_level: None,
             sold_at: None,
@@ -189,10 +199,65 @@ impl Journal {
     pub fn list_all_holdings(&self) -> Result<Vec<HoldingItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
-                    trailing_stop_pct, trailing_stop_level, sold_at, created_at
+                    currency, trailing_stop_pct, trailing_stop_level, sold_at, created_at
              FROM holdings ORDER BY created_at, id",
         )?;
         let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, Option<String>>(7)?,
+                r.get::<_, Option<String>>(8)?,
+                r.get::<_, String>(9)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (
+                id_text,
+                portfolio_text,
+                security_ticker,
+                quantity,
+                purchase_price,
+                currency,
+                stop_pct,
+                stop_level,
+                sold_at,
+                created,
+            ) = row?;
+            out.push(HoldingItem {
+                id: parse_uuid(&id_text, "holdings.id")?,
+                portfolio_id: parse_uuid(&portfolio_text, "holdings.portfolio_id")?,
+                security_ticker,
+                quantity,
+                purchase_price,
+                currency,
+                trailing_stop_pct: stop_pct,
+                trailing_stop_level: stop_level,
+                sold_at,
+                created_at: Timestamp(created),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Every **active** holding in a portfolio, ordered by `created_at` then `id` (deterministic) —
+    /// the register's list. (No `position` column: holdings are not user-reordered in 4.3.) A holding
+    /// sold on a neutral trigger (Story 4.7) has a non-NULL `sold_at` and is **excluded** here — it
+    /// stays in the table so its sell transaction's FK keeps a live referent, but it leaves the
+    /// active register (and the capital-at-risk source, which reads this list).
+    pub fn list_holdings(&self, portfolio_id: Uuid) -> Result<Vec<HoldingItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
+                    currency, trailing_stop_pct, trailing_stop_level, created_at
+             FROM holdings WHERE portfolio_id = ?1 AND sold_at IS NULL ORDER BY created_at, id",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![portfolio_id.to_string()], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -213,57 +278,7 @@ impl Journal {
                 security_ticker,
                 quantity,
                 purchase_price,
-                stop_pct,
-                stop_level,
-                sold_at,
-                created,
-            ) = row?;
-            out.push(HoldingItem {
-                id: parse_uuid(&id_text, "holdings.id")?,
-                portfolio_id: parse_uuid(&portfolio_text, "holdings.portfolio_id")?,
-                security_ticker,
-                quantity,
-                purchase_price,
-                trailing_stop_pct: stop_pct,
-                trailing_stop_level: stop_level,
-                sold_at,
-                created_at: Timestamp(created),
-            });
-        }
-        Ok(out)
-    }
-
-    /// Every **active** holding in a portfolio, ordered by `created_at` then `id` (deterministic) —
-    /// the register's list. (No `position` column: holdings are not user-reordered in 4.3.) A holding
-    /// sold on a neutral trigger (Story 4.7) has a non-NULL `sold_at` and is **excluded** here — it
-    /// stays in the table so its sell transaction's FK keeps a live referent, but it leaves the
-    /// active register (and the capital-at-risk source, which reads this list).
-    pub fn list_holdings(&self, portfolio_id: Uuid) -> Result<Vec<HoldingItem>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
-                    trailing_stop_pct, trailing_stop_level, created_at
-             FROM holdings WHERE portfolio_id = ?1 AND sold_at IS NULL ORDER BY created_at, id",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![portfolio_id.to_string()], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, Option<String>>(5)?,
-                r.get::<_, Option<String>>(6)?,
-                r.get::<_, String>(7)?,
-            ))
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (
-                id_text,
-                portfolio_text,
-                security_ticker,
-                quantity,
-                purchase_price,
+                currency,
                 stop_pct,
                 stop_level,
                 created,
@@ -274,6 +289,7 @@ impl Journal {
                 security_ticker,
                 quantity,
                 purchase_price,
+                currency,
                 trailing_stop_pct: stop_pct,
                 trailing_stop_level: stop_level,
                 sold_at: None,
@@ -283,35 +299,40 @@ impl Journal {
         Ok(out)
     }
 
-    /// Edit a holding's ticker, quantity and/or purchase price (FR36). Changing the **ticker** clears
-    /// the trailing stop (Story 4.5 review): a stop level seeded from the OLD security would otherwise
-    /// persist against the NEW one and — being ratchet-up-only — could show a permanent false breach.
-    /// Editing only quantity/price leaves the stop intact. A no-op (identical values) writes nothing
-    /// and bumps no version. An absent id is a no-op success (idempotent).
+    /// Edit a holding's ticker, quantity, purchase price and/or `currency` (FR36 / Story 6.2 FR38).
+    /// Changing the **ticker** clears the trailing stop (Story 4.5 review): a stop level seeded from
+    /// the OLD security would otherwise persist against the NEW one and — being ratchet-up-only —
+    /// could show a permanent false breach. Editing only quantity/price/currency leaves the stop
+    /// intact. The `currency` is always written (the app supplies the edit form's selection); a no-op
+    /// (all values identical) writes nothing and bumps no version. An absent id is a no-op success.
+    ///
+    /// Caveat for a **pre-6.2 legacy row** (stored currency NULL): the app's edit form prefills the
+    /// coalesced reference currency, so a visually unchanged edit **materializes** that currency
+    /// (NULL `IS NOT` the code → a real write, one version bump). Accepted: it is a deliberate user
+    /// action on the row, not a phantom read-time rewrite (the class the no-op guard exists for).
     pub fn update_holding(
         &mut self,
         id: Uuid,
         security_ticker: &str,
         quantity: &str,
         purchase_price: &str,
+        currency: &str,
     ) -> Result<()> {
         self.check_writable()?;
         let tx = self.conn.transaction()?;
         // The `CASE … security_ticker IS NOT ?2` reads the OLD ticker (SET exprs see pre-update row),
-        // so the stop clears only when the ticker actually changes.
+        // so the stop clears only when the ticker actually changes. `currency IS NOT ?5` in the WHERE
+        // keeps an identical-values edit a true no-op even when only the currency would change.
         let changed = tx.execute(
-            "UPDATE holdings SET security_ticker = ?2, quantity = ?3, purchase_price = ?4,
+            "UPDATE holdings SET security_ticker = ?2, quantity = ?3, purchase_price = ?4, currency = ?5,
                     trailing_stop_pct = CASE WHEN security_ticker IS NOT ?2 THEN NULL ELSE trailing_stop_pct END,
                     trailing_stop_level = CASE WHEN security_ticker IS NOT ?2 THEN NULL ELSE trailing_stop_level END
              WHERE id = ?1
-               AND (security_ticker IS NOT ?2 OR quantity IS NOT ?3 OR purchase_price IS NOT ?4)",
-            rusqlite::params![id.to_string(), security_ticker, quantity, purchase_price],
+               AND (security_ticker IS NOT ?2 OR quantity IS NOT ?3 OR purchase_price IS NOT ?4 OR currency IS NOT ?5)",
+            rusqlite::params![id.to_string(), security_ticker, quantity, purchase_price, currency],
         )?;
         if changed > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(())
@@ -337,29 +358,34 @@ impl Journal {
             rusqlite::params![id.to_string(), pct, level],
         )?;
         if changed > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(())
     }
 
     /// Remove a holding (FR36). One transaction; bumps the version only on a real removal (an
-    /// absent id is an idempotent no-op).
+    /// absent id is an idempotent no-op). Refuses (typed [`Error::CorruptPayload`]-free, neutral
+    /// [`Error::HoldingHasTransactions`]) while transaction rows still reference the holding —
+    /// their FK would otherwise surface as a raw SQLite error (a sell soft-deletes instead, so
+    /// this path only becomes reachable when Story 6.3 adds hard deletes/buy rows).
     pub fn delete_holding(&mut self, id: Uuid) -> Result<()> {
         self.check_writable()?;
         let tx = self.conn.transaction()?;
+        let referenced: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM transactions WHERE holding_id = ?1",
+            rusqlite::params![id.to_string()],
+            |r| r.get(0),
+        )?;
+        if referenced > 0 {
+            return Err(Error::HoldingHasTransactions);
+        }
         let removed = tx.execute(
             "DELETE FROM holdings WHERE id = ?1",
             rusqlite::params![id.to_string()],
         )?;
         if removed > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(())
@@ -383,10 +409,7 @@ impl Journal {
             "INSERT INTO portfolios (id, name, created_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![id.to_string(), name, created_at.0],
         )?;
-        tx.execute(
-            "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-            [],
-        )?;
+        bump_logical_version(&tx)?;
         tx.commit()?;
         Ok(PortfolioItem {
             id,
@@ -406,10 +429,7 @@ impl Journal {
             rusqlite::params![id.to_string(), name],
         )?;
         if changed > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
         }
         tx.commit()?;
         Ok(changed > 0)
@@ -425,7 +445,11 @@ impl Journal {
     /// error surfaced); only [`DeletePortfolioOutcome::Deleted`] writes + bumps the version.
     pub fn delete_portfolio(&mut self, id: Uuid) -> Result<DeletePortfolioOutcome> {
         self.check_writable()?;
-        let holdings: i64 = self.conn.query_row(
+        // Both guards run INSIDE the delete's transaction: a second same-process handle (allowed by
+        // the 5.5 lock re-entry) inserting a holding between a pre-check and the DELETE would
+        // otherwise surface as a raw FK error instead of the typed refusal.
+        let tx = self.conn.transaction()?;
+        let holdings: i64 = tx.query_row(
             "SELECT COUNT(*) FROM holdings WHERE portfolio_id = ?1",
             rusqlite::params![id.to_string()],
             |r| r.get(0),
@@ -433,22 +457,16 @@ impl Journal {
         if holdings > 0 {
             return Ok(DeletePortfolioOutcome::HasHoldings);
         }
-        let total: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM portfolios", [], |r| r.get(0))?;
+        let total: i64 = tx.query_row("SELECT COUNT(*) FROM portfolios", [], |r| r.get(0))?;
         if total <= 1 {
             return Ok(DeletePortfolioOutcome::LastPortfolio);
         }
-        let tx = self.conn.transaction()?;
         let removed = tx.execute(
             "DELETE FROM portfolios WHERE id = ?1",
             rusqlite::params![id.to_string()],
         )?;
         if removed > 0 {
-            tx.execute(
-                "UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1",
-                [],
-            )?;
+            bump_logical_version(&tx)?;
             tx.commit()?;
             Ok(DeletePortfolioOutcome::Deleted)
         } else {
@@ -469,10 +487,4 @@ pub enum DeletePortfolioOutcome {
     HasHoldings,
     /// Refused: it is the last portfolio; the register keeps at least one.
     LastPortfolio,
-}
-
-fn parse_uuid(text: &str, field: &str) -> Result<Uuid> {
-    Uuid::parse_str(text).map_err(|e| Error::CorruptPayload {
-        detail: format!("{field} {text:?} is not a valid UUID: {e}"),
-    })
 }

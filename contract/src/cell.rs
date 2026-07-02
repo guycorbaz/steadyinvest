@@ -12,8 +12,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
+    /// Fetched from a market-data provider.
     Provider,
+    /// Entered by the user.
     Manual,
+    /// Computed from other cells.
     Derived,
 }
 
@@ -21,7 +24,9 @@ pub enum Source {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Freshness {
+    /// The value reflects the latest known state.
     Current,
+    /// The value has aged past the caller's freshness rule and awaits a refresh.
     Stale,
 }
 
@@ -29,8 +34,11 @@ pub enum Freshness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Review {
+    /// Not reviewed yet.
     None,
+    /// Marked for re-checking (?) — e.g. after a divergent edit or provider disagreement.
     ToReview,
+    /// Explicitly validated by the user (✓).
     Validated,
 }
 
@@ -38,8 +46,11 @@ pub enum Review {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Coverage {
+    /// A value is present.
     Present,
+    /// The value is missing and still expected — an open gap.
     ToFill,
+    /// The value is missing and the user accepted its unavailability.
     NotAvailableAccepted,
 }
 
@@ -49,8 +60,10 @@ pub enum Coverage {
 /// reconciliation (Story 3.4). `None` on the cell = no pending divergence (the common case).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingProvider {
+    /// The divergent fetched value (`None` = the provider reported the value as absent).
     #[serde(default)]
     pub value: Option<Money>,
+    /// The provider provenance of the divergent fetch (so the as-of date is queryable).
     pub provenance: Provenance,
 }
 
@@ -58,12 +71,18 @@ pub struct PendingProvider {
 /// provenance. Forward-compatible: `value` defaults to `None` if absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cell {
+    /// The live exact value; `None` = a genuine gap, never coerced to 0.
     #[serde(default)]
     pub value: Option<Money>,
+    /// Where the live value came from (FR17).
     pub source: Source,
+    /// Freshness of the live value (FR23).
     pub freshness: Freshness,
+    /// The user's review tag (FR20).
     pub review: Review,
+    /// Coverage state of this data point (FR19).
     pub coverage: Coverage,
+    /// Dated proof of how the live value was produced.
     pub provenance: Provenance,
     /// A divergent provider value preserved alongside a **manual** value (Story 3.4, FR22). Additive
     /// `#[serde(default)]` field — forward- AND backward-compatible (an older cell loads as `None`),
@@ -135,10 +154,9 @@ impl Cell {
     pub fn reconcile(&self, fetched_value: Option<Money>, fetched_provenance: Provenance) -> Cell {
         let diverges = self.value != fetched_value;
         if !diverges {
-            // Agreement clears any stale pending and keeps the human review tag verbatim. (When
-            // there was no pending and the review is unchanged, this equals `self` — idempotent.)
+            // Agreement clears any stale pending and keeps everything else — including the human
+            // review tag — verbatim. (When there was no pending, this equals `self` — idempotent.)
             return Cell {
-                review: self.review,
                 pending: None,
                 ..self.clone()
             };
@@ -466,135 +484,5 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod edit_rail_properties {
-    use super::*;
-    use crate::provenance::{Provenance, Timestamp};
-    use proptest::prelude::*;
-    use rust_decimal::Decimal;
-
-    fn source() -> impl Strategy<Value = Source> {
-        prop_oneof![
-            Just(Source::Provider),
-            Just(Source::Manual),
-            Just(Source::Derived)
-        ]
-    }
-    fn freshness() -> impl Strategy<Value = Freshness> {
-        prop_oneof![Just(Freshness::Current), Just(Freshness::Stale)]
-    }
-    fn review() -> impl Strategy<Value = Review> {
-        prop_oneof![
-            Just(Review::None),
-            Just(Review::ToReview),
-            Just(Review::Validated)
-        ]
-    }
-    fn coverage() -> impl Strategy<Value = Coverage> {
-        prop_oneof![
-            Just(Coverage::Present),
-            Just(Coverage::ToFill),
-            Just(Coverage::NotAvailableAccepted),
-        ]
-    }
-    /// Optional Money over a deliberately small value space (collisions WANTED, to exercise
-    /// the equal-value branch) with varying scale (value-equality across scales).
-    fn value() -> impl Strategy<Value = Option<Money>> {
-        proptest::option::of((0..50i64, 0..3u32).prop_map(|(mantissa, extra_zeros)| {
-            Money::from(Decimal::new(mantissa * 10i64.pow(extra_zeros), extra_zeros))
-        }))
-    }
-    fn cell() -> impl Strategy<Value = Cell> {
-        (value(), source(), freshness(), review(), coverage()).prop_map(
-            |(value, source, freshness, review, coverage)| Cell {
-                value,
-                source,
-                freshness,
-                review,
-                coverage,
-                provenance: Provenance {
-                    source,
-                    logical_version: 1,
-                    timestamp: Timestamp("2026-06-09T00:00:00Z".to_string()),
-                    hash_of_dependencies: "aa00".to_string(),
-                },
-                pending: None,
-            },
-        )
-    }
-    fn edit_provenance() -> impl Strategy<Value = Provenance> {
-        (source(), 1..100u64).prop_map(|(source, logical_version)| Provenance {
-            source,
-            logical_version,
-            timestamp: Timestamp("2026-06-12T08:00:00Z".to_string()),
-            hash_of_dependencies: "bb11".to_string(),
-        })
-    }
-
-    proptest! {
-        /// Invariant 2b on the rail, for EVERY cell state: a divergent edit always demotes ✓,
-        /// an equal-value edit never does, no edit ever promotes, and the rail never
-        /// half-applies (freshness/source/coverage/provenance always follow the semantics).
-        #[test]
-        fn edit_rail_semantics_hold_for_every_cell_state(
-            original in cell(),
-            new_value in value(),
-            provenance in edit_provenance(),
-        ) {
-            let before = original.clone();
-            let edited = original.edited(new_value, provenance.clone());
-
-            let diverges = before.value != new_value;
-            let expected_review = match before.review {
-                Review::Validated if diverges => Review::ToReview,
-                unchanged => unchanged,
-            };
-            prop_assert_eq!(edited.review, expected_review,
-                "✓ demotes iff the value diverges; None/ToReview never move");
-            prop_assert_eq!(edited.value, new_value);
-            prop_assert_eq!(edited.freshness, Freshness::Current, "a fresh edit is current");
-            prop_assert_eq!(edited.source, provenance.source);
-            prop_assert_eq!(
-                edited.coverage,
-                if new_value.is_some() { Coverage::Present } else { Coverage::ToFill }
-            );
-            prop_assert_eq!(edited.provenance, provenance, "provenance replaced verbatim");
-            prop_assert_eq!(original, before, "snapshot semantics: the original is untouched");
-        }
-
-        /// The Story-3.4 reconcile rail, for EVERY cell state: the LIVE value/source/coverage/
-        /// freshness are NEVER touched (manual wins); a divergence stores a pending and demotes ✓
-        /// (only ✓), an agreement clears any pending and never moves the review.
-        #[test]
-        fn reconcile_rail_never_touches_the_live_value_and_only_pends_on_divergence(
-            original in cell(),
-            fetched in value(),
-            provenance in edit_provenance(),
-        ) {
-            let before = original.clone();
-            let reconciled = original.reconcile(fetched, provenance.clone());
-
-            // The live value and its attributes are inviolate — reconciliation is non-destructive.
-            prop_assert_eq!(reconciled.value, before.value, "manual value never overwritten");
-            prop_assert_eq!(reconciled.source, before.source);
-            prop_assert_eq!(reconciled.coverage, before.coverage);
-            prop_assert_eq!(reconciled.freshness, before.freshness);
-
-            let diverges = before.value != fetched;
-            if diverges {
-                let p = reconciled.pending.expect("a divergence stores a pending");
-                prop_assert_eq!(p.value, fetched);
-                prop_assert_eq!(p.provenance, provenance);
-                let expected = match before.review {
-                    Review::Validated => Review::ToReview,
-                    unchanged => unchanged,
-                };
-                prop_assert_eq!(reconciled.review, expected, "✓ demotes on divergence; others don't move");
-            } else {
-                prop_assert_eq!(reconciled.pending, None, "agreement clears any pending");
-                prop_assert_eq!(reconciled.review, before.review, "agreement never moves the review");
-            }
-            prop_assert_eq!(original, before, "snapshot semantics: the original is untouched");
-        }
-    }
-}
+// Property tests of the `edited`/`reconcile` rails live in `contract/tests/cell_rails.rs`
+// (everything they exercise is public API).

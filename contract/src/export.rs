@@ -22,8 +22,11 @@ use sha2::{Digest, Sha256};
 /// is the lowercase-hex SHA-256 of `payload`'s UTF-8 bytes; `schema_version` is the study's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StudyExport {
+    /// The [`SCHEMA_VERSION`] the study was written under.
     pub schema_version: u32,
+    /// Lowercase-hex SHA-256 of `payload`'s UTF-8 bytes (corruption check, not a signature).
     pub integrity_hash: String,
+    /// The canonical serialized [`Study`] JSON.
     pub payload: String,
 }
 
@@ -34,7 +37,12 @@ pub enum ImportError {
     /// The recomputed hash does not match the envelope's — the file is corrupt or incomplete.
     Integrity,
     /// The envelope's `schema_version` is not the one this build supports (no silent coercion).
-    Version { found: u32, supported: u32 },
+    Version {
+        /// The `schema_version` found in the envelope.
+        found: u32,
+        /// The `SCHEMA_VERSION` this build supports.
+        supported: u32,
+    },
     /// The string is not a valid export envelope, or its payload is not a valid study.
     Malformed(String),
 }

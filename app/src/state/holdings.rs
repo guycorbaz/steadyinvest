@@ -1,0 +1,465 @@
+//! Portfolios + the holdings register (Stories 4.3/4.5/4.7/6.1/6.2 — FR36/FR37/FR38/FR42/FR46):
+//! the active-portfolio rails (one portfolio per bank/account, guarded delete — never orphan a
+//! holding, never drop the last portfolio), holding CRUD with exact-decimal validation (NFR-C1) and
+//! the Story-6.2 currency allow-list, the recorded sell (one atomic SELL row + soft delete),
+//! trailing stops (explicit re-seed + the up-only price-refresh ratchet), and the per-currency
+//! capital-at-risk grouping (amounts stay native, never converted — FX is Story 6.5).
+
+use rust_decimal::Decimal;
+use steadyinvest_persistence::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
+use uuid::Uuid;
+
+use super::{
+    watch_error, JournalState, MSG_HOLDING_INVALID_CURRENCY, MSG_HOLDING_INVALID_NUMBER,
+    MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER, MSG_NO_JOURNAL,
+    MSG_PORTFOLIO_HAS_HOLDINGS, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
+    MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
+};
+
+impl JournalState {
+    // ── Story 6.1 — multiple portfolios (FR37): the active-portfolio rails ──
+
+    /// Every portfolio, ordered deterministically (Story 6.1). Empty when no journal / none yet.
+    pub fn list_portfolios(&self) -> Vec<PortfolioItem> {
+        self.journal
+            .as_ref()
+            .and_then(|j| j.list_portfolios().ok())
+            .unwrap_or_default()
+    }
+
+    /// The **active** portfolio (Story 6.1): the user-selected one when it still exists, else the
+    /// first (deterministic). `None` only when no portfolio exists yet. A pure read.
+    pub fn active_portfolio(&self) -> Option<PortfolioItem> {
+        let portfolios = self.list_portfolios();
+        if let Some(id) = self.active_portfolio_id {
+            if let Some(p) = portfolios.iter().find(|p| p.id == id) {
+                return Some(p.clone());
+            }
+        }
+        portfolios.into_iter().next()
+    }
+
+    /// The active portfolio id (for `main.rs` to persist into `AppConfig`). `None` = no portfolio yet.
+    pub fn active_portfolio_id(&self) -> Option<Uuid> {
+        self.active_portfolio().map(|p| p.id)
+    }
+
+    /// Select the active portfolio (Story 6.1). Accepts only an id that currently exists (a stale id
+    /// is ignored → the getter falls back to the first). In-memory; `main.rs` persists it.
+    pub fn set_active_portfolio(&mut self, id: Uuid) {
+        if self.list_portfolios().iter().any(|p| p.id == id) {
+            self.active_portfolio_id = Some(id);
+        }
+    }
+
+    /// Add a named portfolio (Story 6.1, FR37) — "one per bank/account". Validates the name (non-empty)
+    /// in the app layer; id/timestamp from the injected sources (ADD15). A fresh portfolio becomes the
+    /// active one. Guarded (read-only / no-journal / save-failure → a neutral notice).
+    pub fn add_portfolio(&mut self, name: &str) -> Result<Uuid, String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(MSG_PORTFOLIO_INVALID_NAME.to_string());
+        }
+        let id = self.idgen.new_id();
+        let created_at = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .add_portfolio(id, name, &created_at)
+            .map_err(watch_error)?;
+        self.active_portfolio_id = Some(id);
+        Ok(id)
+    }
+
+    /// Rename a portfolio (Story 6.1). Same name guard. A no-op (identical name) writes nothing.
+    pub fn rename_portfolio(&mut self, id: Uuid, name: &str) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(MSG_PORTFOLIO_INVALID_NAME.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .rename_portfolio(id, name)
+            .map(|_| ())
+            .map_err(watch_error)
+    }
+
+    /// Delete a portfolio (Story 6.1), surfacing the persistence guards as neutral refusals: a
+    /// portfolio with holdings, or the last portfolio, is **not** removed. On a real delete that drops
+    /// the active selection, the active id is cleared → the getter falls back to the first.
+    pub fn delete_portfolio(&mut self, id: Uuid) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        match journal.delete_portfolio(id).map_err(watch_error)? {
+            DeletePortfolioOutcome::Deleted => {
+                if self.active_portfolio_id == Some(id) {
+                    self.active_portfolio_id = None;
+                }
+                Ok(())
+            }
+            DeletePortfolioOutcome::HasHoldings => Err(MSG_PORTFOLIO_HAS_HOLDINGS.to_string()),
+            DeletePortfolioOutcome::LastPortfolio => Err(MSG_PORTFOLIO_LAST.to_string()),
+        }
+    }
+
+    /// The active portfolio, creating the default one if the journal has none yet (the add-holding
+    /// path). Mints an id/timestamp **only** when no portfolio exists (ADD15).
+    fn active_portfolio_or_default(&mut self) -> Result<PortfolioItem, String> {
+        if let Some(p) = self.active_portfolio() {
+            return Ok(p);
+        }
+        self.ensure_default_portfolio()
+    }
+
+    // ── Holdings register (Story 4.3, FR36 — scoped to the active portfolio since Story 6.1) ──
+
+    /// The **active** portfolio's holdings, ordered by creation. Empty when no journal / no portfolio
+    /// exists yet. A pure read — it never creates the portfolio (that happens on the first add).
+    pub fn list_holdings(&self) -> Vec<HoldingItem> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Vec::new();
+        };
+        let Some(portfolio) = self.active_portfolio() else {
+            return Vec::new();
+        };
+        journal.list_holdings(portfolio.id).unwrap_or_else(|error| {
+            tracing::warn!("list_holdings failed: {error}");
+            Vec::new()
+        })
+    }
+
+    /// The active portfolio's **capital-at-risk** + **total invested**, grouped **per currency**
+    /// (Story 6.2, FR38 — the honest interim before FX lands in Story 6.5). Holdings now differ in
+    /// currency, so summing them into one figure would silently mix currencies (forbidden — FR28).
+    /// Instead we group by each holding's **effective currency** (`h.currency`, or `reference_currency`
+    /// for a pre-6.2 `None` row) and, for **each** bucket, call the unchanged single-currency
+    /// `core::risk::capital_at_risk` / `total_invested`. Returns `(currency, capital_at_risk,
+    /// total_invested)` sorted by currency code (deterministic); an empty portfolio yields an empty
+    /// vec. There is **no** consolidated global total — cross-currency consolidation needs FX
+    /// (Story 6.5 / 6.6). A holding whose persisted TEXT decimals don't parse is skipped (defensive).
+    pub fn portfolio_capital_at_risk_by_currency(
+        &self,
+        reference_currency: &str,
+    ) -> Vec<(String, Decimal, Decimal)> {
+        use std::collections::BTreeMap;
+        let mut by_ccy: BTreeMap<String, Vec<steadyinvest_core::risk::PositionRisk>> =
+            BTreeMap::new();
+        for h in self.list_holdings() {
+            let Ok(avg_cost) = Decimal::from_str_exact(&h.purchase_price) else {
+                continue;
+            };
+            let Ok(quantity) = Decimal::from_str_exact(&h.quantity) else {
+                continue;
+            };
+            let stop = h
+                .trailing_stop_level
+                .as_deref()
+                .and_then(|s| Decimal::from_str_exact(s).ok());
+            let currency = h
+                .currency
+                .clone()
+                .unwrap_or_else(|| reference_currency.to_string());
+            by_ccy
+                .entry(currency)
+                .or_default()
+                .push(steadyinvest_core::risk::PositionRisk {
+                    avg_cost,
+                    stop,
+                    quantity,
+                });
+        }
+        by_ccy
+            .into_iter()
+            .map(|(currency, positions)| {
+                (
+                    currency,
+                    steadyinvest_core::risk::capital_at_risk(&positions),
+                    steadyinvest_core::risk::total_invested(&positions),
+                )
+            })
+            .collect()
+    }
+
+    /// Ensure the single default portfolio exists and return it (FR36, single-portfolio). Lazily
+    /// created with an injected id/timestamp (ADD15) on first use; idempotent thereafter. The id/
+    /// timestamp are minted **only when the portfolio is absent** — so a repeat add doesn't burn an
+    /// `IdGen` id (which would shift a deterministic test sequence) and the common path is a pure read.
+    fn ensure_default_portfolio(&mut self) -> Result<PortfolioItem, String> {
+        let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
+        if let Some(existing) = journal.first_portfolio().map_err(watch_error)? {
+            return Ok(existing);
+        }
+        let id = self.idgen.new_id();
+        let created_at = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .ensure_portfolio(id, DEFAULT_PORTFOLIO_NAME, &created_at)
+            .map_err(watch_error)
+    }
+
+    /// Add a holding (FR36): a security symbol, a quantity, a purchase price and the `currency` it is
+    /// denominated in (Story 6.2, FR38). Validates the symbol (non-empty), the two decimals (exact,
+    /// quantity > 0, price ≥ 0) and the currency (a supported allow-list member) **in the app layer**
+    /// — persistence stores faithfully, native, never converted (FR28). Id/timestamp from the injected
+    /// sources. Guarded (read-only / no-journal / save-failure → a neutral notice).
+    pub fn add_holding(
+        &mut self,
+        ticker: &str,
+        quantity: &str,
+        purchase_price: &str,
+        currency: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let ticker = ticker.trim();
+        if ticker.is_empty() {
+            return Err(MSG_HOLDING_INVALID_TICKER.to_string());
+        }
+        if !crate::config::is_supported_currency(currency) {
+            return Err(MSG_HOLDING_INVALID_CURRENCY.to_string());
+        }
+        let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
+        let portfolio_id = self.active_portfolio_or_default()?.id;
+        let id = self.idgen.new_id();
+        let created_at = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .add_holding(
+                id,
+                portfolio_id,
+                ticker,
+                &quantity,
+                &purchase_price,
+                currency,
+                &created_at,
+            )
+            .map(|_| ())
+            .map_err(watch_error)
+    }
+
+    /// Edit a holding's symbol, quantity, purchase price and/or `currency` (FR36 / Story 6.2 FR38).
+    /// Same validation as [`Self::add_holding`]. A no-op (identical values) writes nothing.
+    pub fn update_holding(
+        &mut self,
+        id: Uuid,
+        ticker: &str,
+        quantity: &str,
+        purchase_price: &str,
+        currency: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let ticker = ticker.trim();
+        if ticker.is_empty() {
+            return Err(MSG_HOLDING_INVALID_TICKER.to_string());
+        }
+        if !crate::config::is_supported_currency(currency) {
+            return Err(MSG_HOLDING_INVALID_CURRENCY.to_string());
+        }
+        let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .update_holding(id, ticker, &quantity, &purchase_price, currency)
+            .map_err(watch_error)
+    }
+
+    /// Remove a holding (FR36). Guarded; an absent id is a neutral no-op.
+    pub fn delete_holding(&mut self, id: Uuid) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal.delete_holding(id).map_err(watch_error)
+    }
+
+    /// Record a **sell** chosen on a neutral trigger (Story 4.7, FR46/FR47) and remove the holding
+    /// from the active register. Writes one SELL transaction — `quantity` = the holding's; `unit_price`
+    /// = the matched study's `current_price` (the market fact, Story 4.4) if known, else the holding's
+    /// `purchase_price`; `fees` = 0 (the fees workflow is Epic 6); `currency` = the **holding's own
+    /// currency** (Story 6.2, FR38/FR28 — amounts stay native, never relabeled), with the caller's
+    /// `reference_currency` only as the coalesce fallback for a pre-6.2 legacy row (NULL currency);
+    /// `rationale` = the optional trimmed reason (`None` when blank). The sell row and
+    /// the holding's **soft delete** are written **atomically** in one `record_sell` transaction — not
+    /// a hard delete (the sell transaction's FK must keep a live referent, so the record survives; the
+    /// holding just leaves the register via `sold_at`). The full ledger (partial sells, cost basis)
+    /// stays Epic 6 / Story 6.3. Guarded (read-only / no-journal / save-failure → a neutral notice); an
+    /// absent (or already-sold) id is refused.
+    pub fn sell_holding(
+        &mut self,
+        holding_id: Uuid,
+        rationale: &str,
+        reference_currency: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let holding = self
+            .list_holdings()
+            .into_iter()
+            .find(|h| h.id == holding_id)
+            .ok_or(MSG_SAVE_FAILED.to_string())?;
+        // The transaction is denominated in the holding's own currency (FR28: quantity × unit_price
+        // are that holding's native amounts — stamping the reference currency would mislabel them).
+        let currency = holding
+            .currency
+            .clone()
+            .unwrap_or_else(|| reference_currency.to_string());
+        // The sale price: the matched study's current market price if known, else the cost basis.
+        let unit_price = self
+            .study_id_for_ticker(&holding.security_ticker)
+            .and_then(|sid| self.get_study(sid))
+            .and_then(|s| s.judgment.current_price)
+            .map(|m| m.as_decimal().to_string())
+            .unwrap_or_else(|| holding.purchase_price.clone());
+        let rationale = rationale.trim();
+        let rationale = (!rationale.is_empty()).then_some(rationale);
+        let id = self.idgen.new_id();
+        let now = self.clock.now();
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .record_sell(
+                id,
+                holding_id,
+                &holding.quantity,
+                &unit_price,
+                "0",
+                &currency,
+                rationale,
+                &now,
+            )
+            .map(|_| ())
+            .map_err(watch_error)
+    }
+
+    /// Set (or clear) a holding's trailing-stop percentage (Story 4.5, FR42). An empty `pct_input`
+    /// clears the stop. Otherwise the pct is validated to `(0, 100)` and the level is **seeded fresh**
+    /// from the *reference price* — the matched study's `current_price` if known, else the holding's
+    /// `purchase_price` — so the user's chosen pct wins (they may tighten OR loosen the stop). The
+    /// ratchet-up-only rule (FR42) governs the **automatic** price-driven trailing
+    /// ([`Self::ratchet_trailing_stops_for_study`]), NOT an explicit re-parametrisation — folding the
+    /// prior level here would make the displayed pct and level inconsistent (review finding). Both
+    /// pct + level persist together (idempotent). Guarded.
+    pub fn set_holding_trailing_stop(
+        &mut self,
+        holding_id: Uuid,
+        pct_input: &str,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let pct_input = pct_input.trim();
+        if pct_input.is_empty() {
+            // Clear the stop (both fields → NULL).
+            let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+            return journal
+                .set_trailing_stop(holding_id, None, None)
+                .map_err(watch_error);
+        }
+        let pct = Decimal::from_str_exact(pct_input)
+            .ok()
+            .filter(|p| p.is_sign_positive() && !p.is_zero() && *p < Decimal::ONE_HUNDRED)
+            .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
+        let holding = self
+            .list_holdings()
+            .into_iter()
+            .find(|h| h.id == holding_id)
+            .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
+        let reference_price = self
+            .study_id_for_ticker(&holding.security_ticker)
+            .and_then(|sid| self.get_study(sid))
+            .and_then(|s| s.judgment.current_price)
+            .map(|m| m.as_decimal())
+            .or_else(|| Decimal::from_str_exact(&holding.purchase_price).ok())
+            .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
+        // Seed fresh (no prior level) — an explicit set is the user redefining the stop, not an
+        // automatic ratchet, so it may move the level down as well as up.
+        let level = steadyinvest_core::risk::ratchet_trailing_stop(None, reference_price, pct);
+        // Normalize (drop trailing zeros) so the stored string is canonical — re-computing the same
+        // value yields the same string, which keeps the persistence no-op idempotency guard honest.
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal
+            .set_trailing_stop(
+                holding_id,
+                Some(&pct.normalize().to_string()),
+                Some(&level.normalize().to_string()),
+            )
+            .map_err(watch_error)
+    }
+
+    /// Ratchet the trailing-stop level of every holding of `study_id`'s ticker against a fresh price
+    /// (Story 4.5, FR42) — called after a holdings price refresh fills the study's `current_price`
+    /// ([`Self::apply_holding_price`]). Only holdings that **have** a stop set are touched; the
+    /// `core::risk` ratchet (and the persistence no-op guard) ensure a falling price writes nothing.
+    pub fn ratchet_trailing_stops_for_study(
+        &mut self,
+        study_id: Uuid,
+        price: Decimal,
+    ) -> Result<(), String> {
+        if self.read_only {
+            return Ok(()); // a read-only refresh simply doesn't ratchet — never an error
+        }
+        let Some(ticker) = self.get_study(study_id).map(|s| s.security_ticker) else {
+            return Ok(());
+        };
+        let targets: Vec<(Uuid, Decimal, Option<Decimal>)> = self
+            .list_holdings()
+            .into_iter()
+            .filter(|h| h.security_ticker.eq_ignore_ascii_case(&ticker))
+            .filter_map(|h| {
+                let pct = h
+                    .trailing_stop_pct
+                    .as_deref()
+                    .and_then(|s| Decimal::from_str_exact(s).ok())?;
+                let prior = h
+                    .trailing_stop_level
+                    .as_deref()
+                    .and_then(|s| Decimal::from_str_exact(s).ok());
+                Some((h.id, pct, prior))
+            })
+            .collect();
+        for (id, pct, prior) in targets {
+            let level = steadyinvest_core::risk::ratchet_trailing_stop(prior, price, pct);
+            let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+            journal
+                .set_trailing_stop(
+                    id,
+                    Some(&pct.normalize().to_string()),
+                    Some(&level.normalize().to_string()),
+                )
+                .map_err(watch_error)?;
+        }
+        Ok(())
+    }
+}
+
+/// The display name of the single default portfolio (Story 4.3, FR36). Not user-editable in 4.3
+/// (multi-portfolio naming is FR37/Epic 6).
+const DEFAULT_PORTFOLIO_NAME: &str = "Portefeuille";
+
+/// Validate a holding's quantity and purchase price (Story 4.3, FR36 + NFR-C1). Both must parse as
+/// **exact** decimals (`Decimal::from_str_exact` — errors instead of silently rounding); quantity
+/// must be strictly positive and price non-negative. On success returns their **canonical** decimal
+/// spellings to store as TEXT; on any failure, the neutral [`MSG_HOLDING_INVALID_NUMBER`].
+fn validate_holding_amounts(
+    quantity: &str,
+    purchase_price: &str,
+) -> Result<(String, String), String> {
+    let qty = Decimal::from_str_exact(quantity.trim())
+        .ok()
+        .filter(|q| q.is_sign_positive() && !q.is_zero())
+        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+    let price = Decimal::from_str_exact(purchase_price.trim())
+        .ok()
+        .filter(|p| !p.is_sign_negative())
+        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+    Ok((qty.to_string(), price.to_string()))
+}

@@ -14,7 +14,10 @@ use rust_decimal::Decimal;
 /// (or a looser `pct`) never lowers it. With no prior level (`None`), it seeds from the candidate.
 ///
 /// `pct` is the trailing-stop percentage (e.g. `15` for 15 %), assumed already validated to `(0,
-/// 100)` by the caller. Exact decimal throughout.
+/// 100)` by the caller. Exact decimal throughout, all arithmetic checked — no panic on any input:
+/// should the candidate computation overflow `Decimal` (only reachable on inputs outside the
+/// validated range), the prior level is kept (the ratchet holds), or `Decimal::ZERO` is returned
+/// when there is no prior level (a floor no positive price breaches).
 ///
 /// ```
 /// use rust_decimal::Decimal;
@@ -35,10 +38,16 @@ pub fn ratchet_trailing_stop(
     reference_price: Decimal,
     pct: Decimal,
 ) -> Decimal {
-    let candidate = reference_price * (Decimal::ONE - pct / Decimal::ONE_HUNDRED);
-    match prior_level {
-        Some(prior) => prior.max(candidate),
-        None => candidate,
+    let candidate = pct
+        .checked_div(Decimal::ONE_HUNDRED)
+        .and_then(|fraction| Decimal::ONE.checked_sub(fraction))
+        .and_then(|factor| reference_price.checked_mul(factor));
+    match (prior_level, candidate) {
+        (Some(prior), Some(candidate)) => prior.max(candidate),
+        // Overflowed candidate: the level holds (ratchet-up only, see the doc note).
+        (Some(prior), None) => prior,
+        (None, Some(candidate)) => candidate,
+        (None, None) => Decimal::ZERO,
     }
 }
 
@@ -53,8 +62,11 @@ pub fn stop_breached(stop_level: Decimal, current_price: Decimal) -> bool {
 /// trailing-stop level (`None` when no stop is set), and its quantity. All exact [`Decimal`].
 #[derive(Debug, Clone, Copy)]
 pub struct PositionRisk {
+    /// Average acquisition cost per unit.
     pub avg_cost: Decimal,
+    /// The trailing-stop level; `None` when no stop is set.
     pub stop: Option<Decimal>,
+    /// Held quantity.
     pub quantity: Decimal,
 }
 
@@ -63,20 +75,29 @@ pub struct PositionRisk {
 /// position with no stop, or whose stop has ratcheted **above** cost, contributes **0** (its
 /// capital-loss risk is gone). `≥ 0` by construction (the `stop ≤ avg_cost` guard means every summed
 /// term is non-negative). Single-currency — the caller sums one reference currency (no FX, Epic 4).
+///
+/// All arithmetic is saturating — no panic on any input: an out-of-`Decimal`-range term or sum
+/// clamps at the `Decimal` bounds instead of overflowing (unreachable for realistic portfolios;
+/// defense in depth only).
 pub fn capital_at_risk(positions: &[PositionRisk]) -> Decimal {
     positions
         .iter()
         .filter_map(|p| {
             let stop = p.stop?;
-            (stop <= p.avg_cost).then(|| (p.avg_cost - stop) * p.quantity)
+            (stop <= p.avg_cost).then(|| p.avg_cost.saturating_sub(stop).saturating_mul(p.quantity))
         })
-        .sum()
+        .fold(Decimal::ZERO, |acc, term| acc.saturating_add(term))
 }
 
 /// Total invested capital `Σ avg_cost × quantity` (Story 4.6) — the denominator for capital-at-risk
-/// as a percentage. `0` for an empty portfolio (the caller omits the percent then).
+/// as a percentage. `0` for an empty portfolio (the caller omits the percent then). Saturating
+/// arithmetic, like [`capital_at_risk`] — an out-of-range term or sum clamps at the `Decimal`
+/// bounds instead of panicking.
 pub fn total_invested(positions: &[PositionRisk]) -> Decimal {
-    positions.iter().map(|p| p.avg_cost * p.quantity).sum()
+    positions
+        .iter()
+        .map(|p| p.avg_cost.saturating_mul(p.quantity))
+        .fold(Decimal::ZERO, |acc, term| acc.saturating_add(term))
 }
 
 /// Which neutral trigger a holding fires (Story 4.7, FR46/FR47). The app surfaces the fact and
@@ -92,8 +113,9 @@ pub enum TriggerKind {
 /// The neutral trigger state for one holding (Story 4.7, FR46/FR47): given whether its trailing
 /// stop is breached and whether it is in its Sell zone, return which trigger (if any) fires. **The
 /// stop takes priority over the Sell zone** — when both hold, the result is [`TriggerKind::Stop`].
-/// This is the **isolated, testable FR47 business rule** (stop-loss priority); keep it a pure
-/// boolean function so the priority never leaks into UI conditionals. Neither condition → `None`.
+/// This is the **isolated, testable FR47 business rule** (stop-loss priority); keeping it a pure
+/// function of the two booleans (→ `Option<TriggerKind>`) means the priority never leaks into UI
+/// conditionals. Neither condition → `None`.
 pub fn trigger_state(stop_breached: bool, in_sell_zone: bool) -> Option<TriggerKind> {
     if stop_breached {
         Some(TriggerKind::Stop) // FR47: the stop wins, even when also in the Sell zone.

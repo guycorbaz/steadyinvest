@@ -4,7 +4,7 @@
 // persist + re-render).
 
 import { Tokens } from "../tokens.slint";
-import { Holdings, HoldingRow, PortfolioRow, Labels, Prefs } from "../state.slint";
+import { Holdings, HoldingRow, PortfolioRow, CapitalAtRiskRow, Labels, Prefs } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { TextField } from "../components/text_field.slint";
@@ -14,6 +14,9 @@ export component PortfolioScreen inherits Rectangle {
     property <string> draft-ticker;
     property <string> draft-quantity;
     property <string> draft-price;
+    // Story 6.2 (FR38): the chosen currency for the holding being added/edited (defaults to the
+    // reference currency; overwritten with the row's currency when editing).
+    property <string> draft-currency: Holdings.reference-currency;
     property <string> editing-id;
     // Story 6.1 (FR37): draft names for adding / renaming a portfolio.
     property <string> draft-portfolio-name;
@@ -23,6 +26,7 @@ export component PortfolioScreen inherits Rectangle {
         root.draft-ticker = "";
         root.draft-quantity = "";
         root.draft-price = "";
+        root.draft-currency = Holdings.reference-currency;
         root.editing-id = "";
     }
 
@@ -102,15 +106,25 @@ export component PortfolioScreen inherits Rectangle {
             font-size: Tokens.font-caption;
         }
 
-        // Story 4.6 (FR43): the portfolio's capital-at-risk — a neutral fact (no hue, no action). The
-        // "% du capital investi" clause is dropped when nothing is invested.
-        Text {
-            text: Holdings.capital-at-risk-pct != ""
-                ? @tr("Capital à risque : {} {} ({} % du capital investi)", Holdings.capital-at-risk, Holdings.reference-currency, Holdings.capital-at-risk-pct)
-                : @tr("Capital à risque : {} {}", Holdings.capital-at-risk, Holdings.reference-currency);
-            color: Tokens.text-high;
-            font-family: Tokens.font-numeric;
-            font-size: Tokens.font-caption;
+        // Story 4.6 (FR43) / Story 6.2 (FR38): the portfolio's capital-at-risk — a neutral fact (no
+        // hue, no action), shown PER currency. Holdings can differ in currency, so there is no mixed
+        // global total (FX only at consolidation, Story 6.5/6.6). The "% du capital investi" clause is
+        // dropped for a currency with nothing invested.
+        if Holdings.capital-at-risk-by-currency.length > 0: VerticalLayout {
+            spacing: Tokens.space-4;
+            Text {
+                text: @tr("Capital à risque par devise :");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            for car in Holdings.capital-at-risk-by-currency: Text {
+                text: car.pct != ""
+                    ? @tr("{} {} ({} % du capital investi)", car.amount, car.currency, car.pct)
+                    : @tr("{} {}", car.amount, car.currency);
+                color: Tokens.text-high;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+            }
         }
 
         // ── Manual price refresh (Story 4.4, FR40) — user-initiated; never background-polled. ──
@@ -147,13 +161,13 @@ export component PortfolioScreen inherits Rectangle {
                 enabled: !Holdings.read-only && root.draft-ticker != "";
                 clicked => {
                     // Reset the form ONLY when the write was accepted — a refused add/edit (bad
-                    // number / empty symbol) keeps the user's input so they can correct it.
+                    // number / empty symbol / unsupported currency) keeps the user's input to correct.
                     if (root.editing-id == "") {
-                        if (Holdings.add-holding(root.draft-ticker, root.draft-quantity, root.draft-price)) {
+                        if (Holdings.add-holding(root.draft-ticker, root.draft-quantity, root.draft-price, root.draft-currency)) {
                             root.reset-draft();
                         }
                     } else {
-                        if (Holdings.edit-holding(root.editing-id, root.draft-ticker, root.draft-quantity, root.draft-price)) {
+                        if (Holdings.edit-holding(root.editing-id, root.draft-ticker, root.draft-quantity, root.draft-price, root.draft-currency)) {
                             root.reset-draft();
                         }
                     }
@@ -163,6 +177,23 @@ export component PortfolioScreen inherits Rectangle {
                 label: @tr("Annuler");
                 enabled: true;
                 clicked => { root.reset-draft(); }
+            }
+        }
+        // Story 6.2 (FR38): the holding's currency — a fixed allow-list picker (chips from Rust's
+        // config::SUPPORTED_CURRENCIES). Stored native, never converted (FX only at consolidation).
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            alignment: start;
+            Text {
+                text: @tr("Devise :");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
+            for c in Holdings.supported-currencies: ChoiceChip {
+                label: c;
+                selected: c == root.draft-currency;
+                activated => { root.draft-currency = c; }
             }
         }
 
@@ -209,7 +240,7 @@ export component PortfolioScreen inherits Rectangle {
                     vertical-alignment: center;
                 }
                 Text {
-                    text: @tr("Prix d'achat : {} {}", row.purchase-price, Holdings.reference-currency);
+                    text: @tr("Prix d'achat : {} {}", row.purchase-price, row.currency);
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
@@ -231,7 +262,7 @@ export component PortfolioScreen inherits Rectangle {
                         font-size: Tokens.font-caption;
                     }
                     if row.linked && row.current-price != "": Text {
-                        text: @tr("Prix actuel : {} {}", row.current-price, Holdings.reference-currency);
+                        text: @tr("Prix actuel : {} {}", row.current-price, row.currency);
                         color: Tokens.text-high;
                         font-family: Tokens.font-numeric;
                         font-size: Tokens.font-caption;
@@ -256,7 +287,7 @@ export component PortfolioScreen inherits Rectangle {
                     alignment: center;
                     horizontal-stretch: 1;
                     if row.has-stop: Text {
-                        text: @tr("Stop {}% : {} {}", row.stop-pct, row.stop-level, Holdings.reference-currency);
+                        text: @tr("Stop {}% : {} {}", row.stop-pct, row.stop-level, row.currency);
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;
                     }
@@ -266,7 +297,7 @@ export component PortfolioScreen inherits Rectangle {
                         font-size: Tokens.font-caption;
                     }
                     if row.has-stop && !row.stop-breached && row.stop-distance != "": Text {
-                        text: @tr("à {} {} au-dessus", row.stop-distance, Holdings.reference-currency);
+                        text: @tr("à {} {} au-dessus", row.stop-distance, row.currency);
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;
                     }
@@ -297,6 +328,7 @@ export component PortfolioScreen inherits Rectangle {
                         root.draft-ticker = row.ticker;
                         root.draft-quantity = row.quantity;
                         root.draft-price = row.purchase-price;
+                        root.draft-currency = row.currency;
                     }
                 }
                 ActionButton {

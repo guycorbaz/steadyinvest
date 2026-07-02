@@ -630,11 +630,23 @@ export struct PortfolioRow {
     name: string,
 }
 
+// Story 6.2 (FR38): one per-currency capital-at-risk subtotal. `amount`/`pct` are already-formatted
+// display strings (`pct` is "" when nothing is invested in that currency). There is deliberately NO
+// consolidated global total — currencies are never mixed until FX lands (Story 6.5 / 6.6).
+export struct CapitalAtRiskRow {
+    currency: string,
+    amount: string,
+    pct: string,
+}
+
 export struct HoldingRow {
     id: string,
     ticker: string,
     quantity: string,
     purchase-price: string,
+    // Story 6.2 (FR38): the currency this holding is denominated in ("CHF" | "EUR" | …). Shown beside
+    // every amount; a pre-6.2 holding is read under the reference currency (coalesced in Rust).
+    currency: string,
     // Story 4.4 (FR40): the auto-matched study's zone + freshness. `linked` is false when no saved
     // study matches the ticker (neutral "no study" state). `zone` is the key crossed from Rust
     // ("buy"/"neutral"/"sell"/"" — "" shows "—", outside the band or undefined). `current-price` and
@@ -670,18 +682,20 @@ export global Holdings {
     in-out property <bool> read-only;
     in-out property <string> notice;
     in-out property <string> reference-currency: "CHF";
+    // Story 6.2 (FR38): the fixed allow-list a holding may be denominated in, pushed from Rust
+    // (config::SUPPORTED_CURRENCIES) so the picker and the validator share one source of truth.
+    in-out property <[string]> supported-currencies: ["CHF", "EUR", "USD", "GBP", "JPY"];
     // Story 4.4 / issue #52: true while a price refresh is in flight — disables the refresh button
     // so a double-click can't enqueue duplicate jobs. Cleared when the last job's outcome arrives.
     in-out property <bool> refreshing;
-    // Story 4.6 (FR43): the portfolio's capital-at-risk figure + its share of invested capital, both
-    // already-formatted display strings (the figure is "0.00" at the Price scale when none;
-    // `capital-at-risk-pct` is "" when invested=0, else a locale-formatted 1-dp percent).
-    in-out property <string> capital-at-risk;
-    in-out property <string> capital-at-risk-pct;
-    // ticker, quantity, purchase-price → written? (so the form keeps the user's input on refusal)
-    callback add-holding(string, string, string) -> bool;
-    // id, ticker, quantity, purchase-price → written?
-    callback edit-holding(string, string, string, string) -> bool;
+    // Story 4.6 (FR43) / Story 6.2 (FR38): the portfolio's capital-at-risk, one subtotal PER currency
+    // (holdings can differ in currency, so a single mixed total is forbidden until FX lands). Each row
+    // carries the currency + a formatted figure + its share of that currency's invested capital.
+    in-out property <[CapitalAtRiskRow]> capital-at-risk-by-currency;
+    // ticker, quantity, purchase-price, currency → written? (so the form keeps the user's input on refusal)
+    callback add-holding(string, string, string, string) -> bool;
+    // id, ticker, quantity, purchase-price, currency → written?
+    callback edit-holding(string, string, string, string, string) -> bool;
     callback remove-holding(string); // id
     // Story 4.4 (FR40): user-initiated price refresh for every linked holding (off the UI thread).
     callback refresh-prices();

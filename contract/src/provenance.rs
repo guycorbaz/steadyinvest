@@ -20,8 +20,11 @@ pub struct Timestamp(pub String);
 /// Dated proof of how a fact was produced.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provenance {
+    /// Where the fact came from (provider / manual / derived).
     pub source: Source,
+    /// The journal's monotonic logical version at which the fact was produced.
     pub logical_version: u64,
+    /// When the fact was produced (RFC3339 UTC, produced by the injected clock).
     pub timestamp: Timestamp,
     /// Hex digest (e.g. SHA-256) of the inputs this fact descends from — a `String` so `contract`
     /// needs no hashing crate. NOTE: when computing this over serialized cells, **normalize** decimal
