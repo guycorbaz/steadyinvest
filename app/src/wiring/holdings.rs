@@ -17,7 +17,9 @@ use crate::viewmodel::format::NumberFormat;
 use crate::wiring::fetch::resolve_provider_key;
 use crate::wiring::{persist, Session};
 use crate::{fetch, state, viewmodel};
-use crate::{CapitalAtRiskRow, HoldingRow, Holdings, LedgerRow, MainWindow, PortfolioRow};
+use crate::{
+    BankCarRow, CapitalAtRiskRow, HoldingRow, Holdings, LedgerRow, MainWindow, PortfolioRow,
+};
 
 /// Transient (NOT persisted) per-ticker price-refresh freshness for the holdings register (Story
 /// 4.4, FR40): the outcome of the last manual refresh. Keyed by **upper-cased** ticker so it joins
@@ -216,6 +218,94 @@ pub(crate) fn refresh_holdings(
         })
         .collect();
     holdings.set_reinvestable_cash(ModelRc::new(VecModel::from(cash_rows)));
+
+    // Story 6.6 (FR44): the consolidation hierarchy — shown only when there is something to
+    // consolidate (more than one bank, or any foreign-currency bucket); FX applied ONLY here.
+    let consolidation = state.journal_capital_at_risk_consolidation(&reference_currency);
+    let any_foreign = consolidation
+        .banks
+        .iter()
+        .any(|b| b.buckets.iter().any(|(c, _, _)| c != &reference_currency));
+    let show = consolidation.banks.len() > 1 || any_foreign;
+    let pct_of = |car: rust_decimal::Decimal, invested: rust_decimal::Decimal| {
+        if invested > rust_decimal::Decimal::ZERO {
+            // Checked like every sum on this surface (review): an overflowing ratio shows
+            // nothing rather than panicking the render path.
+            car.checked_div(invested)
+                .and_then(|r| r.checked_mul(rust_decimal::Decimal::from(100)))
+                .map(|r| viewmodel::format::format_scaled(r, DisplayField::Percent, format))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        }
+    };
+    let bank_rows: Vec<BankCarRow> = if show {
+        consolidation
+            .banks
+            .iter()
+            .map(|bank| match bank.converted {
+                Some((car, invested)) => BankCarRow {
+                    name: bank.name.clone().into(),
+                    amount: format!(
+                        "{} {}",
+                        viewmodel::format::format_scaled(car, DisplayField::Price, format),
+                        reference_currency
+                    )
+                    .into(),
+                    pct: pct_of(car, invested).into(),
+                    missing: SharedString::new(),
+                    unavailable: false,
+                },
+                None => BankCarRow {
+                    name: bank.name.clone().into(),
+                    amount: SharedString::new(),
+                    pct: SharedString::new(),
+                    missing: bank.missing_pairs.join(" · ").into(),
+                    unavailable: bank.unavailable,
+                },
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    holdings.set_consolidation_banks(ModelRc::new(VecModel::from(bank_rows)));
+    let (global_text, global_pct) = match consolidation.global.filter(|_| show) {
+        Some((car, invested)) => (
+            format!(
+                "{} {}",
+                viewmodel::format::format_scaled(car, DisplayField::Price, format),
+                reference_currency
+            ),
+            pct_of(car, invested),
+        ),
+        None => (String::new(), String::new()),
+    };
+    holdings.set_consolidation_global(global_text.into());
+    holdings.set_consolidation_global_pct(global_pct.into());
+    holdings.set_consolidation_missing(if show {
+        consolidation.missing_pairs.join(" · ").into()
+    } else {
+        SharedString::new()
+    });
+    // The FR28 footnote: every rate actually used, with its day and source.
+    holdings.set_consolidation_rates(if show {
+        consolidation
+            .rates_used
+            .iter()
+            .map(|r| {
+                // No prose baked into Rust (posture — the @tr scan cannot see it): the entry is
+                // pure data — pair, rate, then "(date, source)".
+                format!(
+                    "{} → {} {} ({}, {})",
+                    r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+            .into()
+    } else {
+        SharedString::new()
+    });
 
     // Story 6.1 (FR37): the portfolio selector + the active id (the register above is the active
     // portfolio's holdings). Pushed here so every holdings re-render keeps the selector in sync.

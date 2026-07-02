@@ -288,6 +288,16 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         None => counts.into(),
                     });
                     crate::wiring::fx::push_fx_rates(&ui, &journal_state.borrow());
+                    // Story 6.6 (review): freshly fetched rates feed the consolidation block —
+                    // re-render the register so it converts without a restart.
+                    let format = config.borrow().number_format;
+                    refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
                 }
                 fetch::WorkerOutcome::TestKey(result) => {
                     // The key test (Story 3.2): a verdict, not study data. Surface it as the

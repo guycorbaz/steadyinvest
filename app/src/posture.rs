@@ -613,9 +613,13 @@ mod tests {
         // 0) » placeholder is a buy/sell fact, so the dividend meaning is stated on the form):
         // +1 = 347. Story 6.5 adds the FX panel (the Taux de change title, the empty state, the
         // date-source template, the two refresh labels, the three manual-entry placeholders, the
-        // Enregistrer le taux action): +9 = 356. Floor strict.
+        // Enregistrer le taux action): +9 = 356. Story 6.6 adds the consolidation block (the
+        // header template, the three per-bank line variants, the two global-total variants, the
+        // global-missing template, the rates footnote): +8 = 364. Its review adds the two
+        // plain-« indisponible » variants (per-bank + global — an overflow/read-failure absence
+        // must name itself, never render a dangling empty amount): +2 = 366. Floor strict.
         assert!(
-            total >= 356,
+            total >= 366,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

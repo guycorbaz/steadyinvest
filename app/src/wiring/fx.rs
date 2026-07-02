@@ -34,6 +34,8 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
         journal_state,
         config,
         fetch_tx,
+        holding_freshness,
+        holding_dismissed,
         ..
     } = s;
     // ── « Actualiser les taux » — one job, one pair per foreign currency in use (AC3). ──
@@ -97,6 +99,8 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         let config = Rc::clone(config);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Fx>().on_add_rate(move |base, rate, date| {
             let ui = ui_weak.unwrap();
             let reference = config.borrow().reference_currency_or_default();
@@ -109,6 +113,16 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 Ok(()) => {
                     fx.set_notice(state::MSG_FX_RECORDED.into());
                     push_fx_rates(&ui, &journal_state.borrow());
+                    // Story 6.6 (review): the Portefeuille consolidation block converts with
+                    // these rates — a new rate must re-render it without a restart.
+                    let format = config.borrow().number_format;
+                    crate::wiring::holdings::refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
                 }
                 Err(message) => fx.set_notice(message.into()),
             }

@@ -145,6 +145,54 @@ export component PortfolioScreen inherits Rectangle {
             }
         }
 
+        // ── Story 6.6 (FR44): the consolidation hierarchy — per bank, then the global total, in
+        // the reference currency; FX applied ONLY here (the per-currency lines above stay
+        // native). Every converted figure's rates are named below (FR28 inspectability). ──
+        if Holdings.consolidation-banks.length > 0: VerticalLayout {
+            spacing: Tokens.space-4;
+            Text {
+                text: @tr("Consolidation (toutes banques, en {}) :", Holdings.reference-currency);
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            for bank in Holdings.consolidation-banks: Text {
+                text: bank.missing != ""
+                    ? @tr("{} — indisponible : taux manquant {}", bank.name, bank.missing)
+                    : bank.unavailable
+                        ? @tr("{} — indisponible", bank.name)
+                        : bank.pct != ""
+                            ? @tr("{} — {} ({} % du capital investi)", bank.name, bank.amount, bank.pct)
+                            : @tr("{} — {}", bank.name, bank.amount);
+                color: Tokens.text-high;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.consolidation-global != "": Text {
+                text: Holdings.consolidation-global-pct != ""
+                    ? @tr("Total global : {} ({} % du capital investi)",
+                        Holdings.consolidation-global, Holdings.consolidation-global-pct)
+                    : @tr("Total global : {}", Holdings.consolidation-global);
+                color: Tokens.text-high;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.consolidation-global == "" && Holdings.consolidation-missing != "": Text {
+                text: @tr("Total global indisponible : taux manquant {}", Holdings.consolidation-missing);
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.consolidation-global == "" && Holdings.consolidation-missing == "": Text {
+                text: @tr("Total global indisponible");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.consolidation-rates != "": Text {
+                text: @tr("Convertis aux taux : {}", Holdings.consolidation-rates);
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+        }
+
         // ── Manual price refresh (Story 4.4, FR40) — user-initiated; never background-polled. ──
         HorizontalLayout {
             alignment: start;

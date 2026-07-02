@@ -130,3 +130,151 @@ impl JournalState {
             .map_err(watch_error)
     }
 }
+
+/// One bank's (portfolio's) consolidation slice (Story 6.6, FR44): the FX-free native buckets, the
+/// converted subtotal in the reference currency (`None` when a pair is missing or a checked sum
+/// overflowed — absent, never wrong), and the missing pairs by name.
+pub struct BankConsolidation {
+    pub name: String,
+    /// `(currency, capital_at_risk, total_invested)` — native, FX-free (FR28).
+    pub buckets: Vec<(String, Decimal, Decimal)>,
+    /// `(capital_at_risk, total_invested)` in the REFERENCE currency.
+    pub converted: Option<(Decimal, Decimal)>,
+    /// The `BASE → reference` pairs this bank needed but the store lacks (e.g. `"EUR → CHF"`).
+    pub missing_pairs: Vec<String>,
+    /// `true` when the bank could not consolidate for a reason that is NOT a nameable missing
+    /// pair (2026-07-02 review): the holdings read failed, or a checked conversion/sum
+    /// overflowed. The UI renders a plain « indisponible » — an absence, never a zero.
+    pub unavailable: bool,
+}
+
+/// The journal-wide FR44 hierarchy: per-currency → per-bank → global, conversion ONLY here (the
+/// consolidation point — FR28), every rate used carried for display (date + source inspectable).
+pub struct JournalConsolidation {
+    pub banks: Vec<BankConsolidation>,
+    /// The global `(capital_at_risk, total_invested)` in the reference currency — `None` when any
+    /// bank could not consolidate (missing pair / overflow): never a partial sum passed off as
+    /// the total.
+    pub global: Option<(Decimal, Decimal)>,
+    /// Union of the banks' missing pairs, deduplicated, deterministic.
+    pub missing_pairs: Vec<String>,
+    /// The rates actually used (deduplicated per pair) — the UI footnote (FR28 inspectability).
+    pub rates_used: Vec<FxRateItem>,
+}
+
+impl JournalState {
+    /// The FR44 consolidation (Story 6.6): for EVERY portfolio, the ACTIVE holdings' per-currency
+    /// buckets (sold holdings carry no position risk — the unchanged 4.6 semantics), each foreign
+    /// bucket converted at the LATEST stored rate ([`Journal::latest_fx_rate`] — 6.5's
+    /// arbitration; the reference currency converts at identity, no self-rate looked up), summed
+    /// checked per bank and globally. A missing pair (or a corrupt stored rate, or an overflow)
+    /// makes the affected subtotal and the global ABSENT with the pair named — honesty over
+    /// completeness. A pure read; deterministic throughout.
+    pub fn journal_capital_at_risk_consolidation(
+        &self,
+        reference_currency: &str,
+    ) -> JournalConsolidation {
+        use std::collections::BTreeSet;
+        let mut banks = Vec::new();
+        let mut rates_used: Vec<FxRateItem> = Vec::new();
+        let mut all_missing: BTreeSet<String> = BTreeSet::new();
+        let Some(journal) = self.journal.as_ref() else {
+            return JournalConsolidation {
+                banks,
+                global: None,
+                missing_pairs: Vec::new(),
+                rates_used,
+            };
+        };
+        // Bank order = the portfolio list order (deterministic — the 6.1 selector order), so the
+        // UI lines and the tests share one contract.
+        for portfolio in self.list_portfolios() {
+            // A failed holdings read is an ABSENT bank, never a confident zero (2026-07-02
+            // review, HIGH — the "absent, never wrong" rule applies to IO too).
+            let holdings = match journal.list_holdings(portfolio.id) {
+                Ok(holdings) => holdings,
+                Err(_) => {
+                    banks.push(BankConsolidation {
+                        name: portfolio.name.clone(),
+                        buckets: Vec::new(),
+                        converted: None,
+                        missing_pairs: Vec::new(),
+                        unavailable: true,
+                    });
+                    continue;
+                }
+            };
+            let buckets = super::holdings::car_buckets_by_currency(&holdings, reference_currency);
+            let mut converted: Option<(Decimal, Decimal)> = Some((Decimal::ZERO, Decimal::ZERO));
+            let mut missing: Vec<String> = Vec::new();
+            for (currency, car, invested) in &buckets {
+                let (car_ref, invested_ref) = if currency == reference_currency {
+                    // Identity — the reference bucket needs (and must never require) a self-rate.
+                    (Some(*car), Some(*invested))
+                } else {
+                    let rate_row = journal
+                        .latest_fx_rate(currency, reference_currency, None)
+                        .ok()
+                        .flatten();
+                    match rate_row
+                        .as_ref()
+                        .and_then(|r| Decimal::from_str_exact(&r.rate).ok())
+                        // A nonpositive stored rate (an edited/foreign import) must not convert
+                        // to a confident zero — folded into the named refusal (review).
+                        .filter(|r| r.is_sign_positive() && !r.is_zero())
+                    {
+                        Some(rate) => {
+                            if let Some(row) = rate_row {
+                                if !rates_used.iter().any(|u| {
+                                    u.base_currency == row.base_currency
+                                        && u.quote_currency == row.quote_currency
+                                }) {
+                                    rates_used.push(row);
+                                }
+                            }
+                            (
+                                steadyinvest_core::risk::convert(*car, rate),
+                                steadyinvest_core::risk::convert(*invested, rate),
+                            )
+                        }
+                        None => {
+                            missing.push(format!("{currency} → {reference_currency}"));
+                            (None, None)
+                        }
+                    }
+                };
+                converted = match (converted, car_ref, invested_ref) {
+                    (Some((acc_car, acc_inv)), Some(c), Some(i)) => {
+                        acc_car.checked_add(c).zip(acc_inv.checked_add(i))
+                    }
+                    _ => None,
+                };
+            }
+            all_missing.extend(missing.iter().cloned());
+            // `converted` is None either because a pair is missing (named) or because a checked
+            // conversion/sum overflowed — the latter is the plain-« indisponible » case (review:
+            // the absence must never render as a dangling empty amount).
+            let unavailable = converted.is_none() && missing.is_empty();
+            banks.push(BankConsolidation {
+                name: portfolio.name.clone(),
+                buckets,
+                converted,
+                missing_pairs: missing,
+                unavailable,
+            });
+        }
+        let global = banks.iter().try_fold(
+            (Decimal::ZERO, Decimal::ZERO),
+            |(acc_car, acc_inv), bank| {
+                let (c, i) = bank.converted?;
+                acc_car.checked_add(c).zip(acc_inv.checked_add(i))
+            },
+        );
+        JournalConsolidation {
+            banks,
+            global,
+            missing_pairs: all_missing.into_iter().collect(),
+            rates_used,
+        }
+    }
+}
