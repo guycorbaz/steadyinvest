@@ -129,6 +129,12 @@ fn finish_journal_switch(
             retain_held_freshness(holding_freshness, &st);
             refresh_studies(ui, &st);
             refresh_watchlist(ui, &st);
+            // Story 6.5 review: the FX panel follows the journal (rates are journal data); the
+            // in-flight flag and sticky notice reset with it.
+            crate::wiring::fx::push_fx_rates(ui, &st);
+            ui.global::<crate::Fx>().set_refreshing(false);
+            ui.global::<crate::Fx>()
+                .set_notice(slint::SharedString::new());
             refresh_holdings(
                 ui,
                 &st,
@@ -244,6 +250,8 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             retain_held_freshness(&holding_freshness, &state);
             refresh_studies(&ui, &state);
             refresh_watchlist(&ui, &state);
+            // Story 6.5 review: imported/restored fx_rates must show without a restart.
+            crate::wiring::fx::push_fx_rates(&ui, &state);
             refresh_holdings(
                 &ui,
                 &state,
@@ -320,6 +328,8 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             retain_held_freshness(&holding_freshness, &state);
             refresh_studies(&ui, &state);
             refresh_watchlist(&ui, &state);
+            // Story 6.5 review: imported/restored fx_rates must show without a restart.
+            crate::wiring::fx::push_fx_rates(&ui, &state);
             refresh_holdings(
                 &ui,
                 &state,

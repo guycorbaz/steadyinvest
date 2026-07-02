@@ -16,7 +16,7 @@ use crate::wiring::push::{display_timestamp, push_form};
 use crate::wiring::studies::refresh_studies;
 use crate::wiring::Session;
 use crate::{fetch, keychain, state};
-use crate::{Holdings, MainWindow, Prefs, Studies};
+use crate::{Fx, Holdings, MainWindow, Prefs, Studies};
 
 /// The legacy interim key source (Story 3.1), kept ONLY as a fallback for environments with no
 /// running OS secret agent (headless/NAS — AC5/AC6).
@@ -236,6 +236,58 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             ui.global::<Holdings>().set_refreshing(false);
                         }
                     }
+                }
+                fetch::WorkerOutcome::FxRates {
+                    journal_id,
+                    source,
+                    results,
+                } => {
+                    // Story 6.5 (FR28) + review: the SOURCE travels with the job (never re-read
+                    // from mutable config — an in-flight provider switch must not falsify
+                    // provenance), and the outcome only applies to the journal that ASKED (an
+                    // in-flight journal switch must not write phantom rates into the new one).
+                    let fx = ui.global::<Fx>();
+                    fx.set_refreshing(false);
+                    if journal_state.borrow().journal_id() != journal_id {
+                        fx.set_notice(state::MSG_FX_JOURNAL_CHANGED.into());
+                        return;
+                    }
+                    let total = results.len();
+                    let mut landed = 0usize;
+                    let mut failure: Option<String> = None;
+                    for outcome in results {
+                        match outcome.result {
+                            Ok(Some(rate)) => {
+                                match journal_state.borrow_mut().apply_fx_fetch(
+                                    &outcome.base,
+                                    &outcome.quote,
+                                    rate,
+                                    &source,
+                                ) {
+                                    Ok(()) => landed += 1,
+                                    // An app-side refusal (read-only, invalid) is a cause too —
+                                    // never a bare "0/N" (review).
+                                    Err(message) => {
+                                        failure.get_or_insert(message);
+                                    }
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                failure.get_or_insert_with(|| {
+                                    state::provider_failure_notice(&error).to_string()
+                                });
+                            }
+                        }
+                    }
+                    // The count ALWAYS shows; the first failure cause rides along whenever one
+                    // exists (a partial failure must name itself — review).
+                    let counts = state::fx_refreshed_message(landed, total);
+                    fx.set_notice(match failure {
+                        Some(cause) => format!("{counts} {cause}").into(),
+                        None => counts.into(),
+                    });
+                    crate::wiring::fx::push_fx_rates(&ui, &journal_state.borrow());
                 }
                 fetch::WorkerOutcome::TestKey(result) => {
                     // The key test (Story 3.2): a verdict, not study data. Surface it as the

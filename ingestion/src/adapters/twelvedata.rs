@@ -98,6 +98,22 @@ impl MarketDataProvider for TwelveDataProvider {
         let body = self.get_json(&url, ticker).await?;
         Ok(price_of(&body))
     }
+
+    async fn fetch_fx_rate(
+        &self,
+        base: &str,
+        quote: &str,
+        api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError> {
+        // Story 6.5 (FR28): on Twelve Data an FX pair is served by the SAME `/price` endpoint as an
+        // equity's latest price, under the native pair symbol `"{base}/{quote}"` (e.g. `EUR/CHF`).
+        // So this is exactly a one-line symbol-format + delegate — the HTTP call, the 200-body error
+        // classification ([`classify_twelvedata`]) and the exact-decimal parse ([`price_of`]) are
+        // the already-tested `fetch_latest_price` path, never duplicated (NFR-S1 stays in one place).
+        // Currency codes are plain `[A-Z]{3}`, so no URL-encoding concern beyond the fixed `/`.
+        self.fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
+            .await
+    }
 }
 
 /// PURE: classify a Twelve Data 200 body that reports an error (`{"status":"error","code":N,
@@ -145,6 +161,13 @@ pub fn latest_close(series: &Value) -> Option<Decimal> {
 /// PURE: the price from a `/price` body (`{"price":"104.23"}`). `None` when absent/empty.
 pub fn price_of(body: &Value) -> Option<Decimal> {
     dec(body.get("price"))
+}
+
+/// PURE: Twelve Data's FX pair symbol (Story 6.5, FR28) — its native slash form, `"{base}/{quote}"`
+/// (e.g. `EUR/CHF`), accepted by `/price` exactly like an equity ticker. Per-provider pair
+/// spellings are the #70 symbol-convention class.
+pub fn fx_pair_symbol(base: &str, quote: &str) -> String {
+    format!("{base}/{quote}")
 }
 
 /// PURE: a Twelve Data `/time_series` JSON → a **price-led** [`RawFinancials`]. No I/O. Currency from
@@ -249,6 +272,33 @@ mod tests {
             Some(dec_s("104.23"))
         );
         assert_eq!(price_of(&json!({})), None);
+    }
+
+    #[test]
+    fn fx_pair_symbol_is_the_native_slash_form() {
+        // Story 6.5: `fetch_fx_rate` = `fetch_latest_price` with this symbol — the only new logic.
+        assert_eq!(fx_pair_symbol("EUR", "CHF"), "EUR/CHF");
+        assert_eq!(fx_pair_symbol("USD", "JPY"), "USD/JPY");
+    }
+
+    #[test]
+    fn an_fx_rate_body_parses_like_any_price_body() {
+        // Story 6.5: the `/price` body for a pair symbol is the SAME shape as an equity's
+        // (`{"price":"0.9312"}`) — the delegated `price_of` path parses it exactly (NFR-C1), and a
+        // no-quote body yields None (never an inverted-pair guess).
+        assert_eq!(
+            price_of(&json!({ "price": "0.9312" })),
+            Some(dec_s("0.9312"))
+        );
+        assert_eq!(price_of(&json!({})), None);
+        // Pair-symbol errors (e.g. an unknown pair reported as a 200 body) classify identically.
+        assert!(matches!(
+            classify_twelvedata(
+                &json!({ "status": "error", "code": 404, "message": "symbol not found" }),
+                "EUR/CHF",
+            ),
+            Some(ProviderError::TickerNotFound { .. })
+        ));
     }
 
     #[test]

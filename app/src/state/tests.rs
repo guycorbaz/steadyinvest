@@ -350,6 +350,7 @@ fn journal_import_maps_each_rejection_to_its_neutral_notice_and_writes_nothing()
 #[test]
 fn journal_imported_message_fills_the_counts() {
     let summary = ImportSummary {
+        fx_rates: 0,
         source_journal_id: Uuid::from_u128(1),
         source_logical_version: 7,
         studies: 3,
@@ -4044,5 +4045,184 @@ fn archive_and_delete_are_refused_on_a_read_only_journal() {
         status_in_list(&open_state(&path), id).as_deref(),
         Some("active"),
         "a refused archive/delete mutated nothing"
+    );
+}
+
+// ── Story 6.5 — FX acquisition: dated, source-aware rates (FR28) ──
+
+#[test]
+fn a_manual_fx_rate_records_dated_and_sourced_and_reupserts_in_place() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x650);
+    state
+        .upsert_manual_fx_rate("eur", "0.93", "2026-06-26", "CHF")
+        .expect("the manual rate records");
+    let rates = state.list_fx_rates();
+    assert_eq!(rates.len(), 1);
+    assert_eq!(rates[0].base_currency, "EUR", "uppercased");
+    assert_eq!(rates[0].quote_currency, "CHF");
+    assert_eq!(rates[0].rate, "0.93");
+    assert_eq!(rates[0].rate_date, "2026-06-26");
+    assert_eq!(rates[0].source, "manuel");
+
+    // Same (pair, date, source) with a corrected rate → update in place, no duplicate.
+    state
+        .upsert_manual_fx_rate("EUR", "0.94", "2026-06-26", "CHF")
+        .unwrap();
+    let rates = state.list_fx_rates();
+    assert_eq!(rates.len(), 1, "no duplicate row");
+    assert_eq!(rates[0].rate, "0.94");
+}
+
+#[test]
+fn manual_fx_validation_refuses_neutrally() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x651);
+    assert_eq!(
+        state.upsert_manual_fx_rate("CHF", "0.93", "", "CHF"),
+        Err(MSG_FX_SAME_CURRENCY.to_string()),
+        "base == reference refused"
+    );
+    assert_eq!(
+        state.upsert_manual_fx_rate("EUR", "0", "", "CHF"),
+        Err(MSG_FX_INVALID_RATE.to_string())
+    );
+    assert_eq!(
+        state.upsert_manual_fx_rate("EUR", "-1", "", "CHF"),
+        Err(MSG_FX_INVALID_RATE.to_string())
+    );
+    assert_eq!(
+        state.upsert_manual_fx_rate("SEK", "0.93", "", "CHF"),
+        Err(MSG_FX_INVALID_CURRENCY.to_string()),
+        "an off-allow-list base is a CURRENCY refusal, not a rate one (review)"
+    );
+    assert_eq!(
+        state.upsert_manual_fx_rate("EUR", "0.93", "2027-01-01", "CHF"),
+        Err(MSG_FX_FUTURE_DATE.to_string()),
+        "a future-dated rate would win the latest arbitration until that day (review)"
+    );
+    assert_eq!(
+        state.upsert_manual_fx_rate("EUR", "0.93", "2026-02-30", "CHF"),
+        Err(MSG_LEDGER_INVALID_DATE.to_string()),
+        "the 6.3 real-calendar validation is reused"
+    );
+    assert!(state.list_fx_rates().is_empty(), "nothing written");
+}
+
+#[test]
+fn foreign_currencies_in_use_covers_all_portfolio_holdings_minus_the_reference() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x652);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("AAPL", "5", "150", "USD").unwrap();
+    state.add_holding("ASML", "2", "600", "EUR").unwrap();
+    // A SOLD USD holding still counts (its history feeds the 6.6 consolidation).
+    let usd_id = state
+        .list_holdings()
+        .iter()
+        .find(|h| h.security_ticker == "AAPL")
+        .unwrap()
+        .id;
+    state.sell_holding(usd_id, "", "", "CHF").unwrap();
+
+    assert_eq!(
+        state.foreign_currencies_in_use("CHF"),
+        vec!["EUR".to_string(), "USD".to_string()],
+        "deterministic, deduplicated, reference excluded, sold holdings counted"
+    );
+}
+
+#[test]
+fn apply_fx_fetch_stamps_the_day_and_the_provider_source() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x653);
+    state
+        .apply_fx_fetch(
+            "USD",
+            "CHF",
+            Decimal::from_str_exact("0.8850").unwrap(),
+            "twelvedata",
+        )
+        .expect("the fetched rate lands");
+    let rates = state.list_fx_rates();
+    assert_eq!(rates.len(), 1);
+    assert_eq!(rates[0].rate, "0.885", "normalized spelling");
+    assert_eq!(
+        rates[0].rate_date, "2026-06-27",
+        "the fetch DAY (the fixed test clock)"
+    );
+    assert_eq!(rates[0].source, "twelvedata");
+}
+
+#[test]
+fn a_corrected_manual_rate_wins_the_same_day_tie_over_an_earlier_provider_row() {
+    // Review HIGH: the in-place update refreshes created_at, so the LATEST write always wins
+    // the same-day arbitration — a user's evening correction outranks the mid-day provider row.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x655);
+    state
+        .upsert_manual_fx_rate("EUR", "0.93", "2026-06-27", "CHF")
+        .unwrap();
+    state
+        .apply_fx_fetch(
+            "EUR",
+            "CHF",
+            Decimal::from_str_exact("0.94").unwrap(),
+            "eodhd",
+        )
+        .unwrap();
+    // The user corrects the manual rate LAST (same natural key → in-place update).
+    state
+        .upsert_manual_fx_rate("EUR", "0.95", "2026-06-27", "CHF")
+        .unwrap();
+
+    let latest = state
+        .journal
+        .as_ref()
+        .unwrap()
+        .latest_fx_rate("EUR", "CHF", None)
+        .unwrap()
+        .expect("a rate exists");
+    assert_eq!(latest.rate, "0.95", "the corrected manual rate wins");
+    assert_eq!(latest.source, "manuel");
+}
+
+#[test]
+fn an_off_list_holding_currency_never_poisons_the_fetch_pair_set() {
+    // Review MED: an imported "SEK" holding must not put an unfetchable pair into the set.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x656);
+    state.add_holding("AAPL", "5", "150", "USD").unwrap();
+    // Plant an off-list currency straight at persistence (the import path's freedom).
+    let pid = state.active_portfolio().unwrap().id;
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .add_holding(
+            Uuid::from_u128(0x5EC),
+            pid,
+            "ERIC",
+            "10",
+            "50",
+            "SEK",
+            &Timestamp("2026-06-27T15:00:00Z".to_string()),
+        )
+        .unwrap();
+    assert_eq!(
+        state.foreign_currencies_in_use("CHF"),
+        vec!["USD".to_string()],
+        "the off-list SEK is excluded from the fetch set"
+    );
+}
+
+#[test]
+fn fx_writes_are_refused_on_a_read_only_journal() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x654);
+    state.read_only = true;
+    assert_eq!(
+        state.upsert_manual_fx_rate("EUR", "0.93", "", "CHF"),
+        Err(MSG_READ_ONLY_WRITE.to_string())
     );
 }

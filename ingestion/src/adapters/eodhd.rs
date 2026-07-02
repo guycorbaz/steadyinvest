@@ -96,6 +96,22 @@ impl MarketDataProvider for EodhdProvider {
         let prices = get_json(&self.http, &eod_url, ticker).await?;
         Ok(latest_eod_close(&prices))
     }
+
+    async fn fetch_fx_rate(
+        &self,
+        base: &str,
+        quote: &str,
+        api_key: Option<&str>,
+    ) -> Result<Option<Decimal>, ProviderError> {
+        // Story 6.5 (FR28): EODHD serves FX pairs on the SAME `/eod` endpoint as equities, under the
+        // symbol `"{base}{quote}.FOREX"` (e.g. `EURCHF.FOREX`); the latest EOD close IS the rate.
+        // So this is exactly a one-line symbol-format + delegate — the HTTP call, status
+        // classification and exact-decimal parse ([`latest_eod_close`]) are the already-tested
+        // `fetch_latest_price` path, never duplicated (NFR-S1 stays in one place). It also inherits
+        // the #50 property: `/eod`-only, so it works on the free tier that 403s `/fundamentals`.
+        self.fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
+            .await
+    }
 }
 
 /// The most recent close from the daily EOD array (Story 4.4). The series is requested `order=a`
@@ -105,6 +121,13 @@ pub fn latest_eod_close(prices: &Value) -> Option<Decimal> {
     let bars = prices.as_array()?;
     let last = bars.last()?;
     dec(last.get("close"))
+}
+
+/// PURE: EODHD's FX pair symbol (Story 6.5, FR28) — the concatenated pair on the virtual FOREX
+/// exchange, `"{base}{quote}.FOREX"` (e.g. `EURCHF.FOREX`), served by the same `/eod` endpoint as
+/// an equity ticker. Per-provider pair spellings are the #70 symbol-convention class.
+pub fn fx_pair_symbol(base: &str, quote: &str) -> String {
+    format!("{base}{quote}.FOREX")
 }
 
 /// PURE: EODHD `/fundamentals` + `/eod` JSON → [`RawFinancials`]. No I/O. Missing fields stay
@@ -289,6 +312,29 @@ mod tests {
         assert_eq!(latest_eod_close(&json!({})), None);
         // Last bar present but no `close` field → no price, not a zero.
         assert_eq!(latest_eod_close(&json!([{ "date": "2026-06-26" }])), None);
+    }
+
+    #[test]
+    fn fx_pair_symbol_is_the_concatenated_forex_form() {
+        // Story 6.5: `fetch_fx_rate` = `fetch_latest_price` with this symbol — the only new logic.
+        assert_eq!(fx_pair_symbol("EUR", "CHF"), "EURCHF.FOREX");
+        assert_eq!(fx_pair_symbol("USD", "JPY"), "USDJPY.FOREX");
+    }
+
+    #[test]
+    fn an_fx_eod_body_parses_like_any_eod_body() {
+        // Story 6.5: `/eod` bars for a `.FOREX` symbol are the SAME shape as an equity's — the
+        // delegated `latest_eod_close` path reads the last ascending bar's close exactly (NFR-C1),
+        // and an empty series (no quote for the pair) yields None, never an inverted-pair guess.
+        let bars = json!([
+            { "date": "2026-07-01", "close": "0.9328" },
+            { "date": "2026-07-02", "close": "0.9312" },
+        ]);
+        assert_eq!(
+            latest_eod_close(&bars),
+            Some(Decimal::from_str_exact("0.9312").unwrap())
+        );
+        assert_eq!(latest_eod_close(&json!([])), None);
     }
 
     #[test]

@@ -5,7 +5,8 @@
 //! - [`bump_logical_version`] — **every mutating transaction on an exported table bumps
 //!   `journal_meta.logical_version` exactly once** (NFR-R2). The single deliberate exception is
 //!   `price_history` (a local, reconstructible cache excluded from the export snapshot — see
-//!   `price_history.rs`), which is why that module does not call this helper.
+//!   `price_history.rs`), which is why that module does not call this helper. `fx_rates` (Story
+//!   6.5) is the contrast case: an EXPORTED axis, so its writers DO bump.
 
 use crate::error::{Error, Result};
 use uuid::Uuid;

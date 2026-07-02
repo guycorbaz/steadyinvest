@@ -4,7 +4,7 @@
 // swap and render in the numeric font, digits stacked to show tabular figures.
 
 import { Tokens } from "../tokens.slint";
-import { Holdings, Labels, Prefs, Verify, RecentJournalRow } from "../state.slint";
+import { Fx, Holdings, Labels, Prefs, Verify, RecentJournalRow } from "../state.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { TextField } from "../components/text_field.slint";
@@ -459,6 +459,92 @@ export component SettingsScreen inherits Rectangle {
                         label: @tr("Enregistrer");
                         enabled: true;
                         clicked => { Prefs.withholding-rate-pct-changed(withholding-panel.draft); }
+                    }
+                }
+            }
+
+            // Story 6.5 (FR28) — dated, source-aware exchange rates: the stored list, the
+            // user-initiated provider refresh (FR65), and manual entry (source « manuel »).
+            // NO conversion happens here — consolidation is Story 6.6.
+            fx-panel := SettingsPanel {
+                title: @tr("Taux de change");
+                property <string> draft-base;
+                property <string> draft-rate;
+                property <string> draft-date;
+
+                VerticalLayout {
+                    spacing: Tokens.space-8;
+
+                    if Fx.notice != "": Text {
+                        text: Fx.notice;
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    if Fx.rates.length == 0: Text {
+                        text: @tr("Aucun taux enregistré pour le moment.");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    for r in Fx.rates: HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: r.pair;
+                            color: Tokens.text-high;
+                            font-size: Tokens.font-caption;
+                        }
+                        Text {
+                            text: r.rate;
+                            color: Tokens.text-high;
+                            font-family: Tokens.font-numeric;
+                            font-size: Tokens.font-caption;
+                        }
+                        Text {
+                            text: @tr("le {} ({})", r.date, r.source);
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+                        ActionButton {
+                            label: Fx.refreshing
+                                ? @tr("Actualisation…") : @tr("Actualiser les taux");
+                            enabled: !Fx.refreshing;
+                            clicked => { Fx.refresh-rates(); }
+                        }
+                    }
+                    // Manual entry: base → the reference currency, at a dated rate.
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        TextField {
+                            placeholder: @tr("Devise (ex. EUR)");
+                            text <=> fx-panel.draft-base;
+                            width: 140px;
+                        }
+                        TextField {
+                            placeholder: @tr("Taux vers {}", Prefs.reference-currency);
+                            text <=> fx-panel.draft-rate;
+                            width: 180px;
+                        }
+                        TextField {
+                            placeholder: @tr("Date (AAAA-MM-JJ, vide = aujourd'hui)");
+                            text <=> fx-panel.draft-date;
+                            width: 260px;
+                        }
+                        ActionButton {
+                            label: @tr("Enregistrer le taux");
+                            enabled: fx-panel.draft-base != "" && fx-panel.draft-rate != "";
+                            clicked => {
+                                if (Fx.add-rate(fx-panel.draft-base, fx-panel.draft-rate,
+                                        fx-panel.draft-date)) {
+                                    fx-panel.draft-base = "";
+                                    fx-panel.draft-rate = "";
+                                    fx-panel.draft-date = "";
+                                }
+                            }
+                        }
                     }
                 }
             }

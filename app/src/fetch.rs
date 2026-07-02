@@ -19,7 +19,7 @@ use std::sync::mpsc;
 use rust_decimal::Decimal;
 use steadyinvest_ingestion::{
     adapters::eodhd::EodhdProvider, adapters::twelvedata::TwelveDataProvider, fetch_canonical,
-    fetch_price, FetchedFinancials, IngestionError, Provider,
+    fetch_fx_rate, fetch_price, FetchedFinancials, IngestionError, Provider,
 };
 use uuid::Uuid;
 
@@ -49,12 +49,27 @@ pub struct TestKeyRequest {
     pub provider: ProviderChoice,
 }
 
+/// An FX-rates refresh request (Story 6.5, FR28): one job, N `(base, quote)` pairs fetched
+/// sequentially (batching/fallback is Story 6.9). User-initiated only (FR65). `journal_id` and
+/// `source` are captured at ENQUEUE time (2026-07-02 review): the outcome must be applied to the
+/// journal that asked and stamped with the provider that fetched — never read back from mutable
+/// config after an in-flight switch.
+pub struct FxRatesRequest {
+    pub pairs: Vec<(String, String)>,
+    pub api_key: Option<String>,
+    pub provider: ProviderChoice,
+    pub journal_id: Option<Uuid>,
+    pub source: String,
+}
+
 /// A job for the worker thread.
 pub enum WorkerJob {
     Fetch(FetchRequest),
     /// A holdings PRICE refresh (Story 4.4 / issue #50): a price-only `/eod` fetch (no
     /// `/fundamentals`), routed to the holdings surface, not the open study screen.
     RefreshHolding(FetchRequest),
+    /// An FX-rates refresh (Story 6.5): the latest BASE→QUOTE rate per pair.
+    FetchFxRates(FxRatesRequest),
     TestKey(TestKeyRequest),
 }
 
@@ -73,11 +88,25 @@ pub struct HoldingPriceOutcome {
     pub result: Result<Option<Decimal>, IngestionError>,
 }
 
+/// One pair's FX fetch result (Story 6.5): `Ok(None)` = the provider has no quote for the pair.
+pub struct FxRateOutcome {
+    pub base: String,
+    pub quote: String,
+    pub result: Result<Option<Decimal>, IngestionError>,
+}
+
 /// What the worker produces, marshalled back to the UI thread.
 pub enum WorkerOutcome {
     Fetch(FetchOutcome),
     /// A holdings price-refresh result (Story 4.4) — routed to the holdings surface, not the study.
     HoldingFetch(HoldingPriceOutcome),
+    /// The FX-rates refresh results (Story 6.5), one entry per requested pair — plus the
+    /// enqueue-time journal identity and provider source (2026-07-02 review).
+    FxRates {
+        journal_id: Option<Uuid>,
+        source: String,
+        results: Vec<FxRateOutcome>,
+    },
     /// Key-test verdict: `Ok` = the provider accepted the key; `Err` carries the cause.
     TestKey(Result<(), IngestionError>),
 }
@@ -149,6 +178,29 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                             ticker: req.ticker,
                             result,
                         })
+                    }
+                    WorkerJob::FetchFxRates(req) => {
+                        // Story 6.5 (FR28): one job, N pairs sequentially (batching = 6.9). Each
+                        // pair keeps its own result — one failed pair never hides the others.
+                        let mut results = Vec::with_capacity(req.pairs.len());
+                        for (base, quote) in req.pairs {
+                            let result = runtime.block_on(fetch_fx_rate(
+                                select(req.provider),
+                                &base,
+                                &quote,
+                                req.api_key.as_deref(),
+                            ));
+                            results.push(FxRateOutcome {
+                                base,
+                                quote,
+                                result,
+                            });
+                        }
+                        WorkerOutcome::FxRates {
+                            journal_id: req.journal_id,
+                            source: req.source,
+                            results,
+                        }
                     }
                     WorkerJob::TestKey(req) => {
                         // A minimal live fetch; the data is discarded — only the verdict matters. The

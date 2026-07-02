@@ -243,6 +243,7 @@ fn a_holdings_currency_round_trips_including_a_legacy_none() {
             },
         ],
         transactions: Vec::new(),
+        fx_rates: Vec::new(),
     };
     let envelope = envelope_json(&snapshot);
 
@@ -646,4 +647,57 @@ fn a_study_blob_with_an_incompatible_version_is_rejected_and_rolls_back() {
         0,
         "nothing imported on rejection"
     );
+}
+
+#[test]
+fn fx_rates_round_trip_and_an_old_file_without_the_array_still_imports() {
+    // Story 6.5 (FR28/AC5): fx_rates ride the export; `#[serde(default)]` is the #78 additive
+    // rail — an OLD export (no array) imports fine into this build.
+    let (_da, mut a) = empty_journal("a.db", 0xA65);
+    a.upsert_fx_rate(&steadyinvest_persistence::FxRateItem {
+        id: Uuid::from_u128(0xF1),
+        base_currency: "USD".to_string(),
+        quote_currency: "CHF".to_string(),
+        rate: "0.885".to_string(),
+        rate_date: "2026-07-02".to_string(),
+        source: "manuel".to_string(),
+        created_at: ts("2026-07-02T09:00:00Z"),
+    })
+    .unwrap();
+
+    let envelope = a.export_journal().unwrap();
+    let (_db, mut b) = empty_journal("b.db", 0xB65);
+    let summary = b.import_journal(&envelope).unwrap();
+    assert_eq!(summary.fx_rates, 1);
+    let rates = b.list_fx_rates().unwrap();
+    assert_eq!(rates.len(), 1);
+    assert_eq!(rates[0].rate, "0.885");
+    assert_eq!(rates[0].rate_date, "2026-07-02");
+    assert_eq!(
+        rates[0].source, "manuel",
+        "date + source round-trip verbatim"
+    );
+
+    // An OLD file: with `skip_serializing_if`, an empty store serializes WITHOUT the array —
+    // which is byte-for-byte the pre-6.5 file shape (the #78 back-compat half).
+    let mut snapshot = snapshot_of(&a);
+    snapshot.fx_rates.clear();
+    let old_payload = serde_json::to_string(&snapshot).unwrap();
+    assert!(
+        !old_payload.contains("fx_rates"),
+        "an empty store omits the array entirely (pre-6.5 builds still read this export)"
+    );
+    let old_envelope = serde_json::to_string(&JournalExport {
+        schema_version: snapshot.schema_version,
+        journal_id: snapshot.journal_id.to_string(),
+        logical_version: snapshot.logical_version,
+        integrity_hash: sha256_hex(old_payload.as_bytes()),
+        payload: old_payload,
+    })
+    .unwrap();
+    let (_dc, mut c) = empty_journal("c.db", 0xC65);
+    let summary = c
+        .import_journal(&old_envelope)
+        .expect("a pre-6.5 file (no fx_rates array) imports fine");
+    assert_eq!(summary.fx_rates, 0);
 }
