@@ -4226,3 +4226,144 @@ fn fx_writes_are_refused_on_a_read_only_journal() {
         Err(MSG_READ_ONLY_WRITE.to_string())
     );
 }
+
+// ── Story 6.6 — capital-at-risk per currency → per bank → global (FR44) ──
+
+#[test]
+fn the_consolidation_converts_per_bank_and_globally_with_exact_rates() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x660);
+    // Bank 1 (the default): CHF 10@100 stop 85 → CaR 150; USD 4@50 stop 40 → CaR 40.
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
+    state.set_holding_trailing_stop(ids[0], "15").unwrap();
+    state.set_holding_trailing_stop(ids[1], "20").unwrap();
+    // Bank 2: EUR 10@20 stop 15 → CaR 50.
+    let bank2 = state.add_portfolio("PostFinance").unwrap();
+    state.add_holding("ASML", "10", "20", "EUR").unwrap();
+    let eur_id = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(eur_id, "25").unwrap();
+    let _ = bank2;
+    // Rates: USD→CHF 0.5 (CaR 40 → 20), EUR→CHF 2 (CaR 50 → 100).
+    state
+        .upsert_manual_fx_rate("USD", "0.5", "2026-06-27", "CHF")
+        .unwrap();
+    state
+        .upsert_manual_fx_rate("EUR", "2", "2026-06-27", "CHF")
+        .unwrap();
+
+    let view = state.journal_capital_at_risk_consolidation("CHF");
+    assert_eq!(view.banks.len(), 2);
+    let bank1 = &view.banks[0];
+    assert_eq!(
+        bank1.converted.unwrap().0,
+        Decimal::from(170),
+        "150 CHF + 40 USD × 0.5 = 170 CHF"
+    );
+    let bank2 = &view.banks[1];
+    assert_eq!(
+        bank2.converted.unwrap().0,
+        Decimal::from(100),
+        "50 EUR × 2 = 100 CHF"
+    );
+    assert_eq!(
+        view.global.unwrap().0,
+        Decimal::from(270),
+        "the global total"
+    );
+    assert_eq!(
+        view.rates_used.len(),
+        2,
+        "both rates named for the footnote"
+    );
+    assert!(view.missing_pairs.is_empty());
+}
+
+#[test]
+fn a_missing_pair_absents_the_bank_and_the_global_by_name() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x661);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
+    state.set_holding_trailing_stop(ids[1], "20").unwrap();
+    // NO USD→CHF rate stored.
+    let view = state.journal_capital_at_risk_consolidation("CHF");
+    assert!(
+        view.banks[0].converted.is_none(),
+        "the bank cannot consolidate"
+    );
+    assert_eq!(view.banks[0].missing_pairs, vec!["USD → CHF".to_string()]);
+    assert!(
+        view.global.is_none(),
+        "never a partial sum passed off as total"
+    );
+    assert_eq!(view.missing_pairs, vec!["USD → CHF".to_string()]);
+
+    // The rate arrives → the next read consolidates.
+    state
+        .upsert_manual_fx_rate("USD", "0.5", "2026-06-27", "CHF")
+        .unwrap();
+    let view = state.journal_capital_at_risk_consolidation("CHF");
+    assert!(view.global.is_some());
+    assert!(view.missing_pairs.is_empty());
+}
+
+#[test]
+fn reference_buckets_convert_at_identity_and_sold_holdings_stay_excluded() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x662);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(id, "15").unwrap();
+    // A sold USD holding: no rate stored for USD, but a sold position carries no risk — it must
+    // neither require the pair nor block the global.
+    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    let usd_id = state
+        .list_holdings()
+        .iter()
+        .find(|h| h.security_ticker == "AAPL")
+        .unwrap()
+        .id;
+    state.sell_holding(usd_id, "", "", "CHF").unwrap();
+
+    let view = state.journal_capital_at_risk_consolidation("CHF");
+    assert_eq!(
+        view.global.unwrap().0,
+        Decimal::from(150),
+        "identity conversion for CHF; the sold USD position is not position risk"
+    );
+    assert!(
+        view.missing_pairs.is_empty(),
+        "no pair required for a sold holding"
+    );
+    assert!(view.rates_used.is_empty(), "no rate looked up at all");
+}
+
+#[test]
+fn a_checked_overflow_absents_the_bank_plainly_never_a_wrong_figure() {
+    // AC5/review: an overflowing conversion is an ABSENT subtotal marked `unavailable` (no
+    // dangling empty line, no partial global) — never a corrupt number.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x663);
+    // A USD position whose saturated CaR is Decimal::MAX-scale: converting at 2 overflows.
+    state
+        .add_holding("HUGE", "79228162514264337593543950335", "1", "USD")
+        .unwrap();
+    let id = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(id, "15").unwrap();
+    state
+        .upsert_manual_fx_rate("USD", "2", "2026-06-27", "CHF")
+        .unwrap();
+
+    let view = state.journal_capital_at_risk_consolidation("CHF");
+    let bank = &view.banks[0];
+    assert!(bank.converted.is_none(), "absent, never wrong");
+    assert!(
+        bank.missing_pairs.is_empty(),
+        "no pair is missing — the rate exists"
+    );
+    assert!(bank.unavailable, "marked plainly unavailable (overflow)");
+    assert!(view.global.is_none(), "the global never sums a broken bank");
+}

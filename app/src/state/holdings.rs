@@ -148,39 +148,7 @@ impl JournalState {
         &self,
         reference_currency: &str,
     ) -> Vec<(String, Decimal, Decimal)> {
-        use std::collections::BTreeMap;
-        let mut by_ccy: BTreeMap<String, Vec<steadyinvest_core::risk::PositionRisk>> =
-            BTreeMap::new();
-        for h in self.list_holdings() {
-            let Ok(avg_cost) = Decimal::from_str_exact(&h.purchase_price) else {
-                continue;
-            };
-            let Ok(quantity) = Decimal::from_str_exact(&h.quantity) else {
-                continue;
-            };
-            let stop = h
-                .trailing_stop_level
-                .as_deref()
-                .and_then(|s| Decimal::from_str_exact(s).ok());
-            by_ccy
-                .entry(effective_currency(&h, reference_currency))
-                .or_default()
-                .push(steadyinvest_core::risk::PositionRisk {
-                    avg_cost,
-                    stop,
-                    quantity,
-                });
-        }
-        by_ccy
-            .into_iter()
-            .map(|(currency, positions)| {
-                (
-                    currency,
-                    steadyinvest_core::risk::capital_at_risk(&positions),
-                    steadyinvest_core::risk::total_invested(&positions),
-                )
-            })
-            .collect()
+        car_buckets_by_currency(&self.list_holdings(), reference_currency)
     }
 
     /// Ensure the single default portfolio exists and return it (FR36, single-portfolio). Lazily
@@ -409,6 +377,48 @@ impl JournalState {
 /// The display name of the single default portfolio (Story 4.3, FR36). Not user-editable in 4.3
 /// (multi-portfolio naming is FR37/Epic 6).
 const DEFAULT_PORTFOLIO_NAME: &str = "Portefeuille";
+
+/// Group ACTIVE holdings into per-currency capital-at-risk buckets (Stories 6.2/6.6, FR38/FR44):
+/// the ONE grouping both the active-portfolio read and the journal-wide consolidation use — group
+/// by effective currency, then call the unchanged single-currency `core::risk` folds once per
+/// bucket. Deterministic order (BTreeMap); unparseable stored decimals skipped defensively.
+pub(crate) fn car_buckets_by_currency(
+    holdings: &[HoldingItem],
+    reference_currency: &str,
+) -> Vec<(String, Decimal, Decimal)> {
+    use std::collections::BTreeMap;
+    let mut by_ccy: BTreeMap<String, Vec<steadyinvest_core::risk::PositionRisk>> = BTreeMap::new();
+    for h in holdings {
+        let Ok(avg_cost) = Decimal::from_str_exact(&h.purchase_price) else {
+            continue;
+        };
+        let Ok(quantity) = Decimal::from_str_exact(&h.quantity) else {
+            continue;
+        };
+        let stop = h
+            .trailing_stop_level
+            .as_deref()
+            .and_then(|s| Decimal::from_str_exact(s).ok());
+        by_ccy
+            .entry(effective_currency(h, reference_currency))
+            .or_default()
+            .push(steadyinvest_core::risk::PositionRisk {
+                avg_cost,
+                stop,
+                quantity,
+            });
+    }
+    by_ccy
+        .into_iter()
+        .map(|(currency, positions)| {
+            (
+                currency,
+                steadyinvest_core::risk::capital_at_risk(&positions),
+                steadyinvest_core::risk::total_invested(&positions),
+            )
+        })
+        .collect()
+}
 
 /// A holding's **effective currency** (Story 6.2, FR38): its own `currency` when set, else the
 /// caller's reference currency — the ONE read-boundary coalescing rule for a pre-6.2 legacy row

@@ -44,6 +44,19 @@ export struct FxRateRow {
     source: string,    // "manuel" | provider wire name
 }
 
+// Story 6.6 (FR44): one bank's consolidated capital-at-risk line. `amount`/`pct` are formatted
+// display strings in the reference currency; `missing` names the absent pair(s) when the bank
+// could not consolidate ("" otherwise — then amount shows).
+export struct BankCarRow {
+    name: string,
+    amount: string,
+    pct: string,
+    missing: string,
+    // true = absent for a non-nameable reason (holdings read failure, checked overflow) — the
+    // line renders a plain « indisponible », never a dangling empty amount (2026-07-02 review).
+    unavailable: bool,
+}
+
 // Story 6.5 (FR28): the FX-rates surface — stored rates + the two acquisition paths (provider
 // refresh, user-initiated only; manual entry). NO conversion happens here (consolidation = 6.6).
 export global Fx {
@@ -764,6 +777,15 @@ export global Holdings {
     callback record-dividend(string, string, string, string, string, string) -> bool;
     // Story 6.4 (FR41): the NET reinvestable dividend cash per currency (pct unused — "").
     in-out property <[CapitalAtRiskRow]> reinvestable-cash;
+    // ── Story 6.6 (FR44): the consolidation hierarchy — per bank + global, in the reference
+    //    currency, FX only here. Empty banks list = nothing to consolidate (single bank, no
+    //    foreign bucket) → the block hides. `consolidation-global` is "" when a pair is missing
+    //    (then `consolidation-missing` names it); `consolidation-rates` is the footnote. ──
+    in-out property <[BankCarRow]> consolidation-banks;
+    in-out property <string> consolidation-global;
+    in-out property <string> consolidation-global-pct;
+    in-out property <string> consolidation-missing;
+    in-out property <string> consolidation-rates;
     // transaction id, date, quantity, unit price, fees, rationale → applied? (kind/currency are not editable)
     callback update-transaction(string, string, string, string, string, string) -> bool;
     callback delete-transaction(string); // transaction id
