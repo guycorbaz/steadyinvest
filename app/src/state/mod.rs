@@ -40,6 +40,7 @@ mod confront;
 mod export_import;
 mod holdings;
 mod journal_io;
+mod ledger;
 mod messages;
 mod refresh;
 mod restore;

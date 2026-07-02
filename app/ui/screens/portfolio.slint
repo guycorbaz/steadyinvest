@@ -218,6 +218,24 @@ export component PortfolioScreen inherits Rectangle {
             // Per-row draft for an optional sell rationale (Story 4.7) — captured with the
             // "Enregistrer une vente" action.
             property <string> sell-rationale;
+            // Story 6.3 (FR39): the sell quantity — empty sells the WHOLE position (the 4.7 flow).
+            property <string> sell-quantity;
+            // Story 6.3 (FR39): the ledger form drafts. `txn-editing-id` is "" while the form
+            // records a NEW buy; a row's "Modifier" loads it for an edit instead.
+            property <string> txn-editing-id;
+            property <string> txn-date;
+            property <string> txn-quantity;
+            property <string> txn-price;
+            property <string> txn-fees;
+            property <string> txn-rationale;
+            function reset-txn-draft() {
+                self.txn-editing-id = "";
+                self.txn-date = "";
+                self.txn-quantity = "";
+                self.txn-price = "";
+                self.txn-fees = "";
+                self.txn-rationale = "";
+            }
             background: Tokens.surface-alt;
             border-radius: Tokens.radius;
             min-height: 96px;
@@ -320,6 +338,19 @@ export component PortfolioScreen inherits Rectangle {
                         }
                     }
                 }
+                // Story 6.3 (FR39): show/hide this holding's transaction ledger (one at a time).
+                ActionButton {
+                    label: Holdings.ledger-holding-id == row.id
+                        ? @tr("Masquer les transactions") : @tr("Transactions");
+                    clicked => {
+                        if (Holdings.ledger-holding-id == row.id) {
+                            Holdings.close-ledger();
+                        } else {
+                            hrow.reset-txn-draft();
+                            Holdings.open-ledger(row.id);
+                        }
+                    }
+                }
                 ActionButton {
                     label: @tr("Modifier");
                     enabled: !Holdings.read-only;
@@ -360,6 +391,13 @@ export component PortfolioScreen inherits Rectangle {
                       vertical-alignment: center;
                       horizontal-stretch: 1;
                   }
+                  // Story 6.3 (FR39): the sell quantity — empty = the whole position (4.7 flow),
+                  // a smaller number records a PARTIAL sell and the position stays.
+                  TextField {
+                      placeholder: @tr("Quantité (vide = tout)");
+                      text <=> hrow.sell-quantity;
+                      horizontal-stretch: 1;
+                  }
                   TextField {
                       placeholder: @tr("Raison (facultative)");
                       text <=> hrow.sell-rationale;
@@ -368,7 +406,7 @@ export component PortfolioScreen inherits Rectangle {
                   ActionButton {
                       label: @tr("Enregistrer une vente");
                       enabled: !Holdings.read-only;
-                      clicked => { Holdings.sell-holding(row.id, hrow.sell-rationale); }
+                      clicked => { Holdings.sell-holding(row.id, hrow.sell-quantity, hrow.sell-rationale); }
                   }
                   ActionButton {
                       label: @tr("Relever le stop");
@@ -379,6 +417,152 @@ export component PortfolioScreen inherits Rectangle {
                       label: @tr("Ignorer");
                       enabled: true;
                       clicked => { Holdings.dismiss-trigger(row.id); }
+                  }
+              }
+              // ── Story 6.3 (FR39): the holding's transaction ledger — buys and (partial) sells,
+              // editable and deletable; the position's quantity and weighted-average cost derive
+              // from it. The row currency is the holding's (FR28) — displayed, never chosen. ──
+              if Holdings.ledger-holding-id == row.id: VerticalLayout {
+                  padding-left: Tokens.space-12;
+                  padding-right: Tokens.space-12;
+                  padding-bottom: Tokens.space-8;
+                  spacing: Tokens.space-8;
+                  if Holdings.ledger-rows.length == 0: Text {
+                      text: @tr("Aucune transaction enregistrée pour cette position.");
+                      color: Tokens.text-mid;
+                      font-size: Tokens.font-caption;
+                  }
+                  for lrow in Holdings.ledger-rows: HorizontalLayout {
+                      spacing: Tokens.space-8;
+                      Text {
+                          text: lrow.date;
+                          color: Tokens.text-mid;
+                          font-size: Tokens.font-caption;
+                          vertical-alignment: center;
+                      }
+                      Text {
+                          text: lrow.kind == "buy" ? @tr("Achat") : @tr("Vente");
+                          color: Tokens.text-high;
+                          font-size: Tokens.font-caption;
+                          vertical-alignment: center;
+                      }
+                      Text {
+                          text: @tr("{} × {} {}", lrow.quantity, lrow.unit-price, lrow.currency);
+                          color: Tokens.text-mid;
+                          font-family: Tokens.font-numeric;
+                          font-size: Tokens.font-caption;
+                          vertical-alignment: center;
+                      }
+                      Text {
+                          text: @tr("Frais : {}", lrow.fees);
+                          color: Tokens.text-mid;
+                          font-size: Tokens.font-caption;
+                          vertical-alignment: center;
+                      }
+                      Text {
+                          text: lrow.rationale;
+                          color: Tokens.text-mid;
+                          font-size: Tokens.font-caption;
+                          vertical-alignment: center;
+                          horizontal-stretch: 1;
+                      }
+                      ActionButton {
+                          label: @tr("Modifier");
+                          enabled: !Holdings.read-only;
+                          clicked => {
+                              hrow.txn-editing-id = lrow.id;
+                              hrow.txn-date = lrow.date;
+                              hrow.txn-quantity = lrow.quantity;
+                              hrow.txn-price = lrow.unit-price;
+                              hrow.txn-fees = lrow.fees;
+                              hrow.txn-rationale = lrow.rationale;
+                          }
+                      }
+                      ActionButton {
+                          label: @tr("Supprimer");
+                          enabled: !Holdings.read-only;
+                          clicked => {
+                              if (hrow.txn-editing-id == lrow.id) {
+                                  hrow.reset-txn-draft();
+                              }
+                              Holdings.delete-transaction(lrow.id);
+                          }
+                      }
+                  }
+                  // The buy/sell/edit form: records a NEW buy or sell while `txn-editing-id` is
+                  // "", otherwise applies the loaded row's edit (its kind and currency stay what
+                  // they are). The amounts are in the holding's own currency (FR28) — shown
+                  // read-only beside the fields, never chosen here.
+                  HorizontalLayout {
+                      spacing: Tokens.space-8;
+                      Text {
+                          text: row.currency;
+                          color: Tokens.text-mid;
+                          font-size: Tokens.font-caption;
+                          vertical-alignment: center;
+                      }
+                      TextField {
+                          placeholder: @tr("Date (AAAA-MM-JJ, vide = aujourd'hui)");
+                          text <=> hrow.txn-date;
+                          horizontal-stretch: 1;
+                      }
+                      TextField {
+                          placeholder: @tr("Quantité");
+                          text <=> hrow.txn-quantity;
+                          horizontal-stretch: 1;
+                      }
+                      TextField {
+                          placeholder: @tr("Prix unitaire");
+                          text <=> hrow.txn-price;
+                          horizontal-stretch: 1;
+                      }
+                      TextField {
+                          placeholder: @tr("Frais (vide = 0)");
+                          text <=> hrow.txn-fees;
+                          horizontal-stretch: 1;
+                      }
+                      TextField {
+                          placeholder: @tr("Raison (facultative)");
+                          text <=> hrow.txn-rationale;
+                          horizontal-stretch: 1;
+                      }
+                      ActionButton {
+                          label: hrow.txn-editing-id == ""
+                              ? @tr("Enregistrer un achat") : @tr("Mettre à jour la transaction");
+                          enabled: !Holdings.read-only
+                              && hrow.txn-quantity != "" && hrow.txn-price != "";
+                          clicked => {
+                              if (hrow.txn-editing-id == "") {
+                                  if (Holdings.record-buy(row.id, hrow.txn-date, hrow.txn-quantity,
+                                          hrow.txn-price, hrow.txn-fees, hrow.txn-rationale)) {
+                                      hrow.reset-txn-draft();
+                                  }
+                              } else {
+                                  if (Holdings.update-transaction(hrow.txn-editing-id, hrow.txn-date,
+                                          hrow.txn-quantity, hrow.txn-price, hrow.txn-fees,
+                                          hrow.txn-rationale)) {
+                                      hrow.reset-txn-draft();
+                                  }
+                              }
+                          }
+                      }
+                      // Story 6.3 review decision (FR39): an ordinary sell with an EXPLICIT unit
+                      // price — the one actually obtained — plus date/fees/raison from the form.
+                      if hrow.txn-editing-id == "": ActionButton {
+                          label: @tr("Enregistrer une vente");
+                          enabled: !Holdings.read-only
+                              && hrow.txn-quantity != "" && hrow.txn-price != "";
+                          clicked => {
+                              if (Holdings.record-sell(row.id, hrow.txn-date, hrow.txn-quantity,
+                                      hrow.txn-price, hrow.txn-fees, hrow.txn-rationale)) {
+                                  hrow.reset-txn-draft();
+                              }
+                          }
+                      }
+                      if hrow.txn-editing-id != "": ActionButton {
+                          label: @tr("Abandonner la modification");
+                          clicked => { hrow.reset-txn-draft(); }
+                      }
                   }
               }
             }

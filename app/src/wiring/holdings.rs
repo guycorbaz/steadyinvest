@@ -17,7 +17,7 @@ use crate::viewmodel::format::NumberFormat;
 use crate::wiring::fetch::resolve_provider_key;
 use crate::wiring::{persist, Session};
 use crate::{fetch, state, viewmodel};
-use crate::{CapitalAtRiskRow, HoldingRow, Holdings, MainWindow, PortfolioRow};
+use crate::{CapitalAtRiskRow, HoldingRow, Holdings, LedgerRow, MainWindow, PortfolioRow};
 
 /// Transient (NOT persisted) per-ticker price-refresh freshness for the holdings register (Story
 /// 4.4, FR40): the outcome of the last manual refresh. Keyed by **upper-cased** ticker so it joins
@@ -221,6 +221,50 @@ pub(crate) fn refresh_holdings(
             .unwrap_or_default()
             .into(),
     );
+}
+
+/// Push one holding's transaction ledger (Story 6.3, FR39) into the `Holdings` global and mark it
+/// as the opened one. Rows are the exact canonical TEXT spellings (no display rounding — the
+/// ledger IS the record); the date shows the event day (`occurred_at`'s date part); a `NULL`
+/// legacy `kind` renders as a sell (the only pre-6.3 writer).
+pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uuid) {
+    let rows: Vec<LedgerRow> = state
+        .holding_ledger(holding_id)
+        .iter()
+        .map(|t| LedgerRow {
+            id: t.id.to_string().into(),
+            // A malformed/short stored stamp falls back to the FULL string (review: an empty date
+            // cell would round-trip through "Modifier" as an empty — i.e. today's — date).
+            date: t.occurred_at.0.get(..10).unwrap_or(&t.occurred_at.0).into(),
+            kind: t.kind.clone().unwrap_or_else(|| "sell".to_string()).into(),
+            quantity: t.quantity.clone().into(),
+            unit_price: t.unit_price.clone().into(),
+            fees: t.fees.clone().into(),
+            currency: t.currency.clone().into(),
+            rationale: t.rationale.clone().unwrap_or_default().into(),
+        })
+        .collect();
+    let holdings = ui.global::<Holdings>();
+    holdings.set_ledger_rows(ModelRc::new(VecModel::from(rows)));
+    holdings.set_ledger_holding_id(holding_id.to_string().into());
+}
+
+/// Re-sync the ledger panel after a mutation (2026-07-02 review): re-push the rows while the
+/// holding is still in the active register; CLEAR the two globals when the mutation retired it
+/// (the row — and the panel inside it — left the register; stale globals must not resurface on
+/// the next render).
+pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_id: Uuid) {
+    let open_for = ui.global::<Holdings>().get_ledger_holding_id();
+    if open_for.as_str() != holding_id.to_string() {
+        return;
+    }
+    if state.list_holdings().iter().any(|h| h.id == holding_id) {
+        push_ledger(ui, state, holding_id);
+    } else {
+        let holdings = ui.global::<Holdings>();
+        holdings.set_ledger_rows(ModelRc::new(VecModel::from(Vec::<LedgerRow>::new())));
+        holdings.set_ledger_holding_id(SharedString::new());
+    }
 }
 
 /// Surface a holdings write's outcome (neutral notice on refusal) and re-render the register.
@@ -517,7 +561,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Holdings>()
-            .on_sell_holding(move |id, rationale| {
+            .on_sell_holding(move |id, quantity, rationale| {
                 let ui = ui_weak.unwrap();
                 let Ok(uuid) = Uuid::parse_str(&id) else {
                     return;
@@ -525,19 +569,23 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 // The reference currency is only the coalesce fallback for a pre-6.2 legacy row —
                 // `sell_holding` stamps the transaction with the holding's OWN currency (FR28).
                 let reference = config.borrow().reference_currency_or_default();
+                // Story 6.3 (FR39): an empty quantity sells the whole position (the 4.7 flow);
+                // otherwise it is a PARTIAL sell and the holding stays in the register.
                 let result = journal_state
                     .borrow_mut()
-                    .sell_holding(uuid, &rationale, &reference);
-                // The holding is gone on success — drop any stale dismiss entry so the id can't leak.
-                if result.is_ok() {
+                    .sell_holding(uuid, &quantity, &rationale, &reference);
+                // Drop the stale dismiss entry only when the position actually LEFT the register
+                // (a whole-position sell) — a partial sell keeps the row, and its dismissed
+                // trigger must stay dismissed (2026-07-02 review).
+                if result == Ok(state::MSG_HOLDING_SOLD) {
                     holding_dismissed.borrow_mut().remove(id.as_str());
                 }
                 let format = config.borrow().number_format;
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
-                // A neutral confirmation on success; the guarded refusal notice otherwise.
-                let result = result.map(|()| {
-                    ui.global::<Holdings>()
-                        .set_notice(state::MSG_HOLDING_SOLD.into());
+                // A neutral confirmation on success (full vs partial — sell_holding says which);
+                // the guarded refusal notice otherwise.
+                let result = result.map(|notice| {
+                    ui.global::<Holdings>().set_notice(notice.into());
                 });
                 if result.is_ok() {
                     refresh_holdings(
@@ -557,6 +605,9 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                         format,
                     );
                 }
+                // Keep an open ledger panel truthful (review): re-push after a partial sell,
+                // clear the globals when the sell retired the holding.
+                sync_ledger_panel(&ui, &journal_state.borrow(), uuid);
             });
     }
     {
@@ -577,5 +628,227 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 format,
             );
         });
+    }
+    // ── Story 6.3 (FR39): the transaction ledger — open/close the per-holding view, record a buy,
+    // edit/delete a row. Every mutation replays the ledger through the pure core derivation and
+    // re-renders BOTH the ledger and the register (the aggregate — and possibly the retired state —
+    // changed). Neutral notices throughout (FR13). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Holdings>().on_open_ledger(move |id| {
+            let ui = ui_weak.unwrap();
+            let Ok(uuid) = Uuid::parse_str(&id) else {
+                return;
+            };
+            push_ledger(&ui, &journal_state.borrow(), uuid);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        ui.global::<Holdings>().on_close_ledger(move || {
+            let ui = ui_weak.unwrap();
+            let holdings = ui.global::<Holdings>();
+            holdings.set_ledger_rows(ModelRc::new(VecModel::from(Vec::<LedgerRow>::new())));
+            holdings.set_ledger_holding_id(SharedString::new());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Holdings>()
+            .on_record_buy(move |id, date, quantity, price, fees, rationale| {
+                let ui = ui_weak.unwrap();
+                let Ok(uuid) = Uuid::parse_str(&id) else {
+                    return false;
+                };
+                let reference = config.borrow().reference_currency_or_default();
+                let result = journal_state.borrow_mut().record_buy_for(
+                    uuid, &date, &quantity, &price, &fees, &rationale, &reference,
+                );
+                let written = result.is_ok();
+                let format = config.borrow().number_format;
+                let result = result.map(|()| {
+                    ui.global::<Holdings>()
+                        .set_notice(state::MSG_LEDGER_BUY_RECORDED.into());
+                });
+                if result.is_ok() {
+                    refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                } else {
+                    apply_holdings_result(
+                        &ui,
+                        &journal_state.borrow(),
+                        result,
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                }
+                sync_ledger_panel(&ui, &journal_state.borrow(), uuid);
+                // Report whether the buy was written so the form keeps the user's input on refusal.
+                written
+            });
+    }
+    // Story 6.3 review decision (FR39 to the letter): an ordinary sell from the ledger form, every
+    // field explicit — date, quantity, the unit price actually obtained, fees, rationale. The
+    // trigger-panel sell (above) keeps its 4.7 shape.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Holdings>().on_record_sell(
+            move |id, date, quantity, price, fees, rationale| {
+                let ui = ui_weak.unwrap();
+                let Ok(uuid) = Uuid::parse_str(&id) else {
+                    return false;
+                };
+                let reference = config.borrow().reference_currency_or_default();
+                let result = journal_state.borrow_mut().record_sell_for(
+                    uuid, &date, &quantity, &price, &fees, &rationale, &reference,
+                );
+                let written = result.is_ok();
+                if result == Ok(state::MSG_HOLDING_SOLD) {
+                    holding_dismissed.borrow_mut().remove(id.as_str());
+                }
+                let format = config.borrow().number_format;
+                retain_held_freshness(&holding_freshness, &journal_state.borrow());
+                let result = result.map(|notice| {
+                    ui.global::<Holdings>().set_notice(notice.into());
+                });
+                if result.is_ok() {
+                    refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                } else {
+                    apply_holdings_result(
+                        &ui,
+                        &journal_state.borrow(),
+                        result,
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                }
+                sync_ledger_panel(&ui, &journal_state.borrow(), uuid);
+                written
+            },
+        );
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Holdings>().on_update_transaction(
+            move |txn_id, date, quantity, price, fees, rationale| {
+                let ui = ui_weak.unwrap();
+                let holding_id = ui.global::<Holdings>().get_ledger_holding_id();
+                let (Ok(txn_uuid), Ok(holding_uuid)) =
+                    (Uuid::parse_str(&txn_id), Uuid::parse_str(&holding_id))
+                else {
+                    return false;
+                };
+                let reference = config.borrow().reference_currency_or_default();
+                let result = journal_state.borrow_mut().update_transaction_for(
+                    holding_uuid,
+                    txn_uuid,
+                    &date,
+                    &quantity,
+                    &price,
+                    &fees,
+                    &rationale,
+                    &reference,
+                );
+                let written = result.is_ok();
+                let format = config.borrow().number_format;
+                let result = result.map(|()| {
+                    ui.global::<Holdings>()
+                        .set_notice(state::MSG_LEDGER_UPDATED.into());
+                });
+                if result.is_ok() {
+                    refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                } else {
+                    apply_holdings_result(
+                        &ui,
+                        &journal_state.borrow(),
+                        result,
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                }
+                sync_ledger_panel(&ui, &journal_state.borrow(), holding_uuid);
+                written
+            },
+        );
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Holdings>()
+            .on_delete_transaction(move |txn_id| {
+                let ui = ui_weak.unwrap();
+                let holding_id = ui.global::<Holdings>().get_ledger_holding_id();
+                let (Ok(txn_uuid), Ok(holding_uuid)) =
+                    (Uuid::parse_str(&txn_id), Uuid::parse_str(&holding_id))
+                else {
+                    return;
+                };
+                let reference = config.borrow().reference_currency_or_default();
+                let result = journal_state.borrow_mut().delete_transaction_for(
+                    holding_uuid,
+                    txn_uuid,
+                    &reference,
+                );
+                let format = config.borrow().number_format;
+                let result = result.map(|()| {
+                    ui.global::<Holdings>()
+                        .set_notice(state::MSG_LEDGER_DELETED.into());
+                });
+                if result.is_ok() {
+                    refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                } else {
+                    apply_holdings_result(
+                        &ui,
+                        &journal_state.borrow(),
+                        result,
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                }
+                sync_ledger_panel(&ui, &journal_state.borrow(), holding_uuid);
+            });
     }
 }

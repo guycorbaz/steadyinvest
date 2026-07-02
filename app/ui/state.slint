@@ -639,6 +639,20 @@ export struct CapitalAtRiskRow {
     pct: string,
 }
 
+// Story 6.3 (FR39): one row of the opened holding's transaction ledger. `kind` is the raw
+// discriminator ("buy"/"sell" — the display noun is chosen in the view); decimals are the exact
+// canonical TEXT spellings; `date` is the event date (AAAA-MM-JJ).
+export struct LedgerRow {
+    id: string,
+    date: string,
+    kind: string,
+    quantity: string,
+    unit-price: string,
+    fees: string,
+    currency: string,
+    rationale: string,
+}
+
 export struct HoldingRow {
     id: string,
     ticker: string,
@@ -701,10 +715,27 @@ export global Holdings {
     callback refresh-prices();
     // Story 4.5 (FR42): set/clear a holding's trailing-stop percentage (id, pct — "" clears).
     callback set-trailing-stop(string, string);
-    // Story 4.7 (FR46/FR47): record a sell on a neutral trigger (id, rationale — rationale optional);
-    // the app never auto-sells. Dismiss hides a trigger's action panel for the session (id).
-    callback sell-holding(string, string);
+    // Story 4.7 (FR46/FR47) + Story 6.3 (FR39): record a sell on a neutral trigger (id, quantity,
+    // rationale). An empty quantity sells the WHOLE position (the 4.7 flow); a smaller one is a
+    // partial sell — the holding stays with the reduced quantity. The app never auto-sells.
+    // Dismiss hides a trigger's action panel for the session (id).
+    callback sell-holding(string, string, string);
     callback dismiss-trigger(string);
+    // ── Story 6.3 (FR39): the transaction ledger of ONE opened holding. `ledger-holding-id` is ""
+    //    while no ledger is shown; rows are pushed by Rust on open and after every mutation. The
+    //    row currency is pinned to the holding's (FR28) — displayed, never chosen. ──
+    in-out property <[LedgerRow]> ledger-rows;
+    in-out property <string> ledger-holding-id;
+    callback open-ledger(string);   // holding id → push rows + show
+    callback close-ledger();
+    // holding id, date (AAAA-MM-JJ, "" = today), quantity, unit price, fees ("" = 0), rationale → recorded?
+    callback record-buy(string, string, string, string, string, string) -> bool;
+    // Same shape for an ordinary ledger-form SELL (6.3 review decision, FR39): the unit price is
+    // the one the user actually obtained — explicit, not the matched study's.
+    callback record-sell(string, string, string, string, string, string) -> bool;
+    // transaction id, date, quantity, unit price, fees, rationale → applied? (kind/currency are not editable)
+    callback update-transaction(string, string, string, string, string, string) -> bool;
+    callback delete-transaction(string); // transaction id
     // ── Story 6.1 (FR37): multiple portfolios. The list + the active id; the register above shows the
     //    active portfolio's holdings. Add/rename/delete are guarded (neutral notices on refusal). ──
     in-out property <[PortfolioRow]> portfolios;

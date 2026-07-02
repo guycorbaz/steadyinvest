@@ -10,7 +10,7 @@ use steadyinvest_contract::{
     sha256_hex, ForecastLowOption, Judgment, Study, Timestamp, SCHEMA_VERSION,
 };
 use steadyinvest_persistence::{
-    Error, HoldingItem, Journal, JournalExport, JournalSnapshot, PortfolioItem,
+    Error, HoldingItem, Journal, JournalExport, JournalSnapshot, LedgerEntry, PortfolioItem,
 };
 use tempfile::tempdir;
 use uuid::Uuid;
@@ -288,6 +288,96 @@ fn re_import_is_an_idempotent_update_not_a_duplicate() {
         1,
         "no duplicate txns"
     );
+}
+
+#[test]
+fn ledger_buy_and_partial_sell_rows_round_trip_through_export_import() {
+    // Story 6.3 (FR39): the ledger rows (kind "buy"/"sell", event dates, fees, rationale) and the
+    // materialized weighted-average aggregate survive a whole-journal round-trip, and the
+    // partially-sold holding stays ACTIVE on the other side.
+    let (_da, mut a) = empty_journal("a.db", 0xA63);
+    let pid = Uuid::from_u128(0xB1);
+    a.ensure_portfolio(pid, "Portfolio", &ts("2026-06-03T00:00:00Z"))
+        .unwrap();
+    let h = a
+        .add_holding(
+            Uuid::from_u128(0xC1),
+            pid,
+            "NESN",
+            "10",
+            "100",
+            "CHF",
+            &ts("2026-06-04T00:00:00Z"),
+        )
+        .unwrap();
+    // A buy with a materialized opening (the app's Story-6.3 flow), then a partial sell.
+    let opening = LedgerEntry {
+        id: Uuid::from_u128(0xE0),
+        occurred_at: "2026-06-04T00:00:00Z",
+        quantity: "10",
+        unit_price: "100",
+        fees: "0",
+        currency: "CHF",
+        rationale: None,
+    };
+    let buy = LedgerEntry {
+        id: Uuid::from_u128(0xE1),
+        occurred_at: "2026-07-01T00:00:00Z",
+        quantity: "10",
+        unit_price: "110",
+        fees: "10",
+        currency: "CHF",
+        rationale: Some("renforcement"),
+    };
+    a.record_buy(
+        h.id,
+        Some(&opening),
+        &buy,
+        "20",
+        "105.5",
+        &ts("2026-07-02T09:00:00Z"),
+    )
+    .unwrap();
+    let sell = LedgerEntry {
+        id: Uuid::from_u128(0xE2),
+        occurred_at: "2026-07-02T00:00:00Z",
+        quantity: "4",
+        unit_price: "120",
+        fees: "0",
+        currency: "CHF",
+        rationale: None,
+    };
+    a.record_partial_sell(h.id, None, &sell, "16", &ts("2026-07-02T10:00:00Z"))
+        .unwrap();
+
+    let envelope = a.export_journal().unwrap();
+    let (_db, mut b) = empty_journal("b.db", 0xB63);
+    let summary = b.import_journal(&envelope).unwrap();
+    assert_eq!(summary.transactions, 3, "opening + buy + sell all carried");
+
+    let txns = b.list_transactions(h.id).unwrap();
+    assert_eq!(txns.len(), 3);
+    assert_eq!(
+        txns.iter()
+            .map(|t| t.kind.as_deref().unwrap().to_string())
+            .collect::<Vec<_>>(),
+        vec!["buy", "buy", "sell"],
+        "kinds and (occurred_at, id) order preserved"
+    );
+    let buy_back = txns.iter().find(|t| t.id == buy.id).unwrap();
+    assert_eq!(buy_back.fees, "10", "fees round-trip");
+    assert_eq!(buy_back.rationale.as_deref(), Some("renforcement"));
+    let holding = b
+        .list_holdings(pid)
+        .unwrap()
+        .into_iter()
+        .find(|hh| hh.id == h.id)
+        .expect("the partially-sold holding is still ACTIVE after import");
+    assert_eq!(
+        holding.quantity, "16",
+        "the materialized aggregate round-trips"
+    );
+    assert_eq!(holding.purchase_price, "105.5", "WAC round-trips");
 }
 
 #[test]

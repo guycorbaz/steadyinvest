@@ -37,7 +37,11 @@ pub struct PortfolioItem {
 
 /// One holding row (FR36): a security, a quantity and a purchase price in the holding's own currency.
 /// `quantity`/`purchase_price` are the canonical decimal **TEXT** spellings (parsed and validated by
-/// the app before they reach here). `trailing_stop_pct` is Story 4.5's (NULL here).
+/// the app before they reach here). Since Story 6.3 (FR39) a ledger-backed holding's pair is the
+/// **materialized aggregate** of its transaction ledger — `purchase_price` then means
+/// "weighted-average cost, fees included" (Appendix A), rewritten atomically with every ledger
+/// mutation (never derived here: the app computes it via `core::risk::ledger`).
+/// `trailing_stop_pct` is Story 4.5's (NULL here).
 /// `Serialize`/`Deserialize` so the whole-journal export (Story 5.3) carries it verbatim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HoldingItem {

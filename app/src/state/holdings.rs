@@ -11,9 +11,9 @@ use uuid::Uuid;
 
 use super::{
     watch_error, JournalState, MSG_HOLDING_INVALID_CURRENCY, MSG_HOLDING_INVALID_NUMBER,
-    MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER, MSG_NO_JOURNAL,
+    MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER, MSG_LEDGER_BACKED, MSG_NO_JOURNAL,
     MSG_PORTFOLIO_HAS_HOLDINGS, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
-    MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
+    MSG_READ_ONLY_WRITE,
 };
 
 impl JournalState {
@@ -243,6 +243,13 @@ impl JournalState {
 
     /// Edit a holding's symbol, quantity, purchase price and/or `currency` (FR36 / Story 6.2 FR38).
     /// Same validation as [`Self::add_holding`]. A no-op (identical values) writes nothing.
+    ///
+    /// Story 6.3 guard (2026-07-02 review, HIGH): once the holding is **ledger-backed** (any
+    /// transaction row exists), its quantity/price are the DERIVED weighted-average aggregate and
+    /// its currency is stamped on every row — a direct rewrite would silently desynchronize them
+    /// from the recorded history ("sell all" would become a partial sell). Changing those three is
+    /// refused with [`MSG_LEDGER_BACKED`] (the ledger is the correction surface); the **ticker**
+    /// stays editable (it is not ledger-derived).
     pub fn update_holding(
         &mut self,
         id: Uuid,
@@ -262,6 +269,27 @@ impl JournalState {
             return Err(MSG_HOLDING_INVALID_CURRENCY.to_string());
         }
         let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
+        let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
+        let ledger_backed = !journal
+            .list_transactions(id)
+            .map_err(watch_error)?
+            .is_empty();
+        if ledger_backed {
+            let current = journal
+                .list_all_holdings()
+                .map_err(watch_error)?
+                .into_iter()
+                .find(|h| h.id == id);
+            if let Some(current) = current {
+                let currency_changed = current.currency.as_deref().is_some_and(|c| c != currency);
+                if current.quantity != quantity
+                    || current.purchase_price != purchase_price
+                    || currency_changed
+                {
+                    return Err(MSG_LEDGER_BACKED.to_string());
+                }
+            }
+        }
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal
             .update_holding(id, ticker, &quantity, &purchase_price, currency)
@@ -275,62 +303,6 @@ impl JournalState {
         }
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal.delete_holding(id).map_err(watch_error)
-    }
-
-    /// Record a **sell** chosen on a neutral trigger (Story 4.7, FR46/FR47) and remove the holding
-    /// from the active register. Writes one SELL transaction — `quantity` = the holding's; `unit_price`
-    /// = the matched study's `current_price` (the market fact, Story 4.4) if known, else the holding's
-    /// `purchase_price`; `fees` = 0 (the fees workflow is Epic 6); `currency` = the **holding's own
-    /// currency** (Story 6.2, FR38/FR28 — amounts stay native, never relabeled), with the caller's
-    /// `reference_currency` only as the coalesce fallback for a pre-6.2 legacy row (NULL currency);
-    /// `rationale` = the optional trimmed reason (`None` when blank). The sell row and
-    /// the holding's **soft delete** are written **atomically** in one `record_sell` transaction — not
-    /// a hard delete (the sell transaction's FK must keep a live referent, so the record survives; the
-    /// holding just leaves the register via `sold_at`). The full ledger (partial sells, cost basis)
-    /// stays Epic 6 / Story 6.3. Guarded (read-only / no-journal / save-failure → a neutral notice); an
-    /// absent (or already-sold) id is refused.
-    pub fn sell_holding(
-        &mut self,
-        holding_id: Uuid,
-        rationale: &str,
-        reference_currency: &str,
-    ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
-        let holding = self
-            .list_holdings()
-            .into_iter()
-            .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())?;
-        // The transaction is denominated in the holding's own currency (FR28: quantity × unit_price
-        // are that holding's native amounts — stamping the reference currency would mislabel them).
-        let currency = effective_currency(&holding, reference_currency);
-        // The sale price: the matched study's current market price if known, else the cost basis.
-        let unit_price = self
-            .study_id_for_ticker(&holding.security_ticker)
-            .and_then(|sid| self.get_study(sid))
-            .and_then(|s| s.judgment.current_price)
-            .map(|m| m.as_decimal().to_string())
-            .unwrap_or_else(|| holding.purchase_price.clone());
-        let rationale = rationale.trim();
-        let rationale = (!rationale.is_empty()).then_some(rationale);
-        let id = self.idgen.new_id();
-        let now = self.clock.now();
-        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
-        journal
-            .record_sell(
-                id,
-                holding_id,
-                &holding.quantity,
-                &unit_price,
-                "0",
-                &currency,
-                rationale,
-                &now,
-            )
-            .map(|_| ())
-            .map_err(watch_error)
     }
 
     /// Set (or clear) a holding's trailing-stop percentage (Story 4.5, FR42). An empty `pct_input`
