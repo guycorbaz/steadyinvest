@@ -1,6 +1,6 @@
 # Story 6.2 — Multi-currency holdings (FR38)
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -22,29 +22,29 @@ so that a EUR position and a USD position are stored and read honestly in their 
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — `persistence`: migration v6 + `HoldingItem.currency` + CRUD (AC1, AC2)** — `persistence/src/schema.rs`, `persistence/src/migrations.rs`, `persistence/src/holdings.rs`
-  - [ ] Add `migrate_to_v6(tx)` in `schema.rs`: `ALTER TABLE holdings ADD COLUMN currency TEXT` (nullable), with a doc comment in the v2–v5 house style (additive, forward-safe, `DDL_V1` frozen, no backfill — the app owns the `NULL`→reference-currency meaning).
-  - [ ] Register `(6, crate::schema::migrate_to_v6)` in the `REGISTRY` array (`migrations.rs:27-31`). The `SIX_STEP_REGISTRY` / "Migration { version: 6 }" tests (`migrations.rs:163-242`) already anticipate a v6 slot — make them pass against the real step.
-  - [ ] `HoldingItem`: add `pub currency: Option<String>` (place it near `security_ticker`/amounts; keep serde derives — the 5.3 export carries it). Update the doc comment (no longer "the single reference currency").
-  - [ ] `add_holding`: add a `currency: Option<String>` parameter (or `&str` — dev's call, but the stored value is the chosen code), INSERT it into the new column. `list_holdings` + any other `SELECT … FROM holdings` add `currency` to the column list and map it. `update_holding` (edit path) carries currency; an identical-value edit stays a no-op (no version bump).
-  - [ ] Tests: fresh-v6 schema == migrated-v5 schema; add a holding with `EUR` → reads back `Some("EUR")`; a pre-6.2 row (NULL) reads back `None`; edit currency bumps version, identical-currency edit does not; `record_sell` still soft-deletes a multi-currency holding fine.
+- [x] **Task 1 — `persistence`: migration v6 + `HoldingItem.currency` + CRUD (AC1, AC2)** — `persistence/src/schema.rs`, `persistence/src/migrations.rs`, `persistence/src/holdings.rs`
+  - [x] Add `migrate_to_v6(tx)` in `schema.rs`: `ALTER TABLE holdings ADD COLUMN currency TEXT` (nullable), with a doc comment in the v2–v5 house style (additive, forward-safe, `DDL_V1` frozen, no backfill — the app owns the `NULL`→reference-currency meaning).
+  - [x] Register `(6, crate::schema::migrate_to_v6)` in the `REGISTRY` array (`migrations.rs:27-31`). The `SIX_STEP_REGISTRY` / "Migration { version: 6 }" tests (`migrations.rs:163-242`) already anticipate a v6 slot — make them pass against the real step.
+  - [x] `HoldingItem`: add `pub currency: Option<String>` (place it near `security_ticker`/amounts; keep serde derives — the 5.3 export carries it). Update the doc comment (no longer "the single reference currency").
+  - [x] `add_holding`: add a `currency: Option<String>` parameter (or `&str` — dev's call, but the stored value is the chosen code), INSERT it into the new column. `list_holdings` + any other `SELECT … FROM holdings` add `currency` to the column list and map it. `update_holding` (edit path) carries currency; an identical-value edit stays a no-op (no version bump).
+  - [x] Tests: fresh-v6 schema == migrated-v5 schema; add a holding with `EUR` → reads back `Some("EUR")`; a pre-6.2 row (NULL) reads back `None`; edit currency bumps version, identical-currency edit does not; `record_sell` still soft-deletes a multi-currency holding fine.
 
-- [ ] **Task 2 — `app` state: effective currency + per-currency capital-at-risk (AC2, AC3)** — `app/src/state.rs`, `app/src/config.rs`
-  - [ ] A `SUPPORTED_CURRENCIES: &[&str]` const (allow-list) + a membership validator (reuse/extend `is_valid_currency_code` for format, add allow-list membership). The reference-currency default must be a member (or fall back gracefully).
-  - [ ] An "effective currency" helper: `holding.currency` when `Some`, else `AppConfig::reference_currency_or_default()`.
-  - [ ] Replace `portfolio_capital_at_risk() -> (Decimal, Decimal)` with a per-currency read returning an **ordered** `Vec<(String, Decimal, Decimal)>` or `BTreeMap<String, (Decimal, Decimal)>` (`currency → (car, invested)`): group holdings by effective currency, and per bucket build `PositionRisk`s and call the **unchanged** `core::risk::capital_at_risk` / `total_invested`. Deterministic order (sort by currency code). Keep the map empty for an empty portfolio.
-  - [ ] The holdings add/edit rails thread the chosen currency (validated against the allow-list; a bad value → a neutral message, never a panic).
-  - [ ] Tests: two holdings in different currencies → two subtotal buckets, each summed independently, **no** cross-currency total; a legacy `None` holding lands in the reference-currency bucket; an all-one-currency portfolio yields a single bucket equal to the old single sum (regression parity).
+- [x] **Task 2 — `app` state: effective currency + per-currency capital-at-risk (AC2, AC3)** — `app/src/state.rs`, `app/src/config.rs`
+  - [x] A `SUPPORTED_CURRENCIES: &[&str]` const (allow-list) + a membership validator (reuse/extend `is_valid_currency_code` for format, add allow-list membership). The reference-currency default must be a member (or fall back gracefully).
+  - [x] An "effective currency" helper: `holding.currency` when `Some`, else `AppConfig::reference_currency_or_default()`.
+  - [x] Replace `portfolio_capital_at_risk() -> (Decimal, Decimal)` with a per-currency read returning an **ordered** `Vec<(String, Decimal, Decimal)>` or `BTreeMap<String, (Decimal, Decimal)>` (`currency → (car, invested)`): group holdings by effective currency, and per bucket build `PositionRisk`s and call the **unchanged** `core::risk::capital_at_risk` / `total_invested`. Deterministic order (sort by currency code). Keep the map empty for an empty portfolio.
+  - [x] The holdings add/edit rails thread the chosen currency (validated against the allow-list; a bad value → a neutral message, never a panic).
+  - [x] Tests: two holdings in different currencies → two subtotal buckets, each summed independently, **no** cross-currency total; a legacy `None` holding lands in the reference-currency bucket; an all-one-currency portfolio yields a single bucket equal to the old single sum (regression parity).
 
-- [ ] **Task 3 — `app` UI: currency chooser + per-currency display (AC4)** — `app/src/main.rs`, `app/ui/screens/portfolio.slint`, `app/ui/state.slint`
-  - [ ] A currency chooser on the add/edit-holding form (a `ChoiceChip`/dropdown fed by the allow-list; default = reference currency), wired to the state rails.
-  - [ ] The holdings register shows each row's currency beside its amounts; the capital-at-risk panel renders **per-currency subtotals** (label each bucket with its code; no mixed total).
-  - [ ] Posture: `@tr` floor bumped by the **exact** number of new literals; any new `MSG_*` registered + the MSG inventory bumped exactly. (6.1 left `@tr` floor at **320**, MSG inventory at **78**.)
+- [x] **Task 3 — `app` UI: currency chooser + per-currency display (AC4)** — `app/src/main.rs`, `app/ui/screens/portfolio.slint`, `app/ui/state.slint`
+  - [x] A currency chooser on the add/edit-holding form (a `ChoiceChip`/dropdown fed by the allow-list; default = reference currency), wired to the state rails.
+  - [x] The holdings register shows each row's currency beside its amounts; the capital-at-risk panel renders **per-currency subtotals** (label each bucket with its code; no mixed total).
+  - [x] Posture: `@tr` floor bumped by the **exact** number of new literals; any new `MSG_*` registered + the MSG inventory bumped exactly. (6.1 left `@tr` floor at **320**, MSG inventory at **78**.)
 
-- [ ] **Task 4 — Gates + export round-trip (AC5)** — fmt, clippy `-D`, `test --workspace`, `deny`, smoke
-  - [ ] Confirm: **no `core`/`contract` API change** (`git diff main` on `core/`, `contract/` empty apart from — there should be nothing); **no new dependency** (`Cargo.lock`/`deny.toml` unchanged); `fx_rates` still has no CRUD/reads; `contract::SCHEMA_VERSION` unchanged; `user_version` is 6.
-  - [ ] Whole-journal export/import (5.3) round-trips `currency` for both a `Some` and a `None` holding — add a test.
-  - [ ] Bump `@tr` / MSG inventories to the exact new counts; smoke `cargo run -p steadyinvest-app` (exit 124).
+- [x] **Task 4 — Gates + export round-trip (AC5)** — fmt, clippy `-D`, `test --workspace`, `deny`, smoke
+  - [x] Confirm: **no `core`/`contract` API change** (`git diff main` on `core/`, `contract/` empty apart from — there should be nothing); **no new dependency** (`Cargo.lock`/`deny.toml` unchanged); `fx_rates` still has no CRUD/reads; `contract::SCHEMA_VERSION` unchanged; `user_version` is 6.
+  - [x] Whole-journal export/import (5.3) round-trips `currency` for both a `Some` and a `None` holding — add a test.
+  - [x] Bump `@tr` / MSG inventories to the exact new counts; smoke `cargo run -p steadyinvest-app` (exit 124).
 
 ## Dev Notes
 
@@ -93,10 +93,29 @@ so that a EUR position and a USD position are stored and read honestly in their 
 
 ### Agent Model Used
 
-Claude Opus 4.8 (1M context).
+Claude Opus 4.8 (1M context) — dev; Claude Fable 5 — review pass, task closure & merge (2026-07-02).
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- All 4 tasks implemented as specified: migration v6 (`migrate_to_v6`, REGISTRY slot 6, fresh==migrated parity via the introspection tests), `HoldingItem.currency: Option<String>` + `add_holding(&str)`/`list_holdings`/`update_holding` threading (identical-currency edit = no-op, currency-only edit bumps once), per-currency capital-at-risk (`portfolio_capital_at_risk_by_currency` → ordered `Vec<(String, Decimal, Decimal)>`, `core::risk` untouched), UI chooser fed by `SUPPORTED_CURRENCIES` (+ per-row currency labels + per-currency CaR panel), 5.3 export round-trip test incl. a legacy `None` holding.
+- **Review pass (2026-07-02, whole-codebase review embarked in the same PR) found and fixed on the 6.2 slice:** (1) HIGH — `sell_holding` stamped the SELL transaction with the *reference* currency; it now stamps the holding's **own** effective currency (FR28), reference only as the legacy-NULL fallback, pinned by `sell_holding_stamps_the_holdings_own_currency_not_the_reference`; (2) MED — a reference-currency change only set the UI globals while the row labels/CaR buckets are baked at render → the callback now re-renders the register; (3) `reference_currency_or_default` now gates on allow-list **membership**, not just shape (a hand-edited off-list code would make a legacy row un-saveable); (4) JPY added to `SUPPORTED_CURRENCIES` (AC4's list); (5) the Réglages reference-currency chips now iterate the pushed allow-list model — one source of truth (`@tr` floor 322→318, currency codes are not translatable copy); (6) the Task-2 "effective currency" helper exists as `state::effective_currency` and is the single coalescing point (CaR buckets, sell stamp, row labels).
+- **AC5 deviation, documented:** "no core/contract API change" holds for the 6.2 *slice*, but the PR embarks the 2026-07-02 whole-codebase review/reorg which DID touch core/contract internals (module splits `verdict/`+`compare/`, checked/saturating arithmetic, docs) — behavior-preserving: all digests, the method fingerprint and the 11 golden fixtures verified byte-identical; no public-API semantic change. `Cargo.lock` untouched; `deny.toml` gained two documented advisory ignores for the pre-existing quick-xml RUSTSEC-2026-0194/0195 (build-time-only Wayland codegen path, no compatible fix; tracked in #83) — not a 6.2 dependency change.
+- Gates: 619 tests green (workspace), clippy 0 warnings, fmt clean, `cargo deny check` ok, smoke launch exit 124, `user_version` = 6, `SCHEMA_VERSION` = 1, `fx_rates` inert.
+- Deferred to issues: #78 (export entity-field forward-compat policy — the 6.2 `currency` field is the proving case), #81 (holding↔study auto-match ignores currency — cross-currency sell price/stop ratchet).
+
 ### File List
+
+- `persistence/src/schema.rs` — `migrate_to_v6` (nullable `holdings.currency`).
+- `persistence/src/migrations.rs` — REGISTRY v6 slot + tests.
+- `persistence/src/holdings.rs` — `HoldingItem.currency`, CRUD threading, doc refresh.
+- `persistence/src/export.rs` + `persistence/tests/export.rs` — currency round-trip (incl. legacy `None`).
+- `persistence/tests/holdings.rs`, `persistence/tests/transactions.rs`, `persistence/tests/readonly_newer.rs` — 6.2 tests.
+- `app/src/config.rs` — `SUPPORTED_CURRENCIES` (+JPY), `is_supported_currency`, membership-gated `reference_currency_or_default`.
+- `app/src/state/holdings.rs` — `effective_currency`, `portfolio_capital_at_risk_by_currency`, currency-aware add/update/sell rails.
+- `app/src/state/messages.rs` — `MSG_HOLDING_INVALID_CURRENCY` (+ inventory).
+- `app/src/wiring/holdings.rs`, `app/src/wiring/prefs.rs` — row currency labels, per-currency CaR push, re-render on reference change.
+- `app/ui/screens/portfolio.slint`, `app/ui/screens/settings.slint`, `app/ui/state.slint` — currency chooser, per-row labels, per-currency CaR panel, unified currency chips.
+- `app/src/posture.rs` — `@tr` floor 318 (documented).
+- (Same PR, beyond 6.2 scope: the 2026-07-02 whole-codebase reorg — `app/src/state/`, `app/src/wiring/`, `core/src/verdict/`, `core/src/golden/compare/`, `ingestion/src/adapters/common.rs`, `persistence/src/util.rs` and the associated fixes/docs — see the PR body.)

@@ -39,6 +39,16 @@ yanked = "deny"
 # control (e.g. `paste` RUSTSEC-2024-0436, pulled in by Slint's image/rav1e stack). Vulnerabilities
 # are still denied by default.
 unmaintained = "workspace"
+ignore = [
+    # quick-xml 0.39.4 XML-parsing DoS (quadratic duplicate-attribute check / unbounded xmlns
+    # allocation). Reached ONLY via wayland-scanner (→ smithay-client-toolkit → Slint's Wayland
+    # backend) and zbus-lockstep — both are BUILD-TIME code generators parsing their own vendored,
+    # trusted protocol XML; no untrusted XML ever reaches quick-xml at runtime in this app. No
+    # semver-compatible fix exists (the fix is 0.41, wayland-scanner pins 0.39.x) — remove these
+    # ignores when the Slint/smithay stack bumps (tracked in issue #83).
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
 
 [sources]
 unknown-registry = "deny"

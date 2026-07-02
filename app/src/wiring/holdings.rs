@@ -148,10 +148,7 @@ pub(crate) fn refresh_holdings(
             let dismissed = dismissed.contains(&id_text);
             // Story 6.2 (FR38): the holding's effective currency — its own, or the reference currency
             // for a pre-6.2 (None) row. Shown beside every amount; the register never mixes currencies.
-            let currency = h
-                .currency
-                .clone()
-                .unwrap_or_else(|| reference_currency.clone());
+            let currency = crate::state::effective_currency(h, &reference_currency);
             HoldingRow {
                 id: id_text.into(),
                 ticker: h.security_ticker.clone().into(),

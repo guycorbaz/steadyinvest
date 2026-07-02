@@ -1,5 +1,5 @@
 # generated: 2026-06-09
-# last_updated: 2026-06-28
+# last_updated: 2026-07-02
 # project: steadyinvest
 # project_key: NOKEY
 # tracking_system: file-system
@@ -410,7 +410,7 @@ development_status:
   # ── Epic 6: Multi-portfolio, multi-currency & full risk overlay [P2] (story outlines) ──
   epic-6: in-progress
   6-1-multiple-portfolios-one-per-bank: done
-  6-2-multi-currency-holdings: in-progress
+  6-2-multi-currency-holdings: done
   6-3-transaction-ledger-partial-sells-weighted-average-cost-basis: backlog
   6-4-dividends-gross-study-net-reinvestable: backlog
   6-5-fx-acquisition-consolidation: backlog

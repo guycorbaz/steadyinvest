@@ -52,6 +52,7 @@ mod tests;
 
 pub use cells::*;
 pub use confront::*;
+pub(crate) use holdings::effective_currency;
 pub use journal_io::*;
 pub use messages::*;
 pub use refresh::*;

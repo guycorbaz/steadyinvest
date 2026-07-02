@@ -162,12 +162,8 @@ impl JournalState {
                 .trailing_stop_level
                 .as_deref()
                 .and_then(|s| Decimal::from_str_exact(s).ok());
-            let currency = h
-                .currency
-                .clone()
-                .unwrap_or_else(|| reference_currency.to_string());
             by_ccy
-                .entry(currency)
+                .entry(effective_currency(&h, reference_currency))
                 .or_default()
                 .push(steadyinvest_core::risk::PositionRisk {
                     avg_cost,
@@ -309,10 +305,7 @@ impl JournalState {
             .ok_or(MSG_SAVE_FAILED.to_string())?;
         // The transaction is denominated in the holding's own currency (FR28: quantity × unit_price
         // are that holding's native amounts — stamping the reference currency would mislabel them).
-        let currency = holding
-            .currency
-            .clone()
-            .unwrap_or_else(|| reference_currency.to_string());
+        let currency = effective_currency(&holding, reference_currency);
         // The sale price: the matched study's current market price if known, else the cost basis.
         let unit_price = self
             .study_id_for_ticker(&holding.security_ticker)
@@ -444,6 +437,18 @@ impl JournalState {
 /// The display name of the single default portfolio (Story 4.3, FR36). Not user-editable in 4.3
 /// (multi-portfolio naming is FR37/Epic 6).
 const DEFAULT_PORTFOLIO_NAME: &str = "Portefeuille";
+
+/// A holding's **effective currency** (Story 6.2, FR38): its own `currency` when set, else the
+/// caller's reference currency — the ONE read-boundary coalescing rule for a pre-6.2 legacy row
+/// (the v6 `ADD COLUMN` left it NULL; persistence never rewrites it). Every consumer — the
+/// per-currency capital-at-risk buckets, the sell-transaction stamp, the register row labels —
+/// goes through this helper so the rule cannot drift.
+pub(crate) fn effective_currency(holding: &HoldingItem, reference_currency: &str) -> String {
+    holding
+        .currency
+        .clone()
+        .unwrap_or_else(|| reference_currency.to_string())
+}
 
 /// Validate a holding's quantity and purchase price (Story 4.3, FR36 + NFR-C1). Both must parse as
 /// **exact** decimals (`Decimal::from_str_exact` — errors instead of silently rounding); quantity
