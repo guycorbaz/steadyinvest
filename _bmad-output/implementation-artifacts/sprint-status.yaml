@@ -40,6 +40,21 @@
 
 generated: 2026-06-09
 last_updated: 2026-07-03
+# 2026-07-03: epic-6 RETROSPECTIVE → done (epic-6-retro-2026-07-03.md). 9/9 stories, PRs #77–#102,
+#             tests 546→728, ZERO migrations, ZERO new deps, core::ssg untouched epic-wide; the only
+#             CRITICAL (6.9 silent fallback) caught pre-merge. Wins: the absence-honesty doctrine
+#             compounded as review criteria; outline→per-story refinement worked; the pins acted as
+#             design inputs (6.9 no-contract-change → readable digest). Challenges: a NEW defect
+#             family named (state keyed off the wrong discriminator — 6.8 header, 6.9 fell_back);
+#             the F4 notice rule regressed once; on-display debt re-accrued a 3rd epic; backlog grew
+#             to 28 open. E1/E2 slipped AGAIN → now BLOCKING gates F1 (on-display walk of the
+#             epic-5+6 batches) and F2 (triage 28 issues; rail-wide cluster #93/#94/#95/#88 resolved
+#             or waived before 7.1). Other actions: F3 discriminator checklist rule + in-code
+#             conventions; F4 fix the #94 staleness rail BEFORE 7.1/7.2 (read-heavy screens amplify
+#             it); F5 decide the sector source (#98) before 7.2; F6 live-keys verification session
+#             (both providers, forced fallback, pacing, #80 retry-after reality, rfd picker). Epic-7
+#             preview: 7.1/7.2 foundations ready (build_snapshot off-form + 6.7/6.8 reads); NO epic
+#             replan needed; stories outline-only → same per-story refinement approach.
 # 2026-07-03: story 6-9 review complete → done — EPIC 6 COMPLETE (9/9; retrospective optional).
 #             3-layer review: 0 decision · 7 patch · 2 defer · 5 dismiss. All 7 applied + gates
 #             re-green (728 tests, clippy -D --locked 0, deny ok, smoke 124, pinned surfaces empty):
@@ -606,7 +621,7 @@ development_status:
   6-7-concentration-check-diversify-by-size: done
   6-8-replacement-candidate-surfacing-on-sell: done
   6-9-provider-fallback-chain-rate-limit-batching: done
-  epic-6-retrospective: optional
+  epic-6-retrospective: done
 
   # ── Epic 7: Comparison, health review, screening & reports [P3] (story outlines) ──
   epic-7: in-progress
