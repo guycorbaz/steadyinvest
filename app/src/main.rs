@@ -282,6 +282,7 @@ fn main() -> Result<(), slint::PlatformError> {
     wiring::watchlist::wire_watchlist(&ui, &session);
     wiring::holdings::wire_holdings(&ui, &session);
     wiring::replacement::wire_replacement(&ui, &session);
+    wiring::wire_navigation(&ui, &session);
     wiring::cells::wire_cells(&ui, &session);
     wiring::judgment::wire_judgment(&ui, &session);
     wiring::prefs::wire_prefs(&ui, &session);
