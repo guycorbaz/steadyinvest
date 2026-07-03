@@ -66,6 +66,15 @@ pub fn is_valid_size_target_pct(s: &str) -> bool {
     rust_decimal::Decimal::from_str_exact(s.trim())
         .is_ok_and(|p| p > rust_decimal::Decimal::ZERO && p <= rust_decimal::Decimal::ONE_HUNDRED)
 }
+/// Whether `s` is a well-formed fallback-provider wire name (Story 6.9, FR26): parses as a
+/// [`crate::provider::ProviderChoice`] and is not `none` (an explicit "no fallback" is the
+/// ABSENT field, never a stored sentinel).
+pub fn is_valid_fallback_provider(s: &str) -> bool {
+    matches!(
+        crate::provider::ProviderChoice::parse(s.trim()),
+        Some(choice) if choice != crate::provider::ProviderChoice::None
+    )
+}
 /// Sanity bounds for a persisted size — outside means a damaged value, fall back.
 const MIN_SANE_WINDOW: u32 = 320;
 const MAX_SANE_WINDOW: u32 = 16_384;
@@ -209,6 +218,18 @@ pub struct AppConfig {
     pub size_target_medium_pct: Option<String>,
     #[serde(default)]
     pub size_target_large_pct: Option<String>,
+    /// The per-field-type FALLBACK providers (Story 6.9, FR26): the wire name of the provider a
+    /// price / fundamentals / FX fetch fails over to when the PRIMARY (`preferred_provider`,
+    /// unchanged) errors. `None` = no fallback (the pre-6.9 behaviour). Append-only
+    /// `#[serde(default)]`; read through [`AppConfig::provider_chain`] (validate before trust —
+    /// a damaged wire name, the primary itself, or a provider incapable of the field is dropped
+    /// from the effective chain, never a broken request).
+    #[serde(default)]
+    pub price_fallback_provider: Option<String>,
+    #[serde(default)]
+    pub fundamentals_fallback_provider: Option<String>,
+    #[serde(default)]
+    pub fx_fallback_provider: Option<String>,
 }
 
 /// Whether `s` is a well-formed trailing-stop percentage: an exact decimal strictly inside `(0, 100)`
@@ -269,6 +290,9 @@ impl Default for AppConfig {
             size_target_small_pct: None,
             size_target_medium_pct: None,
             size_target_large_pct: None,
+            price_fallback_provider: None,
+            fundamentals_fallback_provider: None,
+            fx_fallback_provider: None,
         }
     }
 }
@@ -404,6 +428,69 @@ impl AppConfig {
         )
     }
 
+    /// The stored fallback wire name for `field` (Story 6.9) — raw, for the Réglages mirror.
+    fn fallback_field(&self, field: steadyinvest_ingestion::FieldKind) -> &Option<String> {
+        use steadyinvest_ingestion::FieldKind;
+        match field {
+            FieldKind::Price => &self.price_fallback_provider,
+            FieldKind::Fundamentals => &self.fundamentals_fallback_provider,
+            FieldKind::Fx => &self.fx_fallback_provider,
+        }
+    }
+
+    /// The stored fallback for `field` when valid, capable of the field AND different from the
+    /// current primary, else `None` — the Réglages mirror matches the EFFECTIVE chain (2026-07-03
+    /// review: a chip must never show an active fallback the chain dedups away; a fundamentals
+    /// fallback of `twelvedata` in a hand-edited config is dropped, the declared-capability rule).
+    pub fn fallback_provider_or_none(
+        &self,
+        field: steadyinvest_ingestion::FieldKind,
+    ) -> Option<crate::provider::ProviderChoice> {
+        self.fallback_field(field)
+            .as_deref()
+            .map(str::trim)
+            .and_then(crate::provider::ProviderChoice::parse)
+            .filter(|c| *c != crate::provider::ProviderChoice::None)
+            .filter(|c| *c != self.preferred_provider)
+            .filter(|c| steadyinvest_ingestion::supports(c.wire(), field))
+    }
+
+    /// The EFFECTIVE provider chain for `field` (Story 6.9, FR26): the primary
+    /// (`preferred_provider` — unchanged 7.4 semantics, it always leads its chain) followed by
+    /// the per-field fallback when set, valid, capable of the field, and different from the
+    /// primary. Empty when the primary is `None` (the existing no-provider guards fire before
+    /// any enqueue). The `Vec` shape generalizes beyond two providers later.
+    pub fn provider_chain(
+        &self,
+        field: steadyinvest_ingestion::FieldKind,
+    ) -> Vec<crate::provider::ProviderChoice> {
+        // No primary → an empty chain: "no provider configured" is a deliberate state the
+        // existing MSG_PROVIDER_NONE guards own; a fallback never resurrects it silently.
+        if self.preferred_provider == crate::provider::ProviderChoice::None {
+            return Vec::new();
+        }
+        let fallback = self.fallback_provider_or_none(field);
+        // An INCAPABLE primary with a capable configured fallback is SUBSTITUTED (2026-07-03
+        // review, HIGH: twelvedata's fundamentals succeed EMPTY by design — it would never
+        // error-trigger the failover the user configured the fallback for). Without a capable
+        // fallback the primary passes through unchanged (the 7.4 partial-fundamentals
+        // behaviour); the substitution is a visible event — the fallback notice compares the
+        // effective member against the CONFIGURED primary, not chain position.
+        if !steadyinvest_ingestion::supports(self.preferred_provider.wire(), field) {
+            if let Some(fallback) = fallback {
+                return vec![fallback];
+            }
+            return vec![self.preferred_provider];
+        }
+        let mut chain = vec![self.preferred_provider];
+        if let Some(fallback) = fallback {
+            if !chain.contains(&fallback) {
+                chain.push(fallback);
+            }
+        }
+        chain
+    }
+
     /// Persisted window size if it is sane, the default size otherwise (a 0×0 or absurd value
     /// must not produce an unusable window — validate before trust).
     pub fn sane_window_size(&self) -> (u32, u32) {
@@ -531,6 +618,9 @@ mod tests {
             }],
             active_portfolio_id: Some("22222222-2222-2222-2222-222222222222".to_string()),
             concentration_threshold_pct: Some("40".to_string()),
+            price_fallback_provider: Some("twelvedata".to_string()),
+            fundamentals_fallback_provider: Some("eodhd".to_string()),
+            fx_fallback_provider: Some("twelvedata".to_string()),
             size_small_max: Some("500000000".to_string()),
             size_medium_max: Some("5000000000".to_string()),
             size_target_small_pct: Some("30".to_string()),
@@ -1097,6 +1187,131 @@ mod tests {
                 DEFAULT_SIZE_SMALL_MAX.to_string(),
                 DEFAULT_SIZE_MEDIUM_MAX.to_string()
             )
+        );
+    }
+
+    // ── Story 6.9 (FR26) — per-field-type fallback chain ──
+
+    #[test]
+    fn provider_chain_is_primary_plus_a_valid_capable_distinct_fallback() {
+        use crate::provider::ProviderChoice;
+        use steadyinvest_ingestion::FieldKind;
+        let mut c = AppConfig::default(); // primary = Eodhd
+        assert_eq!(
+            c.provider_chain(FieldKind::Price),
+            vec![ProviderChoice::Eodhd],
+            "no fallback set → the pre-6.9 single-provider chain"
+        );
+        c.price_fallback_provider = Some("twelvedata".to_string());
+        assert_eq!(
+            c.provider_chain(FieldKind::Price),
+            vec![ProviderChoice::Eodhd, ProviderChoice::TwelveData]
+        );
+        // The primary as its own fallback dedups (accepted at commit, neutralized here).
+        c.price_fallback_provider = Some("eodhd".to_string());
+        assert_eq!(
+            c.provider_chain(FieldKind::Price),
+            vec![ProviderChoice::Eodhd]
+        );
+        // A damaged wire name is dropped, never a broken request.
+        c.price_fallback_provider = Some("yahoo".to_string());
+        assert_eq!(
+            c.provider_chain(FieldKind::Price),
+            vec![ProviderChoice::Eodhd]
+        );
+        // "none" is not a storable fallback (the absent field is the "no fallback" state).
+        c.price_fallback_provider = Some("none".to_string());
+        assert_eq!(
+            c.provider_chain(FieldKind::Price),
+            vec![ProviderChoice::Eodhd]
+        );
+        assert!(!is_valid_fallback_provider("none"));
+        assert!(is_valid_fallback_provider(" twelvedata "));
+    }
+
+    #[test]
+    fn an_incapable_fallback_is_dropped_for_that_field_only() {
+        use crate::provider::ProviderChoice;
+        use steadyinvest_ingestion::FieldKind;
+        // Twelve Data serves NO fundamentals (7.4 by design) — a hand-edited config naming it as
+        // the fundamentals fallback is dropped; the SAME wire name serves price/fx fine.
+        let c = AppConfig {
+            fundamentals_fallback_provider: Some("twelvedata".to_string()),
+            price_fallback_provider: Some("twelvedata".to_string()),
+            fx_fallback_provider: Some("twelvedata".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            c.provider_chain(FieldKind::Fundamentals),
+            vec![ProviderChoice::Eodhd],
+            "incapable fallback dropped for fundamentals"
+        );
+        assert_eq!(
+            c.provider_chain(FieldKind::Price),
+            vec![ProviderChoice::Eodhd, ProviderChoice::TwelveData]
+        );
+        assert_eq!(
+            c.provider_chain(FieldKind::Fx),
+            vec![ProviderChoice::Eodhd, ProviderChoice::TwelveData]
+        );
+        // 2026-07-03 review (HIGH): an INCAPABLE primary is SUBSTITUTED by a capable fallback
+        // for that field (twelvedata fundamentals succeed empty — error failover never fires),
+        // and passes through unchanged when no capable fallback exists (7.4 semantics).
+        let c = AppConfig {
+            preferred_provider: ProviderChoice::TwelveData,
+            fundamentals_fallback_provider: Some("eodhd".to_string()),
+            price_fallback_provider: Some("eodhd".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            c.provider_chain(FieldKind::Fundamentals),
+            vec![ProviderChoice::Eodhd],
+            "capable fallback substitutes the incapable primary"
+        );
+        assert_eq!(
+            c.provider_chain(FieldKind::Price),
+            vec![ProviderChoice::TwelveData, ProviderChoice::Eodhd],
+            "the same primary leads the fields it CAN serve"
+        );
+        let c = AppConfig {
+            preferred_provider: ProviderChoice::TwelveData,
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            c.provider_chain(FieldKind::Fundamentals),
+            vec![ProviderChoice::TwelveData],
+            "no capable fallback → unchanged 7.4 partial-fundamentals behaviour"
+        );
+    }
+
+    #[test]
+    fn a_none_primary_yields_an_empty_chain_and_old_configs_default_the_fields() {
+        use crate::provider::ProviderChoice;
+        use steadyinvest_ingestion::FieldKind;
+        let c = AppConfig {
+            preferred_provider: ProviderChoice::None,
+            price_fallback_provider: Some("eodhd".to_string()),
+            ..AppConfig::default()
+        };
+        assert!(
+            c.provider_chain(FieldKind::Price).is_empty(),
+            "no primary → the existing no-provider guard fires before any enqueue"
+        );
+        // Append-only rail: a pre-6.9 config has none of the three fields.
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        std::fs::write(
+            &path,
+            r#"{ "window_width": 1280, "theme": "light", "journal_path": "/x/journal.db" }"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert!(loaded.warning.is_none());
+        assert_eq!(loaded.config.price_fallback_provider, None);
+        assert_eq!(
+            loaded.config.provider_chain(FieldKind::Fundamentals),
+            vec![ProviderChoice::Eodhd],
+            "pre-6.9 behaviour unchanged"
         );
     }
 

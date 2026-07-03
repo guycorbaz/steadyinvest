@@ -49,6 +49,28 @@ pub(crate) fn resolve_provider_key(provider: ProviderChoice) -> Option<String> {
     env_key
 }
 
+/// Build the SHIPPED fallback chain for `field` (Story 6.9, FR26): the config's effective chain
+/// with each member's OWN key resolved (the keychain slots are per-provider); a keyed member
+/// without a key is dropped here — the worker must never send a guaranteed-401 request. An empty
+/// result with a configured primary means "no usable key anywhere" (the caller surfaces
+/// `MSG_PROVIDER_NO_KEY`, the unchanged 3.2 semantics).
+pub(crate) fn resolve_chain(
+    config: &crate::config::AppConfig,
+    field: steadyinvest_ingestion::FieldKind,
+) -> Vec<fetch::ChainMember> {
+    config
+        .provider_chain(field)
+        .into_iter()
+        .filter_map(|provider| {
+            let api_key = resolve_provider_key(provider);
+            if provider.requires_key() && api_key.is_none() {
+                return None;
+            }
+            Some(fetch::ChainMember { provider, api_key })
+        })
+        .collect()
+}
+
 /// Mirror the provider choice + keychain status into `Prefs` (Story 3.2). The key VALUE never
 /// crosses — only the boolean "configured" status (NFR-S1). A store failure shows as "not
 /// configured" plus a neutral notice (AC6).
@@ -131,7 +153,15 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                 Ok(report) => {
                                     // Name the recompute cause (FR29) and, after an annual update
                                     // (Story 3.6), the re-validation scope ("N à revérifier").
-                                    studies.set_notice(state::refresh_summary(report).into());
+                                    // Story 6.9 (FR26): a fallback names itself alongside.
+                                    let mut notice = state::refresh_summary(report);
+                                    if let Some(effective) = outcome.fell_back_to {
+                                        notice = format!(
+                                            "{notice} {}",
+                                            state::provider_fallback_notice(effective)
+                                        );
+                                    }
+                                    studies.set_notice(notice.into());
                                     render_open();
                                 }
                                 Err(message) => studies.set_notice(message.into()),
@@ -179,11 +209,20 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                             as_of: Some(now),
                                         },
                                     );
-                                    // Clear ONLY the in-progress banner — don't wipe a sibling
-                                    // ticker's failure notice that resolved earlier. (Review F4.)
-                                    if holdings.get_notice().as_str()
-                                        == state::MSG_HOLDINGS_REFRESHING
-                                    {
+                                    // Story 6.9 (FR26): a fallback names itself — but NEVER over
+                                    // a sibling ticker's failure notice (the F4 rule holds for
+                                    // the new notice too, 2026-07-03 review): it only replaces
+                                    // the in-progress banner or an empty slot.
+                                    let current = holdings.get_notice();
+                                    let replaceable = current.is_empty()
+                                        || current.as_str() == state::MSG_HOLDINGS_REFRESHING;
+                                    if let Some(effective) = outcome.fell_back_to {
+                                        if replaceable {
+                                            holdings.set_notice(
+                                                state::provider_fallback_notice(effective).into(),
+                                            );
+                                        }
+                                    } else if current.as_str() == state::MSG_HOLDINGS_REFRESHING {
                                         holdings.set_notice(SharedString::new());
                                     }
                                 }
@@ -239,13 +278,14 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 }
                 fetch::WorkerOutcome::FxRates {
                     journal_id,
-                    source,
                     results,
+                    fell_back_to,
                 } => {
-                    // Story 6.5 (FR28) + review: the SOURCE travels with the job (never re-read
-                    // from mutable config — an in-flight provider switch must not falsify
-                    // provenance), and the outcome only applies to the journal that ASKED (an
-                    // in-flight journal switch must not write phantom rates into the new one).
+                    // Story 6.5 (FR28) + review: the outcome only applies to the journal that
+                    // ASKED (an in-flight journal switch must not write phantom rates into the
+                    // new one). Story 6.9 (FR26): each pair's stamped source is its EFFECTIVE
+                    // chain member — the provider that actually fetched, never the primary's
+                    // name on a fallback's data.
                     let fx = ui.global::<Fx>();
                     fx.set_refreshing(false);
                     if journal_state.borrow().journal_id() != journal_id {
@@ -262,7 +302,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                     &outcome.base,
                                     &outcome.quote,
                                     rate,
-                                    &source,
+                                    &outcome.effective,
                                 ) {
                                     Ok(()) => landed += 1,
                                     // An app-side refusal (read-only, invalid) is a cause too —
@@ -281,12 +321,16 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         }
                     }
                     // The count ALWAYS shows; the first failure cause rides along whenever one
-                    // exists (a partial failure must name itself — review).
-                    let counts = state::fx_refreshed_message(landed, total);
-                    fx.set_notice(match failure {
-                        Some(cause) => format!("{counts} {cause}").into(),
-                        None => counts.into(),
-                    });
+                    // exists (a partial failure must name itself — review); a fallback names
+                    // itself too (Story 6.9).
+                    let mut notice = state::fx_refreshed_message(landed, total);
+                    if let Some(cause) = failure {
+                        notice = format!("{notice} {cause}");
+                    }
+                    if let Some(effective) = fell_back_to {
+                        notice = format!("{notice} {}", state::provider_fallback_notice(effective));
+                    }
+                    fx.set_notice(notice.into());
                     crate::wiring::fx::push_fx_rates(&ui, &journal_state.borrow());
                     // Story 6.6 (review): freshly fetched rates feed the consolidation block —
                     // re-render the register so it converts without a restart.
@@ -346,27 +390,30 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             else {
                 return;
             };
-            // Key source (Story 3.2): the OS keychain for the preferred provider, with an env-var
-            // fallback for environments that have no running secret agent (AC5/AC6). A keyless
-            // provider fetches with no key; a key-requiring provider with no key found is refused.
-            let provider_choice = config.borrow().preferred_provider;
-            if provider_choice == ProviderChoice::None {
+            // Story 6.9 (FR26): the FUNDAMENTALS fallback chain, each member with its own key
+            // (Story 3.2 keychain + env fallback). No primary → the provider guard; a configured
+            // primary whose whole chain lacks keys → the key guard (unchanged semantics).
+            if config.borrow().preferred_provider == ProviderChoice::None {
                 studies.set_notice(state::MSG_PROVIDER_NONE.into());
                 return;
             }
-            let api_key = resolve_provider_key(provider_choice);
-            if provider_choice.requires_key() && api_key.is_none() {
+            let chain = resolve_chain(
+                &config.borrow(),
+                steadyinvest_ingestion::FieldKind::Fundamentals,
+            );
+            if chain.is_empty() {
                 studies.set_notice(state::MSG_PROVIDER_NO_KEY.into());
                 return;
             }
             studies.set_fetching(true);
             studies.set_notice(state::MSG_PROVIDER_FETCHING.into());
+            let primary = config.borrow().preferred_provider;
             if fetch_tx
                 .send(fetch::WorkerJob::Fetch(fetch::FetchRequest {
                     study_id,
                     ticker,
-                    api_key,
-                    provider: provider_choice,
+                    chain,
+                    primary,
                 }))
                 .is_err()
             {

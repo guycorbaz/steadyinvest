@@ -221,6 +221,93 @@ export component SettingsScreen inherits Rectangle {
                     }
                 }
 
+                // ── Story 6.9 (FR26) — the per-field-type fallback provider: the chain a
+                // price / fundamentals / FX fetch fails over to when the primary above errors.
+                // The fundamentals row offers no Twelve Data (declared capability: its
+                // fundamentals are empty by design). Facts and thresholds — never advice. ──
+                if Prefs.provider != "none": VerticalLayout {
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: @tr("Fournisseur de repli (en cas d'échec du fournisseur principal) :");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: @tr("Prix");
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            vertical-alignment: center;
+                            width: 160px;
+                        }
+                        ChoiceChip {
+                            label: @tr("Aucun repli");
+                            selected: Prefs.price-fallback == "";
+                            activated => { Prefs.fallback-provider-selected("price", ""); }
+                        }
+                        ChoiceChip {
+                            label: @tr("EODHD");
+                            selected: Prefs.price-fallback == "eodhd";
+                            activated => { Prefs.fallback-provider-selected("price", "eodhd"); }
+                        }
+                        ChoiceChip {
+                            label: @tr("Twelve Data");
+                            selected: Prefs.price-fallback == "twelvedata";
+                            activated => { Prefs.fallback-provider-selected("price", "twelvedata"); }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: @tr("Fondamentaux");
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            vertical-alignment: center;
+                            width: 160px;
+                        }
+                        ChoiceChip {
+                            label: @tr("Aucun repli");
+                            selected: Prefs.fundamentals-fallback == "";
+                            activated => { Prefs.fallback-provider-selected("fundamentals", ""); }
+                        }
+                        ChoiceChip {
+                            label: @tr("EODHD");
+                            selected: Prefs.fundamentals-fallback == "eodhd";
+                            activated => { Prefs.fallback-provider-selected("fundamentals", "eodhd"); }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: @tr("Taux de change");
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            vertical-alignment: center;
+                            width: 160px;
+                        }
+                        ChoiceChip {
+                            label: @tr("Aucun repli");
+                            selected: Prefs.fx-fallback == "";
+                            activated => { Prefs.fallback-provider-selected("fx", ""); }
+                        }
+                        ChoiceChip {
+                            label: @tr("EODHD");
+                            selected: Prefs.fx-fallback == "eodhd";
+                            activated => { Prefs.fallback-provider-selected("fx", "eodhd"); }
+                        }
+                        ChoiceChip {
+                            label: @tr("Twelve Data");
+                            selected: Prefs.fx-fallback == "twelvedata";
+                            activated => { Prefs.fallback-provider-selected("fx", "twelvedata"); }
+                        }
+                    }
+                }
+
                 if Prefs.provider-status != "": Text {
                     text: Prefs.provider-status;
                     color: Tokens.text-mid;

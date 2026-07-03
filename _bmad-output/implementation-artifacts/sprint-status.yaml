@@ -40,6 +40,70 @@
 
 generated: 2026-06-09
 last_updated: 2026-07-03
+# 2026-07-03: story 6-9 review complete → done — EPIC 6 COMPLETE (9/9; retrospective optional).
+#             3-layer review: 0 decision · 7 patch · 2 defer · 5 dismiss. All 7 applied + gates
+#             re-green (728 tests, clippy -D --locked 0, deny ok, smoke 124, pinned surfaces empty):
+#             P1 CRITICAL a keyless primary let the fallback serve IN SILENCE (fell_back keyed off
+#             chain position) → requests carry the CONFIGURED primary; the fallback event is by
+#             IDENTITY (member != primary), never index (+ test); P2 HIGH an incapable primary was
+#             never filtered (twelvedata fundamentals succeed EMPTY — the configured eodhd fallback
+#             could never trigger) → provider_chain SUBSTITUTES a capable fallback for an incapable
+#             primary (7.4 semantics kept when none exists, + tests); P3 HIGH the F4 notice rule
+#             regressed (fallback notice clobbered a sibling failure) → replaces only the banner/
+#             empty slot; P4 HIGH Ok(None) no-quote counted as SUCCESS (coverage gaps never failed
+#             over) → converted to a coverage miss, the chain advances (+ test); P5 MED the quota
+#             retry bypassed pacing (1s retry-after inside a 7.5s window burned the one retry) →
+#             the retry is paced too (max(retry_after, remaining)); P6 MED a primary-equal fallback
+#             mirrored as an ACTIVE chip while dedupped → the mirror matches the EFFECTIVE chain +
+#             re-mirrors on primary switch; P7 LOW FetchRequest doc. Defers → #100 (no progress/
+#             cancel on long paced batches) + #101 (a keyless configured fallback drops silently —
+#             Réglages murmur). Dismissed incl. the last-error attribution (documented deliberate)
+#             and the VERIFIED-none digest-shape consumers. Auditor: AC2 PARTIAL→resolved (the
+#             CRITICAL), all other ACs PASS.
+# 2026-07-03: story 6-9 dev complete → review. Ingestion: FieldKind/supports/min_request_interval
+#             (declared: twelvedata NO fundamentals; 7500ms/200ms pacing) keyed by tag (config layer
+#             consults without adapters); dependency_digest VERIFIED not readable → now "{tag}:{sha}"
+#             (FR26 cell record human-readable; pre-6.9 cells re-read as a dependency change once,
+#             documented). Config: 3 append-only fields + provider_chain(field) = [primary]+deduped
+#             capable fallback; None primary = EMPTY chain (MSG_PROVIDER_NONE owns it). Worker:
+#             ChainMember keys resolved AT ENQUEUE (resolve_chain; keyless member dropped, never a
+#             401); run_chain module-level + headless-tested — paced per tag before EVERY request
+#             (pure delay_before), Quota retry_after honored bounded (pure quota_wait, 30s cap, ONE
+#             retry), ANY error advances, last error surfaces via the unchanged 3.5 mapping; FX runs
+#             the chain PER PAIR; TestKey single-provider but paced; Instant not the journal clock
+#             (documented). Recording: fell_back_to on outcomes + MSG_PROVIDER_FALLBACK (« Données
+#             obtenues via {p} (fournisseur de repli). ») + display_name; apply_fx_fetch stamps each
+#             pair's EFFECTIVE member (never the primary's name on a fallback's data). Réglages: the
+#             fallback rows (Prix/Fondamentaux/Taux de change; NO Twelve Data chip on fundamentals);
+#             mirror_fallback_prefs startup+commit from validated accessors (chips — #93 avoided).
+#             Gates: 726 workspace tests (+11), clippy -D --locked 0, deny ok, smoke 124; contract/
+#             persistence/core/report/Cargo.lock/deny.toml EMPTY (ingestion+app only — the
+#             no-contract-change decision HELD); NO migration, NO new dep; @tr 430→442 (+12), MSG
+#             100→101. Bulk endpoints deliberately not wired (scope pin, personal scale).
+# 2026-07-03: story 6-9 created (provider fallback chain per field type + rate-limit batching,
+#             FR26/FR27) → ready-for-dev. LAST story of Epic 6. FR26: three append-only AppConfig
+#             fields (price/fundamentals/fx fallback provider — wire names, validated); primary
+#             stays the global preferred_provider; effective chain per field = [primary]+[fallback]
+#             deduped + CAPABILITY-filtered (declared table: twelvedata serves NO fundamentals —
+#             7.4's by-design None fields would never error-trigger failover, so incapable members
+#             are skipped up front). Worker fails over on EVERY ProviderError (incl. TickerNotFound
+#             — symbol coverage differs — and key errors); per-member keys resolved AT ENQUEUE
+#             (worker never touches the keychain); last error surfaces through the unchanged 3.5
+#             notice mapping. Effective provider RECORDED with NO contract change (a Provenance
+#             field was REJECTED: 5.3's deny_unknown_fields makes even additive contract fields an
+#             export/import cliff): (a) the provider-tagged dependency digest per cell — VERIFY the
+#             tag is a READABLE "{tag}:{sha}" prefix, reformat the String value if hashed in; (b)
+#             fx_rates.source stamps the EFFECTIVE member; (c) a new posture-gated fallback notice
+#             when effective ≠ primary. FR27: declared per-adapter min_request_interval consts
+#             (twelvedata 7500ms free 8/min; eodhd 200ms courtesy) enforced in the ONE worker loop
+#             (per-tag last-Instant; enqueue sites untouched — N per-ticker jobs stay the batch
+#             shape); Quota retry_after honored bounded (min(retry,30s), ONE retry, then advance).
+#             Pacing/retry decisions = PURE fns (delay_before/quota_wait), no sleep-based tests;
+#             Instant not the journal clock (ADD15 governs journal facts only). Réglages: three
+#             « Repli » chip rows (capability-disabled chip for twelvedata fundamentals). Scope
+#             OUT: bulk endpoints (issue if wanted), per-field primaries, background fetches
+#             (FR65 manual-only), retry persistence, new adapters. ingestion+app ONLY — core/
+#             contract/persistence/report pinned. 4 open Qs with defaults.
 # 2026-07-03: story 6-8 review complete → done. 3-layer review (Blind/Edge + Auditor stopped mid-run
 #             after its verifications landed — floors/pinned/tests/issue #98 confirmed; it converged
 #             on the same zone-rendering finding): 0 decision · 8 patch · 1 defer · ~7 dismiss. All 8
@@ -532,7 +596,7 @@ development_status:
   epic-5-retrospective: done
 
   # ── Epic 6: Multi-portfolio, multi-currency & full risk overlay [P2] (story outlines) ──
-  epic-6: in-progress
+  epic-6: done
   6-1-multiple-portfolios-one-per-bank: done
   6-2-multi-currency-holdings: done
   6-3-transaction-ledger-partial-sells-weighted-average-cost-basis: done
@@ -541,7 +605,7 @@ development_status:
   6-6-capital-at-risk-per-currency-bank-global: done
   6-7-concentration-check-diversify-by-size: done
   6-8-replacement-candidate-surfacing-on-sell: done
-  6-9-provider-fallback-chain-rate-limit-batching: backlog
+  6-9-provider-fallback-chain-rate-limit-batching: done
   epic-6-retrospective: optional
 
   # ── Epic 7: Comparison, health review, screening & reports [P3] (story outlines) ──
