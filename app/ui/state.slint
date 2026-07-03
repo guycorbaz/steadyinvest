@@ -57,6 +57,36 @@ export struct BankCarRow {
     unavailable: bool,
 }
 
+// Story 6.7 (FR45): one security's share of the TOTAL invested capital, aggregated across all
+// banks and currencies. `amount`/`share` are formatted display strings in the reference currency;
+// `flagged` marks a share near/above the configured threshold (a neutral murmur, ink only);
+// `missing` names the absent pair(s) when the figure could not convert ("" otherwise).
+export struct ConcentrationLine {
+    ticker: string,
+    amount: string,
+    share: string,
+    flagged: bool,
+    missing: string,
+}
+
+// Story 6.7: one size class of the diversify-by-size mix. `class-key` crosses as a key
+// ("small" | "medium" | "large" — translated at render, the zone-key pattern); `share` is the
+// actual portfolio share ("" when absent), `target` the configured anchor.
+export struct SizeMixLine {
+    class-key: string,
+    share: string,
+    target: string,
+}
+
+// Story 6.7: one held security that could NOT be classified by size — an honest bucket, never a
+// default class. `reason-key` crosses as a key ("no-study" | "no-sales" | "missing-rate" |
+// "unconvertible"); `missing` names the pair for "missing-rate" ("" otherwise).
+export struct UnclassifiedLine {
+    ticker: string,
+    reason-key: string,
+    missing: string,
+}
+
 // Story 6.5 (FR28): the FX-rates surface — stored rates + the two acquisition paths (provider
 // refresh, user-initiated only; manual entry). NO conversion happens here (consolidation = 6.6).
 export global Fx {
@@ -585,6 +615,20 @@ export global Prefs {
     // Story 6.4 (FR41): the default dividend withholding rate in percent (mirrors
     // AppConfig.withholding_rate_pct_or_default — always a value, 35 = CH impôt anticipé).
     in-out property <string> withholding-rate-pct;
+    // ── Story 6.7 (FR45) — concentration threshold + the diversify-by-size table, mirrored from
+    //    the validated AppConfig accessors (always effective values, defaults when unset). The
+    //    commits are validated in Rust; a refusal names itself in `risk-settings-status` and
+    //    writes nothing (the table commits whole or not at all). ──
+    in-out property <string> concentration-threshold-pct;
+    in-out property <string> size-small-max;
+    in-out property <string> size-medium-max;
+    in-out property <string> size-target-small-pct;
+    in-out property <string> size-target-medium-pct;
+    in-out property <string> size-target-large-pct;
+    in-out property <string> risk-settings-status;
+    callback concentration-threshold-pct-changed(string); // "" resets to the default (50)
+    // small-max, medium-max, target-small, target-medium, target-large ("" = that field's default)
+    callback size-table-changed(string, string, string, string, string);
     // ── Story 5.3 — whole-journal export / import (FR60) ──
     // The latest neutral outcome of an export/import (with counts on a successful import), set by Rust.
     in-out property <string> journal-status;
@@ -786,6 +830,33 @@ export global Holdings {
     in-out property <string> consolidation-global-pct;
     in-out property <string> consolidation-missing;
     in-out property <string> consolidation-rates;
+    // ── Story 6.7 (FR45): concentration on the TOTAL invested capital + the diversify-by-size
+    //    mix. Rows are per SECURITY (aggregated across banks/currencies), largest share first;
+    //    `concentration-missing` names the pairs when the denominator is absent;
+    //    `concentration-unavailable` marks a failed read (an absence, never a zero state);
+    //    `concentration-rates` is the FR28 footnote for pairs not already named above. The
+    //    threshold / boundary / target mirrors are canonical validated strings pushed from
+    //    app-config (startup + Réglages change) — `refresh_holdings` bakes them at render time
+    //    (the reference-currency pattern). ──
+    in-out property <[ConcentrationLine]> concentration-rows;
+    in-out property <bool> concentration-unavailable;
+    // true when securities are listed but the shares' denominator is unusable: the total could
+    // not be formed (missing pair named in `concentration-missing`, or a checked overflow when
+    // it is ""), or the total is present but nonpositive (all-zero-cost positions).
+    in-out property <bool> concentration-global-absent;
+    in-out property <string> concentration-missing;
+    in-out property <string> concentration-rates;
+    in-out property <[SizeMixLine]> size-mix-rows;
+    in-out property <[UnclassifiedLine]> size-unclassified-rows;
+    in-out property <string> concentration-threshold-pct: "50";
+    // The threshold's locale-formatted DISPLAY spelling (the murmur line shows it beside
+    // locale-formatted shares; the canonical string above is the parse source, never shown).
+    in-out property <string> concentration-threshold-display: "50";
+    in-out property <string> size-small-max: "1000000000";
+    in-out property <string> size-medium-max: "10000000000";
+    in-out property <string> size-target-small-pct: "25";
+    in-out property <string> size-target-medium-pct: "50";
+    in-out property <string> size-target-large-pct: "25";
     // transaction id, date, quantity, unit price, fees, rationale → applied? (kind/currency are not editable)
     callback update-transaction(string, string, string, string, string, string) -> bool;
     callback delete-transaction(string); // transaction id

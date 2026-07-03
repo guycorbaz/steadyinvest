@@ -191,6 +191,16 @@ pub const MSG_FX_INVALID_CURRENCY: &str =
 pub const MSG_FX_FUTURE_DATE: &str =
     "La date est postérieure à aujourd'hui ; rien n'a été enregistré.";
 
+/// Risk-settings copy (Story 6.7, FR45) — fact-stating, posture-gated. Raised when the
+/// concentration threshold is not a percentage strictly between 0 and 100; nothing is written.
+pub const MSG_CONCENTRATION_INVALID: &str =
+    "Le seuil de concentration doit être un pourcentage entre 0 et 100 ; rien n'a été enregistré.";
+/// Raised when the diversify-by-size table is malformed: a sales boundary is not a strictly
+/// positive number, the small boundary is not below the medium one, or a target share lies
+/// outside (0, 100]; nothing is written (the table commits whole or not at all).
+pub const MSG_SIZE_TABLE_INVALID: &str =
+    "Les bornes doivent être des nombres positifs croissants et les cibles des pourcentages entre 0 et 100 ; rien n'a été enregistré.";
+
 /// Substitute the counts into [`MSG_FX_REFRESHED`].
 pub fn fx_refreshed_message(landed: usize, total: usize) -> String {
     MSG_FX_REFRESHED
@@ -485,6 +495,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_FX_JOURNAL_CHANGED,
     MSG_FX_INVALID_CURRENCY,
     MSG_FX_FUTURE_DATE,
+    MSG_CONCENTRATION_INVALID,
+    MSG_SIZE_TABLE_INVALID,
     MSG_PORTFOLIO_INVALID_NAME,
     MSG_PORTFOLIO_HAS_HOLDINGS,
     MSG_PORTFOLIO_LAST,

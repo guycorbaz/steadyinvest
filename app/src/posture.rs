@@ -617,9 +617,19 @@ mod tests {
         // header template, the three per-bank line variants, the two global-total variants, the
         // global-missing template, the rates footnote): +8 = 364. Its review adds the two
         // plain-« indisponible » variants (per-bank + global — an overflow/read-failure absence
-        // must name itself, never render a dangling empty amount): +2 = 366. Floor strict.
+        // must name itself, never render a dangling empty amount): +2 = 366. Story 6.7 adds the
+        // Réglages « Concentration et diversification par taille » panel (title, threshold
+        // placeholder + Enregistrer, the table caption, the three class rows' labels +
+        // boundary/target placeholders, « Enregistrer la table ») and the Portefeuille
+        // concentration block (the header template, the per-security line variants incl. the
+        // near-threshold murmur, the two Parts-indisponibles variants, « Concentration
+        // indisponible », the size-mix header + line variants with the nested Petite/Moyenne/
+        // Grande nouns, the three non-classé reason templates, the rates footnote occurrence):
+        // +39 = 405. Its review adds the « conversion impossible » non-classé variant (a
+        // sales-conversion overflow must name its own reason, never « chiffre d'affaires
+        // indisponible »): +1 = 406. Floor strict.
         assert!(
-            total >= 366,
+            total >= 406,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -685,10 +695,11 @@ mod tests {
         // Story 6.5 adds the six FX notices (recorded, invalid-rate, same-currency, refreshing,
         // the refreshed-count template, no-pairs): 89 + 6 = 95; its review adds three more
         // (journal-changed-in-flight, invalid-currency [a currency problem must not be reported
-        // as a rate problem], future-date): 95 + 3 = 98.
+        // as a rate problem], future-date): 95 + 3 = 98. Story 6.7 adds the two risk-settings
+        // refusals (concentration-threshold invalid, size-table invalid): 98 + 2 = 100.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            98,
+            100,
             "state.rs message inventory changed — register the new notice"
         );
     }

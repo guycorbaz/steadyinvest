@@ -463,6 +463,118 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
+            // Story 6.7 (FR45) — the concentration threshold + the configurable diversify-by-size
+            // table (change-request): boundaries are compared against study sales CONVERTED to
+            // the reference currency, in the same unit as entered in studies; targets are the
+            // user's anchors (they need not sum to 100). Facts and thresholds — never advice.
+            size-panel := SettingsPanel {
+                title: @tr("Concentration et diversification par taille");
+                property <string> draft-threshold: Prefs.concentration-threshold-pct;
+                property <string> draft-small-max: Prefs.size-small-max;
+                property <string> draft-medium-max: Prefs.size-medium-max;
+                property <string> draft-target-small: Prefs.size-target-small-pct;
+                property <string> draft-target-medium: Prefs.size-target-medium-pct;
+                property <string> draft-target-large: Prefs.size-target-large-pct;
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    TextField {
+                        placeholder: @tr("Seuil de concentration % (vide = 50)");
+                        text <=> size-panel.draft-threshold;
+                        width: 260px;
+                    }
+                    ActionButton {
+                        label: @tr("Enregistrer");
+                        enabled: true;
+                        clicked => { Prefs.concentration-threshold-pct-changed(size-panel.draft-threshold); }
+                    }
+                }
+
+                Text {
+                    text: @tr("Bornes de chiffre d'affaires (converties en {}, même unité que les études) et cibles :", Prefs.reference-currency);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+                    Text {
+                        text: @tr("Petite — croissance anticipée > 12 %");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    TextField {
+                        placeholder: @tr("Borne petite/moyenne (vide = 1000000000)");
+                        text <=> size-panel.draft-small-max;
+                        width: 280px;
+                    }
+                    TextField {
+                        placeholder: @tr("Cible % (vide = 25)");
+                        text <=> size-panel.draft-target-small;
+                        width: 160px;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+                    Text {
+                        text: @tr("Moyenne — croissance anticipée 7 – 12 %");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    TextField {
+                        placeholder: @tr("Borne moyenne/grande (vide = 10000000000)");
+                        text <=> size-panel.draft-medium-max;
+                        width: 280px;
+                    }
+                    TextField {
+                        placeholder: @tr("Cible % (vide = 50)");
+                        text <=> size-panel.draft-target-medium;
+                        width: 160px;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+                    Text {
+                        text: @tr("Grande — croissance anticipée 5 – 7 %");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    TextField {
+                        placeholder: @tr("Cible % (vide = 25)");
+                        text <=> size-panel.draft-target-large;
+                        width: 160px;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    ActionButton {
+                        label: @tr("Enregistrer la table");
+                        enabled: true;
+                        clicked => {
+                            Prefs.size-table-changed(
+                                size-panel.draft-small-max,
+                                size-panel.draft-medium-max,
+                                size-panel.draft-target-small,
+                                size-panel.draft-target-medium,
+                                size-panel.draft-target-large);
+                        }
+                    }
+                }
+                if Prefs.risk-settings-status != "": Text {
+                    text: Prefs.risk-settings-status;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+
             // Story 6.5 (FR28) — dated, source-aware exchange rates: the stored list, the
             // user-initiated provider refresh (FR65), and manual entry (source « manuel »).
             // NO conversion happens here — consolidation is Story 6.6.

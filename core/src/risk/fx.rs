@@ -1,10 +1,11 @@
 //! The FX conversion primitive (Story 6.5, FR28) — pure, explicit, consolidation-only.
 //!
 //! FR28's rule is structural, not advisory: every study and every per-currency figure stays in
-//! its NATIVE currency; conversion happens **only at the consolidation points** (the Story-6.6
-//! per-currency → per-bank → global roll-up). This module is deliberately tiny — one checked
-//! multiply — so the rule stays auditable: grep [`convert`]'s callers; in Story 6.5 there are
-//! none outside tests. The CALLER picks the dated, source-aware rate (from the journal's
+//! its NATIVE currency; conversion happens **only at the consolidation points** — the Story-6.6
+//! per-currency → per-bank → global roll-up and the Story-6.7 concentration/diversify-by-size
+//! read (both journal-wide `app::state` reads). This module is deliberately tiny — one checked
+//! multiply — so the rule stays auditable: grep [`convert`]'s callers; outside tests they all
+//! live in those enumerated consolidation reads. The CALLER picks the dated, source-aware rate (from the journal's
 //! `fx_rates` rows) and remains accountable for showing its date and source; nothing here (or
 //! anywhere else) selects, inverts or interpolates a rate implicitly.
 //!

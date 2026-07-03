@@ -18,7 +18,8 @@ use crate::wiring::fetch::resolve_provider_key;
 use crate::wiring::{persist, Session};
 use crate::{fetch, state, viewmodel};
 use crate::{
-    BankCarRow, CapitalAtRiskRow, HoldingRow, Holdings, LedgerRow, MainWindow, PortfolioRow,
+    BankCarRow, CapitalAtRiskRow, ConcentrationLine, HoldingRow, Holdings, LedgerRow, MainWindow,
+    PortfolioRow, SizeMixLine, UnclassifiedLine,
 };
 
 /// Transient (NOT persisted) per-ticker price-refresh freshness for the holdings register (Story
@@ -295,6 +296,174 @@ pub(crate) fn refresh_holdings(
             .map(|r| {
                 // No prose baked into Rust (posture — the @tr scan cannot see it): the entry is
                 // pure data — pair, rate, then "(date, source)".
+                format!(
+                    "{} → {} {} ({}, {})",
+                    r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+            .into()
+    } else {
+        SharedString::new()
+    });
+
+    // Story 6.7 (FR45): concentration against the TOTAL invested capital + the diversify-by-size
+    // mix. The threshold/boundary mirrors are canonical validated strings pushed from app-config
+    // (startup + Réglages change) — parsed here with the pinned defaults as the safety net (they
+    // are Rust-written, so the fallback is unreachable through the UI).
+    let parse_or = |s: String, default: &str| {
+        rust_decimal::Decimal::from_str_exact(&s)
+            .or_else(|_| rust_decimal::Decimal::from_str_exact(default))
+            .unwrap_or_default()
+    };
+    let small_max = parse_or(
+        holdings.get_size_small_max().to_string(),
+        crate::config::DEFAULT_SIZE_SMALL_MAX,
+    );
+    let medium_max = parse_or(
+        holdings.get_size_medium_max().to_string(),
+        crate::config::DEFAULT_SIZE_MEDIUM_MAX,
+    );
+    let threshold = parse_or(
+        holdings.get_concentration_threshold_pct().to_string(),
+        crate::config::DEFAULT_CONCENTRATION_THRESHOLD_PCT,
+    );
+    let div = state.journal_diversification(&reference_currency, small_max, medium_max);
+    // The threshold and the targets render BESIDE locale-formatted shares — same locale path
+    // (2026-07-03 review: never two decimal conventions in one sentence). The canonical config
+    // strings stay in their mirror properties; these are the display spellings.
+    let fmt_pct = |d: rust_decimal::Decimal| {
+        viewmodel::format::format_scaled(d, DisplayField::Percent, format)
+    };
+    holdings.set_concentration_threshold_display(fmt_pct(threshold).into());
+    let fmt_target = |raw: slint::SharedString| -> SharedString {
+        rust_decimal::Decimal::from_str_exact(&raw)
+            .map(&fmt_pct)
+            .unwrap_or_else(|_| raw.to_string())
+            .into()
+    };
+    // Hidden when there is nothing held anywhere (rows empty, read fine) — an empty portfolio
+    // needs no concentration facts.
+    let show_div = !div.rows.is_empty() || div.unavailable;
+    let conc_rows: Vec<ConcentrationLine> = if show_div {
+        div.rows
+            .iter()
+            .map(|r| {
+                if !r.missing_pairs.is_empty() {
+                    return ConcentrationLine {
+                        ticker: r.ticker.clone().into(),
+                        amount: SharedString::new(),
+                        share: SharedString::new(),
+                        flagged: false,
+                        missing: r.missing_pairs.join(" · ").into(),
+                    };
+                }
+                match r.invested {
+                    Some(invested) => {
+                        let share = r.share_pct.map(|s| {
+                            viewmodel::format::format_scaled(s, DisplayField::Percent, format)
+                        });
+                        // The FR45 murmur: near/above the configured majority share — a neutral
+                        // fact stated in the line's own words, never a hue (colour budget).
+                        let flagged = r
+                            .share_pct
+                            .map(|s| steadyinvest_core::risk::concentration_flagged(s, threshold))
+                            .unwrap_or(false);
+                        ConcentrationLine {
+                            ticker: r.ticker.clone().into(),
+                            amount: format!(
+                                "{} {}",
+                                viewmodel::format::format_scaled(
+                                    invested,
+                                    DisplayField::Price,
+                                    format
+                                ),
+                                reference_currency
+                            )
+                            .into(),
+                            share: share.unwrap_or_default().into(),
+                            flagged,
+                            missing: SharedString::new(),
+                        }
+                    }
+                    // Absent for a non-nameable reason (checked overflow) — a plain
+                    // « indisponible » line, never a dangling empty amount (the 6.6 rule).
+                    None => ConcentrationLine {
+                        ticker: r.ticker.clone().into(),
+                        amount: SharedString::new(),
+                        share: SharedString::new(),
+                        flagged: false,
+                        missing: SharedString::new(),
+                    },
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    holdings.set_concentration_rows(ModelRc::new(VecModel::from(conc_rows)));
+    holdings.set_concentration_unavailable(div.unavailable);
+    // Also fires on a PRESENT nonpositive total (all-zero-cost positions): the shares are
+    // undefined then, and their absence must state itself (2026-07-03 review), never render
+    // as rows that silently lack their percentages.
+    let global_positive = div
+        .global_invested
+        .map(|g| g > rust_decimal::Decimal::ZERO)
+        .unwrap_or(false);
+    holdings.set_concentration_global_absent(show_div && !div.unavailable && !global_positive);
+    holdings.set_concentration_missing(if show_div {
+        div.missing_pairs.join(" · ").into()
+    } else {
+        SharedString::new()
+    });
+    let mix_rows: Vec<SizeMixLine> = if show_div && !div.unavailable {
+        [
+            ("small", &div.small, holdings.get_size_target_small_pct()),
+            ("medium", &div.medium, holdings.get_size_target_medium_pct()),
+            ("large", &div.large, holdings.get_size_target_large_pct()),
+        ]
+        .into_iter()
+        .map(|(key, slot, target)| SizeMixLine {
+            class_key: key.into(),
+            share: slot.share_pct.map(&fmt_pct).unwrap_or_default().into(),
+            target: fmt_target(target),
+        })
+        .collect()
+    } else {
+        Vec::new()
+    };
+    holdings.set_size_mix_rows(ModelRc::new(VecModel::from(mix_rows)));
+    let unclassified_rows: Vec<UnclassifiedLine> = if show_div {
+        div.unclassified
+            .iter()
+            .map(|u| {
+                let (reason_key, missing) = match &u.reason {
+                    state::UnclassifiedReason::NoStudy => ("no-study", SharedString::new()),
+                    state::UnclassifiedReason::NoSales => ("no-sales", SharedString::new()),
+                    state::UnclassifiedReason::MissingRate(pair) => {
+                        ("missing-rate", pair.clone().into())
+                    }
+                    state::UnclassifiedReason::Unconvertible => {
+                        ("unconvertible", SharedString::new())
+                    }
+                };
+                UnclassifiedLine {
+                    ticker: u.ticker.clone().into(),
+                    reason_key: reason_key.into(),
+                    missing,
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    holdings.set_size_unclassified_rows(ModelRc::new(VecModel::from(unclassified_rows)));
+    // The FR28 footnote — pure data entries, no prose baked into Rust (posture).
+    holdings.set_concentration_rates(if show_div {
+        div.rates_used
+            .iter()
+            .map(|r| {
                 format!(
                     "{} → {} {} ({}, {})",
                     r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source

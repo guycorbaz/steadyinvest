@@ -39,7 +39,70 @@
 # 7 [P3] / 8 [V] are deliberate story outlines (refine with create-epics-and-stories per phase).
 
 generated: 2026-06-09
-last_updated: 2026-07-02
+last_updated: 2026-07-03
+# 2026-07-03: story 6-7 review complete → done. 3-layer adversarial review (Blind/Edge/Acceptance,
+#             0 failed layers; AC verdicts PASS ×6 + AC7 PARTIAL→resolved): 0 decision · 8 patch ·
+#             4 defer · 9 dismiss. All 8 patches applied + gates re-green (710 workspace tests,
+#             clippy -D --locked 0, deny ok, smoke 124, pinned surfaces empty): P1 HIGH a half-
+#             specified size-table commit (one bound entered, other "") was accepted then SILENTLY
+#             served the whole default pair — bounds now resolve independently (entered-or-default,
+#             the commit's own semantics) then the EFFECTIVE pair must order (+ test); P2 MED
+#             classification-only missing pairs no longer blamed for the shares' denominator (named
+#             on their « non classé » row only, + assertion); P3 MED nonpositive latest sales
+#             refuses to classify (was: confident Small; + test) and a sales-conversion overflow is
+#             its OWN named reason « conversion impossible » (new Unconvertible variant, @tr 405→406);
+#             P4 MED threshold + targets now locale-formatted beside the shares (no mixed decimal
+#             conventions; new concentration-threshold-display prop); P5 MED per-call rate memo (no
+#             N identical DB reads per render); P6 LOW a PRESENT nonpositive total now states
+#             « Parts indisponibles » (was: silently absent shares); P7 LOW a failed list_portfolios
+#             read → « Concentration indisponible » (was: vanished block); P8 LOW the FR28 pin doc in
+#             core/risk/fx.rs enumerates the 6.7 read. Deferred → GitHub issues: #93 Réglages drafts
+#             never re-seed after commit (RAIL-WIDE, also 4.5/6.4 panels); #94 study mutations never
+#             re-render holdings surfaces (PRE-EXISTING since 4.4 — zones stale too); #95 get_study/
+#             list_studies IO-error-vs-absence conflation (rail-wide); #96 size-table refusal names
+#             no field. Dismissed incl. wording/placeholder house precedents, the documented
+#             threshold≤10 pin, and the auditor-verified denominator deviation. Epic 6: 7/9 done.
+# 2026-07-03: story 6-7 dev complete → review. Core (+108, risk overlay ONLY — core::ssg/goldens
+#             untouched): share_pct (checked), SizeClass/size_class (boundary pin TESTED: exactly-at-
+#             boundary = Medium), concentration_flagged (≥ max(threshold−10, 0)). Config: 6 append-only
+#             fields + validators/accessors — bounds validate as a PAIR, fall back WHOLE on crossed/
+#             damaged; targets fall back ALONE (anchors, not a partition). State: NEW concentration.rs
+#             journal_diversification (ONE combined read — the story's journal_concentration +
+#             journal_size_mix; deviation noted: denominator = checked sum of the per-ticker converted
+#             figures, self-consistent with the numerators and = the 6.6 global by construction, NOT
+#             extracted from the 6.6 read). One security at two banks = ONE line (proven); missing pair
+#             absents figure+denominator by name; failed bank read → WHOLE view unavailable (no honest
+#             partial for a share); non classé with named reason (no-study/no-sales/missing-rate),
+#             never a default class. UI: Portefeuille « Concentration » block (largest-first lines,
+#             murmur in words — ink only; Parts-indisponibles variants; size mix Petite/Moyenne/Grande
+#             actual vs cible, NO verdict language; rates footnote) + Réglages panel (threshold + table,
+#             commits WHOLE, refusals via 2 new MSG_*, drafts never clobbered); re-render on
+#             refresh_holdings + both new settings callbacks + reference-currency change; startup
+#             mirror (mirror_risk_settings). Gates: 708 workspace tests (+15), fmt/clippy -D --locked/
+#             deny green, smoke exit 124; Cargo.lock/deny.toml/contract/persistence/ingestion/report
+#             re-diff EMPTY; NO migration, NO new dep. Posture @tr 366→405 (+39), MSG 98→100 (+2).
+#             In-GUI click-through = documented partial (human/AT-SPI), as 2.1+.
+# 2026-07-03: story 6-7 created (concentration check on total capital + configurable diversify-by-size
+#             table, FR45) → ready-for-dev. Journal-wide per-SECURITY share of TOTAL invested capital
+#             (ticker uppercased, aggregated ACROSS banks/currencies — one security at two banks = ONE
+#             line, the FR45 point), converted at latest_fx_rate via core::risk::fx::convert, denominator
+#             = the 6.6 global invested (EXTRACTED from journal_capital_at_risk_consolidation, not
+#             re-derived); share division + SizeClass classification = NEW pure core::risk helpers
+#             (checked, never unchecked Decimal ops on the render thread — 6.6 lesson). Configured
+#             majority-share threshold (AppConfig, default "50"; "warns near" pinned = murmur from
+#             threshold−10 pts) + the change-request_guy.md diversify-by-size table (2 sales boundaries
+#             $1B/$10B + 3 target % 25/50/25, ALL configurable app-config; growth-rate column = static
+#             @tr display ONLY). Size = latest Some-sales year of the ticker's most-recent study
+#             (study_id_for_ticker join, RAW app-side read — NO core::normalize in a portfolio read),
+#             converted to reference; no study/no sales/missing rate → « non classé » with named reason,
+#             NEVER a default class, never a confident zero. UI: « Concentration » block under the 6.6
+#             consolidation block + « Diversification par taille » Réglages panel beside the trailing-
+#             stop threshold; re-render on refresh_holdings AND on settings changes (6.6 HIGH lesson:
+#             every mutation path re-renders). Neutral throughout (facts vs targets side by side, no
+#             surpondéré-style verdict language, no colour spend). NO migration, NO new dependency,
+#             NO schema change (9 tables frozen); core::ssg/goldens untouched; posture floors (@tr 366,
+#             MSG 98) bump by exact counts. Scope OUT: FR48 replacement/re-concentration (6.8), provider
+#             fallback (6.9), Health Review/growth comparison (7.2), rate staleness (#90).
 # 2026-06-29: story 5-3 created (export/import the WHOLE journal, FR60) → ready-for-dev. Scope decided
 #             with Guy = ALL journaled entities (faithful FR60), not studies-only: studies (full) +
 #             watchlist + portfolio(s) + holdings (incl. soft-deleted/sold) + sell transactions, in one
@@ -415,7 +478,7 @@ development_status:
   6-4-dividends-gross-study-net-reinvestable: done
   6-5-fx-acquisition-consolidation: done
   6-6-capital-at-risk-per-currency-bank-global: done
-  6-7-concentration-check-diversify-by-size: backlog
+  6-7-concentration-check-diversify-by-size: done
   6-8-replacement-candidate-surfacing-on-sell: backlog
   6-9-provider-fallback-chain-rate-limit-batching: backlog
   epic-6-retrospective: optional

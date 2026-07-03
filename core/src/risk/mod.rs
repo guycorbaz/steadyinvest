@@ -110,6 +110,56 @@ pub fn total_invested(positions: &[PositionRisk]) -> Decimal {
         .fold(Decimal::ZERO, |acc, term| acc.saturating_add(term))
 }
 
+/// One value's **share of a whole, in percent** (Story 6.7, FR45): `part / whole × 100`, exact
+/// [`Decimal`]. `None` when the whole is zero or negative (no meaningful share) or when a checked
+/// operation overflows — absent, never wrong (and never an unchecked `/`/`*` on a render path,
+/// the 6.6 review rule).
+pub fn share_pct(part: Decimal, whole: Decimal) -> Option<Decimal> {
+    if whole <= Decimal::ZERO {
+        return None;
+    }
+    part.checked_div(whole)?.checked_mul(Decimal::ONE_HUNDRED)
+}
+
+/// A company's **size class** from its sales (Story 6.7 — the configurable diversify-by-size
+/// table from `change-request_guy.md`): Small / Medium / Large.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeClass {
+    /// Sales strictly below the small/medium boundary ("less than $1 billion" in the CR).
+    Small,
+    /// Sales from the small/medium boundary up to **and including** the medium/large boundary.
+    Medium,
+    /// Sales strictly above the medium/large boundary ("more than $10 billion").
+    Large,
+}
+
+/// Classify `sales` against the two configured boundaries (Story 6.7). Boundary pin (documented,
+/// tested): the CR's ranges are "less than X" / "X – Y" / "more than Y", so a value **exactly at**
+/// a boundary is **Medium** — `sales < small_max` → Small; `sales ≤ medium_max` → Medium; else
+/// Large. The caller guarantees `small_max < medium_max` (config validation); on violated inputs
+/// the same comparisons still yield a deterministic class (no panic path).
+pub fn size_class(sales: Decimal, small_max: Decimal, medium_max: Decimal) -> SizeClass {
+    if sales < small_max {
+        SizeClass::Small
+    } else if sales <= medium_max {
+        SizeClass::Medium
+    } else {
+        SizeClass::Large
+    }
+}
+
+/// Whether a holding's share of total invested capital is **near or above** the configured
+/// majority-share threshold (Story 6.7, FR45 "warns near a configured majority share"): flagged
+/// from **10 points below** the threshold upward, floored at zero (a threshold ≤ 10 flags every
+/// positive share — the user chose a very low majority bar; over-warning is the honest reading).
+/// A pure state — the app surfaces the fact as a neutral murmur, never an instruction.
+pub fn concentration_flagged(share_pct: Decimal, threshold_pct: Decimal) -> bool {
+    share_pct
+        >= threshold_pct
+            .saturating_sub(Decimal::TEN)
+            .max(Decimal::ZERO)
+}
+
 /// Which neutral trigger a holding fires (Story 4.7, FR46/FR47). The app surfaces the fact and
 /// offers manual actions — it **never acts on its own**.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +290,64 @@ mod tests {
             capital_at_risk(&[p]),
             Decimal::from_str_exact("30.75").unwrap()
         );
+    }
+
+    // ── Story 6.7 — concentration share + size classification (FR45) ──
+
+    #[test]
+    fn share_pct_is_exact_and_absent_on_a_zero_or_negative_whole() {
+        assert_eq!(share_pct(d(25), d(100)), Some(d(25)));
+        // Exact decimal: 1/3 of 300 → 100, 1/8 of 200 → 12.5 — no float rounding.
+        assert_eq!(
+            share_pct(d(25), d(200)),
+            Some(Decimal::from_str_exact("12.5").unwrap())
+        );
+        assert_eq!(share_pct(d(10), d(0)), None, "zero whole → absent");
+        assert_eq!(share_pct(d(10), d(-5)), None, "negative whole → absent");
+        // A checked overflow is absent, never wrong (Decimal::MAX × 100 overflows).
+        assert_eq!(share_pct(Decimal::MAX, Decimal::ONE), None);
+    }
+
+    #[test]
+    fn size_class_pins_the_boundary_inclusive_side() {
+        let small_max = Decimal::from(1_000_000_000i64);
+        let medium_max = Decimal::from(10_000_000_000i64);
+        assert_eq!(
+            size_class(d(999_999_999), small_max, medium_max),
+            SizeClass::Small
+        );
+        // EXACTLY at a boundary is Medium ("less than X" / "X – Y" / "more than Y").
+        assert_eq!(
+            size_class(small_max, small_max, medium_max),
+            SizeClass::Medium
+        );
+        assert_eq!(
+            size_class(medium_max, small_max, medium_max),
+            SizeClass::Medium
+        );
+        assert_eq!(
+            size_class(medium_max + Decimal::ONE, small_max, medium_max),
+            SizeClass::Large
+        );
+        assert_eq!(size_class(d(0), small_max, medium_max), SizeClass::Small);
+    }
+
+    #[test]
+    fn concentration_flags_from_ten_points_below_the_threshold() {
+        let threshold = d(50);
+        assert!(!concentration_flagged(d(39), threshold));
+        assert!(
+            concentration_flagged(d(40), threshold),
+            "threshold − 10 flags"
+        );
+        assert!(concentration_flagged(d(50), threshold), "at the threshold");
+        assert!(
+            concentration_flagged(d(80), threshold),
+            "above the threshold"
+        );
+        // A threshold ≤ 10 floors the band at zero — every positive share flags.
+        assert!(concentration_flagged(d(1), d(5)));
+        assert!(concentration_flagged(d(0), d(5)), "band floored at zero");
     }
 
     // ── Story 4.7 — the neutral trigger state + the FR47 stop-priority rule ──

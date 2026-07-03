@@ -37,6 +37,35 @@ pub fn is_valid_withholding_rate_pct(s: &str) -> bool {
     rust_decimal::Decimal::from_str_exact(s)
         .is_ok_and(|r| !r.is_sign_negative() && r <= rust_decimal::Decimal::ONE_HUNDRED)
 }
+/// The pinned default **concentration threshold** in percent (Story 6.7, FR45): the "configured
+/// majority share" — 50 %. The Portefeuille concentration block murmurs from 10 points below it
+/// (`core::risk::concentration_flagged`). Configurable in Réglages.
+pub const DEFAULT_CONCENTRATION_THRESHOLD_PCT: &str = "50";
+
+/// The pinned default diversify-by-size table (Story 6.7 — `change-request_guy.md`): the two
+/// sales boundaries ($1 billion / $10 billion, compared in the reference currency, same unit as
+/// entered in studies) and the three target portfolio shares (25 / 50 / 25 %). All configurable.
+pub const DEFAULT_SIZE_SMALL_MAX: &str = "1000000000";
+pub const DEFAULT_SIZE_MEDIUM_MAX: &str = "10000000000";
+pub const DEFAULT_SIZE_TARGET_SMALL_PCT: &str = "25";
+pub const DEFAULT_SIZE_TARGET_MEDIUM_PCT: &str = "50";
+pub const DEFAULT_SIZE_TARGET_LARGE_PCT: &str = "25";
+
+/// Whether `s` is a well-formed sales boundary for the diversify-by-size table (Story 6.7): an
+/// exact, strictly positive decimal. A zero/negative/garbage boundary is rejected (the classes
+/// would collapse); a nonpositive parseable value must not classify confidently (the 6.6 rule).
+pub fn is_valid_size_bound(s: &str) -> bool {
+    rust_decimal::Decimal::from_str_exact(s.trim())
+        .is_ok_and(|b| b.is_sign_positive() && !b.is_zero())
+}
+
+/// Whether `s` is a well-formed size-class target share (Story 6.7): an exact decimal in
+/// `(0, 100]`. The three targets need NOT sum to 100 — they are the user's per-class anchors
+/// from the change request, not a partition the app enforces.
+pub fn is_valid_size_target_pct(s: &str) -> bool {
+    rust_decimal::Decimal::from_str_exact(s.trim())
+        .is_ok_and(|p| p > rust_decimal::Decimal::ZERO && p <= rust_decimal::Decimal::ONE_HUNDRED)
+}
 /// Sanity bounds for a persisted size — outside means a damaged value, fall back.
 const MIN_SANE_WINDOW: u32 = 320;
 const MAX_SANE_WINDOW: u32 = 16_384;
@@ -156,6 +185,30 @@ pub struct AppConfig {
     /// read through [`AppConfig::withholding_rate_pct_or_default`] (validate before trust).
     #[serde(default)]
     pub withholding_rate_pct: Option<String>,
+    /// The **concentration threshold** in percent (Story 6.7, FR45) — the configured majority
+    /// share the Portefeuille block warns near. `None` = the pinned default
+    /// [`DEFAULT_CONCENTRATION_THRESHOLD_PCT`] (50). Append-only `#[serde(default)]`; read through
+    /// [`AppConfig::concentration_threshold_pct_or_default`] (validate before trust).
+    #[serde(default)]
+    pub concentration_threshold_pct: Option<String>,
+    /// The diversify-by-size **sales boundaries** (Story 6.7 — `change-request_guy.md`): the
+    /// small/medium and medium/large cut-offs, compared against study sales converted to the
+    /// reference currency (same unit as entered in studies). `None` = the pinned $1B / $10B
+    /// defaults. Append-only; read through [`AppConfig::size_bounds_or_default`], which also
+    /// enforces `small < medium` (a crossed pair falls back whole — half a table is not a table).
+    #[serde(default)]
+    pub size_small_max: Option<String>,
+    #[serde(default)]
+    pub size_medium_max: Option<String>,
+    /// The per-class **target portfolio shares** in percent (Story 6.7). `None` = the pinned
+    /// 25 / 50 / 25 defaults. Targets are the user's anchors — they need not sum to 100 and the
+    /// app never rebalances them. Read through [`AppConfig::size_targets_or_default`].
+    #[serde(default)]
+    pub size_target_small_pct: Option<String>,
+    #[serde(default)]
+    pub size_target_medium_pct: Option<String>,
+    #[serde(default)]
+    pub size_target_large_pct: Option<String>,
 }
 
 /// Whether `s` is a well-formed trailing-stop percentage: an exact decimal strictly inside `(0, 100)`
@@ -210,6 +263,12 @@ impl Default for AppConfig {
             recent_journals: Vec::new(),
             active_portfolio_id: None,
             withholding_rate_pct: None,
+            concentration_threshold_pct: None,
+            size_small_max: None,
+            size_medium_max: None,
+            size_target_small_pct: None,
+            size_target_medium_pct: None,
+            size_target_large_pct: None,
         }
     }
 }
@@ -283,6 +342,66 @@ impl AppConfig {
             .filter(|s| is_valid_withholding_rate_pct(s))
             .map(str::to_string)
             .unwrap_or_else(|| DEFAULT_WITHHOLDING_RATE_PCT.to_string())
+    }
+
+    /// The concentration threshold in percent (Story 6.7, FR45): the persisted value when it is
+    /// an exact decimal strictly inside `(0, 100)` (the trailing-stop shape — a 0 %/100 %
+    /// majority bar is meaningless), else [`DEFAULT_CONCENTRATION_THRESHOLD_PCT`] (50). Trimmed,
+    /// parseable verbatim (the 6.4 accessor lesson).
+    pub fn concentration_threshold_pct_or_default(&self) -> String {
+        self.concentration_threshold_pct
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| is_valid_trailing_stop_pct(s))
+            .map(str::to_string)
+            .unwrap_or_else(|| DEFAULT_CONCENTRATION_THRESHOLD_PCT.to_string())
+    }
+
+    /// The diversify-by-size sales boundaries `(small_max, medium_max)` (Story 6.7): each bound
+    /// resolves **independently** to its persisted value when valid, else its pinned default —
+    /// the exact `""` = default semantics the Réglages commit uses (2026-07-03 review, HIGH: a
+    /// half-specified table — one bound entered, the other left unset — must NOT discard the
+    /// entered bound). The EFFECTIVE pair must then be ordered; a crossed/equal effective pair
+    /// falls back whole (never one real and one default boundary out of order). Trimmed,
+    /// parseable verbatim.
+    pub fn size_bounds_or_default(&self) -> (String, String) {
+        let one = |v: &Option<String>, default: &str| {
+            v.as_deref()
+                .map(str::trim)
+                .filter(|s| is_valid_size_bound(s))
+                .map(str::to_string)
+                .unwrap_or_else(|| default.to_string())
+        };
+        let small = one(&self.size_small_max, DEFAULT_SIZE_SMALL_MAX);
+        let medium = one(&self.size_medium_max, DEFAULT_SIZE_MEDIUM_MAX);
+        match (
+            rust_decimal::Decimal::from_str_exact(&small),
+            rust_decimal::Decimal::from_str_exact(&medium),
+        ) {
+            (Ok(sd), Ok(md)) if sd < md => (small, medium),
+            _ => (
+                DEFAULT_SIZE_SMALL_MAX.to_string(),
+                DEFAULT_SIZE_MEDIUM_MAX.to_string(),
+            ),
+        }
+    }
+
+    /// The per-class target shares `(small, medium, large)` in percent (Story 6.7). Each target
+    /// validates independently (`(0, 100]`) and falls back alone — a damaged target must not
+    /// discard the two healthy ones (they are independent anchors, not a partition).
+    pub fn size_targets_or_default(&self) -> (String, String, String) {
+        let one = |v: &Option<String>, default: &str| {
+            v.as_deref()
+                .map(str::trim)
+                .filter(|s| is_valid_size_target_pct(s))
+                .map(str::to_string)
+                .unwrap_or_else(|| default.to_string())
+        };
+        (
+            one(&self.size_target_small_pct, DEFAULT_SIZE_TARGET_SMALL_PCT),
+            one(&self.size_target_medium_pct, DEFAULT_SIZE_TARGET_MEDIUM_PCT),
+            one(&self.size_target_large_pct, DEFAULT_SIZE_TARGET_LARGE_PCT),
+        )
     }
 
     /// Persisted window size if it is sane, the default size otherwise (a 0×0 or absurd value
@@ -411,6 +530,12 @@ mod tests {
                 last_seen_version: 12,
             }],
             active_portfolio_id: Some("22222222-2222-2222-2222-222222222222".to_string()),
+            concentration_threshold_pct: Some("40".to_string()),
+            size_small_max: Some("500000000".to_string()),
+            size_medium_max: Some("5000000000".to_string()),
+            size_target_small_pct: Some("30".to_string()),
+            size_target_medium_pct: Some("40".to_string()),
+            size_target_large_pct: Some("30".to_string()),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
@@ -806,6 +931,172 @@ mod tests {
         assert!(
             !path.with_extension("json.tmp").exists(),
             "temp file cleaned up by rename"
+        );
+    }
+
+    // ── Story 6.7 (FR45) — concentration threshold + diversify-by-size table ──
+
+    #[test]
+    fn concentration_threshold_validates_and_falls_back_on_damage() {
+        let mut c = AppConfig::default();
+        assert_eq!(
+            c.concentration_threshold_pct_or_default(),
+            DEFAULT_CONCENTRATION_THRESHOLD_PCT,
+            "unset → the pinned 50"
+        );
+        c.concentration_threshold_pct = Some(" 40 ".to_string());
+        assert_eq!(c.concentration_threshold_pct_or_default(), "40", "trimmed");
+        for damaged in ["0", "100", "-5", "abc", ""] {
+            c.concentration_threshold_pct = Some(damaged.to_string());
+            assert_eq!(
+                c.concentration_threshold_pct_or_default(),
+                DEFAULT_CONCENTRATION_THRESHOLD_PCT,
+                "damaged {damaged:?} falls back"
+            );
+        }
+    }
+
+    #[test]
+    fn size_bounds_validate_as_a_pair_and_fall_back_whole() {
+        let mut c = AppConfig::default();
+        assert_eq!(
+            c.size_bounds_or_default(),
+            (
+                DEFAULT_SIZE_SMALL_MAX.to_string(),
+                DEFAULT_SIZE_MEDIUM_MAX.to_string()
+            )
+        );
+        c.size_small_max = Some("1000".to_string());
+        c.size_medium_max = Some("10000".to_string());
+        assert_eq!(
+            c.size_bounds_or_default(),
+            ("1000".to_string(), "10000".to_string()),
+            "a valid ordered pair is used verbatim (unit-agnostic — Guy may enter millions)"
+        );
+        // A CROSSED pair falls back WHOLE — never one real + one default boundary.
+        c.size_small_max = Some("10000".to_string());
+        c.size_medium_max = Some("1000".to_string());
+        assert_eq!(
+            c.size_bounds_or_default(),
+            (
+                DEFAULT_SIZE_SMALL_MAX.to_string(),
+                DEFAULT_SIZE_MEDIUM_MAX.to_string()
+            ),
+            "crossed boundaries fall back whole"
+        );
+        // An EQUAL pair is also crossed (the Medium band would be a single point below Small).
+        c.size_small_max = Some("1000".to_string());
+        c.size_medium_max = Some("1000".to_string());
+        assert_eq!(
+            c.size_bounds_or_default().0,
+            DEFAULT_SIZE_SMALL_MAX,
+            "equal boundaries fall back whole"
+        );
+        // A nonpositive/garbage bound resolves to ITS default; the effective pair then orders
+        // (-1 → 1e9 default, 10000 stays) — crossed effectively, so the pair falls back whole.
+        c.size_small_max = Some("-1".to_string());
+        c.size_medium_max = Some("10000".to_string());
+        assert_eq!(
+            c.size_bounds_or_default(),
+            (
+                DEFAULT_SIZE_SMALL_MAX.to_string(),
+                DEFAULT_SIZE_MEDIUM_MAX.to_string()
+            ),
+            "damaged small → default 1e9 crosses the entered 10000 → whole fallback"
+        );
+        assert!(!is_valid_size_bound("0"));
+        assert!(!is_valid_size_bound("abc"));
+        assert!(is_valid_size_bound(" 1000000000 "));
+    }
+
+    #[test]
+    fn a_half_specified_bounds_pair_keeps_the_entered_bound() {
+        // 2026-07-03 review (HIGH): one bound entered, the other left at default ("" → None) —
+        // the entered bound must be SERVED, not silently discarded for the whole default pair
+        // (the Réglages commit validated and reported success on exactly this shape).
+        let c = AppConfig {
+            size_medium_max: Some("5000000000".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            c.size_bounds_or_default(),
+            (DEFAULT_SIZE_SMALL_MAX.to_string(), "5000000000".to_string()),
+            "(unset, entered) serves default small + the entered medium"
+        );
+        let c = AppConfig {
+            size_small_max: Some("500000000".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            c.size_bounds_or_default(),
+            ("500000000".to_string(), DEFAULT_SIZE_MEDIUM_MAX.to_string()),
+            "(entered, unset) serves the entered small + default medium"
+        );
+        // An entered bound that crosses the OTHER side's default still falls back whole (the
+        // commit refuses this shape; a hand-edited config must not classify against it).
+        let c = AppConfig {
+            size_small_max: Some("20000000000".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            c.size_bounds_or_default(),
+            (
+                DEFAULT_SIZE_SMALL_MAX.to_string(),
+                DEFAULT_SIZE_MEDIUM_MAX.to_string()
+            ),
+            "small above the default medium is a crossed effective pair"
+        );
+    }
+
+    #[test]
+    fn size_targets_validate_independently() {
+        let mut c = AppConfig::default();
+        assert_eq!(
+            c.size_targets_or_default(),
+            ("25".to_string(), "50".to_string(), "25".to_string())
+        );
+        c.size_target_small_pct = Some("30".to_string());
+        c.size_target_medium_pct = Some("garbage".to_string());
+        c.size_target_large_pct = Some("100".to_string());
+        assert_eq!(
+            c.size_targets_or_default(),
+            (
+                "30".to_string(),
+                DEFAULT_SIZE_TARGET_MEDIUM_PCT.to_string(),
+                "100".to_string()
+            ),
+            "a damaged target falls back ALONE (independent anchors, not a partition)"
+        );
+        assert!(!is_valid_size_target_pct("0"), "a 0 % target is rejected");
+        assert!(!is_valid_size_target_pct("101"));
+        assert!(is_valid_size_target_pct("100"), "100 is a valid anchor");
+        // The three targets need NOT sum to 100 — no cross-validation exists to test.
+    }
+
+    #[test]
+    fn old_config_without_the_size_table_loads_and_defaults_every_field() {
+        // The append-only rail (Story 6.7): a pre-6.7 config has none of the six fields. It must
+        // still load — no migration, no failure — and every accessor serves the pinned defaults.
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        std::fs::write(
+            &path,
+            r#"{ "window_width": 1280, "theme": "light", "journal_path": "/x/journal.db" }"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert!(loaded.warning.is_none());
+        assert_eq!(loaded.config.concentration_threshold_pct, None);
+        assert_eq!(
+            loaded.config.concentration_threshold_pct_or_default(),
+            DEFAULT_CONCENTRATION_THRESHOLD_PCT
+        );
+        assert_eq!(
+            loaded.config.size_bounds_or_default(),
+            (
+                DEFAULT_SIZE_SMALL_MAX.to_string(),
+                DEFAULT_SIZE_MEDIUM_MAX.to_string()
+            )
         );
     }
 
