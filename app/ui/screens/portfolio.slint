@@ -106,6 +106,132 @@ export component PortfolioScreen inherits Rectangle {
             font-size: Tokens.font-caption;
         }
 
+        // ── Story 6.8 (FR48): the replacement-candidates panel — watchlist candidates nearest
+        // to / inside their Buy zone, with neutral re-concentration FACTS. Auto-opened after a
+        // sell, or via « Candidats » on a trigger; the app surfaces facts, never « buy this one ».
+        // Ink only — the zone is stated in words (Labels nouns); no hue outside §4. ──
+        if Holdings.candidates-visible: Rectangle {
+            background: Tokens.surface;
+            border-radius: Tokens.radius;
+            border-width: Tokens.border;
+            border-color: Tokens.separator;
+
+            VerticalLayout {
+                padding: Tokens.space-12;
+                spacing: Tokens.space-8;
+                HorizontalLayout {
+                    spacing: Tokens.space-16;
+                    Text {
+                        text: Holdings.candidates-sold
+                            ? @tr("Vente enregistrée : {} — candidats de la liste de suivi", Holdings.candidates-context)
+                            : Holdings.candidates-context != ""
+                                ? @tr("Candidats de remplacement pour {} (liste de suivi)", Holdings.candidates-context)
+                                : @tr("Candidats de remplacement (liste de suivi)");
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-body;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
+                    }
+                    ActionButton {
+                        label: @tr("Fermer");
+                        enabled: true;
+                        clicked => { Holdings.close-candidates(); }
+                    }
+                }
+                if Holdings.candidates-unavailable: Text {
+                    text: @tr("Liste de suivi indisponible.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                }
+                if Holdings.candidate-rows.length == 0 && !Holdings.candidates-unavailable: Text {
+                    text: @tr("La liste de suivi est vide.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                }
+                for candidate in Holdings.candidate-rows: HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    Text {
+                        text: candidate.data == "no-study"
+                            ? @tr("{} — aucune étude", candidate.ticker)
+                            : candidate.data == "insufficient"
+                                ? @tr("{} — données insuffisantes", candidate.ticker)
+                                : candidate.in-buy-zone
+                                    ? @tr("{} — dans la zone d'achat", candidate.ticker)
+                                    : candidate.distance != ""
+                                        ? @tr("{} — à {} % au-dessus de la zone d'achat", candidate.ticker, candidate.distance)
+                                        // A known zone without a statable distance (degenerate
+                                        // band bottom) — the zone noun IS the fact. The key
+                                        // comparisons stay OUTSIDE @tr (the register precedent).
+                                        : candidate.zone == "neutral"
+                                            ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-hold)
+                                            : candidate.zone == "sell"
+                                                ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-sell)
+                                                : @tr("{} — zone : {}", candidate.ticker, Labels.zone-buy);
+                        color: Tokens.text-high;
+                        font-family: Tokens.font-numeric;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
+                    }
+                    if candidate.ud != "": Text {
+                        text: @tr("H/B {}", candidate.ud);
+                        color: Tokens.text-high;
+                        font-family: Tokens.font-numeric;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    if candidate.held-share != "": Text {
+                        text: candidate.held-flagged
+                            ? @tr("déjà détenu : {} % du capital · seuil {} % approché ou atteint", candidate.held-share, Holdings.concentration-threshold-display)
+                            : @tr("déjà détenu : {} % du capital", candidate.held-share);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    if candidate.currency-missing != "": Text {
+                        text: @tr("devise {} : exposition indisponible (taux manquant {})", candidate.currency, candidate.currency-missing);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    if candidate.currency-missing == "" && candidate.currency-share != "": Text {
+                        text: candidate.currency-flagged
+                            ? @tr("devise {} : déjà {} % du capital · seuil {} % approché ou atteint", candidate.currency, candidate.currency-share, Holdings.concentration-threshold-display)
+                            : @tr("devise {} : déjà {} % du capital", candidate.currency, candidate.currency-share);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    // The exposure could not be stated at all (the shares' total is absent for a
+                    // reason named on ANOTHER currency's line, or unformed) — an honest absence,
+                    // never a silently missing fact.
+                    if candidate.currency != "" && candidate.currency-missing == "" && candidate.currency-share == "": Text {
+                        text: @tr("devise {} : exposition indisponible", candidate.currency);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    if candidate.study-id != "": ActionButton {
+                        label: @tr("Ouvrir l'étude");
+                        enabled: true;
+                        clicked => { Holdings.open-candidate-study(candidate.study-id); }
+                    }
+                    if candidate.study-id == "": ActionButton {
+                        label: @tr("Études");
+                        enabled: true;
+                        clicked => { Holdings.go-to-studies(); }
+                    }
+                }
+                if Holdings.candidates-rates != "": Text {
+                    text: @tr("Convertis aux taux : {}", Holdings.candidates-rates);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                }
+            }
+        }
+
         // Story 4.6 (FR43) / Story 6.2 (FR38): the portfolio's capital-at-risk — a neutral fact (no
         // hue, no action), shown PER currency. Holdings can differ in currency, so there is no mixed
         // global total (FX only at consolidation, Story 6.5/6.6). The "% du capital investi" clause is
@@ -554,6 +680,13 @@ export component PortfolioScreen inherits Rectangle {
                       label: @tr("Relever le stop");
                       enabled: !Holdings.read-only && hrow.stop-draft != "";
                       clicked => { Holdings.set-trailing-stop(row.id, hrow.stop-draft); }
+                  }
+                  // Story 6.8 (FR48): the same surfacing, BEFORE deciding — a sell-zone entry or
+                  // a stop breach is a redeployment moment too.
+                  ActionButton {
+                      label: @tr("Candidats");
+                      enabled: true;
+                      clicked => { Holdings.open-candidates(row.ticker); }
                   }
                   ActionButton {
                       label: @tr("Ignorer");

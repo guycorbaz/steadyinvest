@@ -87,6 +87,26 @@ export struct UnclassifiedLine {
     missing: string,
 }
 
+// Story 6.8 (FR48): one replacement candidate from the watchlist. Facts only, formatted in Rust
+// via the locale path; `data` crosses as a key ("ok" | "insufficient" | "no-study"); `zone` is
+// the engine zone key (Labels nouns at render — no hue, §4 owns the zone colours); the two
+// `*-flagged` murmurs use the 6.7 threshold band (an absent share never flags).
+export struct CandidateRow {
+    ticker: string,
+    study-id: string,        // "" when no study resolves
+    data: string,
+    zone: string,
+    in-buy-zone: bool,
+    distance: string,        // formatted % above the buy zone ("" inside the zone / unknown)
+    ud: string,              // formatted "N:1" ratio ("" when Undefined/Unknown)
+    currency: string,
+    held-share: string,      // formatted % ("" when not held or absent)
+    held-flagged: bool,
+    currency-share: string,  // formatted % ("" when absent)
+    currency-flagged: bool,
+    currency-missing: string, // named pair when the currency share is absent for a missing rate
+}
+
 // Story 6.5 (FR28): the FX-rates surface — stored rates + the two acquisition paths (provider
 // refresh, user-initiated only; manual entry). NO conversion happens here (consolidation = 6.6).
 export global Fx {
@@ -868,4 +888,23 @@ export global Holdings {
     callback add-portfolio(string);             // name
     callback rename-portfolio(string, string);  // id, name
     callback delete-portfolio(string);          // id
+    // ── Story 6.8 (FR48): the replacement-candidates panel — a PORTFOLIO-LEVEL pushed state
+    //    (a whole-position sell removes its row, so the panel outlives it). Auto-opened by Rust
+    //    after a successful sell (both paths), manually via the trigger-panel « Candidats »;
+    //    session-only, cleared on journal switch, re-synced while open. ──
+    in-out property <[CandidateRow]> candidate-rows;
+    in-out property <bool> candidates-visible;
+    in-out property <string> candidates-context; // the sold/triggering ticker ("" = manual open)
+    // true ONLY when the panel was opened by a RECORDED sell (the two sell hooks) — the
+    // « Vente enregistrée » header must never assert a sale that did not happen (a trigger's
+    // « Candidats » opens BEFORE deciding).
+    in-out property <bool> candidates-sold;
+    // true when the watchlist itself could not be read — « indisponible », never « liste vide ».
+    in-out property <bool> candidates-unavailable;
+    // The FR28 footnote for the exposure shares: every rate used, with its date and source.
+    in-out property <string> candidates-rates;
+    callback open-candidates(string);        // context ticker ("" allowed)
+    callback close-candidates();
+    callback open-candidate-study(string);   // study id → navigate to Études + open (one rail)
+    callback go-to-studies();                // unlinked hand-off → the Études list/create form
 }

@@ -45,6 +45,7 @@ mod journal_io;
 mod ledger;
 mod messages;
 mod refresh;
+mod replacement;
 mod restore;
 mod studies;
 mod undo;
@@ -60,6 +61,7 @@ pub(crate) use holdings::effective_currency;
 pub use journal_io::*;
 pub use messages::*;
 pub use refresh::*;
+pub use replacement::*;
 pub use restore::*;
 pub use undo::*;
 

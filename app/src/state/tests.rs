@@ -4625,3 +4625,210 @@ fn diversification_without_a_journal_is_unavailable_never_a_zero_state() {
     assert!(view.rows.is_empty());
     assert_eq!(view.global_invested, None);
 }
+
+// ── Story 6.8 — replacement candidates on a sell (FR48) ──
+
+/// A study with a §4 band (provider-filled years + complete judgment): high = 8×20 = 160,
+/// low = 6×10 = 60 → buy_top = 60 + (160−60)/3. `current_price` positions it in/above the band.
+fn banded_study(
+    state: &mut JournalState,
+    ticker: &str,
+    currency: &str,
+    current_price: i64,
+) -> Uuid {
+    let id = state.create_study(ticker, currency).unwrap();
+    state
+        .apply_provider_refresh(id, &fetched_for(&[2020, 2021, 2022, 2023, 2024]))
+        .unwrap();
+    for (field, v) in [
+        ("est_high_eps", 8),
+        ("est_low_eps", 6),
+        ("high_pe", 20),
+        ("low_pe", 10),
+        ("current_price", current_price),
+    ] {
+        state
+            .set_judgment_field(id, field, Some(und_money(v)))
+            .unwrap();
+    }
+    id
+}
+
+#[test]
+fn candidates_order_in_zone_then_distance_then_insufficient_then_unlinked() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x680);
+    // Watchlist positions deliberately REVERSED vs the expected surfacing order.
+    state.add_watch_item("EUNLINKED", None).unwrap(); // no study at all
+    state.add_watch_item("CFAR", None).unwrap(); // far above the buy zone
+    state.add_watch_item("BNEAR", None).unwrap(); // just above the buy zone
+    state.add_watch_item("AIN", None).unwrap(); // inside the buy zone
+    state.add_watch_item("DINSUF", None).unwrap(); // study without a band
+    banded_study(&mut state, "CFAR", "CHF", 150);
+    banded_study(&mut state, "BNEAR", "CHF", 100);
+    banded_study(&mut state, "AIN", "CHF", 70);
+    state.create_study("DINSUF", "CHF").unwrap(); // no judgment → no band
+
+    let candidates = state.replacement_candidates("CHF").unwrap();
+    let order: Vec<&str> = candidates.iter().map(|c| c.ticker.as_str()).collect();
+    assert_eq!(
+        order,
+        vec!["AIN", "BNEAR", "CFAR", "DINSUF", "EUNLINKED"],
+        "in-zone → ascending distance → insufficient → unlinked"
+    );
+    assert!(candidates[0].in_buy_zone);
+    assert_eq!(candidates[0].zone_key, "buy");
+    assert_eq!(candidates[0].data, CandidateData::Ok);
+    assert_eq!(candidates[3].data, CandidateData::Insufficient);
+    assert_eq!(candidates[4].data, CandidateData::NoStudy);
+    assert_eq!(candidates[4].study_id, None, "an honest row, never dropped");
+    // The link fell back to `study_id_for_ticker` (items were added with NO explicit link).
+    assert!(candidates[0].study_id.is_some());
+}
+
+#[test]
+fn candidate_distance_and_ud_are_exact_and_absent_when_undefined() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x681);
+    state.add_watch_item("NEAR", None).unwrap();
+    state.add_watch_item("BELOW", None).unwrap();
+    let near = banded_study(&mut state, "NEAR", "CHF", 100);
+    banded_study(&mut state, "BELOW", "CHF", 50); // below forecast_low → U/D Undefined
+
+    // The expected relative distance derives from the SAME snapshot the read uses.
+    let snapshot = engine::build_snapshot(&state.get_study(near).unwrap()).unwrap();
+    let buy_top = snapshot
+        .outputs()
+        .risk_reward
+        .zones
+        .as_ref()
+        .unwrap()
+        .buy_top;
+    let expected = (Decimal::from(100) - buy_top) / buy_top * Decimal::from(100);
+
+    let candidates = state.replacement_candidates("CHF").unwrap();
+    let near_c = candidates.iter().find(|c| c.ticker == "NEAR").unwrap();
+    assert_eq!(near_c.distance_above_buy_pct, Some(expected));
+    assert_eq!(
+        near_c.ud_ratio,
+        Some(Decimal::from_str_exact("1.5").unwrap()),
+        "(160 − 100) / (100 − 60)"
+    );
+    let below_c = candidates.iter().find(|c| c.ticker == "BELOW").unwrap();
+    assert_eq!(
+        below_c.ud_ratio, None,
+        "Undefined is an absence, never a number"
+    );
+    assert_eq!(below_c.distance_above_buy_pct, None, "below the band");
+    assert_eq!(
+        below_c.data,
+        CandidateData::Insufficient,
+        "the §4 zone is undefined below the band — an honest bucket"
+    );
+}
+
+#[test]
+fn held_share_and_currency_exposure_facts_join_the_candidate() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x682);
+    // Held: NESN 6@100 CHF (600) + AAPL 8@100 USD × 0.5 = 400 CHF → global 1000.
+    state.add_holding("NESN", "6", "100", "CHF").unwrap();
+    state.add_holding("AAPL", "8", "100", "USD").unwrap();
+    state
+        .upsert_manual_fx_rate("USD", "0.5", "2026-06-27", "CHF")
+        .unwrap();
+    // Watched: NESN (held, CHF study), XYZ (unheld, USD study), EUR-study candidate (unheld ccy).
+    state.add_watch_item("NESN", None).unwrap();
+    state.add_watch_item("XYZ", None).unwrap();
+    state.add_watch_item("EURC", None).unwrap();
+    banded_study(&mut state, "NESN", "CHF", 70);
+    banded_study(&mut state, "XYZ", "USD", 70);
+    banded_study(&mut state, "EURC", "EUR", 70);
+
+    let candidates = state.replacement_candidates("CHF").unwrap();
+    let by = |t: &str| candidates.iter().find(|c| c.ticker == t).unwrap();
+    assert_eq!(
+        by("NESN").held_share_pct,
+        Some(Decimal::from(60)),
+        "600 / 1000 — the already-held fact"
+    );
+    assert_eq!(by("XYZ").held_share_pct, None, "not held → no fact");
+    assert_eq!(
+        by("XYZ").currency_share_pct,
+        Some(Decimal::from(40)),
+        "USD already carries 400 / 1000 of the capital"
+    );
+    assert_eq!(
+        by("NESN").currency_share_pct,
+        Some(Decimal::from(60)),
+        "CHF exposure"
+    );
+    assert_eq!(
+        by("EURC").currency_share_pct,
+        Some(Decimal::ZERO),
+        "an unheld currency is an honest 0 % when the total is known"
+    );
+    assert_eq!(by("EURC").currency_missing_pair, None);
+}
+
+#[test]
+fn currency_exposure_refuses_honestly_on_a_missing_pair() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x683);
+    state.add_holding("NESN", "6", "100", "CHF").unwrap();
+    state.add_holding("AAPL", "8", "100", "USD").unwrap();
+    // No USD→CHF rate stored.
+    let exposure = state.journal_currency_exposure("CHF").unwrap();
+    assert!(!exposure.global_positive, "the total could not be formed");
+    let usd = exposure.rows.iter().find(|r| r.currency == "USD").unwrap();
+    assert_eq!(usd.share_pct, None);
+    assert_eq!(usd.missing_pair, Some("USD → CHF".to_string()));
+    let chf = exposure.rows.iter().find(|r| r.currency == "CHF").unwrap();
+    assert_eq!(
+        chf.share_pct, None,
+        "no share against an absent total — never a partial"
+    );
+    assert_eq!(
+        exposure.share_for("EUR"),
+        (None, None),
+        "an absent total never yields an honest zero either"
+    );
+    // The rate arriving makes the next read consolidate.
+    state
+        .upsert_manual_fx_rate("USD", "0.5", "2026-06-27", "CHF")
+        .unwrap();
+    let exposure = state.journal_currency_exposure("CHF").unwrap();
+    assert!(exposure.global_positive);
+    assert_eq!(exposure.share_for("USD").0, Some(Decimal::from(40)));
+    assert_eq!(exposure.share_for("CHF").0, Some(Decimal::from(60)));
+}
+
+#[test]
+fn exposure_excludes_sold_holdings_and_is_none_without_a_journal() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x684);
+    state.add_holding("NESN", "6", "100", "CHF").unwrap();
+    state.add_holding("GONE", "4", "100", "CHF").unwrap();
+    let gone = state
+        .list_holdings()
+        .iter()
+        .find(|h| h.security_ticker == "GONE")
+        .unwrap()
+        .id;
+    state.sell_holding(gone, "", "", "CHF").unwrap();
+    let exposure = state.journal_currency_exposure("CHF").unwrap();
+    assert_eq!(
+        exposure.share_for("CHF").0,
+        Some(Decimal::from(100)),
+        "position facts — the sold holding carries no exposure (4.6/6.2 semantics)"
+    );
+    state.journal = None;
+    assert!(
+        state.journal_currency_exposure("CHF").is_none(),
+        "an absence, never an empty-looking zero state"
+    );
+    assert!(
+        state.replacement_candidates("CHF").is_none(),
+        "the candidates read refuses too — « indisponible », never « liste vide »"
+    );
+}
