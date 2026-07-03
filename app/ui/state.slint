@@ -646,6 +646,14 @@ export global Prefs {
     in-out property <string> size-target-medium-pct;
     in-out property <string> size-target-large-pct;
     in-out property <string> risk-settings-status;
+    // ── Story 6.9 (FR26) — the per-field-type FALLBACK providers, mirrored from the validated
+    //    config accessors (wire strings; "" = no fallback). The PRIMARY stays `provider` above.
+    //    The fundamentals row never offers Twelve Data (declared capability: no fundamentals). ──
+    in-out property <string> price-fallback;
+    in-out property <string> fundamentals-fallback;
+    in-out property <string> fx-fallback;
+    // field key ("price" | "fundamentals" | "fx"), provider wire ("" clears the fallback)
+    callback fallback-provider-selected(string, string);
     callback concentration-threshold-pct-changed(string); // "" resets to the default (50)
     // small-max, medium-max, target-small, target-medium, target-large ("" = that field's default)
     callback size-table-changed(string, string, string, string, string);

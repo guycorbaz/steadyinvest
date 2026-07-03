@@ -7,7 +7,6 @@ use std::rc::Rc;
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::state::JournalState;
-use crate::wiring::fetch::resolve_provider_key;
 use crate::wiring::Session;
 use crate::{fetch, state};
 use crate::{Fx, FxRateRow, MainWindow};
@@ -50,11 +49,9 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
             if fx.get_refreshing() {
                 return; // the #52 double-click guard
             }
-            let (provider, reference) = {
-                let cfg = config.borrow();
-                (cfg.preferred_provider, cfg.reference_currency_or_default())
-            };
-            if provider == crate::provider::ProviderChoice::None {
+            let reference = config.borrow().reference_currency_or_default();
+            let primary = config.borrow().preferred_provider;
+            if primary == crate::provider::ProviderChoice::None {
                 fx.set_notice(state::MSG_PROVIDER_NONE.into());
                 return;
             }
@@ -63,8 +60,13 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 fx.set_notice(state::MSG_FX_NO_PAIRS.into());
                 return;
             }
-            let api_key = resolve_provider_key(provider);
-            if provider.requires_key() && api_key.is_none() {
+            // Story 6.9 (FR26): the FX fallback chain, each member with its own key. The stamped
+            // source is each pair's EFFECTIVE member, carried back per result.
+            let chain = crate::wiring::fetch::resolve_chain(
+                &config.borrow(),
+                steadyinvest_ingestion::FieldKind::Fx,
+            );
+            if chain.is_empty() {
                 fx.set_notice(state::MSG_PROVIDER_NO_KEY.into());
                 return;
             }
@@ -74,12 +76,11 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 .collect();
             let request = fetch::FxRatesRequest {
                 pairs,
-                api_key,
-                provider,
-                // Captured at enqueue time (review): the outcome applies only to THIS journal
-                // and is stamped with THIS provider, whatever changes mid-flight.
+                chain,
+                primary,
+                // Captured at enqueue time (review): the outcome applies only to THIS journal,
+                // whatever changes mid-flight.
                 journal_id: journal_state.borrow().journal_id(),
-                source: provider.wire().to_string(),
             };
             // The flag latches ONLY on a successful send (review: a dead worker + a discarded
             // send error would otherwise disable the refresh for the whole session).

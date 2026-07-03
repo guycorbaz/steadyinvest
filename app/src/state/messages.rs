@@ -201,6 +201,16 @@ pub const MSG_CONCENTRATION_INVALID: &str =
 pub const MSG_SIZE_TABLE_INVALID: &str =
     "Les bornes doivent être des nombres positifs croissants et les cibles des pourcentages entre 0 et 100 ; rien n'a été enregistré.";
 
+/// Fallback-chain copy (Story 6.9, FR26) — fact-stating, posture-gated. Set when a fetch was
+/// served by a NON-PRIMARY chain member: a fallback is a visible event, never a silence. `{p}`
+/// is replaced with the effective provider's display name.
+pub const MSG_PROVIDER_FALLBACK: &str = "Données obtenues via {p} (fournisseur de repli).";
+
+/// Substitute the effective provider into [`MSG_PROVIDER_FALLBACK`].
+pub fn provider_fallback_notice(provider: crate::provider::ProviderChoice) -> String {
+    MSG_PROVIDER_FALLBACK.replace("{p}", provider.display_name())
+}
+
 /// Substitute the counts into [`MSG_FX_REFRESHED`].
 pub fn fx_refreshed_message(landed: usize, total: usize) -> String {
     MSG_FX_REFRESHED
@@ -497,6 +507,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_FX_FUTURE_DATE,
     MSG_CONCENTRATION_INVALID,
     MSG_SIZE_TABLE_INVALID,
+    MSG_PROVIDER_FALLBACK,
     MSG_PORTFOLIO_INVALID_NAME,
     MSG_PORTFOLIO_HAS_HOLDINGS,
     MSG_PORTFOLIO_LAST,

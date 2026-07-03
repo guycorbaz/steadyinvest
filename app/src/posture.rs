@@ -635,9 +635,12 @@ mod tests {
         // trigger-open must never assert « Vente enregistrée »), the watchlist-unavailable
         // state, the three zone-noun line variants (a known zone without a statable distance),
         // the generic exposure-indisponible variant and the FR28 rates footnote: +7 = 430.
+        // Story 6.9 adds the Réglages fallback rows (the section caption, the three field
+        // labels Prix/Fondamentaux/Taux de change, the three « Aucun repli » chips, the
+        // EODHD/Twelve Data chip occurrences across the price/fundamentals/fx rows): +12 = 442.
         // Floor strict.
         assert!(
-            total >= 430,
+            total >= 442,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -704,10 +707,12 @@ mod tests {
         // the refreshed-count template, no-pairs): 89 + 6 = 95; its review adds three more
         // (journal-changed-in-flight, invalid-currency [a currency problem must not be reported
         // as a rate problem], future-date): 95 + 3 = 98. Story 6.7 adds the two risk-settings
-        // refusals (concentration-threshold invalid, size-table invalid): 98 + 2 = 100.
+        // refusals (concentration-threshold invalid, size-table invalid): 98 + 2 = 100. Story
+        // 6.9 adds the fallback-chain notice (MSG_PROVIDER_FALLBACK — a fetch served by a
+        // non-primary member names itself, FR26): 100 + 1 = 101.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            100,
+            101,
             "state.rs message inventory changed — register the new notice"
         );
     }

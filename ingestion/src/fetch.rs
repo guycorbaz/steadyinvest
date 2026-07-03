@@ -24,6 +24,44 @@ pub struct FetchedFinancials {
     pub latest_price: Option<Decimal>,
 }
 
+/// Which field a fetch serves (Story 6.9, FR26) — the fallback chain is configured PER field
+/// type, because provider capabilities differ (see [`supports`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldKind {
+    /// The latest market close (`fetch_latest_price` — issue #50's price-only path).
+    Price,
+    /// The fundamentals payload (`fetch_fundamentals` → `normalize`).
+    Fundamentals,
+    /// A BASE→QUOTE exchange rate (`fetch_fx_rate`, Story 6.5).
+    Fx,
+}
+
+/// Whether the provider identified by `tag` can serve `field` (Story 6.9, FR26) — a DECLARED
+/// capability table, not runtime discovery: Twelve Data's fundamentals fetch returns its
+/// financial fields as `None` by design (Story 7.4, free tier), a success-but-empty answer that
+/// would never trigger error-based failover — so a fallback chain must skip it up front for
+/// fundamentals. Keyed by the stable provenance tag so the app's config layer can consult it
+/// without constructing adapters. Unknown tags support nothing (defensive).
+pub fn supports(tag: &str, field: FieldKind) -> bool {
+    match (tag, field) {
+        ("twelvedata", FieldKind::Fundamentals) => false,
+        ("eodhd" | "twelvedata" | "fake", _) => true,
+        _ => false,
+    }
+}
+
+/// The provider's DECLARED minimum spacing between consecutive requests (Story 6.9, FR27) — a
+/// documented fact about the provider, not user config: Twelve Data's free tier allows 8
+/// requests/minute → 7500 ms; EODHD's quota is daily, so 200 ms is courtesy spacing; the fake
+/// (and anything unknown) is unpaced. The worker's single loop enforces it per tag.
+pub fn min_request_interval(tag: &str) -> std::time::Duration {
+    match tag {
+        "twelvedata" => std::time::Duration::from_millis(7500),
+        "eodhd" => std::time::Duration::from_millis(200),
+        _ => std::time::Duration::ZERO,
+    }
+}
+
 /// Concrete providers, dispatched by enum so the `async fn` trait needs no `dyn`/`async-trait`.
 pub enum Provider {
     Eodhd(crate::adapters::eodhd::EodhdProvider),
@@ -42,6 +80,16 @@ impl Provider {
             Provider::TwelveData(_) => "twelvedata",
             Provider::Fake(_) => "fake",
         }
+    }
+
+    /// [`supports`] keyed by this provider's tag (Story 6.9).
+    pub fn supports(&self, field: FieldKind) -> bool {
+        supports(self.tag(), field)
+    }
+
+    /// [`min_request_interval`] keyed by this provider's tag (Story 6.9, FR27).
+    pub fn min_request_interval(&self) -> std::time::Duration {
+        min_request_interval(self.tag())
     }
 }
 
@@ -128,10 +176,14 @@ pub async fn fetch_fx_rate(
     Ok(provider.fetch_fx_rate(base, quote, api_key).await?)
 }
 
-/// SHA-256 hex over `"{provider_tag}:{ticker}"` + each canonical year's value-normalized decimals (so
-/// `"3.0"` and `"3"` hash identically — `Money`/`Decimal` value equality, not byte equality). The
-/// provider tag (Story 7.4) keeps two providers' digests distinct for the same ticker/values, so the
-/// data's provenance is honest and a provider switch is observable as a dependency change.
+/// `"{provider_tag}:{sha256-hex}"` — the tag as a READABLE prefix (Story 6.9, FR26: the effective
+/// provider is recorded on every refreshed cell via `provenance.hash_of_dependencies`, and a
+/// human must be able to read WHICH provider without reversing a hash) over each canonical year's
+/// value-normalized decimals (so `"3.0"` and `"3"` hash identically — `Money`/`Decimal` value
+/// equality, not byte equality). The tag also feeds the hash (Story 7.4), so two providers'
+/// digests stay distinct even for identical values, and a provider switch is observable as a
+/// dependency change. Format note: pre-6.9 cells hold the bare 64-char hex — their first
+/// post-upgrade refresh reads as a dependency change (visible, honest, one-time).
 pub fn dependency_digest(
     provider_tag: &str,
     ticker: &str,
@@ -162,7 +214,9 @@ pub fn dependency_digest(
         }
     }
     let bytes = hasher.finalize();
-    let mut hex = String::with_capacity(bytes.len() * 2);
+    let mut hex = String::with_capacity(provider_tag.len() + 1 + bytes.len() * 2);
+    hex.push_str(provider_tag);
+    hex.push(':');
     for b in bytes {
         use std::fmt::Write;
         let _ = write!(hex, "{b:02x}");
@@ -249,6 +303,33 @@ mod tests {
     use rust_decimal::Decimal;
     use steadyinvest_core::normalize::{RawAmount, RawYear};
 
+    // ── Story 6.9 — declared capabilities + pacing (FR26/FR27) ──
+
+    #[test]
+    fn twelvedata_declares_no_fundamentals_and_everything_else_serves_all() {
+        assert!(!supports("twelvedata", FieldKind::Fundamentals));
+        assert!(supports("twelvedata", FieldKind::Price));
+        assert!(supports("twelvedata", FieldKind::Fx));
+        for field in [FieldKind::Price, FieldKind::Fundamentals, FieldKind::Fx] {
+            assert!(supports("eodhd", field));
+            assert!(supports("fake", field));
+            assert!(!supports("unknown", field), "unknown tags support nothing");
+        }
+    }
+
+    #[test]
+    fn declared_pacing_matches_the_documented_tiers() {
+        use std::time::Duration;
+        assert_eq!(
+            min_request_interval("twelvedata"),
+            Duration::from_millis(7500),
+            "free tier: 8 requests/minute"
+        );
+        assert_eq!(min_request_interval("eodhd"), Duration::from_millis(200));
+        assert_eq!(min_request_interval("fake"), Duration::ZERO);
+        assert_eq!(min_request_interval("unknown"), Duration::ZERO);
+    }
+
     fn raw(value: &str) -> RawFinancials {
         let amt = |v: &str| {
             Some(RawAmount {
@@ -277,7 +358,16 @@ mod tests {
             .expect("fake fetch normalizes");
         assert_eq!(fetched.canonical.years.len(), 1);
         assert_eq!(fetched.canonical.years[0].sales, Some(Decimal::from(100)));
-        assert_eq!(fetched.digest.len(), 64, "sha-256 hex is 64 chars");
+        assert_eq!(
+            fetched.digest,
+            format!("fake:{}", &fetched.digest["fake:".len()..]),
+            "the effective provider is a READABLE digest prefix (FR26)"
+        );
+        assert_eq!(
+            fetched.digest.len(),
+            "fake:".len() + 64,
+            "tag + ':' + sha-256 hex"
+        );
     }
 
     #[tokio::test]

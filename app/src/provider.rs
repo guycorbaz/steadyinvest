@@ -44,6 +44,16 @@ impl ProviderChoice {
         }
     }
 
+    /// The human-readable display name (Story 6.9 — the fallback notice names the effective
+    /// provider). Proper nouns, matching the Réglages chips.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ProviderChoice::Eodhd => "EODHD",
+            ProviderChoice::TwelveData => "Twelve Data",
+            ProviderChoice::None => "—",
+        }
+    }
+
     /// Whether a fetch with this provider needs an API key. A keyless/none provider does not, so
     /// the absence of a stored key is not an error for it (AC3).
     pub fn requires_key(self) -> bool {

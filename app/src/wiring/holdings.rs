@@ -14,7 +14,6 @@ use uuid::Uuid;
 use crate::provider::ProviderChoice;
 use crate::state::JournalState;
 use crate::viewmodel::format::NumberFormat;
-use crate::wiring::fetch::resolve_provider_key;
 use crate::wiring::{persist, Session};
 use crate::{fetch, state, viewmodel};
 use crate::{
@@ -782,13 +781,18 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 holdings.set_notice(state::MSG_HOLDINGS_REFRESH_NONE.into());
                 return;
             }
-            let provider_choice = config.borrow().preferred_provider;
-            if provider_choice == ProviderChoice::None {
+            // Story 6.9 (FR26): the PRICE fallback chain, resolved once and shared by every
+            // per-ticker job of this batch (the worker paces them within the declared limits).
+            let primary = config.borrow().preferred_provider;
+            if primary == ProviderChoice::None {
                 holdings.set_notice(state::MSG_PROVIDER_NONE.into());
                 return;
             }
-            let api_key = resolve_provider_key(provider_choice);
-            if provider_choice.requires_key() && api_key.is_none() {
+            let chain = crate::wiring::fetch::resolve_chain(
+                &config.borrow(),
+                steadyinvest_ingestion::FieldKind::Price,
+            );
+            if chain.is_empty() {
                 holdings.set_notice(state::MSG_PROVIDER_NO_KEY.into());
                 return;
             }
@@ -800,8 +804,8 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     .send(fetch::WorkerJob::RefreshHolding(fetch::FetchRequest {
                         study_id,
                         ticker,
-                        api_key: api_key.clone(),
-                        provider: provider_choice,
+                        chain: chain.clone(),
+                        primary,
                     }))
                     .is_ok()
                 {

@@ -30,6 +30,22 @@ pub(crate) fn push_samples(ui: &MainWindow, format: NumberFormat) {
     prefs.set_sample_amount_alt(format_amount(SAMPLE_AMOUNT_ALT, format).into());
 }
 
+/// Mirror the Story 6.9 per-field-type fallback providers from the VALIDATED config accessors
+/// into `Prefs` (wire strings; "" = no fallback). Capability-filtered — a hand-edited
+/// fundamentals fallback of `twelvedata` mirrors as "" (dropped), matching the effective chain.
+pub(crate) fn mirror_fallback_prefs(ui: &MainWindow, cfg: &crate::config::AppConfig) {
+    use steadyinvest_ingestion::FieldKind;
+    let prefs = ui.global::<Prefs>();
+    let wire = |field: FieldKind| {
+        cfg.fallback_provider_or_none(field)
+            .map(|c| c.wire())
+            .unwrap_or_default()
+    };
+    prefs.set_price_fallback(wire(FieldKind::Price).into());
+    prefs.set_fundamentals_fallback(wire(FieldKind::Fundamentals).into());
+    prefs.set_fx_fallback(wire(FieldKind::Fx).into());
+}
+
 /// Mirror the Story 6.7 risk settings (concentration threshold + diversify-by-size table) from
 /// the validated config accessors into BOTH globals: `Prefs` (the Réglages fields) and `Holdings`
 /// (the canonical strings `refresh_holdings` bakes at render time — the reference-currency
@@ -328,6 +344,44 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
             },
         );
     }
+    // ── Story 6.9 (FR26) — the per-field-type fallback provider. "" clears; a wire name must
+    // parse (and never `none` — the absent field IS "no fallback"); an incapable pick for the
+    // field is ignored (the UI never offers one — defensive against a stale UI state). ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(config);
+        let path = config_path.clone();
+        ui.global::<Prefs>()
+            .on_fallback_provider_selected(move |field, wire| {
+                use steadyinvest_ingestion::FieldKind;
+                let field = match field.as_str() {
+                    "price" => FieldKind::Price,
+                    "fundamentals" => FieldKind::Fundamentals,
+                    "fx" => FieldKind::Fx,
+                    _ => return,
+                };
+                let stored = if wire.is_empty() {
+                    None
+                } else if config::is_valid_fallback_provider(&wire)
+                    && steadyinvest_ingestion::supports(wire.as_str(), field)
+                {
+                    Some(wire.to_string())
+                } else {
+                    return;
+                };
+                let ui = ui_weak.unwrap();
+                {
+                    let mut cfg = config.borrow_mut();
+                    match field {
+                        FieldKind::Price => cfg.price_fallback_provider = stored,
+                        FieldKind::Fundamentals => cfg.fundamentals_fallback_provider = stored,
+                        FieldKind::Fx => cfg.fx_fallback_provider = stored,
+                    }
+                }
+                persist(path.as_ref(), &config.borrow());
+                mirror_fallback_prefs(&ui, &config.borrow());
+            });
+    }
     // ── Story 3.2 — provider selection + key management (FR25/FR63) ──
     {
         let ui_weak = ui.as_weak();
@@ -341,6 +395,9 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
             config.borrow_mut().preferred_provider = choice;
             persist(path.as_ref(), &config.borrow());
             mirror_provider_prefs(&ui, choice);
+            // Story 6.9 (2026-07-03 review): a primary switch changes the EFFECTIVE fallbacks
+            // (a fallback equal to the new primary neutralizes) — the chips must follow.
+            mirror_fallback_prefs(&ui, &config.borrow());
             // Drop any prior save/test verdict — it referred to the previous provider (F3).
             ui.global::<Prefs>().set_provider_status("".into());
         });
