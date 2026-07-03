@@ -15,6 +15,7 @@ pub(crate) mod judgment;
 pub(crate) mod overlays;
 pub(crate) mod prefs;
 pub(crate) mod push;
+pub(crate) mod replacement;
 pub(crate) mod studies;
 pub(crate) mod watchlist;
 

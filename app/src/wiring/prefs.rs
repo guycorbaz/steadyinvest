@@ -100,6 +100,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let config = Rc::clone(config);
         let path = config_path.clone();
+        let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>()
             .on_number_format_selected(move |value| {
                 let Some(format) = NumberFormat::parse(&value) else {
@@ -111,6 +112,9 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     .set_number_format(format.as_str().into());
                 config.borrow_mut().number_format = format;
                 persist(path.as_ref(), &config.borrow());
+                // Story 6.8 (2026-07-03 review): an OPEN candidates panel re-renders in the new
+                // locale (its strings are baked at push time).
+                crate::wiring::replacement::sync_candidates(&ui, &journal_state.borrow());
             });
     }
     // ── Story 4.3 — reference currency (FR63) ── persist the chosen code and re-label the register.

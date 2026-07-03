@@ -40,6 +40,67 @@
 
 generated: 2026-06-09
 last_updated: 2026-07-03
+# 2026-07-03: story 6-8 review complete → done. 3-layer review (Blind/Edge + Auditor stopped mid-run
+#             after its verifications landed — floors/pinned/tests/issue #98 confirmed; it converged
+#             on the same zone-rendering finding): 0 decision · 8 patch · 1 defer · ~7 dismiss. All 8
+#             applied + gates re-green (715 tests, clippy -D --locked 0, deny ok, smoke 124, pinned
+#             surfaces empty): P1 HIGH the trigger « Candidats » asserted « Vente enregistrée » with
+#             NO sale → candidates-sold flag set ONLY by the sell hooks (honest trigger header); P2
+#             MED FR28 rates footnote added to the panel (exposure shares now name rate+date+source);
+#             P3 MED a known zone without a statable distance is Ok + renders the zone NOUN (kills the
+#             dead CandidateRow.zone payload; key comparisons kept OUTSIDE @tr — the posture gate
+#             caught the first attempt); P4 MED bystander-currency absence now states « exposition
+#             indisponible » (never a silently missing fact); P5 LOW flags fire on POSITIVE shares
+#             only (an honest 0 % is never a near-breach); P6 LOW number-format change re-syncs an
+#             open panel; P7 LOW failed watchlist read → « Liste de suivi indisponible » (Option
+#             return, never « liste vide »); P8 LOW dead rate_cache dropped. Defer → comment on the
+#             EXISTING #94 (study mutations don't re-render — the panel inherits it; « Ouvrir
+#             l'étude » may carry a deleted id, open rail no-ops safely). Dismissed incl. the FALSE
+#             buy_top boundary claim (core Buy interval is INCLUSIVE) and the uppercase-invariant
+#             case joins. @tr 423→430 (+7), MSG 100. Epic 6: 8/9 done — 6.9 remains.
+# 2026-07-03: story 6-8 dev complete → review. core UNTOUCHED (share_pct/concentration_flagged/
+#             convert sufficed, as the story anticipated). State: NEW replacement.rs —
+#             journal_currency_exposure (SHARED car_buckets_by_currency fold + memoized rates,
+#             checked global, missing pair → share+global absent by name; unheld ccy = honest 0 %
+#             ONLY when the total is known) + replacement_candidates (one build_snapshot per watch
+#             item — the confront precedent; explicit link else 4.1 fallback; relative distance
+#             above buy_top, U/D Undefined→absent; pinned order in-zone→distance→insuffisantes→
+#             aucune étude; held share joined from the 6.7 read with pinned default bounds,
+#             documented). Wiring: push/open/sync/clear panel (format+threshold from UI mirrors);
+#             auto-open on BOTH sell paths whole AND partial (ticker captured PRE-sell); re-sync at
+#             end of refresh_holdings + refresh_watchlist; cleared at the 3 journal open/switch/
+#             restore sites; hand-off = set_current_screen(0) + invoke_open_study (ONE open rail,
+#             never copied) / study-open=false for unlinked. UI: portfolio-level banner panel (2.12
+#             tokens) + « Candidats » on the 4.7 trigger panel; murmurs on PRESENT shares only, via
+#             the 6.7 threshold band + locale display mirror. Sector flags → GitHub issue #98 (no
+#             data source exists — options enumerated). Gates: 715 workspace tests (+5), clippy -D
+#             --locked 0, deny ok, smoke 124; Cargo.lock/deny/contract/persistence/ingestion/report
+#             re-diff EMPTY; core diff = the fx.rs FR28 pin DOC grown (AC5, doc only, no logic);
+#             NO migration, NO new dep; @tr 406→423 (+17), MSG 100 unchanged.
+# 2026-07-03: story 6-8 created (replacement-candidate surfacing on a sell + re-concentration
+#             flags, FR48) → ready-for-dev. PORTFOLIO-LEVEL pushed panel (2.12 banner pattern — a
+#             whole-position sell removes the row, so per-row would vanish): auto-opens on BOTH
+#             sell paths (4.7 trigger sell + 6.3 ledger sell, whole AND partial), manual « Candidats »
+#             action on the 4.7 trigger panel, session-only dismiss, cleared on journal switch,
+#             re-synced while open. Candidates = watch items → resolved study → ONE build_snapshot
+#             each (the confront.rs off-form precedent; the watchlist already pays this per refresh):
+#             zone (Labels nouns, NO hue), RELATIVE distance above buy_top ((price−buy_top)/buy_top),
+#             U/D ratio (Undefined → absent, never 0). Ordering pinned: in-zone first (position
+#             tiebreak) → ascending distance → « données insuffisantes » → « aucune étude » (honest
+#             rows, never dropped). Flags = neutral FACTS with the 6.7 threshold band verbatim
+#             (concentration_flagged, ONE threshold): already-held share (journal_diversification)
+#             + currency exposure via NEW read journal_currency_exposure (effective_currency
+#             grouping, memoized rate_for, checked sums, missing pair → share absent AND named —
+#             an absent fact NEVER flags). SECTOR flags OUT — no sector field exists anywhere
+#             (verified) → GitHub issue at dev time, never invent data. Hand-off: « Ouvrir l'étude »
+#             = current-screen 0 + invoke_open_study (REUSE the one open rail, never copy);
+#             unlinked → navigate only (prefill = deferred polish). « sold X → replaced by Y » =
+#             the 6.3 sell rationale (FR13: the app never writes it). NO migration, NO new dep,
+#             NO schema/contract change; core::risk likely UNCHANGED (share_pct/flagged/convert
+#             suffice). Inherits the 6.7 review rules (absences never flag, locale-consistent
+#             numbers via concentration-threshold-display, IO failures → indisponible, #93 draft
+#             pattern not replicated). 4 open Qs with defaults. Scope OUT: 7.1 comparison, 7.3
+#             screening, 6.9 provider, auto-rationale, buy-side math.
 # 2026-07-03: story 6-7 review complete → done. 3-layer adversarial review (Blind/Edge/Acceptance,
 #             0 failed layers; AC verdicts PASS ×6 + AC7 PARTIAL→resolved): 0 decision · 8 patch ·
 #             4 defer · 9 dismiss. All 8 patches applied + gates re-green (710 workspace tests,
@@ -479,7 +540,7 @@ development_status:
   6-5-fx-acquisition-consolidation: done
   6-6-capital-at-risk-per-currency-bank-global: done
   6-7-concentration-check-diversify-by-size: done
-  6-8-replacement-candidate-surfacing-on-sell: backlog
+  6-8-replacement-candidate-surfacing-on-sell: done
   6-9-provider-fallback-chain-rate-limit-batching: backlog
   epic-6-retrospective: optional
 

@@ -494,6 +494,10 @@ pub(crate) fn refresh_holdings(
             .unwrap_or_default()
             .into(),
     );
+
+    // Story 6.8 (FR48): keep an OPEN candidates panel truthful across every holdings/ledger/FX
+    // mutation that re-renders the register (a closed panel costs nothing).
+    crate::wiring::replacement::sync_candidates(ui, state);
 }
 
 /// Push one holding's transaction ledger (Story 6.3, FR39) into the `Holdings` global and mark it
@@ -856,6 +860,14 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 let Ok(uuid) = Uuid::parse_str(&id) else {
                     return;
                 };
+                // Story 6.8 (FR48): capture the ticker BEFORE the sell — a whole-position sell
+                // retires the row, and the candidates panel is headed by the sold ticker.
+                let sold_ticker = journal_state
+                    .borrow()
+                    .list_holdings()
+                    .iter()
+                    .find(|h| h.id == uuid)
+                    .map(|h| h.security_ticker.clone());
                 // The reference currency is only the coalesce fallback for a pre-6.2 legacy row —
                 // `sell_holding` stamps the transaction with the holding's OWN currency (FR28).
                 let reference = config.borrow().reference_currency_or_default();
@@ -877,7 +889,8 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 let result = result.map(|notice| {
                     ui.global::<Holdings>().set_notice(notice.into());
                 });
-                if result.is_ok() {
+                let sold = result.is_ok();
+                if sold {
                     refresh_holdings(
                         &ui,
                         &journal_state.borrow(),
@@ -898,6 +911,18 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 // Keep an open ledger panel truthful (review): re-push after a partial sell,
                 // clear the globals when the sell retired the holding.
                 sync_ledger_panel(&ui, &journal_state.borrow(), uuid);
+                // Story 6.8 (FR48): a recorded sell (whole OR partial — freed capital is freed
+                // capital) surfaces the replacement candidates, headed by the sold ticker.
+                if sold {
+                    if let Some(ticker) = sold_ticker {
+                        crate::wiring::replacement::open_candidates(
+                            &ui,
+                            &journal_state.borrow(),
+                            &ticker,
+                            true,
+                        );
+                    }
+                }
             });
     }
     {
@@ -1003,6 +1028,13 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 let Ok(uuid) = Uuid::parse_str(&id) else {
                     return false;
                 };
+                // Story 6.8 (FR48): the ticker BEFORE the sell (a whole sell retires the row).
+                let sold_ticker = journal_state
+                    .borrow()
+                    .list_holdings()
+                    .iter()
+                    .find(|h| h.id == uuid)
+                    .map(|h| h.security_ticker.clone());
                 let reference = config.borrow().reference_currency_or_default();
                 let result = journal_state.borrow_mut().record_sell_for(
                     uuid, &date, &quantity, &price, &fees, &rationale, &reference,
@@ -1035,6 +1067,18 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     );
                 }
                 sync_ledger_panel(&ui, &journal_state.borrow(), uuid);
+                // Story 6.8 (FR48): a ledger-form sell surfaces the candidates too (whole or
+                // partial — the same redeployment moment as the trigger-panel sell).
+                if written {
+                    if let Some(ticker) = sold_ticker {
+                        crate::wiring::replacement::open_candidates(
+                            &ui,
+                            &journal_state.borrow(),
+                            &ticker,
+                            true,
+                        );
+                    }
+                }
                 written
             },
         );

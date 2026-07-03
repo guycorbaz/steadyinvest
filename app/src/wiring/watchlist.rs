@@ -56,6 +56,10 @@ pub(crate) fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
     watchlist.set_in_buy_zone_count(in_buy_zone_count);
     watchlist.set_rows(ModelRc::new(VecModel::from(rows)));
     watchlist.set_read_only(state.is_read_only());
+
+    // Story 6.8 (FR48): an OPEN candidates panel re-syncs on watchlist mutations too — the
+    // candidates ARE the watchlist (a closed panel costs nothing).
+    crate::wiring::replacement::sync_candidates(ui, state);
 }
 
 /// Surface a watchlist write's outcome (neutral notice on refusal) and re-render the list.

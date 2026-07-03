@@ -627,9 +627,17 @@ mod tests {
         // Grande nouns, the three non-classé reason templates, the rates footnote occurrence):
         // +39 = 405. Its review adds the « conversion impossible » non-classé variant (a
         // sales-conversion overflow must name its own reason, never « chiffre d'affaires
-        // indisponible »): +1 = 406. Floor strict.
+        // indisponible »): +1 = 406. Story 6.8 adds the replacement-candidates panel (the two
+        // header variants, the empty state, the four candidate-line variants, the H/B template,
+        // the two held-share variants, the currency-missing template, the two currency-exposure
+        // variants, « Ouvrir l'étude » / « Études » / « Fermer », the trigger-panel
+        // « Candidats » action): +17 = 423. Its review adds the honest-header variant (a
+        // trigger-open must never assert « Vente enregistrée »), the watchlist-unavailable
+        // state, the three zone-noun line variants (a known zone without a statable distance),
+        // the generic exposure-indisponible variant and the FR28 rates footnote: +7 = 430.
+        // Floor strict.
         assert!(
-            total >= 406,
+            total >= 430,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
