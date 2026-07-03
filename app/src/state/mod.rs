@@ -36,6 +36,7 @@ use uuid::Uuid;
 use crate::clock::{Clock, IdGen};
 
 mod cells;
+mod concentration;
 mod confront;
 mod export_import;
 mod fx;
@@ -53,6 +54,7 @@ mod watchlist;
 mod tests;
 
 pub use cells::*;
+pub use concentration::*;
 pub use confront::*;
 pub(crate) use holdings::effective_currency;
 pub use journal_io::*;

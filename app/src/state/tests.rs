@@ -4367,3 +4367,261 @@ fn a_checked_overflow_absents_the_bank_plainly_never_a_wrong_figure() {
     assert!(bank.unavailable, "marked plainly unavailable (overflow)");
     assert!(view.global.is_none(), "the global never sums a broken bank");
 }
+
+// ── Story 6.7 — concentration on total capital + diversify-by-size (FR45) ──
+
+/// Bank 1: NESN 10@100 CHF (1000) + AAPL 4@50 USD (200 USD); Bank 2: NESN 5@100 CHF (500).
+/// USD→CHF 0.5 → AAPL = 100 CHF; NESN = 1500 CHF across banks; global = 1600 CHF.
+fn diversification_fixture(dir: &TempDir, seed: u128) -> JournalState {
+    let mut state = watch_state(dir, seed);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    state.add_portfolio("PostFinance").unwrap();
+    state.add_holding("NESN", "5", "100", "CHF").unwrap();
+    state
+        .upsert_manual_fx_rate("USD", "0.5", "2026-06-27", "CHF")
+        .unwrap();
+    state
+}
+
+fn bounds() -> (Decimal, Decimal) {
+    (
+        Decimal::from(1_000_000_000i64),
+        Decimal::from(10_000_000_000i64),
+    )
+}
+
+#[test]
+fn a_ticker_held_at_two_banks_is_one_concentration_line_with_an_exact_share() {
+    // THE FR45 point (PRD Journey 3): concentration is against the TOTAL capital, regardless of
+    // which bank or currency holds the security — NESN's two positions are ONE line.
+    let dir = TempDir::new().unwrap();
+    let state = diversification_fixture(&dir, 0x670);
+    let (small, medium) = bounds();
+
+    let view = state.journal_diversification("CHF", small, medium);
+    assert!(!view.unavailable);
+    assert_eq!(view.rows.len(), 2, "two securities, not three positions");
+    assert_eq!(view.global_invested, Some(Decimal::from(1600)));
+    // Largest share first.
+    assert_eq!(view.rows[0].ticker, "NESN");
+    assert_eq!(view.rows[0].invested, Some(Decimal::from(1500)));
+    assert_eq!(
+        view.rows[0].share_pct,
+        Some(Decimal::from_str_exact("93.75").unwrap()),
+        "1500 / 1600 — exact decimal, no rounding"
+    );
+    assert_eq!(view.rows[1].ticker, "AAPL");
+    assert_eq!(
+        view.rows[1].share_pct,
+        Some(Decimal::from_str_exact("6.25").unwrap())
+    );
+    assert_eq!(view.rates_used.len(), 1, "USD→CHF named for the footnote");
+    assert!(view.missing_pairs.is_empty());
+}
+
+#[test]
+fn a_missing_rate_absents_the_security_and_the_denominator_by_name() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x671);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    // No USD→CHF rate stored.
+    let (small, medium) = bounds();
+    let view = state.journal_diversification("CHF", small, medium);
+
+    let aapl = view.rows.iter().find(|r| r.ticker == "AAPL").unwrap();
+    assert_eq!(aapl.invested, None, "absent, never a partial figure");
+    assert_eq!(aapl.missing_pairs, vec!["USD → CHF".to_string()]);
+    assert_eq!(
+        view.global_invested, None,
+        "the denominator refuses — never a partial total passed off as the whole"
+    );
+    let nesn = view.rows.iter().find(|r| r.ticker == "NESN").unwrap();
+    assert_eq!(
+        nesn.share_pct, None,
+        "even a fully-converted security has no share against an absent total"
+    );
+    assert_eq!(nesn.invested, Some(Decimal::from(1000)), "its figure stays");
+    assert_eq!(view.missing_pairs, vec!["USD → CHF".to_string()]);
+    // A rate arriving makes the next read consolidate (the 6.6 rule).
+    state
+        .upsert_manual_fx_rate("USD", "0.5", "2026-06-27", "CHF")
+        .unwrap();
+    let view = state.journal_diversification("CHF", small, medium);
+    assert_eq!(view.global_invested, Some(Decimal::from(1100)));
+}
+
+#[test]
+fn size_classification_joins_the_study_converts_sales_and_fills_the_mix() {
+    let dir = TempDir::new().unwrap();
+    let mut state = diversification_fixture(&dir, 0x672);
+    // NESN's study (CHF): latest sales 2 000 000 000 → Medium (1e9 ≤ s ≤ 1e10).
+    let nesn_study = state.create_study("NESN", "CHF").unwrap();
+    state
+        .edit_cell(nesn_study, 4, entry::FIELD_SALES, Some(money("2000000000")))
+        .unwrap();
+    // AAPL's study (USD): latest sales 500 000 000 USD × 0.5 = 250 000 000 CHF → Small.
+    let aapl_study = state.create_study("AAPL", "USD").unwrap();
+    state
+        .edit_cell(aapl_study, 4, entry::FIELD_SALES, Some(money("500000000")))
+        .unwrap();
+
+    let (small, medium) = bounds();
+    let view = state.journal_diversification("CHF", small, medium);
+    assert!(view.unclassified.is_empty());
+    assert_eq!(
+        view.medium.share_pct,
+        Some(Decimal::from_str_exact("93.75").unwrap()),
+        "NESN — 1500 / 1600"
+    );
+    assert_eq!(
+        view.small.share_pct,
+        Some(Decimal::from_str_exact("6.25").unwrap()),
+        "AAPL — 100 / 1600"
+    );
+    assert_eq!(
+        view.large.share_pct,
+        Some(Decimal::ZERO),
+        "0 % of a present total — a fact, not an absence"
+    );
+}
+
+#[test]
+fn an_unclassifiable_security_lands_in_the_honest_bucket_with_its_reason() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x673);
+    // NOSTUDY: held, no study at all. NOSALES: a study with no sales value. EURSALES: a study
+    // whose sales are in EUR — and no EUR→CHF rate stored (the holding itself is CHF, so its
+    // INVESTED still converts at identity; only the CLASSIFICATION refuses).
+    state.add_holding("NOSTUDY", "1", "100", "CHF").unwrap();
+    state.add_holding("NOSALES", "1", "100", "CHF").unwrap();
+    state.add_holding("EURSALES", "1", "100", "CHF").unwrap();
+    state.create_study("NOSALES", "CHF").unwrap();
+    let eur_study = state.create_study("EURSALES", "EUR").unwrap();
+    state
+        .edit_cell(eur_study, 4, entry::FIELD_SALES, Some(money("5000000000")))
+        .unwrap();
+
+    let (small, medium) = bounds();
+    let view = state.journal_diversification("CHF", small, medium);
+    assert_eq!(
+        view.global_invested,
+        Some(Decimal::from(300)),
+        "every holding is CHF — the denominator is whole"
+    );
+    assert_eq!(view.unclassified.len(), 3);
+    let reason_of = |ticker: &str| {
+        &view
+            .unclassified
+            .iter()
+            .find(|u| u.ticker == ticker)
+            .unwrap()
+            .reason
+    };
+    assert!(matches!(reason_of("NOSTUDY"), UnclassifiedReason::NoStudy));
+    assert!(matches!(reason_of("NOSALES"), UnclassifiedReason::NoSales));
+    match reason_of("EURSALES") {
+        UnclassifiedReason::MissingRate(pair) => assert_eq!(pair, "EUR → CHF"),
+        other => panic!(
+            "expected MissingRate, got {}",
+            match other {
+                UnclassifiedReason::NoStudy => "NoStudy",
+                UnclassifiedReason::NoSales => "NoSales",
+                UnclassifiedReason::Unconvertible => "Unconvertible",
+                UnclassifiedReason::MissingRate(_) => unreachable!(),
+            }
+        ),
+    }
+    // No class received them — never a default class (0 % of a present total).
+    assert_eq!(view.small.share_pct, Some(Decimal::ZERO));
+    assert_eq!(view.medium.share_pct, Some(Decimal::ZERO));
+    assert_eq!(view.large.share_pct, Some(Decimal::ZERO));
+    // 2026-07-03 review: EUR → CHF blocks only the CLASSIFICATION — named on its « non classé »
+    // row, never blamed for the shares' denominator (which is whole here).
+    assert!(
+        view.missing_pairs.is_empty(),
+        "classification-only pairs stay off the denominator set"
+    );
+}
+
+#[test]
+fn a_nonpositive_latest_sales_refuses_to_classify() {
+    // 2026-07-03 review: a negative (or zero) latest sales figure must not classify confidently
+    // as Small — it is not a usable classification input, so the security lands in the honest
+    // « non classé » bucket.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x677);
+    state.add_holding("NEG", "1", "100", "CHF").unwrap();
+    let study = state.create_study("NEG", "CHF").unwrap();
+    state
+        .edit_cell(study, 4, entry::FIELD_SALES, Some(money("-5")))
+        .unwrap();
+
+    let (small, medium) = bounds();
+    let view = state.journal_diversification("CHF", small, medium);
+    assert_eq!(view.unclassified.len(), 1);
+    assert!(matches!(
+        view.unclassified[0].reason,
+        UnclassifiedReason::NoSales
+    ));
+    assert_eq!(view.small.share_pct, Some(Decimal::ZERO), "never Small");
+}
+
+#[test]
+fn a_sold_holding_is_excluded_from_concentration() {
+    // Position facts — the unchanged 4.6/6.2 semantics: a sold position carries no share of the
+    // invested capital.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x674);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("GONE", "5", "100", "CHF").unwrap();
+    let gone = state
+        .list_holdings()
+        .iter()
+        .find(|h| h.security_ticker == "GONE")
+        .unwrap()
+        .id;
+    state.sell_holding(gone, "", "", "CHF").unwrap();
+
+    let (small, medium) = bounds();
+    let view = state.journal_diversification("CHF", small, medium);
+    assert_eq!(view.rows.len(), 1, "the sold position left the view");
+    assert_eq!(view.rows[0].ticker, "NESN");
+    assert_eq!(view.global_invested, Some(Decimal::from(1000)));
+}
+
+#[test]
+fn a_checked_overflow_absents_the_share_and_the_total_never_corrupts() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x675);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    // cost × qty overflows Decimal — the checked product is absent, never saturated into a share.
+    state
+        .add_holding("HUGE", "2", "79228162514264337593543950335", "CHF")
+        .unwrap();
+
+    let (small, medium) = bounds();
+    let view = state.journal_diversification("CHF", small, medium);
+    let huge = view.rows.iter().find(|r| r.ticker == "HUGE").unwrap();
+    assert_eq!(huge.invested, None, "absent, never wrong");
+    assert!(huge.missing_pairs.is_empty(), "no pair to blame — overflow");
+    assert_eq!(view.global_invested, None, "the total never sums a break");
+    assert_eq!(
+        view.rows.last().unwrap().ticker,
+        "HUGE",
+        "absent rows sink below priced ones"
+    );
+}
+
+#[test]
+fn diversification_without_a_journal_is_unavailable_never_a_zero_state() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x676);
+    state.journal = None;
+    let (small, medium) = bounds();
+    let view = state.journal_diversification("CHF", small, medium);
+    assert!(view.unavailable, "an absence, never an empty-looking zero");
+    assert!(view.rows.is_empty());
+    assert_eq!(view.global_invested, None);
+}

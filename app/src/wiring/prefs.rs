@@ -30,6 +30,30 @@ pub(crate) fn push_samples(ui: &MainWindow, format: NumberFormat) {
     prefs.set_sample_amount_alt(format_amount(SAMPLE_AMOUNT_ALT, format).into());
 }
 
+/// Mirror the Story 6.7 risk settings (concentration threshold + diversify-by-size table) from
+/// the validated config accessors into BOTH globals: `Prefs` (the Réglages fields) and `Holdings`
+/// (the canonical strings `refresh_holdings` bakes at render time — the reference-currency
+/// pattern). Always effective values (defaults when unset/damaged).
+pub(crate) fn mirror_risk_settings(ui: &MainWindow, cfg: &crate::config::AppConfig) {
+    let threshold = cfg.concentration_threshold_pct_or_default();
+    let (small_max, medium_max) = cfg.size_bounds_or_default();
+    let (target_small, target_medium, target_large) = cfg.size_targets_or_default();
+    let prefs = ui.global::<Prefs>();
+    prefs.set_concentration_threshold_pct(threshold.clone().into());
+    prefs.set_size_small_max(small_max.clone().into());
+    prefs.set_size_medium_max(medium_max.clone().into());
+    prefs.set_size_target_small_pct(target_small.clone().into());
+    prefs.set_size_target_medium_pct(target_medium.clone().into());
+    prefs.set_size_target_large_pct(target_large.clone().into());
+    let holdings = ui.global::<Holdings>();
+    holdings.set_concentration_threshold_pct(threshold.into());
+    holdings.set_size_small_max(small_max.into());
+    holdings.set_size_medium_max(medium_max.into());
+    holdings.set_size_target_small_pct(target_small.into());
+    holdings.set_size_target_medium_pct(target_medium.into());
+    holdings.set_size_target_large_pct(target_large.into());
+}
+
 /// Wire the preferences domain: theme / label-set / number-format / reference-currency /
 /// default-trailing-stop / provider-choice, applied live and persisted on change.
 pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
@@ -174,6 +198,131 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     config.borrow().withholding_rate_pct_or_default().into(),
                 );
             });
+    }
+    // ── Story 6.7 (FR45) — the concentration threshold. "" resets to the default (50); else
+    // validate (0,100) (the trailing-stop shape). A refusal names itself and writes nothing; a
+    // success re-mirrors + re-renders the Portefeuille block (the mirrors bake at render time). ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(config);
+        let path = config_path.clone();
+        let journal_state = Rc::clone(journal_state);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Prefs>()
+            .on_concentration_threshold_pct_changed(move |value| {
+                let ui = ui_weak.unwrap();
+                let value = value.trim();
+                let stored = if value.is_empty() {
+                    None
+                } else if config::is_valid_trailing_stop_pct(value) {
+                    Some(value.to_string())
+                } else {
+                    ui.global::<Prefs>()
+                        .set_risk_settings_status(crate::state::MSG_CONCENTRATION_INVALID.into());
+                    return;
+                };
+                config.borrow_mut().concentration_threshold_pct = stored;
+                persist(path.as_ref(), &config.borrow());
+                ui.global::<Prefs>().set_risk_settings_status("".into());
+                mirror_risk_settings(&ui, &config.borrow());
+                let format = config.borrow().number_format;
+                refresh_holdings(
+                    &ui,
+                    &journal_state.borrow(),
+                    &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
+                    format,
+                );
+            });
+    }
+    // ── Story 6.7 (FR45) — the diversify-by-size table: two boundaries + three targets, committed
+    // WHOLE or not at all ("" = that field's default; the small < medium cross-check runs on the
+    // EFFECTIVE values so a half-empty commit cannot cross the defaults). ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(config);
+        let path = config_path.clone();
+        let journal_state = Rc::clone(journal_state);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Prefs>().on_size_table_changed(
+            move |small_max, medium_max, target_small, target_medium, target_large| {
+                let ui = ui_weak.unwrap();
+                let refuse = || {
+                    ui_weak
+                        .unwrap()
+                        .global::<Prefs>()
+                        .set_risk_settings_status(crate::state::MSG_SIZE_TABLE_INVALID.into());
+                };
+                // "" → None (that field's pinned default); a non-empty field must validate.
+                let bound = |v: &str, ok: &mut bool| {
+                    let v = v.trim();
+                    if v.is_empty() {
+                        None
+                    } else if config::is_valid_size_bound(v) {
+                        Some(v.to_string())
+                    } else {
+                        *ok = false;
+                        None
+                    }
+                };
+                let target = |v: &str, ok: &mut bool| {
+                    let v = v.trim();
+                    if v.is_empty() {
+                        None
+                    } else if config::is_valid_size_target_pct(v) {
+                        Some(v.to_string())
+                    } else {
+                        *ok = false;
+                        None
+                    }
+                };
+                let mut ok = true;
+                let small = bound(&small_max, &mut ok);
+                let medium = bound(&medium_max, &mut ok);
+                let t_small = target(&target_small, &mut ok);
+                let t_medium = target(&target_medium, &mut ok);
+                let t_large = target(&target_large, &mut ok);
+                if !ok {
+                    refuse();
+                    return;
+                }
+                // Cross-check on the EFFECTIVE pair (entered or default): small < medium.
+                let effective = |v: &Option<String>, default: &str| {
+                    rust_decimal::Decimal::from_str_exact(v.as_deref().unwrap_or(default))
+                };
+                match (
+                    effective(&small, config::DEFAULT_SIZE_SMALL_MAX),
+                    effective(&medium, config::DEFAULT_SIZE_MEDIUM_MAX),
+                ) {
+                    (Ok(s), Ok(m)) if s < m => {}
+                    _ => {
+                        refuse();
+                        return;
+                    }
+                }
+                {
+                    let mut cfg = config.borrow_mut();
+                    cfg.size_small_max = small;
+                    cfg.size_medium_max = medium;
+                    cfg.size_target_small_pct = t_small;
+                    cfg.size_target_medium_pct = t_medium;
+                    cfg.size_target_large_pct = t_large;
+                }
+                persist(path.as_ref(), &config.borrow());
+                ui.global::<Prefs>().set_risk_settings_status("".into());
+                mirror_risk_settings(&ui, &config.borrow());
+                let format = config.borrow().number_format;
+                refresh_holdings(
+                    &ui,
+                    &journal_state.borrow(),
+                    &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
+                    format,
+                );
+            },
+        );
     }
     // ── Story 3.2 — provider selection + key management (FR25/FR63) ──
     {

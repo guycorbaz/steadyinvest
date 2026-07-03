@@ -193,6 +193,82 @@ export component PortfolioScreen inherits Rectangle {
             }
         }
 
+        // ── Story 6.7 (FR45): concentration against the TOTAL invested capital — per security,
+        // aggregated across ALL banks and currencies (largest share first) — plus the
+        // diversify-by-size mix against the configured table. Neutral facts; the near-threshold
+        // murmur is stated in the line's own words (ink only, no hue — colour budget). ──
+        if Holdings.concentration-rows.length > 0 || Holdings.concentration-unavailable: VerticalLayout {
+            spacing: Tokens.space-4;
+            Text {
+                text: @tr("Concentration (part du capital total investi, en {}) :", Holdings.reference-currency);
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.concentration-unavailable: Text {
+                text: @tr("Concentration indisponible");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            for line in Holdings.concentration-rows: Text {
+                text: line.missing != ""
+                    ? @tr("{} — indisponible : taux manquant {}", line.ticker, line.missing)
+                    : line.amount == ""
+                        ? @tr("{} — indisponible", line.ticker)
+                        : line.flagged
+                            ? @tr("{} — {} ({} % du capital total · seuil {} % approché ou atteint)",
+                                line.ticker, line.amount, line.share, Holdings.concentration-threshold-display)
+                            : line.share != ""
+                                ? @tr("{} — {} ({} % du capital total)", line.ticker, line.amount, line.share)
+                                : @tr("{} — {}", line.ticker, line.amount);
+                color: Tokens.text-high;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.concentration-global-absent && Holdings.concentration-missing != "": Text {
+                text: @tr("Parts indisponibles : taux manquant {}", Holdings.concentration-missing);
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.concentration-global-absent && Holdings.concentration-missing == "": Text {
+                text: @tr("Parts indisponibles");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.size-mix-rows.length > 0: Text {
+                text: @tr("Répartition par taille (chiffre d'affaires) :");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            for mix in Holdings.size-mix-rows: Text {
+                text: mix.share != ""
+                    ? @tr("{} — {} % (cible {} %)",
+                        mix.class-key == "small" ? @tr("Petite") : mix.class-key == "medium" ? @tr("Moyenne") : @tr("Grande"),
+                        mix.share, mix.target)
+                    : @tr("{} — indisponible (cible {} %)",
+                        mix.class-key == "small" ? @tr("Petite") : mix.class-key == "medium" ? @tr("Moyenne") : @tr("Grande"),
+                        mix.target);
+                color: Tokens.text-high;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+            }
+            for unclassified in Holdings.size-unclassified-rows: Text {
+                text: unclassified.reason-key == "no-study"
+                    ? @tr("{} — non classé (aucune étude)", unclassified.ticker)
+                    : unclassified.reason-key == "no-sales"
+                        ? @tr("{} — non classé (chiffre d'affaires indisponible)", unclassified.ticker)
+                        : unclassified.reason-key == "missing-rate"
+                            ? @tr("{} — non classé (taux manquant {})", unclassified.ticker, unclassified.missing)
+                            : @tr("{} — non classé (conversion impossible)", unclassified.ticker);
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+            if Holdings.concentration-rates != "": Text {
+                text: @tr("Convertis aux taux : {}", Holdings.concentration-rates);
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+            }
+        }
+
         // ── Manual price refresh (Story 4.4, FR40) — user-initiated; never background-polled. ──
         HorizontalLayout {
             alignment: start;
