@@ -51,6 +51,10 @@ export component MainWindow inherits Window {
 
     // Active destination index — pure-Slint nav state (no Rust round-trip needed in 2.1).
     in-out property <int> current-screen: 0;
+    // Issue #94: fired on every nav activation so Rust re-renders the STUDY-DERIVED surfaces of
+    // the destination (watchlist zones, holdings zones/prices/size-mix/candidates) — a study
+    // edited on the Études screen must not show stale on arrival elsewhere.
+    callback screen-activated(int);
     property <[string]> destinations: [
         @tr("Études"),
         @tr("Liste de suivi"),
@@ -113,6 +117,8 @@ export component MainWindow inherits Window {
                                 Studies.study-open = false;
                                 Studies.judgment-dragging = false;
                             }
+                            // Issue #94: let Rust refresh the destination's study-derived facts.
+                            root.screen-activated(index);
                         }
                     }
                 }

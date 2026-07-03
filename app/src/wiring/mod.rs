@@ -64,3 +64,45 @@ pub(crate) fn persist(path: Option<&PathBuf>, config: &AppConfig) {
         eprintln!("steadyinvest: {message}");
     }
 }
+
+/// Issue #94 (epic-6 retro F4): the study-derived surfaces — watchlist zones (4.2), holdings
+/// zones/prices (4.4), the size mix and « non classé » lines (6.7), the candidates panel (6.8) —
+/// are baked at render time from studies, but study MUTATIONS happen on the Études screen and
+/// never re-rendered them. Refreshing on NAVIGATION bounds the staleness at the moment the user
+/// can actually see it, and covers every mutation source at once (manual edits, judgment drags,
+/// provider refreshes, imports, restores) without threading a re-render through each study rail.
+pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
+    use slint::ComponentHandle;
+    let Session {
+        journal_state,
+        config,
+        holding_freshness,
+        holding_dismissed,
+        ..
+    } = s;
+    let ui_weak = ui.as_weak();
+    let journal_state = std::rc::Rc::clone(journal_state);
+    let config = std::rc::Rc::clone(config);
+    let holding_freshness = std::rc::Rc::clone(holding_freshness);
+    let holding_dismissed = std::rc::Rc::clone(holding_dismissed);
+    ui.on_screen_activated(move |index| {
+        let ui = ui_weak.unwrap();
+        match index {
+            // Liste de suivi: the per-item buy-zone flags re-derive from the CURRENT studies.
+            1 => crate::wiring::watchlist::refresh_watchlist(&ui, &journal_state.borrow()),
+            // Portefeuille: zones/prices/triggers + the 6.7/6.8 blocks re-derive (this also
+            // re-syncs an open candidates panel through refresh_holdings' existing hook).
+            2 => {
+                let format = config.borrow().number_format;
+                crate::wiring::holdings::refresh_holdings(
+                    &ui,
+                    &journal_state.borrow(),
+                    &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
+                    format,
+                );
+            }
+            _ => {}
+        }
+    });
+}

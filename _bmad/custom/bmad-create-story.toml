@@ -1,0 +1,3 @@
+# Epic-6 retro F3: story authoring carries the defect-class checklist as context.
+[workflow]
+persistent_facts = ["file:{project-root}/docs/review-checklist.md"]
