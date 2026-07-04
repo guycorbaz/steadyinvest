@@ -91,7 +91,15 @@ export component GrowthChart inherits Rectangle {
                 stroke: Tokens.text-low;
                 stroke-width: Tokens.chart-stroke-thin;
                 opacity: Tokens.chart-fan-opacity;
-                viewbox-width: root.chart.chart-w;
+                // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
+                // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
+                // from x=0 = the LEFT edge (the origin is at the left, not the middle). viewbox-height
+                // stays chart-h == plot-h, so the vertical mapping the drag relies on is untouched.
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                viewbox-width: parent.width / 1px;
                 viewbox-height: root.chart.chart-h;
             }
 
@@ -100,14 +108,30 @@ export component GrowthChart inherits Rectangle {
                 commands: root.chart.sales-commands;
                 stroke: Tokens.text-low;
                 stroke-width: Tokens.chart-stroke;
-                viewbox-width: root.chart.chart-w;
+                // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
+                // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
+                // from x=0 = the LEFT edge (the origin is at the left, not the middle). viewbox-height
+                // stays chart-h == plot-h, so the vertical mapping the drag relies on is untouched.
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                viewbox-width: parent.width / 1px;
                 viewbox-height: root.chart.chart-h;
             }
             Path {
                 commands: root.chart.price-commands;
                 stroke: Tokens.text-mid;
                 stroke-width: Tokens.chart-stroke-thin;
-                viewbox-width: root.chart.chart-w;
+                // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
+                // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
+                // from x=0 = the LEFT edge (the origin is at the left, not the middle). viewbox-height
+                // stays chart-h == plot-h, so the vertical mapping the drag relies on is untouched.
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                viewbox-width: parent.width / 1px;
                 viewbox-height: root.chart.chart-h;
             }
             // EPS — the protagonist (brightest).
@@ -115,7 +139,15 @@ export component GrowthChart inherits Rectangle {
                 commands: root.chart.eps-commands;
                 stroke: Tokens.text-high;
                 stroke-width: Tokens.chart-stroke;
-                viewbox-width: root.chart.chart-w;
+                // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
+                // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
+                // from x=0 = the LEFT edge (the origin is at the left, not the middle). viewbox-height
+                // stays chart-h == plot-h, so the vertical mapping the drag relies on is untouched.
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                viewbox-width: parent.width / 1px;
                 viewbox-height: root.chart.chart-h;
             }
             // The judgment trend line (origin fixed at the last historical EPS → forecast endpoint),
@@ -124,7 +156,15 @@ export component GrowthChart inherits Rectangle {
                 commands: root.chart.judgment-commands;
                 stroke: Tokens.text-high;
                 stroke-width: Tokens.chart-judgment-stroke;
-                viewbox-width: root.chart.chart-w;
+                // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
+                // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
+                // from x=0 = the LEFT edge (the origin is at the left, not the middle). viewbox-height
+                // stays chart-h == plot-h, so the vertical mapping the drag relies on is untouched.
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                viewbox-width: parent.width / 1px;
                 viewbox-height: root.chart.chart-h;
             }
 
