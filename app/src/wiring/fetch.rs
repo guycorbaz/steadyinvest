@@ -191,10 +191,15 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         // The price arrived: fill `current_price` (price-only — never the yearly
                         // cells, issue #50) so the §4 zone recomputes, and stamp a fresh `as_of`.
                         Ok(Some(price)) => {
-                            match journal_state
+                            // Bind the result to a local so the `borrow_mut()` RefMut is DROPPED
+                            // before the arms run — temporaries in a `match` scrutinee otherwise
+                            // live for the whole `match`, so the `borrow_mut()` (ratchet) and
+                            // `borrow()` (now / re-render) below would panic "RefCell already
+                            // borrowed" on every successful price refresh.
+                            let applied = journal_state
                                 .borrow_mut()
-                                .apply_holding_price(outcome.study_id, price)
-                            {
+                                .apply_holding_price(outcome.study_id, price);
+                            match applied {
                                 Ok(()) => {
                                     // Story 4.5 (FR42): ratchet every same-ticker holding's stop level
                                     // up against the fresh price (a falling price writes nothing).
