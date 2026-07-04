@@ -155,6 +155,64 @@ fn provider_fetch_fills_a_fresh_study_with_provider_stamped_cells() {
     );
 }
 
+/// Issue #109: a fetch drops the in-progress current year — a provider `/eod`-only row for a fiscal
+/// year whose annual statements are not filed (price + EPS, but NO `sales`) is not a usable analysis
+/// year. The study materializes the COMPLETE years only (matching the manual window).
+#[test]
+fn provider_fetch_drops_the_in_progress_year_without_annual_statements() {
+    use steadyinvest_core::normalize::{normalize, RawAmount, RawFinancials, RawYear};
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x4C, "2026-06-15T10:00:00Z");
+    let id = state.create_study("AAPL", "CHF").unwrap();
+
+    let amt = |v: i64| {
+        Some(RawAmount {
+            value: rust_decimal::Decimal::new(v, 0),
+            currency: "CHF".to_string(),
+        })
+    };
+    // 2021..=2024 are complete; 2025 is the in-progress year — a price + EPS row with NO sales.
+    let mut rows: Vec<RawYear> = (2021..=2024)
+        .map(|y| RawYear {
+            sales: amt(1000),
+            eps: amt(5),
+            high_price: amt(100),
+            low_price: amt(50),
+            ..RawYear::empty(y)
+        })
+        .collect();
+    rows.push(RawYear {
+        eps: amt(6),
+        high_price: amt(120),
+        low_price: amt(60),
+        ..RawYear::empty(2025)
+    });
+    let fetched = FetchedFinancials {
+        canonical: normalize(RawFinancials {
+            native_currency: "CHF".to_string(),
+            years: rows,
+            splits: vec![],
+        })
+        .expect("normalizes"),
+        digest: "d109".to_string(),
+        latest_price: None,
+    };
+
+    state.apply_provider_refresh(id, &fetched).unwrap();
+    let years: Vec<i32> = state
+        .get_study(id)
+        .unwrap()
+        .years
+        .iter()
+        .map(|y| y.year)
+        .collect();
+    assert_eq!(
+        years,
+        vec![2021, 2022, 2023, 2024],
+        "the in-progress year (no sales) is dropped — analysis uses complete years only"
+    );
+}
+
 // ── Story 5.2 — export / import a single study ──
 
 #[test]
@@ -3247,7 +3305,7 @@ fn extend_history_rolls_the_window_forward_each_call() {
         .collect();
     assert_eq!(
         years,
-        vec![2021, 2022, 2023, 2024, 2025, 2026, 2027],
+        vec![2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027],
         "each call appends the next year (oldest→newest, horizon re-bases off the new latest)"
     );
 }

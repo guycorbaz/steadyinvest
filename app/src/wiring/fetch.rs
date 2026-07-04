@@ -139,6 +139,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         // "no data", NOT "no change" — report it honestly and flag last-known
                         // provider data stale (never apply an empty refresh as if nothing changed).
                         Ok(fetched) if fetched.canonical.years.is_empty() => {
+                            tracing::warn!(study_id = %outcome.study_id, "study fetch returned no usable years (no data)");
                             studies.set_notice(state::MSG_PROVIDER_NO_DATA.into());
                             let _ = journal_state
                                 .borrow_mut()
@@ -151,6 +152,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                 .apply_provider_refresh(outcome.study_id, &fetched);
                             match applied {
                                 Ok(report) => {
+                                    tracing::info!(study_id = %outcome.study_id, "study fetch applied");
                                     // Name the recompute cause (FR29) and, after an annual update
                                     // (Story 3.6), the re-validation scope ("N à revérifier").
                                     // Story 6.9 (FR26): a fallback names itself alongside.
@@ -171,6 +173,15 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         // flag the open study's provider cells stale (degrading the verdict). Never
                         // clear data; the user keeps working offline and retries later.
                         Err(error) => {
+                            // Look up the ticker for a diagnosable log line (the FetchOutcome carries
+                            // only the study_id). The borrow drops at the `;`, before the borrow_mut
+                            // below — the RefCell lesson.
+                            let ticker = journal_state
+                                .borrow()
+                                .get_study(outcome.study_id)
+                                .map(|s| s.security_ticker)
+                                .unwrap_or_default();
+                            tracing::warn!(%ticker, error = %error, "study fetch failed");
                             studies.set_notice(state::provider_failure_notice(&error).into());
                             let _ = journal_state
                                 .borrow_mut()
@@ -201,6 +212,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                 .apply_holding_price(outcome.study_id, price);
                             match applied {
                                 Ok(()) => {
+                                    tracing::info!(ticker = %outcome.ticker, "price refresh: quote applied");
                                     // Story 4.5 (FR42): ratchet every same-ticker holding's stop level
                                     // up against the fresh price (a falling price writes nothing).
                                     let _ = journal_state
@@ -244,10 +256,12 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         // flag `périmé`, keep the last-known zone (AC4); never stamp "à jour" when the
                         // price the user asked to refresh did not come back.
                         Ok(None) => {
+                            tracing::warn!(ticker = %outcome.ticker, "price refresh: provider returned no quote");
                             holdings.set_notice(state::MSG_PROVIDER_NO_DATA.into());
                             mark_holding_stale(&holding_freshness, &key);
                         }
                         Err(error) => {
+                            tracing::warn!(ticker = %outcome.ticker, error = %error, "price refresh failed");
                             holdings.set_notice(state::provider_failure_notice(&error).into());
                             mark_holding_stale(&holding_freshness, &key);
                         }
@@ -319,6 +333,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             }
                             Ok(None) => {}
                             Err(error) => {
+                                tracing::warn!(base = %outcome.base, quote = %outcome.quote, error = %error, "fx rate fetch failed");
                                 failure.get_or_insert_with(|| {
                                     state::provider_failure_notice(&error).to_string()
                                 });
@@ -351,6 +366,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 fetch::WorkerOutcome::TestKey(result) => {
                     // The key test (Story 3.2): a verdict, not study data. Surface it as the
                     // provider/key status in Réglages (cause-named on failure).
+                    match &result {
+                        Ok(()) => tracing::info!("provider key test succeeded"),
+                        Err(error) => tracing::warn!(error = %error, "provider key test failed"),
+                    }
                     let prefs = ui.global::<Prefs>();
                     let status = match result {
                         Ok(()) => state::MSG_KEY_OK.to_string(),
@@ -413,6 +432,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             studies.set_fetching(true);
             studies.set_notice(state::MSG_PROVIDER_FETCHING.into());
             let primary = config.borrow().preferred_provider;
+            tracing::info!(ticker = %ticker, provider = primary.wire(), "study fetch requested");
             if fetch_tx
                 .send(fetch::WorkerJob::Fetch(fetch::FetchRequest {
                     study_id,
