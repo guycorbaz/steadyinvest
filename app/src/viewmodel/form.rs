@@ -339,9 +339,9 @@ mod tests {
                 );
             }
         }
-        // Year labels are the 5 complete years before the created-at year (2026 → 2021..=2025).
-        assert_eq!(rows[0].year, "2021");
-        assert_eq!(rows[4].year, "2025");
+        // Year labels are the 10 complete years before the created-at year (2026 → 2016..=2025).
+        assert_eq!(rows[0].year, "2016");
+        assert_eq!(rows[9].year, "2025");
     }
 
     #[test]
@@ -455,7 +455,10 @@ mod tests {
     fn year_headers_match_the_materialized_window() {
         let headers = year_headers(&study(vec![]));
         let headers: Vec<&str> = headers.iter().map(|s| s.as_str()).collect();
-        assert_eq!(headers, vec!["2021", "2022", "2023", "2024", "2025"]);
+        assert_eq!(
+            headers,
+            vec!["2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"]
+        );
     }
 
     // ── Story 2.7 — the plausibility warning channel on the cell state ──

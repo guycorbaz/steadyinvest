@@ -3247,7 +3247,7 @@ fn extend_history_rolls_the_window_forward_each_call() {
         .collect();
     assert_eq!(
         years,
-        vec![2021, 2022, 2023, 2024, 2025, 2026, 2027],
+        vec![2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027],
         "each call appends the next year (oldest→newest, horizon re-bases off the new latest)"
     );
 }

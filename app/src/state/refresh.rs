@@ -70,7 +70,15 @@ impl JournalState {
         fetched: &FetchedFinancials,
     ) -> Result<RefreshReport, String> {
         let provenance = self.provider_provenance(fetched.digest.clone());
-        let years: Vec<CanonicalYear> = fetched.canonical.years.clone();
+        // Issue #109: providers return decades of history (EODHD ~30y); the form + the §1 growth CAGR
+        // only use the SSG window. Cap to the most recent `YEAR_WINDOW` years — canonical years are
+        // ascending (core::normalize sorts them), so drop the oldest overflow. Matches the manual
+        // materialized window, so a fetched study looks like a hand-entered one.
+        let mut years: Vec<CanonicalYear> = fetched.canonical.years.clone();
+        let window = crate::viewmodel::entry::YEAR_WINDOW;
+        if years.len() > window {
+            years.drain(0..years.len() - window);
+        }
         // Story 4.4 (AC2/AC6): the latest `/eod` close is the present market price for the §4 zone.
         // `None` for a provider with no current price → `current_price` left untouched (pre-4.4 shape).
         let latest_price = fetched.latest_price;

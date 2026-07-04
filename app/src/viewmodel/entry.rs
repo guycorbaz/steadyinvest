@@ -27,11 +27,13 @@ pub const ALL_FIELDS: [&str; 7] = [
 
 use crate::viewmodel::format::{parse_amount, NumberFormat};
 
-/// How many most-recent complete fiscal years a freshly-created study materializes for entry. The
-/// canonical SSG history window. (Extending the forward projection horizon is Story 2.11; full
-/// year-column add/remove beyond this initial window is a documented partial — see the 2.4
+/// How many most-recent complete fiscal years a freshly-created study materializes for entry, and
+/// the cap a provider fetch imports (issue #109). The canonical SSG history window: the §1 Visual
+/// Analysis is a 10-year growth picture (§2/§3 still compute on the last 5 usable years — the engine
+/// rule is independent of this window). (Extending the forward projection horizon is Story 2.11;
+/// full year-column add/remove beyond this initial window is a documented partial — see the 2.4
 /// interpretations issue.)
-pub const YEAR_WINDOW: usize = 5;
+pub const YEAR_WINDOW: usize = 10;
 
 /// The editable §3 P/E-table columns, in left→right order (A·high, B·low, C·EPS, F·dividend). The
 /// computed columns D/E/G/H are caption-only (engine, Story 2.6) and are NOT in this list — the
@@ -257,14 +259,14 @@ mod tests {
     }
 
     #[test]
-    fn window_is_the_five_complete_years_before_created_at_all_to_fill() {
+    fn window_is_the_ten_complete_years_before_created_at_all_to_fill() {
         let years =
             materialize_year_window(&Timestamp("2026-06-13T09:00:00Z".to_string()), &prov());
         let labels: Vec<i32> = years.iter().map(|y| y.year).collect();
         assert_eq!(
             labels,
-            vec![2021, 2022, 2023, 2024, 2025],
-            "5 complete years, oldest first"
+            vec![2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+            "10 complete years, oldest first"
         );
         for y in &years {
             for cell in [&y.sales, &y.eps, &y.high_price, &y.low_price] {
