@@ -131,6 +131,9 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 // Story 6.8 (2026-07-03 review): an OPEN candidates panel re-renders in the new
                 // locale (its strings are baked at push time).
                 crate::wiring::replacement::sync_candidates(&ui, &journal_state.borrow());
+                // Issue #107: the dashboard's potential-return column is baked in the current locale
+                // at curate time — re-render it so the "%" figures re-format with the new separator.
+                crate::wiring::studies::refresh_studies(&ui, &journal_state.borrow());
             });
     }
     // ── Story 4.3 — reference currency (FR63) ── persist the chosen code and re-label the register.

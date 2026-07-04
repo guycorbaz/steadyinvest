@@ -263,7 +263,11 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 return;
             };
             let format = config.borrow().number_format;
-            match journal_state.borrow_mut().undo(id) {
+            // Bind first: a `borrow_mut()` in the `match` scrutinee stays alive for the whole
+            // `match`, so the `journal_state.borrow()` in the Ok(true) arm would panic "RefCell
+            // already borrowed". (Same class as the fetch.rs price-refresh panic.)
+            let undone = journal_state.borrow_mut().undo(id);
+            match undone {
                 Ok(true) => {
                     studies.set_notice(SharedString::new());
                     if let Some(study) = journal_state.borrow().get_study(id) {
@@ -293,7 +297,11 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 return;
             };
             let format = config.borrow().number_format;
-            match journal_state.borrow_mut().redo(id) {
+            // Bind first: a `borrow_mut()` in the `match` scrutinee stays alive for the whole
+            // `match`, so the `journal_state.borrow()` in the Ok(true) arm would panic "RefCell
+            // already borrowed". (Same class as the fetch.rs price-refresh panic.)
+            let redone = journal_state.borrow_mut().redo(id);
+            match redone {
                 Ok(true) => {
                     studies.set_notice(SharedString::new());
                     if let Some(study) = journal_state.borrow().get_study(id) {

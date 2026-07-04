@@ -18,7 +18,7 @@ use crate::wiring::push::{push_form, push_view_state};
 use crate::wiring::watchlist::refresh_watchlist;
 use crate::wiring::{persist, Session};
 use crate::{regime, state, viewmodel};
-use crate::{FixtureLine, MainWindow, ScenarioCompareState, Studies, StudyRow, Verify};
+use crate::{FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, Verify};
 
 /// Write a study's export envelope to a file (Story 5.2, FR59) and return its path. The file lands in
 /// an `exports/` folder under the OS data dir — **never** beside the live journal DB (ADD7/8
@@ -34,32 +34,77 @@ fn write_study_export(id: Uuid, json: &str) -> std::io::Result<std::path::PathBu
     Ok(path)
 }
 
-/// Write a study's faithful PDF to a file (Story 5.6, FR52) and return its path. Same `exports/`
-/// folder + naming discipline as the JSON export — never beside the live journal (ADD7/8). `app` owns
-/// the I/O; `report` produced the bytes from `core`/`contract` alone.
-fn write_study_pdf(id: Uuid, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
-    let dir = directories::ProjectDirs::from("", "", "steadyinvest")
-        .map(|d| d.data_dir().join("exports"))
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no OS data directory"))?;
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("study-{id}.pdf"));
-    std::fs::write(&path, bytes)?;
-    Ok(path)
+/// The default `exports/` folder under the OS data dir — the native PDF save picker (issue #106)
+/// opens here, but the user is free to save anywhere. `None` when the OS exposes no data directory.
+fn default_exports_dir() -> Option<std::path::PathBuf> {
+    directories::ProjectDirs::from("", "", "steadyinvest").map(|d| d.data_dir().join("exports"))
+}
+
+/// A filesystem-safe default file stem from a ticker (e.g. `AAPL.US` → `AAPL.US`, `BRK/B` → `BRK_B`).
+/// Path separators and control/space characters become `_`; the common `.`/`-` are kept.
+fn safe_stem(ticker: &str) -> String {
+    let stem: String = ticker
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if stem.is_empty() {
+        "etude".to_string()
+    } else {
+        stem
+    }
 }
 
 /// Rebuild the dashboard list from the journal and mirror the read-only flag into the `Studies`
 /// global. Called on startup and after every create.
 pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
+    use steadyinvest_core::rounding::DisplayField;
     let studies = ui.global::<Studies>();
     // The dashboard view state (search/sort/filter) lives on the `Studies` global — read it back and
     // curate the persistence summaries (Story 2.12). Deterministic, pure (`viewmodel::studies::curate`).
     let summaries = state.list_studies();
+    // Issue #107: the estimated potential per study (§5 projected total annualized return). Computed
+    // app-side via `build_snapshot` (Cardinal Rule kept: `curate` only READS this) and formatted with
+    // the user's number format (mirrored on `Prefs`, as `replacement.rs` already reads it). A study
+    // that does not compute / withholds the return contributes an absent value → sorts last, "—" shown.
+    // Personal scale: one snapshot per study per refresh is sub-ms (the holdings register already does
+    // the same per row).
+    let format =
+        crate::viewmodel::format::NumberFormat::parse(&ui.global::<Prefs>().get_number_format())
+            .unwrap_or_default();
+    let mut returns: std::collections::HashMap<uuid::Uuid, viewmodel::studies::StudyReturn> =
+        std::collections::HashMap::new();
+    for summary in &summaries {
+        let Some(study) = state.get_study(summary.id) else {
+            continue;
+        };
+        let value = crate::viewmodel::engine::build_snapshot(&study)
+            .ok()
+            .and_then(|snap| snap.outputs().returns.projected_total_annualized_return_pct);
+        let display = match value {
+            Some(v) => format!(
+                "{} %",
+                crate::viewmodel::format::format_scaled(v, DisplayField::Percent, format)
+            ),
+            None => crate::viewmodel::form::EMPTY_SLOT.to_string(),
+        };
+        returns.insert(
+            summary.id,
+            viewmodel::studies::StudyReturn { value, display },
+        );
+    }
     let rows: Vec<StudyRow> = viewmodel::studies::curate(
         &summaries,
         studies.get_search_query().as_str(),
         viewmodel::studies::SortKey::from_wire(studies.get_sort_key().as_str()),
         studies.get_sort_descending(),
         viewmodel::studies::StatusFilter::from_wire(studies.get_status_filter().as_str()),
+        &returns,
     );
     studies.set_study_count(summaries.len() as i32);
     studies.set_rows(ModelRc::new(VecModel::from(rows)));
@@ -124,9 +169,10 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         });
     }
     {
-        // Story 5.6 (FR52): export a study's faithful, neutral, greyscale PDF via the `report` crate
-        // (UI-independent, from `core`/`contract`). Path-based like the JSON export; the native save
-        // picker is a later refinement. Read-only — rendering writes no journal.
+        // Story 5.6 (FR52) + issue #106: export a study's faithful, neutral, greyscale PDF via the
+        // `report` crate (UI-independent, from `core`/`contract`). A native `rfd` save picker lets the
+        // user choose the destination directory + filename (defaulting into exports/ with a ticker-
+        // named file); cancel is a silent no-op. Read-only — rendering writes no journal.
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_export_study_pdf(move |id| {
@@ -135,16 +181,39 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             let Ok(uuid) = Uuid::parse_str(&id) else {
                 return;
             };
-            let notice = match journal_state.borrow().get_study(uuid) {
-                Some(study) => match steadyinvest_report::render_study_pdf(&study) {
-                    Ok(bytes) => match write_study_pdf(uuid, &bytes) {
-                        Ok(path) => format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
-                        Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
-                    },
-                    // The study does not compute as entered — a neutral refusal, no panic, no leak.
-                    Err(_) => state::MSG_SAVE_FAILED.to_string(),
-                },
-                None => state::MSG_SAVE_FAILED.to_string(),
+            // Fetch + render BEFORE opening a dialog, so a study that does not compute never prompts
+            // for a destination it can't fill.
+            let Some(study) = journal_state.borrow().get_study(uuid) else {
+                studies.set_notice(state::MSG_SAVE_FAILED.into());
+                return;
+            };
+            let Ok(bytes) = steadyinvest_report::render_study_pdf(&study) else {
+                // The study does not compute as entered — a neutral refusal, no panic, no leak.
+                studies.set_notice(state::MSG_SAVE_FAILED.into());
+                return;
+            };
+            // Native save picker on the UI thread (modal — the established `rfd` pattern, cf. the
+            // journal export/create rails). Cancel → no notice, nothing written.
+            let mut dialog = rfd::FileDialog::new()
+                .set_title("Exporter l'étude en PDF")
+                .add_filter("PDF", &["pdf"])
+                .set_file_name(format!("etude-{}.pdf", safe_stem(&study.security_ticker)));
+            if let Some(dir) = default_exports_dir() {
+                let _ = std::fs::create_dir_all(&dir); // best-effort so the dialog opens there
+                dialog = dialog.set_directory(dir);
+            }
+            let Some(path) = dialog.save_file() else {
+                return;
+            };
+            // rfd does not force the filter extension on every platform — ensure `.pdf`.
+            let path = if path.extension().is_some() {
+                path
+            } else {
+                path.with_extension("pdf")
+            };
+            let notice = match std::fs::write(&path, &bytes) {
+                Ok(()) => format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
+                Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
             };
             studies.set_notice(notice.into());
         });

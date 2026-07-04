@@ -77,6 +77,17 @@ component StudyListRow inherits Rectangle {
             font-size: Tokens.font-caption;
             vertical-alignment: center;
         }
+        // Issue #107: the estimated potential (§5 projected total annualized return) — a neutral FACT,
+        // no hue, right-aligned tabular figures; "—" when the study withholds it. Also the sort key.
+        Text {
+            text: root.entry.potential-return;
+            color: Tokens.text-mid;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-caption;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            min-width: Tokens.space-48 + Tokens.space-24;
+        }
         Text {
             text: root.entry.status;
             color: Tokens.text-low;
@@ -272,6 +283,13 @@ export component DashboardScreen inherits Rectangle {
                         label: @tr("Tri : symbole");
                         selected: Studies.sort-key == "ticker";
                         activated => { Studies.set-sort("ticker", Studies.sort-descending); }
+                    }
+                    // Issue #107: sort by estimated potential (§5 projected total annualized return),
+                    // so the highest-potential candidates surface first (descending default).
+                    ChoiceChip {
+                        label: @tr("Tri : potentiel");
+                        selected: Studies.sort-key == "potential";
+                        activated => { Studies.set-sort("potential", Studies.sort-descending); }
                     }
                     ChoiceChip {
                         label: Studies.sort-descending ? @tr("Ordre : décroissant") : @tr("Ordre : croissant");

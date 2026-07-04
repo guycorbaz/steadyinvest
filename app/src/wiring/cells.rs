@@ -364,7 +364,11 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 return;
             };
             let format = config.borrow().number_format;
-            match journal_state.borrow_mut().unlock_all(id, &scope) {
+            // Bind first: a `borrow_mut()` in the `match` scrutinee stays alive for the whole
+            // `match`, so the `journal_state.borrow()` in the Ok arm would panic "RefCell already
+            // borrowed". (Same class as the fetch.rs price-refresh panic.)
+            let unlocked = journal_state.borrow_mut().unlock_all(id, &scope);
+            match unlocked {
                 Ok(count) => {
                     studies.set_notice(state::unlock_done_message(count).into());
                     if let Some(study) = journal_state.borrow().get_study(id) {

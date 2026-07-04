@@ -22,6 +22,9 @@ export struct StudyRow {
     ticker: string,
     created-at: string,
     status: string,
+    // Issue #107: the estimated potential — the §5 projected total annualized return, already
+    // locale-formatted (e.g. "12,5 %"); "—" when the study withholds it. Also the "Potentiel" sort key.
+    potential-return: string,
 }
 
 // One watchlist row (Story 4.1, FR34). `linked` is the authoritative link state (the cell's
@@ -552,7 +555,7 @@ export global Studies {
     // View controls. Rust holds the authoritative view state and re-curates `rows` on each change;
     // these mirror it so the controls render the current selection.
     in-out property <string> search-query;
-    in-out property <string> sort-key: "date";       // "date" | "ticker"
+    in-out property <string> sort-key: "date";       // "date" | "ticker" | "potential"
     in-out property <bool> sort-descending: true;     // default: most-recent / Z→A first
     in-out property <string> status-filter: "active"; // "active" | "archived" | "all"
     // The TOTAL study count (all statuses, before curation) — so the controls stay reachable even when

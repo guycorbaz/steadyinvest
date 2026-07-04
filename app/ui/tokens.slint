@@ -60,12 +60,15 @@ export global Tokens {
     out property <length> space-24: 24px;
     out property <length> space-32: 32px;
     out property <length> space-48: 48px;
-    // Type scale: verdict 28 / H2 18 / H3 15 / body 14 / caption 12.
-    out property <length> font-verdict: 28px;
-    out property <length> font-h2: 18px;
-    out property <length> font-h3: 15px;
-    out property <length> font-body: 14px;
-    out property <length> font-caption: 12px;
+    // Type scale: verdict 40 / H2 28 / H3 23 / body 22 / caption 19. Bumped ~+55% from the original
+    // 28/18/15/14/12 after on-display testing found the compact scale far too small on desktop —
+    // especially the Portefeuille/Études data, most of which renders at the caption tier. This is
+    // the single lever: every component reads these tokens, so the whole app scales together.
+    out property <length> font-verdict: 40px;
+    out property <length> font-h2: 28px;
+    out property <length> font-h3: 23px;
+    out property <length> font-body: 22px;
+    out property <length> font-caption: 19px;
     out property <int> weight-regular: 400;
     out property <int> weight-medium: 500;
     out property <int> weight-semibold: 600;
@@ -73,7 +76,9 @@ export global Tokens {
     out property <length> border: 1px;
     out property <length> focus-border: 2px;
     out property <length> radius: 4px;
-    out property <length> row-height: 28px;
+    // Row height grows with the bumped body size so grid cells keep their vertical breathing room
+    // (22px body inside a 44px row) and never clip.
+    out property <length> row-height: 44px;
     // Manual-entry textures (Story 2.4), quasi-static so a theme/regime swap never re-lays-out:
     // the bold glyph that marks a to-fill gap ("a hole in a regular grid"), the hollow dot that
     // accompanies a stale value's murmur, and the stale opacity (~60%). Glyphs are language-neutral

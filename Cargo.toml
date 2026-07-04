@@ -47,6 +47,11 @@ serde_json = "1"
 thiserror = "2"
 proptest = "1"
 tracing = "0.1"
+# Rotating-file log subscriber for the deferred ADD15 logs (the `tracing` events above have had no
+# sink until now). `fmt` only — no ANSI/env-filter — to keep the dep tree small; all licenses
+# (MIT/Apache) are already in deny.toml's allow list.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
+tracing-appender = "0.2"
 # OS secret store for provider API keys (Story 3.2, FR25/NFR-S1). `keyring = "3"` is the REAL
 # credential library — NOT crates.io `keyring` 4.0.x (a sample/CLI meta-crate pulling a
 # turso/tantivy/dbus keystore stack). default-features off + explicit backend. Decision (Guy,
