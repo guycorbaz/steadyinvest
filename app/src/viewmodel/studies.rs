@@ -4,19 +4,45 @@
 //! (Story 2.3); the 2.2 minimal restore view it replaced — and its `detail()` string builder — are
 //! gone now that the faithful §1–§5 form renders the open study.
 
+use std::collections::HashMap;
+
+use rust_decimal::Decimal;
 use steadyinvest_persistence::StudySummary;
+use uuid::Uuid;
 
 use crate::state::created_at_date;
 use crate::StudyRow;
 
+/// One study's estimated potential (issue #107): the §5 projected total annualized return, split into
+/// the `value` used for sorting (`None` when the study withholds it — sorts LAST, never a top pick)
+/// and the already-locale-formatted `display` string ("—" when absent). Computed app-side via
+/// `build_snapshot` (Cardinal Rule: `curate` stays pure and only READS this map).
+#[derive(Debug, Clone)]
+pub struct StudyReturn {
+    pub value: Option<Decimal>,
+    pub display: String,
+}
+
+impl Default for StudyReturn {
+    /// An unknown potential: no sort value, and the app's faithful em-dash (never `0`) for display —
+    /// so a study missing from the map (or one that withholds the return) reads "—", not blank.
+    fn default() -> Self {
+        StudyReturn {
+            value: None,
+            display: crate::viewmodel::form::EMPTY_SLOT.to_string(),
+        }
+    }
+}
+
 /// Map one summary row into the Slint `StudyRow` (id stringified, date trimmed to the day, status
-/// verbatim).
-pub fn to_row(summary: &StudySummary) -> StudyRow {
+/// verbatim, and the pre-formatted potential-return string — "—" when the study withholds it).
+pub fn to_row(summary: &StudySummary, potential_return: &str) -> StudyRow {
     StudyRow {
         id: summary.id.to_string().into(),
         ticker: summary.security_ticker.clone().into(),
         created_at: created_at_date(&summary.created_at).into(),
         status: summary.status.clone().into(),
+        potential_return: potential_return.into(),
     }
 }
 
@@ -54,6 +80,9 @@ impl StatusFilter {
 pub enum SortKey {
     Date,
     Ticker,
+    /// Issue #107: the estimated potential (§5 projected total annualized return). Studies whose
+    /// potential is withheld sort LAST in both directions.
+    PotentialReturn,
 }
 
 impl SortKey {
@@ -61,6 +90,7 @@ impl SortKey {
     pub fn from_wire(s: &str) -> Self {
         match s {
             "ticker" => Self::Ticker,
+            "potential" => Self::PotentialReturn,
             _ => Self::Date,
         }
     }
@@ -77,7 +107,9 @@ pub fn curate(
     sort_key: SortKey,
     descending: bool,
     status_filter: StatusFilter,
+    returns: &HashMap<Uuid, StudyReturn>,
 ) -> Vec<StudyRow> {
+    use std::cmp::Ordering;
     let needle = query.trim().to_lowercase();
     let mut kept: Vec<&StudySummary> = summaries
         .iter()
@@ -85,21 +117,40 @@ pub fn curate(
         .filter(|s| needle.is_empty() || s.security_ticker.to_lowercase().contains(&needle))
         .collect();
     kept.sort_by(|a, b| {
+        // The primary comparison; the `id` tiebreak + the descending flip are applied after. A
+        // PotentialReturn study with NO computed value sorts LAST in both directions (an early return,
+        // bypassing the flip) — an unknown potential is never a top pick.
         let ord = match sort_key {
-            SortKey::Date => a.created_at.0.cmp(&b.created_at.0).then(a.id.cmp(&b.id)),
+            SortKey::Date => a.created_at.0.cmp(&b.created_at.0),
             SortKey::Ticker => a
                 .security_ticker
                 .to_lowercase()
-                .cmp(&b.security_ticker.to_lowercase())
-                .then(a.id.cmp(&b.id)),
-        };
+                .cmp(&b.security_ticker.to_lowercase()),
+            SortKey::PotentialReturn => {
+                let va = returns.get(&a.id).and_then(|r| r.value);
+                let vb = returns.get(&b.id).and_then(|r| r.value);
+                match (va, vb) {
+                    (Some(x), Some(y)) => x.cmp(&y),
+                    (Some(_), None) => return Ordering::Less, // known before unknown, always
+                    (None, Some(_)) => return Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }
+            }
+        }
+        .then(a.id.cmp(&b.id));
         if descending {
             ord.reverse()
         } else {
             ord
         }
     });
-    kept.iter().map(|s| to_row(s)).collect()
+    let empty = StudyReturn::default();
+    kept.iter()
+        .map(|s| {
+            let display = returns.get(&s.id).unwrap_or(&empty).display.as_str();
+            to_row(s, display)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -129,9 +180,29 @@ mod tests {
         ]
     }
 
+    /// No computed potentials — the non-PotentialReturn tests don't depend on them.
+    fn no_returns() -> HashMap<Uuid, StudyReturn> {
+        HashMap::new()
+    }
+
+    /// A potential value keyed by the `Uuid::from_u128(id)` the `sm` helper mints.
+    fn ret(value: &str, display: &str) -> StudyReturn {
+        StudyReturn {
+            value: Some(Decimal::from_str_exact(value).unwrap()),
+            display: display.to_string(),
+        }
+    }
+
     #[test]
     fn status_filter_active_hides_archived() {
-        let rows = curate(&sample(), "", SortKey::Date, false, StatusFilter::Active);
+        let rows = curate(
+            &sample(),
+            "",
+            SortKey::Date,
+            false,
+            StatusFilter::Active,
+            &no_returns(),
+        );
         assert_eq!(
             tickers(&rows),
             vec!["NESN", "ROG"],
@@ -141,39 +212,88 @@ mod tests {
 
     #[test]
     fn status_filter_archived_and_all() {
-        let archived = curate(&sample(), "", SortKey::Date, false, StatusFilter::Archived);
+        let archived = curate(
+            &sample(),
+            "",
+            SortKey::Date,
+            false,
+            StatusFilter::Archived,
+            &no_returns(),
+        );
         assert_eq!(tickers(&archived), vec!["ABBN"]);
-        let all = curate(&sample(), "", SortKey::Date, false, StatusFilter::All);
+        let all = curate(
+            &sample(),
+            "",
+            SortKey::Date,
+            false,
+            StatusFilter::All,
+            &no_returns(),
+        );
         assert_eq!(all.len(), 3, "all shows active + archived");
     }
 
     #[test]
     fn search_is_case_insensitive_ticker_substring() {
-        let rows = curate(&sample(), "bb", SortKey::Date, false, StatusFilter::All);
+        let rows = curate(
+            &sample(),
+            "bb",
+            SortKey::Date,
+            false,
+            StatusFilter::All,
+            &no_returns(),
+        );
         assert_eq!(
             tickers(&rows),
             vec!["ABBN"],
             "substring match, case-insensitive"
         );
-        let none = curate(&sample(), "ZZZ", SortKey::Date, false, StatusFilter::All);
+        let none = curate(
+            &sample(),
+            "ZZZ",
+            SortKey::Date,
+            false,
+            StatusFilter::All,
+            &no_returns(),
+        );
         assert!(none.is_empty(), "no match → empty");
     }
 
     #[test]
     fn sort_by_date_and_ticker_both_directions() {
-        let by_date = curate(&sample(), "", SortKey::Date, false, StatusFilter::All);
+        let by_date = curate(
+            &sample(),
+            "",
+            SortKey::Date,
+            false,
+            StatusFilter::All,
+            &no_returns(),
+        );
         assert_eq!(
             tickers(&by_date),
             vec!["NESN", "ABBN", "ROG"],
             "date ascending"
         );
-        let by_date_desc = curate(&sample(), "", SortKey::Date, true, StatusFilter::All);
+        let by_date_desc = curate(
+            &sample(),
+            "",
+            SortKey::Date,
+            true,
+            StatusFilter::All,
+            &no_returns(),
+        );
         assert_eq!(
             tickers(&by_date_desc),
             vec!["ROG", "ABBN", "NESN"],
             "date descending"
         );
-        let by_ticker = curate(&sample(), "", SortKey::Ticker, false, StatusFilter::All);
+        let by_ticker = curate(
+            &sample(),
+            "",
+            SortKey::Ticker,
+            false,
+            StatusFilter::All,
+            &no_returns(),
+        );
         assert_eq!(
             tickers(&by_ticker),
             vec!["ABBN", "NESN", "ROG"],
@@ -188,13 +308,63 @@ mod tests {
             sm(2, "AAA", "2026-01-01T00:00:00Z", "active"),
             sm(1, "AAA", "2026-01-01T00:00:00Z", "active"),
         ];
-        let rows = curate(&same, "", SortKey::Date, false, StatusFilter::All);
+        let rows = curate(
+            &same,
+            "",
+            SortKey::Date,
+            false,
+            StatusFilter::All,
+            &no_returns(),
+        );
         let ids: Vec<String> = rows.iter().map(|r| r.id.to_string()).collect();
         assert_eq!(
             ids[0],
             Uuid::from_u128(1).to_string(),
             "lower id first (deterministic)"
         );
+    }
+
+    #[test]
+    fn sort_by_potential_orders_by_value_and_sinks_the_unknown() {
+        // NESN 12 %, ROG 8 %, ABBN(active here) has NO computed potential.
+        let studies = vec![
+            sm(1, "NESN", "2026-01-10T00:00:00Z", "active"),
+            sm(2, "ROG", "2026-03-02T00:00:00Z", "active"),
+            sm(3, "ABBN", "2026-02-15T00:00:00Z", "active"),
+        ];
+        let mut returns = HashMap::new();
+        returns.insert(Uuid::from_u128(1), ret("12", "12,0 %"));
+        returns.insert(Uuid::from_u128(2), ret("8", "8,0 %"));
+        // id 3 (ABBN) deliberately absent → unknown potential.
+
+        // Descending (the default): highest potential first, the unknown always LAST.
+        let desc = curate(
+            &studies,
+            "",
+            SortKey::PotentialReturn,
+            true,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(tickers(&desc), vec!["NESN", "ROG", "ABBN"]);
+        // The formatted potential rides along on the row.
+        assert_eq!(desc[0].potential_return.to_string(), "12,0 %");
+        assert_eq!(
+            desc[2].potential_return.to_string(),
+            "—",
+            "unknown potential → the faithful em-dash"
+        );
+
+        // Ascending: lowest known first, but the unknown STILL sinks last (never a top pick).
+        let asc = curate(
+            &studies,
+            "",
+            SortKey::PotentialReturn,
+            false,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(tickers(&asc), vec!["ROG", "NESN", "ABBN"]);
     }
 
     #[test]
