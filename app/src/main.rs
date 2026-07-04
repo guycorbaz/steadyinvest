@@ -38,6 +38,7 @@ mod config;
 mod fetch;
 mod keychain;
 mod labels;
+mod logging;
 mod posture;
 mod provider;
 mod regime;
@@ -69,8 +70,14 @@ use crate::wiring::watchlist::refresh_watchlist;
 slint::include_modules!();
 
 fn main() -> Result<(), slint::PlatformError> {
-    // Minimal logging: tracing carries the events; a real subscriber (ADD15 rotating logs) is
-    // deferred — see the Story 2.1 GitHub issue. Until then load warnings also go to stderr.
+    // File logging + panic hook FIRST — before any work that might log or panic — so a crash (or any
+    // `tracing` warn/info the app already emits) lands in a daily-rotating file under the OS data dir
+    // (the ADD15 rotating logs, previously deferred). Non-fatal: no data dir → runs without a file.
+    let log_dir = logging::init();
+    if let Some(dir) = &log_dir {
+        eprintln!("steadyinvest: logging to {}", dir.display());
+    }
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "steadyinvest starting");
     // Story 3.1 — install the pure-Rust `ring` crypto provider for rustls before any HTTPS fetch
     // (reqwest uses `rustls-no-provider`). Idempotent; must run before the fetch worker is used.
     steadyinvest_ingestion::install_crypto_provider();
