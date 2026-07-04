@@ -38,22 +38,32 @@ component ZoneSegment inherits Rectangle {
         x: Tokens.space-4;
         y: (parent.height - self.height) / 2;
     }
+    // Fill the band so the label is CENTERED inside it (a bare Text child sits top-left at its own
+    // natural width and spills past a too-narrow band — the "rectangle smaller than the text" bug).
     Text {
+        width: 100%;
+        height: 100%;
         text: root.label;
         color: Tokens.text-high;
         font-size: Tokens.font-caption;
         font-weight: Tokens.weight-semibold;
         horizontal-alignment: center;
         vertical-alignment: center;
+        overflow: elide;
     }
 }
 
 export component ZoneBar inherits Rectangle {
     in property <ZoneBarState> bar: Studies.zone-bar;
 
-    // Constant geometry: three equal 44px thirds → a 132px bar (token-derived, never a magic px).
-    property <length> third-height: Tokens.space-48 - Tokens.space-4;
+    // Geometry derived from the TYPE scale (not the spacing scale) so the bands always dwarf their
+    // labels and scale with any future font bump: each band ~2.6× the body size tall, the bar wide
+    // enough to hold the longest zone label ("Zone de maintien") centred with margin, the price axis
+    // sized for the (now larger) boundary numerals.
+    property <length> third-height: Tokens.font-body * 2.6;
     property <length> bar-height: root.third-height * 3;
+    property <length> bar-width: Tokens.font-body * 9;
+    property <length> axis-width: Tokens.font-body * 4;
     // Muted in entry → full in contemplation (regime-emphasis = 1.0 entry / 0.55 contemplation).
     property <float> regime-factor: 1.0 - (Tokens.regime-emphasis - 0.55);
     // Saturation gate by verdict confidence (AC 6): full → full; provisional → desaturated + hatch.
@@ -86,7 +96,7 @@ export component ZoneBar inherits Rectangle {
 
         // Price axis (the four boundary prices, top = high → bottom = low).
         Rectangle {
-            width: 64px;
+            width: root.axis-width;
             height: root.bar-height;
             VerticalLayout {
                 Text { text: root.bar.forecast-high; color: Tokens.text-mid; font-family: Tokens.font-numeric; font-size: Tokens.font-caption; horizontal-alignment: right; }
@@ -101,7 +111,7 @@ export component ZoneBar inherits Rectangle {
 
         // The bar (Sell top → Buy bottom) with the present-price marker overlaid.
         Rectangle {
-            width: 96px;
+            width: root.bar-width;
             height: root.bar-height;
 
             VerticalLayout {

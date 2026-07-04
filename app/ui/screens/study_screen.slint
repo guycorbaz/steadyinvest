@@ -113,8 +113,9 @@ component PeHeaderCell inherits Rectangle {
 // 2.4); D/E/G/H stay caption-only em-dash slots (engine, Story 2.6).
 component PeTableRow inherits HorizontalLayout {
     in property <PeRow> pe;
+    in property <length> year-width;
     spacing: 0;
-    GridLabelCell { label: root.pe.year; numeric: true; }
+    GridLabelCell { label: root.pe.year; numeric: true; width: root.year-width; }
     EditableCell { state: root.pe.a; }
     EditableCell { state: root.pe.b; }
     EditableCell { state: root.pe.c; }
@@ -126,14 +127,18 @@ component PeTableRow inherits HorizontalLayout {
 }
 
 // One §2 management-grid editable raw-input row: a left label + one editable cell per year column.
+// The label + the two trailing stat columns take FIXED widths (passed in) so every row — header,
+// input, computed — pins the same column boundaries and the year cells line up (the alignment fix).
 component MgmtInputRow inherits HorizontalLayout {
     in property <string> label;
     in property <MgmtRow> mgmt;
+    in property <length> label-width;
+    in property <length> stat-width;
     spacing: 0;
-    GridLabelCell { label: root.label; horizontal-stretch: 2; }
+    GridLabelCell { label: root.label; width: root.label-width; }
     for cell in root.mgmt.cells: EditableCell { state: cell; }
-    GridCell { value: FormConst.empty-slot; } // Moy. 5 ans (computed, 2.6)
-    GridCell { value: FormConst.empty-slot; } // Tendance (computed, 2.6)
+    GridCell { value: FormConst.empty-slot; width: root.stat-width; } // Moy. 5 ans (computed, 2.6)
+    GridCell { value: FormConst.empty-slot; width: root.stat-width; } // Tendance (computed, 2.6)
 }
 
 // A §3 summary row: a wide label + a single value slot (Total / Moyenne / PER moyen / PER courant).
@@ -190,6 +195,14 @@ component CalcRow inherits HorizontalLayout {
 export component StudyScreen inherits Rectangle {
     in property <FormHeader> header: Studies.form-header;
     in property <[PeRow]> pe-rows: Studies.pe-rows;
+
+    // Fixed grid-column widths (the alignment fix). Pinning the label / stat / year-label columns to
+    // a constant width makes every independently-laid-out row share the same column boundaries, so the
+    // year cells align regardless of how long a given row's label is. The remaining width is split
+    // equally among the (stretchy) year columns.
+    property <length> col-label: 240px; // §2 "Indicateur" row-label column
+    property <length> col-stat: 72px;   // §2 "Moy. 5 ans" / "Tendance" columns
+    property <length> col-year: 64px;   // §3 "Année" row-label column
 
     background: Tokens.bg;
 
@@ -597,24 +610,26 @@ export component StudyScreen inherits Rectangle {
                 toggled(v) => { Studies.toggle-fold(1, v); }
 
                 // Header row: row-label column + the materialized year columns + Moy + Tendance.
+                // Fixed widths on the label + the two stat columns keep this header aligned to every
+                // data/computed row below (the alignment fix).
                 HorizontalLayout {
                     spacing: 0;
-                    GridLabelCell { label: @tr("Indicateur"); horizontal-stretch: 2; }
+                    GridLabelCell { label: @tr("Indicateur"); width: root.col-label; }
                     for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; }
-                    GridLabelCell { label: @tr("Moy. 5 ans"); }
-                    GridLabelCell { label: @tr("Tendance"); }
+                    GridLabelCell { label: @tr("Moy. 5 ans"); width: root.col-stat; }
+                    GridLabelCell { label: @tr("Tendance"); width: root.col-stat; }
                 }
                 // Editable raw-input rows (sales · pre-tax profit · book value), paired with their
                 // label by index — the row order is fixed by `viewmodel/form.rs`.
-                MgmtInputRow { label: @tr("Ventes"); mgmt: Studies.mgmt-rows[0]; }
-                MgmtInputRow { label: @tr("Bénéfice avant impôt"); mgmt: Studies.mgmt-rows[1]; }
-                MgmtInputRow { label: @tr("Valeur comptable / action"); mgmt: Studies.mgmt-rows[2]; }
+                MgmtInputRow { label: @tr("Ventes"); mgmt: Studies.mgmt-rows[0]; label-width: root.col-label; stat-width: root.col-stat; }
+                MgmtInputRow { label: @tr("Bénéfice avant impôt"); mgmt: Studies.mgmt-rows[1]; label-width: root.col-label; stat-width: root.col-stat; }
+                MgmtInputRow { label: @tr("Valeur comptable / action"); mgmt: Studies.mgmt-rows[2]; label-width: root.col-label; stat-width: root.col-stat; }
                 // Computed management ratios — now the engine's (Story 2.6). Per-year cells align to
                 // the year columns; the empty-study case (no computed values yet) keeps em-dash cells
                 // so the grid never misaligns.
                 HorizontalLayout {
                     spacing: 0;
-                    GridLabelCell { label: @tr("PTP — Bén. av. impôt ÷ ventes"); horizontal-stretch: 2; }
+                    GridLabelCell { label: @tr("PTP — Bén. av. impôt ÷ ventes"); width: root.col-label; }
                     if Studies.mgmt-computed.ptp.length > 0: HorizontalLayout {
                         spacing: 0;
                         horizontal-stretch: Studies.year-headers.length;
@@ -625,12 +640,12 @@ export component StudyScreen inherits Rectangle {
                         horizontal-stretch: Studies.year-headers.length;
                         for yh in Studies.year-headers: GridCell { value: FormConst.empty-slot; }
                     }
-                    GridCell { value: Studies.mgmt-computed.avg-ptp; }
-                    GridCell { value: Studies.mgmt-computed.ptp-trend; }
+                    GridCell { value: Studies.mgmt-computed.avg-ptp; width: root.col-stat; }
+                    GridCell { value: Studies.mgmt-computed.ptp-trend; width: root.col-stat; }
                 }
                 HorizontalLayout {
                     spacing: 0;
-                    GridLabelCell { label: @tr("ROE — BPA ÷ valeur comptable/action"); horizontal-stretch: 2; }
+                    GridLabelCell { label: @tr("ROE — BPA ÷ valeur comptable/action"); width: root.col-label; }
                     if Studies.mgmt-computed.roe.length > 0: HorizontalLayout {
                         spacing: 0;
                         horizontal-stretch: Studies.year-headers.length;
@@ -641,8 +656,8 @@ export component StudyScreen inherits Rectangle {
                         horizontal-stretch: Studies.year-headers.length;
                         for yh in Studies.year-headers: GridCell { value: FormConst.empty-slot; }
                     }
-                    GridCell { value: Studies.mgmt-computed.avg-roe; }
-                    GridCell { value: Studies.mgmt-computed.roe-trend; }
+                    GridCell { value: Studies.mgmt-computed.avg-roe; width: root.col-stat; }
+                    GridCell { value: Studies.mgmt-computed.roe-trend; width: root.col-stat; }
                 }
                 // ── Story 2.11 — extend the projection (FR3): roll the data window forward one year.
                 //    Appends the next actual fiscal year as a new ToFill column; the grid re-renders
@@ -672,7 +687,7 @@ export component StudyScreen inherits Rectangle {
                 // Column header row: Année + lettered boxes A…H with formula/field captions.
                 HorizontalLayout {
                     spacing: 0;
-                    PeHeaderCell { letter: @tr("Année"); caption: ""; }
+                    PeHeaderCell { letter: @tr("Année"); caption: ""; width: root.col-year; }
                     PeHeaderCell { letter: "A"; caption: @tr("Haut"); }
                     PeHeaderCell { letter: "B"; caption: @tr("Bas"); }
                     PeHeaderCell { letter: "C"; caption: @tr("BPA"); }
@@ -683,7 +698,7 @@ export component StudyScreen inherits Rectangle {
                     PeHeaderCell { letter: "H"; caption: "F÷B×100"; }
                 }
                 // Year rows (data-driven; faithful empties until 2.4 fills them).
-                for pe in root.pe-rows: PeTableRow { pe: pe; }
+                for pe in root.pe-rows: PeTableRow { pe: pe; year-width: root.col-year; }
                 // Summary rows — now the engine's (Story 2.6). "Total"/"Moyenne" aggregate paper
                 // columns the single-slot layout can't faithfully render (recorded interpretation —
                 // the avg high/low P/E surface via the D/E columns); PER moyen / PER courant are direct.
