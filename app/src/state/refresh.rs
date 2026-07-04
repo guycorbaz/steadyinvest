@@ -70,11 +70,17 @@ impl JournalState {
         fetched: &FetchedFinancials,
     ) -> Result<RefreshReport, String> {
         let provenance = self.provider_provenance(fetched.digest.clone());
-        // Issue #109: providers return decades of history (EODHD ~30y); the form + the §1 growth CAGR
-        // only use the SSG window. Cap to the most recent `YEAR_WINDOW` years — canonical years are
-        // ascending (core::normalize sorts them), so drop the oldest overflow. Matches the manual
-        // materialized window, so a fetched study looks like a hand-entered one.
+        // Issue #109: the analysis uses COMPLETE fiscal years only, and the SSG history window.
+        // 1) Drop the in-progress current year: a provider's `/eod` contributes a price-only row for
+        //    a fiscal year whose annual statements are not filed yet (no `sales`) — including it would
+        //    show a half-empty column and (worse) stretch the §1 growth CAGR onto a partial year. A
+        //    year without `sales` (the core income-statement figure) is not a usable analysis year.
+        // 2) Then cap to the most recent `YEAR_WINDOW` complete years (canonical years are ascending —
+        //    core::normalize sorts them — so drop the oldest overflow). Filtering BEFORE the cap means
+        //    a dropped partial current year is replaced by an older complete one, not left short.
+        // Matches the manual materialized window (which already excludes the current year).
         let mut years: Vec<CanonicalYear> = fetched.canonical.years.clone();
+        years.retain(|cy| cy.sales.is_some());
         let window = crate::viewmodel::entry::YEAR_WINDOW;
         if years.len() > window {
             years.drain(0..years.len() - window);
