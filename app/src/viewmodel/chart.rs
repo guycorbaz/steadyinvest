@@ -28,11 +28,14 @@ use steadyinvest_core::rounding::DisplayField;
 /// only, so x-scaling does not affect the est-high-EPS the endpoint sets.
 const CHART_W: f32 = 720.0;
 const CHART_H: f32 = 420.0;
-/// The faithful SSG semi-log axis runs 1 → 200 (UX-DR10).
-const AXIS_MIN: f64 = 1.0;
-const AXIS_MAX: f64 = 200.0;
-/// The 1→200 decade ticks the side axis labels.
-const AXIS_TICKS: [i32; 8] = [1, 2, 5, 10, 20, 50, 100, 200];
+/// Fallback axis (log10 bounds) when a series has no plottable data — the faithful 1 → 200.
+const AXIS_FALLBACK: (f64, f64) = (0.0, 2.30103); // (log10 1, log10 200)
+/// Issue #25: each series is fit to its OWN log range spanning the data ± this padding (in DECADES),
+/// so the curve fills the plot (no clamp, no compression) with a little breathing room top/bottom.
+const RANGE_PAD_DECADES: f64 = 0.12;
+/// …but a nearly-flat series is given at least this many decades of span, so a ~few-percent change is
+/// NOT stretched to fill the whole height (honest: flat data reads flat, not dramatic).
+const MIN_RANGE_DECADES: f64 = 0.6;
 /// The 5–30 % growth-guide fan rates (UX-DR10), drawn from the last historical EPS point.
 const FAN_RATES: [i32; 6] = [5, 10, 15, 20, 25, 30];
 /// The per-share display scale the dragged est-high-EPS value snaps to (2 dp).
@@ -41,43 +44,94 @@ const EPS_DRAG_SCALE: u32 = 2;
 /// cached close, since a lone point can't form a visible polyline (Story 5.1).
 const CONFRONT_MARKER: f32 = 4.0;
 
-/// Map a value on the 1→200 semi-log axis to a viewbox-y (0 = top, `CHART_H` = bottom). Values are
-/// clamped to `[1, 200]` before the `log10`, so an off-axis figure pins to an edge rather than
-/// escaping the box.
-pub fn y_for(value: f64) -> f32 {
-    let lmin = AXIS_MIN.log10();
-    let lmax = AXIS_MAX.log10();
-    let t = (value.clamp(AXIS_MIN, AXIS_MAX).log10() - lmin) / (lmax - lmin);
+/// Issue #25: the log10 bounds `(lmin, lmax)` of the OWN scale for one series — the data's log range
+/// padded by [`RANGE_PAD_DECADES`], widened to at least [`MIN_RANGE_DECADES`] so a flat series is not
+/// stretched to fill. Empty / non-positive → the 1→200 fallback. Each series gets its own bounds so
+/// none clamps off the top and none compresses to a sliver (the multi-scale fix).
+fn series_bounds(values: impl IntoIterator<Item = f64>) -> (f64, f64) {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for v in values {
+        if v.is_finite() && v > 0.0 {
+            let l = v.log10();
+            lo = lo.min(l);
+            hi = hi.max(l);
+        }
+    }
+    if !(lo.is_finite() && hi.is_finite()) {
+        return AXIS_FALLBACK;
+    }
+    let mut span = hi - lo;
+    if span < MIN_RANGE_DECADES {
+        // Centre the flat data in the minimum span.
+        let mid = (lo + hi) / 2.0;
+        lo = mid - MIN_RANGE_DECADES / 2.0;
+        hi = mid + MIN_RANGE_DECADES / 2.0;
+        span = MIN_RANGE_DECADES;
+    }
+    let pad = span * RANGE_PAD_DECADES;
+    (lo - pad, hi + pad)
+}
+
+/// Map a value to a viewbox-y (0 = top, `CHART_H` = bottom) on a log scale with log10 bounds
+/// `lmin`/`lmax`. Clamped to the range so an off-scale figure pins to an edge.
+pub fn y_for(value: f64, lmin: f64, lmax: f64) -> f32 {
+    let lv = value.max(1e-12).log10().clamp(lmin, lmax);
+    let t = (lv - lmin) / (lmax - lmin);
     (f64::from(CHART_H) * (1.0 - t)) as f32
 }
 
-/// Inverse of [`y_for`]: a viewbox-y (px) back to a value on the 1→200 axis. `y` is clamped to
-/// `[0, CHART_H]` so a drag past an edge resolves to that edge's value, never beyond the axis.
-pub fn value_for_y(y: f32) -> f64 {
-    let lmin = AXIS_MIN.log10();
-    let lmax = AXIS_MAX.log10();
+/// Inverse of [`y_for`]: a viewbox-y (px) back to a value on the log scale `[lmin, lmax]`. `y` clamped
+/// to `[0, CHART_H]` so a drag past an edge resolves to that edge's value.
+pub fn value_for_y(y: f32, lmin: f64, lmax: f64) -> f64 {
     let t = (1.0 - (f64::from(y) / f64::from(CHART_H))).clamp(0.0, 1.0);
     10f64.powf(lmin + t * (lmax - lmin))
 }
 
-/// The judgment value a drag to viewbox-y `y` sets — the est-high-EPS, snapped to the per-share
-/// display scale so the line and the exact-value field round-trip to the identical stored number.
-pub fn judgment_value_for_y(y: f32) -> Money {
-    let value = value_for_y(y);
-    // `value_for_y` is always finite in `[1, 200]`, so `from_f64_retain` is `Some`; fall back to the
-    // axis floor rather than `unwrap` (no panics in non-test code).
+/// The judgment value a drag to viewbox-y `y` sets — the est-high-EPS on the EPS series' OWN scale
+/// (`axis_min`/`axis_max`, read from the chart state), snapped to the per-share display scale so the
+/// line and the exact-value field round-trip to the identical stored number.
+pub fn judgment_value_for_y(y: f32, axis_min: f64, axis_max: f64) -> Money {
+    let lmin = axis_min.max(1e-12).log10();
+    let lmax = axis_max.max(axis_min * 1.0000001).log10();
+    let value = value_for_y(y, lmin, lmax);
+    // Always finite, so `from_f64_retain` is `Some`; fall back to 1 rather than `unwrap` (no panics).
     let dec = rust_decimal::Decimal::from_f64_retain(value)
         .unwrap_or(rust_decimal::Decimal::ONE)
         .round_dp(EPS_DRAG_SCALE);
     Money::from(dec)
 }
 
-/// Build a Slint `Path` `commands` string ("M x y L x y …") for `(x_px, value)` points. An empty
-/// slice → "" (the `Path` renders nothing); a single point → a lone "M" (no stroke).
-fn path_commands(points: &[(f32, f64)]) -> String {
+/// A compact tick label for the EPS scale: plain up to 999, then `k / M / Md` (French) — data, not
+/// prose (no `@tr`). The EPS scale is small ($ per share), so this is usually the plain number.
+fn compact_axis_label(v: f64) -> String {
+    let r = |x: f64| {
+        // 2 significant-ish digits for a readable tick.
+        if x >= 100.0 {
+            format!("{}", x.round() as i64)
+        } else if x >= 10.0 {
+            format!("{:.0}", x)
+        } else {
+            format!("{:.1}", x)
+        }
+    };
+    if v >= 1e9 {
+        format!("{} Md", (v / 1e9).round() as i64)
+    } else if v >= 1e6 {
+        format!("{} M", (v / 1e6).round() as i64)
+    } else if v >= 1e3 {
+        format!("{} k", (v / 1e3).round() as i64)
+    } else {
+        r(v)
+    }
+}
+
+/// Build a Slint `Path` `commands` string ("M x y L x y …") for `(x_px, value)` points on the log
+/// scale `[lmin, lmax]`. An empty slice → "" (renders nothing); a single point → a lone "M".
+fn path_commands(points: &[(f32, f64)], lmin: f64, lmax: f64) -> String {
     let mut s = String::with_capacity(points.len() * 16);
     for (i, (x, value)) in points.iter().enumerate() {
-        let y = y_for(*value);
+        let y = y_for(*value, lmin, lmax);
         s.push_str(if i == 0 { "M " } else { "L " });
         s.push_str(&format!("{x:.1} {y:.1} "));
     }
@@ -93,10 +147,11 @@ fn x_for(offset: f64, span: f64) -> f32 {
     ((offset / span) * f64::from(CHART_W)) as f32
 }
 
-/// The §1 chart geometry for the open study's coherent [`StudyFrame`]. Plots the canonical Sales /
-/// EPS / high-Price series (solid historical) on the shared 1→200 semi-log axis, the 5–30 % guide
-/// fan, and the judgment TREND LINE — anchored (origin fixed) at the last historical EPS and running
-/// to the draggable forecast endpoint.
+/// The §1 chart geometry for the open study's coherent [`StudyFrame`]. Issue #25 (multi-scale): the
+/// canonical Sales / EPS / high-Price series are each plotted on their OWN log scale (so none clamps
+/// off the top and none compresses to a sliver), the 5–30 % guide fan + the judgment TREND LINE on
+/// the EPS scale (anchored, origin fixed, at the last historical EPS → the draggable forecast
+/// endpoint). The labelled side axis is the EPS scale; Sales/Price are told apart by colour + legend.
 ///
 /// The endpoint sits at the engine's est-high-EPS (`outputs().growth.estimated_high_eps`, the user's
 /// direct value or the value derived from the growth-% they typed). When neither is set the line is
@@ -112,18 +167,18 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
     let span = (n as f64 - 1.0) + f64::from(FORECAST_HORIZON_YEARS);
     let x_hist = |i: usize| x_for(i as f64, span);
 
-    let series_cmd =
+    // Per-series (x, value) points.
+    let series_pts =
         |get: fn(&steadyinvest_core::normalize::CanonicalYear) -> Option<rust_decimal::Decimal>| {
-            let points: Vec<(f32, f64)> = years
+            years
                 .iter()
                 .enumerate()
                 .filter_map(|(i, cy)| get(cy).and_then(|d| d.to_f64()).map(|v| (x_hist(i), v)))
-                .collect();
-            path_commands(&points)
+                .collect::<Vec<(f32, f64)>>()
         };
-    let sales_commands = series_cmd(|cy| cy.sales);
-    let eps_commands = series_cmd(|cy| cy.eps);
-    let price_commands = series_cmd(|cy| cy.high_price);
+    let sales_pts = series_pts(|cy| cy.sales);
+    let eps_pts = series_pts(|cy| cy.eps);
+    let price_pts = series_pts(|cy| cy.high_price);
 
     // The projection / fan origin: the last historical year that has an EPS value.
     let last_eps = years
@@ -131,47 +186,58 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
         .enumerate()
         .rev()
         .find_map(|(i, cy)| cy.eps.and_then(|d| d.to_f64()).map(|v| (x_hist(i), v)));
-
-    // The judgment is a TREND LINE: its origin is FIXED at the last historical EPS point and only its
-    // future ENDPOINT moves (the right-edge drag sets the est-high-EPS). The line is drawn solid from
-    // origin → endpoint; the endpoint pixel `(judgment_x, judgment_y)` carries the grip handle. FR33:
-    // with no forecast (neither a direct est-high-EPS nor a projected growth %), the line stays unset.
     let est_high = frame.snapshot.outputs().growth.estimated_high_eps;
+
+    // ── Issue #25 (multi-scale): each series on its OWN log scale so none clamps off the top and none
+    //    compresses. Sales/Price fit their own data; the EPS scale ALSO reserves the forecast headroom
+    //    (the fan at 30 % + the est-high) so the projection + the drag live comfortably on it. ──
+    let (s_lmin, s_lmax) = series_bounds(sales_pts.iter().map(|p| p.1));
+    let (p_lmin, p_lmax) = series_bounds(price_pts.iter().map(|p| p.1));
+    // The EPS scale is STABLE during a drag: it spans the historical EPS + a FIXED forecast headroom
+    // (the 30 % fan endpoint), but NOT the live `est_high` (including it would shift the scale as you
+    // drag, so the line would "flee" the cursor). A drag beyond the headroom clamps at the top.
+    let eps_range_vals: Vec<f64> = eps_pts
+        .iter()
+        .map(|p| p.1)
+        .chain(last_eps.map(|(_, ov)| ov * 1.30f64.powi(FORECAST_HORIZON_YEARS as i32)))
+        .collect();
+    let (e_lmin, e_lmax) = series_bounds(eps_range_vals);
+
+    let sales_commands = path_commands(&sales_pts, s_lmin, s_lmax);
+    let price_commands = path_commands(&price_pts, p_lmin, p_lmax);
+    let eps_commands = path_commands(&eps_pts, e_lmin, e_lmax);
+
+    // The judgment TREND LINE + grip, on the EPS scale (origin FIXED at the last historical EPS →
+    // the draggable forecast endpoint). FR33: unset when there is no forecast (never auto-placed).
     let (judgment_x, judgment_y, judgment_label, judgment_commands) = match est_high {
         Some(dec) => {
-            let value = dec.to_f64().unwrap_or(AXIS_MIN);
+            let value = dec.to_f64().unwrap_or(1.0);
             let label = format_scaled(dec, DisplayField::PerShare, format);
             let line = match last_eps {
-                // Anchored at the last historical EPS (origin fixed) → the forecast endpoint.
-                Some((ox, ov)) => path_commands(&[(ox, ov), (CHART_W, value)]),
+                Some((ox, ov)) => path_commands(&[(ox, ov), (CHART_W, value)], e_lmin, e_lmax),
                 None => String::new(),
             };
-            (CHART_W, y_for(value), label, line)
+            (CHART_W, y_for(value, e_lmin, e_lmax), label, line)
         }
         None => (CHART_W, -1.0, String::new(), String::new()),
     };
 
-    // The 5–30 % guide fan from the last historical EPS point — pure guide geometry (f64 rendering,
-    // not a decision number): endpoint = origin × (1 + r/100)^horizon at the forecast x.
+    // The 5–30 % guide fan from the last historical EPS point, on the EPS scale — pure guide geometry.
     let fan_commands: Vec<slint::SharedString> = match last_eps {
         Some((ox, ov)) => FAN_RATES
             .iter()
             .map(|r| {
                 let endpoint =
                     ov * (1.0 + f64::from(*r) / 100.0).powi(FORECAST_HORIZON_YEARS as i32);
-                path_commands(&[(ox, ov), (CHART_W, endpoint)]).into()
+                path_commands(&[(ox, ov), (CHART_W, endpoint)], e_lmin, e_lmax).into()
             })
             .collect(),
         None => Vec::new(),
     };
 
-    let axis_ticks: Vec<AxisTick> = AXIS_TICKS
-        .iter()
-        .map(|v| AxisTick {
-            label: v.to_string().into(),
-            y: y_for(f64::from(*v)),
-        })
-        .collect();
+    // The labelled axis is the EPS scale (issue #25 option a): Sales/Price are told apart by colour +
+    // legend (their scales differ). Nice 1/2/5×10^k ticks that fall inside the EPS range.
+    let axis_ticks = eps_ticks(e_lmin, e_lmax);
 
     GrowthChartState {
         available: true,
@@ -186,7 +252,30 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
         judgment_x,
         judgment_y,
         judgment_label: judgment_label.into(),
+        axis_min: 10f64.powf(e_lmin) as f32,
+        axis_max: 10f64.powf(e_lmax) as f32,
     }
+}
+
+/// Nice 1/2/5×10^k ticks that fall inside the EPS scale `[10^lmin, 10^lmax]` (issue #25). Positions
+/// via [`y_for`] on the same bounds, so the labels line up with the EPS curve.
+fn eps_ticks(lmin: f64, lmax: f64) -> Vec<AxisTick> {
+    let (min, max) = (10f64.powf(lmin), 10f64.powf(lmax));
+    let mut ticks = Vec::new();
+    let k0 = min.log10().floor() as i32;
+    let k1 = max.log10().ceil() as i32;
+    for k in k0..=k1 {
+        for m in [1.0, 2.0, 5.0] {
+            let v = m * 10f64.powi(k);
+            if v >= min && v <= max {
+                ticks.push(AxisTick {
+                    label: compact_axis_label(v).into(),
+                    y: y_for(v, lmin, lmax),
+                });
+            }
+        }
+    }
+    ticks
 }
 
 /// The calm "no chart" state (no plottable years OR a transient normalize failure) — the chart area
@@ -206,6 +295,8 @@ pub fn unavailable() -> GrowthChartState {
         judgment_x: CHART_W,
         judgment_y: -1.0,
         judgment_label: Default::default(),
+        axis_min: 1.0,
+        axis_max: 200.0,
     }
 }
 
@@ -379,48 +470,54 @@ mod tests {
     /// clamp at the axis bounds (a drag past an edge resolves to that edge, never beyond 1→200).
     #[test]
     fn axis_maps_round_trip_and_clamp_at_bounds() {
+        let (lmin, lmax) = (1.0f64.log10(), 200.0f64.log10());
         for value in [1.0, 2.0, 8.0, 37.5, 150.0, 200.0] {
-            let back = value_for_y(y_for(value));
+            let back = value_for_y(y_for(value, lmin, lmax), lmin, lmax);
             assert!(
                 (back - value).abs() < 0.01,
                 "value_for_y(y_for({value})) must round-trip, got {back}"
             );
         }
-        // Bounds: top of the box → 200, bottom → 1.
+        // Bounds: top of the box → the range max, bottom → the range min.
         assert!(
-            (value_for_y(0.0) - AXIS_MAX).abs() < 0.001,
-            "top maps to 200"
+            (value_for_y(0.0, lmin, lmax) - 200.0).abs() < 0.001,
+            "top maps to the max"
         );
         assert!(
-            (value_for_y(CHART_H) - AXIS_MIN).abs() < 0.001,
-            "bottom maps to 1"
+            (value_for_y(CHART_H, lmin, lmax) - 1.0).abs() < 0.001,
+            "bottom maps to the min"
         );
-        // Off-axis values pin to an edge in the forward map.
-        assert_eq!(y_for(0.5), y_for(1.0), "below-axis clamps to the 1 edge");
+        // Off-range values pin to an edge in the forward map.
         assert_eq!(
-            y_for(500.0),
-            y_for(200.0),
-            "above-axis clamps to the 200 edge"
+            y_for(0.5, lmin, lmax),
+            y_for(1.0, lmin, lmax),
+            "below-range clamps to the low edge"
         );
-        // A drag past the bottom edge resolves to the axis floor, not beyond it.
-        assert!(value_for_y(CHART_H + 50.0) >= AXIS_MIN - 0.001);
+        assert_eq!(
+            y_for(500.0, lmin, lmax),
+            y_for(200.0, lmin, lmax),
+            "above-range clamps to the high edge"
+        );
+        // A drag past the bottom edge resolves to the range floor, not beyond it.
+        assert!(value_for_y(CHART_H + 50.0, lmin, lmax) >= 1.0 - 0.001);
     }
 
-    /// `judgment_value_for_y` snaps to 2 dp and mirrors the axis: the top of the box is ~200/share.
+    /// `judgment_value_for_y` snaps to 2 dp and mirrors the EPS scale: the top of the box is the max.
     #[test]
     fn judgment_value_snaps_to_two_decimals() {
-        let top = judgment_value_for_y(0.0);
+        let top = judgment_value_for_y(0.0, 1.0, 200.0);
         assert_eq!(top.as_decimal().scale(), EPS_DRAG_SCALE, "snapped to 2 dp");
         assert!(
-            (top.as_decimal().to_f64().unwrap() - AXIS_MAX).abs() < 0.5,
-            "the top of the chart is ~200/share"
+            (top.as_decimal().to_f64().unwrap() - 200.0).abs() < 0.5,
+            "the top of the chart maps to ~the scale max"
         );
     }
 
-    /// `path_commands` emits one M then L's, with the y mapped through the log axis.
+    /// `path_commands` emits one M then L's, with the y mapped through the given log range.
     #[test]
     fn path_commands_emits_move_then_lines() {
-        let cmds = path_commands(&[(0.0, 1.0), (300.0, 200.0)]);
+        let (lmin, lmax) = (1.0f64.log10(), 200.0f64.log10());
+        let cmds = path_commands(&[(0.0, 1.0), (300.0, 200.0)], lmin, lmax);
         assert!(
             cmds.starts_with("M 0.0 "),
             "first point is a move, got {cmds}"
@@ -429,10 +526,14 @@ mod tests {
             cmds.contains("L 300.0 "),
             "second point is a line, got {cmds}"
         );
-        // y of value 1 is the bottom (CHART_H), value 200 the top (0).
+        // y of the range min is the bottom (CHART_H), the range max the top (0).
         assert!(cmds.contains(&format!("M 0.0 {:.1}", CHART_H)));
         assert!(cmds.contains("L 300.0 0.0"));
-        assert_eq!(path_commands(&[]), "", "no points → empty commands");
+        assert_eq!(
+            path_commands(&[], lmin, lmax),
+            "",
+            "no points → empty commands"
+        );
     }
 
     /// A populated study yields drawable series, the 5–30 % fan (six lines), the decade ticks, and a
@@ -452,7 +553,10 @@ mod tests {
         assert!(!chart.sales_commands.is_empty(), "Sales series is drawn");
         assert!(!chart.price_commands.is_empty(), "Price series is drawn");
         assert_eq!(chart.fan_commands.row_count(), FAN_RATES.len());
-        assert_eq!(chart.axis_ticks.row_count(), AXIS_TICKS.len());
+        assert!(
+            chart.axis_ticks.row_count() >= 1,
+            "the EPS scale carries nice 1/2/5×10^k ticks (issue #25)"
+        );
         assert!(chart.judgment_y >= 0.0, "the judgment line is placed");
         assert!(
             !chart.judgment_commands.is_empty(),
@@ -473,10 +577,14 @@ mod tests {
             !chart.judgment_label.is_empty(),
             "the est-high-EPS caption is shown"
         );
-        // The judgment line sits at the forecast EPS (9/share).
+        // The judgment line sits at the forecast EPS (9/share) on the chart's EPS scale.
+        let (e_lmin, e_lmax) = (
+            (chart.axis_min as f64).log10(),
+            (chart.axis_max as f64).log10(),
+        );
         assert!(
-            (f64::from(chart.judgment_y) - f64::from(y_for(9.0))).abs() < 0.1,
-            "the line is at y_for(9), got {}",
+            (f64::from(chart.judgment_y) - f64::from(y_for(9.0, e_lmin, e_lmax))).abs() < 0.1,
+            "the line is at y_for(9) on the EPS scale, got {}",
             chart.judgment_y
         );
     }
@@ -503,7 +611,10 @@ mod tests {
         let years = (2021..=2025).map(|y| year(y, "5")).collect();
         let mut s = study(years, judgment(None));
         for y in [40.0_f32, 120.0, 250.0] {
-            let value = judgment_value_for_y(y);
+            // The EPS scale is stable (it excludes `est_high`), so read it from the current chart and
+            // invert the drag against it — exactly what the drag wiring does (issue #25).
+            let chart0 = growth_chart(&build_frame(&s).expect("normalizes"), NumberFormat::Comma);
+            let value = judgment_value_for_y(y, chart0.axis_min as f64, chart0.axis_max as f64);
             crate::state::apply_judgment_field(&mut s.judgment, "est_high_eps", Some(value));
             let frame = build_frame(&s).expect("normalizes");
             let chart = growth_chart(&frame, NumberFormat::Comma);
@@ -528,7 +639,7 @@ mod tests {
         crate::state::apply_judgment_field(
             &mut s.judgment,
             "est_high_eps",
-            Some(judgment_value_for_y(80.0)),
+            Some(judgment_value_for_y(80.0, 1.0, 200.0)),
         );
         let frame = build_frame(&s).expect("normalizes");
         let zone = crate::viewmodel::engine::zone_bar(&s, &frame.snapshot, NumberFormat::Comma);

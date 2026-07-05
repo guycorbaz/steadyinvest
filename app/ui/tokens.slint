@@ -95,10 +95,17 @@ export global Tokens {
     // second non-colour channel that keeps it unmistakably distinct from the hollow `◦` stale dot.
     // Quasi-static (a metric), so a theme/regime swap never re-lays-out the marker.
     out property <length> marker-outline: 1.5px;
-    // ── §1 growth-chart strokes (Story 2.8). INK-SCALE ONLY: the §1 chart spends NO judgment hue
-    //    (those are geofenced to the §4 zone bar); the three series separate by VALUE (text-high/mid/
-    //    low lightness) + stroke weight + dash, never colour. All metric/typo (quasi-static), so a
-    //    theme/regime swap never re-lays-out the chart. ──
+    // ── §1 growth-chart series COLOURS (issue #116 / #25). The §1 chart now plots each series on its
+    //    OWN log scale (multi-scale, #25) so none clamps/compresses — which makes colour necessary to
+    //    tell the overlaid curves apart. A DISTINCT categorical trio, deliberately NOT the Okabe-Ito
+    //    §4 zone hues (buy-green/hold-amber/sell-red), so §4 colour keeps its judgment meaning: blue /
+    //    violet / rose. Stroke weight + dash stay as a redundant channel (colour-blind safe). Identical
+    //    across themes (like the zone hues); bright enough on the dark scale. ──
+    in-out property <color> series-sales: #4C8DFF;   // Ventes (blue)
+    in-out property <color> series-price: #B07CF0;   // Prix (violet)
+    in-out property <color> series-eps: #F26DA8;     // BPA (rose) — the protagonist / dragged series
+    // ── §1 growth-chart strokes (Story 2.8). Stroke weight + dash remain the redundant (colour-blind)
+    //    channel alongside the #116 series colours above. ──
     out property <length> chart-stroke: 2px;            // historical series stroke (EPS, Sales)
     out property <length> chart-stroke-thin: 1px;       // the price line + the guide fan + axis grid
     out property <length> chart-judgment-stroke: 2.5px; // the draggable judgment line — thicker, grabbable
