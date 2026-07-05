@@ -653,6 +653,37 @@ fn gate_judgment_label(name: &str) -> &'static str {
     }
 }
 
+/// Issue #114: a judgment gate's `JudgmentInputs` name → the Slint `JudgmentField` key (the wire the
+/// form's inputs carry), so the UI can highlight the exact field. `None` for a name with no on-form
+/// field (defensive).
+fn gate_judgment_field_key(name: &str) -> Option<&'static str> {
+    match name {
+        "estimated_high_eps" => Some("est_high_eps"),
+        "estimated_low_eps" => Some("est_low_eps"),
+        "judged_avg_high_pe" => Some("high_pe"),
+        "judged_avg_low_pe" => Some("low_pe"),
+        "current_price" => Some("current_price"),
+        _ => None,
+    }
+}
+
+/// Issue #114: the `JudgmentField` keys of the verdict's OPEN judgment gates — the load-bearing
+/// judgment inputs still MISSING (a present judgment value is `ValidatedFresh`, so a judgment gate is
+/// open only when empty). The §1/§3 judgment fields highlight themselves when their key is in this
+/// set, so the user sees exactly which inputs to fill (neutral emphasis, driven by the verdict — the
+/// highlight clears as each is entered). Empty when the verdict is `Full` (nothing to fill).
+pub fn required_judgment_fields(snapshot: &StudySnapshot) -> Vec<slint::SharedString> {
+    snapshot
+        .verdict()
+        .open_gates()
+        .iter()
+        .filter_map(|g| match &g.input {
+            GatedInput::JudgmentInput { name } => gate_judgment_field_key(name).map(|k| k.into()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The provenance date (DD/MM) of the most recent load-bearing cell edit, or the study's creation
 /// date when no cell has been entered — the temporal-provenance caption's source (FR11).
 fn provenance_dd_mm(study: &Study) -> String {
@@ -881,6 +912,30 @@ mod tests {
                 name: "current_price"
             }
         )));
+    }
+
+    /// Issue #114: `required_judgment_fields` maps the verdict's OPEN judgment gates to their
+    /// `JudgmentField` keys, so the form highlights exactly the inputs to fill. A missing
+    /// `current_price` surfaces as the `"current_price"` field-key; a field that IS filled never
+    /// appears (the highlight clears as each input is entered).
+    #[test]
+    fn required_judgment_fields_lists_the_open_judgment_gate_keys() {
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let judgment = Judgment {
+            current_price: None,
+            ..full_judgment()
+        };
+        let study = study_with(years, judgment);
+        let snap = build_snapshot(&study).unwrap();
+        let keys = required_judgment_fields(&snap);
+        assert!(
+            keys.iter().any(|k| k == "current_price"),
+            "the missing current_price is flagged for the form, got {keys:?}"
+        );
+        assert!(
+            !keys.iter().any(|k| k == "low_pe"),
+            "a filled field (judged_avg_low_pe) is never flagged, got {keys:?}"
+        );
     }
 
     /// One un-validated load-bearing data cell (review ≠ ✓), nothing missing → Verdict::Provisional.

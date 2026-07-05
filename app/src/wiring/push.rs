@@ -90,6 +90,10 @@ pub(crate) fn push_form(
             studies.set_return_computed(engine::return_computed(outputs, format));
             studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
             studies.set_verdict(engine::verdict_badge(study, snapshot, format));
+            // Issue #114: the load-bearing judgment inputs still to fill (drives the field highlight).
+            studies.set_required_fields(ModelRc::new(VecModel::from(
+                engine::required_judgment_fields(snapshot),
+            )));
             // Story 2.8 — the §1 interactive growth chart geometry (from the SAME coherent frame).
             studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
             // The study-level (§4) warning key — `low_price_above_current`, anchored near forecast-low.
