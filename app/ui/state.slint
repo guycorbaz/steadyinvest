@@ -501,6 +501,10 @@ export global Studies {
     in-out property <ZoneBarState> zone-bar;
     in-out property <VerdictState> verdict;
     in-out property <TraceState> trace;
+    // Issue #114: the JudgmentField keys of the verdict's open judgment gates (load-bearing inputs
+    // still missing). A JudgmentField highlights itself when its key is in this set, so the user sees
+    // exactly which inputs to fill; empty for a Full verdict. Pushed alongside the verdict.
+    in-out property <[string]> required-fields;
     // ── Story 2.8 — the §1 interactive growth chart geometry (pre-computed by `viewmodel/chart.rs`).
     in-out property <GrowthChartState> growth-chart;
     // True while the user holds the §1 judgment endpoint — the enclosing form `Flickable` disables its
