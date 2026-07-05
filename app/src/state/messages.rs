@@ -149,6 +149,11 @@ pub const MSG_LEDGER_INVALID_DATE: &str =
 /// aggregate rewrite would silently desynchronize it from the recorded history — the ledger is the
 /// place to correct the position.
 pub const MSG_LEDGER_BACKED: &str = "La quantité, le prix et la devise de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
+/// Issue #85: a ledger row carries a transaction `kind` this build does not recognise (a #78
+/// forward-compat case — a journal written by a newer version). The position can't be replayed from
+/// an unknown transaction, so this holding's ledger is suspended; the notice NAMES the cause (a newer
+/// kind) instead of the misleading generic save-failure. Fact-stating, no imperative (posture-gated).
+pub const MSG_LEDGER_UNKNOWN_KIND: &str = "Ce registre contient un type de transaction inconnu de cette version (écrit par une version plus récente) ; les modifications de cette position sont suspendues.";
 
 /// Dividend copy (Story 6.4, FR41) — fact-stating, posture-gated. The study keeps the GROSS
 /// dividend (method fidelity); the portfolio's reinvestable cash uses the NET (gross − retenue).
@@ -505,6 +510,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_LEDGER_OVERSELL,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
+    MSG_LEDGER_UNKNOWN_KIND,
     MSG_DIVIDEND_RECORDED,
     MSG_DIVIDEND_WITHHOLDING,
     MSG_DIVIDEND_RETIRED,
