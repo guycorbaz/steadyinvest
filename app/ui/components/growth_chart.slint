@@ -16,6 +16,26 @@
 import { Tokens } from "../tokens.slint";
 import { Studies, GrowthChartState, AxisTick } from "../state.slint";
 
+// One legend entry (issue #25/#116): a colour swatch matching a series' stroke + its name.
+component LegendItem inherits HorizontalLayout {
+    in property <color> hue;
+    in property <string> name;
+    spacing: Tokens.space-4;
+    Rectangle {
+        width: Tokens.space-12;
+        height: Tokens.space-12;
+        y: (parent.height - self.height) / 2;
+        background: root.hue;
+        border-radius: Tokens.radius / 2;
+    }
+    Text {
+        text: root.name;
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+        vertical-alignment: center;
+    }
+}
+
 export component GrowthChart inherits Rectangle {
     in property <GrowthChartState> chart: Studies.growth-chart;
     // The judgment field the §1 drag writes — the forecast est-high-EPS (drives §4 forecast_high →
@@ -26,7 +46,7 @@ export component GrowthChart inherits Rectangle {
     property <length> plot-h: root.chart.chart-h * 1px;
     property <length> strip-w: Tokens.space-48;
 
-    min-height: root.plot-h + 2 * Tokens.chart-pad;
+    min-height: root.plot-h + Tokens.row-height + 2 * Tokens.chart-pad;
 
     // ── Calm empty state (no plottable years) — constant geometry, nothing drawn ──
     if !root.chart.available: Rectangle {
@@ -45,12 +65,16 @@ export component GrowthChart inherits Rectangle {
         }
     }
 
-    // ── The chart: side axis + plot area ──
-    if root.chart.available: HorizontalLayout {
+    // ── The chart: side axis + plot area, with the series legend below (issue #25/#116: the labelled
+    //    axis is the EPS scale, so a colour legend tells the three independently-scaled series apart) ──
+    if root.chart.available: VerticalLayout {
+        spacing: Tokens.space-4;
+
+        HorizontalLayout {
         spacing: Tokens.space-8;
         alignment: stretch;
 
-        // Side axis — the 1→200 semi-log decade labels at their viewbox-y.
+        // Side axis — the EPS-scale ticks at their viewbox-y.
         Rectangle {
             width: Tokens.space-32;
             height: root.plot-h;
@@ -103,10 +127,11 @@ export component GrowthChart inherits Rectangle {
                 viewbox-height: root.chart.chart-h;
             }
 
-            // Historical series — ink scale, separated by lightness + stroke weight (no colour).
+            // Historical series (issue #25/#116): each on its OWN log scale (no clamp/compression),
+            // told apart by a DISTINCT colour (not a §4 zone hue) + stroke weight.
             Path {
                 commands: root.chart.sales-commands;
-                stroke: Tokens.text-low;
+                stroke: Tokens.series-sales;
                 stroke-width: Tokens.chart-stroke;
                 // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
                 // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
@@ -121,7 +146,7 @@ export component GrowthChart inherits Rectangle {
             }
             Path {
                 commands: root.chart.price-commands;
-                stroke: Tokens.text-mid;
+                stroke: Tokens.series-price;
                 stroke-width: Tokens.chart-stroke-thin;
                 // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
                 // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
@@ -134,10 +159,10 @@ export component GrowthChart inherits Rectangle {
                 viewbox-width: parent.width / 1px;
                 viewbox-height: root.chart.chart-h;
             }
-            // EPS — the protagonist (brightest).
+            // EPS — the protagonist (the dragged/decision series, its scale is the labelled one).
             Path {
                 commands: root.chart.eps-commands;
-                stroke: Tokens.text-high;
+                stroke: Tokens.series-eps;
                 stroke-width: Tokens.chart-stroke;
                 // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
                 // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
@@ -154,7 +179,7 @@ export component GrowthChart inherits Rectangle {
             // drawn solid + thick as the actor. Rendered only when set (FR33).
             if root.chart.judgment-y >= 0.0: Path {
                 commands: root.chart.judgment-commands;
-                stroke: Tokens.text-high;
+                stroke: Tokens.series-eps;
                 stroke-width: Tokens.chart-judgment-stroke;
                 // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
                 // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
@@ -229,6 +254,19 @@ export component GrowthChart inherits Rectangle {
                     accessible-value: root.chart.judgment-label;
                 }
             }
+        }
+        }
+
+        // ── Series legend (issue #25/#116): a colour swatch + name for each series, so the three
+        //    independently-scaled curves are identifiable (only the EPS scale is numbered on the side
+        //    axis; Sales/Price live on their own scales). ──
+        HorizontalLayout {
+            spacing: Tokens.space-16;
+            alignment: start;
+            padding-left: Tokens.space-32 + Tokens.space-8;
+            LegendItem { hue: Tokens.series-sales; name: @tr("Ventes"); }
+            LegendItem { hue: Tokens.series-price; name: @tr("Prix"); }
+            LegendItem { hue: Tokens.series-eps; name: @tr("BPA"); }
         }
     }
 }

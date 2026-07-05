@@ -233,10 +233,15 @@ export struct GrowthChartState {
     price-commands: string,             // historical (high price), solid
     judgment-commands: string,          // the trend line: last historical EPS (fixed) → forecast endpoint
     fan-commands: [string],             // the 5–30 % growth-guide fan from the last historical EPS
-    axis-ticks: [AxisTick],             // 1→200 semi-log decade labels
+    axis-ticks: [AxisTick],             // ticks of the EPS scale (issue #25: the labelled scale)
     judgment-x: float,                  // viewbox-x of the draggable endpoint (the future edge)
     judgment-y: float,                  // viewbox-y of the draggable endpoint; -1 = unset
     judgment-label: string,             // formatted est. high EPS caption ("" when unset)
+    // Issue #25 (multi-scale): the EPS series' OWN log-scale bounds — the scale the drag operates on
+    // (the est-high-EPS handle lives on the EPS scale, so the drag inverse must use these, not a fixed
+    // 1→200). Sales/Price are drawn on their own scales (in the commands) but the drag only touches EPS.
+    axis-min: float,
+    axis-max: float,
 }
 
 // The confront overlay geometry (Story 5.1) — the recorded §4 forecast band (a shaded rectangle) and

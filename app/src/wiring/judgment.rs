@@ -159,7 +159,14 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 return;
             };
             *drag_moved.borrow_mut() = true;
-            let value = Some(viewmodel::chart::judgment_value_for_y(y));
+            // Issue #25: the est-high-EPS handle lives on the EPS series' OWN scale — invert against
+            // its bounds (read from the chart state), not a fixed 1→200.
+            let chart = ui.global::<Studies>().get_growth_chart();
+            let value = Some(viewmodel::chart::judgment_value_for_y(
+                y,
+                chart.axis_min as f64,
+                chart.axis_max as f64,
+            ));
             if !state::apply_judgment_field(&mut preview.judgment, field.as_str(), value) {
                 return;
             }
@@ -196,7 +203,13 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             if !moved {
                 return;
             }
-            let value = Some(viewmodel::chart::judgment_value_for_y(y));
+            // Issue #25: invert the drag against the EPS scale's bounds (as the `moved` handler does).
+            let chart = ui.global::<Studies>().get_growth_chart();
+            let value = Some(viewmodel::chart::judgment_value_for_y(
+                y,
+                chart.axis_min as f64,
+                chart.axis_max as f64,
+            ));
             let result = journal_state
                 .borrow_mut()
                 .set_judgment_field(id, field.as_str(), value);
