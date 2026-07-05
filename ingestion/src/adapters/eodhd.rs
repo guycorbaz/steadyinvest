@@ -147,6 +147,7 @@ pub fn map_eodhd(
 
     let income = obj(fundamentals.pointer("/Financials/Income_Statement/yearly"));
     let balance = obj(fundamentals.pointer("/Financials/Balance_Sheet/yearly"));
+    let cash_flow = obj(fundamentals.pointer("/Financials/Cash_Flow/yearly"));
     let earnings = obj(fundamentals.pointer("/Earnings/Annual"));
 
     // Per-year high/low reduced from the daily EOD bars (root array, `"date"`-keyed).
@@ -154,7 +155,12 @@ pub fn map_eodhd(
 
     // Union of every fiscal year mentioned by any section, ascending.
     let mut years_set: BTreeMap<i32, ()> = BTreeMap::new();
-    for key in income.keys().chain(balance.keys()).chain(earnings.keys()) {
+    for key in income
+        .keys()
+        .chain(balance.keys())
+        .chain(cash_flow.keys())
+        .chain(earnings.keys())
+    {
         if let Some(y) = year_of_date_key(key) {
             years_set.insert(y, ());
         }
@@ -175,6 +181,7 @@ pub fn map_eodhd(
         .map(|&y| {
             let inc = year_row(income, y);
             let bal = year_row(balance, y);
+            let cash = year_row(cash_flow, y);
             let earn = year_row(earnings, y);
             RawYear {
                 year: y,
@@ -184,7 +191,10 @@ pub fn map_eodhd(
                 eps: amount(field_dec(earn, "epsActual")),
                 high_price: amount(highs.get(&y).copied()),
                 low_price: amount(lows.get(&y).copied()),
-                dividend_per_share: None, // EODHD per-share dividends come from a later endpoint (#21 / Story 3.x)
+                // Issue #112: per-share dividend for the fiscal year — the cash-flow `dividendsPaid`
+                // (total, same yearly statement → aligned to the fiscal year, no ex-date guessing)
+                // over shares outstanding. `None` when either is absent (a non-payer or a gap).
+                dividend_per_share: amount(dividend_per_share(cash, bal)),
                 pre_tax_profit: amount(field_dec(inc, "incomeBeforeTax")),
                 net_profit: amount(field_dec(inc, "netIncome")),
                 tax_rate: None, // pre_tax_profit is reported directly → no gross-up needed
@@ -265,6 +275,20 @@ fn book_value_per_share(year: Option<&Value>) -> Option<Decimal> {
     equity.checked_div(shares).map(|d| d.round_dp(4))
 }
 
+/// PURE: the per-share dividend for a fiscal year (Issue #112) = `|dividendsPaid| / shares`, from the
+/// cash-flow + balance-sheet rows of the SAME yearly statement (so it is aligned to the fiscal year,
+/// with no ex-dividend-date → year guessing). `dividendsPaid` may be reported as a cash OUTFLOW
+/// (negative) — the magnitude is the dividend; rounded to 4 dp like [`book_value_per_share`]. `None`
+/// when either input is absent (a non-payer, or a year the cash-flow statement does not cover).
+fn dividend_per_share(cash: Option<&Value>, balance: Option<&Value>) -> Option<Decimal> {
+    let paid = field_dec(cash, "dividendsPaid")?;
+    let shares = field_dec(balance, "commonStockSharesOutstanding")?;
+    if shares.is_zero() {
+        return None;
+    }
+    paid.abs().checked_div(shares).map(|d| d.round_dp(4))
+}
+
 // ── small JSON helpers ────────────────────────────────────────────────────────────────────────
 
 /// Borrow a JSON object, or an empty static map when the pointer missed / isn't an object.
@@ -316,6 +340,53 @@ mod tests {
         assert_eq!(latest_eod_close(&json!({})), None);
         // Last bar present but no `close` field → no price, not a zero.
         assert_eq!(latest_eod_close(&json!([{ "date": "2026-06-26" }])), None);
+    }
+
+    /// Issue #112: `map_eodhd` derives the per-share dividend for each fiscal year from the cash-flow
+    /// `dividendsPaid` over the balance-sheet shares (aligned, no ex-date guessing), rounded to 4 dp;
+    /// a cash OUTFLOW (negative) is taken by magnitude; a year with no cash-flow row (a non-payer) is
+    /// `None`. Also covers the #119 book-value rounding on the same fixture.
+    #[test]
+    fn map_eodhd_derives_per_share_dividend_from_the_cash_flow_statement() {
+        let fundamentals = json!({
+            "General": { "CurrencyCode": "USD" },
+            "Earnings": { "Annual": {
+                "2023-09-30": { "epsActual": "5.9" },
+                "2024-09-30": { "epsActual": "6.1" },
+            } },
+            "Financials": {
+                "Income_Statement": { "yearly": {
+                    "2023-09-30": { "totalRevenue": "383000000000", "incomeBeforeTax": "114000000000" },
+                    "2024-09-30": { "totalRevenue": "391000000000", "incomeBeforeTax": "120000000000" },
+                } },
+                "Balance_Sheet": { "yearly": {
+                    "2023-09-30": { "totalStockholderEquity": "62000000000", "commonStockSharesOutstanding": "15500000000" },
+                    "2024-09-30": { "totalStockholderEquity": "57000000000", "commonStockSharesOutstanding": "15000000000" },
+                } },
+                "Cash_Flow": { "yearly": {
+                    // 2024 pays (positive), 2023 reports the outflow as NEGATIVE, 2022 is absent (non-payer year).
+                    "2024-09-30": { "dividendsPaid": "15000000000" },
+                    "2023-09-30": { "dividendsPaid": "-15500000000" },
+                } },
+            }
+        });
+        let fin = map_eodhd(&fundamentals, &json!([]), "AAPL.US").expect("maps");
+        let y = |year: i32| {
+            fin.years
+                .iter()
+                .find(|y| y.year == year)
+                .expect("year present")
+        };
+        let div = |year: i32| y(year).dividend_per_share.as_ref().map(|a| a.value);
+        // 2024: 15e9 / 15e9 = 1.0000.
+        assert_eq!(div(2024), Some(Decimal::from_str_exact("1").unwrap()));
+        // 2023: |-15.5e9| / 15.5e9 = 1.0000 (a negative outflow is taken by magnitude).
+        assert_eq!(div(2023), Some(Decimal::from_str_exact("1").unwrap()));
+        // #119: book value 2024 = 57e9 / 15e9 = 3.8, rounded 4 dp.
+        assert_eq!(
+            y(2024).book_value_per_share.as_ref().map(|a| a.value),
+            Some(Decimal::from_str_exact("3.8").unwrap())
+        );
     }
 
     #[test]
