@@ -391,8 +391,10 @@ impl JournalState {
                 .to_string()
         };
         // The sale price: the matched study's current market price if known, else the cost basis.
+        // Issue #81: match a study in the holding's own currency — never price a CHF sale from a
+        // same-ticker USD study.
         let unit_price = self
-            .study_id_for_ticker(&holding.security_ticker)
+            .study_id_for_ticker_in_currency(&holding.security_ticker, holding.currency.as_deref())
             .and_then(|sid| self.get_study(sid))
             .and_then(|s| s.judgment.current_price)
             .map(|m| m.as_decimal().to_string())

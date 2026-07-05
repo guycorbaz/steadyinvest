@@ -34,6 +34,35 @@ impl JournalState {
             .map(|s| s.id)
     }
 
+    /// Issue #81: like [`Self::study_id_for_ticker`], but a holding auto-match ALSO requires the same
+    /// currency — so a CHF holding never links a USD study of the same ticker (which would then price
+    /// its sale / ratchet its stop / display its register row at the wrong-currency figure). A holding
+    /// with **no** declared currency (`None`) falls back to the ticker-only match (today's behaviour).
+    /// The watchlist link (no currency) keeps using [`Self::study_id_for_ticker`].
+    pub fn study_id_for_ticker_in_currency(
+        &self,
+        ticker: &str,
+        currency: Option<&str>,
+    ) -> Option<Uuid> {
+        // No declared currency → keep the cheap ticker-only match (today's behaviour).
+        let Some(currency) = currency else {
+            return self.study_id_for_ticker(ticker);
+        };
+        // The currency lives in the JSON payload (not an indexed summary column), so load only the
+        // same-ticker candidates — usually 0–2 — newest-first, and take the first currency match.
+        self.list_studies()
+            .into_iter()
+            .rev()
+            .filter(|s| s.security_ticker.eq_ignore_ascii_case(ticker))
+            .find_map(|s| {
+                let study = self.get_study(s.id)?;
+                study
+                    .native_currency
+                    .eq_ignore_ascii_case(currency)
+                    .then_some(study.id)
+            })
+    }
+
     /// Add a watched security (FR34) — appended at the end. Id/timestamp from the injected sources
     /// (ADD15). Guarded (read-only / no-journal / save-failure → a neutral notice).
     pub fn add_watch_item(&mut self, ticker: &str, study_id: Option<Uuid>) -> Result<(), String> {

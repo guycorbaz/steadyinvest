@@ -1914,6 +1914,37 @@ fn study_id_for_ticker_matches_case_insensitively_and_picks_most_recent() {
     assert_eq!(state.study_id_for_ticker("UNKNOWN"), None);
 }
 
+/// Issue #81: the holdings auto-match never crosses currencies — a CHF holding resolves the CHF study
+/// of the ticker, a USD holding the USD study; a currency with no study yields NO match (safer than a
+/// wrong-currency one); a holding with no declared currency falls back to the ticker-only match.
+#[test]
+fn study_id_for_ticker_in_currency_never_crosses_currencies() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x921);
+    let chf = state.create_study("AAPL", "CHF").unwrap();
+    let usd = state.create_study("AAPL", "USD").unwrap();
+    assert_eq!(
+        state.study_id_for_ticker_in_currency("aapl", Some("CHF")),
+        Some(chf),
+        "a CHF holding matches the CHF study"
+    );
+    assert_eq!(
+        state.study_id_for_ticker_in_currency("aapl", Some("USD")),
+        Some(usd),
+        "a USD holding matches the USD study"
+    );
+    assert_eq!(
+        state.study_id_for_ticker_in_currency("aapl", Some("EUR")),
+        None,
+        "no EUR study → no match, never a cross-currency one"
+    );
+    assert_eq!(
+        state.study_id_for_ticker_in_currency("aapl", None),
+        Some(usd),
+        "no declared currency → ticker-only fallback (most recent)"
+    );
+}
+
 // ── Story 4.2 — buy-zone alert (the app-surface read of the engine zone) ──
 
 #[test]
