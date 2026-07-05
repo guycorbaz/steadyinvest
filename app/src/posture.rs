@@ -714,9 +714,10 @@ mod tests {
         // size-table refusal into a field-naming template + a crossed-pair notice: 101 − 1 + 2 = 102.
         // Issue #101 adds the skipped-keyless-fallback clause (MSG_FALLBACK_NO_KEY): 102 + 1 = 103.
         // Issue #85 adds the unknown-transaction-kind notice (MSG_LEDGER_UNKNOWN_KIND): 103 + 1 = 104.
+        // Issue #88 adds the two percent-panel refusals (trailing-stop + withholding): 104 + 2 = 106.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            104,
+            106,
             "state.rs message inventory changed — register the new notice"
         );
     }
