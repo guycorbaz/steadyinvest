@@ -6,7 +6,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use steadyinvest_contract::Money;
-use steadyinvest_core::rounding::{round_for_display, DisplayField};
+use steadyinvest_core::rounding::{DisplayField, round_for_display};
 
 /// True minus sign (U+2212) used for display — visually distinct from the ASCII hyphen.
 pub const MINUS_SIGN: char = '\u{2212}';

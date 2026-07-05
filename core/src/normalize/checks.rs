@@ -25,14 +25,14 @@ fn amounts(year: &RawYear) -> [(&'static str, Option<&RawAmount>); 8] {
 pub(super) fn currency_findings(years: &[RawYear], native: &str, findings: &mut Vec<Finding>) {
     for year in years {
         for (field, amount) in amounts(year) {
-            if let Some(a) = amount {
-                if a.currency != native {
-                    findings.push(Finding {
-                        key: PlausibilityKey::CurrencyMismatch,
-                        year: year.year,
-                        context: field,
-                    });
-                }
+            if let Some(a) = amount
+                && a.currency != native
+            {
+                findings.push(Finding {
+                    key: PlausibilityKey::CurrencyMismatch,
+                    year: year.year,
+                    context: field,
+                });
             }
         }
     }
@@ -53,14 +53,14 @@ pub(super) fn fiscal_findings(years: &[RawYear], findings: &mut Vec<Finding>) {
     }
     for pair in years.windows(2) {
         let (prev, cur) = (&pair[0], &pair[1]);
-        if let (Some(a), Some(b)) = (prev.fiscal_year_end_month, cur.fiscal_year_end_month) {
-            if a != b {
-                findings.push(Finding {
-                    key: PlausibilityKey::FiscalPeriodMisalignment,
-                    year: cur.year,
-                    context: "fiscal_year_end_month",
-                });
-            }
+        if let (Some(a), Some(b)) = (prev.fiscal_year_end_month, cur.fiscal_year_end_month)
+            && a != b
+        {
+            findings.push(Finding {
+                key: PlausibilityKey::FiscalPeriodMisalignment,
+                year: cur.year,
+                context: "fiscal_year_end_month",
+            });
         }
     }
 }

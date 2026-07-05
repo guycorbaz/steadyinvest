@@ -115,9 +115,9 @@ mod tests {
 
     #[test]
     fn uuid_gen_produces_distinct_v4_ids() {
-        let gen = UuidGen;
-        let a = gen.new_id();
-        let b = gen.new_id();
+        let generator = UuidGen;
+        let a = generator.new_id();
+        let b = generator.new_id();
         assert_ne!(a, b, "two draws collided");
         assert_eq!(a.get_version_num(), 4, "not a v4 UUID");
     }
@@ -129,8 +129,8 @@ mod tests {
         assert_eq!(clock.now().0, "2026-06-13T00:00:00Z");
 
         let id = Uuid::from_u128(0xABCD);
-        let gen = FixedIdGen(id);
-        assert_eq!(gen.new_id(), id);
-        assert_eq!(gen.new_id(), gen.new_id());
+        let generator = FixedIdGen(id);
+        assert_eq!(generator.new_id(), id);
+        assert_eq!(generator.new_id(), generator.new_id());
     }
 }

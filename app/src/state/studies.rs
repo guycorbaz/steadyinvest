@@ -12,8 +12,8 @@ use uuid::Uuid;
 use crate::viewmodel::engine;
 
 use super::{
-    empty_judgment, JournalState, MSG_BLANK_CURRENCY, MSG_BLANK_TICKER, MSG_NORMALIZE_FAILED,
-    MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
+    JournalState, MSG_BLANK_CURRENCY, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_NORMALIZE_FAILED,
+    MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, empty_judgment,
 };
 
 impl JournalState {

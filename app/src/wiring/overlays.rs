@@ -8,10 +8,10 @@ use std::rc::Rc;
 use slint::{ComponentHandle, SharedString};
 use uuid::Uuid;
 
-use crate::wiring::push::push_form;
 use crate::wiring::Session;
-use crate::{state, viewmodel};
+use crate::wiring::push::push_form;
 use crate::{Confront, MainWindow, ScenarioCompareState, Studies, TraceState};
+use crate::{state, viewmodel};
 
 /// Wire the overlay domain: confront request / dismiss, scenario compare open / set-alternate /
 /// close, the forecast-low option, and traceability open / close.

@@ -141,10 +141,10 @@ impl JournalState {
             report_ref.set(acc);
         })?;
         // Story 5.1: cache the latest close into the price-history trajectory (confront's source).
-        if let Some(price) = latest_price {
-            if let Some(study) = self.get_study(study_id) {
-                self.cache_close(&study.security_ticker, price);
-            }
+        if let Some(price) = latest_price
+            && let Some(study) = self.get_study(study_id)
+        {
+            self.cache_close(&study.security_ticker, price);
         }
         Ok(report.get())
     }

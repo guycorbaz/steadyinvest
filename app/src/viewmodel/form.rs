@@ -24,7 +24,7 @@ use crate::viewmodel::engine::{self, PlausibilityWarnings};
 use crate::viewmodel::entry::{
     self, FIELD_DIVIDEND, FIELD_EPS, FIELD_HIGH, FIELD_LOW, MGMT_FIELDS,
 };
-use crate::viewmodel::format::{format_amount, NumberFormat};
+use crate::viewmodel::format::{NumberFormat, format_amount};
 use crate::{FormHeader, GridCellState, MgmtRow, PeRow};
 
 /// The faithful empty/absent slot — an em dash. A computed/derived value not yet produced (D/E/G/H,
@@ -458,7 +458,9 @@ mod tests {
         let headers: Vec<&str> = headers.iter().map(|s| s.as_str()).collect();
         assert_eq!(
             headers,
-            vec!["2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"]
+            vec![
+                "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"
+            ]
         );
     }
 

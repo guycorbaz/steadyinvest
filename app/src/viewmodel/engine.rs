@@ -22,8 +22,8 @@
 //!   P/E / relative value are honestly `unknown` (quarterly capture is a later story / Epic 3).
 //! - **splits**: v1 manual entry records no split events → `splits: vec![]`.
 
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use steadyinvest_contract::{ForecastLowOption as CForecastLowOption, Money, Study};
 use steadyinvest_core::normalize::{Finding, PlausibilityKey};
 use steadyinvest_core::rounding::DisplayField;
@@ -32,7 +32,7 @@ use steadyinvest_core::verdict::{GateState, GatedInput, OpenGate, StudySnapshot,
 
 use crate::viewmodel::entry;
 use crate::viewmodel::form::EMPTY_SLOT;
-use crate::viewmodel::format::{format_scaled, NumberFormat};
+use crate::viewmodel::format::{NumberFormat, format_scaled};
 use crate::{
     GrowthComputed, JudgmentFields, MgmtComputed, PeComputed, ReturnComputed, RiskComputed,
     ScenarioCompareState, ScenarioOutcome, TraceState, VerdictState, ZoneBarState,
@@ -47,7 +47,7 @@ use crate::{
 // Only the names `app` references in non-test code are re-exported; the rest of the mapping is
 // `report::form`-internal (consumed by `build_frame` there). `money_dec` is used by the formatting
 // functions below; the `Study → snapshot` construction by every form/chart/state caller.
-pub use steadyinvest_report::form::{build_frame, build_snapshot, money_dec, StudyFrame};
+pub use steadyinvest_report::form::{StudyFrame, build_frame, build_snapshot, money_dec};
 
 /// Whether a study's current price sits in its §4 **buy zone** (Story 4.2, FR35). A presentation-only
 /// read of the existing `core::ssg` risk-reward output — it never alters the verdict and is
@@ -1197,10 +1197,11 @@ mod tests {
             "the year-less forecast_low finding anchors at the §4/study surface"
         );
         // The fiscal metadata anchors at the year (index 1), never at a value cell.
-        assert!(w
-            .items
-            .iter()
-            .any(|it| it.anchor == WarningAnchor::Year { year_index: 1 }));
+        assert!(
+            w.items
+                .iter()
+                .any(|it| it.anchor == WarningAnchor::Year { year_index: 1 })
+        );
         // forecast_low + current_pe (year None) + the out-of-window currency finding → §4/study.
         assert_eq!(
             w.items

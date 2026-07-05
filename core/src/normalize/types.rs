@@ -397,10 +397,12 @@ mod tests {
             NormalizeError::DuplicateYear { year: 2020 }.to_string(),
             "duplicate reported year: 2020"
         );
-        assert!(NormalizeError::InvalidSplitRatio {
-            effective_year: 2021
-        }
-        .to_string()
-        .contains("2021"));
+        assert!(
+            NormalizeError::InvalidSplitRatio {
+                effective_year: 2021
+            }
+            .to_string()
+            .contains("2021")
+        );
     }
 }

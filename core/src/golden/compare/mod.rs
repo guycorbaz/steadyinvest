@@ -19,8 +19,8 @@ mod sections;
 
 use crate::golden::schema::GoldenStudy;
 use crate::method_version::METHOD_VERSION;
-use crate::normalize::{normalize, RawFinancials};
-use crate::ssg::{compute, JudgmentInputs, QuarterlyObservations};
+use crate::normalize::{RawFinancials, normalize};
+use crate::ssg::{JudgmentInputs, QuarterlyObservations, compute};
 use rust_decimal::Decimal;
 use sections::{compare_normalize_findings, compare_outputs};
 use std::fmt;

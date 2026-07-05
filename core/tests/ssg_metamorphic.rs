@@ -15,9 +15,9 @@ use proptest::collection::vec;
 use proptest::option;
 use proptest::prelude::*;
 use rust_decimal::Decimal;
-use steadyinvest_core::normalize::{normalize, RawAmount, RawFinancials, RawYear, SplitEvent};
+use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear, SplitEvent, normalize};
 use steadyinvest_core::ssg::{
-    compute, ForecastLowOption, JudgmentInputs, QuarterlyObservations, SsgOutputs, UpsideDownside,
+    ForecastLowOption, JudgmentInputs, QuarterlyObservations, SsgOutputs, UpsideDownside, compute,
 };
 
 const NATIVE: &str = "USD";

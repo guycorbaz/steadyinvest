@@ -9,11 +9,11 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::config::StudyViewState;
 use crate::state::JournalState;
 use crate::viewmodel::format::NumberFormat;
-use crate::{regime, state, viewmodel};
 use crate::{
     GrowthComputed, MainWindow, MgmtComputed, PeComputed, ReturnComputed, RiskComputed, Studies,
     VerdictState, ZoneBarState,
 };
+use crate::{regime, state, viewmodel};
 
 /// A compact display form of an RFC3339 timestamp for the holdings freshness caption (Story 4.4):
 /// `YYYY-MM-DD HH:MM` (drop seconds + zone; the journal stores the full RFC3339 string).

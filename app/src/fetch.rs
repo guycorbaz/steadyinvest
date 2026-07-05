@@ -18,8 +18,8 @@ use std::sync::mpsc;
 
 use rust_decimal::Decimal;
 use steadyinvest_ingestion::{
-    adapters::eodhd::EodhdProvider, adapters::twelvedata::TwelveDataProvider, fetch_canonical,
-    fetch_fx_rate, fetch_price, FetchedFinancials, IngestionError, Provider,
+    FetchedFinancials, IngestionError, Provider, adapters::eodhd::EodhdProvider,
+    adapters::twelvedata::TwelveDataProvider, fetch_canonical, fetch_fx_rate, fetch_price,
 };
 use uuid::Uuid;
 
@@ -236,13 +236,12 @@ fn run_chain<'a, T>(
         if let Err(IngestionError::Provider(steadyinvest_ingestion::ProviderError::Quota {
             retry_after_secs,
         })) = &attempt
+            && let Some(wait) = quota_wait(*retry_after_secs)
         {
-            if let Some(wait) = quota_wait(*retry_after_secs) {
-                // FR27: honor the declared retry-after (bounded) — ONE retry.
-                std::thread::sleep(wait);
-                last_request.insert(provider.tag(), std::time::Instant::now());
-                attempt = call(provider, member.api_key.as_deref());
-            }
+            // FR27: honor the declared retry-after (bounded) — ONE retry.
+            std::thread::sleep(wait);
+            last_request.insert(provider.tag(), std::time::Instant::now());
+            attempt = call(provider, member.api_key.as_deref());
         }
         effective = Some(member.provider);
         let succeeded = attempt.is_ok();

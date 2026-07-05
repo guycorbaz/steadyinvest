@@ -8,9 +8,9 @@ members = ["core", "contract", "ingestion", "persistence", "report", "app"]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "GPL-3.0-or-later"
-rust-version = "1.96"          # MSRV — pinned deps (Slint 1.16, libsqlite3-sys 0.38 cfg_select!) require a recent stable
+rust-version = "1.96"          # MSRV — edition 2024 needs ≥1.85; pinned deps (Slint 1.17, libsqlite3-sys cfg_select!) also need recent stable
 authors = ["Guy"]
 repository = "https://github.com/guycorbaz/steadyinvest"
 

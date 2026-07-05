@@ -16,9 +16,9 @@ use crate::regime::Regime;
 use crate::state::JournalState;
 use crate::wiring::push::{push_form, push_view_state};
 use crate::wiring::watchlist::refresh_watchlist;
-use crate::wiring::{persist, Session};
-use crate::{regime, state, viewmodel};
+use crate::wiring::{Session, persist};
 use crate::{FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, Verify};
+use crate::{regime, state, viewmodel};
 
 /// Write a study's export envelope to a file (Story 5.2, FR59) and return its path. The file lands in
 /// an `exports/` folder under the OS data dir — **never** beside the live journal DB (ADD7/8

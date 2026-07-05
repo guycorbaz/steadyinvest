@@ -8,14 +8,14 @@
 use std::path::{Path, PathBuf};
 
 use steadyinvest_persistence::{
-    inspect_backup, restore_journal_file, Error as PersistError, Journal,
+    Error as PersistError, Journal, inspect_backup, restore_journal_file,
 };
 use uuid::Uuid;
 
 use super::{
-    path_with_suffix, same_file_path, sync_mode_for, JournalState, MSG_NO_JOURNAL,
-    MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY, MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL,
-    MSG_RESTORE_UNREADABLE, MSG_SAVE_FAILED,
+    JournalState, MSG_NO_JOURNAL, MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY,
+    MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL, MSG_RESTORE_UNREADABLE, MSG_SAVE_FAILED,
+    path_with_suffix, same_file_path, sync_mode_for,
 };
 
 /// How a candidate backup compares to the current journal (Story 5.4, AC2).

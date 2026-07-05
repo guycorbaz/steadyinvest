@@ -2,7 +2,7 @@
 //! the file's `PRAGMA user_version` (open path) and a row's `schema_version` (read path).
 
 use rusqlite::Connection;
-use steadyinvest_contract::{ForecastLowOption, Judgment, Money, Study, Timestamp, SCHEMA_VERSION};
+use steadyinvest_contract::{ForecastLowOption, Judgment, Money, SCHEMA_VERSION, Study, Timestamp};
 use steadyinvest_persistence::{Error, Journal};
 use tempfile::TempDir;
 use uuid::Uuid;

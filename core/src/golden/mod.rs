@@ -26,12 +26,12 @@
 mod compare;
 mod schema;
 
-pub use compare::{check, check_all, GoldenDeviation, GoldenReport};
+pub use compare::{GoldenDeviation, GoldenReport, check, check_all};
 pub use schema::{
     ExpectedCalcFinding, ExpectedCriterion, ExpectedGrowth, ExpectedManagement,
     ExpectedNormalizeFinding, ExpectedOutputs, ExpectedReturns, ExpectedRiskReward, ExpectedTrend,
     ExpectedUpsideDownside, ExpectedValuation, ExpectedVerdictFacts, ExpectedYearRatios,
-    ExpectedYearValuation, ExpectedZone, ExpectedZoneBounds, FixtureAmount,
+    ExpectedYearValuation, ExpectedZone, ExpectedZoneBounds, FIXTURE_FORMAT_VERSION, FixtureAmount,
     FixtureForecastLowOption, FixtureJudgment, FixtureQuarterly, FixtureSplit, FixtureYear,
-    GoldenInput, GoldenMeta, GoldenStudy, FIXTURE_FORMAT_VERSION,
+    GoldenInput, GoldenMeta, GoldenStudy,
 };

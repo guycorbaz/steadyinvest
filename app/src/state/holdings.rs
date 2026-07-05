@@ -10,10 +10,10 @@ use steadyinvest_persistence::{DeletePortfolioOutcome, HoldingItem, PortfolioIte
 use uuid::Uuid;
 
 use super::{
-    watch_error, JournalState, MSG_HOLDING_INVALID_CURRENCY, MSG_HOLDING_INVALID_NUMBER,
+    JournalState, MSG_HOLDING_INVALID_CURRENCY, MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER, MSG_LEDGER_BACKED, MSG_NO_JOURNAL,
     MSG_PORTFOLIO_HAS_HOLDINGS, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
-    MSG_READ_ONLY_WRITE,
+    MSG_READ_ONLY_WRITE, watch_error,
 };
 
 impl JournalState {
@@ -31,10 +31,10 @@ impl JournalState {
     /// first (deterministic). `None` only when no portfolio exists yet. A pure read.
     pub fn active_portfolio(&self) -> Option<PortfolioItem> {
         let portfolios = self.list_portfolios();
-        if let Some(id) = self.active_portfolio_id {
-            if let Some(p) = portfolios.iter().find(|p| p.id == id) {
-                return Some(p.clone());
-            }
+        if let Some(id) = self.active_portfolio_id
+            && let Some(p) = portfolios.iter().find(|p| p.id == id)
+        {
+            return Some(p.clone());
         }
         portfolios.into_iter().next()
     }

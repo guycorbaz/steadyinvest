@@ -33,8 +33,8 @@ pub use types::{
 };
 
 use crate::method::{
-    high_pe_aggressive, high_pe_implausible, relative_value_ceiling_pct, roe_low_pct, ud_extreme,
-    ud_target, verdict_double_appreciation_pct, USABLE_YEARS_FLOOR,
+    USABLE_YEARS_FLOOR, high_pe_aggressive, high_pe_implausible, relative_value_ceiling_pct,
+    roe_low_pct, ud_extreme, ud_target, verdict_double_appreciation_pct,
 };
 use crate::normalize::{CanonicalFinancials, CanonicalYear, YearUsability};
 use rust_decimal::Decimal;
@@ -122,10 +122,10 @@ fn quality_flags(
         flags.push(QualityFlagKey::RoeLow);
     }
     // EPS CAGR < sales CAGR (strict — equal CAGRs do NOT lag); either unknown ⇒ not raised.
-    if let (Some(eps), Some(sales)) = (growth.eps_cagr_pct, growth.sales_cagr_pct) {
-        if eps < sales {
-            flags.push(QualityFlagKey::EpsLagsSales);
-        }
+    if let (Some(eps), Some(sales)) = (growth.eps_cagr_pct, growth.sales_cagr_pct)
+        && eps < sales
+    {
+        flags.push(QualityFlagKey::EpsLagsSales);
     }
     // Judged future high P/E > 20 / > 25 (strict, spec §2) — independent rows, both can fire.
     if let Some(pe) = judgment.judged_avg_high_pe {
@@ -226,7 +226,7 @@ mod tests {
     /// framework is UI-side (Story 2.14); this is the engine's cheap gate.
     #[test]
     fn engine_emitted_strings_contain_no_banned_verbs() {
-        use crate::method::{contains_word, BANNED_VERBS_EN, BANNED_VERBS_FR};
+        use crate::method::{BANNED_VERBS_EN, BANNED_VERBS_FR, contains_word};
         use crate::normalize::PlausibilityKey;
 
         let zone_labels: Vec<&str> = [Zone::Buy, Zone::Neutral, Zone::Sell]

@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use steadyinvest_core::golden::{check, GoldenStudy};
+use steadyinvest_core::golden::{GoldenStudy, check};
 
 /// AC-4 floor: an empty or thinned glob must never pass.
 const MIN_GOLDEN_FIXTURES: usize = 10;

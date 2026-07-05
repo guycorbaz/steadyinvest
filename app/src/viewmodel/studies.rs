@@ -10,8 +10,8 @@ use rust_decimal::Decimal;
 use steadyinvest_persistence::StudySummary;
 use uuid::Uuid;
 
-use crate::state::created_at_date;
 use crate::StudyRow;
+use crate::state::created_at_date;
 
 /// One study's estimated potential (issue #107): the §5 projected total annualized return, split into
 /// the `value` used for sorting (`None` when the study withholds it — sorts LAST, never a top pick)
@@ -138,11 +138,7 @@ pub fn curate(
             }
         }
         .then(a.id.cmp(&b.id));
-        if descending {
-            ord.reverse()
-        } else {
-            ord
-        }
+        if descending { ord.reverse() } else { ord }
     });
     let empty = StudyReturn::default();
     kept.iter()

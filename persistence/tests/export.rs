@@ -7,7 +7,7 @@
 //! the honest level for these tests.
 
 use steadyinvest_contract::{
-    sha256_hex, ForecastLowOption, Judgment, Study, Timestamp, SCHEMA_VERSION,
+    ForecastLowOption, Judgment, SCHEMA_VERSION, Study, Timestamp, sha256_hex,
 };
 use steadyinvest_persistence::{
     Error, HoldingItem, Journal, JournalExport, JournalSnapshot, LedgerEntry, PortfolioItem,

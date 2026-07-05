@@ -4,10 +4,10 @@
 
 use proptest::prelude::*;
 use rust_decimal::Decimal;
+use steadyinvest_core::METHOD_VERSION;
 use steadyinvest_core::normalize::{CanonicalFinancials, CanonicalYear, YearUsability};
 use steadyinvest_core::ssg::{JudgmentInputs, QuarterlyObservations};
 use steadyinvest_core::verdict::{GateState, InputGates, StudySnapshot, Verdict, YearGates};
-use steadyinvest_core::METHOD_VERSION;
 
 fn d(s: &str) -> Decimal {
     Decimal::from_str_exact(s).expect("test literal must parse")

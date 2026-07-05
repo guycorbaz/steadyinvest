@@ -81,7 +81,7 @@ fn fetched_custom(
     low: i64,
     digest: &str,
 ) -> FetchedFinancials {
-    use steadyinvest_core::normalize::{normalize, RawAmount, RawFinancials, RawYear};
+    use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear, normalize};
     let amt = |v: i64| {
         Some(RawAmount {
             value: rust_decimal::Decimal::new(v, 0),
@@ -161,7 +161,7 @@ fn provider_fetch_fills_a_fresh_study_with_provider_stamped_cells() {
 /// year. The study materializes the COMPLETE years only (matching the manual window).
 #[test]
 fn provider_fetch_drops_the_in_progress_year_without_annual_statements() {
-    use steadyinvest_core::normalize::{normalize, RawAmount, RawFinancials, RawYear};
+    use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear, normalize};
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x4C, "2026-06-15T10:00:00Z");
     let id = state.create_study("AAPL", "CHF").unwrap();
@@ -3154,10 +3154,12 @@ fn undo_redo_steps_back_and_forward_and_a_new_edit_clears_redo() {
     state.edit_cell(id, 0, "a", Some(und_money(100))).unwrap();
     assert!(state.can_undo(), "an edit is undoable");
     assert!(!state.can_redo());
-    assert!(state.get_study(id).unwrap().years[0]
-        .high_price
-        .value
-        .is_some());
+    assert!(
+        state.get_study(id).unwrap().years[0]
+            .high_price
+            .value
+            .is_some()
+    );
 
     // Undo → the pre-edit (fresh, no-value) state returns.
     assert_eq!(state.undo(id), Ok(true));
@@ -3170,10 +3172,12 @@ fn undo_redo_steps_back_and_forward_and_a_new_edit_clears_redo() {
 
     // Redo → the value comes back.
     assert_eq!(state.redo(id), Ok(true));
-    assert!(state.get_study(id).unwrap().years[0]
-        .high_price
-        .value
-        .is_some());
+    assert!(
+        state.get_study(id).unwrap().years[0]
+            .high_price
+            .value
+            .is_some()
+    );
 
     // A NEW edit after an undo forks history → the redo branch is cleared.
     assert_eq!(state.undo(id), Ok(true));
@@ -3194,12 +3198,14 @@ fn undo_restores_a_judgment_edit() {
     state
         .set_judgment_field(id, "est_high_eps", Some(und_money(9)))
         .unwrap();
-    assert!(state
-        .get_study(id)
-        .unwrap()
-        .judgment
-        .estimated_high_eps
-        .is_some());
+    assert!(
+        state
+            .get_study(id)
+            .unwrap()
+            .judgment
+            .estimated_high_eps
+            .is_some()
+    );
     assert_eq!(state.undo(id), Ok(true));
     assert!(
         state
@@ -3399,7 +3405,9 @@ fn extend_history_rolls_the_window_forward_each_call() {
         .collect();
     assert_eq!(
         years,
-        vec![2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027],
+        vec![
+            2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027
+        ],
         "each call appends the next year (oldest→newest, horizon re-bases off the new latest)"
     );
 }

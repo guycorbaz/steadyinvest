@@ -14,12 +14,12 @@ use uuid::Uuid;
 use crate::provider::ProviderChoice;
 use crate::state::JournalState;
 use crate::viewmodel::format::NumberFormat;
-use crate::wiring::{persist, Session};
-use crate::{fetch, state, viewmodel};
+use crate::wiring::{Session, persist};
 use crate::{
     BankCarRow, CapitalAtRiskRow, ConcentrationLine, HoldingRow, Holdings, LedgerRow, MainWindow,
     PortfolioRow, SizeMixLine, UnclassifiedLine,
 };
+use crate::{fetch, state, viewmodel};
 
 /// Transient (NOT persisted) per-ticker price-refresh freshness for the holdings register (Story
 /// 4.4, FR40): the outcome of the last manual refresh. Keyed by **upper-cased** ticker so it joins
@@ -917,15 +917,13 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 sync_ledger_panel(&ui, &journal_state.borrow(), uuid);
                 // Story 6.8 (FR48): a recorded sell (whole OR partial — freed capital is freed
                 // capital) surfaces the replacement candidates, headed by the sold ticker.
-                if sold {
-                    if let Some(ticker) = sold_ticker {
-                        crate::wiring::replacement::open_candidates(
-                            &ui,
-                            &journal_state.borrow(),
-                            &ticker,
-                            true,
-                        );
-                    }
+                if sold && let Some(ticker) = sold_ticker {
+                    crate::wiring::replacement::open_candidates(
+                        &ui,
+                        &journal_state.borrow(),
+                        &ticker,
+                        true,
+                    );
                 }
             });
     }
@@ -1073,15 +1071,13 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 sync_ledger_panel(&ui, &journal_state.borrow(), uuid);
                 // Story 6.8 (FR48): a ledger-form sell surfaces the candidates too (whole or
                 // partial — the same redeployment moment as the trigger-panel sell).
-                if written {
-                    if let Some(ticker) = sold_ticker {
-                        crate::wiring::replacement::open_candidates(
-                            &ui,
-                            &journal_state.borrow(),
-                            &ticker,
-                            true,
-                        );
-                    }
+                if written && let Some(ticker) = sold_ticker {
+                    crate::wiring::replacement::open_candidates(
+                        &ui,
+                        &journal_state.borrow(),
+                        &ticker,
+                        true,
+                    );
                 }
                 written
             },

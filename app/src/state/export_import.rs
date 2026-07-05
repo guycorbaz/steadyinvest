@@ -54,7 +54,7 @@ impl JournalState {
         match journal.put_study(&study) {
             Ok(()) => {}
             Err(PersistError::NewerJournalSchema { .. }) => {
-                return Err(MSG_READ_ONLY_WRITE.to_string())
+                return Err(MSG_READ_ONLY_WRITE.to_string());
             }
             Err(error) => return Err(format!("{MSG_SAVE_FAILED} {error}")),
         }

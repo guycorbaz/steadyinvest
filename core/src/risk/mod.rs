@@ -15,7 +15,7 @@ mod ledger;
 
 pub use fx::convert;
 pub use ledger::{
-    derive_position, net_dividend_cash, LedgerError, LedgerEvent, LedgerEventKind, PositionBasis,
+    LedgerError, LedgerEvent, LedgerEventKind, PositionBasis, derive_position, net_dividend_cash,
 };
 
 /// The ratcheted trailing-stop **level** (a price) after observing `reference_price` (Story 4.5,

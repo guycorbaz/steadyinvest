@@ -483,10 +483,10 @@ impl AppConfig {
             return vec![self.preferred_provider];
         }
         let mut chain = vec![self.preferred_provider];
-        if let Some(fallback) = fallback {
-            if !chain.contains(&fallback) {
-                chain.push(fallback);
-            }
+        if let Some(fallback) = fallback
+            && !chain.contains(&fallback)
+        {
+            chain.push(fallback);
         }
         chain
     }

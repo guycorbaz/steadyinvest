@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 
 use rust_decimal::Decimal;
-use steadyinvest_core::risk::{share_pct, size_class, SizeClass};
+use steadyinvest_core::risk::{SizeClass, share_pct, size_class};
 use steadyinvest_persistence::FxRateItem;
 
 use super::JournalState;
@@ -162,15 +162,14 @@ impl JournalState {
                         // A nonpositive stored rate must not convert to a confident zero (6.6
                         // review) — folded into the named refusal.
                         .filter(|r| r.is_sign_positive() && !r.is_zero());
-                    if rate.is_some() {
-                        if let Some(row) = row {
-                            if !rates_used.iter().any(|u| {
-                                u.base_currency == row.base_currency
-                                    && u.quote_currency == row.quote_currency
-                            }) {
-                                rates_used.push(row);
-                            }
-                        }
+                    if rate.is_some()
+                        && let Some(row) = row
+                        && !rates_used.iter().any(|u| {
+                            u.base_currency == row.base_currency
+                                && u.quote_currency == row.quote_currency
+                        })
+                    {
+                        rates_used.push(row);
                     }
                     rate_cache.insert(base.to_string(), rate);
                     rate

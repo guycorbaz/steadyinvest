@@ -17,7 +17,7 @@
 use rust_decimal::Decimal;
 use steadyinvest_contract::Study;
 use steadyinvest_core::normalize::NormalizeError;
-use steadyinvest_core::rounding::{round_for_display, DisplayField};
+use steadyinvest_core::rounding::{DisplayField, round_for_display};
 use steadyinvest_core::ssg::{Trend, UpsideDownside, Zone};
 
 use pdf_writer::{Content, Name, Pdf, Rect, Ref, Str};

@@ -81,12 +81,9 @@ pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause
 /// names the cause; last-known values stay in place and affected provider data is flagged stale. The
 /// API key never appears (NFR-S1 — these are static, no raw-error interpolation). Selected by
 /// [`provider_failure_notice`].
-pub const MSG_PROVIDER_OFFLINE: &str =
-    "La connexion au fournisseur a échoué ; les dernières données connues restent affichées (à actualiser).";
-pub const MSG_PROVIDER_QUOTA: &str =
-    "Le fournisseur a signalé une limite d'usage ; les dernières données connues restent affichées, réessayez plus tard.";
-pub const MSG_PROVIDER_NO_DATA: &str =
-    "Le fournisseur n'a renvoyé aucune donnée pour ce symbole ; les dernières données connues restent affichées.";
+pub const MSG_PROVIDER_OFFLINE: &str = "La connexion au fournisseur a échoué ; les dernières données connues restent affichées (à actualiser).";
+pub const MSG_PROVIDER_QUOTA: &str = "Le fournisseur a signalé une limite d'usage ; les dernières données connues restent affichées, réessayez plus tard.";
+pub const MSG_PROVIDER_NO_DATA: &str = "Le fournisseur n'a renvoyé aucune donnée pour ce symbole ; les dernières données connues restent affichées.";
 
 /// Manual-refresh recompute-cause copy (Story 3.3, FR29) — fact-stating, posture-gated. The cause is
 /// a classification of what the refresh changed; the message names it (price / fundamentals / both),
@@ -110,14 +107,12 @@ pub const MSG_WATCH_NO_STUDY: &str =
 
 /// Holdings register copy (Story 4.3, FR36) — fact-stating, posture-gated. Raised when a holding's
 /// quantity or price is not a valid number, or its symbol is empty; nothing is written.
-pub const MSG_HOLDING_INVALID_NUMBER: &str =
-    "La quantité et le prix d'achat doivent être des nombres ; aucune position n'a été enregistrée.";
+pub const MSG_HOLDING_INVALID_NUMBER: &str = "La quantité et le prix d'achat doivent être des nombres ; aucune position n'a été enregistrée.";
 pub const MSG_HOLDING_INVALID_TICKER: &str =
     "Le symbole est vide ; aucune position n'a été enregistrée.";
 /// Raised when a holding currency is not one of the supported set (Story 6.2, FR38); nothing is
 /// written. A defensive guard — the UI only offers allow-list currencies.
-pub const MSG_HOLDING_INVALID_CURRENCY: &str =
-    "La devise doit faire partie des devises prises en charge ; aucune position n'a été enregistrée.";
+pub const MSG_HOLDING_INVALID_CURRENCY: &str = "La devise doit faire partie des devises prises en charge ; aucune position n'a été enregistrée.";
 
 /// Trailing-stop copy (Story 4.5, FR42) — fact-stating, posture-gated. Raised when a trailing-stop
 /// percentage is not a number strictly between 0 and 100; nothing is written.
@@ -153,8 +148,7 @@ pub const MSG_LEDGER_INVALID_DATE: &str =
 /// holding whose position derives from its transaction ledger (2026-07-02 review, HIGH): a direct
 /// aggregate rewrite would silently desynchronize it from the recorded history — the ledger is the
 /// place to correct the position.
-pub const MSG_LEDGER_BACKED: &str =
-    "La quantité, le prix et la devise de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
+pub const MSG_LEDGER_BACKED: &str = "La quantité, le prix et la devise de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
 
 /// Dividend copy (Story 6.4, FR41) — fact-stating, posture-gated. The study keeps the GROSS
 /// dividend (method fidelity); the portfolio's reinvestable cash uses the NET (gross − retenue).
@@ -202,8 +196,7 @@ pub const MSG_CONCENTRATION_INVALID: &str =
 /// Raised when the diversify-by-size table is malformed: a sales boundary is not a strictly
 /// positive number, the small boundary is not below the medium one, or a target share lies
 /// outside (0, 100]; nothing is written (the table commits whole or not at all).
-pub const MSG_SIZE_TABLE_INVALID: &str =
-    "Les bornes doivent être des nombres positifs croissants et les cibles des pourcentages entre 0 et 100 ; rien n'a été enregistré.";
+pub const MSG_SIZE_TABLE_INVALID: &str = "Les bornes doivent être des nombres positifs croissants et les cibles des pourcentages entre 0 et 100 ; rien n'a été enregistré.";
 
 /// Fallback-chain copy (Story 6.9, FR26) — fact-stating, posture-gated. Set when a fetch was
 /// served by a NON-PRIMARY chain member: a fallback is a visible event, never a silence. `{p}`
@@ -237,8 +230,7 @@ pub const MSG_STUDY_IMPORTED: &str = "L'étude a été importée.";
 pub const MSG_STUDY_UPDATED: &str =
     "L'étude existait déjà ; elle a été mise à jour depuis le fichier.";
 pub const MSG_EXPORT_MISSING: &str = "L'étude est introuvable ; rien n'a été exporté.";
-pub const MSG_IMPORT_INTEGRITY: &str =
-    "Le fichier ne correspond pas à son empreinte d'intégrité (fichier corrompu ou incomplet) ; rien n'a été importé.";
+pub const MSG_IMPORT_INTEGRITY: &str = "Le fichier ne correspond pas à son empreinte d'intégrité (fichier corrompu ou incomplet) ; rien n'a été importé.";
 pub const MSG_IMPORT_VERSION: &str =
     "Le fichier provient d'une version incompatible du format ; rien n'a été importé.";
 pub const MSG_IMPORT_MALFORMED: &str =
@@ -253,8 +245,7 @@ pub const MSG_JOURNAL_EXPORTED: &str = "Le journal a été exporté.";
 /// Substitution template (the const is posture-scanned; [`journal_imported_message`] fills it). The
 /// trailing `(source : journal {jid}, version {ver})` clause surfaces the imported file's identity so
 /// the user sees whether it is the **same** journal (an update) or a **foreign** seed (AC3).
-pub const MSG_JOURNAL_IMPORTED: &str =
-    "Le journal a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s). (source : journal {jid}, version {ver})";
+pub const MSG_JOURNAL_IMPORTED: &str = "Le journal a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s). (source : journal {jid}, version {ver})";
 
 /// Backup / restore copy (Story 5.4, FR61) — fact-stating, posture-gated. The backup/restore unit is
 /// the raw `.db`; a restore validates integrity + schema-version + identity BEFORE any overwrite and
@@ -262,17 +253,14 @@ pub const MSG_JOURNAL_IMPORTED: &str =
 pub const MSG_BACKUP_CREATED: &str = "La sauvegarde du journal a été créée.";
 pub const MSG_RESTORE_DONE: &str = "Le journal a été restauré depuis la sauvegarde.";
 pub const MSG_RESTORE_FAILED: &str = "La restauration a échoué ; le journal n'a pas été remplacé.";
-pub const MSG_RESTORE_INTEGRITY: &str =
-    "Le fichier de sauvegarde est corrompu (échec du contrôle d'intégrité) ; rien n'a été restauré.";
-pub const MSG_RESTORE_NEWER_SCHEMA: &str =
-    "La sauvegarde provient d'une version plus récente de l'application ; cette version ne sait pas la lire ; rien n'a été restauré.";
+pub const MSG_RESTORE_INTEGRITY: &str = "Le fichier de sauvegarde est corrompu (échec du contrôle d'intégrité) ; rien n'a été restauré.";
+pub const MSG_RESTORE_NEWER_SCHEMA: &str = "La sauvegarde provient d'une version plus récente de l'application ; cette version ne sait pas la lire ; rien n'a été restauré.";
 pub const MSG_RESTORE_NOT_A_JOURNAL: &str =
     "Le fichier n'est pas un journal valide ; rien n'a été restauré.";
 pub const MSG_RESTORE_UNREADABLE: &str =
     "Le fichier de sauvegarde est illisible ; rien n'a été restauré.";
 /// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
-pub const MSG_RESTORE_CONFIRM: &str =
-    "Restaurer depuis cette sauvegarde (journal {jid}, version {ver}) ? {reason}Le journal actuel sera remplacé.";
+pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (journal {jid}, version {ver}) ? {reason}Le journal actuel sera remplacé.";
 pub const MSG_RESTORE_REASON_STALE: &str =
     "Cette sauvegarde (version {b}) est plus ancienne que le journal actuel (version {c}). ";
 pub const MSG_RESTORE_REASON_FOREIGN: &str = "Cette sauvegarde appartient à un autre journal. ";
@@ -282,15 +270,12 @@ pub const MSG_RESTORE_REASON_FOREIGN: &str = "Cette sauvegarde appartient à un 
 pub const MSG_JOURNAL_OPENED: &str = "Le journal a été ouvert.";
 pub const MSG_JOURNAL_CREATED: &str = "Le nouveau journal a été créé et ouvert.";
 pub const MSG_JOURNAL_OPEN_FAILED: &str = "Le journal n'a pas pu être ouvert.";
-pub const MSG_JOURNAL_LOCKED: &str =
-    "Ce journal est déjà ouvert dans une autre fenêtre ou un autre processus ; il n'a pas été ouvert.";
+pub const MSG_JOURNAL_LOCKED: &str = "Ce journal est déjà ouvert dans une autre fenêtre ou un autre processus ; il n'a pas été ouvert.";
 pub const MSG_JOURNAL_LOCK_RECLAIMABLE: &str =
     "Ce journal porte un verrou laissé par une session interrompue ; le verrou peut être levé.";
-pub const MSG_SYNC_FOLDER_WARNING: &str =
-    "Ce dossier est synchronisé : le journal est ouvert en mode sûr (sans fichier annexe). Un journal en local avec des sauvegardes versionnées dans ce dossier reste l'approche recommandée.";
+pub const MSG_SYNC_FOLDER_WARNING: &str = "Ce dossier est synchronisé : le journal est ouvert en mode sûr (sans fichier annexe). Un journal en local avec des sauvegardes versionnées dans ce dossier reste l'approche recommandée.";
 /// Substitution template (the const is posture-scanned; [`journal_stale_message`] fills it).
-pub const MSG_JOURNAL_STALE: &str =
-    "Ce journal semble plus ancien que ce que vous aviez vu (vu version {seen}, ici version {here}).";
+pub const MSG_JOURNAL_STALE: &str = "Ce journal semble plus ancien que ce que vous aviez vu (vu version {seen}, ici version {here}).";
 
 /// The neutral stale-on-reopen notice (Story 5.5) — a `{n}`-substitution of [`MSG_JOURNAL_STALE`]
 /// surfacing the last-seen vs on-disk versions, so a regressed journal is flagged (not blocked).
@@ -338,8 +323,7 @@ pub const MSG_KEY_DELETED: &str = "La clé du fournisseur est retirée du trouss
 pub const MSG_KEY_TESTING: &str = "Test de la clé du fournisseur en cours.";
 pub const MSG_KEY_OK: &str = "La clé est valide ; le fournisseur a répondu.";
 pub const MSG_KEY_INVALID: &str = "La clé est invalide ou absente ; le fournisseur l'a refusée.";
-pub const MSG_KEY_FORBIDDEN: &str =
-    "La clé est valide, mais l'abonnement ne couvre pas ces données ; le fournisseur a refusé l'accès.";
+pub const MSG_KEY_FORBIDDEN: &str = "La clé est valide, mais l'abonnement ne couvre pas ces données ; le fournisseur a refusé l'accès.";
 pub const MSG_KEYCHAIN_UNAVAILABLE: &str =
     "Le trousseau du système est indisponible ; la clé n'a pas été enregistrée.";
 

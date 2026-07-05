@@ -4,8 +4,8 @@
 //! `golden/compare/primitives.rs`). Includes the module's FR13 posture gate over its emitted
 //! strings.
 
-use steadyinvest_core::golden::{check, check_all, FixtureSplit, GoldenStudy};
 use steadyinvest_core::METHOD_VERSION;
+use steadyinvest_core::golden::{FixtureSplit, GoldenStudy, check, check_all};
 
 /// A no-years minimal study: parses, runs the pipeline, and every unknown matches null.
 const MINIMAL_STUDY: &str = r#"{
@@ -159,7 +159,7 @@ fn structurally_invalid_input_is_a_failing_report() {
 /// it whenever `golden/compare` gains a new emitted string.
 #[test]
 fn golden_emitted_strings_contain_no_banned_verbs() {
-    use steadyinvest_core::method::{contains_word, BANNED_VERBS_EN, BANNED_VERBS_FR};
+    use steadyinvest_core::method::{BANNED_VERBS_EN, BANNED_VERBS_FR, contains_word};
 
     // Spec §6 exemptions: zone labels + zone-derived field-path nouns.
     let exempt = [

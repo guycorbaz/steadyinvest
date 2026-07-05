@@ -4,11 +4,11 @@
 //! the primitives in `primitives`. [`compare_outputs`] is the section dispatcher `check`
 //! drives; field paths are dotted into the expected/actual output surface.
 
+use super::GoldenDeviation;
 use super::primitives::{
     calc_finding_str, compare_exact, compare_list, compare_numeric, criterion_str,
     expected_criterion, expected_trend, expected_zone, opt_trend, opt_zone, ud_str,
 };
-use super::GoldenDeviation;
 use crate::golden::schema::{
     ExpectedCalcFinding, ExpectedGrowth, ExpectedManagement, ExpectedNormalizeFinding,
     ExpectedOutputs, ExpectedReturns, ExpectedRiskReward, ExpectedUpsideDownside,

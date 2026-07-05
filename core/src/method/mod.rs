@@ -7,7 +7,7 @@
 
 use crate::method_version::METHOD_VERSION;
 use crate::quality_flags::{PLAUSIBILITY_RULES, QUALITY_FLAGS};
-use crate::rounding::{strategy_behavior_probe, DisplayField};
+use crate::rounding::{DisplayField, strategy_behavior_probe};
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 

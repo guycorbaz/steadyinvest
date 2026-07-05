@@ -175,7 +175,7 @@ fn study() -> impl Strategy<Value = Study> {
 }
 
 macro_rules! roundtrip {
-    ($name:ident, $strat:expr, $ty:ty) => {
+    ($name:ident, $strat:expr_2021, $ty:ty) => {
         proptest! {
             #[test]
             fn $name(x in $strat) {

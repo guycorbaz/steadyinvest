@@ -6,8 +6,8 @@
 //! Each drag logs the **recompute latency** (µs) to stderr; the perceived <100 ms click-to-pixel
 //! feel is judged visually on the target hardware.
 
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::time::Instant;
 
 slint::slint! {

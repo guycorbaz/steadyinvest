@@ -23,10 +23,10 @@ pub mod rounding;
 pub mod ssg;
 pub mod verdict;
 
-pub use golden::{check, check_all, GoldenDeviation, GoldenReport, GoldenStudy};
+pub use golden::{GoldenDeviation, GoldenReport, GoldenStudy, check, check_all};
 pub use method_version::METHOD_VERSION;
-pub use normalize::{normalize, CanonicalFinancials, RawFinancials};
-pub use ssg::{compute, JudgmentInputs, QuarterlyObservations, SsgOutputs};
+pub use normalize::{CanonicalFinancials, RawFinancials, normalize};
+pub use ssg::{JudgmentInputs, QuarterlyObservations, SsgOutputs, compute};
 pub use verdict::{
     DegradedVerdict, FullVerdict, GateState, GatedInput, InputGates, OpenGate, StudySnapshot,
     Verdict, YearGates,
