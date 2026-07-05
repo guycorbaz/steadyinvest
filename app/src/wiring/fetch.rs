@@ -71,6 +71,19 @@ pub(crate) fn resolve_chain(
         .collect()
 }
 
+/// Issue #101: the configured FALLBACK for `field` that is INACTIVE because its provider needs a key
+/// but none is stored — so [`resolve_chain`] silently dropped it and the shipped chain is a single
+/// member. A quota/outage then fails outright with the failover the user configured never running.
+/// `None` when the fallback is absent, keyless-capable, or has its key. Used to name the skipped
+/// fallback in a fetch-failure notice, so the outright failure is not a mystery.
+pub(crate) fn configured_fallback_missing_key(
+    config: &crate::config::AppConfig,
+    field: steadyinvest_ingestion::FieldKind,
+) -> Option<crate::provider::ProviderChoice> {
+    let fallback = config.fallback_provider_or_none(field)?;
+    (fallback.requires_key() && !keychain::has_key(fallback).unwrap_or(false)).then_some(fallback)
+}
+
 /// Mirror the provider choice + keychain status into `Prefs` (Story 3.2). The key VALUE never
 /// crosses — only the boolean "configured" status (NFR-S1). A store failure shows as "not
 /// configured" plus a neutral notice (AC6).
@@ -181,7 +194,18 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                 .map(|s| s.security_ticker)
                                 .unwrap_or_default();
                             tracing::warn!(%ticker, error = %error, "study fetch failed");
-                            studies.set_notice(state::provider_failure_notice(&error).into());
+                            // Issue #101: if a configured fallback was skipped for a missing key, the
+                            // failover the user set up never ran — name it so the outright failure is
+                            // not a mystery ("I configured a backup, why did it just fail?").
+                            let mut notice = state::provider_failure_notice(&error).to_string();
+                            if let Some(fallback) = configured_fallback_missing_key(
+                                &config.borrow(),
+                                steadyinvest_ingestion::FieldKind::Fundamentals,
+                            ) {
+                                notice.push(' ');
+                                notice.push_str(&state::fallback_no_key_notice(fallback));
+                            }
+                            studies.set_notice(notice.into());
                             let _ = journal_state
                                 .borrow_mut()
                                 .mark_provider_stale(outcome.study_id);
