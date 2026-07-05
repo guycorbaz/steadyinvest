@@ -193,10 +193,15 @@ pub const MSG_FX_FUTURE_DATE: &str =
 /// concentration threshold is not a percentage strictly between 0 and 100; nothing is written.
 pub const MSG_CONCENTRATION_INVALID: &str =
     "Le seuil de concentration doit être un pourcentage entre 0 et 100 ; rien n'a été enregistré.";
-/// Raised when the diversify-by-size table is malformed: a sales boundary is not a strictly
-/// positive number, the small boundary is not below the medium one, or a target share lies
-/// outside (0, 100]; nothing is written (the table commits whole or not at all).
-pub const MSG_SIZE_TABLE_INVALID: &str = "Les bornes doivent être des nombres positifs croissants et les cibles des pourcentages entre 0 et 100 ; rien n'a été enregistré.";
+/// Diversify-by-size table refusal that NAMES the offending field (issue #96) — fact-stating,
+/// posture-gated. The table commits whole or not at all; `{field}` is a static French field label (a
+/// neutral noun, spliced by [`size_field_invalid_message`]) so the notice points at the one input to
+/// fix instead of restating all five rules opaquely.
+pub const MSG_SIZE_FIELD_INVALID: &str = "« {field} » n'est pas valide ; rien n'a été enregistré. Les bornes sont des nombres positifs, les cibles des pourcentages entre 0 et 100.";
+/// The diversify-by-size crossed-bounds refusal (issue #96): the small boundary must stay below the
+/// medium one; nothing is written.
+pub const MSG_SIZE_PAIR_CROSSED: &str =
+    "La borne « petite » doit rester inférieure à la borne « moyenne » ; rien n'a été enregistré.";
 
 /// Fallback-chain copy (Story 6.9, FR26) — fact-stating, posture-gated. Set when a fetch was
 /// served by a NON-PRIMARY chain member: a fallback is a visible event, never a silence. `{p}`
@@ -427,6 +432,13 @@ pub fn study_action_done_message(action: &str, ticker: &str) -> String {
     template.replace("{t}", ticker)
 }
 
+/// The diversify-by-size refusal naming the offending field (issue #96). `field` is a static French
+/// field label (a neutral noun); the [`MSG_SIZE_FIELD_INVALID`] template carries the posture-gated
+/// prose.
+pub fn size_field_invalid_message(field: &str) -> String {
+    MSG_SIZE_FIELD_INVALID.replace("{field}", field)
+}
+
 /// Every static user-facing message above — exposed so the crate-local posture gate (FR13) scans
 /// them for banned verbs alongside the `@tr()` literals. Test-only (the gate's sole consumer);
 /// the individual `MSG_*` consts are the runtime surfaces. Keep in sync with the consts.
@@ -495,7 +507,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_FX_INVALID_CURRENCY,
     MSG_FX_FUTURE_DATE,
     MSG_CONCENTRATION_INVALID,
-    MSG_SIZE_TABLE_INVALID,
+    MSG_SIZE_FIELD_INVALID,
+    MSG_SIZE_PAIR_CROSSED,
     MSG_PROVIDER_FALLBACK,
     MSG_PORTFOLIO_INVALID_NAME,
     MSG_PORTFOLIO_HAS_HOLDINGS,

@@ -710,10 +710,11 @@ mod tests {
         // as a rate problem], future-date): 95 + 3 = 98. Story 6.7 adds the two risk-settings
         // refusals (concentration-threshold invalid, size-table invalid): 98 + 2 = 100. Story
         // 6.9 adds the fallback-chain notice (MSG_PROVIDER_FALLBACK — a fetch served by a
-        // non-primary member names itself, FR26): 100 + 1 = 101.
+        // non-primary member names itself, FR26): 100 + 1 = 101. Issue #96 splits the one opaque
+        // size-table refusal into a field-naming template + a crossed-pair notice: 101 − 1 + 2 = 102.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            101,
+            102,
             "state.rs message inventory changed — register the new notice"
         );
     }
