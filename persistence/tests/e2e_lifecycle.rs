@@ -8,10 +8,10 @@
 
 use rusqlite::Connection;
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review, Source,
-    Study, Timestamp, YearData, SCHEMA_VERSION,
+    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review,
+    SCHEMA_VERSION, Source, Study, Timestamp, YearData,
 };
-use steadyinvest_persistence::{clear_lock, lock_is_stale, Error, Journal, JournalMode};
+use steadyinvest_persistence::{Error, Journal, JournalMode, clear_lock, lock_is_stale};
 use tempfile::TempDir;
 use uuid::Uuid;
 

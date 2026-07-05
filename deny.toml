@@ -25,6 +25,7 @@ allow = [
     "MPL-2.0",
     "CC0-1.0",
     "CDLA-Permissive-2.0",            # Mozilla webpki cert bundle (webpki-roots/-root-certs) — Story 3.1 TLS; permissive data license, GPL-compatible
+    "Unlicense",                      # ksni (Linux tray/StatusNotifierItem, pulled by i-slint-core 1.17) — public-domain dedication, GPL-compatible
 ]
 
 [bans]

@@ -9,10 +9,10 @@ use std::rc::Rc;
 use slint::{ComponentHandle, SharedString};
 use uuid::Uuid;
 
-use crate::wiring::push::{push_form, push_live_preview};
 use crate::wiring::Session;
-use crate::{state, viewmodel};
+use crate::wiring::push::{push_form, push_live_preview};
 use crate::{MainWindow, Studies};
+use crate::{state, viewmodel};
 
 /// Wire the judgment domain: field commits, rationale, extend-history, the §1 drag gesture and
 /// undo / redo.

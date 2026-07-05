@@ -15,8 +15,8 @@ pub mod provider;
 
 pub use error::{IngestionError, ProviderError};
 pub use fetch::{
-    dependency_digest, fetch_canonical, fetch_fx_rate, fetch_price, min_request_interval, supports,
-    FakeProvider, FetchedFinancials, FieldKind, Provider,
+    FakeProvider, FetchedFinancials, FieldKind, Provider, dependency_digest, fetch_canonical,
+    fetch_fx_rate, fetch_price, min_request_interval, supports,
 };
 pub use provider::MarketDataProvider;
 

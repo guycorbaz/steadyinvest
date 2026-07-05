@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::state::JournalState;
 use crate::wiring::Session;
-use crate::{state, viewmodel};
 use crate::{MainWindow, WatchRow, Watchlist};
+use crate::{state, viewmodel};
 
 /// Rebuild the watchlist surface from persistence (Story 4.1): rows ordered by position, each
 /// resolving its optional study link to that study's ticker (the buy-zone source for Story 4.2).

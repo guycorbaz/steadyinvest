@@ -25,7 +25,7 @@ pub const ALL_FIELDS: [&str; 7] = [
     FIELD_BOOK,
 ];
 
-use crate::viewmodel::format::{parse_amount, NumberFormat};
+use crate::viewmodel::format::{NumberFormat, parse_amount};
 
 /// How many most-recent complete fiscal years a freshly-created study materializes for entry, and
 /// the cap a provider fetch imports (issue #109). The canonical SSG history window: the §1 Visual

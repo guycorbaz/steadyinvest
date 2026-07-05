@@ -96,14 +96,14 @@ pub(super) fn compute(
 
     // §4 constraint check: a selected forecast low strictly above the current price violates
     // "forecast low ≤ current price" (equality allowed) — study-level finding, value reported.
-    if let (Some(low), Some(price)) = (forecast_low, current) {
-        if low > price {
-            findings.push(CalcFinding {
-                key: PlausibilityKey::LowPriceAboveCurrent,
-                year: None,
-                context: "forecast_low",
-            });
-        }
+    if let (Some(low), Some(price)) = (forecast_low, current)
+        && low > price
+    {
+        findings.push(CalcFinding {
+            key: PlausibilityKey::LowPriceAboveCurrent,
+            year: None,
+            context: "forecast_low",
+        });
     }
 
     let zones = forecast_low

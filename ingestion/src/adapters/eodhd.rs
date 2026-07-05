@@ -228,14 +228,15 @@ fn map_splits(fundamentals: &Value) -> Vec<SplitEvent> {
         let mut parts = s.split('/');
         let num = parts.next().and_then(parse_split_part);
         let den = parts.next().and_then(parse_split_part);
-        if let (Some(numerator), Some(denominator)) = (num, den) {
-            if numerator > 0 && denominator > 0 {
-                out.push(SplitEvent {
-                    effective_year: year,
-                    numerator,
-                    denominator,
-                });
-            }
+        if let (Some(numerator), Some(denominator)) = (num, den)
+            && numerator > 0
+            && denominator > 0
+        {
+            out.push(SplitEvent {
+                effective_year: year,
+                numerator,
+                denominator,
+            });
         }
     }
     out.sort_by_key(|s| s.effective_year);

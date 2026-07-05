@@ -11,8 +11,8 @@
 use rust_decimal::Decimal;
 use steadyinvest_core::method::USABLE_YEARS_FLOOR;
 use steadyinvest_core::normalize::{
-    normalize, Finding, NormalizeError, PlausibilityKey, RawAmount, RawFinancials, RawYear,
-    SplitEvent, YearUsability,
+    Finding, NormalizeError, PlausibilityKey, RawAmount, RawFinancials, RawYear, SplitEvent,
+    YearUsability, normalize,
 };
 
 const NATIVE: &str = "USD";

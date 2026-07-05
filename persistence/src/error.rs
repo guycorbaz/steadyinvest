@@ -76,7 +76,9 @@ pub enum Error {
 
     /// A whole-journal import file did not match its integrity fingerprint — corrupt or incomplete
     /// (Story 5.3, NFR-R5). Nothing was applied.
-    #[error("the import file does not match its integrity fingerprint (corrupt or incomplete); nothing was applied")]
+    #[error(
+        "the import file does not match its integrity fingerprint (corrupt or incomplete); nothing was applied"
+    )]
     ImportIntegrity,
 
     /// A whole-journal import file was written under a `schema_version` this build does not support

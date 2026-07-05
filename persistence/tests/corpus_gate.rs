@@ -10,8 +10,8 @@
 use rusqlite::Connection;
 use std::path::PathBuf;
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review, Source,
-    Study, Timestamp, YearData, SCHEMA_VERSION,
+    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review,
+    SCHEMA_VERSION, Source, Study, Timestamp, YearData,
 };
 use steadyinvest_persistence::Journal;
 use tempfile::TempDir;

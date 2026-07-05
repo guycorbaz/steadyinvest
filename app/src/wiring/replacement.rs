@@ -6,7 +6,7 @@
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::state::{CandidateData, JournalState};
-use crate::viewmodel::format::{format_scaled, NumberFormat};
+use crate::viewmodel::format::{NumberFormat, format_scaled};
 use crate::wiring::Session;
 use crate::{CandidateRow, Holdings, MainWindow, Prefs, Studies};
 

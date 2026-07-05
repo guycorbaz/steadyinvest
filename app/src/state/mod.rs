@@ -30,7 +30,7 @@
 use std::path::{Path, PathBuf};
 
 use steadyinvest_contract::{ForecastLowOption, Judgment, Timestamp};
-use steadyinvest_persistence::{clear_lock, lock_is_stale, Error as PersistError, Journal};
+use steadyinvest_persistence::{Error as PersistError, Journal, clear_lock, lock_is_stale};
 use uuid::Uuid;
 
 use crate::clock::{Clock, IdGen};
@@ -136,40 +136,40 @@ impl JournalState {
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
         // 1) A configured journal that exists on disk → open it.
-        if let Some(path) = configured {
-            if path.exists() {
-                // Story 5.5: a STALE lock (left by a crashed prior run — no live owner) on the
-                // configured journal is auto-reclaimed at startup, so a post-crash relaunch reopens the
-                // user's own journal rather than failing `LockHeld` and orphaning it onto the default. A
-                // LIVE lock (a genuine second instance) is not stale → left intact → the open refuses.
-                if lock_is_stale(path) {
-                    let _ = clear_lock(path);
+        if let Some(path) = configured
+            && path.exists()
+        {
+            // Story 5.5: a STALE lock (left by a crashed prior run — no live owner) on the
+            // configured journal is auto-reclaimed at startup, so a post-crash relaunch reopens the
+            // user's own journal rather than failing `LockHeld` and orphaning it onto the default. A
+            // LIVE lock (a genuine second instance) is not stale → left intact → the open refuses.
+            if lock_is_stale(path) {
+                let _ = clear_lock(path);
+            }
+            match Journal::open_with_mode(path, sync_mode_for(path)) {
+                Ok(journal) => {
+                    let read_only = journal.is_read_only();
+                    return (
+                        Self {
+                            journal: Some(journal),
+                            path: Some(path.to_path_buf()),
+                            read_only,
+                            clock,
+                            idgen,
+                            history: UndoHistory::default(),
+                            pending_restore: None,
+                            active_portfolio_id: None,
+                        },
+                        read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
+                    );
                 }
-                match Journal::open_with_mode(path, sync_mode_for(path)) {
-                    Ok(journal) => {
-                        let read_only = journal.is_read_only();
-                        return (
-                            Self {
-                                journal: Some(journal),
-                                path: Some(path.to_path_buf()),
-                                read_only,
-                                clock,
-                                idgen,
-                                history: UndoHistory::default(),
-                                pending_restore: None,
-                                active_portfolio_id: None,
-                            },
-                            read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
-                        );
-                    }
-                    Err(error) => {
-                        // The configured pick is corrupt/foreign/damaged — never write our schema
-                        // into it (open already refused without writing). Fall back to the default
-                        // journal so the app stays usable, and surface the cause.
-                        tracing::warn!("configured journal {} unreadable: {error}", path.display());
-                        let (state, _) = Self::open_or_create_default(clock, idgen);
-                        return (state, Some(MSG_CONFIGURED_UNREADABLE.to_string()));
-                    }
+                Err(error) => {
+                    // The configured pick is corrupt/foreign/damaged — never write our schema
+                    // into it (open already refused without writing). Fall back to the default
+                    // journal so the app stays usable, and surface the cause.
+                    tracing::warn!("configured journal {} unreadable: {error}", path.display());
+                    let (state, _) = Self::open_or_create_default(clock, idgen);
+                    return (state, Some(MSG_CONFIGURED_UNREADABLE.to_string()));
                 }
             }
         }
@@ -202,10 +202,10 @@ impl JournalState {
         let result = if path.exists() {
             Journal::open_with_mode(&path, sync_mode_for(&path))
         } else {
-            if let Some(parent) = path.parent() {
-                if let Err(error) = std::fs::create_dir_all(parent) {
-                    tracing::warn!("data dir {} not created: {error}", parent.display());
-                }
+            if let Some(parent) = path.parent()
+                && let Err(error) = std::fs::create_dir_all(parent)
+            {
+                tracing::warn!("data dir {} not created: {error}", parent.display());
             }
             Journal::create(&path, idgen.new_id(), &clock.now())
         };

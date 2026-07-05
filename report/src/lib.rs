@@ -11,4 +11,4 @@
 pub mod form;
 pub mod pdf;
 
-pub use pdf::{render_study_pdf, ReportError};
+pub use pdf::{ReportError, render_study_pdf};

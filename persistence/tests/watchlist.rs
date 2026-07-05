@@ -167,7 +167,7 @@ fn watchlist_survives_reopen() {
 
 #[test]
 fn deleting_a_linked_study_clears_the_watchlist_link() {
-    use steadyinvest_contract::{ForecastLowOption, Judgment, Study, SCHEMA_VERSION};
+    use steadyinvest_contract::{ForecastLowOption, Judgment, SCHEMA_VERSION, Study};
     let dir = TempDir::new().unwrap();
     let (mut journal, jid) = fresh(&dir);
     let study_id = Uuid::from_u128(0x1234);

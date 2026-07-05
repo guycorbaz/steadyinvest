@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::journal::Journal;
 use crate::util::bump_logical_version;
 use rusqlite::OptionalExtension;
-use steadyinvest_contract::{Study, Timestamp, SCHEMA_VERSION};
+use steadyinvest_contract::{SCHEMA_VERSION, Study, Timestamp};
 use uuid::Uuid;
 
 /// One row of [`Journal::list_studies`]: the indexed columns only — no payload parse.

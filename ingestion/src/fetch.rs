@@ -5,7 +5,7 @@
 
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
-use steadyinvest_core::normalize::{normalize, CanonicalFinancials, RawFinancials};
+use steadyinvest_core::normalize::{CanonicalFinancials, RawFinancials, normalize};
 
 use crate::error::{IngestionError, ProviderError};
 use crate::provider::{MarketDataProvider, RawFetch};

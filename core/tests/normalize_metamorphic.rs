@@ -12,7 +12,7 @@ use proptest::option;
 use proptest::prelude::*;
 use rust_decimal::Decimal;
 use steadyinvest_core::normalize::{
-    normalize, CanonicalFinancials, RawAmount, RawFinancials, RawYear, SplitEvent,
+    CanonicalFinancials, RawAmount, RawFinancials, RawYear, SplitEvent, normalize,
 };
 
 const NATIVE: &str = "USD";

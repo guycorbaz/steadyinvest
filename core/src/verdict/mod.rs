@@ -496,7 +496,7 @@ mod tests {
     /// (case-insensitive, whole-word) — same recipe as the 1.8/1.9/1.10 local gates.
     #[test]
     fn verdict_vocabulary_contains_no_banned_verbs() {
-        use crate::method::{contains_word, BANNED_VERBS_EN, BANNED_VERBS_FR};
+        use crate::method::{BANNED_VERBS_EN, BANNED_VERBS_FR, contains_word};
 
         let vocabulary: [&str; 42] = [
             // Types

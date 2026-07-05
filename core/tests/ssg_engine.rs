@@ -10,11 +10,11 @@
 
 use rust_decimal::Decimal;
 use steadyinvest_core::normalize::{
-    normalize, CanonicalFinancials, PlausibilityKey, RawAmount, RawYear,
+    CanonicalFinancials, PlausibilityKey, RawAmount, RawYear, normalize,
 };
 use steadyinvest_core::ssg::{
-    compute, CalcFinding, CriterionFact, ForecastLowOption, JudgmentInputs, QualityFlagKey,
-    QuarterlyObservations, UpsideDownside, Zone,
+    CalcFinding, CriterionFact, ForecastLowOption, JudgmentInputs, QualityFlagKey,
+    QuarterlyObservations, UpsideDownside, Zone, compute,
 };
 
 fn d(s: &str) -> Decimal {

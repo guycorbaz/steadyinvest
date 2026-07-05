@@ -365,7 +365,7 @@ mod tests {
         assert_eq!(grid.cells[2 * COLS + 1].text, ""); // row 2, col 1 — gap, empty not 0
         assert!(!grid.cells[2 * COLS + 1].filled);
         assert_eq!(grid.cells[3 * COLS + 1].text, "3"); // row 3, col 1
-                                                        // Other columns untouched.
+        // Other columns untouched.
         assert_eq!(grid.cells[COLS].text, "");
     }
 }

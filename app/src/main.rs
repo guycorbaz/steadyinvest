@@ -60,7 +60,7 @@ use crate::config::AppConfig;
 use crate::state::{JournalState, UnlockScope};
 use crate::theme::Theme;
 use crate::wiring::fetch::mirror_provider_prefs;
-use crate::wiring::holdings::{refresh_holdings, HoldingFreshnessMap};
+use crate::wiring::holdings::{HoldingFreshnessMap, refresh_holdings};
 use crate::wiring::journal::{record_current_pointer, render_journal_panel};
 use crate::wiring::persist;
 use crate::wiring::prefs::push_samples;
@@ -246,14 +246,14 @@ fn main() -> Result<(), slint::PlatformError> {
         // pointer is set) and render the location panel.
         {
             let st = journal_state.borrow();
-            if let Some(path) = st.path().map(|p| p.to_path_buf()) {
-                if let Some(jid) = st.journal_id() {
-                    let version = st.logical_version_or_zero();
-                    config
-                        .borrow_mut()
-                        .record_recent(&path, &jid.to_string(), version);
-                    persist(config_path.as_ref(), &config.borrow());
-                }
+            if let Some(path) = st.path().map(|p| p.to_path_buf())
+                && let Some(jid) = st.journal_id()
+            {
+                let version = st.logical_version_or_zero();
+                config
+                    .borrow_mut()
+                    .record_recent(&path, &jid.to_string(), version);
+                persist(config_path.as_ref(), &config.borrow());
             }
             render_journal_panel(&ui, &st, &config.borrow());
         }

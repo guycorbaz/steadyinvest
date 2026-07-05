@@ -11,7 +11,7 @@
 //!     EODHD_API_KEY=demo cargo run -p steadyinvest-ingestion --example eodhd_gonogo -- AAPL.US
 
 use steadyinvest_ingestion::adapters::eodhd::EodhdProvider;
-use steadyinvest_ingestion::{fetch_canonical, install_crypto_provider, Provider};
+use steadyinvest_ingestion::{Provider, fetch_canonical, install_crypto_provider};
 
 #[tokio::main]
 async fn main() {

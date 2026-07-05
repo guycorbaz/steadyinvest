@@ -48,14 +48,14 @@ fn check_bound(
     year: i32,
     findings: &mut Vec<CalcFinding>,
 ) {
-    if let Some(v) = value {
-        if v.abs() > ptp_roe_bound_pct() {
-            findings.push(CalcFinding {
-                key: PlausibilityKey::OutOfBoundsRatio,
-                year: Some(year),
-                context,
-            });
-        }
+    if let Some(v) = value
+        && v.abs() > ptp_roe_bound_pct()
+    {
+        findings.push(CalcFinding {
+            key: PlausibilityKey::OutOfBoundsRatio,
+            year: Some(year),
+            context,
+        });
     }
 }
 

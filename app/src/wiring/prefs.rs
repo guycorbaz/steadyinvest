@@ -11,12 +11,12 @@ use slint::ComponentHandle;
 use crate::labels::LabelSet;
 use crate::provider::ProviderChoice;
 use crate::theme::Theme;
-use crate::viewmodel::format::{format_amount, NumberFormat};
+use crate::viewmodel::format::{NumberFormat, format_amount};
 use crate::wiring::fetch::mirror_provider_prefs;
 use crate::wiring::holdings::refresh_holdings;
-use crate::wiring::{persist, Session};
-use crate::{config, labels, theme};
+use crate::wiring::{Session, persist};
 use crate::{Holdings, MainWindow, Prefs};
+use crate::{config, labels, theme};
 
 /// Constant sample amounts for the Settings locale panel (formatted for display, computed
 /// nothing — Cardinal Rule). Two stacked values with different digits double as the tabular-

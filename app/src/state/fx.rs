@@ -18,8 +18,8 @@ use steadyinvest_persistence::FxRateItem;
 
 use super::ledger::normalize_event_date;
 use super::{
-    watch_error, JournalState, MSG_FX_FUTURE_DATE, MSG_FX_INVALID_CURRENCY, MSG_FX_INVALID_RATE,
-    MSG_FX_SAME_CURRENCY, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE,
+    JournalState, MSG_FX_FUTURE_DATE, MSG_FX_INVALID_CURRENCY, MSG_FX_INVALID_RATE,
+    MSG_FX_SAME_CURRENCY, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, watch_error,
 };
 
 impl JournalState {
@@ -224,13 +224,13 @@ impl JournalState {
                         .filter(|r| r.is_sign_positive() && !r.is_zero())
                     {
                         Some(rate) => {
-                            if let Some(row) = rate_row {
-                                if !rates_used.iter().any(|u| {
+                            if let Some(row) = rate_row
+                                && !rates_used.iter().any(|u| {
                                     u.base_currency == row.base_currency
                                         && u.quote_currency == row.quote_currency
-                                }) {
-                                    rates_used.push(row);
-                                }
+                                })
+                            {
+                                rates_used.push(row);
                             }
                             (
                                 steadyinvest_core::risk::convert(*car, rate),

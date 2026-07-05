@@ -10,10 +10,10 @@ use slint::{ComponentHandle, Model, SharedString};
 use uuid::Uuid;
 
 use crate::state::UnlockScope;
-use crate::wiring::push::push_form;
 use crate::wiring::Session;
-use crate::{state, viewmodel};
+use crate::wiring::push::push_form;
 use crate::{MainWindow, Studies};
+use crate::{state, viewmodel};
 
 /// Build an [`UnlockScope`] from the Slint callback's `(scope-kind, scope-arg)` pair (Story 2.5).
 /// `"study"` ignores the arg; `"year"` parses the arg as a year-window index; `"metric"` takes the

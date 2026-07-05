@@ -22,14 +22,14 @@ fn check_pe_bound(
     year: Option<i32>,
     findings: &mut Vec<CalcFinding>,
 ) {
-    if let Some(pe) = value {
-        if pe < pe_axis_min() || pe > pe_axis_max() {
-            findings.push(CalcFinding {
-                key: PlausibilityKey::OutOfBoundsRatio,
-                year,
-                context,
-            });
-        }
+    if let Some(pe) = value
+        && (pe < pe_axis_min() || pe > pe_axis_max())
+    {
+        findings.push(CalcFinding {
+            key: PlausibilityKey::OutOfBoundsRatio,
+            year,
+            context,
+        });
     }
 }
 

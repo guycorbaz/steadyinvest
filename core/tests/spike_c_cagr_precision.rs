@@ -14,7 +14,7 @@
 
 use rust_decimal::{Decimal, MathematicalOps};
 use sha2::{Digest, Sha256};
-use steadyinvest_core::rounding::{round_for_display, DisplayField};
+use steadyinvest_core::rounding::{DisplayField, round_for_display};
 
 /// Asserted upper bound on the fractional-`powd` relative error. Deliberately conservative so the
 /// gate never flakes (the measured error is orders of magnitude smaller — see the findings note),

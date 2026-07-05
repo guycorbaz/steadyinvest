@@ -8,13 +8,13 @@
 use std::path::{Path, PathBuf};
 
 use steadyinvest_persistence::{
-    clear_lock, lock_is_stale, Error as PersistError, Journal, JournalMode,
+    Error as PersistError, Journal, JournalMode, clear_lock, lock_is_stale,
 };
 use uuid::Uuid;
 
 use super::{
-    JournalState, OpenOutcome, MSG_JOURNAL_LOCKED, MSG_JOURNAL_OPEN_FAILED, MSG_NO_DATA_DIR,
-    MSG_NO_JOURNAL, MSG_SAVE_FAILED,
+    JournalState, MSG_JOURNAL_LOCKED, MSG_JOURNAL_OPEN_FAILED, MSG_NO_DATA_DIR, MSG_NO_JOURNAL,
+    MSG_SAVE_FAILED, OpenOutcome,
 };
 
 /// Whether `path` (a journal file or its directory) lives in a **detected sync folder** (Story 5.5,
@@ -146,14 +146,15 @@ impl JournalState {
     pub fn open_journal(&mut self, path: &Path) -> Result<OpenOutcome, String> {
         // Re-selecting the journal that is already open is a no-op — closing + reopening it would
         // pointlessly wipe the undo history. Return the current identity without touching anything.
-        if let Some(current) = self.path.clone() {
-            if self.journal.is_some() && same_file_path(&current, path) {
-                return Ok(OpenOutcome {
-                    journal_id: self.journal_id().unwrap_or_else(Uuid::nil),
-                    logical_version: self.logical_version_or_zero(),
-                    sync_warning: matches!(sync_mode_for(path), JournalMode::Delete),
-                });
-            }
+        if let Some(current) = self.path.clone()
+            && self.journal.is_some()
+            && same_file_path(&current, path)
+        {
+            return Ok(OpenOutcome {
+                journal_id: self.journal_id().unwrap_or_else(Uuid::nil),
+                logical_version: self.logical_version_or_zero(),
+                sync_warning: matches!(sync_mode_for(path), JournalMode::Delete),
+            });
         }
         let prev = self.path.clone();
         self.close_current();

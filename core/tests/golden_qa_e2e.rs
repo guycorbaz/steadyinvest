@@ -13,7 +13,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use steadyinvest_core::golden::{check, check_all, GoldenStudy};
+use steadyinvest_core::golden::{GoldenStudy, check, check_all};
 
 /// The trusted tamper bases: real on-disk fixtures (never modified on disk).
 const G01: &str = include_str!("golden/g01-worked-example.json");

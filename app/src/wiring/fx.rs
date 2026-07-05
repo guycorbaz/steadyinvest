@@ -8,8 +8,8 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::state::JournalState;
 use crate::wiring::Session;
-use crate::{fetch, state};
 use crate::{Fx, FxRateRow, MainWindow};
+use crate::{fetch, state};
 
 /// Push the stored rates into the `Fx` global (pair "EUR → CHF", exact rate spelling, day, source).
 pub(crate) fn push_fx_rates(ui: &MainWindow, state: &JournalState) {

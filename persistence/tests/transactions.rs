@@ -414,10 +414,12 @@ fn update_transaction_on_an_absent_id_writes_nothing() {
         .expect("the absent edit is a no-op success");
 
     assert!(!applied, "absent id → Ok(false)");
-    assert!(journal
-        .list_transactions(hid)
-        .expect("list reads")
-        .is_empty());
+    assert!(
+        journal
+            .list_transactions(hid)
+            .expect("list reads")
+            .is_empty()
+    );
     assert_eq!(
         holding_row(&journal, hid).quantity,
         "10",
@@ -535,10 +537,12 @@ fn delete_transaction_rewrites_the_aggregate_with_one_bump() {
         .expect("the delete applies");
 
     assert!(applied);
-    assert!(journal
-        .list_transactions(hid)
-        .expect("list reads")
-        .is_empty());
+    assert!(
+        journal
+            .list_transactions(hid)
+            .expect("list reads")
+            .is_empty()
+    );
     let holding = holding_row(&journal, hid);
     assert_eq!(
         holding.quantity, "10",

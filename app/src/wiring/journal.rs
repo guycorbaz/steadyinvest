@@ -15,10 +15,10 @@ use uuid::Uuid;
 use crate::config::AppConfig;
 use crate::state;
 use crate::state::JournalState;
-use crate::wiring::holdings::{refresh_holdings, retain_held_freshness, HoldingFreshnessMap};
+use crate::wiring::holdings::{HoldingFreshnessMap, refresh_holdings, retain_held_freshness};
 use crate::wiring::studies::refresh_studies;
 use crate::wiring::watchlist::refresh_watchlist;
-use crate::wiring::{persist, Session};
+use crate::wiring::{Session, persist};
 use crate::{MainWindow, Prefs, RecentJournalRow, Studies};
 use steadyinvest_persistence::lock_is_stale;
 

@@ -14,9 +14,9 @@ use steadyinvest_contract::{
     Study, Timestamp, YearData,
 };
 use steadyinvest_core::golden::{
-    check_all, FixtureAmount, FixtureForecastLowOption, FixtureJudgment, FixtureYear, GoldenStudy,
+    FixtureAmount, FixtureForecastLowOption, FixtureJudgment, FixtureYear, GoldenStudy, check_all,
 };
-use steadyinvest_core::{method, METHOD_VERSION};
+use steadyinvest_core::{METHOD_VERSION, method};
 use uuid::Uuid;
 
 use crate::viewmodel::entry::tofill_cell;

@@ -11,12 +11,12 @@ use slint::{ComponentHandle, SharedString};
 use uuid::Uuid;
 
 use crate::provider::ProviderChoice;
-use crate::wiring::holdings::{mark_holding_stale, refresh_holdings, HoldingFreshness};
+use crate::wiring::Session;
+use crate::wiring::holdings::{HoldingFreshness, mark_holding_stale, refresh_holdings};
 use crate::wiring::push::{display_timestamp, push_form};
 use crate::wiring::studies::refresh_studies;
-use crate::wiring::Session;
-use crate::{fetch, keychain, state};
 use crate::{Fx, Holdings, MainWindow, Prefs, Studies};
+use crate::{fetch, keychain, state};
 
 /// The legacy interim key source (Story 3.1), kept ONLY as a fallback for environments with no
 /// running OS secret agent (headless/NAS — AC5/AC6).
@@ -125,12 +125,11 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             .as_deref()
                             .and_then(|s| Uuid::parse_str(s).ok())
                             == Some(outcome.study_id);
-                        if still_open {
-                            if let Some(study) = journal_state.borrow().get_study(outcome.study_id)
-                            {
-                                let format = config.borrow().number_format;
-                                push_form(&ui, &journal_state.borrow(), &study, format);
-                            }
+                        if still_open
+                            && let Some(study) = journal_state.borrow().get_study(outcome.study_id)
+                        {
+                            let format = config.borrow().number_format;
+                            push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                         refresh_studies(&ui, &journal_state.borrow());
                     };
@@ -273,10 +272,9 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         .as_deref()
                         .and_then(|s| Uuid::parse_str(s).ok())
                         == Some(outcome.study_id)
+                        && let Some(study) = journal_state.borrow().get_study(outcome.study_id)
                     {
-                        if let Some(study) = journal_state.borrow().get_study(outcome.study_id) {
-                            push_form(&ui, &journal_state.borrow(), &study, format);
-                        }
+                        push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                     refresh_holdings(
                         &ui,

@@ -18,7 +18,7 @@ use steadyinvest_contract::Money;
 use steadyinvest_core::method::FORECAST_HORIZON_YEARS;
 
 use crate::viewmodel::engine::StudyFrame;
-use crate::viewmodel::format::{format_scaled, NumberFormat};
+use crate::viewmodel::format::{NumberFormat, format_scaled};
 use crate::{AxisTick, GrowthChartState};
 use steadyinvest_core::rounding::DisplayField;
 
@@ -302,8 +302,8 @@ pub fn unavailable() -> GrowthChartState {
 
 // ── Story 5.1 — the confront overlay geometry (recorded band vs actual trajectory) ──
 
-use crate::state::ConfrontView;
 use crate::ConfrontState;
+use crate::state::ConfrontView;
 
 /// Build the confront chart (Story 5.1, FR50): the security's **actual** close trajectory since the
 /// decision as a polyline, overlaid on the study's **recorded** §4 forecast band (a shaded rectangle).

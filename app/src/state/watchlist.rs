@@ -6,7 +6,7 @@
 use steadyinvest_persistence::WatchItem;
 use uuid::Uuid;
 
-use super::{watch_error, JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE};
+use super::{JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, watch_error};
 
 impl JournalState {
     // ── Watchlist (Story 4.1, FR34) ──

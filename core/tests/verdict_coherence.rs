@@ -18,7 +18,7 @@ use steadyinvest_contract::{
     YearData,
 };
 use steadyinvest_core::method::{LOAD_BEARING_JUDGMENT_INPUTS, LOAD_BEARING_YEAR_FIELDS};
-use steadyinvest_core::normalize::{normalize, RawAmount, RawFinancials, RawYear};
+use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear, normalize};
 use steadyinvest_core::ssg::{ForecastLowOption, JudgmentInputs, QuarterlyObservations};
 use steadyinvest_core::verdict::{
     GateState, GatedInput, InputGates, StudySnapshot, Verdict, YearGates,

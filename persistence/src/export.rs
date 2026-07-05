@@ -30,7 +30,7 @@ use crate::util::bump_logical_version;
 use crate::watchlist::WatchItem;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use steadyinvest_contract::{sha256_hex, ImportError, Study, SCHEMA_VERSION};
+use steadyinvest_contract::{ImportError, SCHEMA_VERSION, Study, sha256_hex};
 use uuid::Uuid;
 
 /// One study plus its lifecycle `status` (the indexed column, not part of the [`Study`] blob — so it
