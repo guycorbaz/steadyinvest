@@ -702,6 +702,42 @@ export component PortfolioScreen inherits Rectangle {
                   padding-right: Tokens.space-12;
                   padding-bottom: Tokens.space-8;
                   spacing: Tokens.space-8;
+                  // Issue #86: confirm-before-act for the irreversible row delete (the 2.12 destructive
+                  // pattern) — the row's « Supprimer » parks its id + raises this; it recalculates the
+                  // cost basis and can retire/un-retire the position, so it is never a one-click act.
+                  if Holdings.ledger-delete-confirm-visible: Rectangle {
+                      background: Tokens.surface;
+                      border-width: Tokens.focus-border;
+                      border-color: Tokens.focus;
+                      border-radius: Tokens.radius;
+                      HorizontalLayout {
+                          padding: Tokens.space-12;
+                          spacing: Tokens.space-16;
+                          Text {
+                              text: @tr("Supprimer cette transaction ? Le coût de revient de la position est recalculé ; cette suppression est définitive.");
+                              color: Tokens.text-high;
+                              font-size: Tokens.font-body;
+                              vertical-alignment: center;
+                              wrap: word-wrap;
+                              horizontal-stretch: 1;
+                          }
+                          ActionButton {
+                              label: @tr("Supprimer définitivement");
+                              clicked => {
+                                  Holdings.delete-transaction(Holdings.ledger-delete-pending-id);
+                                  Holdings.ledger-delete-confirm-visible = false;
+                                  Holdings.ledger-delete-pending-id = "";
+                              }
+                          }
+                          ActionButton {
+                              label: @tr("Annuler");
+                              clicked => {
+                                  Holdings.ledger-delete-confirm-visible = false;
+                                  Holdings.ledger-delete-pending-id = "";
+                              }
+                          }
+                      }
+                  }
                   if Holdings.ledger-rows.length == 0: Text {
                       text: @tr("Aucune transaction enregistrée pour cette position.");
                       color: Tokens.text-mid;
@@ -771,7 +807,10 @@ export component PortfolioScreen inherits Rectangle {
                               if (hrow.txn-editing-id == lrow.id) {
                                   hrow.reset-txn-draft();
                               }
-                              Holdings.delete-transaction(lrow.id);
+                              // Issue #86: park the row + raise the confirm overlay (never a one-click
+                              // irreversible delete).
+                              Holdings.ledger-delete-pending-id = lrow.id;
+                              Holdings.ledger-delete-confirm-visible = true;
                           }
                       }
                   }

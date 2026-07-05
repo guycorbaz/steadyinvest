@@ -541,6 +541,10 @@ pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uui
     let holdings = ui.global::<Holdings>();
     holdings.set_ledger_rows(ModelRc::new(VecModel::from(rows)));
     holdings.set_ledger_holding_id(holding_id.to_string().into());
+    // Issue #86: any pending delete-confirm belongs to the previous view of the ledger — clear it on
+    // (re)open so the overlay never lingers over a different holding / after the row it targeted is gone.
+    holdings.set_ledger_delete_confirm_visible(false);
+    holdings.set_ledger_delete_pending_id(SharedString::new());
 }
 
 /// Re-sync the ledger panel after a mutation (2026-07-02 review): re-push the rows while the
@@ -973,6 +977,9 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             let holdings = ui.global::<Holdings>();
             holdings.set_ledger_rows(ModelRc::new(VecModel::from(Vec::<LedgerRow>::new())));
             holdings.set_ledger_holding_id(SharedString::new());
+            // Issue #86: close the panel → drop any pending delete-confirm too.
+            holdings.set_ledger_delete_confirm_visible(false);
+            holdings.set_ledger_delete_pending_id(SharedString::new());
         });
     }
     {
