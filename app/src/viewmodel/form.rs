@@ -47,12 +47,17 @@ fn materialized_years(study: &Study) -> Vec<YearData> {
 /// The cell's pending provider divergence as a formatted display value (Story 3.4, FR22), revealed
 /// on demand beside the source/timestamp. `""` when there is no pending — the common case. The two
 /// values are never merged: this is the *provider's* number, shown alongside the live manual value.
-fn pending_value(cell: Option<&Cell>, format: NumberFormat) -> String {
+fn pending_value(cell: Option<&Cell>, field: &str, format: NumberFormat) -> String {
     match cell
         .and_then(|c| c.pending.as_ref())
         .and_then(|p| p.value.as_ref())
     {
-        Some(money) => format_amount(&money.to_string(), format),
+        // Issue #117: a divergent provider value for a millions field is shown in millions too, so it
+        // lines up with the cell it sits beside.
+        Some(money) => format_amount(
+            &crate::viewmodel::entry::stored_to_display(*money, field).to_string(),
+            format,
+        ),
         None => String::new(),
     }
 }
@@ -92,7 +97,11 @@ fn editable_cell(
 ) -> GridCellState {
     let value = match cell.and_then(|c| c.value.as_ref()) {
         // `Money: Display` is the canonical decimal string; `format_amount` only re-groups it.
-        Some(money) => format_amount(&money.to_string(), format),
+        // Issue #117: Sales / pre-tax profit are shown in millions (the stored value stays absolute).
+        Some(money) => format_amount(
+            &crate::viewmodel::entry::stored_to_display(*money, field).to_string(),
+            format,
+        ),
         None => String::new(),
     };
     GridCellState {
@@ -106,7 +115,7 @@ fn editable_cell(
         timestamp: provenance_date(cell).into(),
         // Story 3.4 (FR22) — a divergent provider value preserved alongside a manual value, revealed
         // on demand. "" when there is no pending divergence (the common case).
-        pending: pending_value(cell, format).into(),
+        pending: pending_value(cell, field, format).into(),
         // The tri-state review tag crosses as an enum-derived string (Story 2.5) — "none" draws no
         // marker, "to-review" the ? glyph, "validated" the ✓ check. Never a float / 0/1/2.
         review: entry::review_str(cell).into(),

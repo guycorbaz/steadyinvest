@@ -53,6 +53,39 @@ pub const FIELD_SALES: &str = "sales";
 pub const FIELD_PRETAX: &str = "pretax";
 pub const FIELD_BOOK: &str = "book";
 
+/// Issue #117: the §2 raw-input fields shown/entered in MILLIONS (Sales + pre-tax profit — the large
+/// absolute figures) so the cells stay short (NAIC-style "(millions)" columns). The STORED value
+/// stays ABSOLUTE, so the engine and every calc are unit-unchanged: [`stored_to_display`] divides for
+/// the cell and [`entered_to_stored`] multiplies the typed value back. Per-share figures (EPS / book
+/// / dividend) and the §3 prices are small, so they are NOT scaled.
+pub const MILLIONS_SCALE: i64 = 1_000_000;
+
+/// Whether a field is displayed/entered in millions (Issue #117).
+pub fn is_millions_field(field: &str) -> bool {
+    field == FIELD_SALES || field == FIELD_PRETAX
+}
+
+/// A STORED absolute value → the decimal shown in the cell (millions fields ÷ 1e6, trailing zeros
+/// trimmed; others unchanged).
+pub fn stored_to_display(value: Money, field: &str) -> rust_decimal::Decimal {
+    let d = value.as_decimal();
+    if is_millions_field(field) {
+        (d / rust_decimal::Decimal::from(MILLIONS_SCALE)).normalize()
+    } else {
+        d
+    }
+}
+
+/// A value the user TYPED (in the field's display units) → the stored ABSOLUTE value (millions fields
+/// × 1e6; others unchanged). The inverse of [`stored_to_display`], so a cell round-trips exactly.
+pub fn entered_to_stored(value: Money, field: &str) -> Money {
+    if is_millions_field(field) {
+        Money::from(value.as_decimal() * rust_decimal::Decimal::from(MILLIONS_SCALE))
+    } else {
+        value
+    }
+}
+
 /// Which grid a field belongs to — the cursor moves *within* one grid (no cross-grid arrow nav).
 fn field_group(field: &str) -> Option<&'static [&'static str]> {
     if PE_FIELDS.contains(&field) {
@@ -256,6 +289,40 @@ mod tests {
 
     fn money(s: &str) -> Money {
         Money::from(rust_decimal::Decimal::from_str_exact(s).unwrap())
+    }
+
+    /// Issue #117: Sales / pre-tax profit display in millions and are typed in millions, but the
+    /// stored value stays ABSOLUTE — the two conversions are exact inverses (a cell round-trips), and
+    /// per-share fields are never scaled.
+    #[test]
+    fn millions_fields_round_trip_display_and_entry() {
+        // Stored 383_000_000_000 → shown "383000"; typed "383000" → stored 383_000_000_000.
+        assert_eq!(
+            stored_to_display(money("383000000000"), FIELD_SALES).to_string(),
+            "383000"
+        );
+        assert_eq!(
+            entered_to_stored(money("383000"), FIELD_SALES),
+            money("383000000000")
+        );
+        // A non-round fetched value keeps its millions remainder and still round-trips.
+        assert_eq!(
+            stored_to_display(money("383285000000"), FIELD_SALES).to_string(),
+            "383285"
+        );
+        assert_eq!(
+            entered_to_stored(money("120000"), FIELD_PRETAX),
+            money("120000000000")
+        );
+        // A per-share field (book value) is NOT scaled — shown and stored as-is.
+        assert_eq!(
+            stored_to_display(money("12.34"), FIELD_BOOK).to_string(),
+            "12.34"
+        );
+        assert_eq!(
+            entered_to_stored(money("12.34"), FIELD_BOOK),
+            money("12.34")
+        );
     }
 
     #[test]

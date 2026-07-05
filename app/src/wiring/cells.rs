@@ -9,6 +9,8 @@ use std::rc::Rc;
 use slint::{ComponentHandle, Model, SharedString};
 use uuid::Uuid;
 
+use steadyinvest_contract::Money;
+
 use crate::state::UnlockScope;
 use crate::wiring::Session;
 use crate::wiring::push::push_form;
@@ -60,7 +62,10 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                     return false;
                 };
                 let format = config.borrow().number_format;
-                let value = viewmodel::format::parse_amount(&text, format);
+                // Issue #117: Sales / pre-tax profit are typed in millions — scale back to the stored
+                // absolute value before persisting (a no-op for every other field).
+                let value = viewmodel::format::parse_amount(&text, format)
+                    .map(|m| viewmodel::entry::entered_to_stored(m, field.as_str()));
                 let result = journal_state.borrow_mut().edit_cell(
                     id,
                     year_index.max(0) as usize,
@@ -114,6 +119,12 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 if values.is_empty() {
                     return;
                 }
+                // Issue #117: a column pasted into Sales / pre-tax profit is in millions — scale each
+                // value back to the stored absolute (a no-op for every other field).
+                let values: Vec<Option<Money>> = values
+                    .into_iter()
+                    .map(|v| v.map(|m| viewmodel::entry::entered_to_stored(m, field.as_str())))
+                    .collect();
                 let result = journal_state.borrow_mut().paste_column(
                     id,
                     year_index.max(0) as usize,
