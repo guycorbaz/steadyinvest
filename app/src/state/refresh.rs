@@ -55,10 +55,14 @@ impl JournalState {
     /// - a **gap** (no value) is **filled** from the provider, whatever its skeleton source;
     /// - a present **`Source::Manual`** value is **skipped** — manual wins, never overwritten here
     ///   (non-destructive dual-value reconciliation of a divergent manual cell is Story 3.4);
-    /// - a present **provider/derived** value is **re-stamped via [`Cell::edited`] only when the
-    ///   value actually changed** — an equal re-fetch is a no-op (idempotency: no timestamp churn,
-    ///   no phantom undo step, no `✓→?` demotion). A divergent value auto-demotes a `✓` provider
-    ///   cell to `?` and degrades the dependent verdict in the same frame (the Epic-1 invariant 2b).
+    /// - a present **validated (`✓`)** cell (Issue #110) is **FROZEN** — the value + `✓` are kept, a
+    ///   divergent provider value is parked as `pending` (never applied), and the contradiction is
+    ///   counted so the notice can flag it (`✓` is never demoted; a validated cell you checked does
+    ///   not change under a refresh — the Story-2.5 soft-lock extended to the provider path);
+    /// - a present **non-validated provider/derived** value is **re-stamped via [`Cell::edited`] only
+    ///   when the value actually changed** — an equal re-fetch is a no-op (idempotency: no timestamp
+    ///   churn, no phantom undo step). A divergent value updates in place (its review is `None`/`?`,
+    ///   so there is nothing to demote).
     ///
     /// Returns a [`RefreshReport`] (updated / filled counts + the classified [`RefreshCause`]) so the
     /// caller can state *why* it recomputed (price / input / FX). Routed through the atomic
@@ -206,8 +210,12 @@ pub struct RefreshReport {
     pub filled: usize,
     /// Manual cells whose divergent provider value was preserved alongside (Story 3.4).
     pub reconciled: usize,
-    /// Cells this refresh reset `✓ → ?` — the re-validation scope of an annual update (Story 3.6).
-    pub revalidate: usize,
+    /// Issue #110: **validated** (`✓`) cells the provider now CONTRADICTS. They are frozen (value +
+    /// `✓` kept), the divergent provider value parked as `pending`; this count drives a neutral notice
+    /// so the user knows reality diverged from what they checked, without their numbers changing.
+    /// (Replaces the Story-3.6 `revalidate` re-validation-scope count, which is dead now that a
+    /// validated cell is never demoted by a refresh.)
+    pub contradicted: usize,
     pub cause: RefreshCause,
 }
 
@@ -218,7 +226,7 @@ impl RefreshReport {
             updated: self.updated + other.updated,
             filled: self.filled + other.filled,
             reconciled: self.reconciled + other.reconciled,
-            revalidate: self.revalidate + other.revalidate,
+            contradicted: self.contradicted + other.contradicted,
             cause: self.cause.merge(other.cause),
         }
     }
@@ -335,8 +343,11 @@ fn refresh_cell(
 ) -> (CellRefresh, bool) {
     let was_validated = cell.review == Review::Validated;
     let outcome = refresh_cell_inner(cell, value, provenance);
-    let demoted = was_validated && cell.review == Review::ToReview;
-    (outcome, demoted)
+    // Issue #110 (b): a validated cell is FROZEN, never demoted — but a divergent provider value on it
+    // is a *contradiction* (a new pending was parked → `Reconciled`). Count that so the notice can flag
+    // "the provider now reports N different values for your validated cells", without the ✓/value moving.
+    let contradicted = was_validated && matches!(outcome, CellRefresh::Reconciled);
+    (outcome, contradicted)
 }
 
 /// The branching that actually mutates the cell (Story 3.3):
@@ -361,6 +372,27 @@ fn refresh_cell_inner(
                 *cell = provider_cell(Some(v), provenance);
                 CellRefresh::Filled
             }
+            None => CellRefresh::Unchanged,
+        }
+    } else if cell.review == Review::Validated {
+        // Issue #110: a validated (✓) cell is FROZEN against a refresh — the user checked its numbers,
+        // so they must not change under an annual update. Keep the value AND the ✓; a divergent
+        // provider value is parked as `pending` (visible, resolvable — never silently applied), the ✓
+        // is never demoted. This extends the Story-2.5 soft-lock to the provider-refresh path, and it
+        // catches BOTH a validated manual and a validated provider cell before the source branches
+        // below (so a validated provider cell no longer re-stamps + demotes as it did pre-#110). The
+        // caller flags the new pending as a *contradiction* so a neutral notice can surface it (#110 b).
+        match value {
+            Some(v) => {
+                let frozen = cell.reconcile_frozen(Some(Money::from(v)), provenance.clone());
+                if frozen == *cell {
+                    CellRefresh::Unchanged
+                } else {
+                    *cell = frozen;
+                    CellRefresh::Reconciled
+                }
+            }
+            // A provider with no value for a frozen cell is no contradiction — keep the ✓ value.
             None => CellRefresh::Unchanged,
         }
     } else if cell.source == Source::Manual {
@@ -425,11 +457,12 @@ fn refresh_optional(
 /// feeds the recompute). Field names drive [`refresh::classify_field`] (no parallel list).
 fn refresh_year(yd: &mut YearData, cy: &CanonicalYear, provenance: &Provenance) -> RefreshReport {
     let mut report = RefreshReport::default();
-    let mut account = |(outcome, demoted): (CellRefresh, bool), field: &str| {
-        // Story 3.6: a cell this refresh reset `✓ → ?` is one the user must re-verify after the
-        // annual update — the re-validation scope, independent of the value-change tally below.
-        if demoted {
-            report.revalidate += 1;
+    let mut account = |(outcome, contradicted): (CellRefresh, bool), field: &str| {
+        // Issue #110 (b): a validated cell the provider now contradicts (frozen, ✓ kept, a new pending
+        // parked) — counted so the notice can surface "N validated cells the provider disagrees with",
+        // independent of the value-change tally below. (Was the Story-3.6 ✓→? re-validation scope.)
+        if contradicted {
+            report.contradicted += 1;
         }
         match outcome {
             CellRefresh::Updated => {
