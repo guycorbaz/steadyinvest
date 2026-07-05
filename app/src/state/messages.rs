@@ -95,9 +95,13 @@ pub const MSG_REFRESH_NOCHANGE: &str = "Aucun changement ; les données sont dé
 pub const MSG_REFRESH_PRICE: &str = "Recalculé : prix actualisés.";
 pub const MSG_REFRESH_INPUT: &str = "Recalculé : données fondamentales actualisées.";
 pub const MSG_REFRESH_BOTH: &str = "Recalculé : prix et données fondamentales actualisés.";
-/// Annual-update change-visibility clause (Story 3.6, FR3/Journey-2b) — appended to the refresh
-/// notice when a re-fetch reset `✓` cells to `?`, naming the re-validation scope. `{n}` is the count.
-pub const MSG_REFRESH_REVALIDATE: &str = "{n} cellule(s) à revérifier.";
+/// Annual-update contradiction clause (Issue #110 b) — appended to the refresh notice when the
+/// provider now reports a different value for a **validated** cell. The cell stays frozen (value +
+/// `✓` kept, the provider value parked as `pending`); this only tells the user reality diverged from
+/// what they checked. Fact-stating, no imperative (posture-gated). `{n}` is the count. (Replaces the
+/// dead Story-3.6 "N à revérifier" clause — a validated cell is no longer demoted by a refresh.)
+pub const MSG_REFRESH_CONTRADICTED: &str =
+    "{n} cellule(s) validée(s) : le fournisseur propose une valeur différente.";
 
 /// Watchlist copy (Story 4.1, FR34) — fact-stating, posture-gated. Raised when a link is requested
 /// but no saved study matches the watched ticker.
@@ -393,17 +397,18 @@ pub fn refresh_notice(report: RefreshReport) -> &'static str {
     }
 }
 
-/// The full post-refresh notice (Story 3.6): the cause line ([`refresh_notice`]) plus, when this
-/// refresh reset `✓` cells to `?`, the re-validation-scope clause ("N cellule(s) à revérifier") — so
-/// an annual update tells the user *what to re-check*, not just *what moved*. With `revalidate == 0`
-/// it is exactly [`refresh_notice`] (no regression on the common path).
+/// The full post-refresh notice (Story 3.6 / Issue #110 b): the cause line ([`refresh_notice`]) plus,
+/// when this refresh found the provider CONTRADICTING a validated (`✓`) cell, the contradiction clause
+/// ("N cellule(s) validée(s) : le fournisseur propose une valeur différente") — so an annual update
+/// tells the user reality diverged from what they checked, without their frozen numbers changing. With
+/// `contradicted == 0` it is exactly [`refresh_notice`] (no regression on the common path).
 pub fn refresh_summary(report: RefreshReport) -> String {
     let cause = refresh_notice(report);
-    if report.revalidate == 0 {
+    if report.contradicted == 0 {
         return cause.to_string();
     }
-    let revalidate = MSG_REFRESH_REVALIDATE.replace("{n}", &report.revalidate.to_string());
-    format!("{cause} · {revalidate}")
+    let contradicted = MSG_REFRESH_CONTRADICTED.replace("{n}", &report.contradicted.to_string());
+    format!("{cause} · {contradicted}")
 }
 
 /// Classify a provider/ingestion failure into its neutral, cause-named notice (Story 3.5, FR24).
@@ -477,7 +482,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_PRICE,
     MSG_REFRESH_INPUT,
     MSG_REFRESH_BOTH,
-    MSG_REFRESH_REVALIDATE,
+    MSG_REFRESH_CONTRADICTED,
     MSG_WATCH_NO_STUDY,
     MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_INVALID_TICKER,

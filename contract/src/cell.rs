@@ -152,6 +152,33 @@ impl Cell {
     /// A manual value and a provider value are thus **never silently merged** — they live in two
     /// distinct, attributed slots until the user resolves the divergence explicitly.
     pub fn reconcile(&self, fetched_value: Option<Money>, fetched_provenance: Provenance) -> Cell {
+        self.reconcile_inner(fetched_value, fetched_provenance, false)
+    }
+
+    /// The **frozen** reconciliation (Issue #110) — like [`Cell::reconcile`], but a [`Review::Validated`]
+    /// cell is NEVER demoted: the value AND the `✓` are kept verbatim, and a divergent provider value is
+    /// parked in [`Cell::pending`] (visible, resolvable) without touching the sign-off. A validated cell
+    /// has been checked by the user (Story 2.5 soft-lock); its numbers must not change under a refresh.
+    /// This extends that soft-lock to the provider-refresh path — the annual-update rule "controlled
+    /// years are frozen". Agreement still clears a stale pending; the churn-trap idempotency still holds.
+    /// The caller counts the new pending as a *contradiction* to surface a neutral notice (#110 b).
+    pub fn reconcile_frozen(
+        &self,
+        fetched_value: Option<Money>,
+        fetched_provenance: Provenance,
+    ) -> Cell {
+        self.reconcile_inner(fetched_value, fetched_provenance, true)
+    }
+
+    /// Shared reconciliation body. `keep_review = true` freezes the review tag (Issue #110); `false`
+    /// demotes a divergent `✓` to `?` (the Story-3.4 default). The pending-preservation + agreement +
+    /// idempotency semantics are identical either way — the ONE difference is the review transition.
+    fn reconcile_inner(
+        &self,
+        fetched_value: Option<Money>,
+        fetched_provenance: Provenance,
+        keep_review: bool,
+    ) -> Cell {
         let diverges = self.value != fetched_value;
         if !diverges {
             // Agreement clears any stale pending and keeps everything else — including the human
@@ -172,9 +199,13 @@ impl Cell {
         {
             return self.clone();
         }
-        let review = match self.review {
-            Review::Validated => Review::ToReview,
-            unchanged => unchanged,
+        let review = if keep_review {
+            self.review
+        } else {
+            match self.review {
+                Review::Validated => Review::ToReview,
+                unchanged => unchanged,
+            }
         };
         Cell {
             review,
@@ -450,6 +481,39 @@ mod tests {
                 "the divergence is still stored"
             );
         }
+    }
+
+    /// Issue #110: `reconcile_frozen` keeps a validated cell's value AND its `✓` (never demoted); the
+    /// divergent provider value is parked as pending — the ONLY difference from `reconcile`. Agreement
+    /// still self-heals a stale pending.
+    #[test]
+    fn reconcile_frozen_keeps_validation_and_parks_the_pending() {
+        let frozen = manual_cell("100").reconcile_frozen(Some(money("110")), provider_prov());
+        assert_eq!(
+            frozen.value,
+            Some(money("100")),
+            "the checked value is frozen"
+        );
+        assert_eq!(
+            frozen.review,
+            Review::Validated,
+            "the ✓ is KEPT — reconcile_frozen never demotes"
+        );
+        assert_eq!(
+            frozen.pending.and_then(|p| p.value),
+            Some(money("110")),
+            "the divergent provider value is parked as pending"
+        );
+
+        // Agreement still self-heals a stale pending, ✓ intact (shared inner logic).
+        let mut with_pending = manual_cell("100");
+        with_pending.pending = Some(PendingProvider {
+            value: Some(money("110")),
+            provenance: provider_prov(),
+        });
+        let healed = with_pending.reconcile_frozen(Some(money("100.0")), provider_prov());
+        assert_eq!(healed.pending, None, "agreement clears the pending");
+        assert_eq!(healed.review, Review::Validated, "✓ intact on agreement");
     }
 
     #[test]

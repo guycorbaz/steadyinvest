@@ -679,7 +679,8 @@ mod tests {
         // MSG_PROVIDER_DONE (folded into the refresh path) and adds the four refresh-cause notices
         // (no-change / price / input / both): net 34 − 1 + 4 = 37. Story 3.5 adds the three
         // graceful-failure cause notices (offline / quota / no-data): 37 + 3 = 40. Story 3.6 adds
-        // the annual-update re-validation-scope clause (MSG_REFRESH_REVALIDATE): 40 + 1 = 41. Story
+        // the annual-update contradiction clause (MSG_REFRESH_CONTRADICTED — the #110 (b) freeze-and-
+        // notify replacement for the retired re-validation-scope clause, same count): 40 + 1 = 41. Story
         // 4.1 adds the watchlist "no study for this ticker" notice (MSG_WATCH_NO_STUDY): 41 + 1 = 42.
         // Story 4.3 adds the two holdings-register validation notices (invalid number / empty
         // symbol): 42 + 2 = 44. Story 4.4 adds the two holdings price-refresh notices (refreshing /

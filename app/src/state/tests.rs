@@ -936,10 +936,11 @@ fn refresh_never_refills_a_not_available_accepted_cell() {
     assert!(report.filled > 0, "ordinary gaps still fill");
 }
 
-/// A divergent refresh of a **validated** provider cell auto-demotes `✓ → ?` (FR20, AC3); a
-/// non-divergent re-fetch keeps the human `✓`.
+/// Issue #110 (b): a divergent refresh of a **validated** provider cell is FROZEN — the value AND the
+/// `✓` are kept, the divergent provider value is parked as `pending` (a *contradiction*, surfaced by
+/// notice), never demoted. A non-divergent re-fetch still keeps the human `✓`.
 #[test]
-fn refresh_demotes_a_divergent_validated_provider_cell() {
+fn refresh_freezes_a_divergent_validated_provider_cell() {
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x54, "2026-06-20T13:00:00Z");
     let id = state.create_study("NESN", "CHF").unwrap();
@@ -965,17 +966,31 @@ fn refresh_demotes_a_divergent_validated_provider_cell() {
         "an equal re-fetch keeps the human ✓"
     );
 
-    // A divergent re-fetch (100 → 250) auto-demotes the ✓ to ?.
-    state
+    // Issue #110 (b): a divergent re-fetch (100 → 250) FREEZES the cell — the ✓ + value stay, the
+    // divergent 250 is parked as pending (a contradiction the notice will flag).
+    let report = state
         .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 250, 50, "beadfeed"))
         .unwrap();
     let high = &state.get_study(id).unwrap().years[0].high_price;
     assert_eq!(
         high.review,
-        Review::ToReview,
-        "a divergent provider value auto-tags ✓ → ?"
+        Review::Validated,
+        "a validated cell keeps its ✓ (frozen)"
     );
-    assert_eq!(high.value, Some(und_money(250)));
+    assert_eq!(
+        high.value,
+        Some(und_money(100)),
+        "the checked value is frozen, not overwritten"
+    );
+    assert_eq!(
+        high.pending.as_ref().and_then(|p| p.value),
+        Some(und_money(250)),
+        "the divergent provider value is parked as pending"
+    );
+    assert_eq!(
+        report.contradicted, 1,
+        "the frozen divergence is counted as a contradiction"
+    );
 }
 
 /// The recompute cause distinguishes a pure-fundamental change from a pure-price change (FR29,
@@ -1012,12 +1027,12 @@ fn refresh_classifies_input_only_vs_price_only_cause() {
     assert_eq!(refresh_notice(price_only), MSG_REFRESH_PRICE);
 }
 
-/// End-to-end (the Story-3.3 invariant 2b through a REAL refresh, not a hand-set freshness):
-/// a fully-validated provider study reads `Full`; a divergent refresh of a load-bearing provider
-/// cell auto-demotes it and the verdict degrades to `Provisional` in the same frame. (AC3,
-/// complements `seam_check.rs` SEAM 3 which sets the flag by hand.)
+/// Issue #110 (b): a fully-validated provider study reads `Full`; a divergent refresh of a load-bearing
+/// validated cell FREEZES it (value + `✓` kept), so the verdict STAYS `Full` — the checked study is not
+/// destabilised by the provider later disagreeing (the divergence is parked as pending + surfaced by
+/// notice, not applied). (Was: the divergence demoted the ✓ and degraded Full → Provisional pre-#110.)
 #[test]
-fn a_divergent_refresh_degrades_a_full_verdict_to_provisional() {
+fn a_divergent_refresh_of_a_validated_cell_freezes_it_and_keeps_the_verdict() {
     use steadyinvest_core::verdict::Verdict;
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x56, "2026-06-20T15:00:00Z");
@@ -1062,24 +1077,28 @@ fn a_divergent_refresh_degrades_a_full_verdict_to_provisional() {
         "an all-validated provider study with a complete judgment reads Full"
     );
 
-    // A divergent refresh of the (validated, provider) high_price demotes ✓ → ? …
-    state
+    // Issue #110 (b): a divergent refresh of the (validated, provider) high_price FREEZES it …
+    let report = state
         .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 250, 50, "deg"))
         .unwrap();
     let study = state.get_study(id).unwrap();
     assert_eq!(
         study.years[0].high_price.review,
-        Review::ToReview,
-        "the divergent provider value auto-demotes the ✓"
+        Review::Validated,
+        "the validated cell keeps its ✓ (frozen) — the provider disagreement does not demote it"
+    );
+    assert_eq!(
+        report.contradicted, 5,
+        "all 5 years' validated high_price are contradicted (frozen), not demoted"
     );
     assert!(
         matches!(
             engine::build_snapshot(&study)
                 .expect("normalizes")
                 .verdict(),
-            Verdict::Provisional(_)
+            Verdict::Full(_)
         ),
-        "a demoted load-bearing input degrades Full → Provisional in the same frame"
+        "the frozen ✓ keeps the load-bearing input valid → the verdict STAYS Full"
     );
 }
 
@@ -1112,7 +1131,8 @@ fn study_with_validated_manual_high(
 }
 
 /// A divergent refresh of a validated MANUAL cell: the manual value stands, the provider value is
-/// preserved alongside (pending), and the `✓` demotes to `?` — never merged. (AC1, AC2, AC3)
+/// preserved alongside (pending), never merged. Issue #110 (b): the `✓` is KEPT (frozen), and the
+/// divergence is flagged as a contradiction — the checked manual value is not destabilised. (AC1/2/3)
 #[test]
 fn refresh_reconciles_a_divergent_manual_cell_non_destructively() {
     let dir = TempDir::new().unwrap();
@@ -1128,10 +1148,18 @@ fn refresh_reconciles_a_divergent_manual_cell_non_destructively() {
     );
     assert!(report.changed(), "a reconciliation is a change");
 
+    assert_eq!(
+        report.contradicted, 1,
+        "the frozen validated divergence is a contradiction (#110 b)"
+    );
     let high = &state.get_study(id).unwrap().years[0].high_price;
     assert_eq!(high.value, Some(und_money(999)), "manual value stands");
     assert_eq!(high.source, Source::Manual);
-    assert_eq!(high.review, Review::ToReview, "the ✓ demotes on divergence");
+    assert_eq!(
+        high.review,
+        Review::Validated,
+        "issue #110: the ✓ is FROZEN, not demoted"
+    );
     let pending = high
         .pending
         .as_ref()
@@ -1269,7 +1297,11 @@ fn a_pending_divergence_survives_reopen() {
         Some(und_money(999)),
         "manual value survives reopen"
     );
-    assert_eq!(high.review, Review::ToReview);
+    assert_eq!(
+        high.review,
+        Review::Validated,
+        "issue #110: the frozen ✓ survives reopen"
+    );
     let pending = high.pending.expect("the pending survives reopen");
     assert_eq!(pending.value, Some(und_money(100)));
 }
@@ -1556,8 +1588,11 @@ fn a_successful_refresh_clears_stale_on_years_it_omits() {
 
 // ── Story 3.6 — annual update journey ──
 
+/// Issue #110 (b): the `contradicted` count is the number of validated (✓) cells the provider now
+/// disagrees with — frozen (value + ✓ kept, pending parked), NOT demoted. A second identical refresh
+/// is idempotent (the pending already matches) → 0.
 #[test]
-fn revalidate_counts_only_demoted_validated_cells() {
+fn contradicted_counts_the_frozen_validated_cells_the_provider_disagrees_with() {
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x80, "2026-06-27T13:00:00Z");
     let id = state.create_study("NESN", "CHF").unwrap();
@@ -1569,24 +1604,35 @@ fn revalidate_counts_only_demoted_validated_cells() {
     for y in 0..years.len() {
         state.set_review(id, y, "a", Review::Validated).unwrap();
     }
-    // Refresh: high_price 100 → 200 diverges (demotes the 5 validated ✓); eps/sales/low unchanged.
+    // Refresh: high_price 100 → 200 diverges. The 5 validated ✓ cells FREEZE (value 100 kept, pending
+    // 200 parked); eps/sales/low unchanged.
     let report = state
         .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 200, 50, "annual"))
         .unwrap();
     assert_eq!(
-        report.revalidate, 5,
-        "the 5 validated high_price cells that diverged are the re-validation scope"
+        report.contradicted, 5,
+        "the 5 frozen validated high_price cells the provider disagrees with"
     );
-    // A second identical refresh demotes nothing (already ? + value agrees) → revalidate 0.
+    let high0 = &state.get_study(id).unwrap().years[0].high_price;
+    assert_eq!(high0.review, Review::Validated, "frozen — the ✓ stays");
+    assert_eq!(
+        high0.value,
+        Some(und_money(100)),
+        "frozen — the checked value stays"
+    );
+    // A second identical refresh contradicts nothing new (the pending already matches) → 0.
     let again = state
         .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 200, 50, "annual"))
         .unwrap();
-    assert_eq!(again.revalidate, 0, "an agreeing re-fetch demotes nothing");
+    assert_eq!(
+        again.contradicted, 0,
+        "an idempotent re-fetch adds no new contradiction"
+    );
 }
 
 #[test]
-fn refresh_summary_appends_the_revalidate_clause_only_when_needed() {
-    let no_demote = RefreshReport {
+fn refresh_summary_appends_the_contradiction_clause_only_when_needed() {
+    let no_contradiction = RefreshReport {
         updated: 1,
         cause: crate::viewmodel::refresh::RefreshCause {
             price: true,
@@ -1595,27 +1641,28 @@ fn refresh_summary_appends_the_revalidate_clause_only_when_needed() {
         ..Default::default()
     };
     assert_eq!(
-        refresh_summary(no_demote),
-        refresh_notice(no_demote),
-        "with no demotions the summary is exactly the cause notice (no regression)"
+        refresh_summary(no_contradiction),
+        refresh_notice(no_contradiction),
+        "with no contradictions the summary is exactly the cause notice (no regression)"
     );
-    let with_demote = RefreshReport {
-        revalidate: 3,
-        ..no_demote
+    let with_contradiction = RefreshReport {
+        contradicted: 3,
+        ..no_contradiction
     };
-    let summary = refresh_summary(with_demote);
-    assert!(summary.starts_with(refresh_notice(with_demote)));
+    let summary = refresh_summary(with_contradiction);
+    assert!(summary.starts_with(refresh_notice(with_contradiction)));
     assert!(
-        summary.contains("3 cellule(s) à revérifier"),
-        "the re-validation scope is named: {summary}"
+        summary.contains("3 cellule(s) validée(s)"),
+        "the contradiction is named: {summary}"
     );
 }
 
 /// The Journey-2b ritual end-to-end through the real rails: reopen a saved validated study, re-fetch
 /// new annual data, and confirm manual + judgment preserved, changed ✓ → ?, unchanged ✓ kept, the
-/// re-validation count correct, and the projection extends. (AC1, AC2, AC3, AC4)
+/// contradiction count correct (#110 b: validated cells freeze, not demote), and the projection
+/// extends. (AC1, AC2, AC3, AC4)
 #[test]
-fn the_annual_update_journey_preserves_manual_and_judgment_and_demotes_only_what_moved() {
+fn the_annual_update_journey_preserves_manual_and_judgment_and_freezes_the_validated() {
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x81, "2026-06-27T13:30:00Z");
     let id = state.create_study("NESN", "CHF").unwrap();
@@ -1672,18 +1719,35 @@ fn the_annual_update_journey_preserves_manual_and_judgment_and_demotes_only_what
         "the divergent provider sales is preserved alongside (Story 3.4)"
     );
     assert_eq!(study.judgment, judgment_before, "judgment lines preserved");
-    // AC2 — a changed validated provider cell is now ?; an unchanged one keeps ✓.
-    assert_eq!(y0.high_price.review, Review::ToReview, "changed high ✓ → ?");
-    assert_eq!(y0.high_price.value, Some(und_money(200)));
+    // AC2 (#110 b) — a validated cell the provider contradicts is FROZEN: value + ✓ kept, provider
+    // value parked as pending; an unchanged one keeps ✓ too. Nothing is demoted.
+    assert_eq!(
+        y0.high_price.review,
+        Review::Validated,
+        "contradicted high stays ✓ (frozen)"
+    );
+    assert_eq!(
+        y0.high_price.value,
+        Some(und_money(100)),
+        "the checked high value is frozen"
+    );
+    assert_eq!(
+        y0.high_price.pending.as_ref().and_then(|p| p.value),
+        Some(und_money(200)),
+        "the divergent provider high is parked as pending"
+    );
     assert_eq!(y0.eps.review, Review::Validated, "unchanged eps keeps ✓");
     assert_eq!(
         y0.sales.review,
-        Review::ToReview,
-        "diverged manual sales → ?"
+        Review::Validated,
+        "contradicted manual sales stays ✓ (frozen)"
     );
-    // AC3 — the re-validation scope: 5 high_price + the 1 manual sales = 6.
-    assert_eq!(report.revalidate, 6, "only what moved needs re-validation");
-    assert!(refresh_summary(report).contains("6 cellule(s) à revérifier"));
+    // AC3 — the contradiction scope: 5 high_price + the 1 manual sales the provider disagrees with = 6.
+    assert_eq!(
+        report.contradicted, 6,
+        "the provider contradicts 6 validated cells"
+    );
+    assert!(refresh_summary(report).contains("6 cellule(s) validée(s)"));
 
     // AC4 — extend the projection: the new fiscal year row appends, prior years intact.
     let max_before = study.years.iter().map(|y| y.year).max().unwrap();
@@ -1724,8 +1788,8 @@ fn unlock_all_then_refresh_demotes_nothing_and_preserves_manual() {
         .apply_provider_refresh(id, &fetched_custom(&years, 1000, 5, 200, 50, "annual"))
         .unwrap();
     assert_eq!(
-        report.revalidate, 0,
-        "nothing was ✓ after unlock → no demotions to re-validate"
+        report.contradicted, 0,
+        "nothing was ✓ after unlock → no frozen validated cell to contradict"
     );
     assert_eq!(
         state.get_study(id).unwrap().years[0].sales.value,
