@@ -849,6 +849,12 @@ export global Holdings {
     //    row currency is pinned to the holding's (FR28) — displayed, never chosen. ──
     in-out property <[LedgerRow]> ledger-rows;
     in-out property <string> ledger-holding-id;
+    // Issue #86: deleting a ledger row rewrites the cost basis (and can retire/un-retire the
+    // position) irreversibly — so it goes through the house confirm-before-act overlay (the 2.12
+    // destructive-delete pattern). The row's « Supprimer » parks its id here + raises the overlay;
+    // the overlay's Confirmer calls `delete-transaction(pending-id)`. Pure-Slint state (no push).
+    in-out property <bool> ledger-delete-confirm-visible;
+    in-out property <string> ledger-delete-pending-id;
     callback open-ledger(string);   // holding id → push rows + show
     callback close-ledger();
     // holding id, date (AAAA-MM-JJ, "" = today), quantity, unit price, fees ("" = 0), rationale → recorded?
