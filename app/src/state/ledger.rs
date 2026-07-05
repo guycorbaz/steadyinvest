@@ -50,7 +50,8 @@ use uuid::Uuid;
 use super::{
     JournalState, MSG_DIVIDEND_RETIRED, MSG_DIVIDEND_WITHHOLDING, MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_OVERSELL, MSG_LEDGER_PARTIAL_SOLD,
-    MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, effective_currency, watch_error,
+    MSG_LEDGER_UNKNOWN_KIND, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
+    effective_currency, watch_error,
 };
 
 /// An owned ledger-row draft — the borrow-free twin of [`LedgerEntry`] (which borrows), so the
@@ -159,14 +160,17 @@ struct Candidate {
 }
 
 /// Parse a stored transaction row into its pure replay event. A `NULL` kind is read as a sell
-/// (4.7 was the only pre-6.3 writer and always wrote sells; nothing else ever produced NULL);
-/// any other unknown kind — or an unparseable stored decimal — is a corrupt row and refuses.
+/// (4.7 was the only pre-6.3 writer and always wrote sells; nothing else ever produced NULL); an
+/// unparseable stored decimal is a corrupt row and refuses ([`MSG_SAVE_FAILED`]). Issue #85: a kind
+/// this build does not recognise is a forward-compat case (a journal written by a newer version, not
+/// corruption) — it refuses with [`MSG_LEDGER_UNKNOWN_KIND`], which NAMES the cause rather than
+/// masquerading as a generic save failure.
 fn event_of(item: &TransactionItem) -> Result<LedgerEvent, String> {
     let kind = match item.kind.as_deref() {
         Some(KIND_BUY) => LedgerEventKind::Buy,
         Some(KIND_DIVIDEND) => LedgerEventKind::Dividend,
         Some("sell") | None => LedgerEventKind::Sell,
-        Some(_) => return Err(MSG_SAVE_FAILED.to_string()),
+        Some(_) => return Err(MSG_LEDGER_UNKNOWN_KIND.to_string()),
     };
     let dec = |s: &str| Decimal::from_str_exact(s).map_err(|_| MSG_SAVE_FAILED.to_string());
     Ok(LedgerEvent {
@@ -858,5 +862,44 @@ impl JournalState {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use steadyinvest_contract::Timestamp;
+
+    fn tx(kind: Option<&str>) -> TransactionItem {
+        TransactionItem {
+            id: Uuid::nil(),
+            holding_id: Uuid::nil(),
+            occurred_at: Timestamp("2026-07-05T00:00:00Z".to_string()),
+            quantity: "10".to_string(),
+            unit_price: "100".to_string(),
+            fees: "0".to_string(),
+            currency: "CHF".to_string(),
+            kind: kind.map(str::to_string),
+            rationale: None,
+            created_at: Timestamp("2026-07-05T00:00:00Z".to_string()),
+        }
+    }
+
+    /// Issue #85: a transaction `kind` this build does not recognise (a newer-version row) refuses
+    /// with the SPECIFIC forward-compat notice — never the generic `MSG_SAVE_FAILED` that hid the
+    /// cause — while every known kind (incl. a NULL = legacy sell) still replays.
+    #[test]
+    fn event_of_names_an_unknown_kind_not_a_generic_save_failure() {
+        assert_eq!(
+            event_of(&tx(Some("a_future_kind"))),
+            Err(MSG_LEDGER_UNKNOWN_KIND.to_string())
+        );
+        assert!(event_of(&tx(Some(KIND_BUY))).is_ok());
+        assert!(event_of(&tx(Some(KIND_DIVIDEND))).is_ok());
+        assert!(event_of(&tx(Some("sell"))).is_ok());
+        assert!(
+            event_of(&tx(None)).is_ok(),
+            "a NULL kind replays as a legacy sell"
+        );
     }
 }
