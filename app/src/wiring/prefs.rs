@@ -176,16 +176,19 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         let path = config_path.clone();
         ui.global::<Prefs>()
             .on_default_trailing_stop_pct_changed(move |value| {
+                let ui = ui_weak.unwrap();
                 let value = value.trim();
-                // Empty clears the default; otherwise ignore a malformed percent (parse-guard).
+                // Empty clears the default; a malformed percent is REFUSED with a named notice (issue
+                // #88 — no longer a silent swallow; the panel re-syncs its field to the effective value).
                 let stored = if value.is_empty() {
                     None
                 } else if config::is_valid_trailing_stop_pct(value) {
                     Some(value.to_string())
                 } else {
+                    ui.global::<Prefs>()
+                        .set_risk_settings_status(crate::state::MSG_TRAILING_STOP_INVALID.into());
                     return;
                 };
-                let ui = ui_weak.unwrap();
                 config.borrow_mut().default_trailing_stop_pct = stored;
                 persist(path.as_ref(), &config.borrow());
                 ui.global::<Prefs>().set_default_trailing_stop_pct(
@@ -195,6 +198,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                         .unwrap_or_default()
                         .into(),
                 );
+                ui.global::<Prefs>().set_risk_settings_status("".into());
             });
     }
     // ── Story 6.4 (FR41) — the default dividend withholding rate. "" resets to the pinned 35. ──
@@ -204,22 +208,25 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         let path = config_path.clone();
         ui.global::<Prefs>()
             .on_withholding_rate_pct_changed(move |value| {
+                let ui = ui_weak.unwrap();
                 let value = value.trim();
-                // Empty resets to the default; otherwise ignore a malformed/out-of-range percent
-                // (parse-guard — the accessor validates [0, 100]).
+                // Empty resets to the default; a malformed/out-of-range percent is REFUSED with a
+                // named notice (issue #88 — no longer a silent swallow; the field re-syncs after).
                 let stored = if value.is_empty() {
                     None
                 } else if config::is_valid_withholding_rate_pct(value) {
                     Some(value.to_string())
                 } else {
+                    ui.global::<Prefs>()
+                        .set_risk_settings_status(crate::state::MSG_WITHHOLDING_INVALID.into());
                     return;
                 };
-                let ui = ui_weak.unwrap();
                 config.borrow_mut().withholding_rate_pct = stored;
                 persist(path.as_ref(), &config.borrow());
                 ui.global::<Prefs>().set_withholding_rate_pct(
                     config.borrow().withholding_rate_pct_or_default().into(),
                 );
+                ui.global::<Prefs>().set_risk_settings_status("".into());
             });
     }
     // ── Story 6.7 (FR45) — the concentration threshold. "" resets to the default (50); else

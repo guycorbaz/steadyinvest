@@ -514,7 +514,13 @@ export component SettingsScreen inherits Rectangle {
                     ActionButton {
                         label: @tr("Enregistrer");
                         enabled: true;
-                        clicked => { Prefs.default-trailing-stop-pct-changed(stop-panel.draft); }
+                        // Issue #88: after the handler runs, re-sync the field to the effective value —
+                        // the two-way `text <=> draft` severed the declarative binding, so a normalized
+                        // save (or a refused invalid entry) would otherwise never refresh the field.
+                        clicked => {
+                            Prefs.default-trailing-stop-pct-changed(stop-panel.draft);
+                            stop-panel.draft = Prefs.default-trailing-stop-pct;
+                        }
                     }
                     ActionButton {
                         label: @tr("Effacer");
@@ -545,7 +551,12 @@ export component SettingsScreen inherits Rectangle {
                     ActionButton {
                         label: @tr("Enregistrer");
                         enabled: true;
-                        clicked => { Prefs.withholding-rate-pct-changed(withholding-panel.draft); }
+                        // Issue #88: re-sync the field to the effective value after the handler (see the
+                        // trailing-stop panel — the two-way binding severs the declarative refresh).
+                        clicked => {
+                            Prefs.withholding-rate-pct-changed(withholding-panel.draft);
+                            withholding-panel.draft = Prefs.withholding-rate-pct;
+                        }
                     }
                 }
             }

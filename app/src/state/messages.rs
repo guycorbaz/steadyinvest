@@ -198,6 +198,14 @@ pub const MSG_FX_FUTURE_DATE: &str =
 /// concentration threshold is not a percentage strictly between 0 and 100; nothing is written.
 pub const MSG_CONCENTRATION_INVALID: &str =
     "Le seuil de concentration doit être un pourcentage entre 0 et 100 ; rien n'a été enregistré.";
+/// Issue #88: the default trailing-stop percentage was not a valid percent — the setting is unchanged
+/// and the field returns to the effective value (no longer a silent swallow). Fact-stating (posture).
+pub const MSG_TRAILING_STOP_INVALID: &str =
+    "Le seuil suiveur doit être un pourcentage entre 0 et 100 ; le réglage n'a pas changé.";
+/// Issue #88: the default dividend-withholding rate was not a valid percent — the setting is unchanged
+/// and the field returns to the effective value (no longer a silent swallow). Fact-stating (posture).
+pub const MSG_WITHHOLDING_INVALID: &str =
+    "La retenue à la source doit être un pourcentage entre 0 et 100 ; le réglage n'a pas changé.";
 /// Diversify-by-size table refusal that NAMES the offending field (issue #96) — fact-stating,
 /// posture-gated. The table commits whole or not at all; `{field}` is a static French field label (a
 /// neutral noun, spliced by [`size_field_invalid_message`]) so the notice points at the one input to
@@ -524,6 +532,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_FX_INVALID_CURRENCY,
     MSG_FX_FUTURE_DATE,
     MSG_CONCENTRATION_INVALID,
+    MSG_TRAILING_STOP_INVALID,
+    MSG_WITHHOLDING_INVALID,
     MSG_SIZE_FIELD_INVALID,
     MSG_SIZE_PAIR_CROSSED,
     MSG_PROVIDER_FALLBACK,
