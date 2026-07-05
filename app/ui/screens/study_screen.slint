@@ -621,8 +621,8 @@ export component StudyScreen inherits Rectangle {
                 }
                 // Editable raw-input rows (sales · pre-tax profit · book value), paired with their
                 // label by index — the row order is fixed by `viewmodel/form.rs`.
-                MgmtInputRow { label: @tr("Ventes"); mgmt: Studies.mgmt-rows[0]; label-width: root.col-label; stat-width: root.col-stat; }
-                MgmtInputRow { label: @tr("Bénéfice avant impôt"); mgmt: Studies.mgmt-rows[1]; label-width: root.col-label; stat-width: root.col-stat; }
+                MgmtInputRow { label: @tr("Ventes (millions)"); mgmt: Studies.mgmt-rows[0]; label-width: root.col-label; stat-width: root.col-stat; }
+                MgmtInputRow { label: @tr("Bénéfice avant impôt (millions)"); mgmt: Studies.mgmt-rows[1]; label-width: root.col-label; stat-width: root.col-stat; }
                 MgmtInputRow { label: @tr("Valeur comptable / action"); mgmt: Studies.mgmt-rows[2]; label-width: root.col-label; stat-width: root.col-stat; }
                 // Computed management ratios — now the engine's (Story 2.6). Per-year cells align to
                 // the year columns; the empty-study case (no computed values yet) keeps em-dash cells
