@@ -86,6 +86,12 @@ pub struct Judgment {
     /// The security's current price — the zone/verdict anchor.
     #[serde(default)]
     pub current_price: Option<Money>,
+    /// Trailing-twelve-months EPS (Issue #113) — the current-P/E denominator (spec §3/§9:
+    /// `current_price / TTM EPS`). A **current market fact** (like `current_price`), populated by a
+    /// provider fetch; `None` when unknown → current P/E stays honestly unknown. Additive
+    /// `#[serde(default)]` optional — no `SCHEMA_VERSION` bump (contract forward-compat policy).
+    #[serde(default)]
+    pub ttm_eps: Option<Money>,
     /// §4 option (d) numerator + §5 present-yield input: the present full-year dividend per share.
     /// Added in Story 2.2 (issue #14).
     #[serde(default)]
@@ -157,6 +163,7 @@ mod tests {
             recent_severe_low: None,
             current_price: None,
             present_full_year_dividend: None,
+            ttm_eps: None,
         }
     }
 

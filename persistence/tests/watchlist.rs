@@ -188,6 +188,7 @@ fn deleting_a_linked_study_clears_the_watchlist_link() {
             recent_severe_low: None,
             current_price: None,
             present_full_year_dividend: None,
+            ttm_eps: None,
         },
         rationale: None,
         created_at: ts("2026-06-27T00:00:00Z"),

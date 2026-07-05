@@ -41,6 +41,7 @@ fn main() {
         recent_severe_low: None,
         current_price: Some(money("80")),
         present_full_year_dividend: Some(money("2")),
+        ttm_eps: None,
     };
     let mut study = Study::new(
         Uuid::from_u128(0x56),

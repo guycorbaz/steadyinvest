@@ -73,6 +73,7 @@ fn study(id: u128, journal_id: Uuid, ticker: &str, created_at: &str) -> Study {
             recent_severe_low: Some(money("72.40")),
             current_price: Some(money("104.00")),
             present_full_year_dividend: Some(money("2.95")),
+            ttm_eps: None,
         },
         rationale: Some("Margin trend noted; demand steady.".to_string()),
         created_at: ts(created_at),

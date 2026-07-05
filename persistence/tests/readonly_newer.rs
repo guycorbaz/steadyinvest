@@ -33,6 +33,7 @@ fn minimal_study(id: u128, journal_id: Uuid) -> Study {
             recent_severe_low: None,
             current_price: None,
             present_full_year_dividend: None,
+            ttm_eps: None,
         },
         rationale: None,
         created_at: ts("2026-06-12T08:30:00Z"),

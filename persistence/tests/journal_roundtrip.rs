@@ -57,6 +57,7 @@ fn judgment() -> Judgment {
         recent_severe_low: Some(money("72.40")),
         current_price: Some(money("104.00")),
         present_full_year_dividend: Some(money("2.95")),
+        ttm_eps: None,
     }
 }
 
@@ -193,6 +194,7 @@ fn varied_studies_round_trip_exactly() {
         recent_severe_low: None,
         current_price: None,
         present_full_year_dividend: None,
+        ttm_eps: None,
     };
 
     for s in [&full, &no_years, &bare_judgment] {

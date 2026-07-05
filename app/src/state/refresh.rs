@@ -92,6 +92,9 @@ impl JournalState {
         // Story 4.4 (AC2/AC6): the latest `/eod` close is the present market price for the §4 zone.
         // `None` for a provider with no current price → `current_price` left untouched (pre-4.4 shape).
         let latest_price = fetched.latest_price;
+        // Issue #113: the trailing-twelve-months EPS (current-P/E denominator), a present market fact
+        // riding alongside the price (not part of the canonical annual calc).
+        let ttm_eps = fetched.ttm_eps;
         let report = std::cell::Cell::new(RefreshReport::default());
         let report_ref = &report;
         self.mutate_study(study_id, move |study| {
@@ -128,6 +131,12 @@ impl JournalState {
             // moved (a price-only refresh). `None` → unchanged.
             if let Some(price) = latest_price {
                 study.judgment.current_price = Some(Money::from(price));
+            }
+            // Issue #113: fill the trailing-twelve-months EPS (the current-P/E denominator) — another
+            // present *market fact* like `current_price`, in the SAME mutation. `None` → unchanged
+            // (a provider that reports no TTM keeps any prior value).
+            if let Some(ttm) = ttm_eps {
+                study.judgment.ttm_eps = Some(Money::from(ttm));
             }
             report_ref.set(acc);
         })?;
