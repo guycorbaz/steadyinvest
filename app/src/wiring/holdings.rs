@@ -85,10 +85,11 @@ pub(crate) fn refresh_holdings(
     let rows: Vec<HoldingRow> = items
         .iter()
         .map(|h| {
-            // Auto-match the holding to the most-recent saved study of the SAME ticker (the watchlist
-            // rule); `None` → a neutral "no linked study" row, never an error.
+            // Auto-match the holding to the most-recent saved study of the same ticker AND currency
+            // (issue #81 — a cross-currency study must not lend this row its price / stop); `None` →
+            // a neutral "no linked study" row, never an error.
             let study = state
-                .study_id_for_ticker(&h.security_ticker)
+                .study_id_for_ticker_in_currency(&h.security_ticker, h.currency.as_deref())
                 .and_then(|sid| state.get_study(sid));
             let f = freshness
                 .get(&h.security_ticker.to_uppercase())
@@ -770,8 +771,12 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     .list_holdings()
                     .into_iter()
                     .filter_map(|h| {
+                        // Issue #81: the price-refresh target is the study in the holding's currency.
                         state
-                            .study_id_for_ticker(&h.security_ticker)
+                            .study_id_for_ticker_in_currency(
+                                &h.security_ticker,
+                                h.currency.as_deref(),
+                            )
                             .map(|sid| (sid, h.security_ticker))
                     })
                     .filter(|(_, ticker)| seen.insert(ticker.to_uppercase()))

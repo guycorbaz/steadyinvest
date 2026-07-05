@@ -307,7 +307,9 @@ impl JournalState {
             .find(|h| h.id == holding_id)
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
         let reference_price = self
-            .study_id_for_ticker(&holding.security_ticker)
+            // Issue #81: match the study in the holding's own currency (a cross-currency study must
+            // not seed this stop level).
+            .study_id_for_ticker_in_currency(&holding.security_ticker, holding.currency.as_deref())
             .and_then(|sid| self.get_study(sid))
             .and_then(|s| s.judgment.current_price)
             .map(|m| m.as_decimal())
@@ -340,13 +342,24 @@ impl JournalState {
         if self.read_only {
             return Ok(()); // a read-only refresh simply doesn't ratchet — never an error
         }
-        let Some(ticker) = self.get_study(study_id).map(|s| s.security_ticker) else {
+        let Some((ticker, study_currency)) = self
+            .get_study(study_id)
+            .map(|s| (s.security_ticker, s.native_currency))
+        else {
             return Ok(());
         };
         let targets: Vec<(Uuid, Decimal, Option<Decimal>)> = self
             .list_holdings()
             .into_iter()
-            .filter(|h| h.security_ticker.eq_ignore_ascii_case(&ticker))
+            // Issue #81: ratchet only holdings in the study's OWN currency — the study's price is in
+            // that currency, so a cross-currency same-ticker holding must not be ratcheted with it. A
+            // holding that declares no currency still ratchets (today's behaviour).
+            .filter(|h| {
+                h.security_ticker.eq_ignore_ascii_case(&ticker)
+                    && h.currency
+                        .as_deref()
+                        .is_none_or(|c| c.eq_ignore_ascii_case(&study_currency))
+            })
             .filter_map(|h| {
                 let pct = h
                     .trailing_stop_pct
