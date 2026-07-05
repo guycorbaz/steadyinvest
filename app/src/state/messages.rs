@@ -213,6 +213,17 @@ pub fn provider_fallback_notice(provider: crate::provider::ProviderChoice) -> St
     MSG_PROVIDER_FALLBACK.replace("{p}", provider.display_name())
 }
 
+/// Issue #101: appended to a fetch-FAILURE notice when a configured fallback was skipped because its
+/// provider has no stored key — so the user learns the failover they set up did not run (the shipped
+/// chain was silently single-member). `{p}` is the provider's display name. Fact-stating (posture).
+pub const MSG_FALLBACK_NO_KEY: &str =
+    "Le fournisseur de repli {p} est sans clé : il n'a pas été utilisé.";
+
+/// Substitute the skipped-fallback provider into [`MSG_FALLBACK_NO_KEY`].
+pub fn fallback_no_key_notice(provider: crate::provider::ProviderChoice) -> String {
+    MSG_FALLBACK_NO_KEY.replace("{p}", provider.display_name())
+}
+
 /// Substitute the counts into [`MSG_FX_REFRESHED`].
 pub fn fx_refreshed_message(landed: usize, total: usize) -> String {
     MSG_FX_REFRESHED
@@ -510,6 +521,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SIZE_FIELD_INVALID,
     MSG_SIZE_PAIR_CROSSED,
     MSG_PROVIDER_FALLBACK,
+    MSG_FALLBACK_NO_KEY,
     MSG_PORTFOLIO_INVALID_NAME,
     MSG_PORTFOLIO_HAS_HOLDINGS,
     MSG_PORTFOLIO_LAST,
