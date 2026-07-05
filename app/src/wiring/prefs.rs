@@ -272,43 +272,45 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_size_table_changed(
             move |small_max, medium_max, target_small, target_medium, target_large| {
                 let ui = ui_weak.unwrap();
-                let refuse = || {
-                    ui_weak
-                        .unwrap()
-                        .global::<Prefs>()
-                        .set_risk_settings_status(crate::state::MSG_SIZE_TABLE_INVALID.into());
+                let set_status = |msg: String| {
+                    ui.global::<Prefs>().set_risk_settings_status(msg.into());
                 };
-                // "" → None (that field's pinned default); a non-empty field must validate.
-                let bound = |v: &str, ok: &mut bool| {
+                // "" → None (that field's pinned default); a non-empty field must validate. Issue #96:
+                // on a bad value, record the FIRST offending field's label so the notice names it.
+                let bound = |v: &str, label: &'static str, bad: &mut Option<&'static str>| {
                     let v = v.trim();
                     if v.is_empty() {
                         None
                     } else if config::is_valid_size_bound(v) {
                         Some(v.to_string())
                     } else {
-                        *ok = false;
+                        if bad.is_none() {
+                            *bad = Some(label);
+                        }
                         None
                     }
                 };
-                let target = |v: &str, ok: &mut bool| {
+                let target = |v: &str, label: &'static str, bad: &mut Option<&'static str>| {
                     let v = v.trim();
                     if v.is_empty() {
                         None
                     } else if config::is_valid_size_target_pct(v) {
                         Some(v.to_string())
                     } else {
-                        *ok = false;
+                        if bad.is_none() {
+                            *bad = Some(label);
+                        }
                         None
                     }
                 };
-                let mut ok = true;
-                let small = bound(&small_max, &mut ok);
-                let medium = bound(&medium_max, &mut ok);
-                let t_small = target(&target_small, &mut ok);
-                let t_medium = target(&target_medium, &mut ok);
-                let t_large = target(&target_large, &mut ok);
-                if !ok {
-                    refuse();
+                let mut bad: Option<&'static str> = None;
+                let small = bound(&small_max, "Borne petite", &mut bad);
+                let medium = bound(&medium_max, "Borne moyenne", &mut bad);
+                let t_small = target(&target_small, "Cible petite", &mut bad);
+                let t_medium = target(&target_medium, "Cible moyenne", &mut bad);
+                let t_large = target(&target_large, "Cible grande", &mut bad);
+                if let Some(label) = bad {
+                    set_status(crate::state::size_field_invalid_message(label));
                     return;
                 }
                 // Cross-check on the EFFECTIVE pair (entered or default): small < medium.
@@ -321,7 +323,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 ) {
                     (Ok(s), Ok(m)) if s < m => {}
                     _ => {
-                        refuse();
+                        set_status(crate::state::MSG_SIZE_PAIR_CROSSED.to_string());
                         return;
                     }
                 }
