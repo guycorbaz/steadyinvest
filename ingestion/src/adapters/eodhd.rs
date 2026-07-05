@@ -258,7 +258,11 @@ fn book_value_per_share(year: Option<&Value>) -> Option<Decimal> {
     if shares.is_zero() {
         return None;
     }
-    equity.checked_div(shares)
+    // Issue #119: `equity / shares` carries ~28 spurious decimals from the division; a book-value-
+    // PER-SHARE figure is a dollars-per-share amount — round to 4 dp (plenty for the §2 ROE) so the
+    // grid cell reads "12.4972", not "12.49724842767295...". The other provider figures are integers,
+    // so this is the only derived ratio that needs it.
+    equity.checked_div(shares).map(|d| d.round_dp(4))
 }
 
 // ── small JSON helpers ────────────────────────────────────────────────────────────────────────
