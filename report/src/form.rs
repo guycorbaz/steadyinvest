@@ -111,10 +111,20 @@ pub fn to_judgment_inputs(judgment: &Judgment) -> JudgmentInputs {
     }
 }
 
-/// v1 manual study carries no quarterly data → [`QuarterlyObservations::empty`] (current P/E /
-/// relative value are honestly `unknown`; quarterly capture is a later story / Epic 3).
-pub fn to_observations(_study: &Study) -> QuarterlyObservations {
-    QuarterlyObservations::empty()
+/// Build the quarterly observations the engine's current-P/E needs (Issue #113). A provider fetch
+/// fills `judgment.ttm_eps` (EODHD's TTM `EarningsShare`); the engine sums a 4-quarter array for the
+/// TTM denominator, so we feed it as `[ttm, 0, 0, 0]` (Σ = ttm). `None` → all-absent (current P/E /
+/// relative value stay honestly `unknown`, e.g. a manual study or a provider with no TTM). The other
+/// quarterly fields (the quarter-over-quarter §3 trend) are not fetched yet.
+pub fn to_observations(study: &Study) -> QuarterlyObservations {
+    use rust_decimal::Decimal;
+    QuarterlyObservations {
+        ttm_quarterly_eps: study
+            .judgment
+            .ttm_eps
+            .map(|t| [t.as_decimal(), Decimal::ZERO, Decimal::ZERO, Decimal::ZERO]),
+        ..QuarterlyObservations::empty()
+    }
 }
 
 /// One data `Cell` → [`GateState`]: `None` (absent cell) → `Missing`; `(Validated, Current)` →
@@ -263,6 +273,7 @@ mod tests {
             recent_severe_low: None,
             current_price: Some(money_of("80")),
             present_full_year_dividend: Some(money_of("2")),
+            ttm_eps: None,
         };
         let mut s = Study::new(
             Uuid::from_u128(0x5_6),

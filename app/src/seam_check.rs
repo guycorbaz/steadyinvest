@@ -98,6 +98,7 @@ mod tests {
             recent_severe_low: None,
             current_price: Some(money("25")),
             present_full_year_dividend: None,
+            ttm_eps: None,
         };
         study
     }

@@ -31,6 +31,7 @@ fn judgment() -> Judgment {
         recent_severe_low: None,
         current_price: None,
         present_full_year_dividend: None,
+        ttm_eps: None,
     }
 }
 

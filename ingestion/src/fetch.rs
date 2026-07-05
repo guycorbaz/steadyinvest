@@ -22,6 +22,9 @@ pub struct FetchedFinancials {
     pub canonical: CanonicalFinancials,
     pub digest: String,
     pub latest_price: Option<Decimal>,
+    /// Trailing-twelve-months EPS (Issue #113) — the current-P/E denominator. A present market fact
+    /// (like `latest_price`), excluded from `digest` (a moving figure must not churn the hash).
+    pub ttm_eps: Option<Decimal>,
 }
 
 /// Which field a fetch serves (Story 6.9, FR26) — the fallback chain is configured PER field
@@ -142,6 +145,7 @@ pub async fn fetch_canonical(
     let RawFetch {
         financials,
         latest_price,
+        ttm_eps,
     } = provider.fetch_fundamentals(ticker, api_key).await?;
     let canonical = normalize(financials)?;
     let digest = dependency_digest(provider.tag(), ticker, &canonical);
@@ -149,6 +153,7 @@ pub async fn fetch_canonical(
         canonical,
         digest,
         latest_price,
+        ttm_eps,
     })
 }
 
@@ -232,6 +237,8 @@ pub struct FakeProvider {
     /// The canned BASE→QUOTE rate `fetch_fx_rate` reports (Story 6.5) — `None` = "no quote for the
     /// pair", the honest provider answer; the canned `result`'s error still wins.
     fx_rate: Option<Decimal>,
+    /// The canned trailing-twelve-months EPS (Issue #113) — drives current-P/E tests.
+    ttm_eps: Option<Decimal>,
 }
 
 impl FakeProvider {
@@ -241,6 +248,7 @@ impl FakeProvider {
             result,
             latest_price: None,
             fx_rate: None,
+            ttm_eps: None,
         }
     }
 
@@ -253,6 +261,7 @@ impl FakeProvider {
             result,
             latest_price,
             fx_rate: None,
+            ttm_eps: None,
         }
     }
 
@@ -260,6 +269,12 @@ impl FakeProvider {
     /// Builder-style so the existing constructors stay untouched.
     pub fn with_fx_rate(mut self, fx_rate: Option<Decimal>) -> Self {
         self.fx_rate = fx_rate;
+        self
+    }
+
+    /// Give the fake a canned TTM EPS (Issue #113 — drives current-P/E tests). Builder-style.
+    pub fn with_ttm_eps(mut self, ttm_eps: Option<Decimal>) -> Self {
+        self.ttm_eps = ttm_eps;
         self
     }
 }
@@ -273,6 +288,7 @@ impl MarketDataProvider for FakeProvider {
         self.result.clone().map(|financials| RawFetch {
             financials,
             latest_price: self.latest_price,
+            ttm_eps: self.ttm_eps,
         })
     }
 

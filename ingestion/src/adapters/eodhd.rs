@@ -75,9 +75,14 @@ impl MarketDataProvider for EodhdProvider {
         // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
         // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
         let latest_price = latest_eod_close(&prices);
+        // Issue #113: the trailing-twelve-months EPS (the current-P/E denominator) — EODHD's own TTM
+        // figure `Highlights.EarningsShare` (verified = the sum of the last 4 reported quarters, and it
+        // skips the not-yet-reported current quarter). A present market fact, not an annual figure.
+        let ttm_eps = dec(fundamentals.pointer("/Highlights/EarningsShare"));
         Ok(RawFetch {
             financials,
             latest_price,
+            ttm_eps,
         })
     }
 

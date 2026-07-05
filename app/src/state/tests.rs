@@ -107,6 +107,7 @@ fn fetched_custom(
         canonical: normalize(raw).expect("the test raw normalizes"),
         digest: digest.to_string(),
         latest_price: None,
+        ttm_eps: None,
     }
 }
 
@@ -196,6 +197,7 @@ fn provider_fetch_drops_the_in_progress_year_without_annual_statements() {
         .expect("normalizes"),
         digest: "d109".to_string(),
         latest_price: None,
+        ttm_eps: None,
     };
 
     state.apply_provider_refresh(id, &fetched).unwrap();
@@ -210,6 +212,34 @@ fn provider_fetch_drops_the_in_progress_year_without_annual_statements() {
         years,
         vec![2021, 2022, 2023, 2024],
         "the in-progress year (no sales) is dropped — analysis uses complete years only"
+    );
+}
+
+/// Issue #113: a fetch that carries the latest price + the trailing-twelve-months EPS lets the engine
+/// compute the current P/E (`current_price / TTM`). The TTM is stored on the judgment (a market fact,
+/// like current_price); `to_observations` feeds it to the engine as the current-P/E denominator.
+#[test]
+fn a_fetch_with_ttm_eps_computes_the_current_pe() {
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x4D, "2026-06-20T13:00:00Z");
+    let id = state.create_study("AAPL", "CHF").unwrap();
+    let fetched = FetchedFinancials {
+        latest_price: Some(rust_decimal::Decimal::new(100, 0)), // current price 100
+        ttm_eps: Some(rust_decimal::Decimal::new(5, 0)),        // TTM EPS 5 → current P/E = 20
+        ..fetched_for(&[2020, 2021, 2022, 2023, 2024])
+    };
+    state.apply_provider_refresh(id, &fetched).unwrap();
+    let study = state.get_study(id).unwrap();
+    assert_eq!(
+        study.judgment.ttm_eps.map(|m| m.as_decimal()),
+        Some(rust_decimal::Decimal::new(5, 0)),
+        "the TTM EPS is stored on the judgment (a market fact, like current_price)"
+    );
+    let snap = crate::viewmodel::engine::build_snapshot(&study).expect("normalizes");
+    assert_eq!(
+        snap.outputs().valuation.current_pe,
+        Some(rust_decimal::Decimal::new(20, 0)),
+        "#113: current P/E = current_price(100) / TTM(5) = 20"
     );
 }
 

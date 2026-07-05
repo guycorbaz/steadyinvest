@@ -84,6 +84,8 @@ impl MarketDataProvider for TwelveDataProvider {
         Ok(RawFetch {
             financials,
             latest_price,
+            // Issue #113: Twelve Data's fundamentals are None by design (Story 7.4) — no TTM EPS either.
+            ttm_eps: None,
         })
     }
 

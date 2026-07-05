@@ -256,6 +256,8 @@ fn judgment_from(j: &FixtureJudgment) -> Judgment {
         recent_severe_low: j.recent_severe_low.map(Money::from),
         current_price: j.current_price.map(Money::from),
         present_full_year_dividend: j.present_full_year_dividend.map(Money::from),
+        // Issue #113: golden fixtures carry no TTM EPS — current P/E stays unknown, as before.
+        ttm_eps: None,
     }
 }
 

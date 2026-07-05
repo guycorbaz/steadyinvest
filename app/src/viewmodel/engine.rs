@@ -816,6 +816,7 @@ mod tests {
             recent_severe_low: None,
             current_price: Some(money("60")),
             present_full_year_dividend: Some(money("2")),
+            ttm_eps: None,
         }
     }
 

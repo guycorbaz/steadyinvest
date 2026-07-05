@@ -579,6 +579,7 @@ mod tests {
             recent_severe_low: None,
             current_price: Some(money_of("80")),
             present_full_year_dividend: Some(money_of("2")),
+            ttm_eps: None,
         };
         let mut s = Study::new(
             Uuid::from_u128(0x5_6),

@@ -124,6 +124,7 @@ mod tests {
             recent_severe_low: None,
             current_price: Some(Money::from(Decimal::from_str_exact("100.50").unwrap())),
             present_full_year_dividend: None,
+            ttm_eps: None,
         }
     }
 

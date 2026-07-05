@@ -141,6 +141,7 @@ fn judgment() -> impl Strategy<Value = Judgment> {
                     recent_severe_low: severe_low,
                     current_price: cur,
                     present_full_year_dividend: dividend,
+                    ttm_eps: None,
                 }
             },
         )
