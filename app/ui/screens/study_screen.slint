@@ -22,6 +22,7 @@ import { JudgmentField } from "../components/judgment_field.slint";
 import { ZoneBar } from "../components/zone_bar.slint";
 import { VerdictBar } from "../components/verdict_badge.slint";
 import { GrowthChart } from "../components/growth_chart.slint";
+import { PeHistoryChart } from "../components/pe_history_chart.slint";
 import { ScenarioCompare } from "../components/scenario_compare.slint";
 import { RationaleNote } from "../components/rationale_note.slint";
 
@@ -707,6 +708,11 @@ export component StudyScreen inherits Rectangle {
                 PeSummaryRow { label: @tr("PER moyen"); value: Studies.pe-computed.avg-pe; }
                 PeSummaryRow { label: @tr("PER courant"); value: Studies.pe-computed.current-pe; }
                 PeSummaryRow { label: @tr("Valeur relative"); value: Studies.pe-computed.relative-value; }
+
+                // Issue #115: the draggable P/E-history chart — judge the future high/low P/E by
+                // LOOKING at the historical range. The two judged levels drag vertically; the exact
+                // fields below mirror them (FR31).
+                PeHistoryChart { }
 
                 // The §3 judged-multiple judgment inputs (exact-value entry → persist → recompute).
                 HorizontalLayout {

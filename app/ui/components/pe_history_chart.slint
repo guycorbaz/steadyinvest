@@ -1,0 +1,240 @@
+// The §3 interactive P/E-history chart (issue #115) — the natural extension of the §1 signature
+// interaction (Story 2.8) to §3. The historical per-year high/low P/E cross as `Path` `commands`
+// polylines on a LINEAR P/E viewbox (unlike §1's semi-log EPS scale), and the two judged average
+// P/E levels are full-width HORIZONTAL lines the user DRAGS vertically. A judged level not yet set
+// is seeded at the 5-yr historical average and drawn dimmed (a start point, never a value — as §1).
+//
+// Reuse: the §1 `ContextChip` selector (one handle at a time, both lines drawn) and the right-edge
+// drag strip. drag-start / cancel are shared with §1 (scale-agnostic); move / commit go through the
+// P/E-specific callbacks (`pe-judgment-*`) because the inversion is LINEAR, not log. High solid /
+// low dashed — the same band language as §1. Judged levels are the rose "actor" colour; the
+// historical channel is violet (P/E derives from price). No zones on §1/§3 (UX-DR10).
+
+import { Tokens } from "../tokens.slint";
+import { Studies, PeChartState, AxisTick } from "../state.slint";
+import { ContextChip, LegendItem } from "growth_chart.slint";
+
+export component PeHistoryChart inherits Rectangle {
+    in property <PeChartState> chart: Studies.pe-chart;
+    // Issue #115: the drag edits whichever judged-P/E level the user picked ("high_pe" / "low_pe").
+    property <string> drag-field: Studies.active-pe-judgment;
+    property <bool> low-active: Studies.active-pe-judgment == "low_pe";
+    // The active context's level y / caption — the grip follows the selected line.
+    property <float> active-y: root.low-active ? root.chart.judged-low-y : root.chart.judged-high-y;
+    property <string> active-label: root.low-active ? root.chart.judged-low-label : root.chart.judged-high-label;
+
+    property <length> plot-h: root.chart.chart-h * 1px;
+    property <length> strip-w: Tokens.space-48;
+
+    min-height: root.plot-h + Tokens.row-height + 2 * Tokens.chart-pad;
+
+    // ── Calm empty state (no usable P/E history) — constant geometry, nothing drawn. ──
+    if !root.chart.available: Rectangle {
+        height: root.plot-h;
+        background: Tokens.surface-alt;
+        border-width: Tokens.border;
+        border-color: Tokens.separator;
+        border-radius: Tokens.radius;
+        opacity: 0.4 + 0.6 * Tokens.regime-emphasis;
+        Text {
+            text: @tr("Aucun historique P/E à tracer");
+            color: Tokens.text-low;
+            font-size: Tokens.font-caption;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    if root.chart.available: VerticalLayout {
+        spacing: Tokens.space-4;
+
+        // ── Issue #115: pick which judged P/E level the drag handle edits (one at a time; both stay
+        //    drawn). You judge the future P/E by LOOKING at the historical P/E range. ──
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            alignment: start;
+            padding-left: Tokens.space-32 + Tokens.space-8;
+            Text {
+                text: @tr("Ajuster :");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
+            ContextChip {
+                label: @tr("PER haut moyen");
+                selected: Studies.active-pe-judgment == "high_pe";
+                clicked => { Studies.active-pe-judgment = "high_pe"; }
+            }
+            ContextChip {
+                label: @tr("PER bas moyen");
+                selected: Studies.active-pe-judgment == "low_pe";
+                clicked => { Studies.active-pe-judgment = "low_pe"; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            alignment: stretch;
+
+            // Side axis — the LINEAR P/E ticks at their viewbox-y.
+            Rectangle {
+                width: Tokens.space-32;
+                height: root.plot-h;
+                for tick in root.chart.axis-ticks: Text {
+                    text: tick.label;
+                    color: Tokens.text-mid;
+                    font-family: Tokens.font-numeric;
+                    font-size: Tokens.font-caption;
+                    horizontal-alignment: right;
+                    width: parent.width;
+                    y: tick.y * 1px - self.height / 2;
+                }
+            }
+
+            // The plot area — fixed HEIGHT, stretching WIDTH.
+            Rectangle {
+                horizontal-stretch: 1;
+                height: root.plot-h;
+                background: Tokens.surface;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+                border-radius: Tokens.radius;
+                clip: true;
+
+                // Gridlines at each P/E tick.
+                for tick in root.chart.axis-ticks: Rectangle {
+                    x: 0;
+                    y: tick.y * 1px;
+                    width: parent.width;
+                    height: Tokens.chart-stroke-thin;
+                    background: Tokens.text-low;
+                    opacity: 0.35;
+                }
+
+                // Historical high P/E channel (violet — P/E derives from price).
+                Path {
+                    commands: root.chart.high-pe-commands;
+                    stroke: Tokens.series-price;
+                    stroke-width: Tokens.chart-stroke;
+                    opacity: 0.7;
+                    x: 0;
+                    y: 0;
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: parent.width / 1px;
+                    viewbox-height: root.chart.chart-h;
+                }
+                // Historical low P/E channel.
+                Path {
+                    commands: root.chart.low-pe-commands;
+                    stroke: Tokens.series-price;
+                    stroke-width: Tokens.chart-stroke-thin;
+                    opacity: 0.7;
+                    x: 0;
+                    y: 0;
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: parent.width / 1px;
+                    viewbox-height: root.chart.chart-h;
+                }
+
+                // The judged avg-HIGH-P/E level (solid horizontal). Dimmed when it is only the seed
+                // (5-yr average) or when est-LOW is the active context.
+                if root.chart.judged-high-y >= 0.0: Path {
+                    commands: root.chart.judged-high-commands;
+                    stroke: Tokens.series-eps;
+                    stroke-width: !root.low-active ? Tokens.chart-judgment-stroke : Tokens.chart-stroke;
+                    opacity: root.chart.judged-high-derived ? 0.55 : (!root.low-active ? 1.0 : 0.8);
+                    x: 0;
+                    y: 0;
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: parent.width / 1px;
+                    viewbox-height: root.chart.chart-h;
+                }
+                // The judged avg-LOW-P/E level (dashed horizontal).
+                if root.chart.judged-low-y >= 0.0: Path {
+                    commands: root.chart.judged-low-commands;
+                    stroke: Tokens.series-eps;
+                    stroke-width: root.low-active ? Tokens.chart-judgment-stroke : Tokens.chart-stroke;
+                    opacity: root.chart.judged-low-derived ? 0.55 : (root.low-active ? 1.0 : 0.8);
+                    x: 0;
+                    y: 0;
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: parent.width / 1px;
+                    viewbox-height: root.chart.chart-h;
+                }
+
+                // ── The right-edge drag strip: the grab target for the ACTIVE judged level. ──
+                Rectangle {
+                    x: parent.width - root.strip-w;
+                    width: root.strip-w;
+                    height: parent.height;
+                    background: Tokens.surface-alt.with-alpha(pe-strip.has-hover ? 0.6 : 0.3);
+
+                    // ONE grip + caption, on the active context's judged level.
+                    if root.active-y >= 0.0: Rectangle {
+                        width: Tokens.chart-grip;
+                        height: Tokens.chart-grip;
+                        x: (parent.width - self.width) / 2;
+                        y: root.active-y * 1px - self.height / 2;
+                        background: Tokens.text-high;
+                        border-radius: Tokens.radius;
+                    }
+                    if root.active-y >= 0.0: Text {
+                        text: root.active-label;
+                        color: Tokens.text-high;
+                        font-family: Tokens.font-numeric;
+                        font-size: Tokens.font-caption;
+                        horizontal-alignment: center;
+                        width: parent.width;
+                        y: root.active-y * 1px - self.height - Tokens.space-4;
+                    }
+                    if root.active-y < 0.0: Text {
+                        text: "⇕";
+                        color: Tokens.text-low;
+                        font-size: Tokens.font-h3;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    pe-strip := TouchArea {
+                        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                        moved => {
+                            Studies.pe-judgment-moved(root.drag-field, self.mouse-y);
+                        }
+                        pointer-event(ev) => {
+                            if (ev.kind == PointerEventKind.down) {
+                                Studies.judgment-drag-start();
+                                Studies.judgment-dragging = true;
+                            }
+                            if (ev.kind == PointerEventKind.up) {
+                                Studies.pe-judgment-commit(root.drag-field, self.mouse-y);
+                                Studies.judgment-dragging = false;
+                            }
+                            if (ev.kind == PointerEventKind.cancel) {
+                                Studies.judgment-cancel();
+                                Studies.judgment-dragging = false;
+                            }
+                        }
+                        accessible-role: slider;
+                        accessible-label: root.low-active
+                            ? @tr("PER bas moyen jugé — glisser pour ajuster")
+                            : @tr("PER haut moyen jugé — glisser pour ajuster");
+                        accessible-value: root.active-label;
+                    }
+                }
+            }
+        }
+
+        // ── Legend: the historical P/E channel vs the judged levels. ──
+        HorizontalLayout {
+            spacing: Tokens.space-16;
+            alignment: start;
+            padding-left: Tokens.space-32 + Tokens.space-8;
+            LegendItem { hue: Tokens.series-price; name: @tr("PER historique"); }
+            LegendItem { hue: Tokens.series-eps; name: @tr("PER moyen jugé"); }
+        }
+    }
+}

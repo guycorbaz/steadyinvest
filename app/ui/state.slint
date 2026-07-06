@@ -255,6 +255,32 @@ export struct GrowthChartState {
     axis-max: float,
 }
 
+// ── Issue #115 — the §3 draggable P/E-history chart. The natural extension of the §1 signature
+// interaction to §3: the historical per-year high/low P/E cross as `Path` `commands` polylines on a
+// LINEAR P/E viewbox (unlike §1's semi-log EPS scale), and the two judged average P/E levels are
+// horizontal lines the user DRAGS vertically (high solid, low dashed — same band language as §1).
+// A judged level not yet set is SEEDED at the 5-yr historical average (`avg_high/low_pe`) and drawn
+// dimmed (`derived`) — a starting point, never a committed judgment until dragged (as §1, FR33). Only
+// one handle is grabbed at a time (`active-pe-judgment`); `-1` y = unset. `available == false` → calm.
+export struct PeChartState {
+    available: bool,
+    chart-w: float,
+    chart-h: float,
+    high-pe-commands: string,           // historical per-year HIGH P/E polyline
+    low-pe-commands: string,            // historical per-year LOW P/E polyline
+    axis-ticks: [AxisTick],             // ticks of the LINEAR P/E scale
+    judged-high-commands: string,       // the judged/seed avg-HIGH-P/E level (full-width horizontal, solid)
+    judged-high-y: float,               // viewbox-y of the avg-HIGH-P/E level; -1 = unset
+    judged-high-label: string,
+    judged-high-derived: bool,          // true = only the seed (5-yr avg), drawn dimmed
+    judged-low-commands: string,        // the judged/seed avg-LOW-P/E level (full-width horizontal, dashed)
+    judged-low-y: float,                // viewbox-y of the avg-LOW-P/E level; -1 = unset
+    judged-low-label: string,
+    judged-low-derived: bool,
+    axis-min: float,                    // LINEAR P/E scale bounds — the scale the drag inverts against
+    axis-max: float,
+}
+
 // The confront overlay geometry (Story 5.1) — the recorded §4 forecast band (a shaded rectangle) and
 // the security's actual close trajectory since the decision (a polyline), both Path `commands` on a
 // shared linear-price viewbox. `available == false` → a neutral empty state.
@@ -525,6 +551,10 @@ export global Studies {
     // "est_low_eps". The context selector sets it; the chart shows the grip on that line only (all the
     // lines stay drawn). A pure UI selection — it changes nothing until the user actually drags.
     in-out property <string> active-judgment: "est_high_eps";
+    // ── Issue #115 — the §3 P/E-history chart geometry + its own active drag context ("high_pe" /
+    //    "low_pe"). Separate from the §1 chart: a LINEAR P/E scale, its own draggable judged levels.
+    in-out property <PeChartState> pe-chart;
+    in-out property <string> active-pe-judgment: "high_pe";
     // ── Story 2.9 — undo/redo availability (the controls disable when their stack is empty).
     in-out property <bool> can-undo;
     in-out property <bool> can-redo;
@@ -551,6 +581,13 @@ export global Studies {
     callback judgment-moved(string, length);  // field-key, viewbox-y
     callback judgment-commit(string, length);  // field-key, viewbox-y → persist (pointer up)
     callback judgment-cancel();                // gesture abandoned → revert to saved, no persist
+
+    // ── Issue #115 — the draggable §3 judged-P/E lines. drag-start / cancel are scale-agnostic (they
+    //    only cache / restore the study), so the P/E chart reuses `judgment-drag-start` /
+    //    `judgment-cancel`; only move/commit need their own inversion against the LINEAR P/E scale
+    //    (`pe-chart.axis-min/max`). Field-keys: "high_pe" | "low_pe" (same rail as the numeric fields).
+    callback pe-judgment-moved(string, length);   // field-key, viewbox-y
+    callback pe-judgment-commit(string, length);  // field-key, viewbox-y → persist (pointer up)
 
     // ── Story 2.9 — undo/redo of any judgment or grid edit (snapshot stack). No-op when its stack
     //    is empty; the controls disable on `!can-undo` / `!can-redo`.

@@ -96,6 +96,8 @@ pub(crate) fn push_form(
             )));
             // Story 2.8 — the §1 interactive growth chart geometry (from the SAME coherent frame).
             studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
+            // Issue #115 — the §3 P/E-history chart (historical high/low P/E + draggable judged levels).
+            studies.set_pe_chart(viewmodel::chart::pe_chart(&frame, &study.judgment, format));
             // The study-level (§4) warning key — `low_price_above_current`, anchored near forecast-low.
             studies.set_section4_warning_key(
                 warnings
@@ -129,6 +131,7 @@ pub(crate) fn push_form(
             studies.set_zone_bar(ZoneBarState::default());
             studies.set_verdict(VerdictState::default());
             studies.set_growth_chart(viewmodel::chart::unavailable());
+            studies.set_pe_chart(viewmodel::chart::pe_chart_unavailable());
             studies.set_section4_warning_key(SharedString::new());
             studies.set_notice(state::MSG_NORMALIZE_FAILED.into());
         }
@@ -156,6 +159,8 @@ pub(crate) fn push_live_preview(
         let warnings = engine::plausibility(&frame.plausibility, &outputs.findings, &years);
         studies.set_judgment(engine::judgment_fields(study, format));
         studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
+        // Issue #115 — the §3 P/E line moves live too (a P/E drag or an est-EPS drag both recompute it).
+        studies.set_pe_chart(viewmodel::chart::pe_chart(&frame, &study.judgment, format));
         studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
         studies.set_verdict(engine::verdict_badge(study, snapshot, format));
         // §4/§5 judgment-dependent numbers stay in step with the recolouring bar (review P1) — the

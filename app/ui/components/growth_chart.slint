@@ -17,7 +17,8 @@ import { Tokens } from "../tokens.slint";
 import { Studies, GrowthChartState, AxisTick } from "../state.slint";
 
 // One legend entry (issue #25/#116): a colour swatch matching a series' stroke + its name.
-component LegendItem inherits HorizontalLayout {
+// Exported so the §3 P/E chart (#115) reuses the same legend row.
+export component LegendItem inherits HorizontalLayout {
     in property <color> hue;
     in property <string> name;
     spacing: Tokens.space-4;
@@ -38,7 +39,8 @@ component LegendItem inherits HorizontalLayout {
 
 // Issue #121: one segment of the "what am I adjusting?" selector — a toggle chip naming an EPS
 // forecast context. Selecting it points the single drag handle at that line (all lines stay drawn).
-component ContextChip inherits Rectangle {
+// Exported so the §3 P/E chart (#115) reuses the same context selector.
+export component ContextChip inherits Rectangle {
     in property <string> label;
     in property <bool> selected;
     callback clicked;
