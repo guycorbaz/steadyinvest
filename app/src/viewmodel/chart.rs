@@ -719,8 +719,14 @@ mod tests {
         let s = study(years, judgment(None));
         let frame = build_frame(&s).expect("normalizes");
         let chart = growth_chart(&frame, NumberFormat::Comma);
-        assert!(chart.judgment_y >= 0.0, "the est-high handle is seeded (a start point)");
-        assert!(!chart.judgment_commands.is_empty(), "the seed line is drawn");
+        assert!(
+            chart.judgment_y >= 0.0,
+            "the est-high handle is seeded (a start point)"
+        );
+        assert!(
+            !chart.judgment_commands.is_empty(),
+            "the seed line is drawn"
+        );
         assert!(
             chart.judgment_high_derived,
             "a seed (not a judgment) must be flagged derived so the UI dims it"
@@ -740,7 +746,10 @@ mod tests {
         let s = study(vec![year(2025, "5")], judgment(None));
         let frame = build_frame(&s).expect("normalizes");
         let chart = growth_chart(&frame, NumberFormat::Comma);
-        assert_eq!(chart.judgment_y, -1.0, "one point can't fit a trend → unset");
+        assert_eq!(
+            chart.judgment_y, -1.0,
+            "one point can't fit a trend → unset"
+        );
         assert!(chart.judgment_label.is_empty());
         assert!(chart.judgment_commands.is_empty());
         assert!(!chart.judgment_high_derived);
