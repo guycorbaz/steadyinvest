@@ -14,13 +14,13 @@
 //! chart (UX-DR10); the Buy/Neutral/Sell bands live in the §4 `ZoneBar`.
 
 use rust_decimal::prelude::ToPrimitive;
-use steadyinvest_contract::Money;
+use steadyinvest_contract::{Judgment, Money};
 use steadyinvest_core::method::FORECAST_HORIZON_YEARS;
 use steadyinvest_core::ssg::least_squares_log_eps_band;
 
 use crate::viewmodel::engine::StudyFrame;
 use crate::viewmodel::format::{NumberFormat, format_scaled};
-use crate::{AxisTick, GrowthChartState};
+use crate::{AxisTick, GrowthChartState, PeChartState};
 use steadyinvest_core::rounding::DisplayField;
 
 /// The viewbox the chart is drawn (and dragged) against. The Slint `Path` scales this onto the
@@ -44,6 +44,14 @@ const EPS_DRAG_SCALE: u32 = 2;
 /// Half-size (viewbox px) of the confront single-close marker box — drawn when there's exactly one
 /// cached close, since a lone point can't form a visible polyline (Story 5.1).
 const CONFRONT_MARKER: f32 = 4.0;
+/// Issue #115: the §3 P/E chart is on a LINEAR scale (P/E ranges are modest — a semi-log axis would
+/// over-dramatise). The judged-P/E drag snaps to this many dp; the axis reserves a fraction of its
+/// span as padding, and a nearly-flat P/E history is given at least this many P/E points of span.
+const PE_DRAG_SCALE: u32 = 2;
+const PE_RANGE_PAD: f64 = 0.10;
+const MIN_PE_SPAN: f64 = 5.0;
+/// The linear P/E axis when there is nothing to plot (a calm 0 → 40).
+const PE_AXIS_FALLBACK: (f64, f64) = (0.0, 40.0);
 
 /// Issue #25: the log10 bounds `(lmin, lmax)` of the OWN scale for one series — the data's log range
 /// padded by [`RANGE_PAD_DECADES`], widened to at least [`MIN_RANGE_DECADES`] so a flat series is not
@@ -372,6 +380,206 @@ pub fn unavailable() -> GrowthChartState {
         judgment_low_derived: false,
         axis_min: 1.0,
         axis_max: 200.0,
+    }
+}
+
+// ── Issue #115 — the §3 P/E-history chart (LINEAR scale) ──
+
+/// Linear P/E axis bounds over `values`: the data range floored at 0 (a P/E is never negative),
+/// padded by [`PE_RANGE_PAD`], widened to at least [`MIN_PE_SPAN`] so a flat P/E history is not
+/// stretched to fill. Empty → the [`PE_AXIS_FALLBACK`].
+fn pe_bounds(values: impl IntoIterator<Item = f64>) -> (f64, f64) {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for v in values {
+        if v.is_finite() && v >= 0.0 {
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+    }
+    if !(lo.is_finite() && hi.is_finite()) {
+        return PE_AXIS_FALLBACK;
+    }
+    if hi - lo < MIN_PE_SPAN {
+        let mid = (lo + hi) / 2.0;
+        lo = (mid - MIN_PE_SPAN / 2.0).max(0.0);
+        hi = lo + MIN_PE_SPAN;
+    }
+    let pad = (hi - lo) * PE_RANGE_PAD;
+    ((lo - pad).max(0.0), hi + pad)
+}
+
+/// Map a P/E value to a viewbox-y on the LINEAR scale `[min, max]` (0 = top, `CHART_H` = bottom),
+/// clamped so an off-scale value pins to an edge.
+fn lin_y_for(value: f64, min: f64, max: f64) -> f32 {
+    let t = ((value - min) / (max - min)).clamp(0.0, 1.0);
+    (f64::from(CHART_H) * (1.0 - t)) as f32
+}
+
+/// The judged P/E a drag to viewbox-y `y` sets, on the LINEAR P/E scale `[axis_min, axis_max]`,
+/// snapped to [`PE_DRAG_SCALE`] dp so the line and the exact-value field round-trip to the same
+/// stored number. The §3 analogue of [`judgment_value_for_y`] — but linear, not log.
+pub fn pe_value_for_y(y: f32, axis_min: f64, axis_max: f64) -> Money {
+    let t = (1.0 - (f64::from(y) / f64::from(CHART_H))).clamp(0.0, 1.0);
+    let value = axis_min + t * (axis_max - axis_min);
+    let dec = rust_decimal::Decimal::from_f64_retain(value)
+        .unwrap_or(rust_decimal::Decimal::ONE)
+        .round_dp(PE_DRAG_SCALE);
+    Money::from(dec)
+}
+
+/// A `Path` `commands` polyline for `(x_px, value)` points on the LINEAR scale `[min, max]`.
+fn lin_path_commands(points: &[(f32, f64)], min: f64, max: f64) -> String {
+    let mut s = String::with_capacity(points.len() * 16);
+    for (i, (x, value)) in points.iter().enumerate() {
+        let y = lin_y_for(*value, min, max);
+        s.push_str(if i == 0 { "M " } else { "L " });
+        s.push_str(&format!("{x:.1} {y:.1} "));
+    }
+    s
+}
+
+/// Nice linear ticks (1/2/5 × 10^k step) inside the P/E scale `[min, max]`.
+fn pe_ticks(min: f64, max: f64) -> Vec<AxisTick> {
+    let span = max - min;
+    if span <= 0.0 {
+        return Vec::new();
+    }
+    let raw = span / 5.0;
+    let mag = 10f64.powf(raw.log10().floor());
+    let norm = raw / mag;
+    let step = mag * if norm < 1.5 {
+        1.0
+    } else if norm < 3.0 {
+        2.0
+    } else if norm < 7.0 {
+        5.0
+    } else {
+        10.0
+    };
+    let mut ticks = Vec::new();
+    let mut v = (min / step).ceil() * step;
+    while v <= max + 1e-9 {
+        ticks.push(AxisTick {
+            label: compact_axis_label(v).into(),
+            y: lin_y_for(v, min, max),
+        });
+        v += step;
+    }
+    ticks
+}
+
+/// The §3 P/E-history chart geometry (issue #115): the historical per-year high/low P/E as two
+/// polylines on a LINEAR P/E scale, plus the two judged average-P/E levels as full-width horizontal
+/// lines the user drags vertically (high solid, low dashed — the §1 band language). A level not yet
+/// judged is SEEDED at the 5-yr historical average (`avg_high/low_pe`) and flagged `derived` (drawn
+/// dimmed): a starting point, never a committed judgment until dragged. `core` is untouched.
+pub fn pe_chart(frame: &StudyFrame, judgment: &Judgment, format: NumberFormat) -> PeChartState {
+    let valuation = &frame.snapshot.outputs().valuation;
+    let per = &valuation.per_year;
+    if per.is_empty() {
+        return pe_chart_unavailable();
+    }
+    let n = per.len();
+    let x_of = |i: usize| -> f32 {
+        if n <= 1 {
+            CHART_W / 2.0
+        } else {
+            ((i as f64 / (n as f64 - 1.0)) * f64::from(CHART_W)) as f32
+        }
+    };
+    let pts = |get: fn(&steadyinvest_core::ssg::YearValuation) -> Option<rust_decimal::Decimal>| {
+        per.iter()
+            .enumerate()
+            .filter_map(|(i, yv)| get(yv).and_then(|d| d.to_f64()).map(|v| (x_of(i), v)))
+            .collect::<Vec<(f32, f64)>>()
+    };
+    let high_pts = pts(|yv| yv.high_pe);
+    let low_pts = pts(|yv| yv.low_pe);
+
+    // The judged level: the user's judged value when set, else the 5-yr average seed (drawn dimmed).
+    let judged_high = judgment.judged_avg_high_pe.map(|m| m.as_decimal());
+    let judged_low = judgment.judged_avg_low_pe.map(|m| m.as_decimal());
+    let seed_high = valuation.avg_high_pe;
+    let seed_low = valuation.avg_low_pe;
+    let high_value = judged_high.or(seed_high);
+    let low_value = judged_low.or(seed_low);
+
+    // Linear P/E scale: the historical highs/lows + the STABLE seed levels (so a level below/above the
+    // history stays on-scale). The live JUDGED value is excluded (as §1) so the scale does not shift
+    // as you drag; a drag beyond the padded range clamps at an edge (the numeric field is exact).
+    let scale_vals: Vec<f64> = high_pts
+        .iter()
+        .map(|p| p.1)
+        .chain(low_pts.iter().map(|p| p.1))
+        .chain(seed_high.and_then(|d| d.to_f64()))
+        .chain(seed_low.and_then(|d| d.to_f64()))
+        .collect();
+    let (axis_min, axis_max) = pe_bounds(scale_vals);
+
+    // A judged/seed level → its horizontal line + grip geometry. Solid for high, dashed for low.
+    let level = |judged: Option<rust_decimal::Decimal>,
+                 shown: Option<rust_decimal::Decimal>,
+                 dashed: bool|
+     -> (f32, String, String, bool) {
+        match shown {
+            Some(dec) => {
+                let y = lin_y_for(dec.to_f64().unwrap_or(0.0), axis_min, axis_max);
+                let label = format_scaled(dec, DisplayField::PeRatio, format);
+                let line = if dashed {
+                    dashed_line((0.0, y), (CHART_W, y), 9.0, 6.0)
+                } else {
+                    format!("M 0.0 {y:.1} L {CHART_W:.1} {y:.1} ")
+                };
+                (y, label, line, judged.is_none())
+            }
+            None => (-1.0, String::new(), String::new(), false),
+        }
+    };
+    let (judged_high_y, judged_high_label, judged_high_commands, judged_high_derived) =
+        level(judged_high, high_value, false);
+    let (judged_low_y, judged_low_label, judged_low_commands, judged_low_derived) =
+        level(judged_low, low_value, true);
+
+    PeChartState {
+        available: true,
+        chart_w: CHART_W,
+        chart_h: CHART_H,
+        high_pe_commands: lin_path_commands(&high_pts, axis_min, axis_max).into(),
+        low_pe_commands: lin_path_commands(&low_pts, axis_min, axis_max).into(),
+        axis_ticks: slint::ModelRc::new(slint::VecModel::from(pe_ticks(axis_min, axis_max))),
+        judged_high_commands: judged_high_commands.into(),
+        judged_high_y,
+        judged_high_label: judged_high_label.into(),
+        judged_high_derived,
+        judged_low_commands: judged_low_commands.into(),
+        judged_low_y,
+        judged_low_label: judged_low_label.into(),
+        judged_low_derived,
+        axis_min: axis_min as f32,
+        axis_max: axis_max as f32,
+    }
+}
+
+/// The calm "no P/E history" state (no usable valuation years) — constant geometry, nothing drawn.
+pub fn pe_chart_unavailable() -> PeChartState {
+    PeChartState {
+        available: false,
+        chart_w: CHART_W,
+        chart_h: CHART_H,
+        high_pe_commands: Default::default(),
+        low_pe_commands: Default::default(),
+        axis_ticks: slint::ModelRc::new(slint::VecModel::<AxisTick>::from(Vec::new())),
+        judged_high_commands: Default::default(),
+        judged_high_y: -1.0,
+        judged_high_label: Default::default(),
+        judged_high_derived: false,
+        judged_low_commands: Default::default(),
+        judged_low_y: -1.0,
+        judged_low_label: Default::default(),
+        judged_low_derived: false,
+        axis_min: PE_AXIS_FALLBACK.0 as f32,
+        axis_max: PE_AXIS_FALLBACK.1 as f32,
     }
 }
 
@@ -791,6 +999,80 @@ mod tests {
             "withheld",
             "a missing load-bearing input keeps the zone bar non-full during a drag (FR12)"
         );
+    }
+
+    // ── Issue #115 — the §3 P/E-history chart ──
+
+    /// The linear P/E inverse round-trips with the forward map and clamps a past-edge drag to the
+    /// axis bound (never beyond), snapped to 2 dp.
+    #[test]
+    fn pe_value_for_y_linear_round_trips_and_clamps() {
+        let (min, max) = (0.0, 40.0);
+        for value in [2.0, 10.0, 18.5, 33.0, 40.0] {
+            let y = lin_y_for(value, min, max);
+            let back = pe_value_for_y(y, min, max).as_decimal().to_f64().unwrap();
+            assert!((back - value).abs() < 0.02, "round-trip {value} → {back}");
+        }
+        // A non-integer drag snaps to ≤ 2 dp (never a long tail).
+        assert!(pe_value_for_y(137.0, min, max).as_decimal().scale() <= PE_DRAG_SCALE);
+        assert!(
+            pe_value_for_y(CHART_H + 50.0, min, max).as_decimal().to_f64().unwrap() >= -0.001,
+            "a drag past the bottom clamps at the floor (≥ 0)"
+        );
+    }
+
+    /// A populated study yields the two historical P/E polylines and the two judged levels — high a
+    /// solid full-width line, low dashed — placed at the judged values.
+    #[test]
+    fn pe_chart_plots_history_and_judged_levels() {
+        let years = (2021..=2025).map(|y| year(y, "5")).collect(); // high_pe = 100/5 = 20, low = 10
+        let s = study(years, judgment(Some(money("9")))); // judged high/low P/E = 20 / 10
+        let frame = build_frame(&s).expect("normalizes");
+        let chart = pe_chart(&frame, &s.judgment, NumberFormat::Comma);
+        assert!(chart.available);
+        assert!(!chart.high_pe_commands.is_empty(), "historical high P/E is drawn");
+        assert!(!chart.low_pe_commands.is_empty(), "historical low P/E is drawn");
+        assert!(chart.judged_high_y >= 0.0 && chart.judged_low_y >= 0.0, "both levels placed");
+        assert!(!chart.judged_high_derived, "a judged value is not a seed");
+        assert_eq!(
+            chart.judged_high_commands.matches("M ").count(),
+            1,
+            "the judged-HIGH level is one solid horizontal"
+        );
+        assert!(
+            chart.judged_low_commands.matches("M ").count() > 1,
+            "the judged-LOW level is dashed"
+        );
+        // The high level sits ABOVE the low level on screen (smaller y = higher up).
+        assert!(chart.judged_high_y < chart.judged_low_y, "high P/E renders above low P/E");
+    }
+
+    /// Issue #115 (as §1): with NO judged P/E the levels are SEEDED at the 5-yr historical average
+    /// and flagged `derived` (drawn dimmed) — a starting point, not a committed judgment.
+    #[test]
+    fn pe_chart_seeds_judged_levels_from_the_average() {
+        let years = (2021..=2025).map(|y| year(y, "5")).collect();
+        let mut s = study(years, judgment(Some(money("9"))));
+        s.judgment.judged_avg_high_pe = None;
+        s.judgment.judged_avg_low_pe = None;
+        let frame = build_frame(&s).expect("normalizes");
+        let chart = pe_chart(&frame, &s.judgment, NumberFormat::Comma);
+        assert!(chart.judged_high_y >= 0.0, "the high level is seeded from the average");
+        assert!(chart.judged_high_derived, "a seed must be flagged derived so the UI dims it");
+        assert!(chart.judged_low_derived);
+        // Seed = the 5-yr average high P/E (20 here); the line sits at lin_y_for(20).
+        let expect_y = lin_y_for(20.0, chart.axis_min as f64, chart.axis_max as f64);
+        assert!((chart.judged_high_y - expect_y).abs() < 0.5, "seeded at avg_high_pe");
+    }
+
+    #[test]
+    fn pe_chart_unavailable_when_no_history() {
+        let s = study(vec![], judgment(Some(money("9"))));
+        let frame = build_frame(&s).expect("normalizes");
+        let chart = pe_chart(&frame, &s.judgment, NumberFormat::Comma);
+        assert!(!chart.available);
+        assert_eq!(chart.judged_high_y, -1.0);
+        assert!(chart.high_pe_commands.is_empty());
     }
 
     // ── Story 5.1 — the confront overlay geometry ──
