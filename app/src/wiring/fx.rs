@@ -33,6 +33,7 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
         journal_state,
         config,
         fetch_tx,
+        fetch_cancel,
         holding_freshness,
         holding_dismissed,
         ..
@@ -43,6 +44,7 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         let config = Rc::clone(config);
         let fetch_tx = fetch_tx.clone();
+        let fetch_cancel = std::sync::Arc::clone(fetch_cancel);
         ui.global::<Fx>().on_refresh_rates(move || {
             let ui = ui_weak.unwrap();
             let fx = ui.global::<Fx>();
@@ -70,10 +72,11 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 fx.set_notice(state::MSG_PROVIDER_NO_KEY.into());
                 return;
             }
-            let pairs = foreign
+            let pairs: Vec<(String, String)> = foreign
                 .into_iter()
                 .map(|base| (base, reference.clone()))
                 .collect();
+            let pair_count = pairs.len();
             let request = fetch::FxRatesRequest {
                 pairs,
                 chain,
@@ -82,6 +85,8 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 // whatever changes mid-flight.
                 journal_id: journal_state.borrow().journal_id(),
             };
+            // Issue #100: fresh batch — clear any prior cancel BEFORE the worker can pick the job up.
+            fetch_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
             // The flag latches ONLY on a successful send (review: a dead worker + a discarded
             // send error would otherwise disable the refresh for the whole session).
             if fetch_tx
@@ -89,10 +94,19 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 .is_ok()
             {
                 fx.set_refreshing(true);
+                fx.set_refresh_progress(format!("0 / {pair_count}").into()); // issue #100
                 fx.set_notice(state::MSG_FX_REFRESHING.into());
             } else {
                 fx.set_notice(state::MSG_PROVIDER_OFFLINE.into());
             }
+        });
+    }
+    // ── Issue #100 — cancel the in-flight FX batch: raise the shared flag; the worker breaks after
+    //    the current pair and returns the pairs done so far. ──
+    {
+        let fetch_cancel = std::sync::Arc::clone(fetch_cancel);
+        ui.global::<Fx>().on_cancel_refresh(move || {
+            fetch_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         });
     }
     // ── Manual entry (AC4): base, rate, date ("" = today); source = "manuel". ──

@@ -52,6 +52,12 @@ pub(crate) struct Session {
     pub(crate) holding_freshness: Rc<RefCell<HoldingFreshnessMap>>,
     pub(crate) holding_dismissed: Rc<RefCell<std::collections::HashSet<String>>>,
     pub(crate) refresh_pending: Rc<RefCell<usize>>,
+    /// Issue #100: the size of the CURRENT holdings refresh batch (set at enqueue) — with
+    /// `refresh_pending` it yields the "done / total" progress counter.
+    pub(crate) refresh_total: Rc<RefCell<usize>>,
+    /// Issue #100: the shared worker cancel flag — raised by a Cancel intent to drain the current
+    /// batch, lowered when a new batch is enqueued.
+    pub(crate) fetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Persist `config`, surfacing (not swallowing) a failure — a config that cannot be written is

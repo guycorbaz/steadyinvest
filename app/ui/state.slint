@@ -115,8 +115,12 @@ export struct CandidateRow {
 export global Fx {
     in-out property <[FxRateRow]> rates;
     in-out property <bool> refreshing;
+    // Issue #100: the "done / total" progress of the paced batch ("" when idle); shown beside the
+    // button so a multi-minute refresh counts up instead of showing a frozen banner.
+    in-out property <string> refresh-progress;
     in-out property <string> notice;
     callback refresh-rates();                     // provider fetch for the foreign currencies in use
+    callback cancel-refresh();                     // issue #100: drain the in-flight batch
     callback add-rate(string, string, string) -> bool; // base, rate, date ("" = today) → recorded?
 }
 
@@ -877,6 +881,8 @@ export global Holdings {
     // Story 4.4 / issue #52: true while a price refresh is in flight — disables the refresh button
     // so a double-click can't enqueue duplicate jobs. Cleared when the last job's outcome arrives.
     in-out property <bool> refreshing;
+    // Issue #100: the "done / total" progress of the paced price-refresh batch ("" when idle).
+    in-out property <string> refresh-progress;
     // Story 4.6 (FR43) / Story 6.2 (FR38): the portfolio's capital-at-risk, one subtotal PER currency
     // (holdings can differ in currency, so a single mixed total is forbidden until FX lands). Each row
     // carries the currency + a formatted figure + its share of that currency's invested capital.
@@ -893,6 +899,7 @@ export global Holdings {
     callback remove-holding(string); // id
     // Story 4.4 (FR40): user-initiated price refresh for every linked holding (off the UI thread).
     callback refresh-prices();
+    callback cancel-refresh();                     // issue #100: drain the in-flight refresh batch
     // Story 4.5 (FR42): set/clear a holding's trailing-stop percentage (id, pct — "" clears).
     callback set-trailing-stop(string, string);
     // Story 4.7 (FR46/FR47) + Story 6.3 (FR39): record a sell on a neutral trigger (id, quantity,

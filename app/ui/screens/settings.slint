@@ -739,6 +739,19 @@ export component SettingsScreen inherits Rectangle {
                             enabled: !Fx.refreshing;
                             clicked => { Fx.refresh-rates(); }
                         }
+                        // Issue #100: the paced batch counts up (n/t) and can be cancelled.
+                        if Fx.refreshing: Text {
+                            text: Fx.refresh-progress;
+                            color: Tokens.text-mid;
+                            font-family: Tokens.font-numeric;
+                            font-size: Tokens.font-caption;
+                            vertical-alignment: center;
+                        }
+                        if Fx.refreshing: ActionButton {
+                            label: @tr("Annuler");
+                            enabled: true;
+                            clicked => { Fx.cancel-refresh(); }
+                        }
                     }
                     // Manual entry: base → the reference currency, at a dated rate.
                     HorizontalLayout {

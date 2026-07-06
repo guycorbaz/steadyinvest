@@ -717,9 +717,10 @@ mod tests {
         // Issue #88 adds the two percent-panel refusals (trailing-stop + withholding): 104 + 2 = 106.
         // Issue #60 adds the holding-amount-out-of-range refusal (MSG_HOLDING_AMOUNT_OUT_OF_RANGE): 106 + 1 = 107.
         // Issue #61 adds the un-protected-exposure line (MSG_UNSTOPPED_EXPOSURE): 107 + 1 = 108.
+        // Issue #100 adds the refresh-cancelled notice (MSG_REFRESH_CANCELLED): 108 + 1 = 109.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            108,
+            109,
             "state.rs message inventory changed — register the new notice"
         );
     }

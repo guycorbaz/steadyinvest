@@ -406,11 +406,25 @@ export component PortfolioScreen inherits Rectangle {
         // ── Manual price refresh (Story 4.4, FR40) — user-initiated; never background-polled. ──
         HorizontalLayout {
             alignment: start;
+            spacing: Tokens.space-8;
             ActionButton {
                 // Disabled while a refresh is in flight (issue #52) — no double-click duplicate jobs.
                 label: Holdings.refreshing ? @tr("Rafraîchissement…") : @tr("Rafraîchir les prix");
                 enabled: !Holdings.read-only && Holdings.holding-count > 0 && !Holdings.refreshing;
                 clicked => { Holdings.refresh-prices(); }
+            }
+            // Issue #100: the paced batch counts up (n/t) and can be cancelled instead of a frozen wait.
+            if Holdings.refreshing: Text {
+                text: Holdings.refresh-progress;
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
+            if Holdings.refreshing: ActionButton {
+                label: @tr("Annuler");
+                enabled: true;
+                clicked => { Holdings.cancel-refresh(); }
             }
         }
 
