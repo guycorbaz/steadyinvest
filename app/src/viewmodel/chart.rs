@@ -448,15 +448,16 @@ fn pe_ticks(min: f64, max: f64) -> Vec<AxisTick> {
     let raw = span / 5.0;
     let mag = 10f64.powf(raw.log10().floor());
     let norm = raw / mag;
-    let step = mag * if norm < 1.5 {
-        1.0
-    } else if norm < 3.0 {
-        2.0
-    } else if norm < 7.0 {
-        5.0
-    } else {
-        10.0
-    };
+    let step = mag
+        * if norm < 1.5 {
+            1.0
+        } else if norm < 3.0 {
+            2.0
+        } else if norm < 7.0 {
+            5.0
+        } else {
+            10.0
+        };
     let mut ticks = Vec::new();
     let mut v = (min / step).ceil() * step;
     while v <= max + 1e-9 {
@@ -927,8 +928,14 @@ mod tests {
         let s = study(years, judgment(None));
         let frame = build_frame(&s).expect("normalizes");
         let chart = growth_chart(&frame, NumberFormat::Comma);
-        assert!(chart.judgment_y >= 0.0, "the est-high handle is seeded (a start point)");
-        assert!(!chart.judgment_commands.is_empty(), "the seed line is drawn");
+        assert!(
+            chart.judgment_y >= 0.0,
+            "the est-high handle is seeded (a start point)"
+        );
+        assert!(
+            !chart.judgment_commands.is_empty(),
+            "the seed line is drawn"
+        );
         assert!(
             chart.judgment_high_derived,
             "a seed (not a judgment) must be flagged derived so the UI dims it"
@@ -948,7 +955,10 @@ mod tests {
         let s = study(vec![year(2025, "5")], judgment(None));
         let frame = build_frame(&s).expect("normalizes");
         let chart = growth_chart(&frame, NumberFormat::Comma);
-        assert_eq!(chart.judgment_y, -1.0, "one point can't fit a trend → unset");
+        assert_eq!(
+            chart.judgment_y, -1.0,
+            "one point can't fit a trend → unset"
+        );
         assert!(chart.judgment_label.is_empty());
         assert!(chart.judgment_commands.is_empty());
         assert!(!chart.judgment_high_derived);
@@ -1016,7 +1026,11 @@ mod tests {
         // A non-integer drag snaps to ≤ 2 dp (never a long tail).
         assert!(pe_value_for_y(137.0, min, max).as_decimal().scale() <= PE_DRAG_SCALE);
         assert!(
-            pe_value_for_y(CHART_H + 50.0, min, max).as_decimal().to_f64().unwrap() >= -0.001,
+            pe_value_for_y(CHART_H + 50.0, min, max)
+                .as_decimal()
+                .to_f64()
+                .unwrap()
+                >= -0.001,
             "a drag past the bottom clamps at the floor (≥ 0)"
         );
     }
@@ -1030,9 +1044,18 @@ mod tests {
         let frame = build_frame(&s).expect("normalizes");
         let chart = pe_chart(&frame, &s.judgment, NumberFormat::Comma);
         assert!(chart.available);
-        assert!(!chart.high_pe_commands.is_empty(), "historical high P/E is drawn");
-        assert!(!chart.low_pe_commands.is_empty(), "historical low P/E is drawn");
-        assert!(chart.judged_high_y >= 0.0 && chart.judged_low_y >= 0.0, "both levels placed");
+        assert!(
+            !chart.high_pe_commands.is_empty(),
+            "historical high P/E is drawn"
+        );
+        assert!(
+            !chart.low_pe_commands.is_empty(),
+            "historical low P/E is drawn"
+        );
+        assert!(
+            chart.judged_high_y >= 0.0 && chart.judged_low_y >= 0.0,
+            "both levels placed"
+        );
         assert!(!chart.judged_high_derived, "a judged value is not a seed");
         assert_eq!(
             chart.judged_high_commands.matches("M ").count(),
@@ -1044,7 +1067,10 @@ mod tests {
             "the judged-LOW level is dashed"
         );
         // The high level sits ABOVE the low level on screen (smaller y = higher up).
-        assert!(chart.judged_high_y < chart.judged_low_y, "high P/E renders above low P/E");
+        assert!(
+            chart.judged_high_y < chart.judged_low_y,
+            "high P/E renders above low P/E"
+        );
     }
 
     /// Issue #115 (as §1): with NO judged P/E the levels are SEEDED at the 5-yr historical average
@@ -1057,12 +1083,21 @@ mod tests {
         s.judgment.judged_avg_low_pe = None;
         let frame = build_frame(&s).expect("normalizes");
         let chart = pe_chart(&frame, &s.judgment, NumberFormat::Comma);
-        assert!(chart.judged_high_y >= 0.0, "the high level is seeded from the average");
-        assert!(chart.judged_high_derived, "a seed must be flagged derived so the UI dims it");
+        assert!(
+            chart.judged_high_y >= 0.0,
+            "the high level is seeded from the average"
+        );
+        assert!(
+            chart.judged_high_derived,
+            "a seed must be flagged derived so the UI dims it"
+        );
         assert!(chart.judged_low_derived);
         // Seed = the 5-yr average high P/E (20 here); the line sits at lin_y_for(20).
         let expect_y = lin_y_for(20.0, chart.axis_min as f64, chart.axis_max as f64);
-        assert!((chart.judged_high_y - expect_y).abs() < 0.5, "seeded at avg_high_pe");
+        assert!(
+            (chart.judged_high_y - expect_y).abs() < 0.5,
+            "seeded at avg_high_pe"
+        );
     }
 
     #[test]

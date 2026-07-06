@@ -239,26 +239,27 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let drag_study = Rc::clone(drag_study);
         let drag_moved = Rc::clone(drag_moved);
-        ui.global::<Studies>().on_pe_judgment_moved(move |field, y| {
-            let ui = ui_weak.unwrap();
-            let Some(mut preview) = drag_study.borrow().clone() else {
-                return;
-            };
-            *drag_moved.borrow_mut() = true;
-            // The judged-P/E handle lives on the LINEAR P/E scale — invert against the P/E chart's
-            // bounds (not the §1 EPS log scale).
-            let chart = ui.global::<Studies>().get_pe_chart();
-            let value = Some(viewmodel::chart::pe_value_for_y(
-                y,
-                chart.axis_min as f64,
-                chart.axis_max as f64,
-            ));
-            if !state::apply_judgment_field(&mut preview.judgment, field.as_str(), value) {
-                return;
-            }
-            let format = config.borrow().number_format;
-            push_live_preview(&ui, &preview, format);
-        });
+        ui.global::<Studies>()
+            .on_pe_judgment_moved(move |field, y| {
+                let ui = ui_weak.unwrap();
+                let Some(mut preview) = drag_study.borrow().clone() else {
+                    return;
+                };
+                *drag_moved.borrow_mut() = true;
+                // The judged-P/E handle lives on the LINEAR P/E scale — invert against the P/E chart's
+                // bounds (not the §1 EPS log scale).
+                let chart = ui.global::<Studies>().get_pe_chart();
+                let value = Some(viewmodel::chart::pe_value_for_y(
+                    y,
+                    chart.axis_min as f64,
+                    chart.axis_max as f64,
+                ));
+                if !state::apply_judgment_field(&mut preview.judgment, field.as_str(), value) {
+                    return;
+                }
+                let format = config.borrow().number_format;
+                push_live_preview(&ui, &preview, format);
+            });
     }
 
     // P/E drag commit (pointer-up): persist ONCE via the same rail as the exact-value field, then
@@ -271,38 +272,40 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         let drag_study = Rc::clone(drag_study);
         let drag_moved = Rc::clone(drag_moved);
-        ui.global::<Studies>().on_pe_judgment_commit(move |field, y| {
-            let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
-            *drag_study.borrow_mut() = None;
-            let moved = std::mem::replace(&mut *drag_moved.borrow_mut(), false);
-            let Some(id_text) = current_study.borrow().clone() else {
-                return;
-            };
-            let Ok(id) = Uuid::parse_str(&id_text) else {
-                return;
-            };
-            let format = config.borrow().number_format;
-            if !moved {
-                return;
-            }
-            let chart = ui.global::<Studies>().get_pe_chart();
-            let value = Some(viewmodel::chart::pe_value_for_y(
-                y,
-                chart.axis_min as f64,
-                chart.axis_max as f64,
-            ));
-            let result = journal_state
-                .borrow_mut()
-                .set_judgment_field(id, field.as_str(), value);
-            match result {
-                Ok(()) => studies.set_notice(SharedString::new()),
-                Err(message) => studies.set_notice(message.into()),
-            }
-            if let Some(study) = journal_state.borrow().get_study(id) {
-                push_form(&ui, &journal_state.borrow(), &study, format);
-            }
-        });
+        ui.global::<Studies>()
+            .on_pe_judgment_commit(move |field, y| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                *drag_study.borrow_mut() = None;
+                let moved = std::mem::replace(&mut *drag_moved.borrow_mut(), false);
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let format = config.borrow().number_format;
+                if !moved {
+                    return;
+                }
+                let chart = ui.global::<Studies>().get_pe_chart();
+                let value = Some(viewmodel::chart::pe_value_for_y(
+                    y,
+                    chart.axis_min as f64,
+                    chart.axis_max as f64,
+                ));
+                let result =
+                    journal_state
+                        .borrow_mut()
+                        .set_judgment_field(id, field.as_str(), value);
+                match result {
+                    Ok(()) => studies.set_notice(SharedString::new()),
+                    Err(message) => studies.set_notice(message.into()),
+                }
+                if let Some(study) = journal_state.borrow().get_study(id) {
+                    push_form(&ui, &journal_state.borrow(), &study, format);
+                }
+            });
     }
 
     // Drag cancel (pointer-event cancel): the gesture was abandoned — revert the live preview to the

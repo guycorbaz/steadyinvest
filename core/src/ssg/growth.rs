@@ -281,7 +281,10 @@ mod tests {
             band.fit
         );
         // A trend with no scatter has an essentially zero-width band.
-        assert!(band.low <= band.fit && band.fit <= band.high, "band is ordered");
+        assert!(
+            band.low <= band.fit && band.fit <= band.high,
+            "band is ordered"
+        );
         assert!(
             approx(band.high, band.low, 1e-6),
             "a scatter-free series has a ~zero-width band, got [{}, {}]",
@@ -320,7 +323,11 @@ mod tests {
         );
         // Only one usable point → unknown (a line needs two).
         let one = vec![(2021, d(4, 0)), (2022, d(-1, 0))];
-        assert_eq!(least_squares_log_eps_band(&one, 5), None, "one point → None");
+        assert_eq!(
+            least_squares_log_eps_band(&one, 5),
+            None,
+            "one point → None"
+        );
         assert_eq!(least_squares_log_eps_band(&[], 5), None, "empty → None");
     }
 
