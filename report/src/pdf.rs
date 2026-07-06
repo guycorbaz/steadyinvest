@@ -526,10 +526,16 @@ impl Doc {
             }
         }
         // Each series on its own scale (greyscale: weight + dash).
-        let draw = |cur: &mut Content, pts: &[(usize, f64)], b: Option<(f64, f64)>, w: f32, dash: &[f32]| {
+        let draw = |cur: &mut Content,
+                    pts: &[(usize, f64)],
+                    b: Option<(f64, f64)>,
+                    w: f32,
+                    dash: &[f32]| {
             if let Some((lmin, lmax)) = b {
-                let p: Vec<(f32, f32)> =
-                    pts.iter().map(|(i, v)| (px(*i as f64), py(*v, lmin, lmax))).collect();
+                let p: Vec<(f32, f32)> = pts
+                    .iter()
+                    .map(|(i, v)| (px(*i as f64), py(*v, lmin, lmax)))
+                    .collect();
                 polyline(cur, &p, w, SERIES_GRAY, dash);
             }
         };
@@ -540,10 +546,22 @@ impl Doc {
         if let (Some((lmin, lmax)), Some((li, lv))) = (eps_b, eps.last().copied()) {
             let (ox, oy) = (px(li as f64), py(lv, lmin, lmax));
             if let Some(h) = est_high.filter(|v| *v > 0.0) {
-                polyline(&mut self.cur, &[(ox, oy), (px(span), py(h, lmin, lmax))], 1.2, SERIES_GRAY, &[1.5, 2.0]);
+                polyline(
+                    &mut self.cur,
+                    &[(ox, oy), (px(span), py(h, lmin, lmax))],
+                    1.2,
+                    SERIES_GRAY,
+                    &[1.5, 2.0],
+                );
             }
             if let Some(l) = est_low.filter(|v| *v > 0.0) {
-                polyline(&mut self.cur, &[(ox, oy), (px(span), py(l, lmin, lmax))], 1.0, SERIES_GRAY, &[1.5, 2.0]);
+                polyline(
+                    &mut self.cur,
+                    &[(ox, oy), (px(span), py(l, lmin, lmax))],
+                    1.0,
+                    SERIES_GRAY,
+                    &[1.5, 2.0],
+                );
             }
         }
         self.y = top + CHART_H + 3.0;
@@ -569,18 +587,32 @@ impl Doc {
         let (x0, x1) = (MARGIN, PAGE_W - MARGIN);
         let w = x1 - x0;
         let top = self.y + 10.0; // room above for the current-price marker label
-        let fx = |price: f64| x0 + (((price - lo) / (hi - lo)).clamp(0.0, 1.0) * f64::from(w)) as f32;
+        let fx =
+            |price: f64| x0 + (((price - lo) / (hi - lo)).clamp(0.0, 1.0) * f64::from(w)) as f32;
 
         // Three thirds, greyscale shades (low third lightest, high third darkest).
         fill_rect(&mut self.cur, x0, top, fx(buy) - x0, ZONEBAR_H, 0.86);
-        fill_rect(&mut self.cur, fx(buy), top, fx(neu) - fx(buy), ZONEBAR_H, 0.70);
+        fill_rect(
+            &mut self.cur,
+            fx(buy),
+            top,
+            fx(neu) - fx(buy),
+            ZONEBAR_H,
+            0.70,
+        );
         fill_rect(&mut self.cur, fx(neu), top, x1 - fx(neu), ZONEBAR_H, 0.52);
         stroke_rect(&mut self.cur, x0, top, w, ZONEBAR_H, 0.5);
 
         // Zone labels centered in each third.
         let mid_y = top + ZONEBAR_H / 2.0 + 3.0;
         text_centered(&mut self.cur, (x0 + fx(buy)) / 2.0, mid_y, 8.0, ZONE_LOW);
-        text_centered(&mut self.cur, (fx(buy) + fx(neu)) / 2.0, mid_y, 8.0, ZONE_MID);
+        text_centered(
+            &mut self.cur,
+            (fx(buy) + fx(neu)) / 2.0,
+            mid_y,
+            8.0,
+            ZONE_MID,
+        );
         text_centered(&mut self.cur, (fx(neu) + x1) / 2.0, mid_y, 8.0, ZONE_HIGH);
 
         // Boundary prices under the bar.
