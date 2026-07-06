@@ -16,6 +16,7 @@
 use rust_decimal::prelude::ToPrimitive;
 use steadyinvest_contract::Money;
 use steadyinvest_core::method::FORECAST_HORIZON_YEARS;
+use steadyinvest_core::ssg::least_squares_log_eps_band;
 
 use crate::viewmodel::engine::StudyFrame;
 use crate::viewmodel::format::{NumberFormat, format_scaled};
@@ -138,6 +139,35 @@ fn path_commands(points: &[(f32, f64)], lmin: f64, lmax: f64) -> String {
     s
 }
 
+/// A dashed straight line between two viewbox-px points as a `Path` `commands` string — Slint's
+/// `Path` has no `stroke-dasharray`, so the dash is baked into the geometry (one `M…L` per dash).
+/// Issue #121: the est-LOW forecast line is dashed so it is unmistakable from the solid est-HIGH
+/// line without spending a §1 colour (UX-DR10) — dash is the design's redundant, colour-blind-safe
+/// channel (tokens.slint). `dash`/`gap` are viewbox px.
+fn dashed_line(p0: (f32, f32), p1: (f32, f32), dash: f32, gap: f32) -> String {
+    let (dx, dy) = (p1.0 - p0.0, p1.1 - p0.1);
+    let len = dx.hypot(dy);
+    if len <= 0.0 || dash <= 0.0 {
+        return String::new();
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let mut s = String::new();
+    let mut t = 0.0f32;
+    while t < len {
+        let a = t;
+        let b = (t + dash).min(len);
+        s.push_str(&format!(
+            "M {:.1} {:.1} L {:.1} {:.1} ",
+            p0.0 + ux * a,
+            p0.1 + uy * a,
+            p0.0 + ux * b,
+            p0.1 + uy * b,
+        ));
+        t += dash + gap;
+    }
+    s
+}
+
 /// The x (viewbox px) of a year at `offset` units from the first plotted year, across a total span of
 /// `(plotted_years - 1) + FORECAST_HORIZON_YEARS` units (so the forecast point lands at the right edge).
 fn x_for(offset: f64, span: f64) -> f32 {
@@ -187,19 +217,36 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
         .rev()
         .find_map(|(i, cy)| cy.eps.and_then(|d| d.to_f64()).map(|v| (x_hist(i), v)));
     let est_high = frame.snapshot.outputs().growth.estimated_high_eps;
+    let est_low = frame.snapshot.outputs().growth.estimated_low_eps;
+
+    // Issue #121: the least-squares SEED band over the historical EPS — a draggable STARTING point for
+    // the est-high / est-low handles (display only; an untouched seed never flows into §4/verdict, so
+    // `core` stays pure). Also reserves EPS-scale headroom so a not-yet-judged handle stays on-scale.
+    let eps_hist_pts: Vec<(i32, rust_decimal::Decimal)> = years
+        .iter()
+        .filter_map(|cy| cy.eps.map(|e| (cy.year, e)))
+        .collect();
+    let seed = least_squares_log_eps_band(&eps_hist_pts, FORECAST_HORIZON_YEARS);
+    // The value each handle SHOWS: the user's judgment when set, else the seed (drawn dimmed). `None`
+    // only when neither exists (no judgment + un-fittable history) → the line stays unset (-1).
+    let high_value = est_high.or_else(|| seed.map(|s| s.high));
+    let low_value = est_low.or_else(|| seed.map(|s| s.low));
 
     // ── Issue #25 (multi-scale): each series on its OWN log scale so none clamps off the top and none
     //    compresses. Sales/Price fit their own data; the EPS scale ALSO reserves the forecast headroom
     //    (the fan at 30 % + the est-high) so the projection + the drag live comfortably on it. ──
     let (s_lmin, s_lmax) = series_bounds(sales_pts.iter().map(|p| p.1));
     let (p_lmin, p_lmax) = series_bounds(price_pts.iter().map(|p| p.1));
-    // The EPS scale is STABLE during a drag: it spans the historical EPS + a FIXED forecast headroom
-    // (the 30 % fan endpoint), but NOT the live `est_high` (including it would shift the scale as you
-    // drag, so the line would "flee" the cursor). A drag beyond the headroom clamps at the top.
+    // The EPS scale is STABLE during a drag: historical EPS + a FIXED forecast headroom (the 30 % fan
+    // endpoint) + the STABLE seed band (so a not-yet-dragged est-low BELOW the history stays on-scale),
+    // but NOT the live judged `est_high`/`est_low` (including those would shift the scale as you drag,
+    // so a line would "flee" the cursor). A drag beyond the headroom clamps at an edge.
     let eps_range_vals: Vec<f64> = eps_pts
         .iter()
         .map(|p| p.1)
         .chain(last_eps.map(|(_, ov)| ov * 1.30f64.powi(FORECAST_HORIZON_YEARS as i32)))
+        .chain(seed.and_then(|s| s.high.to_f64()))
+        .chain(seed.and_then(|s| s.low.to_f64()))
         .collect();
     let (e_lmin, e_lmax) = series_bounds(eps_range_vals);
 
@@ -207,20 +254,38 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
     let price_commands = path_commands(&price_pts, p_lmin, p_lmax);
     let eps_commands = path_commands(&eps_pts, e_lmin, e_lmax);
 
-    // The judgment TREND LINE + grip, on the EPS scale (origin FIXED at the last historical EPS →
-    // the draggable forecast endpoint). FR33: unset when there is no forecast (never auto-placed).
-    let (judgment_x, judgment_y, judgment_label, judgment_commands) = match est_high {
-        Some(dec) => {
-            let value = dec.to_f64().unwrap_or(1.0);
-            let label = format_scaled(dec, DisplayField::PerShare, format);
-            let line = match last_eps {
-                Some((ox, ov)) => path_commands(&[(ox, ov), (CHART_W, value)], e_lmin, e_lmax),
-                None => String::new(),
-            };
-            (CHART_W, y_for(value, e_lmin, e_lmax), label, line)
+    // Issue #121: BOTH forecast trend lines + grips, on the EPS scale (origin FIXED at the last
+    // historical EPS → the draggable endpoint). A line shown at the SEED (no user judgment yet) is
+    // flagged `derived` so the UI dims it — it positions the handle without asserting a value (FR33
+    // relaxed to a *starting point*, never a committed judgment). Unset (-1) when there is nothing to
+    // show (no judgment and no fittable seed).
+    let endpoint = |judged: Option<rust_decimal::Decimal>,
+                    shown: Option<rust_decimal::Decimal>,
+                    dashed: bool|
+     -> (f32, String, String, bool) {
+        match shown {
+            Some(dec) => {
+                let value = dec.to_f64().unwrap_or(1.0);
+                let y_end = y_for(value, e_lmin, e_lmax);
+                let label = format_scaled(dec, DisplayField::PerShare, format);
+                let line = match last_eps {
+                    Some((ox, ov)) if dashed => {
+                        dashed_line((ox, y_for(ov, e_lmin, e_lmax)), (CHART_W, y_end), 9.0, 6.0)
+                    }
+                    Some((ox, ov)) => path_commands(&[(ox, ov), (CHART_W, value)], e_lmin, e_lmax),
+                    None => String::new(),
+                };
+                (y_end, label, line, judged.is_none())
+            }
+            None => (-1.0, String::new(), String::new(), false),
         }
-        None => (CHART_W, -1.0, String::new(), String::new()),
     };
+    // est-HIGH solid (the upper band), est-LOW dashed (the lower band) — a conventional band read.
+    let (judgment_y, judgment_label, judgment_commands, judgment_high_derived) =
+        endpoint(est_high, high_value, false);
+    let (judgment_low_y, judgment_low_label, judgment_low_commands, judgment_low_derived) =
+        endpoint(est_low, low_value, true);
+    let judgment_x = CHART_W;
 
     // The 5–30 % guide fan from the last historical EPS point, on the EPS scale — pure guide geometry.
     let fan_commands: Vec<slint::SharedString> = match last_eps {
@@ -252,6 +317,11 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
         judgment_x,
         judgment_y,
         judgment_label: judgment_label.into(),
+        judgment_low_commands: judgment_low_commands.into(),
+        judgment_low_y,
+        judgment_low_label: judgment_low_label.into(),
+        judgment_high_derived,
+        judgment_low_derived,
         axis_min: 10f64.powf(e_lmin) as f32,
         axis_max: 10f64.powf(e_lmax) as f32,
     }
@@ -295,6 +365,11 @@ pub fn unavailable() -> GrowthChartState {
         judgment_x: CHART_W,
         judgment_y: -1.0,
         judgment_label: Default::default(),
+        judgment_low_commands: Default::default(),
+        judgment_low_y: -1.0,
+        judgment_low_label: Default::default(),
+        judgment_high_derived: false,
+        judgment_low_derived: false,
         axis_min: 1.0,
         axis_max: 200.0,
     }
@@ -537,6 +612,46 @@ mod tests {
         );
     }
 
+    /// `dashed_line` bakes the dash into geometry (Slint has no dasharray): several `M…L` segments for
+    /// a real line, nothing for a zero-length one.
+    #[test]
+    fn dashed_line_emits_multiple_segments() {
+        let cmds = dashed_line((0.0, 0.0), (100.0, 0.0), 9.0, 6.0);
+        assert!(
+            cmds.matches("M ").count() > 1,
+            "a dashed line is several strokes, got {cmds}"
+        );
+        assert!(cmds.contains("L "), "each dash draws a segment");
+        assert_eq!(
+            dashed_line((5.0, 5.0), (5.0, 5.0), 9.0, 6.0),
+            "",
+            "a zero-length line draws nothing"
+        );
+    }
+
+    /// Issue #121: the est-LOW forecast line is DASHED (many segments) while est-HIGH is one solid
+    /// stroke — the two bounds of the EPS band read apart without spending a §1 colour.
+    #[test]
+    fn low_forecast_line_is_dashed_high_is_solid() {
+        let years = (2021..=2025)
+            .enumerate()
+            .map(|(i, y)| year(y, &format!("{}", 4 + i)))
+            .collect();
+        let s = study(years, judgment(Some(money("9")))); // est_low = 3 (from the helper)
+        let frame = build_frame(&s).expect("normalizes");
+        let chart = growth_chart(&frame, NumberFormat::Comma);
+        assert_eq!(
+            chart.judgment_commands.matches("M ").count(),
+            1,
+            "est-HIGH is one solid stroke"
+        );
+        assert!(
+            chart.judgment_low_commands.matches("M ").count() > 1,
+            "est-LOW is dashed (many strokes), got {}",
+            chart.judgment_low_commands
+        );
+    }
+
     /// A populated study yields drawable series, the 5–30 % fan (six lines), the decade ticks, and a
     /// judgment line placed at the forecast est-high-EPS.
     #[test]
@@ -590,18 +705,45 @@ mod tests {
         );
     }
 
-    /// FR33: with NO direct est-high-EPS and NO projected growth %, the engine derives no forecast →
-    /// the chart leaves the judgment line UNSET (never auto-placed).
+    /// Issue #121 (FR33 relaxed to a *starting point*): with NO direct est-high-EPS the chart now
+    /// SEEDS the est-high line from the least-squares fit so the user has a handle to grab — but the
+    /// line is flagged `derived` (drawn dimmed) and the ENGINE OUTPUT stays `None` (an untouched seed
+    /// never flows into §4/verdict — `core` is untouched).
     #[test]
-    fn growth_chart_never_auto_places_the_judgment_line() {
-        let years = (2021..=2025).map(|y| year(y, "5")).collect();
-        // Neither estimated_high_eps nor projected_eps_growth_pct → no forecast EPS.
+    fn growth_chart_seeds_a_derived_line_without_a_judgment() {
+        let years = (2021..=2025)
+            .enumerate()
+            .map(|(i, y)| year(y, &format!("{}", 4 + i)))
+            .collect();
+        // No direct estimated_high_eps and no projected_eps_growth_pct.
         let s = study(years, judgment(None));
         let frame = build_frame(&s).expect("normalizes");
         let chart = growth_chart(&frame, NumberFormat::Comma);
-        assert_eq!(chart.judgment_y, -1.0, "no forecast → no auto-placed line");
+        assert!(chart.judgment_y >= 0.0, "the est-high handle is seeded (a start point)");
+        assert!(!chart.judgment_commands.is_empty(), "the seed line is drawn");
+        assert!(
+            chart.judgment_high_derived,
+            "a seed (not a judgment) must be flagged derived so the UI dims it"
+        );
+        // Core purity: the seed positions the LINE only — the engine still reports no est-high EPS.
+        assert_eq!(
+            frame.snapshot.outputs().growth.estimated_high_eps,
+            None,
+            "an untouched seed must NOT become a judgment (core stays pure)"
+        );
+    }
+
+    /// With too little history to fit (a single year) and no judgment, there is nothing to seed → the
+    /// line genuinely stays unset (never a guessed line).
+    #[test]
+    fn growth_chart_unseedable_history_leaves_the_high_line_unset() {
+        let s = study(vec![year(2025, "5")], judgment(None));
+        let frame = build_frame(&s).expect("normalizes");
+        let chart = growth_chart(&frame, NumberFormat::Comma);
+        assert_eq!(chart.judgment_y, -1.0, "one point can't fit a trend → unset");
         assert!(chart.judgment_label.is_empty());
         assert!(chart.judgment_commands.is_empty());
+        assert!(!chart.judgment_high_derived);
     }
 
     /// The drag loop is self-consistent: a value dragged to viewbox-y `y`, applied to the study and

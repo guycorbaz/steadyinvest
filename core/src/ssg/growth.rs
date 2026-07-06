@@ -41,6 +41,92 @@ pub fn project(base: Decimal, growth_pct: Decimal, years: u32) -> Option<Decimal
     base.checked_mul(grown)
 }
 
+/// The least-squares seed band for the estimated future EPS (§1 chart pre-configuration,
+/// issue #121). Central fit plus a symmetric log-space residual band (`fit × exp(±σ)`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpsSeedBand {
+    /// Central least-squares projection at the horizon (`exp(â + b̂·x_h)`).
+    pub fit: Decimal,
+    /// Upper band: `fit × exp(+σ)`, σ = log-space residual spread.
+    pub high: Decimal,
+    /// Lower band: `fit × exp(−σ)`.
+    pub low: Decimal,
+}
+
+/// Ordinary least-squares fit of `ln(EPS)` against the fiscal year over `points`
+/// (compound-growth / semi-log — matching the §1 chart's log scale), projected `horizon_years`
+/// past the latest supplied year, with a symmetric band at `exp(±σ)` where σ is the population
+/// standard deviation of the log-space residuals.
+///
+/// **Display-only helper (issue #121), deliberately NOT wired into [`compute`]:** it seeds the
+/// draggable §1 est-high / est-low handles at a statistical starting point, but an *untouched*
+/// seed must never flow into §4/verdict — that stays the user's judgment (the "never guess a
+/// number" invariant / FR33). Public for the same reason as [`project`]/[`endpoints_cagr_pct`]:
+/// the UI reuses `core` math rather than re-deriving it.
+///
+/// `None` (unknown — never a guessed number, spec §9 discipline) when fewer than two points have
+/// `eps > 0` (ln is undefined at ≤ 0; a line needs two points), the years are all identical
+/// (`Σ(x−x̄)² = 0` — no trend), or any checked Decimal op overflows.
+pub fn least_squares_log_eps_band(
+    points: &[(i32, Decimal)],
+    horizon_years: u32,
+) -> Option<EpsSeedBand> {
+    // Only strictly-positive EPS can be logged — a compound-growth trend is undefined through ≤ 0.
+    let mut obs: Vec<(Decimal, Decimal)> = Vec::with_capacity(points.len());
+    for (year, eps) in points {
+        if *eps > Decimal::ZERO {
+            obs.push((Decimal::from(*year), eps.checked_ln()?));
+        }
+    }
+    if obs.len() < 2 {
+        return None;
+    }
+    let n = Decimal::from(obs.len() as u64);
+
+    let mut sum_x = Decimal::ZERO;
+    let mut sum_y = Decimal::ZERO;
+    for (x, y) in &obs {
+        sum_x = sum_x.checked_add(*x)?;
+        sum_y = sum_y.checked_add(*y)?;
+    }
+    let x_bar = sum_x.checked_div(n)?;
+    let y_bar = sum_y.checked_div(n)?;
+
+    let mut sxx = Decimal::ZERO;
+    let mut sxy = Decimal::ZERO;
+    for (x, y) in &obs {
+        let dx = x.checked_sub(x_bar)?;
+        sxx = sxx.checked_add(dx.checked_mul(dx)?)?;
+        sxy = sxy.checked_add(dx.checked_mul(y.checked_sub(y_bar)?)?)?;
+    }
+    if sxx <= Decimal::ZERO {
+        return None; // every year identical — no trend to fit
+    }
+    let slope = sxy.checked_div(sxx)?;
+    let intercept = y_bar.checked_sub(slope.checked_mul(x_bar)?)?;
+
+    // Population σ of the log-space residuals (÷n, not ÷(n−2): a two-point fit then gives σ = 0,
+    // i.e. a zero-width band, rather than a division by zero).
+    let mut ss_res = Decimal::ZERO;
+    for (x, y) in &obs {
+        let fitted = intercept.checked_add(slope.checked_mul(*x)?)?;
+        let r = y.checked_sub(fitted)?;
+        ss_res = ss_res.checked_add(r.checked_mul(r)?)?;
+    }
+    let sigma = ss_res.checked_div(n)?.sqrt()?;
+
+    // Project to the horizon year past the latest supplied year (the chart's forecast x).
+    let last_year = points.iter().map(|(y, _)| *y).max()?;
+    let x_h = Decimal::from(last_year).checked_add(Decimal::from(horizon_years))?;
+    let ly_h = intercept.checked_add(slope.checked_mul(x_h)?)?;
+
+    Some(EpsSeedBand {
+        fit: ly_h.checked_exp()?,
+        high: ly_h.checked_add(sigma)?.checked_exp()?,
+        low: ly_h.checked_sub(sigma)?.checked_exp()?,
+    })
+}
+
 /// Recent quarterly % change: `(latest − year_ago) / year_ago × 100`.
 /// Year-ago absent or ≤ 0 ⇒ `None` (recorded interpretation: a non-positive base has no
 /// meaningful percent change).
@@ -170,6 +256,82 @@ mod tests {
         // sign-flipping number.
         assert_eq!(project(d(3, 0), d(-100, 0), 5), Some(Decimal::ZERO));
         assert_eq!(project(d(3, 0), d(-150, 0), 5), None);
+    }
+
+    fn approx(a: Decimal, b: Decimal, rel: f64) -> bool {
+        use rust_decimal::prelude::ToPrimitive;
+        let (a, b) = (a.to_f64().unwrap(), b.to_f64().unwrap());
+        (a - b).abs() <= rel * b.abs().max(1e-9)
+    }
+
+    #[test]
+    fn least_squares_seeds_an_exact_exponential_series() {
+        // EPS = 4 · 1.5^k over 2021..=2025: ln(EPS) is exactly linear in the year, so the fit
+        // projects (within the ln/exp approximation) to 4 · 1.5^(4 + horizon) and the residual
+        // band is ~zero-width (the points sit on the line).
+        let points: Vec<(i32, Decimal)> = (0..5)
+            .map(|k| (2021 + k, project(d(4, 0), d(50, 0), k as u32).unwrap()))
+            .collect();
+        let band = least_squares_log_eps_band(&points, 5).expect("valid trend");
+        // Central projection lands at 4 · 1.5^(4+5) = 4 · 1.5^9.
+        let expected = project(d(4, 0), d(50, 0), 9).unwrap();
+        assert!(
+            approx(band.fit, expected, 1e-6),
+            "fit {} must project the exact trend to {expected}",
+            band.fit
+        );
+        // A trend with no scatter has an essentially zero-width band.
+        assert!(band.low <= band.fit && band.fit <= band.high, "band is ordered");
+        assert!(
+            approx(band.high, band.low, 1e-6),
+            "a scatter-free series has a ~zero-width band, got [{}, {}]",
+            band.low,
+            band.high
+        );
+    }
+
+    #[test]
+    fn least_squares_band_widens_with_scatter_and_stays_ordered() {
+        // A noisy but upward series: the band must straddle the central fit (low < fit < high).
+        let points = vec![
+            (2021, d(40, 1)),  // 4.0
+            (2022, d(70, 1)),  // 7.0
+            (2023, d(55, 1)),  // 5.5
+            (2024, d(90, 1)),  // 9.0
+            (2025, d(110, 1)), // 11.0
+        ];
+        let band = least_squares_log_eps_band(&points, 5).expect("valid trend");
+        assert!(
+            band.low < band.fit && band.fit < band.high,
+            "a scattered series yields a strictly-widening band, got [{}, {}, {}]",
+            band.low,
+            band.fit,
+            band.high
+        );
+    }
+
+    #[test]
+    fn least_squares_ignores_non_positive_eps_and_needs_two_points() {
+        // ln is undefined at ≤ 0 — those years are dropped, not guessed.
+        let with_bad = vec![(2021, d(4, 0)), (2022, Decimal::ZERO), (2023, d(9, 0))];
+        assert!(
+            least_squares_log_eps_band(&with_bad, 5).is_some(),
+            "two positive points survive the ≤0 filter"
+        );
+        // Only one usable point → unknown (a line needs two).
+        let one = vec![(2021, d(4, 0)), (2022, d(-1, 0))];
+        assert_eq!(least_squares_log_eps_band(&one, 5), None, "one point → None");
+        assert_eq!(least_squares_log_eps_band(&[], 5), None, "empty → None");
+    }
+
+    #[test]
+    fn least_squares_identical_years_have_no_trend() {
+        let flat_x = vec![(2021, d(4, 0)), (2021, d(9, 0))];
+        assert_eq!(
+            least_squares_log_eps_band(&flat_x, 5),
+            None,
+            "Σ(x−x̄)² = 0 → no trend, never a guessed slope"
+        );
     }
 
     #[test]
