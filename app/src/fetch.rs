@@ -14,6 +14,8 @@
 //! matters.
 
 use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use rust_decimal::Decimal;
@@ -134,6 +136,16 @@ pub enum WorkerOutcome {
     },
     /// Key-test verdict: `Ok` = the provider accepted the key; `Err` carries the cause.
     TestKey(Result<(), IngestionError>),
+    /// Issue #100: mid-batch FX progress (`done` of `total` pairs) — transient UI feedback emitted
+    /// per pair while the paced batch runs (7.5 s/req on Twelve Data), so the panel is not a frozen
+    /// banner for minutes.
+    FxProgress {
+        done: usize,
+        total: usize,
+    },
+    /// Issue #100: a per-ticker holdings job the worker SKIPPED because the batch was cancelled — it
+    /// still decrements the pending latch so the "refreshing" state clears, but applies no price.
+    HoldingSkipped,
 }
 
 /// The UI-thread handler that applies a [`WorkerOutcome`] to the app state + UI.
@@ -254,9 +266,14 @@ fn run_chain<'a, T>(
     }
     (result, effective, None)
 }
-/// Spawn the worker thread and return the job sender. The worker lives for the process.
-pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
+/// Spawn the worker thread and return the job sender + the shared cancel flag (issue #100). The
+/// worker lives for the process; the UI raises `cancel` to drain the current batch's remaining items
+/// (checked between items — the in-flight request finishes, so cancel latency is bounded by one
+/// paced request + at most one quota wait) and lowers it when it enqueues the next batch.
+pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
     let (tx, rx) = mpsc::channel::<WorkerJob>();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&cancel);
     std::thread::Builder::new()
         .name("provider-fetch".to_string())
         .spawn(move || {
@@ -295,6 +312,11 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                             fell_back_to,
                         })
                     }
+                    WorkerJob::RefreshHolding(_) if worker_cancel.load(Ordering::Relaxed) => {
+                        // Issue #100: the batch was cancelled — drain this queued per-ticker job without
+                        // fetching. The skip still decrements the pending latch so "refreshing" clears.
+                        WorkerOutcome::HoldingSkipped
+                    }
                     WorkerJob::RefreshHolding(req) => {
                         // Issue #50: a PRICE-ONLY fetch (no fundamentals) so the holdings refresh works
                         // on a free tier; routed to the holdings surface. Twelve Data uses `/price`.
@@ -330,9 +352,15 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                         // Story 6.5 (FR28) + 6.9: N pairs, EACH run down the FX chain (a quota on
                         // one pair fails over per pair), all paced through the shared map. Each
                         // pair keeps its own result — one failed pair never hides the others.
-                        let mut results = Vec::with_capacity(req.pairs.len());
+                        let total = req.pairs.len();
+                        let mut results = Vec::with_capacity(total);
                         let mut fell_back_to: Option<ProviderChoice> = None;
-                        for (base, quote) in req.pairs {
+                        for (i, (base, quote)) in req.pairs.into_iter().enumerate() {
+                            // Issue #100: cancel drains the remaining pairs — the outcome below applies
+                            // the pairs done so far (they are valid) and clears the "refreshing" latch.
+                            if worker_cancel.load(Ordering::Relaxed) {
+                                break;
+                            }
                             // 2026-07-03 review: a no-quote `Ok(None)` advances the chain (per
                             // pair) — symbol coverage differs per provider; an all-None chain
                             // surfaces as no-data, the same message as before.
@@ -363,6 +391,11 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
                                     .map(|c| c.wire().to_string())
                                     .unwrap_or_default(),
                             });
+                            // Issue #100: per-pair progress so the panel counts up instead of freezing.
+                            let done = i + 1;
+                            let _ = slint::invoke_from_event_loop(move || {
+                                dispatch_outcome(WorkerOutcome::FxProgress { done, total })
+                            });
                         }
                         WorkerOutcome::FxRates {
                             journal_id: req.journal_id,
@@ -391,7 +424,7 @@ pub fn spawn_fetch_worker() -> mpsc::Sender<WorkerJob> {
             }
         })
         .expect("the fetch worker thread spawns");
-    tx
+    (tx, cancel)
 }
 
 #[cfg(test)]

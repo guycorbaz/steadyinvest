@@ -101,6 +101,31 @@ pub(crate) fn mirror_provider_prefs(ui: &MainWindow, provider: ProviderChoice) {
 /// Wire the provider-fetch domain: install the worker's outcome handler (it must be set before
 /// any job can be enqueued — the send sites are wired after it), then register the study
 /// `fetch-provider` intent and the Réglages key save/delete/test callbacks.
+/// Issue #100: advance the holdings-refresh batch by one resolved (or cancel-skipped) job — decrement
+/// the pending counter, update the "done / total" progress caption, and clear the "refreshing" latch
+/// when the batch fully drains (naming a cancellation if the flag is still raised).
+fn advance_holding_batch(
+    ui: &MainWindow,
+    refresh_pending: &Rc<std::cell::RefCell<usize>>,
+    refresh_total: &Rc<std::cell::RefCell<usize>>,
+    fetch_cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let holdings = ui.global::<Holdings>();
+    let mut pending = refresh_pending.borrow_mut();
+    *pending = pending.saturating_sub(1);
+    let total = *refresh_total.borrow();
+    if *pending == 0 {
+        holdings.set_refreshing(false);
+        holdings.set_refresh_progress(SharedString::new());
+        if fetch_cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            holdings.set_notice(state::MSG_REFRESH_CANCELLED.into());
+        }
+    } else {
+        let done = total.saturating_sub(*pending);
+        holdings.set_refresh_progress(format!("{done} / {total}").into());
+    }
+}
+
 pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
     let Session {
         journal_state,
@@ -109,6 +134,8 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         holding_freshness,
         holding_dismissed,
         refresh_pending,
+        refresh_total,
+        fetch_cancel,
         fetch_tx,
         ..
     } = s;
@@ -120,6 +147,8 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
         let refresh_pending = Rc::clone(refresh_pending);
+        let refresh_total = Rc::clone(refresh_total);
+        let fetch_cancel = std::sync::Arc::clone(fetch_cancel);
         fetch::set_outcome_handler(move |outcome| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
@@ -307,15 +336,18 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         &holding_dismissed.borrow(),
                         format,
                     );
-                    // One job resolved — clear the in-flight latch when the batch is fully drained,
-                    // re-enabling the refresh button (issue #52).
-                    {
-                        let mut pending = refresh_pending.borrow_mut();
-                        *pending = pending.saturating_sub(1);
-                        if *pending == 0 {
-                            ui.global::<Holdings>().set_refreshing(false);
-                        }
-                    }
+                    // One job resolved — advance the batch counter, clear the latch when fully drained.
+                    advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
+                }
+                fetch::WorkerOutcome::HoldingSkipped => {
+                    // Issue #100: a cancelled per-ticker job the worker drained without fetching — it
+                    // only advances the batch counter (no price applied, no re-render needed).
+                    advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
+                }
+                fetch::WorkerOutcome::FxProgress { done, total } => {
+                    // Issue #100: mid-batch FX progress — count up instead of a frozen banner.
+                    ui.global::<Fx>()
+                        .set_refresh_progress(format!("{done} / {total}").into());
                 }
                 fetch::WorkerOutcome::FxRates {
                     journal_id,
@@ -329,6 +361,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     // name on a fallback's data.
                     let fx = ui.global::<Fx>();
                     fx.set_refreshing(false);
+                    fx.set_refresh_progress(SharedString::new()); // issue #100: clear the counter
                     if journal_state.borrow().journal_id() != journal_id {
                         fx.set_notice(state::MSG_FX_JOURNAL_CHANGED.into());
                         return;
@@ -371,6 +404,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     }
                     if let Some(effective) = fell_back_to {
                         notice = format!("{notice} {}", state::provider_fallback_notice(effective));
+                    }
+                    // Issue #100: a cancelled batch names itself (the pairs done so far still applied).
+                    if fetch_cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        notice = format!("{} {notice}", state::MSG_REFRESH_CANCELLED);
                     }
                     fx.set_notice(notice.into());
                     crate::wiring::fx::push_fx_rates(&ui, &journal_state.borrow());

@@ -143,6 +143,10 @@ pub const MSG_HOLDING_INVALID_STOP: &str =
 /// Holdings price-refresh copy (Story 4.4, FR40) — fact-stating, posture-gated. Set when a manual
 /// "refresh prices" begins, or when no holding is linked to a saved study (nothing to refresh).
 pub const MSG_HOLDINGS_REFRESHING: &str = "Rafraîchissement des prix en cours.";
+/// Issue #100: set when the user cancels an in-flight paced batch (holdings prices or FX rates) —
+/// the items done before the cancel are kept; the rest are drained. Fact-stating, posture-gated.
+pub const MSG_REFRESH_CANCELLED: &str =
+    "Actualisation annulée ; les éléments déjà obtenus sont conservés.";
 pub const MSG_HOLDINGS_REFRESH_NONE: &str =
     "Aucune position liée à une étude ; il n'y a aucun prix à rafraîchir.";
 
@@ -532,6 +536,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDING_INVALID_CURRENCY,
     MSG_HOLDING_INVALID_STOP,
     MSG_HOLDINGS_REFRESHING,
+    MSG_REFRESH_CANCELLED,
     MSG_HOLDINGS_REFRESH_NONE,
     MSG_HOLDING_SOLD,
     MSG_LEDGER_BUY_RECORDED,

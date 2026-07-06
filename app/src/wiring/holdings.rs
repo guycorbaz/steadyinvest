@@ -616,6 +616,8 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         holding_dismissed,
         fetch_tx,
         refresh_pending,
+        refresh_total,
+        fetch_cancel,
         ..
     } = s;
     // ── Holdings intents (Story 4.3, FR36) ── add / edit / remove a holding, each validated +
@@ -787,6 +789,8 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let fetch_tx = fetch_tx.clone();
         let refresh_pending = Rc::clone(refresh_pending);
+        let refresh_total = Rc::clone(refresh_total);
+        let fetch_cancel = std::sync::Arc::clone(fetch_cancel);
         ui.global::<Holdings>().on_refresh_prices(move || {
             let ui = ui_weak.unwrap();
             let holdings = ui.global::<Holdings>();
@@ -827,6 +831,10 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 holdings.set_notice(state::MSG_PROVIDER_NO_KEY.into());
                 return;
             }
+            // Issue #100: a fresh batch — clear any leftover cancel flag BEFORE sending jobs (the
+            // worker checks it per job, so it must read false for the new batch). Safe: the button is
+            // disabled while `refreshing`, so a prior batch has fully drained before we get here.
+            fetch_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
             // Count only jobs the worker actually accepted — if the worker is gone, don't latch
             // `refreshing` (which would disable the button for the rest of the session). (Issue #52.)
             let mut enqueued = 0usize;
@@ -850,8 +858,19 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             // → no duplicate jobs). The outcome handler decrements the pending count and clears the
             // flag when the last job resolves. No race — outcomes are marshalled to THIS (UI) thread.
             *refresh_pending.borrow_mut() = enqueued;
+            *refresh_total.borrow_mut() = enqueued; // issue #100: the batch size, for the n/t counter
             holdings.set_refreshing(true);
+            holdings.set_refresh_progress(format!("0 / {enqueued}").into());
             holdings.set_notice(state::MSG_HOLDINGS_REFRESHING.into());
+        });
+    }
+    // ── Issue #100 — cancel the in-flight holdings price-refresh batch: raise the shared flag; the
+    //    worker drains the remaining queued jobs (the in-flight request finishes) and the outcome
+    //    handler clears the latch. ──
+    {
+        let fetch_cancel = std::sync::Arc::clone(fetch_cancel);
+        ui.global::<Holdings>().on_cancel_refresh(move || {
+            fetch_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         });
     }
     // ── Story 4.5 (FR42) — set / clear a holding's trailing-stop percentage. ──

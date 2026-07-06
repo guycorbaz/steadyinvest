@@ -262,7 +262,8 @@ fn main() -> Result<(), slint::PlatformError> {
     // ── Story 3.1 — provider auto-fetch (EODHD), off the UI thread ──
     // The worker thread owns the tokio runtime + network I/O; results return via the thread_local
     // handler set below (which holds the `Rc` state and runs on the UI thread).
-    let fetch_tx = fetch::spawn_fetch_worker();
+    let (fetch_tx, fetch_cancel) = fetch::spawn_fetch_worker();
+    let refresh_total: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
 
     // Bundle the session-scoped handles the wiring closures capture (`wiring::Session`), then
     // register every domain's callbacks. `wire_fetch` installs the worker's outcome handler before
@@ -281,6 +282,8 @@ fn main() -> Result<(), slint::PlatformError> {
         holding_freshness: Rc::clone(&holding_freshness),
         holding_dismissed: Rc::clone(&holding_dismissed),
         refresh_pending: Rc::clone(&refresh_pending),
+        refresh_total: Rc::clone(&refresh_total),
+        fetch_cancel,
     };
     wiring::fetch::wire_fetch(&ui, &session);
     wiring::studies::wire_studies(&ui, &session);
