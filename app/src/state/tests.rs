@@ -3137,6 +3137,22 @@ fn holding_amounts_are_validated_and_bad_input_writes_nothing() {
         MSG_HOLDING_INVALID_NUMBER,
         "price must be non-negative"
     );
+    // Issue #60: an absurd magnitude (qty or price beyond a trillion) is refused, so the saturating
+    // capital-at-risk overlay never has to clamp a persisted holding into a misleading total.
+    assert_eq!(
+        state
+            .add_holding("NESN", "10000000000", "100000000000000000000", "CHF")
+            .unwrap_err(),
+        MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
+        "qty 1e10 × price 1e20 (the overflow case) is refused on write"
+    );
+    assert_eq!(
+        state
+            .add_holding("NESN", "1000000000001", "1", "CHF")
+            .unwrap_err(),
+        MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
+        "quantity just over a trillion is refused"
+    );
     assert!(
         state.list_holdings().is_empty(),
         "no invalid input wrote a row"
@@ -3144,6 +3160,15 @@ fn holding_amounts_are_validated_and_bad_input_writes_nothing() {
     // A free purchase (price 0) is allowed (e.g. a gift/spin-off).
     state.add_holding("FREE", "1", "0", "CHF").unwrap();
     assert_eq!(state.list_holdings().len(), 1);
+    // The bound is inclusive: exactly a trillion (the ceiling) is still accepted.
+    state
+        .add_holding("BIG", "1000000000000", "1000000000000", "CHF")
+        .unwrap();
+    assert_eq!(
+        state.list_holdings().len(),
+        2,
+        "the magnitude ceiling is inclusive"
+    );
 }
 
 #[test]
@@ -4532,16 +4557,45 @@ fn reference_buckets_convert_at_identity_and_sold_holdings_stay_excluded() {
     assert!(view.rates_used.is_empty(), "no rate looked up at all");
 }
 
+/// Inject a holding straight into the journal, bypassing `add_holding`'s issue-#60 magnitude bound —
+/// to simulate a PRE-EXISTING / externally-edited absurd row that the render-side overflow guards
+/// must still handle gracefully (the write bound only stops NEW absurd input).
+fn inject_raw_holding(
+    state: &mut JournalState,
+    ticker: &str,
+    qty: &str,
+    price: &str,
+    currency: &str,
+) {
+    let portfolio_id = match state.active_portfolio() {
+        Some(p) => p.id,
+        None => state.add_portfolio("Portefeuille").unwrap(),
+    };
+    let id = state.idgen.new_id();
+    let created_at = state.clock.now();
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .add_holding(id, portfolio_id, ticker, qty, price, currency, &created_at)
+        .unwrap();
+}
+
 #[test]
 fn a_checked_overflow_absents_the_bank_plainly_never_a_wrong_figure() {
     // AC5/review: an overflowing conversion is an ABSENT subtotal marked `unavailable` (no
     // dangling empty line, no partial global) — never a corrupt number.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x663);
-    // A USD position whose saturated CaR is Decimal::MAX-scale: converting at 2 overflows.
-    state
-        .add_holding("HUGE", "79228162514264337593543950335", "1", "USD")
-        .unwrap();
+    // A USD position whose saturated CaR is Decimal::MAX-scale: converting at 2 overflows. Injected
+    // raw (issue #60): an absurd magnitude can only reach the render path as pre-existing data now.
+    inject_raw_holding(
+        &mut state,
+        "HUGE",
+        "79228162514264337593543950335",
+        "1",
+        "USD",
+    );
     let id = state.list_holdings()[0].id;
     state.set_holding_trailing_stop(id, "15").unwrap();
     state
@@ -4788,9 +4842,15 @@ fn a_checked_overflow_absents_the_share_and_the_total_never_corrupts() {
     let mut state = watch_state(&dir, 0x675);
     state.add_holding("NESN", "10", "100", "CHF").unwrap();
     // cost × qty overflows Decimal — the checked product is absent, never saturated into a share.
-    state
-        .add_holding("HUGE", "2", "79228162514264337593543950335", "CHF")
-        .unwrap();
+    // Injected raw (issue #60): the write bound now refuses such input, so overflow at render only
+    // arises from pre-existing / externally-edited data — which is exactly what this guards.
+    inject_raw_holding(
+        &mut state,
+        "HUGE",
+        "2",
+        "79228162514264337593543950335",
+        "CHF",
+    );
 
     let (small, medium) = bounds();
     let view = state.journal_diversification("CHF", small, medium);

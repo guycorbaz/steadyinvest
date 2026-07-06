@@ -715,9 +715,10 @@ mod tests {
         // Issue #101 adds the skipped-keyless-fallback clause (MSG_FALLBACK_NO_KEY): 102 + 1 = 103.
         // Issue #85 adds the unknown-transaction-kind notice (MSG_LEDGER_UNKNOWN_KIND): 103 + 1 = 104.
         // Issue #88 adds the two percent-panel refusals (trailing-stop + withholding): 104 + 2 = 106.
+        // Issue #60 adds the holding-amount-out-of-range refusal (MSG_HOLDING_AMOUNT_OUT_OF_RANGE): 106 + 1 = 107.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            106,
+            107,
             "state.rs message inventory changed — register the new notice"
         );
     }
