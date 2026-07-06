@@ -151,6 +151,18 @@ impl JournalState {
         car_buckets_by_currency(&self.list_holdings(), reference_currency)
     }
 
+    /// The active portfolio's **un-protected exposure** per currency (issue #61): for each currency,
+    /// the count of active holdings with **no trailing stop** and their total invested value. The
+    /// honest complement to capital-at-risk — a portfolio with no stops reads "0 % at risk", so this
+    /// states plainly how much simply has no stop-loss protection defined. Sorted by currency; only
+    /// currencies that have an un-stopped holding appear (empty when every holding is stop-protected).
+    pub fn portfolio_unstopped_exposure_by_currency(
+        &self,
+        reference_currency: &str,
+    ) -> Vec<(String, usize, Decimal)> {
+        unstopped_exposure_by_currency(&self.list_holdings(), reference_currency)
+    }
+
     /// Ensure the single default portfolio exists and return it (FR36, single-portfolio). Lazily
     /// created with an injected id/timestamp (ADD15) on first use; idempotent thereafter. The id/
     /// timestamp are minted **only when the portfolio is absent** — so a repeat add doesn't burn an
@@ -427,6 +439,53 @@ pub(crate) fn car_buckets_by_currency(
             (
                 currency,
                 steadyinvest_core::risk::capital_at_risk(&positions),
+                steadyinvest_core::risk::total_invested(&positions),
+            )
+        })
+        .collect()
+}
+
+/// Per currency, the count and total invested value of active holdings with **no trailing stop**
+/// (issue #61) — the un-protected exposure. A stop that fails to parse counts as absent (same
+/// treatment as [`car_buckets_by_currency`], where an unparseable stop contributes no protection).
+/// Sorted by currency; only currencies with an un-stopped holding appear.
+pub(crate) fn unstopped_exposure_by_currency(
+    holdings: &[HoldingItem],
+    reference_currency: &str,
+) -> Vec<(String, usize, Decimal)> {
+    use std::collections::BTreeMap;
+    let mut by_ccy: BTreeMap<String, Vec<steadyinvest_core::risk::PositionRisk>> = BTreeMap::new();
+    for h in holdings {
+        // A holding with a PARSEABLE trailing stop is protected — skip it. Absent or unparseable → un-protected.
+        let has_stop = h
+            .trailing_stop_level
+            .as_deref()
+            .and_then(|s| Decimal::from_str_exact(s).ok())
+            .is_some();
+        if has_stop {
+            continue;
+        }
+        let Ok(avg_cost) = Decimal::from_str_exact(&h.purchase_price) else {
+            continue;
+        };
+        let Ok(quantity) = Decimal::from_str_exact(&h.quantity) else {
+            continue;
+        };
+        by_ccy
+            .entry(effective_currency(h, reference_currency))
+            .or_default()
+            .push(steadyinvest_core::risk::PositionRisk {
+                avg_cost,
+                stop: None,
+                quantity,
+            });
+    }
+    by_ccy
+        .into_iter()
+        .map(|(currency, positions)| {
+            (
+                currency,
+                positions.len(),
                 steadyinvest_core::risk::total_invested(&positions),
             )
         })

@@ -251,6 +251,14 @@ export component PortfolioScreen inherits Rectangle {
                 font-family: Tokens.font-numeric;
                 font-size: Tokens.font-caption;
             }
+            // Issue #61: the un-protected exposure — a softer neutral caveat so a "0 %" CaR is not
+            // read as safety. Already-formatted, posture-gated strings from Rust (no @tr here).
+            for line in Holdings.unstopped-exposure: Text {
+                text: line;
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                wrap: word-wrap;
+            }
         }
 
         // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — the study keeps the

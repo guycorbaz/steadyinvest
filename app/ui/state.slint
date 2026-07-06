@@ -881,6 +881,11 @@ export global Holdings {
     // (holdings can differ in currency, so a single mixed total is forbidden until FX lands). Each row
     // carries the currency + a formatted figure + its share of that currency's invested capital.
     in-out property <[CapitalAtRiskRow]> capital-at-risk-by-currency;
+    // Issue #61: the un-protected exposure — one already-formatted, posture-gated line per currency
+    // naming how many holdings have NO trailing stop + their uncovered value. Shown beneath the
+    // capital-at-risk panel so "0 % du capital investi" (no stop set) is not misread as "no downside".
+    // Empty when every holding is stop-protected.
+    in-out property <[string]> unstopped-exposure;
     // ticker, quantity, purchase-price, currency → written? (so the form keeps the user's input on refusal)
     callback add-holding(string, string, string, string) -> bool;
     // id, ticker, quantity, purchase-price, currency → written?

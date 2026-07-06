@@ -115,6 +115,22 @@ pub const MSG_HOLDING_INVALID_NUMBER: &str = "La quantité et le prix d'achat do
 pub const MSG_HOLDING_AMOUNT_OUT_OF_RANGE: &str = "La quantité et le prix d'achat sont hors de la plage prise en charge ; aucune position n'a été enregistrée.";
 pub const MSG_HOLDING_INVALID_TICKER: &str =
     "Le symbole est vide ; aucune position n'a été enregistrée.";
+/// Issue #61: the neutral un-protected-exposure fact shown beneath the capital-at-risk panel — so a
+/// "0 % du capital investi" (no stop set on any holding) is not misread as "no downside". `{n}` is
+/// the pluralized position count, `{value}` the formatted uncovered amount + currency. Fact-stating.
+pub const MSG_UNSTOPPED_EXPOSURE: &str = "{n} sans seuil suiveur ({value} non couverts)";
+
+/// Compose the un-protected-exposure line (issue #61): pluralize the count, substitute the value.
+pub fn unstopped_exposure_notice(count: usize, value: &str) -> String {
+    let n = if count == 1 {
+        "1 position".to_string()
+    } else {
+        format!("{count} positions")
+    };
+    MSG_UNSTOPPED_EXPOSURE
+        .replace("{n}", &n)
+        .replace("{value}", value)
+}
 /// Raised when a holding currency is not one of the supported set (Story 6.2, FR38); nothing is
 /// written. A defensive guard — the UI only offers allow-list currencies.
 pub const MSG_HOLDING_INVALID_CURRENCY: &str = "La devise doit faire partie des devises prises en charge ; aucune position n'a été enregistrée.";
@@ -511,6 +527,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_WATCH_NO_STUDY,
     MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
+    MSG_UNSTOPPED_EXPOSURE,
     MSG_HOLDING_INVALID_TICKER,
     MSG_HOLDING_INVALID_CURRENCY,
     MSG_HOLDING_INVALID_STOP,

@@ -187,7 +187,12 @@ pub(crate) fn refresh_holdings(
         .into_iter()
         .map(|(currency, car, invested)| {
             let amount = viewmodel::format::format_scaled(car, DisplayField::Price, format);
-            let pct = if invested > rust_decimal::Decimal::ZERO {
+            // Issue #61: the "% du capital investi" clause is shown ONLY when there IS capital at risk.
+            // When CaR is 0 (no stop is set on any holding) the "0 %" reads as "no downside" — the
+            // opposite of the truth (no *protection* is defined). The un-stopped-exposure line below
+            // states that plainly instead.
+            let pct = if car > rust_decimal::Decimal::ZERO && invested > rust_decimal::Decimal::ZERO
+            {
                 // Format the percent through the same locale-aware path as the figure (Percent = 1 dp).
                 viewmodel::format::format_scaled(
                     car / invested * rust_decimal::Decimal::from(100),
@@ -205,6 +210,23 @@ pub(crate) fn refresh_holdings(
         })
         .collect();
     holdings.set_capital_at_risk_by_currency(ModelRc::new(VecModel::from(car_rows)));
+
+    // Issue #61: the un-protected exposure — one neutral line per currency naming how many holdings
+    // have NO trailing stop and their uncovered value. The honest complement to the CaR figure above
+    // (a "0 % du capital investi" means no *protection* is set, not "no downside"). Empty → nothing shown.
+    let unstopped_lines: Vec<SharedString> = state
+        .portfolio_unstopped_exposure_by_currency(&reference_currency)
+        .into_iter()
+        .map(|(currency, count, value)| {
+            let value = format!(
+                "{} {}",
+                viewmodel::format::format_scaled(value, DisplayField::Price, format),
+                currency
+            );
+            state::unstopped_exposure_notice(count, &value).into()
+        })
+        .collect();
+    holdings.set_unstopped_exposure(ModelRc::new(VecModel::from(unstopped_lines)));
 
     // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — includes SOLD holdings'
     // dividends (cash received is cash); recomputed with the register so every ledger mutation and
