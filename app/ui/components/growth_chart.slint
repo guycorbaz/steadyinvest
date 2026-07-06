@@ -36,11 +36,43 @@ component LegendItem inherits HorizontalLayout {
     }
 }
 
+// Issue #121: one segment of the "what am I adjusting?" selector — a toggle chip naming an EPS
+// forecast context. Selecting it points the single drag handle at that line (all lines stay drawn).
+component ContextChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+    height: Tokens.row-height;
+    border-radius: Tokens.radius;
+    border-width: Tokens.border;
+    border-color: root.selected ? Tokens.series-eps : Tokens.separator;
+    background: root.selected ? Tokens.series-eps.with-alpha(0.15) : Tokens.surface-alt;
+    HorizontalLayout {
+        padding-left: Tokens.space-12;
+        padding-right: Tokens.space-12;
+        Text {
+            text: root.label;
+            color: root.selected ? Tokens.text-high : Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+        }
+    }
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 export component GrowthChart inherits Rectangle {
     in property <GrowthChartState> chart: Studies.growth-chart;
-    // The judgment field the §1 drag writes — the forecast est-high-EPS (drives §4 forecast_high →
-    // zone recolor). Kept in sync with the exact-value `JudgmentField` of the same key (FR31).
-    property <string> drag-field: "est_high_eps";
+    // Issue #121: the drag writes whichever EPS forecast the user selected (est-high or est-low), kept
+    // in sync with the exact-value `JudgmentField` of the same key (FR31). Only one handle is grabbed
+    // at a time; both trend lines stay drawn (the SSG is a visual method — judge by looking).
+    property <string> drag-field: Studies.active-judgment;
+    property <bool> low-active: Studies.active-judgment == "est_low_eps";
+    // The active context's endpoint y / caption — the grip follows the selected line.
+    property <float> active-y: root.low-active ? root.chart.judgment-low-y : root.chart.judgment-y;
+    property <string> active-label: root.low-active ? root.chart.judgment-low-label : root.chart.judgment-label;
 
     // Height is rendered 1:1 with the viewbox (so the drag's mouse-y maps directly); width stretches.
     property <length> plot-h: root.chart.chart-h * 1px;
@@ -69,6 +101,30 @@ export component GrowthChart inherits Rectangle {
     //    axis is the EPS scale, so a colour legend tells the three independently-scaled series apart) ──
     if root.chart.available: VerticalLayout {
         spacing: Tokens.space-4;
+
+        // ── Issue #121: pick which EPS forecast the drag handle edits. One judgment at a time; every
+        //    curve stays in view (the SSG is a visual method — you judge trends by LOOKING). ──
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            alignment: start;
+            padding-left: Tokens.space-32 + Tokens.space-8;
+            Text {
+                text: @tr("Ajuster :");
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
+            ContextChip {
+                label: @tr("BPA estimé haut");
+                selected: Studies.active-judgment == "est_high_eps";
+                clicked => { Studies.active-judgment = "est_high_eps"; }
+            }
+            ContextChip {
+                label: @tr("BPA estimé bas");
+                selected: Studies.active-judgment == "est_low_eps";
+                clicked => { Studies.active-judgment = "est_low_eps"; }
+            }
+        }
 
         HorizontalLayout {
         spacing: Tokens.space-8;
@@ -180,11 +236,28 @@ export component GrowthChart inherits Rectangle {
             if root.chart.judgment-y >= 0.0: Path {
                 commands: root.chart.judgment-commands;
                 stroke: Tokens.series-eps;
-                stroke-width: Tokens.chart-judgment-stroke;
+                // Issue #121: the ACTIVE context reads as the actor (thick, full); the other line and a
+                // least-squares SEED (no judgment yet) recede (thin / dimmed) but stay in view.
+                stroke-width: !root.low-active ? Tokens.chart-judgment-stroke : Tokens.chart-stroke;
+                opacity: root.chart.judgment-high-derived ? 0.55 : (!root.low-active ? 1.0 : 0.8);
                 // Issue #118: bind viewbox-width to the ELEMENT's real px width so the viewbox aspect
                 // matches the element — no aspect-fit letterbox/centering — and the path renders 1:1
                 // from x=0 = the LEFT edge (the origin is at the left, not the middle). viewbox-height
                 // stays chart-h == plot-h, so the vertical mapping the drag relies on is untouched.
+                x: 0;
+                y: 0;
+                width: 100%;
+                height: 100%;
+                viewbox-width: parent.width / 1px;
+                viewbox-height: root.chart.chart-h;
+            }
+            // Issue #121: the est-LOW forecast trend line (same fixed origin, second endpoint). Dimmed
+            // when it is only the least-squares SEED or when est-HIGH is the active context.
+            if root.chart.judgment-low-y >= 0.0: Path {
+                commands: root.chart.judgment-low-commands;
+                stroke: Tokens.series-eps;
+                stroke-width: root.low-active ? Tokens.chart-judgment-stroke : Tokens.chart-stroke;
+                opacity: root.chart.judgment-low-derived ? 0.55 : (root.low-active ? 1.0 : 0.8);
                 x: 0;
                 y: 0;
                 width: 100%;
@@ -201,26 +274,26 @@ export component GrowthChart inherits Rectangle {
                 height: parent.height;
                 background: Tokens.surface-alt.with-alpha(strip-touch.has-hover ? 0.6 : 0.3);
 
-                // The grip handle at the endpoint (only when set) + the est-high-EPS caption.
-                if root.chart.judgment-y >= 0.0: Rectangle {
+                // Issue #121: ONE grip + caption, on the ACTIVE context's endpoint (est-high or est-low).
+                if root.active-y >= 0.0: Rectangle {
                     width: Tokens.chart-grip;
                     height: Tokens.chart-grip;
                     x: (parent.width - self.width) / 2;
-                    y: root.chart.judgment-y * 1px - self.height / 2;
+                    y: root.active-y * 1px - self.height / 2;
                     background: Tokens.text-high;
                     border-radius: Tokens.radius;
                 }
-                if root.chart.judgment-y >= 0.0: Text {
-                    text: root.chart.judgment-label;
+                if root.active-y >= 0.0: Text {
+                    text: root.active-label;
                     color: Tokens.text-high;
                     font-family: Tokens.font-numeric;
                     font-size: Tokens.font-caption;
                     horizontal-alignment: center;
                     width: parent.width;
-                    y: root.chart.judgment-y * 1px - self.height - Tokens.space-4;
+                    y: root.active-y * 1px - self.height - Tokens.space-4;
                 }
-                // A neutral drag hint when no line is set yet (an affordance, never a suggested value).
-                if root.chart.judgment-y < 0.0: Text {
+                // A neutral drag hint when the active line is unset (an affordance, never a value).
+                if root.active-y < 0.0: Text {
                     text: "⇕";
                     color: Tokens.text-low;
                     font-size: Tokens.font-h3;
@@ -250,8 +323,10 @@ export component GrowthChart inherits Rectangle {
                         }
                     }
                     accessible-role: slider;
-                    accessible-label: @tr("Tendance du BPA estimé haut — glisser pour ajuster");
-                    accessible-value: root.chart.judgment-label;
+                    accessible-label: root.low-active
+                        ? @tr("Tendance du BPA estimé bas — glisser pour ajuster")
+                        : @tr("Tendance du BPA estimé haut — glisser pour ajuster");
+                    accessible-value: root.active-label;
                 }
             }
         }

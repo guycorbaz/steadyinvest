@@ -24,7 +24,7 @@ mod risk_reward;
 mod types;
 mod valuation;
 
-pub use growth::{endpoints_cagr_pct, project};
+pub use growth::{EpsSeedBand, endpoints_cagr_pct, least_squares_log_eps_band, project};
 pub use types::{
     CalcFinding, CriterionFact, ForecastLowOption, GrowthOutputs, JudgmentInputs,
     ManagementOutputs, QualityFlagKey, QuarterlyObservations, ReturnOutputs, RiskRewardOutputs,

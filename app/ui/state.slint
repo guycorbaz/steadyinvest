@@ -231,12 +231,23 @@ export struct GrowthChartState {
     sales-commands: string,             // historical, solid
     eps-commands: string,               // historical, solid
     price-commands: string,             // historical (high price), solid
-    judgment-commands: string,          // the trend line: last historical EPS (fixed) → forecast endpoint
+    judgment-commands: string,          // the est-HIGH trend line: last historical EPS (fixed) → forecast endpoint
     fan-commands: [string],             // the 5–30 % growth-guide fan from the last historical EPS
     axis-ticks: [AxisTick],             // ticks of the EPS scale (issue #25: the labelled scale)
     judgment-x: float,                  // viewbox-x of the draggable endpoint (the future edge)
-    judgment-y: float,                  // viewbox-y of the draggable endpoint; -1 = unset
+    judgment-y: float,                  // viewbox-y of the est-HIGH endpoint; -1 = unset
     judgment-label: string,             // formatted est. high EPS caption ("" when unset)
+    // Issue #121: est-LOW is a SECOND draggable EPS context (same scale). Only one handle is grabbed
+    // at a time (the user picks the context via `Studies.active-judgment`), but BOTH trend lines are
+    // always drawn so the judgment is made by LOOKING at the curves.
+    judgment-low-commands: string,      // the est-LOW trend line: last historical EPS (fixed) → forecast endpoint
+    judgment-low-y: float,              // viewbox-y of the est-LOW endpoint; -1 = unset
+    judgment-low-label: string,         // formatted est. low EPS caption ("" when unset)
+    // Provenance (issue #121): a line placed by the least-squares SEED (a draggable starting point,
+    // NOT a judgment the user made) is drawn dimmed. `false` = the user's own judged value (solid).
+    // The seed positions the line only — it never flows into §4/verdict until the user drags (core pure).
+    judgment-high-derived: bool,
+    judgment-low-derived: bool,
     // Issue #25 (multi-scale): the EPS series' OWN log-scale bounds — the scale the drag operates on
     // (the est-high-EPS handle lives on the EPS scale, so the drag inverse must use these, not a fixed
     // 1→200). Sales/Price are drawn on their own scales (in the commands) but the drag only touches EPS.
@@ -510,6 +521,10 @@ export global Studies {
     // True while the user holds the §1 judgment endpoint — the enclosing form `Flickable` disables its
     // scroll so the vertical drag is not stolen (set on pointer-down, cleared on release).
     in-out property <bool> judgment-dragging;
+    // Issue #121: which §1 EPS judgment the single drag handle currently edits — "est_high_eps" or
+    // "est_low_eps". The context selector sets it; the chart shows the grip on that line only (all the
+    // lines stay drawn). A pure UI selection — it changes nothing until the user actually drags.
+    in-out property <string> active-judgment: "est_high_eps";
     // ── Story 2.9 — undo/redo availability (the controls disable when their stack is empty).
     in-out property <bool> can-undo;
     in-out property <bool> can-redo;
