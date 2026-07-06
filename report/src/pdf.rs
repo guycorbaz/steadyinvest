@@ -58,6 +58,19 @@ const CHART_AXIS_W: f32 = 30.0; // left gutter for the y-axis decade labels
 const ZONEBAR_H: f32 = 26.0; // §4 zone bar height (points)
 const SERIES_PAD_DECADES: f64 = 0.12; // per-series head/foot room (issue #25)
 const MIN_SERIES_DECADES: f64 = 0.6; // a flat series still gets this much span (no false drama)
+
+// ── grid tables (issue #104 — visible SSG grid) ──
+const CELL_PAD: f32 = 5.0; // left padding of text inside a grid cell
+// Column boundaries (left … right) for the 5-column (year + four figures) and 3-column tables.
+const COLS5: [f32; 6] = [
+    MARGIN,
+    MARGIN + 62.0,
+    MARGIN + 182.0,
+    MARGIN + 292.0,
+    MARGIN + 402.0,
+    PAGE_W - MARGIN,
+];
+const COLS3: [f32; 4] = [MARGIN, MARGIN + 150.0, MARGIN + 330.0, PAGE_W - MARGIN];
 const RULE_GRAY: f32 = 0.35; // the default rule/grid grey (restored after a chart)
 const GRID_GRAY: f32 = 0.75; // faint decade gridlines
 const SERIES_GRAY: f32 = 0.0; // series strokes (black; told apart by weight + dash, never hue)
@@ -82,17 +95,23 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
 
     // ── §1 Visual analysis (historical series) ──
     doc.section("1. Analyse visuelle (historique)");
-    doc.row5("Année", "Ventes", "BPA", "Cours haut", "Cours bas", true);
+    doc.grid_begin(study.years.len());
+    doc.grid_row(
+        &["Année", "Ventes", "BPA", "Cours haut", "Cours bas"],
+        &COLS5,
+        true,
+    );
     for y in &study.years {
-        doc.row5(
-            &y.year.to_string(),
-            &cell(y.sales.value, DisplayField::LargeMonetary),
-            &cell(y.eps.value, DisplayField::PerShare),
-            &cell(y.high_price.value, DisplayField::Price),
-            &cell(y.low_price.value, DisplayField::Price),
-            false,
+        let (yr, sa, ep, hp, lp) = (
+            y.year.to_string(),
+            cell(y.sales.value, DisplayField::LargeMonetary),
+            cell(y.eps.value, DisplayField::PerShare),
+            cell(y.high_price.value, DisplayField::Price),
+            cell(y.low_price.value, DisplayField::Price),
         );
+        doc.grid_row(&[&yr, &sa, &ep, &hp, &lp], &COLS5, false);
     }
+    doc.grid_end(&COLS5);
     doc.gap(3.0);
     doc.line(&format!(
         "Croissance annualisée — ventes : {}   ·   BPA : {}",
@@ -106,10 +125,17 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
 
     // ── §2 Management ──
     doc.section("2. Évaluation de la gestion");
-    doc.row3("Année", "% BAII / ventes", "% rendement c.p.", true);
+    doc.grid_begin(outputs.management.per_year.len());
+    doc.grid_row(
+        &["Année", "% BAII / ventes", "% rendement c.p."],
+        &COLS3,
+        true,
+    );
     for r in &outputs.management.per_year {
-        doc.row3(&r.year.to_string(), &pct(r.ptp_pct), &pct(r.roe_pct), false);
+        let (yr, ptp, roe) = (r.year.to_string(), pct(r.ptp_pct), pct(r.roe_pct));
+        doc.grid_row(&[&yr, &ptp, &roe], &COLS3, false);
     }
+    doc.grid_end(&COLS3);
     doc.gap(3.0);
     doc.line(&format!(
         "Moyennes — % BAII/ventes : {} ({})   ·   % rendement c.p. : {} ({})",
@@ -122,24 +148,29 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
 
     // ── §3 Price / earnings history ──
     doc.section("3. Historique cours / bénéfice");
-    doc.row5(
-        "Année",
-        "C/B haut",
-        "C/B bas",
-        "% distribution",
-        "% rendement",
+    doc.grid_begin(outputs.valuation.per_year.len());
+    doc.grid_row(
+        &[
+            "Année",
+            "C/B haut",
+            "C/B bas",
+            "% distribution",
+            "% rendement",
+        ],
+        &COLS5,
         true,
     );
     for v in &outputs.valuation.per_year {
-        doc.row5(
-            &v.year.to_string(),
-            &num(v.high_pe),
-            &num(v.low_pe),
-            &pct(v.payout_pct),
-            &pct(v.high_yield_pct),
-            false,
+        let (yr, hpe, lpe, pay, yld) = (
+            v.year.to_string(),
+            num(v.high_pe),
+            num(v.low_pe),
+            pct(v.payout_pct),
+            pct(v.high_yield_pct),
         );
+        doc.grid_row(&[&yr, &hpe, &lpe, &pay, &yld], &COLS5, false);
     }
+    doc.grid_end(&COLS5);
     doc.gap(3.0);
     doc.line(&format!(
         "Moyennes — C/B haut : {}   ·   C/B bas : {}   ·   C/B moyen : {}   ·   % distribution : {}",
@@ -150,7 +181,8 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     ));
     doc.gap(6.0);
 
-    // ── §4 Risk & reward ──
+    // ── §4 Risk & reward ── (issue #104: the forecast lines + the zone bar stay together)
+    doc.keep_together(HEAD_FONT + 5.0 * LINE_H + ZONEBAR_H + 2.0 * LINE_H);
     doc.section("4. Risque et rendement");
     doc.line(&format!(
         "Prévision — haute : {}   ·   basse : {}",
@@ -374,7 +406,8 @@ const REPORT_USER_FACING: &[&str] = &[
 struct Doc {
     pages: Vec<Content>,
     cur: Content,
-    y: f32, // top-origin cursor (distance from the page top)
+    y: f32,        // top-origin cursor (distance from the page top)
+    grid_top: f32, // the top of the grid table currently being drawn (issue #104)
 }
 
 impl Doc {
@@ -383,6 +416,7 @@ impl Doc {
             pages: Vec::new(),
             cur: new_page_content(),
             y: MARGIN,
+            grid_top: MARGIN,
         }
     }
 
@@ -393,6 +427,12 @@ impl Doc {
             self.pages.push(finished);
             self.y = MARGIN;
         }
+    }
+
+    /// Issue #104: reserve `need` points as ONE block so a heading + its table/chart never split
+    /// across a page break (the §4 zone bar was orphaning). A no-op when the block already fits.
+    fn keep_together(&mut self, need: f32) {
+        self.ensure(need);
     }
 
     fn gap(&mut self, h: f32) {
@@ -409,7 +449,9 @@ impl Doc {
     }
 
     fn section(&mut self, s: &str) {
-        self.ensure(HEAD_FONT + LINE_H);
+        // Issue #104: a heading keeps room for its header + a few rows, so it never dangles alone at
+        // a page foot with its table pushed to the next page.
+        self.keep_together(HEAD_FONT + 5.0 * LINE_H);
         self.y += HEAD_FONT;
         text(&mut self.cur, MARGIN, self.y, HEAD_FONT, s);
         self.y += 4.0;
@@ -424,41 +466,44 @@ impl Doc {
         self.y += LINE_H - FONT;
     }
 
-    /// A 3-column grid row (year + two ratios). `head` draws it bold-ish (a thin underline).
-    fn row3(&mut self, a: &str, b: &str, c: &str, head: bool) {
-        self.ensure(LINE_H + 2.0); // +2 covers a head row's extra underline advance
-        let cols = [MARGIN, MARGIN + 150.0, MARGIN + 320.0];
-        self.y += FONT;
-        text(&mut self.cur, cols[0], self.y, FONT, a);
-        text(&mut self.cur, cols[1], self.y, FONT, b);
-        text(&mut self.cur, cols[2], self.y, FONT, c);
-        if head {
-            self.y += 2.0;
-            hline(&mut self.cur, MARGIN, PAGE_W - MARGIN, self.y, 0.4);
-        }
-        self.y += LINE_H - FONT;
+    /// Issue #104 — start a boxed grid table: reserve `rows` × `LINE_H` (+ header) so the whole table
+    /// stays on one page (a boxed table split mid-way would leave a dangling frame), and record its
+    /// top so [`grid_end`] can draw the outer box + column rules.
+    fn grid_begin(&mut self, rows: usize) {
+        self.keep_together((rows as f32 + 1.0) * LINE_H + 4.0);
+        self.grid_top = self.y;
     }
 
-    /// A 5-column grid row (year + four figures).
-    #[allow(clippy::too_many_arguments)]
-    fn row5(&mut self, a: &str, b: &str, c: &str, d: &str, e: &str, head: bool) {
-        self.ensure(LINE_H + 2.0); // +2 covers a head row's extra underline advance
-        let cols = [
-            MARGIN,
-            MARGIN + 70.0,
-            MARGIN + 175.0,
-            MARGIN + 290.0,
-            MARGIN + 405.0,
-        ];
+    /// One row of the current grid: each cell left-aligned inside its column (edges = column
+    /// boundaries, len = cells + 1). A header row is underlined across the table width.
+    fn grid_row(&mut self, cells: &[&str], edges: &[f32], head: bool) {
         self.y += FONT;
-        for (x, s) in cols.iter().zip([a, b, c, d, e]) {
-            text(&mut self.cur, *x, self.y, FONT, s);
-        }
-        if head {
-            self.y += 2.0;
-            hline(&mut self.cur, MARGIN, PAGE_W - MARGIN, self.y, 0.4);
+        for (i, s) in cells.iter().enumerate() {
+            text(&mut self.cur, edges[i] + CELL_PAD, self.y, FONT, s);
         }
         self.y += LINE_H - FONT;
+        if head {
+            hline(
+                &mut self.cur,
+                edges[0],
+                edges[edges.len() - 1],
+                self.y - 1.5,
+                0.6,
+            );
+        }
+    }
+
+    /// Close the grid: the outer box from [`grid_begin`]'s top to the current cursor + a vertical
+    /// rule at each interior column boundary — the visible SSG grid (high-fidelity forms).
+    fn grid_end(&mut self, edges: &[f32]) {
+        let (top, bottom) = (self.grid_top - 1.0, self.y + 1.0);
+        let left = edges[0];
+        let right = edges[edges.len() - 1];
+        stroke_rect(&mut self.cur, left, top, right - left, bottom - top, 0.6);
+        for e in &edges[1..edges.len() - 1] {
+            vline(&mut self.cur, *e, top, bottom, 0.4);
+        }
+        self.y = bottom + 1.0;
     }
 
     /// Issue #105 — the §1 semi-log growth chart. Sales / EPS / high-Price on ONE log scale (the
@@ -492,7 +537,7 @@ impl Doc {
             return;
         }
 
-        self.ensure(CHART_H + LINE_H + 8.0);
+        self.ensure(CHART_H + 2.0 * LINE_H + 10.0);
         let top = self.y;
         let x0 = MARGIN + CHART_AXIS_W;
         let x1 = PAGE_W - MARGIN;
@@ -564,7 +609,17 @@ impl Doc {
                 );
             }
         }
-        self.y = top + CHART_H + 3.0;
+        // Issue #104 — year labels along the x-axis (each historical year under its column).
+        for (i, cy) in series.iter().enumerate() {
+            text_centered(
+                &mut self.cur,
+                px(i as f64),
+                top + CHART_H + 9.0,
+                6.5,
+                &cy.year.to_string(),
+            );
+        }
+        self.y = top + CHART_H + 13.0;
         self.line(CHART_LEGEND);
     }
 
@@ -726,6 +781,14 @@ fn hline(content: &mut Content, x1: f32, x2: f32, top_y: f32, width: f32) {
     content.set_line_width(width);
     content.move_to(x1, y);
     content.line_to(x2, y);
+    content.stroke();
+}
+
+/// A vertical rule between top-origin `top_y1` and `top_y2` (issue #104 — grid column separators).
+fn vline(content: &mut Content, x: f32, top_y1: f32, top_y2: f32, width: f32) {
+    content.set_line_width(width);
+    content.move_to(x, PAGE_H - top_y1);
+    content.line_to(x, PAGE_H - top_y2);
     content.stroke();
 }
 
