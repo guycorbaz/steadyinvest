@@ -108,6 +108,11 @@ pub const MSG_WATCH_NO_STUDY: &str =
 /// Holdings register copy (Story 4.3, FR36) — fact-stating, posture-gated. Raised when a holding's
 /// quantity or price is not a valid number, or its symbol is empty; nothing is written.
 pub const MSG_HOLDING_INVALID_NUMBER: &str = "La quantité et le prix d'achat doivent être des nombres ; aucune position n'a été enregistrée.";
+/// Raised when a holding's quantity or price is a valid number but its magnitude is beyond the
+/// supported range (issue #60) — a bound that keeps the capital-at-risk overlay's exact-decimal sums
+/// well inside `Decimal`'s range (no saturated, misleading total from an absurd input); nothing is
+/// written.
+pub const MSG_HOLDING_AMOUNT_OUT_OF_RANGE: &str = "La quantité et le prix d'achat sont hors de la plage prise en charge ; aucune position n'a été enregistrée.";
 pub const MSG_HOLDING_INVALID_TICKER: &str =
     "Le symbole est vide ; aucune position n'a été enregistrée.";
 /// Raised when a holding currency is not one of the supported set (Story 6.2, FR38); nothing is
@@ -505,6 +510,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_CONTRADICTED,
     MSG_WATCH_NO_STUDY,
     MSG_HOLDING_INVALID_NUMBER,
+    MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
     MSG_HOLDING_INVALID_TICKER,
     MSG_HOLDING_INVALID_CURRENCY,
     MSG_HOLDING_INVALID_STOP,

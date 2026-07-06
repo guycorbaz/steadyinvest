@@ -10,10 +10,10 @@ use steadyinvest_persistence::{DeletePortfolioOutcome, HoldingItem, PortfolioIte
 use uuid::Uuid;
 
 use super::{
-    JournalState, MSG_HOLDING_INVALID_CURRENCY, MSG_HOLDING_INVALID_NUMBER,
-    MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER, MSG_LEDGER_BACKED, MSG_NO_JOURNAL,
-    MSG_PORTFOLIO_HAS_HOLDINGS, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
-    MSG_READ_ONLY_WRITE, watch_error,
+    JournalState, MSG_HOLDING_AMOUNT_OUT_OF_RANGE, MSG_HOLDING_INVALID_CURRENCY,
+    MSG_HOLDING_INVALID_NUMBER, MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER,
+    MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_HAS_HOLDINGS, MSG_PORTFOLIO_INVALID_NAME,
+    MSG_PORTFOLIO_LAST, MSG_READ_ONLY_WRITE, watch_error,
 };
 
 impl JournalState {
@@ -445,10 +445,21 @@ pub(crate) fn effective_currency(holding: &HoldingItem, reference_currency: &str
         .unwrap_or_else(|| reference_currency.to_string())
 }
 
+/// The largest magnitude a holding's quantity or price may carry (issue #60): a trillion. Orders of
+/// magnitude beyond any real personal portfolio, but small enough that `quantity × price` — and the
+/// sum of those across positions — stays comfortably inside `Decimal`'s ~7.9e28 range, so the
+/// capital-at-risk overlay never has to saturate an absurd persisted value into a misleading total
+/// (its arithmetic is defensively saturating; this write-side bound keeps that path unreachable).
+fn max_holding_magnitude() -> Decimal {
+    Decimal::from(1_000_000_000_000_i64) // 1e12
+}
+
 /// Validate a holding's quantity and purchase price (Story 4.3, FR36 + NFR-C1). Both must parse as
 /// **exact** decimals (`Decimal::from_str_exact` — errors instead of silently rounding); quantity
-/// must be strictly positive and price non-negative. On success returns their **canonical** decimal
-/// spellings to store as TEXT; on any failure, the neutral [`MSG_HOLDING_INVALID_NUMBER`].
+/// must be strictly positive, price non-negative, and both within [`max_holding_magnitude`] (issue
+/// #60). On success returns their **canonical** decimal spellings to store as TEXT; a non-number is
+/// the neutral [`MSG_HOLDING_INVALID_NUMBER`], an out-of-range magnitude
+/// [`MSG_HOLDING_AMOUNT_OUT_OF_RANGE`].
 fn validate_holding_amounts(
     quantity: &str,
     purchase_price: &str,
@@ -461,5 +472,9 @@ fn validate_holding_amounts(
         .ok()
         .filter(|p| !p.is_sign_negative())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+    let max = max_holding_magnitude();
+    if qty > max || price > max {
+        return Err(MSG_HOLDING_AMOUNT_OUT_OF_RANGE.to_string());
+    }
     Ok((qty.to_string(), price.to_string()))
 }

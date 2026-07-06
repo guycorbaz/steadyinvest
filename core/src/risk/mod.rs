@@ -270,6 +270,21 @@ mod tests {
     }
 
     #[test]
+    fn capital_sums_saturate_and_never_panic_on_extreme_inputs() {
+        // Issue #60: an absurd (out-of-`Decimal`-range) holding must NOT panic the render path (it
+        // runs on every register render / price refresh). The sums saturate at the `Decimal` bounds
+        // instead. The app also bounds holding magnitude on write; this is the defense-in-depth half.
+        let huge = PositionRisk {
+            avg_cost: Decimal::MAX,
+            stop: Some(Decimal::ZERO),
+            quantity: Decimal::MAX,
+        };
+        // (MAX − 0) × MAX saturates to MAX per term; MAX + MAX saturates to MAX — no panic, no wrap.
+        assert_eq!(capital_at_risk(&[huge, huge]), Decimal::MAX);
+        assert_eq!(total_invested(&[huge, huge]), Decimal::MAX);
+    }
+
+    #[test]
     fn total_invested_sums_cost_times_quantity() {
         assert_eq!(
             total_invested(&[pos(100, Some(85), 10), pos(50, None, 4)]),
