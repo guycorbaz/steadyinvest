@@ -586,7 +586,14 @@ export component SettingsScreen inherits Rectangle {
                     ActionButton {
                         label: @tr("Enregistrer");
                         enabled: true;
-                        clicked => { Prefs.concentration-threshold-pct-changed(size-panel.draft-threshold); }
+                        // Issue #93: re-sync the field to the effective value after the handler — the
+                        // two-way `text <=> draft` severs the declarative binding, so a normalized save
+                        // (or a refused invalid entry) would otherwise leave stale text on screen (the
+                        // same fix the trailing-stop / withholding panels got in #88).
+                        clicked => {
+                            Prefs.concentration-threshold-pct-changed(size-panel.draft-threshold);
+                            size-panel.draft-threshold = Prefs.concentration-threshold-pct;
+                        }
                     }
                 }
 
@@ -662,6 +669,14 @@ export component SettingsScreen inherits Rectangle {
                                 size-panel.draft-target-small,
                                 size-panel.draft-target-medium,
                                 size-panel.draft-target-large);
+                            // Issue #93: re-sync every field to its effective value after the handler
+                            // (normalized save OR refused entry) — the two-way bindings would otherwise
+                            // leave stale text (the #88 fix, extended to the whole size table).
+                            size-panel.draft-small-max = Prefs.size-small-max;
+                            size-panel.draft-medium-max = Prefs.size-medium-max;
+                            size-panel.draft-target-small = Prefs.size-target-small-pct;
+                            size-panel.draft-target-medium = Prefs.size-target-medium-pct;
+                            size-panel.draft-target-large = Prefs.size-target-large-pct;
                         }
                     }
                 }
