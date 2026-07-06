@@ -4613,6 +4613,57 @@ fn a_checked_overflow_absents_the_bank_plainly_never_a_wrong_figure() {
     assert!(view.global.is_none(), "the global never sums a broken bank");
 }
 
+#[test]
+fn unstopped_exposure_counts_holdings_without_a_stop_per_currency() {
+    // Issue #61: capital-at-risk counts only stop-protected downside, so a stop-less portfolio reads
+    // "0 % at risk". This neutral fact names the un-protected exposure per currency instead.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x610);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap(); // 1000 CHF, no stop
+    state.add_holding("ABBN", "5", "40", "CHF").unwrap(); // 200 CHF, will be stopped
+    state.add_holding("AAPL", "2", "150", "USD").unwrap(); // 300 USD, no stop
+    let abbn = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.security_ticker == "ABBN")
+        .unwrap()
+        .id;
+    state.set_holding_trailing_stop(abbn, "15").unwrap();
+    // CHF: only NESN is un-stopped now (ABBN protected) → 1 position, 1000; USD: AAPL → 1, 300.
+    assert_eq!(
+        state.portfolio_unstopped_exposure_by_currency("CHF"),
+        vec![
+            ("CHF".to_string(), 1, Decimal::from(1000)),
+            ("USD".to_string(), 1, Decimal::from(300)),
+        ]
+    );
+    // The composed line pluralizes the count and carries the uncovered value.
+    assert_eq!(
+        unstopped_exposure_notice(1, "1 000,00 CHF"),
+        "1 position sans seuil suiveur (1 000,00 CHF non couverts)"
+    );
+    assert_eq!(
+        unstopped_exposure_notice(3, "5 000,00 CHF"),
+        "3 positions sans seuil suiveur (5 000,00 CHF non couverts)"
+    );
+    // Protect every remaining holding → the exposure is empty (nothing to warn about).
+    for t in ["NESN", "AAPL"] {
+        let id = state
+            .list_holdings()
+            .into_iter()
+            .find(|h| h.security_ticker == t)
+            .unwrap()
+            .id;
+        state.set_holding_trailing_stop(id, "10").unwrap();
+    }
+    assert!(
+        state
+            .portfolio_unstopped_exposure_by_currency("CHF")
+            .is_empty(),
+        "every holding protected → no un-stopped exposure line"
+    );
+}
+
 // ── Story 6.7 — concentration on total capital + diversify-by-size (FR45) ──
 
 /// Bank 1: NESN 10@100 CHF (1000) + AAPL 4@50 USD (200 USD); Bank 2: NESN 5@100 CHF (500).
