@@ -77,7 +77,9 @@ fn main() {
         year(2025, "416161000000", "7.47", "288.62", "169.21"),
     ];
     let bytes = steadyinvest_report::render_study_pdf(&s).expect("renders");
-    let path = std::env::args().nth(1).unwrap_or_else(|| "/tmp/study.pdf".into());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/tmp/study.pdf".into());
     std::fs::write(&path, &bytes).expect("write");
     eprintln!("wrote {} ({} bytes)", path, bytes.len());
 }
