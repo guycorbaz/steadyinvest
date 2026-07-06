@@ -44,6 +44,27 @@ pub(crate) fn user_version(conn: &Connection) -> Result<i64> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
 }
 
+/// Apply EVERY registered step onto `tx` and stamp `user_version` to the latest — WITHOUT committing
+/// (issue #79, the fresh-**create** path). The caller seeds the `journal_meta` row in the SAME
+/// transaction and commits once, so a hard crash mid-create leaves either an empty file or a complete
+/// journal — never a fully-migrated file with no meta row (which the next open misreads as
+/// `CorruptJournalMeta`). Assumes a FRESH file (all steps pending); the incremental upgrade path
+/// ([`run_pending`], per-step commits) is unchanged. SQLite DDL is transactional, so a rollback (any
+/// step erroring) leaves the file untouched.
+pub(crate) fn apply_all_in_tx(
+    tx: &Transaction<'_>,
+    registry: &[(u32, MigrationStep)],
+) -> Result<()> {
+    for (version, step) in registry {
+        step(tx).map_err(|e| Error::Migration {
+            version: *version,
+            source: Box::new(e),
+        })?;
+    }
+    tx.pragma_update(None, "user_version", latest_version(registry))?;
+    Ok(())
+}
+
 /// Apply every registered step newer than the file's `user_version`, each in its own
 /// transaction that also stamps the new version. Idempotent: a reopen at the latest version
 /// applies nothing. Refuses (with the read-only cause) when the file is newer than the registry.
@@ -105,6 +126,58 @@ mod tests {
             user_version(&conn).expect("pragma reads"),
             6,
             "a fresh DB migrates to the latest known version"
+        );
+    }
+
+    #[test]
+    fn apply_all_in_tx_stamps_latest_and_rolls_back_atomically() {
+        // Issue #79: the create path applies all migrations + seeds meta in ONE transaction. The
+        // batch stamps user_version to the latest; a rollback (a crash before commit) leaves the file
+        // at version 0 with NO schema — never a half-migrated file with a zero-row journal_meta.
+        let mut conn = mem();
+        {
+            let tx = conn.transaction().expect("begin");
+            apply_all_in_tx(&tx, REGISTRY).expect("all steps apply on the tx");
+            assert_eq!(
+                user_version(&tx).expect("pragma reads"),
+                i64::from(latest_version(REGISTRY)),
+                "the batch stamps user_version to the latest inside the tx"
+            );
+            tx.rollback().expect("rollback");
+        }
+        assert_eq!(
+            user_version(&conn).expect("pragma reads"),
+            0,
+            "a rolled-back create leaves the file at version 0"
+        );
+        let has_meta: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='journal_meta'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("sqlite_master reads");
+        assert_eq!(
+            has_meta, 0,
+            "no schema persists after rollback (nothing half-created)"
+        );
+    }
+
+    #[test]
+    fn apply_all_in_tx_committed_matches_run_pending() {
+        // The atomic create path produces the SAME end schema version as the incremental upgrade path.
+        let mut a = mem();
+        {
+            let tx = a.transaction().expect("begin");
+            apply_all_in_tx(&tx, REGISTRY).expect("apply");
+            tx.commit().expect("commit");
+        }
+        let mut b = mem();
+        run_pending(&mut b, REGISTRY).expect("incremental");
+        assert_eq!(
+            user_version(&a).expect("reads"),
+            user_version(&b).expect("reads"),
+            "atomic-create and incremental-upgrade reach the same version"
         );
     }
 

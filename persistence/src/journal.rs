@@ -250,12 +250,21 @@ impl Journal {
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         apply_read_write_pragmas(&conn, mode)?;
-        migrations::run_pending(&mut conn, migrations::REGISTRY)?;
-        conn.execute(
-            "INSERT INTO journal_meta (id, journal_id, logical_version, created_at)
-             VALUES (1, ?1, 0, ?2)",
-            rusqlite::params![journal_id.to_string(), created_at.0],
-        )?;
+        // Issue #79: run every migration AND seed the `journal_meta` row in ONE transaction, so a hard
+        // crash (power loss / kill -9) mid-create leaves either an empty file or a complete journal —
+        // never a fully-migrated file with a zero-row `journal_meta` (which the next open would misread
+        // as `CorruptJournalMeta` on a file the user never actually corrupted). SQLite DDL is
+        // transactional, so any failing step rolls the whole thing back untouched.
+        {
+            let tx = conn.transaction()?;
+            migrations::apply_all_in_tx(&tx, migrations::REGISTRY)?;
+            tx.execute(
+                "INSERT INTO journal_meta (id, journal_id, logical_version, created_at)
+                 VALUES (1, ?1, 0, ?2)",
+                rusqlite::params![journal_id.to_string(), created_at.0],
+            )?;
+            tx.commit()?;
+        }
         Ok(Journal {
             conn,
             id: journal_id,
