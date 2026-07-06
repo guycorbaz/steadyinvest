@@ -15,10 +15,12 @@
 //!   (so a fixture's bytes are testable).
 
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use steadyinvest_contract::Study;
+use steadyinvest_core::method::FORECAST_HORIZON_YEARS;
 use steadyinvest_core::normalize::NormalizeError;
 use steadyinvest_core::rounding::{DisplayField, round_for_display};
-use steadyinvest_core::ssg::{Trend, UpsideDownside, Zone};
+use steadyinvest_core::ssg::{Trend, UpsideDownside, Zone, ZoneBounds};
 
 use pdf_writer::{Content, Name, Pdf, Rect, Ref, Str};
 
@@ -49,6 +51,16 @@ const TITLE_FONT: f32 = 15.0;
 const HEAD_FONT: f32 = 11.0;
 const LINE_H: f32 = 13.0;
 const BOTTOM: f32 = MARGIN + 24.0; // keep clear of the footer disclaimer
+
+// ── chart geometry (issue #105 — vector graphics into the PDF, greyscale-safe) ──
+const CHART_H: f32 = 150.0; // §1 semi-log plot height (points)
+const CHART_AXIS_W: f32 = 30.0; // left gutter for the y-axis decade labels
+const ZONEBAR_H: f32 = 26.0; // §4 zone bar height (points)
+const SERIES_PAD_DECADES: f64 = 0.12; // per-series head/foot room (issue #25)
+const MIN_SERIES_DECADES: f64 = 0.6; // a flat series still gets this much span (no false drama)
+const RULE_GRAY: f32 = 0.35; // the default rule/grid grey (restored after a chart)
+const GRID_GRAY: f32 = 0.75; // faint decade gridlines
+const SERIES_GRAY: f32 = 0.0; // series strokes (black; told apart by weight + dash, never hue)
 
 /// Render a study to a faithful, neutral, greyscale PDF (FR52). Read-only: it computes nothing the
 /// engine does not already compute, writes no journal, and needs no provider.
@@ -87,6 +99,9 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         pct(outputs.growth.sales_cagr_pct),
         pct(outputs.growth.eps_cagr_pct),
     ));
+    doc.gap(4.0);
+    // Issue #105 — the semi-log growth chart (Sales/EPS/Price + est-high/low EPS projection).
+    doc.growth_chart(&frame);
     doc.gap(6.0);
 
     // ── §2 Management ──
@@ -161,6 +176,12 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         zone_label(outputs.risk_reward.present_price_zone),
         upside(&outputs.risk_reward.upside_downside),
     ));
+    doc.gap(4.0);
+    // Issue #105 — the zone bar (low/median/high thirds + the current-price marker), greyscale-safe.
+    doc.zone_bar(
+        outputs.risk_reward.zones.as_ref(),
+        study.judgment.current_price.map(|m| m.as_decimal()),
+    );
     doc.gap(6.0);
 
     // ── §5 Five-year potential ──
@@ -278,6 +299,13 @@ const VERDICT_FULL: &str = "Tous les critères validés et à jour";
 const VERDICT_PROVISIONAL: &str = "Provisoire — données à revérifier ou confiance réduite";
 const VERDICT_WITHHELD: &str = "En attente — au moins une donnée requise manque";
 
+// ── issue #105 — the embedded charts' neutral labels (greyscale legend + zone bands) ──
+const CHART_LEGEND: &str = "BPA (trait épais)   ·   Ventes (trait fin)   ·   Cours (tirets)   ·   projection (pointillés)   —   échelle propre par série (axe : BPA)";
+const ZONE_LOW: &str = "Zone basse";
+const ZONE_MID: &str = "Zone médiane";
+const ZONE_HIGH: &str = "Zone haute";
+const CURRENT_PRICE: &str = "Cours actuel";
+
 #[cfg(test)]
 const REPORT_USER_FACING: &[&str] = &[
     // Header.
@@ -323,6 +351,12 @@ const REPORT_USER_FACING: &[&str] = &[
     "Rendement annualisé total projeté :",
     "Position :",
     "Confiance réduite : moins d'années exploitables que le seuil de la méthode.",
+    // Issue #105 — the embedded charts' labels.
+    CHART_LEGEND,
+    ZONE_LOW,
+    ZONE_MID,
+    ZONE_HIGH,
+    CURRENT_PRICE,
     // Footer disclaimer (FR64).
     "Outil éducatif — ne constitue pas un conseil financier.",
     // The neutral render-failure message.
@@ -427,6 +461,163 @@ impl Doc {
         self.y += LINE_H - FONT;
     }
 
+    /// Issue #105 — the §1 semi-log growth chart. Sales / EPS / high-Price on ONE log scale (the
+    /// classic SSG semilog view), plus the est-high / est-low EPS projection from the last EPS point
+    /// to the forecast horizon. Greyscale-safe: the series are told apart by weight + dash (EPS thick
+    /// solid, Sales thin solid, Price dashed, projection dotted), NEVER colour. Nothing is drawn when
+    /// there is no plottable data (the tables already carry the em-dashes).
+    fn growth_chart(&mut self, frame: &crate::form::StudyFrame) {
+        let series = &frame.series;
+        let outputs = frame.snapshot.outputs();
+        let pts_of =
+            |get: &dyn Fn(&steadyinvest_core::normalize::CanonicalYear) -> Option<Decimal>| {
+                series
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, cy)| {
+                        get(cy)
+                            .and_then(|d| d.to_f64())
+                            .filter(|v| *v > 0.0)
+                            .map(|v| (i, v))
+                    })
+                    .collect::<Vec<(usize, f64)>>()
+            };
+        let sales = pts_of(&|cy| cy.sales);
+        let eps = pts_of(&|cy| cy.eps);
+        let price = pts_of(&|cy| cy.high_price);
+        let est_high = outputs.growth.estimated_high_eps.and_then(|d| d.to_f64());
+        let est_low = outputs.growth.estimated_low_eps.and_then(|d| d.to_f64());
+
+        if series.is_empty() || (sales.is_empty() && eps.is_empty() && price.is_empty()) {
+            return;
+        }
+
+        self.ensure(CHART_H + LINE_H + 8.0);
+        let top = self.y;
+        let x0 = MARGIN + CHART_AXIS_W;
+        let x1 = PAGE_W - MARGIN;
+        let plot_w = x1 - x0;
+        let n = series.len();
+        let span = ((n as f64 - 1.0) + f64::from(FORECAST_HORIZON_YEARS)).max(1.0);
+        let px = |i: f64| x0 + ((i / span) * f64::from(plot_w)) as f32;
+        let py = |v: f64, lmin: f64, lmax: f64| {
+            let t = ((v.max(1e-9).log10() - lmin) / (lmax - lmin)).clamp(0.0, 1.0);
+            top + (f64::from(CHART_H) * (1.0 - t)) as f32
+        };
+
+        // Issue #25 (multi-scale): each series on its OWN log range so none is crushed by another's
+        // magnitude. The EPS scale (the decision series + its projection) is the LABELLED one.
+        let vals = |pts: &[(usize, f64)]| pts.iter().map(|p| p.1).collect::<Vec<f64>>();
+        let sales_b = series_log_bounds(&vals(&sales));
+        let price_b = series_log_bounds(&vals(&price));
+        let mut eps_scale_vals = vals(&eps);
+        eps_scale_vals.extend(est_high.filter(|v| *v > 0.0));
+        eps_scale_vals.extend(est_low.filter(|v| *v > 0.0));
+        let eps_b = series_log_bounds(&eps_scale_vals);
+
+        stroke_rect(&mut self.cur, x0, top, plot_w, CHART_H, 0.6);
+        // Gridlines + labels on the EPS scale (nice 1/2/5×10^k). Sales/Price live on their own scales
+        // (shape/trend, not absolute height — the table carries the exact figures), told apart below.
+        if let Some((lmin, lmax)) = eps_b {
+            for (v, lbl) in nice_ticks(lmin, lmax) {
+                let gy = py(v, lmin, lmax);
+                polyline(&mut self.cur, &[(x0, gy), (x1, gy)], 0.3, GRID_GRAY, &[]);
+                text(&mut self.cur, MARGIN, gy + 2.5, 7.0, &lbl);
+            }
+        }
+        // Each series on its own scale (greyscale: weight + dash).
+        let draw = |cur: &mut Content, pts: &[(usize, f64)], b: Option<(f64, f64)>, w: f32, dash: &[f32]| {
+            if let Some((lmin, lmax)) = b {
+                let p: Vec<(f32, f32)> =
+                    pts.iter().map(|(i, v)| (px(*i as f64), py(*v, lmin, lmax))).collect();
+                polyline(cur, &p, w, SERIES_GRAY, dash);
+            }
+        };
+        draw(&mut self.cur, &sales, sales_b, 0.8, &[]);
+        draw(&mut self.cur, &price, price_b, 0.8, &[3.0, 2.0]);
+        draw(&mut self.cur, &eps, eps_b, 1.6, &[]);
+        // Projection from the last EPS point to est-high / est-low at the horizon (dotted), EPS scale.
+        if let (Some((lmin, lmax)), Some((li, lv))) = (eps_b, eps.last().copied()) {
+            let (ox, oy) = (px(li as f64), py(lv, lmin, lmax));
+            if let Some(h) = est_high.filter(|v| *v > 0.0) {
+                polyline(&mut self.cur, &[(ox, oy), (px(span), py(h, lmin, lmax))], 1.2, SERIES_GRAY, &[1.5, 2.0]);
+            }
+            if let Some(l) = est_low.filter(|v| *v > 0.0) {
+                polyline(&mut self.cur, &[(ox, oy), (px(span), py(l, lmin, lmax))], 1.0, SERIES_GRAY, &[1.5, 2.0]);
+            }
+        }
+        self.y = top + CHART_H + 3.0;
+        self.line(CHART_LEGEND);
+    }
+
+    /// Issue #105 — the §4 zone bar. A horizontal band from forecast-low to forecast-high split into
+    /// the three thirds (low / median / high), greyscale-shaded (light → dark) with a label in each,
+    /// and a marker at the current price. Greyscale-safe: the bands read by shade + label + position,
+    /// never hue. Nothing is drawn when the forecast is incomplete (the §4 text already says so).
+    fn zone_bar(&mut self, zones: Option<&ZoneBounds>, current_price: Option<Decimal>) {
+        let Some(z) = zones else {
+            return;
+        };
+        let lo = z.forecast_low.to_f64().unwrap_or(0.0);
+        let hi = z.forecast_high.to_f64().unwrap_or(0.0);
+        let buy = z.buy_top.to_f64().unwrap_or(0.0);
+        let neu = z.neutral_top.to_f64().unwrap_or(0.0);
+        if hi <= lo {
+            return;
+        }
+        self.ensure(ZONEBAR_H + 2.0 * LINE_H + 12.0);
+        let (x0, x1) = (MARGIN, PAGE_W - MARGIN);
+        let w = x1 - x0;
+        let top = self.y + 10.0; // room above for the current-price marker label
+        let fx = |price: f64| x0 + (((price - lo) / (hi - lo)).clamp(0.0, 1.0) * f64::from(w)) as f32;
+
+        // Three thirds, greyscale shades (low third lightest, high third darkest).
+        fill_rect(&mut self.cur, x0, top, fx(buy) - x0, ZONEBAR_H, 0.86);
+        fill_rect(&mut self.cur, fx(buy), top, fx(neu) - fx(buy), ZONEBAR_H, 0.70);
+        fill_rect(&mut self.cur, fx(neu), top, x1 - fx(neu), ZONEBAR_H, 0.52);
+        stroke_rect(&mut self.cur, x0, top, w, ZONEBAR_H, 0.5);
+
+        // Zone labels centered in each third.
+        let mid_y = top + ZONEBAR_H / 2.0 + 3.0;
+        text_centered(&mut self.cur, (x0 + fx(buy)) / 2.0, mid_y, 8.0, ZONE_LOW);
+        text_centered(&mut self.cur, (fx(buy) + fx(neu)) / 2.0, mid_y, 8.0, ZONE_MID);
+        text_centered(&mut self.cur, (fx(neu) + x1) / 2.0, mid_y, 8.0, ZONE_HIGH);
+
+        // Boundary prices under the bar.
+        let by = top + ZONEBAR_H + 9.0;
+        text(&mut self.cur, x0, by, 7.0, &money(Some(z.forecast_low)));
+        text_centered(&mut self.cur, fx(buy), by, 7.0, &money(Some(z.buy_top)));
+        text_centered(&mut self.cur, fx(neu), by, 7.0, &money(Some(z.neutral_top)));
+        let hi_lbl = money(Some(z.forecast_high));
+        text(
+            &mut self.cur,
+            x1 - hi_lbl.chars().count() as f32 * 7.0 * 0.5,
+            by,
+            7.0,
+            &hi_lbl,
+        );
+
+        // Current-price marker: a vertical line through the bar + a caption above.
+        if let Some(cp) = current_price.and_then(|d| d.to_f64()) {
+            let mx = fx(cp);
+            polyline(
+                &mut self.cur,
+                &[(mx, top - 4.0), (mx, top + ZONEBAR_H + 2.0)],
+                1.3,
+                0.0,
+                &[],
+            );
+            text_centered(
+                &mut self.cur,
+                mx,
+                top - 6.0,
+                7.0,
+                &format!("{CURRENT_PRICE} {}", money(current_price)),
+            );
+        }
+        self.y = by + 4.0;
+    }
+
     /// Stamp the footer disclaimer on a page's content (FR64 — every page).
     fn footer(content: &mut Content) {
         text(
@@ -504,6 +695,112 @@ fn hline(content: &mut Content, x1: f32, x2: f32, top_y: f32, width: f32) {
     content.move_to(x1, y);
     content.line_to(x2, y);
     content.stroke();
+}
+
+// ── vector-graphics primitives for the embedded charts (issue #105), all in top-origin coords ──
+
+/// A polyline through top-origin `pts` in grey `gray`, weight `width`; `dash` (on, off) lengths make
+/// it dashed (empty = solid). Fewer than two points draws nothing (a lone point has no line). The
+/// stroke grey is restored to [`RULE_GRAY`] after, so later rules keep the default weight/tone.
+fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, gray: f32, dash: &[f32]) {
+    if pts.len() < 2 {
+        return;
+    }
+    content.set_stroke_gray(gray);
+    content.set_line_width(width);
+    if !dash.is_empty() {
+        content.set_dash_pattern(dash.iter().copied(), 0.0);
+    }
+    for (i, (x, top_y)) in pts.iter().enumerate() {
+        let y = PAGE_H - top_y;
+        if i == 0 {
+            content.move_to(*x, y);
+        } else {
+            content.line_to(*x, y);
+        }
+    }
+    content.stroke();
+    if !dash.is_empty() {
+        content.set_dash_pattern(std::iter::empty(), 0.0);
+    }
+    content.set_stroke_gray(RULE_GRAY);
+}
+
+/// A stroked rectangle outline at top-origin `(x, top_y)`, size `w × h`.
+fn stroke_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, width: f32) {
+    content.set_line_width(width);
+    content.rect(x, PAGE_H - top_y - h, w, h);
+    content.stroke();
+}
+
+/// A grey-filled rectangle at top-origin `(x, top_y)`, size `w × h`. Restores the fill to black
+/// (text) after — the greyscale zone fills are the only non-black fill in the document.
+fn fill_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, gray: f32) {
+    content.set_fill_gray(gray);
+    content.rect(x, PAGE_H - top_y - h, w, h);
+    content.fill_nonzero();
+    content.set_fill_gray(0.0);
+}
+
+/// Helvetica is ~0.5 em wide on average — enough to CENTER a short label at `cx` without embedding
+/// font metrics (the labels are short and the box wide, so the estimate never overflows visibly).
+fn text_centered(content: &mut Content, cx: f32, top_y: f32, size: f32, s: &str) {
+    let w = s.chars().count() as f32 * size * 0.5;
+    text(content, cx - w / 2.0, top_y, size, s);
+}
+
+/// Issue #25 (multi-scale): the log10 bounds of ONE series' own data range, padded by
+/// [`SERIES_PAD_DECADES`] and widened to at least [`MIN_SERIES_DECADES`] so a flat series is not
+/// stretched to fill. Each series gets its own bounds so none is crushed by another's magnitude
+/// (AAPL: sales in hundreds of billions would otherwise flatten EPS/Price to invisible lines).
+/// `None` when the series has no positive value.
+fn series_log_bounds(values: &[f64]) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for v in values {
+        if *v > 0.0 {
+            lo = lo.min(v.log10());
+            hi = hi.max(v.log10());
+        }
+    }
+    if !(lo.is_finite() && hi.is_finite()) {
+        return None;
+    }
+    if hi - lo < MIN_SERIES_DECADES {
+        let mid = (lo + hi) / 2.0;
+        lo = mid - MIN_SERIES_DECADES / 2.0;
+        hi = mid + MIN_SERIES_DECADES / 2.0;
+    }
+    let pad = (hi - lo) * SERIES_PAD_DECADES;
+    Some((lo - pad, hi + pad))
+}
+
+/// Nice `1 / 2 / 5 × 10^k` tick values (+ their compact labels) inside a log scale `[10^lmin, 10^lmax]`.
+fn nice_ticks(lmin: f64, lmax: f64) -> Vec<(f64, String)> {
+    let (min, max) = (10f64.powf(lmin), 10f64.powf(lmax));
+    let mut out = Vec::new();
+    for k in (min.log10().floor() as i32)..=(max.log10().ceil() as i32) {
+        for m in [1.0, 2.0, 5.0] {
+            let v = m * 10f64.powi(k);
+            if v >= min && v <= max {
+                out.push((v, compact_num(v)));
+            }
+        }
+    }
+    out
+}
+
+/// A compact axis label: plain up to 999, then `k / M / Md` (French short scale) — data, not prose.
+fn compact_num(v: f64) -> String {
+    if v >= 1e9 {
+        format!("{} Md", (v / 1e9).round() as i64)
+    } else if v >= 1e6 {
+        format!("{} M", (v / 1e6).round() as i64)
+    } else if v >= 1e3 {
+        format!("{} k", (v / 1e3).round() as i64)
+    } else {
+        format!("{}", v.round() as i64)
+    }
 }
 
 /// Encode a UTF-8 string as WinAnsi (Latin-1 for the accent range we use, plus a few WinAnsi-only
