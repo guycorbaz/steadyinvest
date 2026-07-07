@@ -87,8 +87,10 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     doc.title("Analyse de sélection de titre");
     doc.line(&format!(
         "Titre : {}   ·   Monnaie : {}   ·   Décision : {}",
-        study.security_ticker,
-        study.native_currency,
+        // Issue #74: a pathological identifier is truncated so the header cannot run past the A4
+        // right edge (else it is silently clipped by the media box).
+        truncate(&study.security_ticker, 40),
+        truncate(&study.native_currency, 16),
         date_prefix(&study.created_at.0),
     ));
     doc.gap(6.0);
@@ -318,6 +320,18 @@ fn date_prefix(ts: &str) -> String {
     ts.chars().take(10).collect()
 }
 
+/// Truncate a display string to at most `max` characters, appending an ellipsis when cut (issue #74)
+/// — so a pathological ticker/currency cannot run past the page's right edge. Char-based (never byte
+/// slicing), so multibyte accents stay intact; `max` is assumed ≥ 1.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let kept: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{kept}…")
+    }
+}
+
 const EM_DASH: &str = "—";
 
 // ── neutral user-facing string inventory (FR13) ──
@@ -408,6 +422,9 @@ struct Doc {
     cur: Content,
     y: f32,        // top-origin cursor (distance from the page top)
     grid_top: f32, // the top of the grid table currently being drawn (issue #104)
+    // Issue #74: the current table's column header, remembered on the header row so it can be
+    // replayed at the top of each continuation page when the table spans a break.
+    grid_header: Vec<String>,
 }
 
 impl Doc {
@@ -417,16 +434,22 @@ impl Doc {
             cur: new_page_content(),
             y: MARGIN,
             grid_top: MARGIN,
+            grid_header: Vec::new(),
         }
     }
 
     /// Ensure `need` points of vertical space remain on the current page; else start a new one.
     fn ensure(&mut self, need: f32) {
         if PAGE_H - self.y - need < BOTTOM {
-            let finished = std::mem::replace(&mut self.cur, new_page_content());
-            self.pages.push(finished);
-            self.y = MARGIN;
+            self.new_page();
         }
+    }
+
+    /// Finish the page in progress and start a fresh one, resetting the cursor to the top margin.
+    fn new_page(&mut self) {
+        let finished = std::mem::replace(&mut self.cur, new_page_content());
+        self.pages.push(finished);
+        self.y = MARGIN;
     }
 
     /// Issue #104: reserve `need` points as ONE block so a heading + its table/chart never split
@@ -466,17 +489,37 @@ impl Doc {
         self.y += LINE_H - FONT;
     }
 
-    /// Issue #104 — start a boxed grid table: reserve `rows` × `LINE_H` (+ header) so the whole table
-    /// stays on one page (a boxed table split mid-way would leave a dangling frame), and record its
-    /// top so [`grid_end`] can draw the outer box + column rules.
-    fn grid_begin(&mut self, rows: usize) {
-        self.keep_together((rows as f32 + 1.0) * LINE_H + 4.0);
+    /// Issue #104 — start a boxed grid table. Reserve only the header + first row together (the
+    /// section heading already reserved a few rows), and record the table top so [`grid_end`] can
+    /// draw the outer box + column rules. Issue #74: a grid may now SPAN page breaks — instead of
+    /// forcing the whole table onto one page (which overflowed the page foot for 60+ year studies),
+    /// [`grid_row`] closes the box at a break and replays the header on the continuation page.
+    fn grid_begin(&mut self, _rows: usize) {
+        self.keep_together(2.0 * LINE_H + 4.0);
         self.grid_top = self.y;
     }
 
     /// One row of the current grid: each cell left-aligned inside its column (edges = column
-    /// boundaries, len = cells + 1). A header row is underlined across the table width.
+    /// boundaries, len = cells + 1). A header row is underlined across the table width and remembered
+    /// for replay. A data row that would cross the page foot closes the box on this page, starts a
+    /// new one, and re-emits the column header before drawing (issue #74).
     fn grid_row(&mut self, cells: &[&str], edges: &[f32], head: bool) {
+        if head {
+            self.grid_header = cells.iter().map(|s| s.to_string()).collect();
+        } else if PAGE_H - self.y - LINE_H < BOTTOM {
+            self.close_grid_box(edges);
+            self.new_page();
+            self.grid_top = self.y;
+            let header = self.grid_header.clone();
+            let refs: Vec<&str> = header.iter().map(String::as_str).collect();
+            self.draw_grid_cells(&refs, edges, true);
+        }
+        self.draw_grid_cells(cells, edges, head);
+    }
+
+    /// Draw one grid row's cells at the current cursor (no page-break logic) — the shared body of a
+    /// header replay and a normal [`grid_row`].
+    fn draw_grid_cells(&mut self, cells: &[&str], edges: &[f32], head: bool) {
         self.y += FONT;
         for (i, s) in cells.iter().enumerate() {
             text(&mut self.cur, edges[i] + CELL_PAD, self.y, FONT, s);
@@ -493,9 +536,10 @@ impl Doc {
         }
     }
 
-    /// Close the grid: the outer box from [`grid_begin`]'s top to the current cursor + a vertical
-    /// rule at each interior column boundary — the visible SSG grid (high-fidelity forms).
-    fn grid_end(&mut self, edges: &[f32]) {
+    /// Draw the grid's outer box from [`grid_top`] to the current cursor + a vertical rule at each
+    /// interior column boundary. Called at each page break (for the portion on the closing page) and
+    /// once more by [`grid_end`] for the final portion — the visible SSG grid (high-fidelity forms).
+    fn close_grid_box(&mut self, edges: &[f32]) {
         let (top, bottom) = (self.grid_top - 1.0, self.y + 1.0);
         let left = edges[0];
         let right = edges[edges.len() - 1];
@@ -503,7 +547,12 @@ impl Doc {
         for e in &edges[1..edges.len() - 1] {
             vline(&mut self.cur, *e, top, bottom, 0.4);
         }
-        self.y = bottom + 1.0;
+    }
+
+    /// Close the grid: box the final (or only) page's portion, then advance past it.
+    fn grid_end(&mut self, edges: &[f32]) {
+        self.close_grid_box(edges);
+        self.y += 2.0;
     }
 
     /// Issue #105 — the §1 semi-log growth chart. Sales / EPS / high-Price on ONE log scale (the
@@ -905,6 +954,7 @@ fn winansi(s: &str) -> Vec<u8> {
         .map(|c| match c as u32 {
             0x2014 => 0x97,            // — em dash
             0x2013 => 0x96,            // – en dash
+            0x2026 => 0x85,            // … horizontal ellipsis (issue #74 truncation)
             0x2019 => 0x92,            // ’ right single quote
             0x20AC => 0x80,            // € euro
             n if n <= 0x7F => n as u8, // ASCII
@@ -1114,6 +1164,48 @@ mod tests {
             .take_while(|b| b.is_ascii_digit())
             .fold(0, |acc, b| acc * 10 + u32::from(b - b'0'));
         assert!(n >= 2, "56 years must paginate to >1 page, got /Count {n}");
+    }
+
+    #[test]
+    fn a_table_spanning_a_page_break_repeats_its_column_header() {
+        // Issue #74: a §1 historical table long enough to cross a page break must re-emit its column
+        // header on each continuation page (fidelity — a headerless continuation is confusing).
+        let mut s = demo_study();
+        s.years = (1900..=2025).map(|y| year(y, "5")).collect(); // 126 years → §1 spans several pages
+        let bytes = render_study_pdf(&s).expect("a long study renders");
+        // "Cours haut" is a §1-only header cell (WinAnsi = ASCII, so a contiguous byte run). One
+        // occurrence per page the table touches → ≥ 2 proves the header was replayed.
+        let header = b"Cours haut";
+        let count = bytes.windows(header.len()).filter(|w| *w == header).count();
+        assert!(
+            count >= 2,
+            "the §1 column header must repeat on continuation pages, saw {count}"
+        );
+    }
+
+    #[test]
+    fn an_over_long_identifier_is_truncated_with_an_ellipsis() {
+        // Issue #74: the header truncates a pathological ticker/currency instead of running it off
+        // the page (clipped by the media box).
+        let long = "X".repeat(200);
+        let t = truncate(&long, 40);
+        assert_eq!(t.chars().count(), 40, "clamped to the max width");
+        assert!(t.ends_with('…'), "a cut string ends with an ellipsis");
+        // A string within budget is returned untouched — no spurious ellipsis.
+        assert_eq!(truncate("NESN", 40), "NESN");
+        assert_eq!(truncate("CHF", 16), "CHF");
+    }
+
+    #[test]
+    fn a_pathological_ticker_does_not_reach_the_pdf_in_full() {
+        // The 200-char ticker must be truncated before it is written into the content stream.
+        let mut s = demo_study();
+        s.security_ticker = "Z".repeat(200);
+        let bytes = render_study_pdf(&s).expect("the study still renders");
+        assert!(
+            !bytes.windows(200).any(|w| w.iter().all(|b| *b == b'Z')),
+            "the over-long ticker must be truncated, never written to the page in full"
+        );
     }
 
     #[test]
