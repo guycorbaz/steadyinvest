@@ -107,6 +107,7 @@ fn fetched_custom(
         canonical: normalize(raw).expect("the test raw normalizes"),
         digest: digest.to_string(),
         latest_price: None,
+        latest_session_date: None,
         ttm_eps: None,
     }
 }
@@ -197,6 +198,7 @@ fn provider_fetch_drops_the_in_progress_year_without_annual_statements() {
         .expect("normalizes"),
         digest: "d109".to_string(),
         latest_price: None,
+        latest_session_date: None,
         ttm_eps: None,
     };
 
@@ -709,7 +711,7 @@ fn a_refresh_caches_a_close_that_confront_reads_back() {
     let id = state.create_study("NESN", "CHF").unwrap();
     // A holdings price refresh caches today's close into the price-history trajectory.
     state
-        .apply_holding_price(id, Decimal::from_str_exact("104.50").unwrap())
+        .apply_holding_price(id, Decimal::from_str_exact("104.50").unwrap(), None)
         .unwrap();
     let view = state.confront(id);
     assert_eq!(
@@ -721,6 +723,89 @@ fn a_refresh_caches_a_close_that_confront_reads_back() {
         "confront reads back the cached post-decision close"
     );
     assert_eq!(view.decision_date, "2026-06-27");
+}
+
+/// Open a state whose fixed clock is `ts` (so `created_at`/`decision_date` predate a later session
+/// date) — issue #72 tests need the cached session date to fall INSIDE the confront window.
+fn dated_state(dir: &TempDir, seed: u128, ts: &str) -> JournalState {
+    let path = dir.path().join("journal.db");
+    if !path.exists() {
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xC0FFEE),
+                &Timestamp("2026-06-01T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+    }
+    let clock: Box<dyn Clock> = Box::new(FixedClock(Timestamp(ts.to_string())));
+    let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
+    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    state
+}
+
+#[test]
+fn a_refresh_keys_the_close_by_the_provider_session_date_not_the_clock_day() {
+    // Issue #72: when the provider supplies a real EOD session date, the cached close is keyed by
+    // THAT date, not the refresh (clock) day. Decision date 2026-06-20; the provider's session was
+    // 2026-06-26 (a later real trading day) — the trajectory point reads under the session date.
+    let dir = TempDir::new().unwrap();
+    let mut state = dated_state(&dir, 0x513, "2026-06-20T15:00:00Z");
+    let id = state.create_study("NESN", "CHF").unwrap();
+    state
+        .apply_holding_price(
+            id,
+            Decimal::from_str_exact("104.50").unwrap(),
+            Some("2026-06-26".to_string()),
+        )
+        .unwrap();
+    let view = state.confront(id);
+    assert_eq!(view.decision_date, "2026-06-20");
+    assert_eq!(
+        view.actual,
+        vec![(
+            "2026-06-26".to_string(),
+            Decimal::from_str_exact("104.5").unwrap()
+        )],
+        "the close is keyed by the provider's session date (2026-06-26), not the clock day (2026-06-20)"
+    );
+}
+
+#[test]
+fn a_weekend_refetch_of_the_same_session_does_not_duplicate_the_close() {
+    // Issue #72: two refreshes both reporting the same finalized session close → one trajectory
+    // point, not one per calendar day (the pre-fix ordinal-axis duplication).
+    let dir = TempDir::new().unwrap();
+    let mut state = dated_state(&dir, 0x514, "2026-06-20T15:00:00Z");
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let close = Decimal::from_str_exact("104.50").unwrap();
+    state
+        .apply_holding_price(id, close, Some("2026-06-26".to_string()))
+        .unwrap();
+    state
+        .apply_holding_price(id, close, Some("2026-06-26".to_string()))
+        .unwrap();
+    assert_eq!(
+        state.confront(id).actual.len(),
+        1,
+        "the same session's close is cached once, never duplicated across calendar days"
+    );
+    // A malformed provider date is rejected → the close falls back to the clock day (2026-06-20,
+    // inside the window) rather than becoming a nonsense key, so the close is never lost.
+    state
+        .apply_holding_price(id, close, Some("not-a-date".to_string()))
+        .unwrap();
+    let dates: Vec<String> = state
+        .confront(id)
+        .actual
+        .into_iter()
+        .map(|(d, _)| d)
+        .collect();
+    assert!(
+        dates.contains(&"2026-06-20".to_string()),
+        "a malformed session date falls back to the clock day, keeping the close: {dates:?}"
+    );
 }
 
 #[test]
@@ -739,7 +824,7 @@ fn confront_does_not_bump_the_version_read_only() {
     let mut state = watch_state(&dir, 0x512);
     let id = state.create_study("NESN", "CHF").unwrap();
     state
-        .apply_holding_price(id, Decimal::from_str_exact("104.50").unwrap())
+        .apply_holding_price(id, Decimal::from_str_exact("104.50").unwrap(), None)
         .unwrap();
     let before = state.logical_version_or_zero();
     let _ = state.confront(id);
@@ -2108,7 +2193,7 @@ fn apply_holding_price_sets_current_price_only_and_moves_the_zone() {
     let before_years = state.get_study(id).unwrap().years.clone();
 
     state
-        .apply_holding_price(id, rust_decimal::Decimal::new(70, 0))
+        .apply_holding_price(id, rust_decimal::Decimal::new(70, 0), None)
         .unwrap();
 
     let after = state.get_study(id).unwrap();

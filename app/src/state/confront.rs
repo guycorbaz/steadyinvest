@@ -86,23 +86,44 @@ impl JournalState {
         }
     }
 
-    /// Append a close to the price-history cache (Story 5.1): `(ticker, today, price)` from a refresh.
-    /// One point per ticker/day (dedup by the unique index); the close is the canonical decimal TEXT.
-    /// A no-op when no journal is open. `source = "provider"` (v1; the per-provider tag is a later
-    /// refinement). The confront overlay reads this back via `closes_since`.
+    /// Append a close to the price-history cache (Story 5.1): `(ticker, session_date, price)` from a
+    /// refresh. One point per ticker/session (dedup by the unique index); the close is the canonical
+    /// decimal TEXT. A no-op when no journal is open. `source = "provider"` (v1; the per-provider tag
+    /// is a later refinement). The confront overlay reads this back via `closes_since`.
     ///
-    /// KNOWN LIMITATION (tracked as issue #72): the close is keyed by the **refresh date**, not
-    /// the provider's real EOD session date — `fetch_latest_price` returns only the price (Decimal), and
-    /// carrying the session date would expand the `MarketDataProvider` surface, which Story 5.1's AC4
-    /// forbids ("no new provider surface"). So a weekend/holiday refresh stamps the prior session's
-    /// close under today, and a same-day re-fetch is first-wins (`INSERT OR IGNORE`). The trajectory's
-    /// x-axis is therefore ordinal ("nth recorded close"), good enough for the MVP confront overlay.
-    pub(crate) fn cache_close(&mut self, ticker: &str, price: Decimal) {
+    /// Issue #72: the close is keyed by the provider's **real EOD session date** (`session_date`) when
+    /// it supplies one (EODHD `/eod` dates its bars); when the provider omits it (Twelve Data's bare
+    /// `/price`) — or hands back a malformed date — it falls back to the clock day. Keying by the
+    /// session date stops a weekend/holiday refresh from filing the prior session's close under today,
+    /// and keeps a re-fetch of the same session idempotent. Same-day policy stays **first-wins**
+    /// (`INSERT OR IGNORE`): once keyed by the true session date, a repeat fetch of a finalized EOD
+    /// close is a no-op, so an intraday last-write-wins correction is a deliberate non-goal here.
+    pub(crate) fn cache_close(&mut self, ticker: &str, price: Decimal, session_date: Option<&str>) {
         let now = self.now();
-        let date: String = now.0.chars().take(10).collect(); // YYYY-MM-DD prefix
+        let clock_day: String = now.0.chars().take(10).collect(); // YYYY-MM-DD prefix
+        // Accept the provider's session date only when it is a well-formed ISO day; otherwise fall
+        // back to the clock day so a malformed provider string never becomes a nonsense cache key.
+        let date: &str = session_date
+            .map(str::trim)
+            .filter(|d| is_iso_date(d))
+            .unwrap_or(&clock_day);
         let close = price.normalize().to_string();
         if let Some(journal) = self.journal.as_mut() {
-            let _ = journal.upsert_closes(ticker, &[(&date, &close, "provider")], &now);
+            let _ = journal.upsert_closes(ticker, &[(date, &close, "provider")], &now);
         }
     }
+}
+
+/// Whether `s` is a well-formed `YYYY-MM-DD` calendar-shaped day (issue #72): the confront cache keys
+/// off it (a lexical compare in `closes_since`), so a provider date that is not this exact shape must
+/// be rejected in favour of the clock day. Shape-only (digits + dashes at the right offsets) — the
+/// providers return real calendar days; this just guards against a malformed string, not leap years.
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[5..7].iter().all(u8::is_ascii_digit)
+        && b[8..].iter().all(u8::is_ascii_digit)
 }

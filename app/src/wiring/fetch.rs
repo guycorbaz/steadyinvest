@@ -253,15 +253,22 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     match outcome.result {
                         // The price arrived: fill `current_price` (price-only — never the yearly
                         // cells, issue #50) so the §4 zone recomputes, and stamp a fresh `as_of`.
-                        Ok(Some(price)) => {
+                        Ok(Some(dated)) => {
+                            // Issue #72: the close carries its real trading-session date — passed to
+                            // `apply_holding_price` so the confront cache keys by the session, not the
+                            // refresh day; the price alone drives the zone + the stop ratchet.
+                            let price = dated.close;
+                            let session_date = dated.session_date;
                             // Bind the result to a local so the `borrow_mut()` RefMut is DROPPED
                             // before the arms run — temporaries in a `match` scrutinee otherwise
                             // live for the whole `match`, so the `borrow_mut()` (ratchet) and
                             // `borrow()` (now / re-render) below would panic "RefCell already
                             // borrowed" on every successful price refresh.
-                            let applied = journal_state
-                                .borrow_mut()
-                                .apply_holding_price(outcome.study_id, price);
+                            let applied = journal_state.borrow_mut().apply_holding_price(
+                                outcome.study_id,
+                                price,
+                                session_date,
+                            );
                             match applied {
                                 Ok(()) => {
                                     tracing::info!(ticker = %outcome.ticker, "price refresh: quote applied");

@@ -19,7 +19,7 @@ use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear};
 
 use crate::adapters::common::{self, build_client, cap_detail, dec, reduce_high_low};
 use crate::error::ProviderError;
-use crate::provider::{MarketDataProvider, RawFetch};
+use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
 
 const DEFAULT_BASE_URL: &str = "https://api.twelvedata.com";
 
@@ -84,9 +84,12 @@ impl MarketDataProvider for TwelveDataProvider {
         let series = self.get_json(&url, ticker).await?;
         let financials = map_twelvedata(&series, ticker)?;
         let latest_price = latest_close(&series);
+        // Issue #72: the newest bar's `datetime` is the real session date of `latest_price`.
+        let latest_session_date = latest_close_session_date(&series);
         Ok(RawFetch {
             financials,
             latest_price,
+            latest_session_date,
             // Issue #113: Twelve Data's fundamentals are None by design (Story 7.4) — no TTM EPS either.
             ttm_eps: None,
         })
@@ -96,14 +99,19 @@ impl MarketDataProvider for TwelveDataProvider {
         &self,
         ticker: &str,
         api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError> {
+    ) -> Result<Option<DatedClose>, ProviderError> {
         // The price-only path (holdings refresh, Story-5.1 price history): the cheap `/price` endpoint.
         let key = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
         // Issue #70: per-provider wire symbol (see `equity_symbol`); original `ticker` kept for errors.
         let symbol = equity_symbol(ticker);
         let url = format!("{}/price?symbol={symbol}&apikey={key}", self.base_url);
         let body = self.get_json(&url, ticker).await?;
-        Ok(price_of(&body))
+        // Issue #72: the bare `/price` body has NO date, so the close is undated (`session_date: None`)
+        // and the caller keys the confront cache by the clock day. (The dated path is `/time_series`.)
+        Ok(price_of(&body).map(|close| DatedClose {
+            close,
+            session_date: None,
+        }))
     }
 
     async fn fetch_fx_rate(
@@ -118,8 +126,10 @@ impl MarketDataProvider for TwelveDataProvider {
         // classification ([`classify_twelvedata`]) and the exact-decimal parse ([`price_of`]) are
         // the already-tested `fetch_latest_price` path, never duplicated (NFR-S1 stays in one place).
         // Currency codes are plain `[A-Z]{3}`, so no URL-encoding concern beyond the fixed `/`.
-        self.fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
-            .await
+        Ok(self
+            .fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
+            .await?
+            .map(|d| d.close))
     }
 }
 
@@ -168,6 +178,19 @@ pub fn latest_close(series: &Value) -> Option<Decimal> {
 /// PURE: the price from a `/price` body (`{"price":"104.23"}`). `None` when absent/empty.
 pub fn price_of(body: &Value) -> Option<Decimal> {
     dec(body.get("price"))
+}
+
+/// PURE: the session date of the newest `/time_series` bar (issue #72) — `values[0].datetime`
+/// (`"YYYY-MM-DD"` at the daily interval; newest-first, matching [`latest_close`]). `None` when
+/// absent. Only the fundamentals (`/time_series`) fetch can supply this; the bare `/price` path has
+/// no date.
+pub fn latest_close_session_date(series: &Value) -> Option<String> {
+    let values = series.get("values")?.as_array()?;
+    values
+        .first()?
+        .get("datetime")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 /// PURE: Twelve Data's FX pair symbol (Story 6.5, FR28) — its native slash form, `"{base}/{quote}"`
@@ -296,6 +319,22 @@ mod tests {
             Some(dec_s("104.23"))
         );
         assert_eq!(price_of(&json!({})), None);
+    }
+
+    #[test]
+    fn latest_close_session_date_reads_the_newest_bar_datetime() {
+        // Issue #72: the fundamentals `/time_series` path can supply the real session date (the
+        // newest bar's `datetime`); the bare `/price` path cannot.
+        let series = json!({ "values": [
+            { "datetime": "2026-12-30", "close": "104.0" },
+            { "datetime": "2026-12-29", "close": "103.0" }
+        ]});
+        assert_eq!(
+            latest_close_session_date(&series),
+            Some("2026-12-30".to_string())
+        );
+        assert_eq!(latest_close_session_date(&json!({ "values": [] })), None);
+        assert_eq!(latest_close_session_date(&json!({})), None);
     }
 
     #[test]

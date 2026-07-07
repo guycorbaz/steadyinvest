@@ -18,7 +18,7 @@ pub use fetch::{
     FakeProvider, FetchedFinancials, FieldKind, Provider, dependency_digest, fetch_canonical,
     fetch_fx_rate, fetch_price, min_request_interval, supports,
 };
-pub use provider::MarketDataProvider;
+pub use provider::{DatedClose, MarketDataProvider};
 
 // Re-export the canonical types callers need to stamp cells, so `app` need not also reach into
 // `core::normalize` for them.
