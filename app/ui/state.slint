@@ -703,6 +703,10 @@ export global Prefs {
     in-out property <bool> key-configured: false;
     // The latest neutral provider/key notice (save/delete/test outcome), set by the Rust side.
     in-out property <string> provider-status;
+    // Issue #40: true while a key-test worker job is in flight — the provider-panel buttons gate on
+    // this so a double-click can't stack duplicate test jobs. Latched by Rust on a successful send,
+    // cleared when the TestKey outcome returns.
+    in-out property <bool> key-testing: false;
     // ── Story 4.3 — reference currency (FR63) ──
     // The single global reference currency the portfolio is read in, mirrored from
     // AppConfig.reference_currency (a 3-letter ISO-4217 code: "CHF" | "EUR" | "USD" | "GBP" | …).
@@ -776,8 +780,10 @@ export global Prefs {
     callback default-trailing-stop-pct-changed(string); // "" clears; else a percent in (0,100)
     callback withholding-rate-pct-changed(string); // "" resets to 35; else a percent in [0,100]
     // The key travels ONE WAY into Rust as a call argument — never stored in an `in-out` property
-    // that could round-trip back out to config/UI (NFR-S1).
-    callback key-saved(string);
+    // that could round-trip back out to config/UI (NFR-S1). Issue #41: `key-saved` returns whether a
+    // save actually happened, so the field is cleared ONLY on a real save (a blank/failed save keeps
+    // the field + shows a neutral notice, never a silent field-clear read as success).
+    callback key-saved(string) -> bool;
     callback key-deleted();
     callback key-tested();
 }

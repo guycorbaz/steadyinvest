@@ -375,6 +375,9 @@ pub fn journal_imported_message(summary: &ImportSummary) -> String {
 /// API key itself is NEVER part of any message (NFR-S1); these state the outcome only.
 pub const MSG_KEY_SAVED: &str =
     "La clé du fournisseur est enregistrée dans le trousseau du système.";
+/// Issue #41: the save field was blank/whitespace — nothing was written (a neutral notice so a blank
+/// « Enregistrer » is not indistinguishable from a successful save).
+pub const MSG_KEY_BLANK: &str = "Aucune clé saisie ; rien n'a été enregistré.";
 pub const MSG_KEY_DELETED: &str = "La clé du fournisseur est retirée du trousseau du système.";
 pub const MSG_KEY_TESTING: &str = "Test de la clé du fournisseur en cours.";
 pub const MSG_KEY_OK: &str = "La clé est valide ; le fournisseur a répondu.";
@@ -599,6 +602,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SYNC_FOLDER_WARNING,
     MSG_JOURNAL_STALE,
     MSG_KEY_SAVED,
+    MSG_KEY_BLANK,
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
     MSG_KEY_OK,

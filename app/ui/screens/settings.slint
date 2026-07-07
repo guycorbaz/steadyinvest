@@ -205,17 +205,24 @@ export component SettingsScreen inherits Rectangle {
 
                         ActionButton {
                             label: @tr("Enregistrer");
+                            // Issue #40: no new test job may start mid-test. Issue #41: clear the
+                            // field ONLY when a save actually happened (blank/failed keeps it).
+                            enabled: !Prefs.key-testing;
                             clicked => {
-                                Prefs.key-saved(keyfield.text);
-                                keyfield.text = "";
+                                if (Prefs.key-saved(keyfield.text)) {
+                                    keyfield.text = "";
+                                }
                             }
                         }
                         ActionButton {
                             label: @tr("Supprimer");
+                            enabled: !Prefs.key-testing;
                             clicked => { Prefs.key-deleted(); }
                         }
                         ActionButton {
-                            label: @tr("Tester");
+                            // Issue #40: disabled while its own test is in flight (no stacked jobs).
+                            label: Prefs.key-testing ? @tr("Test…") : @tr("Tester");
+                            enabled: !Prefs.key-testing;
                             clicked => { Prefs.key-tested(); }
                         }
                     }
