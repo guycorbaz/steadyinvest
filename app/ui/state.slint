@@ -687,6 +687,13 @@ export global Verify {
     callback run();
 }
 
+// Issue #38: one key-using provider that still has a stored key while it is NOT the active provider
+// — an orphaned secret the panel lists so the user can remove it (incl. while "Aucun" is selected).
+export struct StoredKeyRow {
+    wire: string,    // "eodhd" | "twelvedata" — the delete-key-for argument + keychain slot
+    display: string, // "EODHD" | "Twelve Data"
+}
+
 export global Prefs {
     // Current selections, mirrored from AppConfig by the Rust side.
     in-out property <bool> dark-theme: true;
@@ -707,6 +714,10 @@ export global Prefs {
     // this so a double-click can't stack duplicate test jobs. Latched by Rust on a successful send,
     // cleared when the TestKey outcome returns.
     in-out property <bool> key-testing: false;
+    // Issue #38: key-using providers that still hold a stored key while NOT active (orphaned secrets),
+    // mirrored from the keychain by Rust — the panel lists them with a per-row delete so a key is
+    // removable even when the active provider is "Aucun" (NFR-S1: secret only as long as needed).
+    in-out property <[StoredKeyRow]> orphan-keys;
     // ── Story 4.3 — reference currency (FR63) ──
     // The single global reference currency the portfolio is read in, mirrored from
     // AppConfig.reference_currency (a 3-letter ISO-4217 code: "CHF" | "EUR" | "USD" | "GBP" | …).
@@ -786,6 +797,7 @@ export global Prefs {
     callback key-saved(string) -> bool;
     callback key-deleted();
     callback key-tested();
+    callback delete-key-for(string); // issue #38: remove the orphaned key of a non-active provider (wire)
 }
 
 // The watchlist surface (Story 4.1, FR34). Rows are built/ordered by Rust; intents are handled in

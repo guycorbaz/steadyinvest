@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use uuid::Uuid;
 
 use crate::provider::ProviderChoice;
@@ -96,6 +96,23 @@ pub(crate) fn mirror_provider_prefs(ui: &MainWindow, provider: ProviderChoice) {
     // and a fetch still falls back to the env-var key.
     let configured = provider.requires_key() && keychain::has_key(provider).unwrap_or(false);
     prefs.set_key_configured(configured);
+    // Issue #38: surface any ORPHANED key — a key-using provider that is NOT the active one but still
+    // holds a stored key — so it can be removed even while "Aucun" is selected (NFR-S1). Only the
+    // presence boolean is read; the key value never crosses.
+    prefs.set_orphan_keys(ModelRc::new(VecModel::from(orphan_key_rows(provider))));
+}
+
+/// The key-using providers that are NOT `active` yet still hold a stored key (issue #38) — an
+/// unavailable/locked store yields `false`, so we never list an orphan we cannot confirm.
+fn orphan_key_rows(active: ProviderChoice) -> Vec<crate::StoredKeyRow> {
+    crate::provider::KEYED_PROVIDERS
+        .into_iter()
+        .filter(|p| *p != active && keychain::has_key(*p).unwrap_or(false))
+        .map(|p| crate::StoredKeyRow {
+            wire: p.wire().into(),
+            display: p.display_name().into(),
+        })
+        .collect()
 }
 
 /// Wire the provider-fetch domain: install the worker's outcome handler (it must be set before
@@ -566,6 +583,24 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 }
                 Err(_) => prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into()),
             }
+        });
+    }
+    {
+        // Issue #38: remove the ORPHANED key of a NON-active provider (the active provider uses the
+        // Delete button above). Re-mirrors so the just-removed row leaves the orphan list at once.
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(config);
+        ui.global::<Prefs>().on_delete_key_for(move |wire| {
+            let ui = ui_weak.unwrap();
+            let prefs = ui.global::<Prefs>();
+            let Some(provider) = ProviderChoice::parse(&wire) else {
+                return;
+            };
+            match keychain::delete_key(provider) {
+                Ok(()) => prefs.set_provider_status(state::MSG_KEY_DELETED.into()),
+                Err(_) => prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into()),
+            }
+            mirror_provider_prefs(&ui, config.borrow().preferred_provider);
         });
     }
     {
