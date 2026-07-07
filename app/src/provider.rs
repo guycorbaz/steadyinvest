@@ -61,6 +61,12 @@ impl ProviderChoice {
     }
 }
 
+/// Every key-using provider (issue #38): enumerated so the Réglages panel can surface — and remove —
+/// a stored key that is now ORPHANED because the active provider was switched away from it (e.g. to
+/// "Aucun"), honoring NFR-S1's "secret only as long as needed".
+pub const KEYED_PROVIDERS: [ProviderChoice; 2] =
+    [ProviderChoice::Eodhd, ProviderChoice::TwelveData];
+
 #[cfg(test)]
 mod tests {
     use super::*;

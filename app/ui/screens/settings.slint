@@ -228,6 +228,35 @@ export component SettingsScreen inherits Rectangle {
                     }
                 }
 
+                // Issue #38: orphaned stored keys — a key-using provider that is NOT active but still
+                // holds a stored key (e.g. after switching to « Aucun »). Shown regardless of the
+                // active provider so the secret is removable (NFR-S1: only as long as needed).
+                if Prefs.orphan-keys.length > 0: VerticalLayout {
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: @tr("Clés stockées pour d'autres fournisseurs (non actifs) :");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    for k in Prefs.orphan-keys: HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+
+                        Text {
+                            text: k.display;
+                            color: Tokens.text-high;
+                            font-size: Tokens.font-caption;
+                            vertical-alignment: center;
+                        }
+                        ActionButton {
+                            label: @tr("Supprimer la clé");
+                            enabled: !Prefs.key-testing;
+                            clicked => { Prefs.delete-key-for(k.wire); }
+                        }
+                    }
+                }
+
                 // ── Story 6.9 (FR26) — the per-field-type fallback provider: the chain a
                 // price / fundamentals / FX fetch fails over to when the primary above errors.
                 // The fundamentals row offers no Twelve Data (declared capability: its
