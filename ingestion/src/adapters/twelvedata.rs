@@ -71,11 +71,14 @@ impl MarketDataProvider for TwelveDataProvider {
         api_key: Option<&str>,
     ) -> Result<RawFetch, ProviderError> {
         let key = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
+        // Issue #70: the wire symbol is the per-provider spelling of the stored canonical ticker
+        // (`.US` → bare; other venues verbatim). The original `ticker` is kept for error identity.
+        let symbol = equity_symbol(ticker);
         // Daily series → per-year high/low + the latest close. `outputsize` covers several years of
         // bars; `order=desc` is pinned explicitly so `latest_close` (which reads `values[0]`) is the
         // most-recent bar regardless of the API's default ordering. Free tier serves SIX/global equities.
         let url = format!(
-            "{}/time_series?symbol={ticker}&interval=1day&outputsize=5000&order=desc&apikey={key}",
+            "{}/time_series?symbol={symbol}&interval=1day&outputsize=5000&order=desc&apikey={key}",
             self.base_url
         );
         let series = self.get_json(&url, ticker).await?;
@@ -96,7 +99,9 @@ impl MarketDataProvider for TwelveDataProvider {
     ) -> Result<Option<Decimal>, ProviderError> {
         // The price-only path (holdings refresh, Story-5.1 price history): the cheap `/price` endpoint.
         let key = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
-        let url = format!("{}/price?symbol={ticker}&apikey={key}", self.base_url);
+        // Issue #70: per-provider wire symbol (see `equity_symbol`); original `ticker` kept for errors.
+        let symbol = equity_symbol(ticker);
+        let url = format!("{}/price?symbol={symbol}&apikey={key}", self.base_url);
         let body = self.get_json(&url, ticker).await?;
         Ok(price_of(&body))
     }
@@ -170,6 +175,23 @@ pub fn price_of(body: &Value) -> Option<Decimal> {
 /// spellings are the #70 symbol-convention class.
 pub fn fx_pair_symbol(base: &str, quote: &str) -> String {
     format!("{base}/{quote}")
+}
+
+/// PURE: the Twelve Data equity **wire** symbol for a stored canonical ticker (issue #70). The stored
+/// ticker follows EODHD's `TICKER.EXCHANGE` convention, but Twelve Data expects the **bare** symbol
+/// for a US listing. Only the UNAMBIGUOUS US virtual-exchange suffix `.US` is stripped
+/// (`AAPL.US` → `AAPL`, only the trailing exchange, so `BRK.B.US` → `BRK.B`). Any other exchange
+/// suffix (`.SW`, `.PA`, …) is left **verbatim**: mapping it to a Twelve Data listing venue would be
+/// a guess, and a wrong venue would silently fetch the wrong exchange's price — the project's
+/// "absent, never wrong" rail. Such a symbol simply surfaces the neutral no-data notice on Twelve
+/// Data (never a crash, never a wrong price). A symbol with no suffix passes through unchanged.
+pub fn equity_symbol(ticker: &str) -> String {
+    match ticker.rsplit_once('.') {
+        Some((base, exchange)) if !base.is_empty() && exchange.eq_ignore_ascii_case("US") => {
+            base.to_string()
+        }
+        _ => ticker.to_string(),
+    }
 }
 
 /// PURE: a Twelve Data `/time_series` JSON → a **price-led** [`RawFinancials`]. No I/O. Currency from
@@ -281,6 +303,19 @@ mod tests {
         // Story 6.5: `fetch_fx_rate` = `fetch_latest_price` with this symbol — the only new logic.
         assert_eq!(fx_pair_symbol("EUR", "CHF"), "EUR/CHF");
         assert_eq!(fx_pair_symbol("USD", "JPY"), "USD/JPY");
+    }
+
+    #[test]
+    fn equity_symbol_strips_only_the_unambiguous_us_suffix() {
+        // Issue #70: EODHD-canonical `.US` → Twelve Data's bare symbol; every other exchange suffix
+        // is left verbatim (no venue guess → never the wrong exchange's price).
+        assert_eq!(equity_symbol("AAPL.US"), "AAPL");
+        assert_eq!(equity_symbol("aapl.us"), "aapl"); // the suffix match is case-insensitive
+        assert_eq!(equity_symbol("BRK.B.US"), "BRK.B"); // only the TRAILING exchange is removed
+        assert_eq!(equity_symbol("NESN.SW"), "NESN.SW"); // ambiguous venue: verbatim, not guessed
+        assert_eq!(equity_symbol("MC.PA"), "MC.PA");
+        assert_eq!(equity_symbol("AAPL"), "AAPL"); // already bare — unchanged
+        assert_eq!(equity_symbol(".US"), ".US"); // degenerate: no base → verbatim, never ""
     }
 
     #[test]
