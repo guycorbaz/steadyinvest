@@ -708,6 +708,9 @@ export global Prefs {
     // Whether a key is currently stored in the OS keychain for the selected provider. The key VALUE
     // is NEVER mirrored to the UI (NFR-S1) — only this boolean status crosses the boundary.
     in-out property <bool> key-configured: false;
+    // Issue #44 (F10): true when the store is locked/unavailable so key presence is UNKNOWN — the
+    // status line says "indéterminé" rather than a false "aucune clé configurée".
+    in-out property <bool> key-status-unknown: false;
     // The latest neutral provider/key notice (save/delete/test outcome), set by the Rust side.
     in-out property <string> provider-status;
     // Issue #40: true while a key-test worker job is in flight — the provider-panel buttons gate on
