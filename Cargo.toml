@@ -67,6 +67,11 @@ tracing-appender = "0.2"
 # openssl/aws-lc) — consistent with the reqwest/rustls `ring` posture. Needs a running D-Bus secret
 # agent at runtime → app handles its absence gracefully (AC6).
 keyring = { version = "3", default-features = false, features = ["async-secret-service", "crypto-rust", "async-io"] }
+# Zeroize-on-drop for the transient plaintext API key (issue #45 / BH4, NFR-S1). The key lives in the
+# OS store; the in-flight copies (resolve → WorkerJob → worker) are wrapped in `Zeroizing<String>` so
+# the process heap is scrubbed on drop (core-dump / memory-inspection hardening). Already in the lock
+# tree (transitive via keyring's crypto backend), so promoting it adds nothing to Cargo.lock.
+zeroize = "1"
 # Native file dialogs for the journal-location picker (Story 5.5, FR66). The `xdg-portal` backend
 # (ashpd over zbus — already in the tree via keyring) avoids a GTK3 *system* build dependency. The
 # `async-std` runtime feature (NOT `tokio`): rfd's SYNC dialogs are called from the Slint UI thread,

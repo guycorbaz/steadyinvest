@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::provider::ProviderChoice;
 use crate::wiring::Session;
@@ -25,7 +26,7 @@ const ENV_KEY_FALLBACK: &str = "STEADYINVEST_EODHD_API_KEY";
 /// Resolve the API key for a fetch/test (Story 3.2): the OS keychain first, then the env-var
 /// fallback. `None` for a keyless provider or when no key is found anywhere. The key value is never
 /// logged — only the fact that the fallback was used.
-pub(crate) fn resolve_provider_key(provider: ProviderChoice) -> Option<String> {
+pub(crate) fn resolve_provider_key(provider: ProviderChoice) -> Option<Zeroizing<String>> {
     if !provider.requires_key() {
         return None;
     }
@@ -34,10 +35,11 @@ pub(crate) fn resolve_provider_key(provider: ProviderChoice) -> Option<String> {
     // computed before `outcome` is consumed by the precedence decision.
     let store_unavailable = outcome.is_err();
     // Trim consistently with the keychain path (which stores `key.trim()`), so a padded env value
-    // doesn't fetch with stray whitespace the provider would reject (F9).
+    // doesn't fetch with stray whitespace the provider would reject (F9). Issue #45: the env copy is
+    // zeroized on drop like the keychain one.
     let env_key = std::env::var(ENV_KEY_FALLBACK)
         .ok()
-        .map(|k| k.trim().to_string())
+        .map(|k| Zeroizing::new(k.trim().to_string()))
         .filter(|k| !k.is_empty());
     let resolved = resolve_key_precedence(outcome, env_key);
     if store_unavailable && resolved.is_some() {
@@ -55,9 +57,9 @@ pub(crate) fn resolve_provider_key(provider: ProviderChoice) -> Option<String> {
 /// keeps the env fallback to its stated role (environments with no OS secret store) instead of
 /// silently overriding a key the user just removed.
 fn resolve_key_precedence(
-    keychain: Result<Option<String>, crate::keychain::KeychainError>,
-    env_key: Option<String>,
-) -> Option<String> {
+    keychain: Result<Option<Zeroizing<String>>, crate::keychain::KeychainError>,
+    env_key: Option<Zeroizing<String>>,
+) -> Option<Zeroizing<String>> {
     match keychain {
         Ok(Some(key)) => Some(key),
         Ok(None) => None,
@@ -686,28 +688,41 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
 mod tests {
     use super::resolve_key_precedence;
     use crate::keychain::KeychainError;
+    use zeroize::Zeroizing;
+
+    // Compare the resolved key by its plaintext (issue #45: the value rides in a `Zeroizing<String>`).
+    fn plain(k: Option<Zeroizing<String>>) -> Option<String> {
+        k.map(|z| z.to_string())
+    }
+    fn z(s: &str) -> Option<Zeroizing<String>> {
+        Some(Zeroizing::new(s.to_string()))
+    }
 
     #[test]
     fn env_fallback_only_when_the_store_is_unavailable() {
-        let env = || Some("env-key".to_string());
-
         // A stored key always wins over the env interim.
         assert_eq!(
-            resolve_key_precedence(Ok(Some("stored".into())), env()),
+            plain(resolve_key_precedence(Ok(z("stored")), z("env-key"))),
             Some("stored".to_string())
         );
         // Issue #43 (F15): a reachable-but-empty keychain is a DELIBERATE "no key" — the env interim
         // must NOT resurrect a stale key, so a deletion actually takes effect.
-        assert_eq!(resolve_key_precedence(Ok(None), env()), None);
-        assert_eq!(resolve_key_precedence(Ok(None), None), None);
+        assert_eq!(plain(resolve_key_precedence(Ok(None), z("env-key"))), None);
+        assert_eq!(plain(resolve_key_precedence(Ok(None), None)), None);
         // Only an UNAVAILABLE store (no secret agent, headless/NAS) falls back to the env var (AC6).
         assert_eq!(
-            resolve_key_precedence(Err(KeychainError::Unavailable), env()),
+            plain(resolve_key_precedence(
+                Err(KeychainError::Unavailable),
+                z("env-key")
+            )),
             Some("env-key".to_string())
         );
         // Unavailable store AND no env key → genuinely no key.
         assert_eq!(
-            resolve_key_precedence(Err(KeychainError::Unavailable), None),
+            plain(resolve_key_precedence(
+                Err(KeychainError::Unavailable),
+                None
+            )),
             None
         );
     }

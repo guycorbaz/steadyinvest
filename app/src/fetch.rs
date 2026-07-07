@@ -24,6 +24,7 @@ use steadyinvest_ingestion::{
     adapters::twelvedata::TwelveDataProvider, fetch_canonical, fetch_fx_rate, fetch_price,
 };
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::provider::ProviderChoice;
 
@@ -42,7 +43,9 @@ fn key_test_ticker(provider: ProviderChoice) -> &'static str {
 #[derive(Clone)]
 pub struct ChainMember {
     pub provider: ProviderChoice,
-    pub api_key: Option<String>,
+    /// Issue #45 (BH4): the in-flight plaintext key rides in a [`Zeroizing`] buffer so its heap copy
+    /// (held across the mpsc channel + worker) is scrubbed on drop, not left for a core dump.
+    pub api_key: Option<Zeroizing<String>>,
 }
 
 /// A study-data fetch enqueued from the UI thread (Story 3.1). `chain` (Story 6.9, FR26) is the
@@ -61,7 +64,8 @@ pub struct FetchRequest {
 
 /// A key-validation request (Story 3.2): a minimal live fetch whose data is discarded.
 pub struct TestKeyRequest {
-    pub api_key: Option<String>,
+    /// Issue #45 (BH4): zeroized-on-drop like [`ChainMember::api_key`].
+    pub api_key: Option<Zeroizing<String>>,
     pub provider: ProviderChoice,
 }
 
@@ -246,7 +250,7 @@ fn run_chain<'a, T>(
     for member in chain.iter() {
         let provider = select(member.provider);
         pace(last_request, provider.tag());
-        let mut attempt = call(provider, member.api_key.as_deref());
+        let mut attempt = call(provider, member.api_key.as_ref().map(|k| k.as_str()));
         if let Err(IngestionError::Provider(steadyinvest_ingestion::ProviderError::Quota {
             retry_after_secs,
         })) = &attempt
@@ -255,7 +259,7 @@ fn run_chain<'a, T>(
             // FR27: honor the declared retry-after (bounded) — ONE retry.
             std::thread::sleep(wait);
             last_request.insert(provider.tag(), std::time::Instant::now());
-            attempt = call(provider, member.api_key.as_deref());
+            attempt = call(provider, member.api_key.as_ref().map(|k| k.as_str()));
         }
         effective = Some(member.provider);
         let succeeded = attempt.is_ok();
@@ -415,7 +419,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             .block_on(fetch_canonical(
                                 provider,
                                 key_test_ticker(req.provider),
-                                req.api_key.as_deref(),
+                                req.api_key.as_ref().map(|k| k.as_str()),
                             ))
                             .map(|_| ());
                         WorkerOutcome::TestKey(result)
@@ -506,11 +510,11 @@ mod tests {
         vec![
             ChainMember {
                 provider: ProviderChoice::Eodhd,
-                api_key: Some("k1".into()),
+                api_key: Some(zeroize::Zeroizing::new("k1".to_string())),
             },
             ChainMember {
                 provider: ProviderChoice::TwelveData,
-                api_key: Some("k2".into()),
+                api_key: Some(zeroize::Zeroizing::new("k2".to_string())),
             },
         ]
     }
@@ -619,7 +623,7 @@ mod tests {
         // never off chain position.
         let members = vec![ChainMember {
             provider: ProviderChoice::TwelveData,
-            api_key: Some("k2".into()),
+            api_key: Some(zeroize::Zeroizing::new("k2".to_string())),
         }];
         let (result, effective, fell_back) = run_price_chain(Ok(raw()), Ok(raw()), &members);
         // chain[0] routes to the SECOND fake (TwelveData) in this harness.
@@ -672,7 +676,7 @@ mod tests {
     fn a_single_member_chain_behaves_like_the_pre_6_9_single_provider() {
         let members = vec![ChainMember {
             provider: ProviderChoice::Eodhd,
-            api_key: Some("k1".into()),
+            api_key: Some(zeroize::Zeroizing::new("k1".to_string())),
         }];
         let (result, effective, fell_back) = run_price_chain(
             Err(ProviderError::Quota {
