@@ -89,6 +89,9 @@ impl JournalState {
         if years.len() > window {
             years.drain(0..years.len() - window);
         }
+        // Issue #37 (Finding 5): the provider's complete years, captured BEFORE the closure moves
+        // `years` — used after the mutation to count those that fell outside the grid (not integrated).
+        let provider_year_nums: Vec<i32> = years.iter().map(|cy| cy.year).collect();
         // Story 4.4 (AC2/AC6): the latest `/eod` close is the present market price for the §4 zone.
         // `None` for a provider with no current price → `current_price` left untouched (pre-4.4 shape).
         let latest_price = fetched.latest_price;
@@ -148,7 +151,19 @@ impl JournalState {
             let session_date = fetched.latest_session_date.clone();
             self.cache_close(&study.security_ticker, price, session_date.as_deref());
         }
-        Ok(report.get())
+        // Issue #37 (Finding 5): count the provider complete-years now ABSENT from the grid — for a
+        // fresh study the grid was built from these (all present → 0); for an existing grid the
+        // fill-gaps-only scope leaves non-overlapping years out, so this makes the drop VISIBLE
+        // instead of a silent `filled = 0` (never grows the grid — that would regress #35).
+        let unmatched_years = self.get_study(study_id).map_or(0, |study| {
+            provider_year_nums
+                .iter()
+                .filter(|y| !study.years.iter().any(|sy| sy.year == **y))
+                .count()
+        });
+        let mut out = report.get();
+        out.unmatched_years = unmatched_years;
+        Ok(out)
     }
 
     /// Set a study's `current_price` from a price-only holdings refresh (Story 4.4 / issue #50): the
@@ -233,6 +248,12 @@ pub struct RefreshReport {
     /// (Replaces the Story-3.6 `revalidate` re-validation-scope count, which is dead now that a
     /// validated cell is never demoted by a refresh.)
     pub contradicted: usize,
+    /// Issue #37 (Finding 5): provider COMPLETE years that fall outside the current grid and were
+    /// therefore NOT integrated (the 3.1 fill-gaps-only scope, kept so a refresh never grows §2
+    /// unboundedly — cf. #35). Surfaced in the notice so a `filled = 0` refresh of a study whose
+    /// grid does not overlap the provider's years is not silently indistinguishable from "nothing
+    /// to do". A whole-grid fact, set once (not per-year), so `merge` leaves it untouched.
+    pub unmatched_years: usize,
     pub cause: RefreshCause,
 }
 
@@ -244,6 +265,9 @@ impl RefreshReport {
             filled: self.filled + other.filled,
             reconciled: self.reconciled + other.reconciled,
             contradicted: self.contradicted + other.contradicted,
+            // A whole-grid fact, set once on the final report (never per-year) — carry the max so a
+            // merge never zeroes it, though in practice only one side is ever nonzero.
+            unmatched_years: self.unmatched_years.max(other.unmatched_years),
             cause: self.cause.merge(other.cause),
         }
     }

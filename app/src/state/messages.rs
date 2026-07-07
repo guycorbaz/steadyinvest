@@ -99,6 +99,11 @@ pub const MSG_REFRESH_BOTH: &str = "Recalculé : prix et données fondamentales 
 /// dead Story-3.6 "N à revérifier" clause — a validated cell is no longer demoted by a refresh.)
 pub const MSG_REFRESH_CONTRADICTED: &str =
     "{n} cellule(s) validée(s) : le fournisseur propose une valeur différente.";
+/// Issue #37 (Finding 5): provider years outside the current grid were not integrated (fill-gaps-only
+/// scope). Names the count so a `filled = 0` refresh of a non-overlapping study is not a silent no-op.
+/// `{n}` is the count of dropped provider years.
+pub const MSG_REFRESH_UNMATCHED_YEARS: &str =
+    "{n} année(s) du fournisseur hors de la grille actuelle n'ont pas été intégrées.";
 
 /// Watchlist copy (Story 4.1, FR34) — fact-stating, posture-gated. Raised when a link is requested
 /// but no saved study matches the watched ticker.
@@ -474,12 +479,16 @@ pub fn refresh_notice(report: RefreshReport) -> &'static str {
 /// tells the user reality diverged from what they checked, without their frozen numbers changing. With
 /// `contradicted == 0` it is exactly [`refresh_notice`] (no regression on the common path).
 pub fn refresh_summary(report: RefreshReport) -> String {
-    let cause = refresh_notice(report);
-    if report.contradicted == 0 {
-        return cause.to_string();
+    // The recompute cause, then any neutral clauses (contradicted validated cells #110, unmatched
+    // provider years #37) joined by « · » — each surfaced only when it applies.
+    let mut parts = vec![refresh_notice(report).to_string()];
+    if report.contradicted > 0 {
+        parts.push(MSG_REFRESH_CONTRADICTED.replace("{n}", &report.contradicted.to_string()));
     }
-    let contradicted = MSG_REFRESH_CONTRADICTED.replace("{n}", &report.contradicted.to_string());
-    format!("{cause} · {contradicted}")
+    if report.unmatched_years > 0 {
+        parts.push(MSG_REFRESH_UNMATCHED_YEARS.replace("{n}", &report.unmatched_years.to_string()));
+    }
+    parts.join(" · ")
 }
 
 /// Classify a provider/ingestion failure into its neutral, cause-named notice (Story 3.5, FR24).
@@ -561,6 +570,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_INPUT,
     MSG_REFRESH_BOTH,
     MSG_REFRESH_CONTRADICTED,
+    MSG_REFRESH_UNMATCHED_YEARS,
     MSG_WATCH_NO_STUDY,
     MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
