@@ -452,6 +452,9 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         }
                     };
                     prefs.set_provider_status(status.into());
+                    // Issue #40: the test resolved — clear the in-flight flag so the panel's buttons
+                    // re-enable (whatever the verdict).
+                    prefs.set_key_testing(false);
                 }
             }
         });
@@ -527,16 +530,25 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             let ui = ui_weak.unwrap();
             let prefs = ui.global::<Prefs>();
             let provider = config.borrow().preferred_provider;
-            // A blank field is a no-op (mirror the `set_rationale` empty-is-nothing discipline).
+            // Issue #41: a blank/whitespace field is a no-op, but say so — a silent return read as a
+            // successful save (the field cleared either way). Return `false` so the UI KEEPS the
+            // field (nothing to clear) and shows the neutral notice.
             if key.trim().is_empty() {
-                return;
+                prefs.set_provider_status(state::MSG_KEY_BLANK.into());
+                return false;
             }
             match keychain::set_key(provider, key.trim()) {
                 Ok(()) => {
                     prefs.set_key_configured(true);
                     prefs.set_provider_status(state::MSG_KEY_SAVED.into());
+                    true
                 }
-                Err(_) => prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into()),
+                // A keychain failure keeps the field (return `false`) so a transient error does not
+                // silently discard the key the user just typed.
+                Err(_) => {
+                    prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into());
+                    false
+                }
             }
         });
     }
@@ -588,6 +600,11 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         .replace("{cause}", "le service de récupération est indisponible")
                         .into(),
                 );
+            } else {
+                // Issue #40: latch the in-flight flag ONLY on a successful send (a dead worker must
+                // not disable the button for the session) — the Test button gates on this and the
+                // TestKey outcome handler clears it, so a double-click can't stack duplicate jobs.
+                prefs.set_key_testing(true);
             }
         });
     }

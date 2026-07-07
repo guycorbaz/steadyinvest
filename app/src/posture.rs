@@ -719,9 +719,10 @@ mod tests {
         // Issue #61 adds the un-protected-exposure line (MSG_UNSTOPPED_EXPOSURE): 107 + 1 = 108.
         // Issue #100 adds the refresh-cancelled notice (MSG_REFRESH_CANCELLED): 108 + 1 = 109.
         // Issue #90 adds the FX-rate-deleted notice (MSG_FX_DELETED — the panel's repair path): 109 + 1 = 110.
+        // Issue #41 adds the blank-key notice (MSG_KEY_BLANK — a blank save is not a silent no-op): 110 + 1 = 111.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            110,
+            111,
             "state.rs message inventory changed — register the new notice"
         );
     }
