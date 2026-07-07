@@ -47,6 +47,9 @@ arboard = { workspace = true }
 # is the ONLY crate that touches it — the key is injected into `ingestion`, never read there
 # (FR63 / architecture invariant).
 keyring = { workspace = true }
+# Zeroize-on-drop for the transient plaintext provider key (issue #45 / BH4). Wraps the in-flight
+# copies (`resolve_provider_key` → `WorkerJob` → worker) so the heap is scrubbed on drop.
+zeroize = { workspace = true }
 # Native OS file dialogs for the journal-location picker (Story 5.5, FR66) — open/create/pick a
 # journal `.db` + directory. xdg-portal backend (no GTK system dep; reuses zbus from keyring).
 rfd = { workspace = true }

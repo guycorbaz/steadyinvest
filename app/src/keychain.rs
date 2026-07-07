@@ -11,6 +11,8 @@
 //! (gnome-keyring/KWallet) via pure-Rust `zbus`; when no D-Bus secret agent is running the calls
 //! fail with [`KeychainError::Unavailable`] and the caller degrades gracefully (AC6).
 
+use zeroize::Zeroizing;
+
 use crate::provider::ProviderChoice;
 
 /// The keychain *service* name (one app-wide namespace); the *user* slot is per provider so
@@ -71,11 +73,12 @@ pub fn set_key(provider: ProviderChoice, key: &str) -> Result<(), KeychainError>
 }
 
 /// Read the API key for `provider`. `Ok(None)` = no key stored (a normal state, distinct from a
-/// store failure); `Err` = the store is unavailable or errored.
-pub fn get_key(provider: ProviderChoice) -> Result<Option<String>, KeychainError> {
+/// store failure); `Err` = the store is unavailable or errored. Issue #45 (BH4): the plaintext is
+/// returned in a [`Zeroizing`] buffer so the heap copy is scrubbed on drop (NFR-S1 hardening).
+pub fn get_key(provider: ProviderChoice) -> Result<Option<Zeroizing<String>>, KeychainError> {
     let entry = entry(provider)?;
     match entry.get_password() {
-        Ok(key) => Ok(Some(key)),
+        Ok(key) => Ok(Some(Zeroizing::new(key))),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => {
             tracing::warn!(provider = provider.wire(), error = %e, "keychain get_key failed");
