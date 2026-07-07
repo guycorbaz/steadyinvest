@@ -83,8 +83,12 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
         let Some(study) = state.get_study(summary.id) else {
             continue;
         };
-        let value = crate::viewmodel::engine::build_snapshot(&study)
-            .ok()
+        // ONE snapshot per study feeds both the §5 potential (issue #107) and the issue #148
+        // "à compléter" flag — no second engine pass. A study that fails to normalize is "unknown":
+        // absent potential ("—") and NOT flagged incomplete (a broken normalize must not shout).
+        let snapshot = crate::viewmodel::engine::build_snapshot(&study).ok();
+        let value = snapshot
+            .as_ref()
             .and_then(|snap| snap.outputs().returns.projected_total_annualized_return_pct);
         let display = match value {
             Some(v) => format!(
@@ -93,9 +97,16 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
             ),
             None => crate::viewmodel::form::EMPTY_SLOT.to_string(),
         };
+        let incomplete = snapshot
+            .as_ref()
+            .is_some_and(crate::viewmodel::engine::study_incomplete);
         returns.insert(
             summary.id,
-            viewmodel::studies::StudyReturn { value, display },
+            viewmodel::studies::StudyReturn {
+                value,
+                display,
+                incomplete,
+            },
         );
     }
     let rows: Vec<StudyRow> = viewmodel::studies::curate(

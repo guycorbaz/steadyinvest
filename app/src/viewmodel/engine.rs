@@ -684,6 +684,20 @@ pub fn required_judgment_fields(snapshot: &StudySnapshot) -> Vec<slint::SharedSt
         .collect()
 }
 
+/// Issue #148: whether the study still has a **missing** load-bearing input — i.e. the verdict is
+/// `Withheld` (spec §5 "missing"). This is the dashboard's list-level "à compléter" signal, derived
+/// from the SAME open gates that drive the in-form field highlight (#114), so the list and the form
+/// agree on what is missing. Deliberately NOT true for a `Provisional` study (every input entered,
+/// only not-validated/stale — nothing to fill) nor for `Full`; the caller treats a study whose
+/// snapshot did not build as unknown (not incomplete), so a broken normalize never shouts "à saisir".
+pub fn study_incomplete(snapshot: &StudySnapshot) -> bool {
+    snapshot
+        .verdict()
+        .open_gates()
+        .iter()
+        .any(|g| matches!(g.state, GateState::Missing))
+}
+
 /// The provenance date (DD/MM) of the most recent load-bearing cell edit, or the study's creation
 /// date when no cell has been entered — the temporal-provenance caption's source (FR11).
 fn provenance_dd_mm(study: &Study) -> String {

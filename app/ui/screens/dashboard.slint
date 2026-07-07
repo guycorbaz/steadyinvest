@@ -88,6 +88,17 @@ component StudyListRow inherits Rectangle {
             vertical-alignment: center;
             min-width: Tokens.space-48 + Tokens.space-24;
         }
+        // Issue #148: a neutral "à compléter" marker when the study still has a MISSING load-bearing
+        // input (verdict Withheld) — so an unfinished study is evident from the list, before opening
+        // it. NEUTRAL ink only (no hue — the colour budget is the §4 zones); the same open gates that
+        // drive the in-form field highlight (#114) decide this, so the list and the form agree.
+        if root.entry.incomplete: Text {
+            text: @tr("à compléter");
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            font-italic: true;
+            vertical-alignment: center;
+        }
         Text {
             text: root.entry.status;
             color: Tokens.text-low;
