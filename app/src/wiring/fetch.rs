@@ -464,6 +464,16 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         Err(steadyinvest_ingestion::IngestionError::Provider(
                             steadyinvest_ingestion::ProviderError::Forbidden { .. },
                         )) => state::MSG_KEY_FORBIDDEN.to_string(),
+                        // Issue #42: a quota reply PROVES the provider accepted the key (it ran the
+                        // request and hit the rate limit) — acceptance, never a rejected key.
+                        Err(steadyinvest_ingestion::IngestionError::Provider(
+                            steadyinvest_ingestion::ProviderError::Quota { .. },
+                        )) => state::MSG_KEY_OK_QUOTA.to_string(),
+                        // Issue #42: a network failure never reached the provider — the key is neither
+                        // confirmed nor refused (inconclusive), so it must not read as "clé invalide".
+                        Err(steadyinvest_ingestion::IngestionError::Provider(
+                            steadyinvest_ingestion::ProviderError::Network { .. },
+                        )) => state::MSG_KEY_TEST_INCONCLUSIVE.to_string(),
                         Err(error) => {
                             state::MSG_PROVIDER_FAILED.replace("{cause}", &error.to_string())
                         }

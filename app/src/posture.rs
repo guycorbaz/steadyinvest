@@ -720,9 +720,10 @@ mod tests {
         // Issue #100 adds the refresh-cancelled notice (MSG_REFRESH_CANCELLED): 108 + 1 = 109.
         // Issue #90 adds the FX-rate-deleted notice (MSG_FX_DELETED — the panel's repair path): 109 + 1 = 110.
         // Issue #41 adds the blank-key notice (MSG_KEY_BLANK — a blank save is not a silent no-op): 110 + 1 = 111.
+        // Issue #42 adds two key-test verdicts (MSG_KEY_OK_QUOTA accepted-but-quota, MSG_KEY_TEST_INCONCLUSIVE network): 111 + 2 = 113.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            111,
+            113,
             "state.rs message inventory changed — register the new notice"
         );
     }

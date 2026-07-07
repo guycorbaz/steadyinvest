@@ -381,6 +381,13 @@ pub const MSG_KEY_BLANK: &str = "Aucune clé saisie ; rien n'a été enregistré
 pub const MSG_KEY_DELETED: &str = "La clé du fournisseur est retirée du trousseau du système.";
 pub const MSG_KEY_TESTING: &str = "Test de la clé du fournisseur en cours.";
 pub const MSG_KEY_OK: &str = "La clé est valide ; le fournisseur a répondu.";
+/// Issue #42: a quota reply during the key test PROVES the key was accepted (the provider ran the
+/// request and hit its rate limit) — report acceptance, not a failed key.
+pub const MSG_KEY_OK_QUOTA: &str =
+    "La clé est acceptée ; le fournisseur a signalé une limite d'usage (quota).";
+/// Issue #42: a network failure never reached the provider, so the key is neither confirmed nor
+/// refused — an honest inconclusive verdict, never "clé invalide".
+pub const MSG_KEY_TEST_INCONCLUSIVE: &str = "Test non concluant : le fournisseur n'a pas pu être joint ; la clé n'est ni confirmée ni refusée.";
 pub const MSG_KEY_INVALID: &str = "La clé est invalide ou absente ; le fournisseur l'a refusée.";
 pub const MSG_KEY_FORBIDDEN: &str = "La clé est valide, mais l'abonnement ne couvre pas ces données ; le fournisseur a refusé l'accès.";
 pub const MSG_KEYCHAIN_UNAVAILABLE: &str =
@@ -606,6 +613,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_KEY_DELETED,
     MSG_KEY_TESTING,
     MSG_KEY_OK,
+    MSG_KEY_OK_QUOTA,
+    MSG_KEY_TEST_INCONCLUSIVE,
     MSG_KEY_INVALID,
     MSG_KEY_FORBIDDEN,
     MSG_KEYCHAIN_UNAVAILABLE,
