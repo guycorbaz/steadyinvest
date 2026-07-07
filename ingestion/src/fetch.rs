@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use steadyinvest_core::normalize::{CanonicalFinancials, RawFinancials, normalize};
 
 use crate::error::{IngestionError, ProviderError};
-use crate::provider::{MarketDataProvider, RawFetch};
+use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
 
 /// The normalized result of a fetch plus the **dependency digest** (#21): a SHA-256 over the
 /// provider + ticker + the value-normalized canonical decimals. The app stamps this into each
@@ -22,6 +22,9 @@ pub struct FetchedFinancials {
     pub canonical: CanonicalFinancials,
     pub digest: String,
     pub latest_price: Option<Decimal>,
+    /// Issue #72: the trading-session date of `latest_price` (see [`RawFetch::latest_session_date`]),
+    /// threaded to `cache_close` so the confront trajectory is keyed by the real session date.
+    pub latest_session_date: Option<String>,
     /// Trailing-twelve-months EPS (Issue #113) — the current-P/E denominator. A present market fact
     /// (like `latest_price`), excluded from `digest` (a moving figure must not churn the hash).
     pub ttm_eps: Option<Decimal>,
@@ -113,7 +116,7 @@ impl MarketDataProvider for Provider {
         &self,
         ticker: &str,
         api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError> {
+    ) -> Result<Option<DatedClose>, ProviderError> {
         match self {
             Provider::Eodhd(p) => p.fetch_latest_price(ticker, api_key).await,
             Provider::TwelveData(p) => p.fetch_latest_price(ticker, api_key).await,
@@ -145,6 +148,7 @@ pub async fn fetch_canonical(
     let RawFetch {
         financials,
         latest_price,
+        latest_session_date,
         ttm_eps,
     } = provider.fetch_fundamentals(ticker, api_key).await?;
     let canonical = normalize(financials)?;
@@ -153,6 +157,7 @@ pub async fn fetch_canonical(
         canonical,
         digest,
         latest_price,
+        latest_session_date,
         ttm_eps,
     })
 }
@@ -164,7 +169,7 @@ pub async fn fetch_price(
     provider: &Provider,
     ticker: &str,
     api_key: Option<&str>,
-) -> Result<Option<Decimal>, IngestionError> {
+) -> Result<Option<DatedClose>, IngestionError> {
     Ok(provider.fetch_latest_price(ticker, api_key).await?)
 }
 
@@ -234,6 +239,9 @@ pub fn dependency_digest(
 pub struct FakeProvider {
     result: Result<RawFinancials, ProviderError>,
     latest_price: Option<Decimal>,
+    /// The canned trading-session date of `latest_price` (issue #72) — drives the session-dated
+    /// cache tests. `None` = an undated quote (the Twelve Data `/price` shape).
+    latest_session_date: Option<String>,
     /// The canned BASE→QUOTE rate `fetch_fx_rate` reports (Story 6.5) — `None` = "no quote for the
     /// pair", the honest provider answer; the canned `result`'s error still wins.
     fx_rate: Option<Decimal>,
@@ -247,6 +255,7 @@ impl FakeProvider {
         FakeProvider {
             result,
             latest_price: None,
+            latest_session_date: None,
             fx_rate: None,
             ttm_eps: None,
         }
@@ -260,9 +269,17 @@ impl FakeProvider {
         FakeProvider {
             result,
             latest_price,
+            latest_session_date: None,
             fx_rate: None,
             ttm_eps: None,
         }
+    }
+
+    /// Give the fake a canned trading-session date for its latest price (issue #72 — drives the
+    /// session-dated `price_history` cache tests). Builder-style so existing constructors stay intact.
+    pub fn with_session_date(mut self, session_date: Option<&str>) -> Self {
+        self.latest_session_date = session_date.map(str::to_string);
+        self
     }
 
     /// Give the fake a canned FX rate (Story 6.5 — drives the fx-refresh path in `app` tests).
@@ -288,6 +305,7 @@ impl MarketDataProvider for FakeProvider {
         self.result.clone().map(|financials| RawFetch {
             financials,
             latest_price: self.latest_price,
+            latest_session_date: self.latest_session_date.clone(),
             ttm_eps: self.ttm_eps,
         })
     }
@@ -296,9 +314,15 @@ impl MarketDataProvider for FakeProvider {
         &self,
         _ticker: &str,
         _api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError> {
-        // Mirror the canned result's success/failure, handing back the configured latest price.
-        self.result.clone().map(|_| self.latest_price)
+    ) -> Result<Option<DatedClose>, ProviderError> {
+        // Mirror the canned result's success/failure, handing back the configured latest price with
+        // its canned session date (issue #72).
+        self.result.clone().map(|_| {
+            self.latest_price.map(|close| DatedClose {
+                close,
+                session_date: self.latest_session_date.clone(),
+            })
+        })
     }
 
     async fn fetch_fx_rate(
@@ -474,14 +498,30 @@ mod tests {
     #[tokio::test]
     async fn fetch_price_returns_the_latest_price_and_mirrors_provider_errors() {
         // Issue #50: the price-only path returns the latest close (no fundamentals/normalize/digest).
+        // Issue #72: the close rides with its session date (here canned via the fake).
         let price = Decimal::from(42);
-        let ok = Provider::Fake(FakeProvider::returning_with_price(
+        let ok = Provider::Fake(
+            FakeProvider::returning_with_price(Ok(raw("100")), Some(price))
+                .with_session_date(Some("2026-07-03")),
+        );
+        assert_eq!(
+            fetch_price(&ok, "AAPL.US", Some("k")).await.unwrap(),
+            Some(DatedClose {
+                close: price,
+                session_date: Some("2026-07-03".to_string()),
+            })
+        );
+        // An undated fake (Twelve Data `/price` shape) → the close with `session_date: None`.
+        let undated = Provider::Fake(FakeProvider::returning_with_price(
             Ok(raw("100")),
             Some(price),
         ));
         assert_eq!(
-            fetch_price(&ok, "AAPL.US", Some("k")).await.unwrap(),
-            Some(price)
+            fetch_price(&undated, "AAPL.US", Some("k"))
+                .await
+                .unwrap()
+                .and_then(|d| d.session_date),
+            None
         );
 
         // A provider failure (e.g. an unauthenticated request) propagates as an IngestionError.

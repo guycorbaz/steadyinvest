@@ -19,7 +19,7 @@ use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear, SplitEvent
 
 use crate::adapters::common::{build_client, dec, get_json, reduce_high_low, year_of_date_key};
 use crate::error::ProviderError;
-use crate::provider::{MarketDataProvider, RawFetch};
+use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
 
 const DEFAULT_BASE_URL: &str = "https://eodhd.com/api";
 
@@ -74,7 +74,10 @@ impl MarketDataProvider for EodhdProvider {
         let financials = map_eodhd(&fundamentals, &prices, ticker)?;
         // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
         // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
-        let latest_price = latest_eod_close(&prices);
+        // Issue #72: the bar carries its session `date`, threaded on for the confront cache key.
+        let dated = latest_eod_close(&prices);
+        let latest_price = dated.as_ref().map(|d| d.close);
+        let latest_session_date = dated.and_then(|d| d.session_date);
         // Issue #113: the trailing-twelve-months EPS (the current-P/E denominator) — EODHD's own TTM
         // figure `Highlights.EarningsShare` (verified = the sum of the last 4 reported quarters, and it
         // skips the not-yet-reported current quarter). A present market fact, not an annual figure.
@@ -82,6 +85,7 @@ impl MarketDataProvider for EodhdProvider {
         Ok(RawFetch {
             financials,
             latest_price,
+            latest_session_date,
             ttm_eps,
         })
     }
@@ -90,7 +94,7 @@ impl MarketDataProvider for EodhdProvider {
         &self,
         ticker: &str,
         api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError> {
+    ) -> Result<Option<DatedClose>, ProviderError> {
         // Issue #50: hit ONLY `/eod` (no `/fundamentals`) — works on the free EODHD tier, which
         // allows EOD but 403s fundamentals. The series is `order=a`, so the last bar is the latest.
         let token = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
@@ -114,18 +118,27 @@ impl MarketDataProvider for EodhdProvider {
         // classification and exact-decimal parse ([`latest_eod_close`]) are the already-tested
         // `fetch_latest_price` path, never duplicated (NFR-S1 stays in one place). It also inherits
         // the #50 property: `/eod`-only, so it works on the free tier that 403s `/fundamentals`.
-        self.fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
-            .await
+        Ok(self
+            .fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
+            .await?
+            .map(|d| d.close))
     }
 }
 
-/// The most recent close from the daily EOD array (Story 4.4). The series is requested `order=a`
-/// (ascending), so the **last** bar is today's; we read its `close` (raw — comparable to the §4
-/// forecast band, which is in present price terms). `None` when the array is empty/missing.
-pub fn latest_eod_close(prices: &Value) -> Option<Decimal> {
+/// The most recent close from the daily EOD array (Story 4.4) with its trading-session `date` (issue
+/// #72). The series is requested `order=a` (ascending), so the **last** bar is today's; we read its
+/// `close` (raw — comparable to the §4 forecast band, which is in present price terms) and its `date`
+/// (the real EOD session date, used to key the confront cache). `None` when the array is empty or the
+/// last bar has no `close`.
+pub fn latest_eod_close(prices: &Value) -> Option<DatedClose> {
     let bars = prices.as_array()?;
     let last = bars.last()?;
-    dec(last.get("close"))
+    let close = dec(last.get("close"))?;
+    let session_date = last.get("date").and_then(Value::as_str).map(str::to_string);
+    Some(DatedClose {
+        close,
+        session_date,
+    })
 }
 
 /// PURE: EODHD's FX pair symbol (Story 6.5, FR28) — the concatenated pair on the virtual FOREX
@@ -329,14 +342,18 @@ mod tests {
     #[test]
     fn latest_eod_close_reads_the_last_bar_in_ascending_order() {
         // `/eod?order=a` → ascending; the LAST bar is the most recent close (the present price for
-        // the §4 zone marker, Story 4.4). Parsed exactly — never via `f64`.
+        // the §4 zone marker, Story 4.4). Parsed exactly — never via `f64`. Issue #72: the bar's
+        // real session `date` rides alongside the close.
         let prices = json!([
             { "date": "2026-06-25", "close": "101.5" },
             { "date": "2026-06-26", "close": "103.25" },
         ]);
         assert_eq!(
             latest_eod_close(&prices),
-            Some(Decimal::from_str_exact("103.25").unwrap())
+            Some(DatedClose {
+                close: Decimal::from_str_exact("103.25").unwrap(),
+                session_date: Some("2026-06-26".to_string()),
+            })
         );
     }
 
@@ -346,6 +363,14 @@ mod tests {
         assert_eq!(latest_eod_close(&json!({})), None);
         // Last bar present but no `close` field → no price, not a zero.
         assert_eq!(latest_eod_close(&json!([{ "date": "2026-06-26" }])), None);
+        // A close with no `date` still yields the price, with `session_date: None` (caller falls back).
+        assert_eq!(
+            latest_eod_close(&json!([{ "close": "103.25" }])),
+            Some(DatedClose {
+                close: Decimal::from_str_exact("103.25").unwrap(),
+                session_date: None,
+            })
+        );
     }
 
     /// Issue #112: `map_eodhd` derives the per-share dividend for each fiscal year from the cash-flow
@@ -412,7 +437,7 @@ mod tests {
             { "date": "2026-07-02", "close": "0.9312" },
         ]);
         assert_eq!(
-            latest_eod_close(&bars),
+            latest_eod_close(&bars).map(|d| d.close),
             Some(Decimal::from_str_exact("0.9312").unwrap())
         );
         assert_eq!(latest_eod_close(&json!([])), None);

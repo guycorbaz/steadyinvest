@@ -20,7 +20,7 @@ use std::sync::mpsc;
 
 use rust_decimal::Decimal;
 use steadyinvest_ingestion::{
-    FetchedFinancials, IngestionError, Provider, adapters::eodhd::EodhdProvider,
+    DatedClose, FetchedFinancials, IngestionError, Provider, adapters::eodhd::EodhdProvider,
     adapters::twelvedata::TwelveDataProvider, fetch_canonical, fetch_fx_rate, fetch_price,
 };
 use uuid::Uuid;
@@ -105,7 +105,9 @@ pub struct FetchOutcome {
 pub struct HoldingPriceOutcome {
     pub study_id: Uuid,
     pub ticker: String,
-    pub result: Result<Option<Decimal>, IngestionError>,
+    /// Issue #72: the latest close rides with its trading-session date ([`DatedClose`]) so the
+    /// confront cache is keyed by the real session, not the refresh day. `None` = no quote.
+    pub result: Result<Option<DatedClose>, IngestionError>,
     /// Story 6.9: the non-primary member that served a success (see [`FetchOutcome`]).
     pub fell_back_to: Option<ProviderChoice>,
 }
@@ -542,7 +544,10 @@ mod tests {
                 Ok(None) => Err(IngestionError::Provider(ProviderError::TickerNotFound {
                     ticker: "AAPL".into(),
                 })),
-                other => other,
+                // This harness asserts on the chain's price only (issue #72's date is threaded
+                // separately) — reduce the dated close to its price.
+                Ok(Some(d)) => Ok(Some(d.close)),
+                Err(e) => Err(e),
             },
         )
     }
@@ -655,7 +660,8 @@ mod tests {
                 Ok(None) => Err(IngestionError::Provider(ProviderError::TickerNotFound {
                     ticker: "AAPL".into(),
                 })),
-                other => other,
+                Ok(Some(d)) => Ok(Some(d.close)),
+                Err(e) => Err(e),
             },
         );
         assert_eq!(result.unwrap(), Some(2.into()), "the fallback's quote");

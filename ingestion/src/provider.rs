@@ -13,6 +13,18 @@ use steadyinvest_core::normalize::RawFinancials;
 
 use crate::error::ProviderError;
 
+/// A latest close paired with the trading-**session** date it is *for*, when the provider supplies
+/// one (issue #72). EODHD's `/eod` bars carry a `date`; Twelve Data's bare `/price` does not, so
+/// `session_date` is `None` there and the caller keys its `price_history` cache by the clock day
+/// instead. `session_date` is the raw provider date string (`"YYYY-MM-DD"`), validated by the caller
+/// before it becomes a cache key. Keying by the real session date stops a weekend/holiday refresh
+/// from filing the prior session's close under today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatedClose {
+    pub close: Decimal,
+    pub session_date: Option<String>,
+}
+
 /// What an adapter returns (Story 4.4): the `core` [`RawFinancials`] **plus** the present market
 /// price — the **latest `/eod` close**, if the provider supplies one. The latest price is a present
 /// market fact for the §4 zone marker (FR40), **not** an SSG calc input, so it rides this
@@ -22,6 +34,10 @@ use crate::error::ProviderError;
 pub struct RawFetch {
     pub financials: RawFinancials,
     pub latest_price: Option<Decimal>,
+    /// Issue #72: the trading-session date of `latest_price`, when the provider dates its bars (EODHD
+    /// `/eod`, Twelve Data `/time_series`) — threaded to `cache_close` so the confront trajectory is
+    /// keyed by the real session, not the refresh day. `None` when undated → the caller falls back.
+    pub latest_session_date: Option<String>,
     /// Trailing-twelve-months EPS (Issue #113) — the current-P/E denominator, a present market fact
     /// (like `latest_price`), NOT an annual figure (so it rides here, not in `RawFinancials`).
     pub ttm_eps: Option<Decimal>,
@@ -50,12 +66,13 @@ pub trait MarketDataProvider: Send + Sync {
     /// price, not the annual series, so it must not pay for (or be blocked by) fundamentals. This is
     /// what makes the refresh work on plans where EOD is allowed but fundamentals are forbidden (the
     /// free EODHD tier 403s `/fundamentals`). `None` when the provider exposes no current price / the
-    /// series is empty.
+    /// series is empty. Issue #72: the close rides with its trading-**session** date ([`DatedClose`])
+    /// when the provider dates its quote (EODHD `/eod`); an undated quote carries `session_date: None`.
     async fn fetch_latest_price(
         &self,
         ticker: &str,
         api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError>;
+    ) -> Result<Option<DatedClose>, ProviderError>;
 
     /// Fetch the latest BASE→QUOTE exchange rate (Story 6.5, FR28) — how many units of `quote` one
     /// unit of `base` buys. **User-initiated only** (FR65: never background-polled); the app calls

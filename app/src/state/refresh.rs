@@ -141,10 +141,12 @@ impl JournalState {
             report_ref.set(acc);
         })?;
         // Story 5.1: cache the latest close into the price-history trajectory (confront's source).
+        // Issue #72: keyed by the provider's real session date when it dated the quote, else the clock.
         if let Some(price) = latest_price
             && let Some(study) = self.get_study(study_id)
         {
-            self.cache_close(&study.security_ticker, price);
+            let session_date = fetched.latest_session_date.clone();
+            self.cache_close(&study.security_ticker, price, session_date.as_deref());
         }
         Ok(report.get())
     }
@@ -155,14 +157,20 @@ impl JournalState {
     /// stay manual), written through the atomic [`Self::mutate_study`] rail so the §4 zone recomputes
     /// and it is one undo step. Unlike [`Self::apply_provider_refresh`], it touches ONLY
     /// `current_price` — never the yearly provider cells (the holding refresh is price-led).
-    pub fn apply_holding_price(&mut self, study_id: Uuid, price: Decimal) -> Result<(), String> {
+    pub fn apply_holding_price(
+        &mut self,
+        study_id: Uuid,
+        price: Decimal,
+        session_date: Option<String>,
+    ) -> Result<(), String> {
         self.mutate_study(study_id, move |study| {
             study.judgment.current_price = Some(Money::from(price));
         })?;
-        // Story 5.1: cache the close into the price-history trajectory (confront's source). Keyed by
-        // the study's ticker + today's date; idempotent (one point per ticker/day).
+        // Story 5.1: cache the close into the price-history trajectory (confront's source). Issue #72:
+        // keyed by the provider's real trading-session date when it supplied one (EODHD `/eod`), else
+        // today's clock day (Twelve Data's bare `/price`); idempotent (one point per ticker/session).
         if let Some(study) = self.get_study(study_id) {
-            self.cache_close(&study.security_ticker, price);
+            self.cache_close(&study.security_ticker, price, session_date.as_deref());
         }
         Ok(())
     }
