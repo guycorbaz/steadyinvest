@@ -399,3 +399,60 @@ fn manual_and_provider_rows_coexist_on_a_date_and_the_later_created_at_wins_the_
     );
     assert_eq!(latest.rate, "0.9400");
 }
+
+#[test]
+fn delete_removes_the_row_bumps_once_and_an_absent_id_is_a_no_op() {
+    // Issue #90: the Réglages panel's repair path — retract a mis-entered/stranded rate by id.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    journal
+        .upsert_fx_rate(&rate(
+            1,
+            "EUR",
+            "CHF",
+            "0.94",
+            "2026-07-01",
+            "manuel",
+            "2026-07-01T09:00:00Z",
+        ))
+        .expect("the insert applies");
+    journal
+        .upsert_fx_rate(&rate(
+            2,
+            "USD",
+            "CHF",
+            "0.88",
+            "2026-07-01",
+            "manuel",
+            "2026-07-01T09:01:00Z",
+        ))
+        .expect("the insert applies");
+    let before = version(&journal);
+
+    // Deleting a present id removes exactly that row and bumps once.
+    assert!(
+        journal
+            .delete_fx_rate(Uuid::from_u128(1))
+            .expect("the delete succeeds"),
+        "deleting a present id reports removed"
+    );
+    assert_eq!(version(&journal), before + 1, "exactly one version bump");
+    let rows = journal.list_fx_rates().expect("list reads");
+    assert_eq!(rows.len(), 1, "only the targeted row is gone");
+    assert_eq!(rows[0].id, Uuid::from_u128(2), "the other row is untouched");
+    assert_eq!(
+        journal.latest_fx_rate("EUR", "CHF", None).expect("reads"),
+        None,
+        "the deleted pair is honestly absent again"
+    );
+
+    // Deleting an absent id is an idempotent no-op: no removal, no bump.
+    let after_delete = version(&journal);
+    assert!(
+        !journal
+            .delete_fx_rate(Uuid::from_u128(0xDEAD))
+            .expect("the no-op succeeds"),
+        "an absent id reports not-removed"
+    );
+    assert_eq!(version(&journal), after_delete, "no bump on a no-op delete");
+}

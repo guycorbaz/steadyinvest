@@ -17,10 +17,12 @@ pub(crate) fn push_fx_rates(ui: &MainWindow, state: &JournalState) {
         .list_fx_rates()
         .iter()
         .map(|r| FxRateRow {
+            id: r.id.to_string().into(),
             pair: format!("{} → {}", r.base_currency, r.quote_currency).into(),
             rate: r.rate.clone().into(),
             date: r.rate_date.clone().into(),
             source: r.source.clone().into(),
+            quote: r.quote_currency.clone().into(),
         })
         .collect();
     ui.global::<Fx>()
@@ -142,6 +144,39 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 Err(message) => fx.set_notice(message.into()),
             }
             written
+        });
+    }
+    // ── Delete a stored rate by id (issue #90): the panel's repair path for a mis-entered rate or a
+    //    row stranded against an old reference currency. Re-pushes the list and re-renders the
+    //    consolidation (a removed rate can make a bank's subtotal go honestly ABSENT). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Fx>().on_delete_rate(move |id| {
+            let ui = ui_weak.unwrap();
+            let result = journal_state.borrow_mut().delete_fx_rate(&id);
+            let fx = ui.global::<Fx>();
+            match result {
+                // Only a real removal states "supprimé"; a stale UI id (Ok(false)) says nothing.
+                Ok(removed) => {
+                    if removed {
+                        fx.set_notice(state::MSG_FX_DELETED.into());
+                    }
+                    push_fx_rates(&ui, &journal_state.borrow());
+                    let format = config.borrow().number_format;
+                    crate::wiring::holdings::refresh_holdings(
+                        &ui,
+                        &journal_state.borrow(),
+                        &holding_freshness.borrow(),
+                        &holding_dismissed.borrow(),
+                        format,
+                    );
+                }
+                Err(message) => fx.set_notice(message.into()),
+            }
         });
     }
 }

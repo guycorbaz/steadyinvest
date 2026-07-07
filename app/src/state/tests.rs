@@ -4291,6 +4291,44 @@ fn a_manual_fx_rate_records_dated_and_sourced_and_reupserts_in_place() {
 }
 
 #[test]
+fn deleting_a_fx_rate_by_id_removes_it_and_a_stale_id_is_a_benign_no_op() {
+    // Issue #90: the panel's repair path. A real removal reports true; an unparseable/absent id is
+    // Ok(false) (no error) so a stale UI row never blows up.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x653);
+    state
+        .upsert_manual_fx_rate("EUR", "0.94", "2026-06-26", "CHF")
+        .unwrap();
+    state
+        .upsert_manual_fx_rate("USD", "0.88", "2026-06-26", "CHF")
+        .unwrap();
+    let eur_id = state
+        .list_fx_rates()
+        .into_iter()
+        .find(|r| r.base_currency == "EUR")
+        .expect("the EUR rate exists")
+        .id
+        .to_string();
+
+    assert_eq!(
+        state.delete_fx_rate(&eur_id),
+        Ok(true),
+        "deleting a present id reports removed"
+    );
+    let rates = state.list_fx_rates();
+    assert_eq!(rates.len(), 1, "only the targeted row is gone");
+    assert_eq!(rates[0].base_currency, "USD", "the other row is untouched");
+
+    // A garbage id (a stale UI row) is a benign no-op, never an error.
+    assert_eq!(
+        state.delete_fx_rate("not-a-uuid"),
+        Ok(false),
+        "an unparseable id is a benign no-op"
+    );
+    assert_eq!(state.list_fx_rates().len(), 1, "nothing else removed");
+}
+
+#[test]
 fn manual_fx_validation_refuses_neutrally() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x651);

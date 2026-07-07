@@ -218,6 +218,8 @@ pub const MSG_FX_INVALID_CURRENCY: &str =
 /// "latest" arbitration until that day arrives; nothing is written.
 pub const MSG_FX_FUTURE_DATE: &str =
     "La date est postérieure à aujourd'hui ; rien n'a été enregistré.";
+/// Issue #90: a stored rate was removed (the panel's repair path for a mis-entered or stranded row).
+pub const MSG_FX_DELETED: &str = "Le taux de change a été supprimé.";
 
 /// Risk-settings copy (Story 6.7, FR45) — fact-stating, posture-gated. Raised when the
 /// concentration threshold is not a percentage strictly between 0 and 100; nothing is written.
@@ -559,6 +561,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_FX_JOURNAL_CHANGED,
     MSG_FX_INVALID_CURRENCY,
     MSG_FX_FUTURE_DATE,
+    MSG_FX_DELETED,
     MSG_CONCENTRATION_INVALID,
     MSG_TRAILING_STOP_INVALID,
     MSG_WITHHOLDING_INVALID,

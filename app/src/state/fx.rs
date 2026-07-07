@@ -21,6 +21,7 @@ use super::{
     JournalState, MSG_FX_FUTURE_DATE, MSG_FX_INVALID_CURRENCY, MSG_FX_INVALID_RATE,
     MSG_FX_SAME_CURRENCY, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, watch_error,
 };
+use uuid::Uuid;
 
 impl JournalState {
     /// The stored rates, deterministic order (pair, most-recent date first) — the Réglages panel
@@ -128,6 +129,24 @@ impl JournalState {
             .upsert_fx_rate(&item)
             .map(|_| ())
             .map_err(watch_error)
+    }
+
+    /// Remove a stored rate by its `id` string (issue #90): the Réglages panel's repair path for a
+    /// mis-entered rate or a row stranded against an old reference currency — the only way to
+    /// retract a wrong `(pair, date, source)` key. Guarded (read-only / no-journal). Returns whether
+    /// a row was actually removed, so the caller states "supprimé" honestly (only on a real removal);
+    /// an unparseable id (a stale UI row) is a benign `Ok(false)`, never an error. Deleting a rate is
+    /// honest downstream: the affected consolidation goes ABSENT with the pair named (Story 6.6),
+    /// never falling back to a stale figure.
+    pub fn delete_fx_rate(&mut self, id: &str) -> Result<bool, String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let Ok(id) = Uuid::parse_str(id.trim()) else {
+            return Ok(false);
+        };
+        let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
+        journal.delete_fx_rate(id).map_err(watch_error)
     }
 }
 
