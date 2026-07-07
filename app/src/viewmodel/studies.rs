@@ -13,36 +13,44 @@ use uuid::Uuid;
 use crate::StudyRow;
 use crate::state::created_at_date;
 
-/// One study's estimated potential (issue #107): the §5 projected total annualized return, split into
-/// the `value` used for sorting (`None` when the study withholds it — sorts LAST, never a top pick)
-/// and the already-locale-formatted `display` string ("—" when absent). Computed app-side via
-/// `build_snapshot` (Cardinal Rule: `curate` stays pure and only READS this map).
+/// One study's per-refresh derived list facts. Computed app-side via `build_snapshot` (Cardinal Rule:
+/// `curate` stays pure and only READS this map):
+/// - issue #107 — the estimated potential (§5 projected total annualized return): `value` used for
+///   sorting (`None` when the study withholds it — sorts LAST, never a top pick) and the already-
+///   locale-formatted `display` string ("—" when absent);
+/// - issue #148 — `incomplete`: the study still has a MISSING load-bearing input (verdict `Withheld`),
+///   the list-level "à compléter" signal.
 #[derive(Debug, Clone)]
 pub struct StudyReturn {
     pub value: Option<Decimal>,
     pub display: String,
+    pub incomplete: bool,
 }
 
 impl Default for StudyReturn {
     /// An unknown potential: no sort value, and the app's faithful em-dash (never `0`) for display —
-    /// so a study missing from the map (or one that withholds the return) reads "—", not blank.
+    /// so a study missing from the map (or one that withholds the return) reads "—", not blank. Not
+    /// flagged incomplete: absence from the map is "unknown", never a false "à compléter" shout.
     fn default() -> Self {
         StudyReturn {
             value: None,
             display: crate::viewmodel::form::EMPTY_SLOT.to_string(),
+            incomplete: false,
         }
     }
 }
 
 /// Map one summary row into the Slint `StudyRow` (id stringified, date trimmed to the day, status
-/// verbatim, and the pre-formatted potential-return string — "—" when the study withholds it).
-pub fn to_row(summary: &StudySummary, potential_return: &str) -> StudyRow {
+/// verbatim, the pre-formatted potential-return string — "—" when the study withholds it — and the
+/// issue #148 `incomplete` flag driving the "à compléter" marker).
+pub fn to_row(summary: &StudySummary, potential_return: &str, incomplete: bool) -> StudyRow {
     StudyRow {
         id: summary.id.to_string().into(),
         ticker: summary.security_ticker.clone().into(),
         created_at: created_at_date(&summary.created_at).into(),
         status: summary.status.clone().into(),
         potential_return: potential_return.into(),
+        incomplete,
     }
 }
 
@@ -143,8 +151,8 @@ pub fn curate(
     let empty = StudyReturn::default();
     kept.iter()
         .map(|s| {
-            let display = returns.get(&s.id).unwrap_or(&empty).display.as_str();
-            to_row(s, display)
+            let facts = returns.get(&s.id).unwrap_or(&empty);
+            to_row(s, facts.display.as_str(), facts.incomplete)
         })
         .collect()
 }
@@ -186,6 +194,7 @@ mod tests {
         StudyReturn {
             value: Some(Decimal::from_str_exact(value).unwrap()),
             display: display.to_string(),
+            incomplete: false,
         }
     }
 
@@ -361,6 +370,40 @@ mod tests {
             &returns,
         );
         assert_eq!(tickers(&asc), vec!["ROG", "NESN", "ABBN"]);
+    }
+
+    #[test]
+    fn incomplete_flag_rides_onto_the_row() {
+        // Issue #148: the per-study `incomplete` fact threads through curation onto the row (and a
+        // study absent from the map defaults to NOT incomplete — "unknown" never shouts "à compléter").
+        let studies = vec![
+            sm(1, "NESN", "2026-01-10T00:00:00Z", "active"),
+            sm(2, "ROG", "2026-03-02T00:00:00Z", "active"),
+        ];
+        let mut returns = HashMap::new();
+        returns.insert(
+            Uuid::from_u128(1),
+            StudyReturn {
+                value: None,
+                display: "—".to_string(),
+                incomplete: true,
+            },
+        );
+        // id 2 (ROG) deliberately absent → defaults to not incomplete.
+        let rows = curate(
+            &studies,
+            "",
+            SortKey::Ticker,
+            false,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(tickers(&rows), vec!["NESN", "ROG"]);
+        assert!(rows[0].incomplete, "NESN is flagged à compléter");
+        assert!(
+            !rows[1].incomplete,
+            "ROG (absent from the map) defaults to not incomplete"
+        );
     }
 
     #[test]
