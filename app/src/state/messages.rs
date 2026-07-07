@@ -42,6 +42,10 @@ pub const MSG_PASTE_CLIPPED: &str =
 /// A direct value edit was attempted on a validated (soft-locked) cell (Story 2.5). The sign-off
 /// must be cleared first — the cell is never silently blanked by a stray keystroke.
 pub const MSG_SOFT_LOCKED: &str = "Cellule validée ; retirez la validation avant de la modifier.";
+/// Issue #35: the annual roll-forward hit the maximum year window ([`crate::viewmodel::entry::MAX_HISTORY_YEARS`])
+/// — a neutral cap notice so the §2 grid never grows past the horizontal layout, never a silent stop.
+pub const MSG_YEARS_MAX: &str =
+    "La fenêtre d'années maximale est atteinte ; aucune année n'a été ajoutée.";
 /// The "unlock all" confirmation copy (Story 2.5) — fact-stating, posture-gated. `{n}` is replaced
 /// with the count of validated cells the chosen scope would flip back to to-review.
 pub const MSG_UNLOCK_CONFIRM: &str = "Cette action retire la validation de {n} cellule(s).";
@@ -546,6 +550,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,
     MSG_SOFT_LOCKED,
+    MSG_YEARS_MAX,
     MSG_UNLOCK_CONFIRM,
     MSG_UNLOCK_DONE,
     MSG_NORMALIZE_FAILED,
