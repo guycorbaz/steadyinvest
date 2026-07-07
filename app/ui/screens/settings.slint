@@ -716,18 +716,38 @@ export component SettingsScreen inherits Rectangle {
                             text: r.pair;
                             color: Tokens.text-high;
                             font-size: Tokens.font-caption;
+                            vertical-alignment: center;
                         }
                         Text {
                             text: r.rate;
                             color: Tokens.text-high;
                             font-family: Tokens.font-numeric;
                             font-size: Tokens.font-caption;
+                            vertical-alignment: center;
                         }
                         Text {
                             text: @tr("le {} ({})", r.date, r.source);
                             color: Tokens.text-mid;
                             font-size: Tokens.font-caption;
+                            vertical-alignment: center;
                             horizontal-stretch: 1;
+                        }
+                        // Issue #90: a rate stored against a FORMER reference currency (its quote is
+                        // no longer the active reference) is stranded — never used by the current
+                        // consolidation. Mark it neutrally (ink only, no hue) so the user can spot
+                        // and prune it. The current-reference rows show nothing here.
+                        if r.quote != Prefs.reference-currency: Text {
+                            text: @tr("ancienne référence");
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            font-italic: true;
+                            vertical-alignment: center;
+                        }
+                        // Issue #90: retract a mis-entered or stranded rate — the only way to undo a
+                        // wrong (pair, date, source) key.
+                        ActionButton {
+                            label: @tr("Supprimer");
+                            clicked => { Fx.delete-rate(r.id); }
                         }
                     }
                     HorizontalLayout {

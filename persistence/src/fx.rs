@@ -206,4 +206,24 @@ impl Journal {
             .optional()?;
         row.map(item_from_row).transpose()
     }
+
+    /// Remove one stored rate by its `id` (issue #90): the Réglages panel's repair path for a
+    /// mis-entered or stranded row — the ONLY way to retract a wrong `(pair, date, source)` key,
+    /// since the natural-key upsert can only correct a row on its exact same key. One transaction;
+    /// bumps the version only on a real removal (`Ok(true)`) — an absent id is an idempotent no-op
+    /// (`Ok(false)`), never a bump. Deleting a rate is honest: the affected consolidation goes
+    /// ABSENT with the pair named (Story 6.6), it never falls back to a stale figure.
+    pub fn delete_fx_rate(&mut self, id: Uuid) -> Result<bool> {
+        self.check_writable()?;
+        let tx = self.conn.transaction()?;
+        let removed = tx.execute(
+            "DELETE FROM fx_rates WHERE id = ?1",
+            rusqlite::params![id.to_string()],
+        )?;
+        if removed > 0 {
+            bump_logical_version(&tx)?;
+        }
+        tx.commit()?;
+        Ok(removed > 0)
+    }
 }

@@ -41,10 +41,16 @@ export struct WatchRow {
 // One stored exchange rate (Story 6.5, FR28): dated + source-aware, BASE → QUOTE (the reference
 // currency). `rate` is the exact TEXT spelling; display strings built in Rust.
 export struct FxRateRow {
+    id: string,        // issue #90: the stored row id — the delete key
     pair: string,      // "EUR → CHF"
     rate: string,
     date: string,      // AAAA-MM-JJ
     source: string,    // "manuel" | provider wire name
+    // Issue #90: the QUOTE (target) currency of this stored rate. Rates are stored BASE → reference,
+    // so after a reference-currency switch old rows still quote the FORMER reference — the panel
+    // marks any row whose `quote != Prefs.reference-currency` as "ancienne référence" (stranded,
+    // never used by the current consolidation), and the delete button lets the user prune it.
+    quote: string,
 }
 
 // Story 6.6 (FR44): one bank's consolidated capital-at-risk line. `amount`/`pct` are formatted
@@ -122,6 +128,7 @@ export global Fx {
     callback refresh-rates();                     // provider fetch for the foreign currencies in use
     callback cancel-refresh();                     // issue #100: drain the in-flight batch
     callback add-rate(string, string, string) -> bool; // base, rate, date ("" = today) → recorded?
+    callback delete-rate(string);                  // issue #90: retract a stored rate by id
 }
 
 // One entry of the recent-journals list (Story 5.5). `path` is the open key; `name` is a short label;
