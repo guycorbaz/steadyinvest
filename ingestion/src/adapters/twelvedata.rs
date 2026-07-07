@@ -159,6 +159,8 @@ pub fn classify_twelvedata(body: &Value, ticker: &str) -> Option<ProviderError> 
         404 => ProviderError::TickerNotFound {
             ticker: ticker.to_string(),
         },
+        // Issue #80: a 429 delivered as an HTTP status carries `Retry-After` (wired in `common`); a
+        // 429 reported inside a 200 body here has no documented reset field → no hint (advance).
         429 => ProviderError::Quota {
             retry_after_secs: None,
         },

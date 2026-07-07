@@ -69,11 +69,32 @@ pub(crate) async fn get_json(
             detail: cap_detail(&detail),
         });
     }
+    // A 429 carries the server's rate-limit hint in the `Retry-After` header (issue #80): parse it
+    // here (like 403) while the response is in hand, so the worker's `quota_wait` can actually wait
+    // it out for one same-member retry instead of always advancing on an undeclared quota.
+    if status.as_u16() == 429 {
+        let retry_after_secs = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_retry_after_secs);
+        return Err(ProviderError::Quota { retry_after_secs });
+    }
     Err(classify_status(status.as_u16(), ticker))
 }
 
-/// HTTP status → cause-named [`ProviderError`]. (403 is handled in [`get_json`] with the response
-/// body, so it never reaches here — only 401 maps to an invalid/absent key.)
+/// PURE: an HTTP `Retry-After` header value → a whole number of seconds to wait (issue #80). Only the
+/// **delta-seconds** form (`"120"`) is honored — the form rate-limit JSON APIs use; the alternative
+/// HTTP-date form (`"Wed, 21 Oct 2015 07:28:00 GMT"`) yields `None` (this transport layer has no date
+/// parser or injected clock, and guessing a wrong wait is worse than advancing). A non-numeric,
+/// signed, or empty value is `None`, so a malformed header never becomes a nonsense wait.
+fn parse_retry_after_secs(raw: &str) -> Option<u64> {
+    raw.trim().parse::<u64>().ok()
+}
+
+/// HTTP status → cause-named [`ProviderError`]. (403 and 429 are handled in [`get_json`] with the
+/// response in hand — 403 needs the body, 429 the `Retry-After` header — so they never reach here;
+/// only 401 maps to an invalid/absent key. The 429 arm here is a defensive fallback with no hint.)
 fn classify_status(status: u16, ticker: &str) -> ProviderError {
     match status {
         401 => ProviderError::InvalidOrAbsentKey,
@@ -159,6 +180,22 @@ pub(crate) fn reduce_high_low(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parse_retry_after_reads_delta_seconds_and_rejects_the_rest() {
+        // Issue #80: the delta-seconds form is honored; anything else → None (advance, never guess).
+        assert_eq!(parse_retry_after_secs("120"), Some(120));
+        assert_eq!(parse_retry_after_secs("  30 "), Some(30));
+        assert_eq!(parse_retry_after_secs("0"), Some(0)); // quota_wait treats 0 as "no wait"
+        // The HTTP-date form is not parsed (no clock in this layer) → None.
+        assert_eq!(
+            parse_retry_after_secs("Wed, 21 Oct 2015 07:28:00 GMT"),
+            None
+        );
+        assert_eq!(parse_retry_after_secs("-5"), None, "signed → None");
+        assert_eq!(parse_retry_after_secs("soon"), None);
+        assert_eq!(parse_retry_after_secs(""), None);
+    }
 
     #[test]
     fn cap_detail_trims_and_caps_at_200_chars() {
