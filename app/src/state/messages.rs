@@ -392,6 +392,27 @@ pub const MSG_KEY_INVALID: &str = "La clé est invalide ou absente ; le fourniss
 pub const MSG_KEY_FORBIDDEN: &str = "La clé est valide, mais l'abonnement ne couvre pas ces données ; le fournisseur a refusé l'accès.";
 pub const MSG_KEYCHAIN_UNAVAILABLE: &str =
     "Le trousseau du système est indisponible ; la clé n'a pas été enregistrée.";
+/// Issue #44 (F11): the slot has more than one stored credential — actionable, not a generic error.
+pub const MSG_KEY_AMBIGUOUS: &str = "Le trousseau contient plusieurs entrées pour ce fournisseur ; retirez les doublons dans le gestionnaire de mots de passe.";
+/// Issue #44 (F11): the key is longer than the store accepts — nothing was written.
+pub const MSG_KEY_TOO_LONG: &str =
+    "La clé dépasse la taille maximale acceptée par le trousseau ; rien n'a été enregistré.";
+/// Issue #44 (F11): the store was reachable but rejected the operation for another reason (distinct
+/// from « indisponible » — the store answered, it just refused).
+pub const MSG_KEYCHAIN_ERROR: &str =
+    "Le trousseau du système a signalé une erreur ; l'opération n'a pas abouti.";
+
+/// Map a [`crate::keychain::KeychainError`] to its neutral, cause-named notice (issue #44) — so the
+/// actionable causes (duplicate slot, over-long key) are no longer flattened into a generic failure.
+pub fn keychain_error_notice(err: crate::keychain::KeychainError) -> &'static str {
+    use crate::keychain::KeychainError;
+    match err {
+        KeychainError::Unavailable => MSG_KEYCHAIN_UNAVAILABLE,
+        KeychainError::Ambiguous => MSG_KEY_AMBIGUOUS,
+        KeychainError::TooLong => MSG_KEY_TOO_LONG,
+        KeychainError::Backend => MSG_KEYCHAIN_ERROR,
+    }
+}
 
 /// The confirmation prompt for an "unlock all" of `count` cells (a `{n}`-substitution of
 /// [`MSG_UNLOCK_CONFIRM`] so the scanned const and the runtime string stay one source).
@@ -618,4 +639,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_KEY_INVALID,
     MSG_KEY_FORBIDDEN,
     MSG_KEYCHAIN_UNAVAILABLE,
+    MSG_KEY_AMBIGUOUS,
+    MSG_KEY_TOO_LONG,
+    MSG_KEYCHAIN_ERROR,
 ];

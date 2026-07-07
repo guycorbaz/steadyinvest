@@ -26,7 +26,16 @@ pub enum KeychainError {
     /// caller can fall back to the env-var key and keep working (AC6).
     #[error("the OS secret store is unavailable")]
     Unavailable,
-    /// The secret store is reachable but rejected the operation.
+    /// The slot resolves to MORE THAN ONE stored credential (issue #44 / F11) — a duplicate the
+    /// store cannot disambiguate. Actionable: the user clears the duplicates in their password
+    /// manager. Distinct from [`Self::Backend`] so the notice can say what to do.
+    #[error("the OS secret store holds more than one credential for this slot")]
+    Ambiguous,
+    /// The key exceeds the store's maximum length (issue #44 / F11). Actionable: nothing was
+    /// written; the user shortens the key. Distinct so the notice is not a generic failure.
+    #[error("the key exceeds the secret store's maximum length")]
+    TooLong,
+    /// The secret store is reachable but rejected the operation for another reason.
     #[error("the OS secret store reported an error")]
     Backend,
 }
@@ -43,6 +52,9 @@ fn classify(err: &keyring::Error) -> KeychainError {
         keyring::Error::NoStorageAccess(_) | keyring::Error::PlatformFailure(_) => {
             KeychainError::Unavailable
         }
+        // Issue #44 (F11): the actionable cases the user can fix, no longer flattened into `Backend`.
+        keyring::Error::Ambiguous(_) => KeychainError::Ambiguous,
+        keyring::Error::TooLong(_, _) => KeychainError::TooLong,
         _ => KeychainError::Backend,
     }
 }
@@ -98,7 +110,12 @@ mod tests {
     fn error_display_is_neutral_and_carries_no_secret() {
         // NFR-S1 structural guard: `KeychainError` is a unit enum, so no key value can be attached.
         // Its `Display` is a fixed neutral cause — assert it stays free of any value-like content.
-        for err in [KeychainError::Unavailable, KeychainError::Backend] {
+        for err in [
+            KeychainError::Unavailable,
+            KeychainError::Ambiguous,
+            KeychainError::TooLong,
+            KeychainError::Backend,
+        ] {
             let shown = err.to_string();
             assert!(shown.contains("secret store"), "neutral cause: {shown}");
             assert!(!shown.contains("provider:"), "no slot/key leakage: {shown}");

@@ -191,7 +191,11 @@ export component SettingsScreen inherits Rectangle {
                     spacing: Tokens.space-8;
 
                     Text {
-                        text: Prefs.key-configured ? @tr("Clé configurée") : @tr("Aucune clé configurée");
+                        // Issue #44 (F10): three-way — a locked/unavailable store is "indéterminé",
+                        // never a false "aucune clé configurée".
+                        text: Prefs.key-status-unknown
+                            ? @tr("État de la clé indéterminé (trousseau indisponible)")
+                            : (Prefs.key-configured ? @tr("Clé configurée") : @tr("Aucune clé configurée"));
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;
                     }

@@ -94,8 +94,18 @@ pub(crate) fn mirror_provider_prefs(ui: &MainWindow, provider: ProviderChoice) {
     // startup and on provider switch, before the user has asked for anything. The explicit
     // save/delete/test actions surface `MSG_KEYCHAIN_UNAVAILABLE` when the user actually acts (AC6),
     // and a fetch still falls back to the env-var key.
-    let configured = provider.requires_key() && keychain::has_key(provider).unwrap_or(false);
+    // Issue #44 (F10): a locked/unavailable store must read as "can't tell", NOT a false "no key
+    // configured" — the tri-state (`key-status-unknown`) drives an honest third status line.
+    let (configured, unknown) = if provider.requires_key() {
+        match keychain::has_key(provider) {
+            Ok(present) => (present, false),
+            Err(_) => (false, true),
+        }
+    } else {
+        (false, false)
+    };
     prefs.set_key_configured(configured);
+    prefs.set_key_status_unknown(unknown);
     // Issue #38: surface any ORPHANED key — a key-using provider that is NOT the active one but still
     // holds a stored key — so it can be removed even while "Aucun" is selected (NFR-S1). Only the
     // presence boolean is read; the key value never crosses.
@@ -571,9 +581,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     true
                 }
                 // A keychain failure keeps the field (return `false`) so a transient error does not
-                // silently discard the key the user just typed.
-                Err(_) => {
-                    prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into());
+                // silently discard the key the user just typed. Issue #44: name the actual cause
+                // (duplicate slot / over-long key / unavailable), not a flat "unavailable".
+                Err(error) => {
+                    prefs.set_provider_status(state::keychain_error_notice(error).into());
                     false
                 }
             }
@@ -591,7 +602,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     prefs.set_key_configured(false);
                     prefs.set_provider_status(state::MSG_KEY_DELETED.into());
                 }
-                Err(_) => prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into()),
+                Err(error) => prefs.set_provider_status(state::keychain_error_notice(error).into()),
             }
         });
     }
@@ -608,7 +619,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             };
             match keychain::delete_key(provider) {
                 Ok(()) => prefs.set_provider_status(state::MSG_KEY_DELETED.into()),
-                Err(_) => prefs.set_provider_status(state::MSG_KEYCHAIN_UNAVAILABLE.into()),
+                Err(error) => prefs.set_provider_status(state::keychain_error_notice(error).into()),
             }
             mirror_provider_prefs(&ui, config.borrow().preferred_provider);
         });
