@@ -122,6 +122,51 @@ fn fetched_with_price(years: &[i32], latest_price: i64) -> FetchedFinancials {
 }
 
 #[test]
+fn a_refresh_surfaces_provider_years_that_fall_outside_the_grid() {
+    // Issue #37 (Finding 5): a fresh study builds its grid from the provider years (all integrated →
+    // 0 unmatched). A SECOND refresh whose provider years do NOT overlap the existing grid fills
+    // nothing (fill-gaps-only scope — the grid never grows, cf. #35), but the dropped years are
+    // COUNTED so the notice is not a silent "filled = 0" indistinguishable from "nothing to do".
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x37, "2026-06-15T10:00:00Z");
+    let id = state.create_study("NESN", "CHF").unwrap();
+
+    // First fetch builds the grid 2016–2018; every provider year is integrated.
+    let first = state
+        .apply_provider_refresh(id, &fetched_for(&[2016, 2017, 2018]))
+        .unwrap();
+    assert_eq!(
+        first.unmatched_years, 0,
+        "a fresh grid integrates all years"
+    );
+    assert_eq!(state.get_study(id).unwrap().years.len(), 3);
+
+    // A second fetch with DISJOINT years: the grid stays 2016–2018 (no growth), nothing is filled,
+    // and the two non-overlapping provider years are surfaced as unmatched.
+    let second = state
+        .apply_provider_refresh(id, &fetched_for(&[2023, 2024]))
+        .unwrap();
+    assert_eq!(
+        second.filled, 0,
+        "disjoint years fill nothing (fill-gaps-only)"
+    );
+    assert_eq!(
+        second.unmatched_years, 2,
+        "the two provider years outside the grid are counted, not silently dropped"
+    );
+    assert_eq!(
+        state.get_study(id).unwrap().years.len(),
+        3,
+        "the grid never grows from a refresh (no #35 regression)"
+    );
+    // The user-facing summary names the unmatched years.
+    assert!(
+        crate::state::refresh_summary(second).contains("hors de la grille"),
+        "the notice surfaces the unmatched provider years"
+    );
+}
+
+#[test]
 fn provider_fetch_fills_a_fresh_study_with_provider_stamped_cells() {
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x3F, "2026-06-15T10:00:00Z");
