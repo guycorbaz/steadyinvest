@@ -15,7 +15,10 @@ use uuid::Uuid;
 
 use crate::viewmodel::entry;
 
-use super::{JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, MSG_SOFT_LOCKED};
+use super::{
+    JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, MSG_SOFT_LOCKED,
+    MSG_YEARS_MAX,
+};
 
 /// The scope of a bulk "unlock all" (Story 2.5): the whole study, a single year column, or a single
 /// metric (one §3 column / §2 row) across all years. Each flips every `✓` it covers back to `?`.
@@ -466,6 +469,23 @@ impl JournalState {
     /// grows it 5 → 6, never errors. The degraded all-empty case (unreadable `created_at`) appends
     /// `year 0` — safe, never a panic.
     pub fn extend_history(&mut self, study_id: Uuid) -> Result<(), String> {
+        // Read-only takes precedence over the cap (you cannot extend a read-only journal at all).
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        // Issue #35: bound the window so repeated "+ année" cannot overflow the §2 horizontal layout.
+        // A fresh (never-edited) study shows the materialized `YEAR_WINDOW`, so count THAT, not 0 —
+        // the append below materializes first, then grows it. A neutral notice, never a silent stop.
+        if let Some(study) = self.get_study(study_id) {
+            let current = if study.years.is_empty() {
+                entry::YEAR_WINDOW
+            } else {
+                study.years.len()
+            };
+            if current >= entry::MAX_HISTORY_YEARS {
+                return Err(MSG_YEARS_MAX.to_string());
+            }
+        }
         let provenance = self.manual_provenance();
         self.mutate_study(study_id, move |study| {
             // Materialize the canonical window on first touch (the 2.4 materialize-on-first-edit rail),

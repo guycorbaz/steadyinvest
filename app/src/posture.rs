@@ -723,9 +723,10 @@ mod tests {
         // Issue #42 adds two key-test verdicts (MSG_KEY_OK_QUOTA accepted-but-quota, MSG_KEY_TEST_INCONCLUSIVE network): 111 + 2 = 113.
         // Issue #44 adds three keychain-cause notices (MSG_KEY_AMBIGUOUS, MSG_KEY_TOO_LONG, MSG_KEYCHAIN_ERROR): 113 + 3 = 116.
         // Issue #37 adds the unmatched-provider-years notice (MSG_REFRESH_UNMATCHED_YEARS): 116 + 1 = 117.
+        // Issue #35 adds the max-year-window notice (MSG_YEARS_MAX — the extend-history cap): 117 + 1 = 118.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            117,
+            118,
             "state.rs message inventory changed — register the new notice"
         );
     }

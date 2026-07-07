@@ -35,6 +35,13 @@ use crate::viewmodel::format::{NumberFormat, parse_amount};
 /// interpretations issue.)
 pub const YEAR_WINDOW: usize = 10;
 
+/// The maximum number of year columns a study may hold (issue #35). The annual roll-forward
+/// ([`crate::state::JournalState::extend_history`]) appends one column per click; without a bound the
+/// §2 grid (years as COLUMNS) widens past the horizontal layout after ~20. Cap the window at twice the
+/// initial [`YEAR_WINDOW`] — generous for a rolling projection — with a neutral "maximum reached"
+/// notice rather than a silent stop. §3 (years as rows) scrolls fine and is not the constraint.
+pub const MAX_HISTORY_YEARS: usize = 20;
+
 /// The editable §3 P/E-table columns, in left→right order (A·high, B·low, C·EPS, F·dividend). The
 /// computed columns D/E/G/H are caption-only (engine, Story 2.6) and are NOT in this list — the
 /// cell cursor skips them.

@@ -3599,6 +3599,35 @@ fn extend_history_rolls_the_window_forward_each_call() {
 }
 
 #[test]
+fn extend_history_is_capped_at_the_max_year_window_with_a_neutral_notice() {
+    // Issue #35: the annual roll-forward stops at MAX_HISTORY_YEARS with a neutral notice (never a
+    // silent cap), so repeated "+ année" can't overflow the §2 horizontal layout.
+    use crate::viewmodel::entry::MAX_HISTORY_YEARS;
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("journal.db");
+    let (mut state, id) = study_with_entry(&path); // starts at YEAR_WINDOW (10) years
+    let start = state.get_study(id).unwrap().years.len();
+    for _ in 0..(MAX_HISTORY_YEARS - start) {
+        state.extend_history(id).expect("extends until the cap");
+    }
+    assert_eq!(
+        state.get_study(id).unwrap().years.len(),
+        MAX_HISTORY_YEARS,
+        "extends up to exactly the cap"
+    );
+    // The next roll-forward refuses with the neutral notice and grows nothing.
+    assert_eq!(
+        state.extend_history(id),
+        Err(crate::state::MSG_YEARS_MAX.to_string())
+    );
+    assert_eq!(
+        state.get_study(id).unwrap().years.len(),
+        MAX_HISTORY_YEARS,
+        "the grid never grows past the cap"
+    );
+}
+
+#[test]
 fn undo_restores_the_pre_extend_year_window() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("journal.db");
