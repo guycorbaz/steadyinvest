@@ -29,24 +29,40 @@ pub(crate) fn resolve_provider_key(provider: ProviderChoice) -> Option<String> {
     if !provider.requires_key() {
         return None;
     }
-    match keychain::get_key(provider) {
-        Ok(Some(key)) => return Some(key),
-        Ok(None) => {}
-        // Store unavailable (no agent) — fall through to the env fallback rather than fail (AC6).
-        Err(_) => {}
-    }
+    let outcome = keychain::get_key(provider);
+    // Log ONLY when the env interim actually supplies the key (store unavailable + env present) —
+    // computed before `outcome` is consumed by the precedence decision.
+    let store_unavailable = outcome.is_err();
     // Trim consistently with the keychain path (which stores `key.trim()`), so a padded env value
     // doesn't fetch with stray whitespace the provider would reject (F9).
     let env_key = std::env::var(ENV_KEY_FALLBACK)
         .ok()
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty());
-    if env_key.is_some() {
+    let resolved = resolve_key_precedence(outcome, env_key);
+    if store_unavailable && resolved.is_some() {
         tracing::info!(
-            "provider key read from the {ENV_KEY_FALLBACK} fallback environment variable"
+            "provider key read from the {ENV_KEY_FALLBACK} fallback environment variable (OS secret store unavailable)"
         );
     }
-    env_key
+    resolved
+}
+
+/// PURE precedence between the keychain outcome and the env-var interim (issue #43, F15). A stored
+/// key wins; a REACHABLE-but-empty keychain (`Ok(None)`) is a **deliberate** "no key" — a deletion
+/// takes effect and the env interim must NOT resurrect a stale key; only an UNAVAILABLE store
+/// (`Err` — no secret agent, headless/NAS) falls back to the env var, the documented AC6 case. This
+/// keeps the env fallback to its stated role (environments with no OS secret store) instead of
+/// silently overriding a key the user just removed.
+fn resolve_key_precedence(
+    keychain: Result<Option<String>, crate::keychain::KeychainError>,
+    env_key: Option<String>,
+) -> Option<String> {
+    match keychain {
+        Ok(Some(key)) => Some(key),
+        Ok(None) => None,
+        Err(_) => env_key,
+    }
 }
 
 /// Build the SHIPPED fallback chain for `field` (Story 6.9, FR26): the config's effective chain
@@ -663,5 +679,36 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 prefs.set_key_testing(true);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_key_precedence;
+    use crate::keychain::KeychainError;
+
+    #[test]
+    fn env_fallback_only_when_the_store_is_unavailable() {
+        let env = || Some("env-key".to_string());
+
+        // A stored key always wins over the env interim.
+        assert_eq!(
+            resolve_key_precedence(Ok(Some("stored".into())), env()),
+            Some("stored".to_string())
+        );
+        // Issue #43 (F15): a reachable-but-empty keychain is a DELIBERATE "no key" — the env interim
+        // must NOT resurrect a stale key, so a deletion actually takes effect.
+        assert_eq!(resolve_key_precedence(Ok(None), env()), None);
+        assert_eq!(resolve_key_precedence(Ok(None), None), None);
+        // Only an UNAVAILABLE store (no secret agent, headless/NAS) falls back to the env var (AC6).
+        assert_eq!(
+            resolve_key_precedence(Err(KeychainError::Unavailable), env()),
+            Some("env-key".to_string())
+        );
+        // Unavailable store AND no env key → genuinely no key.
+        assert_eq!(
+            resolve_key_precedence(Err(KeychainError::Unavailable), None),
+            None
+        );
     }
 }
