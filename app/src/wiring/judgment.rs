@@ -227,6 +227,58 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         });
     }
 
+    // Issue #28: the arrow-key equivalent of the drag — one press moves the endpoint by `delta`
+    // (viewbox px) and persists immediately (a single click-drag-release, atomically; no separate
+    // uncommitted-drag state, unlike the pointer path, since there is nothing to abandon on blur).
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let current_study = Rc::clone(current_study);
+        ui.global::<Studies>()
+            .on_judgment_step(move |field, delta| {
+                let ui = ui_weak.unwrap();
+                let studies = ui.global::<Studies>();
+                let chart = studies.get_growth_chart();
+                let active_y = if field.as_str() == "est_low_eps" {
+                    chart.judgment_low_y
+                } else {
+                    chart.judgment_y
+                };
+                // Nothing shown yet (no judgment, no fittable seed) → no position to step FROM; the
+                // Slint key handler already gates on this, this is defense in depth.
+                if active_y < 0.0 {
+                    return;
+                }
+                let y = (active_y + delta).clamp(0.0, chart.chart_h);
+                let value = Some(viewmodel::chart::judgment_value_for_y(
+                    y,
+                    chart.axis_min as f64,
+                    chart.axis_max as f64,
+                ));
+                let Some(id_text) = current_study.borrow().clone() else {
+                    return;
+                };
+                let Ok(id) = Uuid::parse_str(&id_text) else {
+                    return;
+                };
+                let format = config.borrow().number_format;
+                let result =
+                    journal_state
+                        .borrow_mut()
+                        .set_judgment_field(id, field.as_str(), value);
+                match result {
+                    Ok(()) => {
+                        studies.set_notice(SharedString::new());
+                        if let Some(study) = journal_state.borrow().get_study(id) {
+                            push_form(&ui, &journal_state.borrow(), &study, format);
+                        }
+                    }
+                    Err(message) => studies.set_notice(message.into()),
+                }
+            });
+    }
+
     // ── Issue #115 — the draggable §3 judged-P/E lines. drag-start / cancel are shared with §1 (they
     //    only cache / restore the study); move + commit need their OWN inversion because the P/E chart
     //    is a LINEAR scale (read `pe_chart` bounds, invert via `pe_value_for_y`), not the §1 EPS log

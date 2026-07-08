@@ -596,6 +596,10 @@ export global Studies {
     callback judgment-moved(string, length);  // field-key, viewbox-y
     callback judgment-commit(string, length);  // field-key, viewbox-y → persist (pointer up)
     callback judgment-cancel();                // gesture abandoned → revert to saved, no persist
+    // Issue #28: the arrow-key equivalent of a whole click-drag-release, atomically (field-key, a
+    // signed viewbox-px delta from the current endpoint) — persists immediately, one press = one
+    // committed step, no separate uncommitted-drag state to abandon on blur.
+    callback judgment-step(string, length);
 
     // ── Issue #115 — the draggable §3 judged-P/E lines. drag-start / cancel are scale-agnostic (they
     //    only cache / restore the study), so the P/E chart reuses `judgment-drag-start` /
