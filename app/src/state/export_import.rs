@@ -10,16 +10,26 @@ use steadyinvest_persistence::{Error as PersistError, ImportSummary};
 use uuid::Uuid;
 
 use super::{
-    JournalState, MSG_EXPORT_MISSING, MSG_IMPORT_INTEGRITY, MSG_IMPORT_MALFORMED,
-    MSG_IMPORT_VERSION, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
+    JournalState, MSG_EXPORT_MISSING, MSG_EXPORT_UNREADABLE, MSG_IMPORT_INTEGRITY,
+    MSG_IMPORT_MALFORMED, MSG_IMPORT_VERSION, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
 };
 
 impl JournalState {
     /// Export one study to its portable envelope JSON (Story 5.2, FR59) — the serialized data
     /// contract + `schema_version` + integrity hash (NOT a raw `.db`). A pure read; the caller writes
     /// the string to a user-chosen file. Guarded: no journal / missing id → a neutral notice.
+    ///
+    /// Issue #63 — reads via `journal.get_study` directly (not the state-level [`Self::get_study`],
+    /// which flattens a read error to `None`) so a **present but unreadable** row (a newer
+    /// `schema_version`, or a payload that fails to parse) is told apart from a truly **absent**
+    /// id: the dashboard lists the row either way (it reads only indexed columns), so "introuvable"
+    /// on a present row was a contradictory message.
     pub fn export_study(&self, id: Uuid) -> Result<String, String> {
-        let study = self.get_study(id).ok_or(MSG_EXPORT_MISSING.to_string())?;
+        let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
+        let study = journal
+            .get_study(id)
+            .map_err(|_| MSG_EXPORT_UNREADABLE.to_string())?
+            .ok_or(MSG_EXPORT_MISSING.to_string())?;
         Ok(steadyinvest_contract::to_export_json(&study))
     }
 

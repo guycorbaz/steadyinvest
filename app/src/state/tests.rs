@@ -362,6 +362,31 @@ fn export_of_a_missing_study_is_a_neutral_refusal() {
 }
 
 #[test]
+fn export_of_a_present_but_unreadable_study_names_the_row_not_missing() {
+    // Issue #63 — a row whose stored schema_version is newer than this build is PRESENT (the
+    // dashboard's list_studies reads only indexed columns, no payload parse) but unreadable. Write
+    // one directly via `journal.put_study` (bypassing the app-level create/normalize path, which
+    // never produces this) to simulate a file written by a newer build.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x524);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let mut future = state.get_study(id).expect("the study exists");
+    future.schema_version = steadyinvest_contract::SCHEMA_VERSION + 1;
+    state.journal.as_mut().unwrap().put_study(&future).unwrap();
+
+    assert_eq!(
+        state.list_studies().len(),
+        1,
+        "the row is still listed — list_studies never parses the payload"
+    );
+    assert_eq!(
+        state.export_study(id),
+        Err(MSG_EXPORT_UNREADABLE.to_string()),
+        "present-but-unreadable is distinct from MSG_EXPORT_MISSING"
+    );
+}
+
+#[test]
 fn import_maps_each_rejection_to_its_neutral_notice_and_writes_nothing() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x522);
