@@ -505,6 +505,33 @@ export component PortfolioScreen inherits Rectangle {
             // Per-row draft for the trailing-stop % field (Story 4.5): pre-filled with the holding's
             // current stop, or the Réglages default when none is set yet.
             property <string> stop-draft: row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
+            // Issue #58 — once `stop-field.text <=> stop-draft` binds two-way, the FIRST keystroke
+            // severs the declarative default above for the lifetime of this component instance. A
+            // `Holdings.rows` rebuild (add/remove/reorder) reuses instances, so a stale draft could
+            // survive onto a DIFFERENT holding, or a just-committed row could keep showing its
+            // pre-commit text. Local scalar mirrors so `changed` can observe them (a `changed`
+            // callback needs a plain property path, not a dotted repeater-row expression):
+            property <string> row-id: row.id;
+            property <string> row-stop-pct: row.stop-pct;
+            property <bool> row-has-stop: row.has-stop;
+            // Identity change (repeater reused this instance for a different holding) — always
+            // reset, focus or not: a draft typed for the PREVIOUS holding is meaningless here.
+            changed row-id => {
+                self.stop-draft = row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
+            }
+            // Same holding, its stop changed underneath (a commit went through) — reset only when
+            // the field is not focused, so an in-progress edit is never clobbered (the RationaleNote
+            // / JudgmentField keep-input discipline).
+            changed row-stop-pct => {
+                if (!stop-field.has-focus) {
+                    self.stop-draft = row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
+                }
+            }
+            changed row-has-stop => {
+                if (!stop-field.has-focus) {
+                    self.stop-draft = row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
+                }
+            }
             // Per-row draft for an optional sell rationale (Story 4.7) — captured with the
             // "Enregistrer une vente" action.
             property <string> sell-rationale;
@@ -611,7 +638,7 @@ export component PortfolioScreen inherits Rectangle {
                     }
                     HorizontalLayout {
                         spacing: Tokens.space-8;
-                        TextField {
+                        stop-field := TextField {
                             placeholder: @tr("Seuil %");
                             text <=> hrow.stop-draft;
                             horizontal-stretch: 1;

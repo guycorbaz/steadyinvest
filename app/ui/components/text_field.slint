@@ -7,6 +7,7 @@ import { Tokens } from "../tokens.slint";
 export component TextField inherits Rectangle {
     in property <string> placeholder;
     in-out property <string> text <=> input.text;
+    out property <bool> has-focus <=> input.has-focus;
     callback accepted();
 
     height: Tokens.row-height + Tokens.space-4;
