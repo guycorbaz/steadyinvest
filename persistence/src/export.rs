@@ -46,10 +46,20 @@ pub struct StudyRecord {
 /// fixed, deterministic order (so the canonical serialization — and its hash — is stable across runs
 /// and OSes); no `HashMap`/`BTreeMap` anywhere.
 ///
-/// `deny_unknown_fields` makes a **newer-format** file (one that adds a future entity array — e.g.
-/// `judgments`/`fx_rates` — without bumping the envelope's `schema_version`) a typed **rejection**
-/// rather than a silent partial import that drops the unknown array. The envelope version axis and the
-/// `Study` blob's own forward-compat (which DOES tolerate unknown fields) stay distinct by design.
+/// `deny_unknown_fields` makes a **newer-format** file that adds a future **entity ARRAY** (a new
+/// top-level field here, e.g. a hypothetical `judgments`) a typed **rejection** rather than a
+/// silent partial import that drops the unknown collection.
+///
+/// Issue #78 (decided 2026-07-08, product/architecture): this guarantee is **envelope-level only**.
+/// The per-entity item types (`HoldingItem`/`PortfolioItem`/`WatchItem`/`TransactionItem`) do NOT
+/// carry `deny_unknown_fields`, so a future build adding a **field** to one of them (e.g. a 6.2-style
+/// `currency` on `HoldingItem`) is accepted by an OLDER build, which silently drops that field —
+/// the same forward-compat rail the `Study` blob deliberately uses (unknown fields tolerated, only
+/// unknown *shape* at the version axis rejected). Kept intentionally, not tightened to
+/// per-entity `deny_unknown_fields`: every additive entity field would otherwise force an envelope
+/// `schema_version` bump, which is disproportionate to a single new field. A field whose ABSENCE
+/// would be unsafe (silently wrong, not just silently missing) needs its own guard at the point
+/// that reads it — this rail does not promise universal safety, only "never a corrupt parse".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JournalSnapshot {
