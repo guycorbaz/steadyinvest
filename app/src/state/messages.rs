@@ -295,6 +295,10 @@ pub const MSG_STUDY_IMPORTED: &str = "L'étude a été importée.";
 pub const MSG_STUDY_UPDATED: &str =
     "L'étude existait déjà ; elle a été mise à jour depuis le fichier.";
 pub const MSG_EXPORT_MISSING: &str = "L'étude est introuvable ; rien n'a été exporté.";
+/// Issue #63 — a study whose row schema is newer than this build (or whose stored payload does not
+/// parse) is present but unreadable, distinct from a truly absent id ([`MSG_EXPORT_MISSING`]).
+pub const MSG_EXPORT_UNREADABLE: &str =
+    "L'étude est présente mais illisible par cette version ; rien n'a été exporté.";
 pub const MSG_IMPORT_INTEGRITY: &str = "Le fichier ne correspond pas à son empreinte d'intégrité (fichier corrompu ou incomplet) ; rien n'a été importé.";
 pub const MSG_IMPORT_VERSION: &str =
     "Le fichier provient d'une version incompatible du format ; rien n'a été importé.";
@@ -622,6 +626,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_STUDY_IMPORTED,
     MSG_STUDY_UPDATED,
     MSG_EXPORT_MISSING,
+    MSG_EXPORT_UNREADABLE,
     MSG_IMPORT_INTEGRITY,
     MSG_IMPORT_VERSION,
     MSG_IMPORT_MALFORMED,

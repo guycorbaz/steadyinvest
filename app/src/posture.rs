@@ -724,9 +724,11 @@ mod tests {
         // Issue #44 adds three keychain-cause notices (MSG_KEY_AMBIGUOUS, MSG_KEY_TOO_LONG, MSG_KEYCHAIN_ERROR): 113 + 3 = 116.
         // Issue #37 adds the unmatched-provider-years notice (MSG_REFRESH_UNMATCHED_YEARS): 116 + 1 = 117.
         // Issue #35 adds the max-year-window notice (MSG_YEARS_MAX — the extend-history cap): 117 + 1 = 118.
+        // Issue #63 adds the export-unreadable notice (MSG_EXPORT_UNREADABLE — a present-but-unreadable
+        // study told apart from a truly absent one): 118 + 1 = 119.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            118,
+            119,
             "state.rs message inventory changed — register the new notice"
         );
     }
