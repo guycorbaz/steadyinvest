@@ -70,15 +70,25 @@ impl JournalState {
     }
 
     /// Apply one PROVIDER-fetched rate (Story 6.5, AC3): `base → quote` at the fetched value,
-    /// dated the fetch **day** (#72 interim rule), `source` = the provider wire name. Guarded.
+    /// `source` = the provider wire name. Issue #90 (part 3): dated by the provider's real trading
+    /// **session** (`session_date`) when it supplies one (EODHD `/eod`) — else the fetch day, the
+    /// same fallback #72 gave the price cache. `normalize_event_date` (in `upsert_fx_rate_from`)
+    /// re-validates the shape regardless (defense in depth for a malformed provider date).
     pub fn apply_fx_fetch(
         &mut self,
         base: &str,
         quote: &str,
         rate: Decimal,
+        session_date: Option<&str>,
         source: &str,
     ) -> Result<(), String> {
-        self.upsert_fx_rate_from(base, &rate.normalize().to_string(), "", quote, source)
+        self.upsert_fx_rate_from(
+            base,
+            &rate.normalize().to_string(),
+            session_date.unwrap_or(""),
+            quote,
+            source,
+        )
     }
 
     /// The shared validated upsert: normalize the inputs, mint id/stamp (ADD15), one persistence

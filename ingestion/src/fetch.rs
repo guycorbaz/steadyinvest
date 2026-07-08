@@ -129,7 +129,7 @@ impl MarketDataProvider for Provider {
         base: &str,
         quote: &str,
         api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError> {
+    ) -> Result<Option<DatedClose>, ProviderError> {
         match self {
             Provider::Eodhd(p) => p.fetch_fx_rate(base, quote, api_key).await,
             Provider::TwelveData(p) => p.fetch_fx_rate(base, quote, api_key).await,
@@ -174,15 +174,16 @@ pub async fn fetch_price(
 }
 
 /// Fetch the latest BASE→QUOTE exchange rate (Story 6.5, FR28) — the FX sibling of [`fetch_price`],
-/// with the same error-conversion shape. User-initiated only (FR65). Each adapter spells the pair
-/// in its own symbol convention and reuses its latest-price wire path; `Ok(None)` when the provider
-/// has no quote for the pair (never an inverted-pair guess — the app refuses honestly instead).
+/// with the same error-conversion shape (and the same [`DatedClose`] shape, issue #90 part 3).
+/// User-initiated only (FR65). Each adapter spells the pair in its own symbol convention and reuses
+/// its latest-price wire path; `Ok(None)` when the provider has no quote for the pair (never an
+/// inverted-pair guess — the app refuses honestly instead).
 pub async fn fetch_fx_rate(
     provider: &Provider,
     base: &str,
     quote: &str,
     api_key: Option<&str>,
-) -> Result<Option<Decimal>, IngestionError> {
+) -> Result<Option<DatedClose>, IngestionError> {
     Ok(provider.fetch_fx_rate(base, quote, api_key).await?)
 }
 
@@ -245,6 +246,9 @@ pub struct FakeProvider {
     /// The canned BASE→QUOTE rate `fetch_fx_rate` reports (Story 6.5) — `None` = "no quote for the
     /// pair", the honest provider answer; the canned `result`'s error still wins.
     fx_rate: Option<Decimal>,
+    /// The canned trading-session date of `fx_rate` (issue #90 part 3) — drives the session-dated
+    /// `fx_rates` tests, mirroring `latest_session_date`. `None` = an undated quote.
+    fx_session_date: Option<String>,
     /// The canned trailing-twelve-months EPS (Issue #113) — drives current-P/E tests.
     ttm_eps: Option<Decimal>,
 }
@@ -257,6 +261,7 @@ impl FakeProvider {
             latest_price: None,
             latest_session_date: None,
             fx_rate: None,
+            fx_session_date: None,
             ttm_eps: None,
         }
     }
@@ -271,6 +276,7 @@ impl FakeProvider {
             latest_price,
             latest_session_date: None,
             fx_rate: None,
+            fx_session_date: None,
             ttm_eps: None,
         }
     }
@@ -286,6 +292,13 @@ impl FakeProvider {
     /// Builder-style so the existing constructors stay untouched.
     pub fn with_fx_rate(mut self, fx_rate: Option<Decimal>) -> Self {
         self.fx_rate = fx_rate;
+        self
+    }
+
+    /// Give the fake a canned trading-session date for its FX rate (issue #90 part 3 — mirrors
+    /// `with_session_date`). Builder-style.
+    pub fn with_fx_session_date(mut self, fx_session_date: Option<&str>) -> Self {
+        self.fx_session_date = fx_session_date.map(str::to_string);
         self
     }
 
@@ -330,10 +343,16 @@ impl MarketDataProvider for FakeProvider {
         _base: &str,
         _quote: &str,
         _api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError> {
-        // Mirror the canned result's success/failure, handing back the configured FX rate
-        // (`None` = the provider has no quote for the pair).
-        self.result.clone().map(|_| self.fx_rate)
+    ) -> Result<Option<DatedClose>, ProviderError> {
+        // Mirror the canned result's success/failure, handing back the configured FX rate + its
+        // canned session date (`None` rate = the provider has no quote for the pair; issue #90
+        // part 3 for the date).
+        self.result.clone().map(|_| {
+            self.fx_rate.map(|close| DatedClose {
+                close,
+                session_date: self.fx_session_date.clone(),
+            })
+        })
     }
 }
 
@@ -474,7 +493,10 @@ mod tests {
         let ok = Provider::Fake(FakeProvider::returning(Ok(raw("100"))).with_fx_rate(Some(rate)));
         assert_eq!(
             fetch_fx_rate(&ok, "EUR", "CHF", Some("k")).await.unwrap(),
-            Some(rate)
+            Some(DatedClose {
+                close: rate,
+                session_date: None
+            })
         );
 
         // A fake without a canned rate = the provider has no quote for the pair → Ok(None).
@@ -493,6 +515,27 @@ mod tests {
             fetch_fx_rate(&err, "EUR", "CHF", None).await.unwrap_err(),
             IngestionError::Provider(ProviderError::InvalidOrAbsentKey)
         ));
+    }
+
+    /// Issue #90 (part 3): a canned FX session date rides through `fetch_fx_rate`, exactly like
+    /// `latest_session_date` does for `fetch_price` (issue #72).
+    #[tokio::test]
+    async fn fetch_fx_rate_carries_the_canned_session_date() {
+        let rate = Decimal::from_str_exact("0.9312").unwrap();
+        let dated = Provider::Fake(
+            FakeProvider::returning(Ok(raw("100")))
+                .with_fx_rate(Some(rate))
+                .with_fx_session_date(Some("2026-07-03")),
+        );
+        assert_eq!(
+            fetch_fx_rate(&dated, "EUR", "CHF", Some("k"))
+                .await
+                .unwrap(),
+            Some(DatedClose {
+                close: rate,
+                session_date: Some("2026-07-03".to_string())
+            })
+        );
     }
 
     #[tokio::test]

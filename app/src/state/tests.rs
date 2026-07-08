@@ -4579,6 +4579,7 @@ fn apply_fx_fetch_stamps_the_day_and_the_provider_source() {
             "USD",
             "CHF",
             Decimal::from_str_exact("0.8850").unwrap(),
+            None, // Twelve Data's bare `/price` is undated (issue #90 part 3) → the fetch-day fallback.
             "twelvedata",
         )
         .expect("the fetched rate lands");
@@ -4587,9 +4588,33 @@ fn apply_fx_fetch_stamps_the_day_and_the_provider_source() {
     assert_eq!(rates[0].rate, "0.885", "normalized spelling");
     assert_eq!(
         rates[0].rate_date, "2026-06-27",
-        "the fetch DAY (the fixed test clock)"
+        "no session date supplied → the fetch DAY (the fixed test clock)"
     );
     assert_eq!(rates[0].source, "twelvedata");
+}
+
+/// Issue #90 (part 3): a provider-supplied session date is used verbatim (a Friday close fetched
+/// on the following Monday stays dated Friday — no weekend phantom row), instead of always the
+/// fetch day.
+#[test]
+fn apply_fx_fetch_uses_the_provider_session_date_over_the_fetch_day() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x654);
+    state
+        .apply_fx_fetch(
+            "EUR",
+            "CHF",
+            Decimal::from_str_exact("0.9312").unwrap(),
+            Some("2026-06-26"), // a Friday; the fixed test clock's "today" is 2026-06-27 (Saturday).
+            "eodhd",
+        )
+        .expect("the fetched rate lands");
+    let rates = state.list_fx_rates();
+    assert_eq!(rates.len(), 1);
+    assert_eq!(
+        rates[0].rate_date, "2026-06-26",
+        "the real session date wins over the (later) fetch day"
+    );
 }
 
 #[test]
@@ -4606,6 +4631,7 @@ fn a_corrected_manual_rate_wins_the_same_day_tie_over_an_earlier_provider_row() 
             "EUR",
             "CHF",
             Decimal::from_str_exact("0.94").unwrap(),
+            Some("2026-06-27"),
             "eodhd",
         )
         .unwrap();

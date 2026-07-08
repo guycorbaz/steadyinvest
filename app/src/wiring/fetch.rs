@@ -427,7 +427,8 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                 match journal_state.borrow_mut().apply_fx_fetch(
                                     &outcome.base,
                                     &outcome.quote,
-                                    rate,
+                                    rate.close,
+                                    rate.session_date.as_deref(),
                                     &outcome.effective,
                                 ) {
                                     Ok(()) => landed += 1,

@@ -111,17 +111,16 @@ impl MarketDataProvider for EodhdProvider {
         base: &str,
         quote: &str,
         api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError> {
+    ) -> Result<Option<DatedClose>, ProviderError> {
         // Story 6.5 (FR28): EODHD serves FX pairs on the SAME `/eod` endpoint as equities, under the
         // symbol `"{base}{quote}.FOREX"` (e.g. `EURCHF.FOREX`); the latest EOD close IS the rate.
         // So this is exactly a one-line symbol-format + delegate — the HTTP call, status
         // classification and exact-decimal parse ([`latest_eod_close`]) are the already-tested
         // `fetch_latest_price` path, never duplicated (NFR-S1 stays in one place). It also inherits
         // the #50 property: `/eod`-only, so it works on the free tier that 403s `/fundamentals`.
-        Ok(self
-            .fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
-            .await?
-            .map(|d| d.close))
+        // Issue #90 (part 3): the bar's `date` rides along too, same as the price path.
+        self.fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
+            .await
     }
 }
 
