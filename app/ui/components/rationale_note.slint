@@ -5,9 +5,10 @@
 // animation). The user's own words are NEVER posture-scanned — only the system label/placeholder
 // are (FR13).
 //
-// Re-seeds the input from the model (`value`) on every re-push, but only when not focused, so a
-// persisted edit / reopen restores the value without clobbering an in-progress edit (the keep-input
-// rail, like `JudgmentField`).
+// Re-seeds the input from the model (`value`) on every re-push, unconditionally (issue #32, like
+// `JudgmentField`) — a routine, unrelated re-push never clobbers a draft (`changed value` only fires
+// when THIS note's own committed text differs), and an external change to this same text while
+// focused (undo/redo) is deliberately allowed to win over an in-progress, uncommitted draft.
 
 import { Tokens } from "../tokens.slint";
 import { Studies } from "../state.slint";
@@ -19,12 +20,18 @@ export component RationaleNote inherits VerticalLayout {
 
     spacing: Tokens.space-4;
 
-    // Re-seed from the model after a persisted re-push (Studies.rationale changed) — but only when
-    // not focused, so an in-progress edit is never clobbered (2.4/2.6 keep-input discipline).
+    // Re-seed from the model after a persisted re-push (Studies.rationale changed).
+    //
+    // Issue #32: `changed value` fires ONLY when this note's OWN committed text actually differs —
+    // an unrelated edit elsewhere never re-triggers this. The one case that DOES fire it while
+    // focused is genuinely dangerous: this note's own edits only ever write back on blur (Enter is a
+    // newline here, never a commit), so a `value` change reaching us while still focused can only be
+    // external (undo/redo). Reseeding unconditionally makes that external truth win — an in-flight,
+    // uncommitted draft is discarded rather than later silently committed OVER the externally-set
+    // text at the next blur (which would look like the undo/redo had no effect). A self-authored
+    // commit's echo is a no-op here (the text already equals `root.value`).
     changed value => {
-        if (!input.has-focus) {
-            input.text = root.value;
-        }
+        input.text = root.value;
     }
 
     Text {

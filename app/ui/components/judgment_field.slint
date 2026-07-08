@@ -3,8 +3,11 @@
 // focus-out (the 2.4 commit-on-focus-out discipline). A cleared field is parsed to `None` in Rust —
 // never `0`. Token-styled, visible focus ring (NFR-U2), keyboard-reachable; constant geometry.
 //
-// The field re-seeds from the model (`value`) on every re-push (`init` + `changed`), so a persisted
-// edit / reopen restores the value without clobbering an in-progress edit.
+// The field re-seeds from the model (`value`) on every re-push (`init` + `changed`, unconditionally
+// — issue #32). This never clobbers a routine, unrelated re-push (`changed value` only fires when
+// THIS field's own committed value differs), and it deliberately DOES override an in-progress draft
+// when something external changed this same value while focused (undo/redo) — see the `changed
+// value` handler below for why that's the correct call, not a regression.
 
 import { Tokens } from "../tokens.slint";
 import { Studies } from "../state.slint";
@@ -18,12 +21,22 @@ export component JudgmentField inherits VerticalLayout {
 
     spacing: Tokens.space-4;
 
-    // Re-seed the input from the model after a persisted re-push (Studies.judgment changed) — but
-    // only when this field is not focused, so an in-progress edit is never clobbered.
+    // Re-seed the input from the model after a persisted re-push (Studies.judgment changed).
+    //
+    // Issue #32: `changed value` fires ONLY when `root.value` (this field's OWN committed value)
+    // actually differs from what it was — an unrelated edit elsewhere (a different field, extending
+    // history, …) never touches THIS value, so it never re-triggers this handler; the prior
+    // `!has-focus` guard was therefore protecting against a case that cannot happen. The one case
+    // that DOES fire this while focused is genuinely dangerous instead: something OTHER than this
+    // field's own commit-on-blur changed the value out from under an in-progress edit (undo/redo is
+    // the concrete trigger) — since this field's own edits only ever write back on blur/Enter, a
+    // `value` change reaching us WHILE STILL FOCUSED can only be external. Reseeding unconditionally
+    // makes the external truth win: an in-flight, uncommitted draft is discarded rather than later
+    // silently committed OVER the externally-set value at the next blur (which would look like the
+    // undo/redo had no effect). A self-authored commit's echo is a no-op here (the text already
+    // equals `root.value`).
     changed value => {
-        if (!input.has-focus) {
-            input.text = root.value;
-        }
+        input.text = root.value;
     }
 
     Text {
