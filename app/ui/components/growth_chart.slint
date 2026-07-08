@@ -79,6 +79,10 @@ export component GrowthChart inherits Rectangle {
     // Height is rendered 1:1 with the viewbox (so the drag's mouse-y maps directly); width stretches.
     property <length> plot-h: root.chart.chart-h * 1px;
     property <length> strip-w: Tokens.space-48;
+    // Issue #28: one arrow-key press moves the endpoint by this many viewbox px (≈40 presses top to
+    // bottom of the plot at the default chart-h — a coarse-but-usable step; the exact-value
+    // `JudgmentField` remains the precise keyboard path).
+    property <length> arrow-key-step: 10px;
 
     min-height: root.plot-h + Tokens.row-height + 2 * Tokens.chart-pad;
 
@@ -310,6 +314,7 @@ export component GrowthChart inherits Rectangle {
                     }
                     pointer-event(ev) => {
                         if (ev.kind == PointerEventKind.down) {
+                            strip-focus.focus();
                             Studies.judgment-drag-start();
                             Studies.judgment-dragging = true;
                         }
@@ -326,9 +331,32 @@ export component GrowthChart inherits Rectangle {
                     }
                     accessible-role: slider;
                     accessible-label: root.low-active
-                        ? @tr("Tendance du BPA estimé bas — glisser pour ajuster")
-                        : @tr("Tendance du BPA estimé haut — glisser pour ajuster");
+                        ? @tr("Tendance du BPA estimé bas — glisser ou flèches ↑/↓ pour ajuster")
+                        : @tr("Tendance du BPA estimé haut — glisser ou flèches ↑/↓ pour ajuster");
                     accessible-value: root.active-label;
+                }
+
+                // Issue #28: the strip announces `accessible-role: slider`, so arrow keys must
+                // actually move it — a keyboard equivalent to the drag, one step-and-commit per
+                // press (the same `judgment-step` call as a whole click-drag-release, atomically, so
+                // there is no separate "moved but uncommitted" state to abandon on blur). Gated on
+                // `active-y >= 0.0`: with nothing shown yet there is no position to step FROM — the
+                // exact-value `JudgmentField` (already keyboard-native) is the entry point then.
+                strip-focus := FocusScope {
+                    key-pressed(event) => {
+                        if (root.active-y < 0.0) {
+                            return EventResult.reject;
+                        }
+                        if (event.text == Key.UpArrow) {
+                            Studies.judgment-step(root.drag-field, -root.arrow-key-step);
+                            return EventResult.accept;
+                        }
+                        if (event.text == Key.DownArrow) {
+                            Studies.judgment-step(root.drag-field, root.arrow-key-step);
+                            return EventResult.accept;
+                        }
+                        EventResult.reject
+                    }
                 }
             }
         }
