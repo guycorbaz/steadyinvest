@@ -18,7 +18,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
-use rust_decimal::Decimal;
 use steadyinvest_ingestion::{
     DatedClose, FetchedFinancials, IngestionError, Provider, adapters::eodhd::EodhdProvider,
     adapters::twelvedata::TwelveDataProvider, fetch_canonical, fetch_fx_rate, fetch_price,
@@ -123,7 +122,10 @@ pub struct HoldingPriceOutcome {
 pub struct FxRateOutcome {
     pub base: String,
     pub quote: String,
-    pub result: Result<Option<Decimal>, IngestionError>,
+    /// Issue #90 (part 3): the rate rides with its trading-session date ([`DatedClose`]), same as
+    /// [`HoldingPriceOutcome`] (issue #72) — so the stored `fx_rates` row is keyed by the real
+    /// session, not the refresh day.
+    pub result: Result<Option<DatedClose>, IngestionError>,
     pub effective: String,
 }
 

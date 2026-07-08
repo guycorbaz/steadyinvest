@@ -119,17 +119,17 @@ impl MarketDataProvider for TwelveDataProvider {
         base: &str,
         quote: &str,
         api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError> {
+    ) -> Result<Option<DatedClose>, ProviderError> {
         // Story 6.5 (FR28): on Twelve Data an FX pair is served by the SAME `/price` endpoint as an
         // equity's latest price, under the native pair symbol `"{base}/{quote}"` (e.g. `EUR/CHF`).
         // So this is exactly a one-line symbol-format + delegate — the HTTP call, the 200-body error
         // classification ([`classify_twelvedata`]) and the exact-decimal parse ([`price_of`]) are
         // the already-tested `fetch_latest_price` path, never duplicated (NFR-S1 stays in one place).
         // Currency codes are plain `[A-Z]{3}`, so no URL-encoding concern beyond the fixed `/`.
-        Ok(self
-            .fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
-            .await?
-            .map(|d| d.close))
+        // Issue #90 (part 3): `session_date` rides along too (always `None` here — the bare
+        // `/price` body is undated, same as the equity price path).
+        self.fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
+            .await
     }
 }
 

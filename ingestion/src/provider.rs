@@ -81,12 +81,14 @@ pub trait MarketDataProvider: Send + Sync {
     /// Each adapter spells the pair in its own symbol convention (Twelve Data `"{base}/{quote}"` on
     /// `/price`; EODHD `"{base}{quote}.FOREX"` on `/eod` — the #70 per-provider-symbol class) and
     /// **delegates to its own latest-price path**, because an FX quote is the same wire shape as an
-    /// equity's latest price. Returns `Ok(None)` when the provider has no quote for the pair —
-    /// never an inverted-pair guess. Same NFR-S1 discipline as every fetch (key never in errors).
+    /// equity's latest price — same [`DatedClose`] shape, so issue #90 (part 3) gets the SAME
+    /// real-session-date keying issue #72 gave the price cache, for free. Returns `Ok(None)` when
+    /// the provider has no quote for the pair — never an inverted-pair guess. Same NFR-S1
+    /// discipline as every fetch (key never in errors).
     async fn fetch_fx_rate(
         &self,
         base: &str,
         quote: &str,
         api_key: Option<&str>,
-    ) -> Result<Option<Decimal>, ProviderError>;
+    ) -> Result<Option<DatedClose>, ProviderError>;
 }
