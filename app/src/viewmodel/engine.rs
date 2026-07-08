@@ -585,6 +585,10 @@ pub fn judgment_fields(study: &Study, format: NumberFormat) -> JudgmentFields {
         recent_severe_low: fmt_money(j.recent_severe_low, DisplayField::Price),
         current_price: fmt_money(j.current_price, DisplayField::Price),
         dividend: fmt_money(j.present_full_year_dividend, DisplayField::PerShare),
+        // Issue #31: direct wins over derived in `core::ssg::growth::compute` — once BOTH are set,
+        // the §1 line/est-high-eps ignore the growth %, even though §5 keeps reading it directly.
+        eps_growth_shadowed_in_growth_line: j.projected_eps_growth_pct.is_some()
+            && j.estimated_high_eps.is_some(),
     }
 }
 
@@ -1388,6 +1392,36 @@ mod tests {
             scs.alternate.confidence.as_str(),
             "withheld",
             "the alternate with a missing load-bearing input is withheld, not full"
+        );
+    }
+
+    /// Issue #31: `eps_growth_shadowed_in_growth_line` flags exactly the direct-wins-over-derived
+    /// case (both set) — never when only one is set, and never a false positive from an unrelated
+    /// field. `full_judgment()` sets both, so it is the positive case here.
+    #[test]
+    fn eps_growth_shadowed_only_when_both_a_direct_and_a_growth_pct_are_set() {
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+
+        let both = study_with(years.clone(), full_judgment());
+        assert!(
+            judgment_fields(&both, NumberFormat::Comma).eps_growth_shadowed_in_growth_line,
+            "a direct est-high-eps AND a growth % → the line ignores the growth %"
+        );
+
+        let mut growth_only = full_judgment();
+        growth_only.estimated_high_eps = None;
+        let growth_only = study_with(years.clone(), growth_only);
+        assert!(
+            !judgment_fields(&growth_only, NumberFormat::Comma).eps_growth_shadowed_in_growth_line,
+            "no direct value → the growth % drives the line, not shadowed"
+        );
+
+        let mut direct_only = full_judgment();
+        direct_only.projected_eps_growth_pct = None;
+        let direct_only = study_with(years, direct_only);
+        assert!(
+            !judgment_fields(&direct_only, NumberFormat::Comma).eps_growth_shadowed_in_growth_line,
+            "no growth % set at all → nothing to shadow"
         );
     }
 }
