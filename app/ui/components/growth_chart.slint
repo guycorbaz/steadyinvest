@@ -273,18 +273,30 @@ export component GrowthChart inherits Rectangle {
             }
 
             // ── The right-edge drag strip: the grab target for the future endpoint. mouse-y spans
-            //    the full height, so it maps 1:1 to the viewbox-y the adapter inverts. ──
-            Rectangle {
+            //    the full height, so it maps 1:1 to the viewbox-y the adapter inverts. A GENEROUS
+            //    mouse target (strip-w wide) is deliberately wider than the line itself — easy to
+            //    grab regardless of where the line actually ends. ──
+            strip := Rectangle {
                 x: parent.width - root.strip-w;
                 width: root.strip-w;
                 height: parent.height;
                 background: Tokens.surface-alt.with-alpha(strip-touch.has-hover ? 0.6 : 0.3);
 
                 // Issue #121: ONE grip + caption, on the ACTIVE context's endpoint (est-high or est-low).
+                // Issue #29: the trend-line `Path` above renders 1:1 in plot-px (viewbox-width is bound
+                // to the plot's real width, #118), so its endpoint sits at literal pixel `judgment-x`
+                // from the PLOT's left edge — NOT at the strip's own midpoint (the strip is anchored to
+                // the plot's right edge, a fixed distance away, so the two only coincide when the plot
+                // happens to render exactly `chart-w` px wide). Aligning the grip's `x` to
+                // `judgment-x - strip.x` (i.e. `judgment-x` translated into the strip's own coordinate
+                // space) makes the marker sit exactly under the line's endpoint regardless of plot
+                // width — deliberately allowed to render OUTSIDE the strip's own background (this
+                // Rectangle has no `clip: true`; only the plot does), so it stays correct even when the
+                // strip's highlight box and the line's endpoint are far apart.
                 if root.active-y >= 0.0: Rectangle {
                     width: Tokens.chart-grip;
                     height: Tokens.chart-grip;
-                    x: (parent.width - self.width) / 2;
+                    x: root.chart.judgment-x * 1px - strip.x - self.width / 2;
                     y: root.active-y * 1px - self.height / 2;
                     background: Tokens.text-high;
                     border-radius: Tokens.radius;
@@ -296,6 +308,7 @@ export component GrowthChart inherits Rectangle {
                     font-size: Tokens.font-caption;
                     horizontal-alignment: center;
                     width: parent.width;
+                    x: root.chart.judgment-x * 1px - strip.x - parent.width / 2;
                     y: root.active-y * 1px - self.height - Tokens.space-4;
                 }
                 // A neutral drag hint when the active line is unset (an affordance, never a value).
