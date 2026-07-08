@@ -217,6 +217,11 @@ export struct JudgmentFields {
     recent-severe-low: string,
     current-price: string,
     dividend: string,
+    // Issue #31: `eps-growth` still drives the §5 average-annual-EPS projection even when a direct
+    // `est-high-eps` also exists — but the §1 forecast-high LINE (and `est-high-eps` itself) ignores
+    // it then (direct wins over derived, `core::ssg::growth::compute`). `true` when BOTH are set, so
+    // the §1 field can name this precisely (never blanket "unused" — it stays live for §5).
+    eps-growth-shadowed-in-growth-line: bool,
 }
 
 // §1 growth computed results (the historical CAGRs; the projected growths are editable inputs).

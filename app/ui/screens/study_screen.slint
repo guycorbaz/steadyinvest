@@ -583,11 +583,24 @@ export component StudyScreen inherits Rectangle {
                         value: Studies.judgment.sales-growth;
                         suffix: "%";
                     }
-                    JudgmentField {
-                        label: @tr("Croissance projetée du BPA");
-                        field-key: "eps_growth";
-                        value: Studies.judgment.eps-growth;
-                        suffix: "%";
+                    VerticalLayout {
+                        spacing: Tokens.space-4;
+                        JudgmentField {
+                            label: @tr("Croissance projetée du BPA");
+                            field-key: "eps_growth";
+                            value: Studies.judgment.eps-growth;
+                            suffix: "%";
+                        }
+                        // Issue #31: direct wins over derived (core::ssg::growth::compute), so once a
+                        // direct "BPA estimé haut" is also set, THIS line ignores the growth % — a
+                        // neutral fact, not "unused" (it still drives §5's average-annual-EPS).
+                        if Studies.judgment.eps-growth-shadowed-in-growth-line: Text {
+                            text: @tr("◦ non utilisée pour cette ligne (BPA direct défini) ; reste utilisée pour le §5");
+                            color: Tokens.text-low;
+                            font-size: Tokens.font-caption;
+                            width: 200px;
+                            wrap: word-wrap;
+                        }
                     }
                     JudgmentField {
                         label: @tr("BPA estimé haut");
