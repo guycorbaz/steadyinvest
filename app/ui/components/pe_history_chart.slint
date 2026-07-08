@@ -166,18 +166,25 @@ export component PeHistoryChart inherits Rectangle {
                     viewbox-height: root.chart.chart-h;
                 }
 
-                // ── The right-edge drag strip: the grab target for the ACTIVE judged level. ──
-                Rectangle {
+                // ── The right-edge drag strip: the grab target for the ACTIVE judged level. A
+                //    GENEROUS mouse target (strip-w wide), deliberately wider than the line. ──
+                pe-strip-bg := Rectangle {
                     x: parent.width - root.strip-w;
                     width: root.strip-w;
                     height: parent.height;
                     background: Tokens.surface-alt.with-alpha(pe-strip.has-hover ? 0.6 : 0.3);
 
-                    // ONE grip + caption, on the active context's judged level.
+                    // ONE grip + caption, on the active context's judged level. Issue #29 (the same
+                    // fix as the §1 growth chart's grip): the level line above renders 1:1 in plot-px
+                    // (viewbox-width bound to the plot's real width, #118), so its right end sits at
+                    // literal pixel `chart-w` from the plot's LEFT edge — not the strip's own
+                    // midpoint (the strip is anchored to the plot's right edge, a fixed distance
+                    // away). Align to `chart-w - pe-strip-bg.x`, allowed to render OUTSIDE the
+                    // strip's own background (no `clip: true` here; only the plot has one).
                     if root.active-y >= 0.0: Rectangle {
                         width: Tokens.chart-grip;
                         height: Tokens.chart-grip;
-                        x: (parent.width - self.width) / 2;
+                        x: root.chart.chart-w * 1px - pe-strip-bg.x - self.width / 2;
                         y: root.active-y * 1px - self.height / 2;
                         background: Tokens.text-high;
                         border-radius: Tokens.radius;
@@ -189,6 +196,7 @@ export component PeHistoryChart inherits Rectangle {
                         font-size: Tokens.font-caption;
                         horizontal-alignment: center;
                         width: parent.width;
+                        x: root.chart.chart-w * 1px - pe-strip-bg.x - parent.width / 2;
                         y: root.active-y * 1px - self.height - Tokens.space-4;
                     }
                     if root.active-y < 0.0: Text {
