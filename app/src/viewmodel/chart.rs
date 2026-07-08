@@ -29,6 +29,11 @@ use steadyinvest_core::rounding::DisplayField;
 /// only, so x-scaling does not affect the est-high-EPS the endpoint sets.
 const CHART_W: f32 = 720.0;
 const CHART_H: f32 = 420.0;
+/// Half-size (viewbox px) of the [`square_marker`] box drawn for a lone point that has no second
+/// point to draw a line to (`Path` strokes lines, never a bare point) — issue #27's single-datum
+/// series, issue #26's un-anchored judgment endpoint, and the pre-existing confront single-close
+/// case (Story 5.1) all share this one shape.
+const POINT_MARKER_R: f32 = 4.0;
 /// Fallback axis (log10 bounds) when a series has no plottable data — the faithful 1 → 200.
 const AXIS_FALLBACK: (f64, f64) = (0.0, 2.30103); // (log10 1, log10 200)
 /// Issue #25: each series is fit to its OWN log range spanning the data ± this padding (in DECADES),
@@ -41,9 +46,6 @@ const MIN_RANGE_DECADES: f64 = 0.6;
 const FAN_RATES: [i32; 6] = [5, 10, 15, 20, 25, 30];
 /// The per-share display scale the dragged est-high-EPS value snaps to (2 dp).
 const EPS_DRAG_SCALE: u32 = 2;
-/// Half-size (viewbox px) of the confront single-close marker box — drawn when there's exactly one
-/// cached close, since a lone point can't form a visible polyline (Story 5.1).
-const CONFRONT_MARKER: f32 = 4.0;
 /// Issue #115: the §3 P/E chart is on a LINEAR scale (P/E ranges are modest — a semi-log axis would
 /// over-dramatise). The judged-P/E drag snaps to this many dp; the axis reserves a fraction of its
 /// span as padding, and a nearly-flat P/E history is given at least this many P/E points of span.
@@ -135,9 +137,28 @@ fn compact_axis_label(v: f64) -> String {
     }
 }
 
+/// A small stroked/fillable square ("M…L…L…L…Z") of half-size `r`, centered at `(cx, cy)` clamped
+/// to `[r, CHART_W − r]` so the box can never clip against the plot's `clip: true` edge — a lone
+/// point has no second point to draw a line *to*, and `Path` only strokes lines, never a bare point
+/// (issue #27 and #26; the same shape the pre-existing confront single-close marker used, Story 5.1).
+fn square_marker(cx: f32, cy: f32, r: f32) -> String {
+    let cx = cx.clamp(r, CHART_W - r);
+    format!(
+        "M {l:.1} {t:.1} L {r_:.1} {t:.1} L {r_:.1} {b:.1} L {l:.1} {b:.1} Z ",
+        l = cx - r,
+        r_ = cx + r,
+        t = cy - r,
+        b = cy + r,
+    )
+}
+
 /// Build a Slint `Path` `commands` string ("M x y L x y …") for `(x_px, value)` points on the log
-/// scale `[lmin, lmax]`. An empty slice → "" (renders nothing); a single point → a lone "M".
+/// scale `[lmin, lmax]`. An empty slice → "" (renders nothing); a single point → a [`square_marker`]
+/// (issue #27), since a lone "M x y" with no line to it would otherwise render nothing.
 fn path_commands(points: &[(f32, f64)], lmin: f64, lmax: f64) -> String {
+    if let [(x, value)] = points {
+        return square_marker(*x, y_for(*value, lmin, lmax), POINT_MARKER_R);
+    }
     let mut s = String::with_capacity(points.len() * 16);
     for (i, (x, value)) in points.iter().enumerate() {
         let y = y_for(*value, lmin, lmax);
@@ -281,7 +302,11 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
                         dashed_line((ox, y_for(ov, e_lmin, e_lmax)), (CHART_W, y_end), 9.0, 6.0)
                     }
                     Some((ox, ov)) => path_commands(&[(ox, ov), (CHART_W, value)], e_lmin, e_lmax),
-                    None => String::new(),
+                    // Issue #26: no historical EPS to anchor a line from (e.g. only sales/price were
+                    // entered), yet the grip + label still render (gated on `y_end`, not on the line).
+                    // A marker keeps the two gates visually coherent instead of an orphan grip with
+                    // nothing under it.
+                    None => square_marker(CHART_W, y_end, POINT_MARKER_R),
                 };
                 (y_end, label, line, judged.is_none())
             }
@@ -630,15 +655,12 @@ pub fn confront_chart(view: &ConfrontView, format: NumberFormat) -> ConfrontStat
     // instead of an invisible line.
     let n = actuals.len();
     let actual_cmd = if n == 1 {
-        let cx = CHART_W - 2.0 * CONFRONT_MARKER; // inset so the box can't clip the right edge
-        let cy = y_of(actuals[0]);
-        let m = CONFRONT_MARKER;
-        format!(
-            "M {l:.1} {t:.1} L {r:.1} {t:.1} L {r:.1} {b:.1} L {l:.1} {b:.1} Z",
-            l = cx - m,
-            r = cx + m,
-            t = cy - m,
-            b = cy + m,
+        // Inset 2r from the edge (not just r) so the box sits with a visible margin, not flush
+        // against the plot border.
+        square_marker(
+            CHART_W - 2.0 * POINT_MARKER_R,
+            y_of(actuals[0]),
+            POINT_MARKER_R,
         )
     } else {
         let denom = (n - 1) as f64;
@@ -719,6 +741,22 @@ mod tests {
             dividend_per_share: Some(cell("2")),
             pre_tax_profit: Some(cell("200")),
             book_value_per_share: Some(cell("40")),
+        }
+    }
+
+    /// A year with sales/price but NO EPS (accepted-absent) — issue #26's degenerate case.
+    fn year_no_eps(y: i32) -> YearData {
+        YearData {
+            eps: Cell {
+                value: None,
+                source: Source::Manual,
+                freshness: Freshness::Current,
+                review: Review::Validated,
+                coverage: Coverage::NotAvailableAccepted,
+                provenance: prov(),
+                pending: None,
+            },
+            ..year(y, "1")
         }
     }
 
@@ -962,6 +1000,48 @@ mod tests {
         assert!(chart.judgment_label.is_empty());
         assert!(chart.judgment_commands.is_empty());
         assert!(!chart.judgment_high_derived);
+    }
+
+    /// Issue #27: a single-year (or single-datum) series produced a lone "M x y" `Path` command,
+    /// which `Path` renders as nothing (it strokes lines, not points) — a blank plot claiming to be
+    /// available. A lone point now draws a small diamond marker instead.
+    #[test]
+    fn growth_chart_a_single_point_series_draws_a_marker_not_nothing() {
+        let s = study(vec![year(2025, "5")], judgment(None));
+        let frame = build_frame(&s).expect("normalizes");
+        let chart = growth_chart(&frame, NumberFormat::Comma);
+        assert!(chart.available, "one year is still a chartable study");
+        for (label, cmds) in [
+            ("sales", chart.sales_commands.as_str()),
+            ("eps", chart.eps_commands.as_str()),
+            ("price", chart.price_commands.as_str()),
+        ] {
+            assert!(
+                cmds.contains('Z'),
+                "{label}: a lone point draws a closed marker shape, got {cmds:?}"
+            );
+        }
+    }
+
+    /// Issue #26: every year's EPS is `None` (only sales/price entered) but a direct judgment is set
+    /// — `last_eps` is `None` (no anchor to draw a line FROM), yet the grip + label still render
+    /// (gated on `y_end`, not on the line). The endpoint now draws a marker instead of leaving the
+    /// grip orphaned over an empty `judgment_commands`.
+    #[test]
+    fn growth_chart_with_no_historical_eps_but_a_direct_forecast_draws_a_marker() {
+        let years = (2021..=2025).map(year_no_eps).collect();
+        let s = study(years, judgment(Some(money("9"))));
+        let frame = build_frame(&s).expect("normalizes");
+        let chart = growth_chart(&frame, NumberFormat::Comma);
+        assert!(
+            chart.judgment_y >= 0.0,
+            "the grip still renders at the judged value"
+        );
+        assert!(
+            chart.judgment_commands.contains('Z'),
+            "no anchor to draw a line from → a marker instead of nothing, got {:?}",
+            chart.judgment_commands
+        );
     }
 
     /// The drag loop is self-consistent: a value dragged to viewbox-y `y`, applied to the study and
