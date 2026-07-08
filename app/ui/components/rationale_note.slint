@@ -33,7 +33,10 @@ export component RationaleNote inherits VerticalLayout {
         font-size: Tokens.font-caption;
     }
     box := Rectangle {
-        height: Tokens.row-height * 3;
+        // Grows with the text (3 rows minimum, matching the old fixed height) up to an 8-row
+        // ceiling; a note longer than that scrolls in the Flickable below (#33 — a fixed 3-row box
+        // with no scrollbar hid any text past the cursor, with no visual hint more text existed).
+        height: Math.max(Tokens.row-height * 3, Math.min(Tokens.row-height * 8, input.preferred-height + Tokens.space-8 * 2));
         border-radius: Tokens.radius;
         background: Tokens.surface-alt;
         border-width: input.has-focus ? Tokens.focus-border : Tokens.border;
@@ -49,26 +52,30 @@ export component RationaleNote inherits VerticalLayout {
             y: Tokens.space-8;
             visible: input.text == "";
         }
-        input := TextInput {
-            color: Tokens.text-high;
-            selection-background-color: Tokens.focus;
-            font-family: Tokens.font-ui;
-            font-size: Tokens.font-body;
-            single-line: false;
-            wrap: word-wrap;
-            width: parent.width - Tokens.space-8 * 2;
-            height: parent.height - Tokens.space-8 * 2;
+        scroll := Flickable {
             x: Tokens.space-8;
             y: Tokens.space-8;
+            width: parent.width - Tokens.space-8 * 2;
+            height: parent.height - Tokens.space-8 * 2;
+            viewport-height: Math.max(self.height, input.preferred-height);
+            input := TextInput {
+                color: Tokens.text-high;
+                selection-background-color: Tokens.focus;
+                font-family: Tokens.font-ui;
+                font-size: Tokens.font-body;
+                single-line: false;
+                wrap: word-wrap;
+                width: parent.width;
 
-            init => {
-                self.text = root.value;
-            }
-            // Commit on focus-out only (Enter is a newline in a multi-line note), and only when the
-            // text actually changed → one undo step per committed edit, no no-op persistence.
-            changed has-focus => {
-                if (!self.has-focus && self.text != root.value) {
-                    Studies.set-rationale(self.text);
+                init => {
+                    self.text = root.value;
+                }
+                // Commit on focus-out only (Enter is a newline in a multi-line note), and only when
+                // the text actually changed → one undo step per committed edit, no no-op persistence.
+                changed has-focus => {
+                    if (!self.has-focus && self.text != root.value) {
+                        Studies.set-rationale(self.text);
+                    }
                 }
             }
         }
