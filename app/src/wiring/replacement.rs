@@ -43,6 +43,17 @@ fn push_candidates(ui: &MainWindow, state: &JournalState) {
         return;
     };
     holdings.set_candidates_unavailable(false);
+    // Issue #98 (FR48): the « non renseigné » bucket's share — the visible blind spot of the
+    // sector shares (2026-07-09 decision), one panel-level line ("" hides it).
+    holdings.set_candidates_sector_unlabeled(
+        state
+            .journal_sector_exposure(&reference)
+            .and_then(|e| e.unlabeled_share())
+            .filter(|share| *share > rust_decimal::Decimal::ZERO)
+            .map(&fmt_pct)
+            .unwrap_or_default()
+            .into(),
+    );
     // The FR28 footnote for the exposure shares (rate + date + source, pure data entries).
     holdings.set_candidates_rates(
         state
@@ -93,6 +104,10 @@ fn push_candidates(ui: &MainWindow, state: &JournalState) {
                 .unwrap_or_default()
                 .into(),
             currency: c.currency.unwrap_or_default().into(),
+            sector: c.sector.unwrap_or_default().into(),
+            sector_flagged: flagged(c.sector_share_pct),
+            sector_share: c.sector_share_pct.map(&fmt_pct).unwrap_or_default().into(),
+            sector_missing: c.sector_missing_pair.unwrap_or_default().into(),
             held_flagged: flagged(c.held_share_pct),
             held_share: c.held_share_pct.map(&fmt_pct).unwrap_or_default().into(),
             currency_flagged: flagged(c.currency_share_pct),
@@ -135,6 +150,7 @@ pub(crate) fn clear_candidates(ui: &MainWindow) {
     holdings.set_candidates_sold(false);
     holdings.set_candidate_rows(ModelRc::new(VecModel::from(Vec::<CandidateRow>::new())));
     holdings.set_candidates_rates(SharedString::new());
+    holdings.set_candidates_sector_unlabeled(SharedString::new());
     holdings.set_candidates_unavailable(false);
 }
 

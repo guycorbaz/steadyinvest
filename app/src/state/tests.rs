@@ -6028,3 +6028,92 @@ fn a_study_fetch_fills_only_the_empty_sector_of_same_ticker_holdings() {
         "an absent provider sector clears nothing"
     );
 }
+
+// ── Issue #98 (FR48, PR 3) — the per-sector invested exposure + the candidate's sector facts ──
+
+#[test]
+fn sector_exposure_shares_over_the_whole_total_with_a_visible_unlabeled_bucket() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x984);
+    state
+        .add_holding("NESN", "1", "600", "CHF", "Consumer Defensive")
+        .unwrap();
+    state
+        .add_holding("ROG", "1", "300", "CHF", "Healthcare")
+        .unwrap();
+    state.add_holding("ABBN", "1", "100", "CHF", "").unwrap(); // non renseigné
+
+    let exposure = state.journal_sector_exposure("CHF").unwrap();
+    assert_eq!(
+        exposure.share_for("Consumer Defensive").0,
+        Some(Decimal::from(60)),
+        "600 / 1000 — the denominator is the WHOLE invested capital, unsectored included"
+    );
+    assert_eq!(exposure.share_for("Healthcare").0, Some(Decimal::from(30)));
+    assert_eq!(
+        exposure.unlabeled_share(),
+        Some(Decimal::from(10)),
+        "the « non renseigné » bucket is a visible share, never silently dropped"
+    );
+    assert_eq!(
+        exposure.share_for("Technology").0,
+        Some(Decimal::ZERO),
+        "an unheld sector is an honest zero when the total is known"
+    );
+}
+
+#[test]
+fn a_missing_rate_absents_the_sector_shares_and_names_the_pair() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x985);
+    state
+        .add_holding("NESN", "1", "600", "CHF", "Consumer Defensive")
+        .unwrap();
+    state
+        .add_holding("SAP", "1", "100", "EUR", "Technology")
+        .unwrap(); // no EUR → CHF rate stored
+
+    let exposure = state.journal_sector_exposure("CHF").unwrap();
+    let (share, missing) = exposure.share_for("Technology");
+    assert_eq!(share, None, "the unconvertible sector states no share");
+    assert_eq!(missing.as_deref(), Some("EUR → CHF"), "the pair is named");
+    assert_eq!(
+        exposure.share_for("Consumer Defensive").0,
+        None,
+        "the global is absent too — never a partial total (the 6.6 rule)"
+    );
+    assert!(!exposure.global_positive);
+}
+
+#[test]
+fn a_candidates_sector_facts_ride_the_same_ticker_holding_label() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x986);
+    state
+        .add_holding("NESN", "1", "600", "CHF", "Consumer Defensive")
+        .unwrap();
+    state.add_holding("UNLBL", "1", "400", "CHF", "").unwrap();
+    state.add_watch_item("NESN", None).unwrap();
+    state.add_watch_item("UNLBL", None).unwrap();
+    banded_study(&mut state, "NESN", "CHF", 70);
+    banded_study(&mut state, "UNLBL", "CHF", 70);
+
+    let candidates = state.replacement_candidates("CHF").unwrap();
+    let nesn = candidates.iter().find(|c| c.ticker == "NESN").unwrap();
+    assert_eq!(
+        nesn.sector.as_deref(),
+        Some("Consumer Defensive"),
+        "the candidate is labeled from its same-ticker holding"
+    );
+    assert_eq!(
+        nesn.sector_share_pct,
+        Some(Decimal::from(60)),
+        "600 / 1000 — the journal-wide sector share"
+    );
+    let unlabeled = candidates.iter().find(|c| c.ticker == "UNLBL").unwrap();
+    assert_eq!(
+        unlabeled.sector, None,
+        "no labeled holding → an honest None (« secteur : non renseigné » in the UI)"
+    );
+    assert_eq!(unlabeled.sector_share_pct, None);
+}
