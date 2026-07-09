@@ -107,6 +107,17 @@ pub(crate) fn migrate_to_v6(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration step 7 (issue #98, FR48): a holding carries its **sector** — provider-reported
+/// (EODHD `General::Sector`, PR 2) with a manual override that always wins, feeding the FR48
+/// sector re-concentration facts (PR 3). A **nullable** `sector`, no backfill: an existing row
+/// reads `NULL` = « non renseigné » (the app states the absence honestly — the 6.6/6.7 rule —
+/// and the provider fills only the void, per the 2026-07-09 product decision). Like v2–v6: a
+/// metadata-only `ADD COLUMN`, forward-safe, `DDL_V1` stays frozen.
+pub(crate) fn migrate_to_v7(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch("ALTER TABLE holdings ADD COLUMN sector TEXT")?;
+    Ok(())
+}
+
 /// The complete v1 DDL. Frozen once shipped — schema changes go through new migration steps.
 const DDL_V1: &str = "
     -- Journal identity (ADD6): one row, journal_id (UUID) + monotonic logical_version.
@@ -260,8 +271,8 @@ mod tests {
         let conn = v1_connection();
         assert_eq!(
             migrations::user_version(&conn).expect("user_version reads"),
-            6,
-            "the registry migrates a fresh DB to the latest version (v6)"
+            7,
+            "the registry migrates a fresh DB to the latest version (v7)"
         );
         assert!(
             column_names(&conn, "watchlist_items").contains(&"study_id".to_string()),
@@ -293,6 +304,17 @@ mod tests {
         ] {
             assert!(column_names(&conn, "holdings").contains(&col.to_string()));
         }
+    }
+
+    #[test]
+    fn v7_adds_the_holdings_sector_column() {
+        // Issue #98 (FR48): the v7 migration gives `holdings` a nullable `sector`. Additive —
+        // existing rows read NULL (« non renseigné », stated honestly; the provider fills the void).
+        let conn = v1_connection();
+        assert!(
+            column_names(&conn, "holdings").contains(&"sector".to_string()),
+            "v7 added holdings.sector"
+        );
     }
 
     #[test]

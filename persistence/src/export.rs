@@ -401,14 +401,15 @@ impl Journal {
             tx.execute(
                 "INSERT INTO holdings
                      (id, portfolio_id, security_ticker, quantity, purchase_price,
-                      currency, trailing_stop_pct, trailing_stop_level, sold_at, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                      currency, sector, trailing_stop_pct, trailing_stop_level, sold_at, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT(id) DO UPDATE SET
                      portfolio_id = excluded.portfolio_id,
                      security_ticker = excluded.security_ticker,
                      quantity = excluded.quantity,
                      purchase_price = excluded.purchase_price,
                      currency = excluded.currency,
+                     sector = excluded.sector,
                      trailing_stop_pct = excluded.trailing_stop_pct,
                      trailing_stop_level = excluded.trailing_stop_level,
                      sold_at = excluded.sold_at,
@@ -420,6 +421,7 @@ impl Journal {
                     h.quantity,
                     h.purchase_price,
                     h.currency,
+                    h.sector,
                     h.trailing_stop_pct,
                     h.trailing_stop_level,
                     h.sold_at,

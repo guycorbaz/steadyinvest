@@ -73,6 +73,7 @@ fn main() {
                 "10",
                 "100.00",
                 "USD",
+                None,
                 &created_at,
             )
             .expect("add holding");

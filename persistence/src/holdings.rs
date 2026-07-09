@@ -56,6 +56,12 @@ pub struct HoldingItem {
     /// writes always carry an explicit currency. Amounts are never mixed/converted (FR28).
     #[serde(default)]
     pub currency: Option<String>,
+    /// The holding's sector (issue #98, FR48) — provider-reported (EODHD `General::Sector`) or a
+    /// manual entry; the manual value always wins (the provider fills only NULL). `None` = « non
+    /// renseigné » — an honest absence the FR48 exposure states as its own bucket. `#[serde(default)]`
+    /// = the #78 additive envelope rail (a pre-#98 export imports fine).
+    #[serde(default)]
+    pub sector: Option<String>,
     pub trailing_stop_pct: Option<String>,
     /// The ratcheted trailing-stop **level** (a price, Story 4.5 / FR42) — `None` when no stop set.
     /// Persisted (v3 column) because the ratchet's high-water mark can't be re-derived from the
@@ -136,6 +142,7 @@ impl Journal {
         quantity: &str,
         purchase_price: &str,
         currency: &str,
+        sector: Option<&str>,
         created_at: &Timestamp,
     ) -> Result<HoldingItem> {
         self.check_writable()?;
@@ -143,8 +150,8 @@ impl Journal {
         tx.execute(
             "INSERT INTO holdings
                  (id, portfolio_id, security_ticker, quantity, purchase_price,
-                  currency, trailing_stop_pct, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7)",
+                  currency, sector, trailing_stop_pct, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
             rusqlite::params![
                 id.to_string(),
                 portfolio_id.to_string(),
@@ -152,6 +159,7 @@ impl Journal {
                 quantity,
                 purchase_price,
                 currency,
+                sector,
                 created_at.0,
             ],
         )?;
@@ -164,6 +172,7 @@ impl Journal {
             quantity: quantity.to_string(),
             purchase_price: purchase_price.to_string(),
             currency: Some(currency.to_string()),
+            sector: sector.map(str::to_string),
             trailing_stop_pct: None,
             trailing_stop_level: None,
             sold_at: None,
@@ -203,10 +212,68 @@ impl Journal {
     pub fn list_all_holdings(&self) -> Result<Vec<HoldingItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
-                    currency, trailing_stop_pct, trailing_stop_level, sold_at, created_at
+                    currency, sector, trailing_stop_pct, trailing_stop_level, sold_at, created_at
              FROM holdings ORDER BY created_at, id",
         )?;
         let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, Option<String>>(7)?,
+                r.get::<_, Option<String>>(8)?,
+                r.get::<_, Option<String>>(9)?,
+                r.get::<_, String>(10)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (
+                id_text,
+                portfolio_text,
+                security_ticker,
+                quantity,
+                purchase_price,
+                currency,
+                sector,
+                stop_pct,
+                stop_level,
+                sold_at,
+                created,
+            ) = row?;
+            out.push(HoldingItem {
+                id: parse_uuid(&id_text, "holdings.id")?,
+                portfolio_id: parse_uuid(&portfolio_text, "holdings.portfolio_id")?,
+                security_ticker,
+                quantity,
+                purchase_price,
+                currency,
+                sector,
+                trailing_stop_pct: stop_pct,
+                trailing_stop_level: stop_level,
+                sold_at,
+                created_at: Timestamp(created),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Every **active** holding in a portfolio, ordered by `created_at` then `id` (deterministic) —
+    /// the register's list. (No `position` column: holdings are not user-reordered in 4.3.) A holding
+    /// sold on a neutral trigger (Story 4.7) has a non-NULL `sold_at` and is **excluded** here — it
+    /// stays in the table so its sell transaction's FK keeps a live referent, but it leaves the
+    /// active register (and the capital-at-risk source, which reads this list).
+    pub fn list_holdings(&self, portfolio_id: Uuid) -> Result<Vec<HoldingItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
+                    currency, sector, trailing_stop_pct, trailing_stop_level, created_at
+             FROM holdings WHERE portfolio_id = ?1 AND sold_at IS NULL ORDER BY created_at, id",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![portfolio_id.to_string()], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -229,60 +296,7 @@ impl Journal {
                 quantity,
                 purchase_price,
                 currency,
-                stop_pct,
-                stop_level,
-                sold_at,
-                created,
-            ) = row?;
-            out.push(HoldingItem {
-                id: parse_uuid(&id_text, "holdings.id")?,
-                portfolio_id: parse_uuid(&portfolio_text, "holdings.portfolio_id")?,
-                security_ticker,
-                quantity,
-                purchase_price,
-                currency,
-                trailing_stop_pct: stop_pct,
-                trailing_stop_level: stop_level,
-                sold_at,
-                created_at: Timestamp(created),
-            });
-        }
-        Ok(out)
-    }
-
-    /// Every **active** holding in a portfolio, ordered by `created_at` then `id` (deterministic) —
-    /// the register's list. (No `position` column: holdings are not user-reordered in 4.3.) A holding
-    /// sold on a neutral trigger (Story 4.7) has a non-NULL `sold_at` and is **excluded** here — it
-    /// stays in the table so its sell transaction's FK keeps a live referent, but it leaves the
-    /// active register (and the capital-at-risk source, which reads this list).
-    pub fn list_holdings(&self, portfolio_id: Uuid) -> Result<Vec<HoldingItem>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, portfolio_id, security_ticker, quantity, purchase_price,
-                    currency, trailing_stop_pct, trailing_stop_level, created_at
-             FROM holdings WHERE portfolio_id = ?1 AND sold_at IS NULL ORDER BY created_at, id",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![portfolio_id.to_string()], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, Option<String>>(5)?,
-                r.get::<_, Option<String>>(6)?,
-                r.get::<_, Option<String>>(7)?,
-                r.get::<_, String>(8)?,
-            ))
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (
-                id_text,
-                portfolio_text,
-                security_ticker,
-                quantity,
-                purchase_price,
-                currency,
+                sector,
                 stop_pct,
                 stop_level,
                 created,
@@ -294,6 +308,7 @@ impl Journal {
                 quantity,
                 purchase_price,
                 currency,
+                sector,
                 trailing_stop_pct: stop_pct,
                 trailing_stop_level: stop_level,
                 sold_at: None,
@@ -321,6 +336,7 @@ impl Journal {
         quantity: &str,
         purchase_price: &str,
         currency: &str,
+        sector: Option<&str>,
     ) -> Result<()> {
         self.check_writable()?;
         let tx = self.conn.transaction()?;
@@ -328,12 +344,12 @@ impl Journal {
         // so the stop clears only when the ticker actually changes. `currency IS NOT ?5` in the WHERE
         // keeps an identical-values edit a true no-op even when only the currency would change.
         let changed = tx.execute(
-            "UPDATE holdings SET security_ticker = ?2, quantity = ?3, purchase_price = ?4, currency = ?5,
+            "UPDATE holdings SET security_ticker = ?2, quantity = ?3, purchase_price = ?4, currency = ?5, sector = ?6,
                     trailing_stop_pct = CASE WHEN security_ticker IS NOT ?2 THEN NULL ELSE trailing_stop_pct END,
                     trailing_stop_level = CASE WHEN security_ticker IS NOT ?2 THEN NULL ELSE trailing_stop_level END
              WHERE id = ?1
-               AND (security_ticker IS NOT ?2 OR quantity IS NOT ?3 OR purchase_price IS NOT ?4 OR currency IS NOT ?5)",
-            rusqlite::params![id.to_string(), security_ticker, quantity, purchase_price, currency],
+               AND (security_ticker IS NOT ?2 OR quantity IS NOT ?3 OR purchase_price IS NOT ?4 OR currency IS NOT ?5 OR sector IS NOT ?6)",
+            rusqlite::params![id.to_string(), security_ticker, quantity, purchase_price, currency, sector],
         )?;
         if changed > 0 {
             bump_logical_version(&tx)?;

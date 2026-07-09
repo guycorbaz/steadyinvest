@@ -162,6 +162,7 @@ pub(crate) fn refresh_holdings(
                 quantity: h.quantity.clone().into(),
                 purchase_price: h.purchase_price.clone().into(),
                 currency: currency.into(),
+                sector: h.sector.clone().unwrap_or_default().into(),
                 linked: study.is_some(),
                 study_unavailable,
                 study_link: study_link.into(),
@@ -667,11 +668,11 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Holdings>()
-            .on_add_holding(move |ticker, quantity, price, currency| {
+            .on_add_holding(move |ticker, quantity, price, currency, sector| {
                 let ui = ui_weak.unwrap();
                 let result = journal_state
                     .borrow_mut()
-                    .add_holding(&ticker, &quantity, &price, &currency);
+                    .add_holding(&ticker, &quantity, &price, &currency, &sector);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
@@ -766,15 +767,15 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
-        ui.global::<Holdings>()
-            .on_edit_holding(move |id, ticker, quantity, price, currency| {
+        ui.global::<Holdings>().on_edit_holding(
+            move |id, ticker, quantity, price, currency, sector| {
                 let ui = ui_weak.unwrap();
                 let Ok(id) = Uuid::parse_str(&id) else {
                     return false;
                 };
                 let result = journal_state
                     .borrow_mut()
-                    .update_holding(id, &ticker, &quantity, &price, &currency);
+                    .update_holding(id, &ticker, &quantity, &price, &currency, &sector);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
@@ -787,7 +788,8 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     format,
                 );
                 written
-            });
+            },
+        );
     }
     {
         let ui_weak = ui.as_weak();

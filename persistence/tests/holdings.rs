@@ -32,7 +32,7 @@ fn add_at(journal: &mut Journal, ticker: &str, qty: &str, price: &str, seq: u8) 
     }));
     let created = ts(&format!("2026-06-27T10:00:{seq:02}Z"));
     journal
-        .add_holding(id, pid, ticker, qty, price, "CHF", &created)
+        .add_holding(id, pid, ticker, qty, price, "CHF", None, &created)
         .expect("add holding");
     id
 }
@@ -122,7 +122,7 @@ fn edit_changes_values_and_bumps_only_on_a_real_change() {
 
     // No-op edit (identical values, same currency) bumps nothing.
     journal
-        .update_holding(id, "NESN", "10", "95.40", "CHF")
+        .update_holding(id, "NESN", "10", "95.40", "CHF", None)
         .unwrap();
     assert_eq!(
         journal.logical_version().unwrap(),
@@ -131,7 +131,7 @@ fn edit_changes_values_and_bumps_only_on_a_real_change() {
     );
     // Editing an absent id bumps nothing.
     journal
-        .update_holding(Uuid::from_u128(0xDEAD), "X", "1", "1", "CHF")
+        .update_holding(Uuid::from_u128(0xDEAD), "X", "1", "1", "CHF", None)
         .unwrap();
     assert_eq!(
         journal.logical_version().unwrap(),
@@ -141,7 +141,7 @@ fn edit_changes_values_and_bumps_only_on_a_real_change() {
 
     // A real edit changes the row and bumps.
     journal
-        .update_holding(id, "NESN.SW", "12", "96.00", "CHF")
+        .update_holding(id, "NESN.SW", "12", "96.00", "CHF", None)
         .unwrap();
     let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
     assert_eq!(h.security_ticker, "NESN.SW");
@@ -204,6 +204,7 @@ fn holdings_survive_reopen() {
                 "10",
                 "95.40",
                 "CHF",
+                None,
                 &ts("2026-06-27T10:00:00Z"),
             )
             .unwrap();
@@ -286,7 +287,7 @@ fn changing_a_holdings_ticker_clears_its_trailing_stop_but_qty_price_edits_keep_
 
     // Edit only quantity + price (same ticker) → the stop is kept.
     journal
-        .update_holding(id, "NESN", "12", "110", "CHF")
+        .update_holding(id, "NESN", "12", "110", "CHF", None)
         .unwrap();
     let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
     assert_eq!(
@@ -298,7 +299,7 @@ fn changing_a_holdings_ticker_clears_its_trailing_stop_but_qty_price_edits_keep_
 
     // Change the ticker → the stop clears (both fields NULL).
     journal
-        .update_holding(id, "ROG", "12", "110", "CHF")
+        .update_holding(id, "ROG", "12", "110", "CHF", None)
         .unwrap();
     let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
     assert_eq!(h.security_ticker, "ROG");
@@ -326,6 +327,7 @@ fn holding_stores_and_reads_back_its_currency() {
             "3",
             "620.00",
             "EUR",
+            None,
             &ts("2026-07-02T10:00:00Z"),
         )
         .unwrap();
@@ -346,7 +348,7 @@ fn editing_only_the_currency_bumps_once_and_an_identical_currency_edit_is_a_no_o
 
     // Same ticker/qty/price, a NEW currency → a real change that bumps once.
     journal
-        .update_holding(id, "NESN", "10", "100", "EUR")
+        .update_holding(id, "NESN", "10", "100", "EUR", None)
         .unwrap();
     assert_eq!(
         journal.logical_version().unwrap(),
@@ -362,7 +364,7 @@ fn editing_only_the_currency_bumps_once_and_an_identical_currency_edit_is_a_no_o
 
     // Repeat with the identical currency → a true no-op (no bump).
     journal
-        .update_holding(id, "NESN", "10", "100", "EUR")
+        .update_holding(id, "NESN", "10", "100", "EUR", None)
         .unwrap();
     assert_eq!(
         journal.logical_version().unwrap(),
