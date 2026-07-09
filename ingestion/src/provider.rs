@@ -41,6 +41,9 @@ pub struct RawFetch {
     /// Trailing-twelve-months EPS (Issue #113) — the current-P/E denominator, a present market fact
     /// (like `latest_price`), NOT an annual figure (so it rides here, not in `RawFinancials`).
     pub ttm_eps: Option<Decimal>,
+    /// The company's sector (issue #98, FR48 — EODHD `General::Sector`; `None` when the provider
+    /// does not expose one). A company fact, not an annual figure — it rides beside the price.
+    pub sector: Option<String>,
 }
 
 /// A source of raw annual fundamentals + prices for a security.

@@ -163,6 +163,19 @@ impl JournalState {
         });
         let mut out = report.get();
         out.unmatched_years = unmatched_years;
+        // Issue #98 (FR48): the fetch also reported the company's sector — fill it on the SAME-ticker
+        // holdings whose sector is still empty (any portfolio: a company fact is journal-wide). The
+        // provider fills ONLY the void; a manual sector is never overwritten (product decision
+        // 2026-07-09; clearing the field re-opens the slot). Best-effort — a failed fill must not
+        // fail the refresh that carried it (logged, the display re-reads later).
+        if let Some(sector) = fetched.sector.as_deref()
+            && let Some(study) = self.get_study(study_id)
+            && let Some(journal) = self.journal.as_mut()
+            && let Err(error) =
+                journal.fill_holdings_sector_if_empty(&study.security_ticker, sector)
+        {
+            tracing::warn!("sector fill for {} failed: {error}", study.security_ticker);
+        }
         Ok(out)
     }
 

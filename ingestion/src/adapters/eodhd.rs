@@ -82,11 +82,20 @@ impl MarketDataProvider for EodhdProvider {
         // figure `Highlights.EarningsShare` (verified = the sum of the last 4 reported quarters, and it
         // skips the not-yet-reported current quarter). A present market fact, not an annual figure.
         let ttm_eps = dec(fundamentals.pointer("/Highlights/EarningsShare"));
+        // Issue #98 (FR48): the company's sector — `General::Sector`, already in the fundamentals
+        // response (no extra call). Trimmed; an empty/absent field is an honest `None`.
+        let sector = fundamentals
+            .pointer("/General/Sector")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
         Ok(RawFetch {
             financials,
             latest_price,
             latest_session_date,
             ttm_eps,
+            sector,
         })
     }
 
