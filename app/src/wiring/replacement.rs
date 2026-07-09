@@ -80,6 +80,7 @@ fn push_candidates(ui: &MainWindow, state: &JournalState) {
             .into(),
             zone: c.zone_key.into(),
             in_buy_zone: c.in_buy_zone,
+            below_band: c.below_band,
             distance: c
                 .distance_above_buy_pct
                 .map(&fmt_pct)

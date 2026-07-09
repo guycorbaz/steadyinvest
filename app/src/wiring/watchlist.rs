@@ -28,11 +28,17 @@ pub(crate) fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
         .iter()
         .map(|w| {
             // Story 4.2: a linked study whose current price is in its §4 buy zone flags a neutral
-            // alert (one `build_snapshot` per linked study; unlinked entries are never in a zone).
-            let in_buy_zone = w
-                .study_id
-                .and_then(|sid| state.get_study(sid))
-                .is_some_and(|study| viewmodel::engine::study_in_buy_zone(&study));
+            // alert (unlinked entries are never in a zone). Issue #48: a price BELOW the recorded
+            // band is its own neutral fact — mutually exclusive with the zone by construction.
+            let (in_buy_zone, below_band) =
+                w.study_id
+                    .and_then(|sid| state.get_study(sid))
+                    .map_or((false, false), |study| {
+                        (
+                            viewmodel::engine::study_in_buy_zone(&study),
+                            viewmodel::engine::study_below_forecast_band(&study),
+                        )
+                    });
             if in_buy_zone {
                 in_buy_zone_count += 1;
             }
@@ -49,6 +55,7 @@ pub(crate) fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
                     .unwrap_or_default()
                     .into(),
                 in_buy_zone,
+                below_band,
             }
         })
         .collect();

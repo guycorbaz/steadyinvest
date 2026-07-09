@@ -166,6 +166,11 @@ pub(crate) fn refresh_holdings(
                 study_unavailable,
                 study_link: study_link.into(),
                 zone: zone.into(),
+                // Issue #48 (FR35): the below-band neutral fact — mutually exclusive with a
+                // defined zone (the §4 zone is undefined outside the band).
+                below_band: study
+                    .as_ref()
+                    .is_some_and(viewmodel::engine::study_below_forecast_band),
                 current_price: current_price.into(),
                 stale: f.stale,
                 as_of: f.as_of.unwrap_or_default().into(),

@@ -648,9 +648,11 @@ mod tests {
         // achat »): +20 = 466. Issue #65 adds the import-arbitration banner actions
         // (« Confirmer l'import » + an « Annuler » occurrence): +2 = 468. Issue #34 (PR 2) adds
         // the « Historique » panel (the toggle pair, the panel title, the unavailable + empty
-        // states, the per-entry Détail/Masquer pair): +7 = 475. Floor strict.
+        // states, the per-entry Détail/Masquer pair): +7 = 475. Issue #48 adds the three
+        // below-band fact lines (watchlist, register zone slot, candidate line): +3 = 478.
+        // Floor strict.
         assert!(
-            total >= 475,
+            total >= 478,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

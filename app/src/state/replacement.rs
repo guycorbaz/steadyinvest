@@ -74,6 +74,9 @@ pub struct ReplacementCandidate {
     /// "buy" | "neutral" | "sell" | "" — the engine zone key (crossed to `Labels` nouns).
     pub zone_key: String,
     pub in_buy_zone: bool,
+    /// Issue #48 (FR35): the price sits BELOW the recorded forecast band — a distinct neutral
+    /// fact; mutually exclusive with a defined zone (undefined outside the band, by method).
+    pub below_band: bool,
     /// `(price − buy_top) / buy_top × 100` when the price sits ABOVE the buy zone — the
     /// relative distance candidates are ranked by. Absent inside the zone or without a band.
     pub distance_above_buy_pct: Option<Decimal>,
@@ -211,6 +214,7 @@ impl JournalState {
                 data,
                 zone_key: String::new(),
                 in_buy_zone: false,
+                below_band: false,
                 distance_above_buy_pct: None,
                 ud_ratio: None,
                 currency: None,
@@ -249,6 +253,17 @@ impl JournalState {
                         None => (None, None, None),
                     };
                     let in_buy_zone = zone == Some(steadyinvest_core::ssg::Zone::Buy);
+                    // Issue #48 (FR35): a price BELOW the recorded band is a statable neutral
+                    // fact of its own — the line reads « sous la bande de prévision », never
+                    // « données insuffisantes ». `data` (and thus the AC1 pinned RANK) is
+                    // untouched: the §4 zone facts genuinely are unavailable there by method;
+                    // only the label becomes honest.
+                    let below_band = snapshot.as_ref().zip(price).is_some_and(|(s, p)| {
+                        s.outputs()
+                            .risk_reward
+                            .forecast_low
+                            .is_some_and(|low| p < low)
+                    });
                     // A KNOWN zone is a statable fact even when the distance is not (a
                     // degenerate/nonpositive buy_top) — never « données insuffisantes » beside
                     // a stated H/B (2026-07-03 review); the UI renders the zone noun then.
@@ -273,6 +288,7 @@ impl JournalState {
                         data,
                         zone_key: engine::zone_key(zone).to_string(),
                         in_buy_zone,
+                        below_band,
                         distance_above_buy_pct: distance,
                         ud_ratio: ud,
                         currency: Some(currency),

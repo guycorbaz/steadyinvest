@@ -72,6 +72,24 @@ pub fn study_zone(study: &Study) -> Option<Zone> {
         .and_then(|snapshot| snapshot.outputs().risk_reward.present_price_zone)
 }
 
+/// Issue #48 (FR35, product decision 2026-07-03): the current price sits **below** the study's
+/// recorded `forecast_low` — a distinct NEUTRAL fact (« sous la bande de prévision »), neither a
+/// Buy signal nor silence. The §4 method stays untouched: `present_zone` rightly returns `None`
+/// outside the band (so this and [`study_zone`] are mutually exclusive by construction); the app
+/// merely states the below-band fact from the snapshot's band bound. `false` without a price, a
+/// band, or a normalizing study.
+pub fn study_below_forecast_band(study: &Study) -> bool {
+    build_snapshot(study).ok().is_some_and(|snapshot| {
+        match (
+            snapshot.outputs().risk_reward.forecast_low,
+            study.judgment.current_price,
+        ) {
+            (Some(low), Some(price)) => price.as_decimal() < low,
+            _ => false,
+        }
+    })
+}
+
 // ── Plausibility surfacing (Story 2.7) — map the engine's two finding sets to UI cell addresses ──
 
 /// Where a plausibility finding attaches on the faithful form. A `Cell` finding draws the inline §2/§3
