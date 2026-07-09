@@ -40,6 +40,9 @@ export struct WatchRow {
     linked: bool,
     study-link: string,
     in-buy-zone: bool, // the linked study's current price is in its §4 buy zone (Story 4.2, FR35)
+    // Issue #48 (FR35): the price sits BELOW the recorded forecast band — a distinct neutral
+    // fact (« sous la bande de prévision »), mutually exclusive with `in-buy-zone`.
+    below-band: bool,
 }
 
 // One stored exchange rate (Story 6.5, FR28): dated + source-aware, BASE → QUOTE (the reference
@@ -112,6 +115,9 @@ export struct CandidateRow {
     data: string,
     zone: string,
     in-buy-zone: bool,
+    // Issue #48 (FR35): the price sits BELOW the recorded forecast band — the line states this
+    // neutral fact instead of « données insuffisantes » (rank unchanged).
+    below-band: bool,
     distance: string,        // formatted % above the buy zone ("" inside the zone / unknown)
     ud: string,              // formatted "N:1" ratio ("" when Undefined/Unknown)
     currency: string,
@@ -937,6 +943,9 @@ export struct HoldingRow {
     study-unavailable: bool,
     study-link: string,
     zone: string,
+    // Issue #48 (FR35): the price sits BELOW the matched study's forecast band — a distinct
+    // neutral fact; mutually exclusive with a defined `zone`.
+    below-band: bool,
     current-price: string,
     stale: bool,
     as-of: string,

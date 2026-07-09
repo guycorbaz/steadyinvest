@@ -159,6 +159,9 @@ export component PortfolioScreen inherits Rectangle {
                             // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
                             : candidate.data == "study-unavailable"
                             ? @tr("{} — étude indisponible", candidate.ticker)
+                            // Issue #48: a price BELOW the recorded band is its own neutral fact.
+                            : candidate.below-band
+                            ? @tr("{} — sous la bande de prévision", candidate.ticker)
                             : candidate.data == "insufficient"
                                 ? @tr("{} — données insuffisantes", candidate.ticker)
                                 : candidate.in-buy-zone
@@ -597,11 +600,13 @@ export component PortfolioScreen inherits Rectangle {
                     horizontal-stretch: 1;
                     Text {
                         // Issue #95: a FAILED study read is « indisponible », never « aucune étude liée ».
+                        // Issue #48: a price BELOW the recorded band is its own neutral fact.
                         text: row.study-unavailable ? @tr("Étude indisponible")
                             : !row.linked ? @tr("Aucune étude liée")
                             : row.zone == "buy" ? @tr("◆ {}", Labels.zone-buy)
                             : row.zone == "neutral" ? @tr("◆ {}", Labels.zone-hold)
                             : row.zone == "sell" ? @tr("◆ {}", Labels.zone-sell)
+                            : row.below-band ? @tr("◆ Sous la bande de prévision")
                             : "—";
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;

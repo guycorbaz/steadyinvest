@@ -5834,3 +5834,66 @@ fn every_effective_save_lands_in_the_durable_history_cross_reopen() {
         "the history survives the reopen"
     );
 }
+
+// ── Issue #48 (FR35) — a price BELOW the forecast band is a distinct neutral fact ──
+
+#[test]
+fn below_forecast_band_is_a_distinct_fact_mutually_exclusive_with_the_zone() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x480);
+    // The banded_study judgment ⇒ forecast band ≈ [~50–60, 160]. A price of 30 sits BELOW it;
+    // 70 sits IN the buy third.
+    let below = banded_study(&mut state, "BELOW", "CHF", 30);
+    let in_zone = banded_study(&mut state, "INZONE", "CHF", 70);
+
+    let below_study = state.get_study(below).unwrap();
+    assert!(engine::study_below_forecast_band(&below_study));
+    assert_eq!(
+        engine::study_zone(&below_study),
+        None,
+        "the §4 zone stays undefined below the band — the method is untouched"
+    );
+
+    let in_zone_study = state.get_study(in_zone).unwrap();
+    assert!(
+        !engine::study_below_forecast_band(&in_zone_study),
+        "in-band is not below-band"
+    );
+    assert!(engine::study_in_buy_zone(&in_zone_study));
+
+    // No current price → no below-band claim (an absence, never a guess).
+    let no_price = state.create_study("NOPRICE", "CHF").unwrap();
+    assert!(!engine::study_below_forecast_band(
+        &state.get_study(no_price).unwrap()
+    ));
+}
+
+#[test]
+fn a_below_band_candidate_states_the_fact_and_keeps_its_rank() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x481);
+    state.add_watch_item("BELOW", None).unwrap();
+    state.add_watch_item("NEAR", None).unwrap();
+    banded_study(&mut state, "BELOW", "CHF", 30); // below the whole band
+    banded_study(&mut state, "NEAR", "CHF", 100); // above the buy zone, distance stated
+
+    let candidates = state.replacement_candidates("CHF").unwrap();
+    let below = candidates.iter().find(|c| c.ticker == "BELOW").unwrap();
+    assert!(below.below_band, "the below-band fact is stated");
+    assert_eq!(
+        below.data,
+        CandidateData::Insufficient,
+        "the AC1 rank is untouched — only the label becomes honest"
+    );
+    assert_eq!(below.zone_key, "", "the zone stays undefined by method");
+    let near = candidates.iter().find(|c| c.ticker == "NEAR").unwrap();
+    assert!(!near.below_band, "an in/above-band candidate never flags");
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|c| c.ticker.as_str())
+            .collect::<Vec<_>>(),
+        vec!["NEAR", "BELOW"],
+        "the pinned order is unchanged (distance-stated before insufficient)"
+    );
+}

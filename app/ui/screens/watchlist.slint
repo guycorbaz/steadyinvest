@@ -84,8 +84,12 @@ export component WatchlistScreen inherits Rectangle {
                 }
                 // Story 4.2 (FR35) — neutral buy-zone marker (ink + glyph, never a buy hue). The fact,
                 // not an instruction. Silent unless the linked study's current price is in its buy zone.
+                // Issue #48: a price BELOW the recorded band states its own neutral fact — the two are
+                // mutually exclusive (the §4 zone is undefined outside the band).
                 Text {
-                    text: row.in-buy-zone ? @tr("◆ Le prix est dans la zone que vous avez définie.") : "";
+                    text: row.in-buy-zone ? @tr("◆ Le prix est dans la zone que vous avez définie.")
+                        : row.below-band ? @tr("◆ Le prix est sous la bande de prévision.")
+                        : "";
                     color: Tokens.text-high;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
