@@ -878,6 +878,16 @@ export struct LedgerRow {
     net: string,
 }
 
+// Issue #84: one SOLD (retired) position of the « Positions vendues » section — read-only facts;
+// its ledger opens through the same `ledger-holding-id` mechanism as the register, and a re-buy
+// (the record-buy rail) re-opens the position. `sold-date` is the sold DAY (AAAA-MM-JJ).
+export struct SoldRow {
+    id: string,
+    ticker: string,
+    currency: string,
+    sold-date: string,
+}
+
 export struct HoldingRow {
     id: string,
     ticker: string,
@@ -962,6 +972,10 @@ export global Holdings {
     //    row currency is pinned to the holding's (FR28) — displayed, never chosen. ──
     in-out property <[LedgerRow]> ledger-rows;
     in-out property <string> ledger-holding-id;
+    // Issue #84: the active portfolio's SOLD positions (most recently sold first), pushed with
+    // every register re-render. The section is collapsed by default (pure-Slint toggle in the
+    // screen); a sold row's ledger reuses `open-ledger` / `ledger-rows` above.
+    in-out property <[SoldRow]> sold-rows;
     // Issue #86: deleting a ledger row rewrites the cost basis (and can retire/un-retire the
     // position) irreversibly — so it goes through the house confirm-before-act overlay (the 2.12
     // destructive-delete pattern). The row's « Supprimer » parks its id here + raises the overlay;

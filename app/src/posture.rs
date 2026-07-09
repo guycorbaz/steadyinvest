@@ -640,9 +640,14 @@ mod tests {
         // EODHD/Twelve Data chip occurrences across the price/fundamentals/fx rows): +12 = 442.
         // Issue #95 adds the four « étude indisponible » read-failure variants (the holdings
         // register row, the non-classé reason, the candidate line, the confront overlay —
-        // a read FAILURE must never state an absence): +4 = 446. Floor strict.
+        // a read FAILURE must never state an absence): +4 = 446. Issue #84 adds the
+        // « Positions vendues » section (the show/hide toggle pair, the sold-row fact line,
+        // the « Racheter : … » caption, and second occurrences of the ledger vocabulary:
+        // Transactions/Masquer, the empty state, the three kind nouns, the qty×price /
+        // Frais / Retenue / net templates, the five form placeholders, « Enregistrer un
+        // achat »): +20 = 466. Floor strict.
         assert!(
-            total >= 446,
+            total >= 466,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

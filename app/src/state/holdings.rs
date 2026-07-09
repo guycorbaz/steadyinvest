@@ -135,6 +135,31 @@ impl JournalState {
         })
     }
 
+    /// The active portfolio's **sold (retired) positions** (issue #84, the « Positions vendues »
+    /// section): holdings whose `sold_at` is stamped, most recently sold first (then id — a
+    /// deterministic order). Empty when no journal / no portfolio / on a read failure (a display
+    /// surface). Their ledger stays readable via [`Self::holding_ledger`] and a re-buy through
+    /// [`Self::record_buy_for`] re-opens the position.
+    pub fn sold_holdings(&self) -> Vec<HoldingItem> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Vec::new();
+        };
+        let Some(portfolio) = self.active_portfolio() else {
+            return Vec::new();
+        };
+        let mut sold: Vec<HoldingItem> = journal
+            .list_all_holdings()
+            .unwrap_or_else(|error| {
+                tracing::warn!("sold_holdings failed: {error}");
+                Vec::new()
+            })
+            .into_iter()
+            .filter(|h| h.portfolio_id == portfolio.id && h.sold_at.is_some())
+            .collect();
+        sold.sort_by(|a, b| b.sold_at.cmp(&a.sold_at).then_with(|| a.id.cmp(&b.id)));
+        sold
+    }
+
     /// The active portfolio's **capital-at-risk** + **total invested**, grouped **per currency**
     /// (Story 6.2, FR38 — the honest interim before FX lands in Story 6.5). Holdings now differ in
     /// currency, so summing them into one figure would silently mix currencies (forbidden — FR28).

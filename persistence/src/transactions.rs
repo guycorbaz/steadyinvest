@@ -209,9 +209,10 @@ impl Journal {
     /// `core::risk::ledger`, never here); then bumps the logical version once. Returns the inserted
     /// [`TransactionItem`] for `entry`.
     ///
-    /// `sold_at` is deliberately untouched: buying on a RETIRED holding is refused at the app
-    /// gate (`state::ledger::record_buy_for` — re-entering is a new position), so this writer
-    /// never has to arbitrate a resurrection it cannot validate.
+    /// `sold_at` is cleared (issue #84, the « Positions vendues » re-buy rail): a buy leaves the
+    /// replayed position strictly positive — quantities are additive, so the caller-computed
+    /// aggregate can never be zero after a buy — which makes the holding ACTIVE by definition.
+    /// On an already-active holding the clear is a no-op.
     pub fn record_buy(
         &mut self,
         holding_id: Uuid,
@@ -228,7 +229,7 @@ impl Journal {
         }
         insert_ledger_row(&tx, holding_id, entry, KIND_BUY, now)?;
         tx.execute(
-            "UPDATE holdings SET quantity = ?2, purchase_price = ?3 WHERE id = ?1",
+            "UPDATE holdings SET quantity = ?2, purchase_price = ?3, sold_at = NULL WHERE id = ?1",
             rusqlite::params![holding_id.to_string(), new_quantity, new_avg_cost],
         )?;
         bump_logical_version(&tx)?;

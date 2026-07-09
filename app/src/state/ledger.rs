@@ -300,6 +300,13 @@ impl JournalState {
     /// Record a **buy** against a holding (Story 6.3, FR39): validates, replays the ledger with
     /// the new row through the pure WAC derivation, and writes the row + the recomputed aggregate
     /// atomically. The currency is the holding's own (FR28) — stamped, never chosen. Guarded.
+    ///
+    /// Issue #84 (product decision, 2026-07-03): a buy on a **retired** holding is the re-buy
+    /// rail of the « Positions vendues » section — it re-opens the position (a buy leaves the
+    /// replayed quantity strictly positive, so persistence clears `sold_at`) with the WAC
+    /// restarting from the new buy (the ledger replays through zero: Appendix A's running
+    /// average over a zero position IS the new buy's unit cost), and the full sell history
+    /// stays on the one ledger.
     #[allow(clippy::too_many_arguments)]
     pub fn record_buy_for(
         &mut self,
@@ -315,10 +322,6 @@ impl JournalState {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
         let holding = self.any_holding(holding_id)?;
-        if holding.sold_at.is_some() {
-            // Buying back is a NEW position (FR36 add rail), not a mutation of a retired one.
-            return Err(MSG_SAVE_FAILED.to_string());
-        }
         let (qty, price, fees) = validate_ledger_amounts(quantity, unit_price, fees)?;
         let now = self.clock.now();
         let occurred_at = normalize_event_date(date_input, &now.0)?;
