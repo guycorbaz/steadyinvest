@@ -579,3 +579,139 @@ fn delete_study_of_an_absent_id_is_a_noop_success() {
         .expect("deleting an absent id is a no-op success");
     assert!(journal.list_studies().expect("list").is_empty());
 }
+
+// ── Issue #34 (FR51) — the durable judgment-snapshot time-series ──
+
+#[test]
+fn put_study_with_history_appends_deduplicated_snapshots_that_round_trip() {
+    let dir = TempDir::new().expect("tempdir");
+    let jid = Uuid::from_u128(0x34);
+    let mut journal =
+        Journal::create(dir.path().join("journal.db"), jid, &ts(JOURNAL_TS)).expect("create");
+    let original = study(0x341, jid, "NESN");
+
+    // The first save opens the timeline.
+    journal
+        .put_study_with_history(&original, &ts("2026-07-09T08:00:00Z"))
+        .expect("first save");
+    // A value-identical re-save is deduplicated — no phantom history entry.
+    journal
+        .put_study_with_history(&original, &ts("2026-07-09T08:01:00Z"))
+        .expect("no-op re-save");
+    assert_eq!(
+        journal.list_judgment_snapshots(original.id).unwrap().len(),
+        1,
+        "an identical payload records no second snapshot"
+    );
+
+    // A real change appends; changing BACK also appends (A→B→A keeps all three states —
+    // dedup compares only against the LATEST snapshot).
+    let mut changed = original.clone();
+    changed.rationale = Some("Nouvelle raison.".to_string());
+    journal
+        .put_study_with_history(&changed, &ts("2026-07-09T08:02:00Z"))
+        .expect("changed save");
+    journal
+        .put_study_with_history(&original, &ts("2026-07-09T08:03:00Z"))
+        .expect("reverted save");
+    let snapshots = journal.list_judgment_snapshots(original.id).unwrap();
+    assert_eq!(snapshots.len(), 3, "A → B → A keeps all three states");
+    assert_eq!(snapshots[0].created_at, ts("2026-07-09T08:00:00Z"));
+    assert_eq!(snapshots[2].created_at, ts("2026-07-09T08:03:00Z"));
+    let distinct: std::collections::HashSet<Uuid> = snapshots.iter().map(|s| s.id).collect();
+    assert_eq!(distinct.len(), 3, "content-derived ids stay unique");
+
+    // Each snapshot reads back as the exact full state of its moment.
+    let middle = journal
+        .get_judgment_snapshot(snapshots[1].id)
+        .unwrap()
+        .expect("present");
+    assert_eq!(middle, changed, "the middle snapshot IS state B");
+    let last = journal
+        .get_judgment_snapshot(snapshots[2].id)
+        .unwrap()
+        .expect("present");
+    assert_eq!(last, original, "the last snapshot IS the reverted state A");
+    assert_eq!(
+        journal
+            .get_judgment_snapshot(Uuid::from_u128(0xDEAD))
+            .unwrap(),
+        None,
+        "an absent id is a true absence"
+    );
+}
+
+#[test]
+fn snapshot_ids_are_deterministic_across_journals() {
+    // The content-derived identity (study id + ordinal) replays identically — the ADD15
+    // injected-sources spirit without threading the app IdGen into persistence.
+    let make = |dirname: &str| {
+        let dir = TempDir::new().expect("tempdir");
+        let jid = Uuid::from_u128(0x34);
+        let mut journal =
+            Journal::create(dir.path().join(dirname), jid, &ts(JOURNAL_TS)).expect("create");
+        let s = study(0x342, jid, "ROG");
+        journal
+            .put_study_with_history(&s, &ts("2026-07-09T08:00:00Z"))
+            .expect("save");
+        journal.list_judgment_snapshots(s.id).unwrap()[0].id
+    };
+    assert_eq!(make("a.db"), make("b.db"));
+}
+
+#[test]
+fn plain_put_study_journals_nothing() {
+    // The un-journaled rail stays available (test fabrication; the import merge whose history
+    // travels in the envelope — PR 3 of #34).
+    let dir = TempDir::new().expect("tempdir");
+    let jid = Uuid::from_u128(0x34);
+    let mut journal =
+        Journal::create(dir.path().join("journal.db"), jid, &ts(JOURNAL_TS)).expect("create");
+    let s = study(0x343, jid, "NOVN");
+    journal.put_study(&s).expect("plain save");
+    assert!(journal.list_judgment_snapshots(s.id).unwrap().is_empty());
+}
+
+#[test]
+fn a_newer_schema_snapshot_row_refuses_its_read() {
+    let dir = TempDir::new().expect("tempdir");
+    let jid = Uuid::from_u128(0x34);
+    let mut journal =
+        Journal::create(dir.path().join("journal.db"), jid, &ts(JOURNAL_TS)).expect("create");
+    let mut s = study(0x344, jid, "ABBN");
+    s.schema_version = steadyinvest_contract::SCHEMA_VERSION + 1;
+    journal
+        .put_study_with_history(&s, &ts("2026-07-09T08:00:00Z"))
+        .expect("the write itself is not gated");
+    let id = journal.list_judgment_snapshots(s.id).unwrap()[0].id;
+    assert!(
+        matches!(
+            journal.get_judgment_snapshot(id),
+            Err(Error::NewerRowSchema { .. })
+        ),
+        "same newer-row gate as get_study — never a silent partial parse"
+    );
+}
+
+#[test]
+fn delete_study_purges_its_snapshots() {
+    let dir = TempDir::new().expect("tempdir");
+    let jid = Uuid::from_u128(0x34);
+    let mut journal =
+        Journal::create(dir.path().join("journal.db"), jid, &ts(JOURNAL_TS)).expect("create");
+    let s = study(0x345, jid, "SREN");
+    journal
+        .put_study_with_history(&s, &ts("2026-07-09T08:00:00Z"))
+        .expect("save");
+    let mut changed = s.clone();
+    changed.rationale = Some("changée".to_string());
+    journal
+        .put_study_with_history(&changed, &ts("2026-07-09T08:01:00Z"))
+        .expect("save 2");
+    assert_eq!(journal.list_judgment_snapshots(s.id).unwrap().len(), 2);
+    journal.delete_study(s.id).expect("delete");
+    assert!(
+        journal.list_judgment_snapshots(s.id).unwrap().is_empty(),
+        "the 2.12 delete transaction purges the FR51 rows with the study"
+    );
+}

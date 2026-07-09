@@ -71,9 +71,12 @@ impl JournalState {
             .find(|s| s.id == id)
             .map(|s| (true, s.status == "archived"));
         let overwrote = existing_archived.is_some();
+        // Issue #34 (FR51): a single-study import is a change event — it lands in the durable
+        // history like any other save (deduplicated if it changes nothing).
+        let now = self.clock.now();
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         study.journal_id = journal.id();
-        match journal.put_study(&study) {
+        match journal.put_study_with_history(&study, &now) {
             Ok(()) => {}
             Err(PersistError::NewerJournalSchema { .. }) => {
                 return Err(MSG_READ_ONLY_WRITE.to_string());

@@ -120,12 +120,15 @@ impl JournalState {
             push_back(&mut self.history, restored);
             return Err(MSG_SAVE_FAILED.to_string());
         };
+        // Issue #34 (FR51): a step back/forward is a real state change — it lands in the durable
+        // history honestly (the cadrage decision: no special case for undo in v1).
+        let now = self.clock.now();
         let result = {
             let journal = self
                 .journal
                 .as_mut()
                 .expect("journal presence checked above");
-            journal.put_study(&restored)
+            journal.put_study_with_history(&restored, &now)
         };
         match result {
             Ok(()) => {

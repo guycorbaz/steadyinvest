@@ -224,12 +224,15 @@ impl JournalState {
                 flipped += 1;
             }
         }
+        // Issue #34 (FR51): the save also appends the durable snapshot — same transaction,
+        // deduplicated (a no-op re-save records no phantom history entry).
+        let now = self.clock.now();
         let result = {
             let journal = self
                 .journal
                 .as_mut()
                 .expect("journal presence checked above");
-            journal.put_study(&study)
+            journal.put_study_with_history(&study, &now)
         };
         match result {
             Ok(()) => {
@@ -334,12 +337,15 @@ impl JournalState {
         let new_cell = make(base, self.manual_provenance());
         entry::set_cell(year, field, new_cell).map_err(|()| MSG_SAVE_FAILED.to_string())?;
 
+        // Issue #34 (FR51): the save also appends the durable snapshot — same transaction,
+        // deduplicated (a no-op re-save records no phantom history entry).
+        let now = self.clock.now();
         let result = {
             let journal = self
                 .journal
                 .as_mut()
                 .expect("journal presence checked above");
-            journal.put_study(&study)
+            journal.put_study_with_history(&study, &now)
         };
         match result {
             Ok(()) => {
@@ -393,12 +399,15 @@ impl JournalState {
             entry::set_cell(year, field, new_cell).map_err(|()| MSG_SAVE_FAILED.to_string())?;
             filled += 1;
         }
+        // Issue #34 (FR51): the save also appends the durable snapshot — same transaction,
+        // deduplicated (a no-op re-save records no phantom history entry).
+        let now = self.clock.now();
         let result = {
             let journal = self
                 .journal
                 .as_mut()
                 .expect("journal presence checked above");
-            journal.put_study(&study)
+            journal.put_study_with_history(&study, &now)
         };
         match result {
             Ok(()) => {
@@ -529,12 +538,15 @@ impl JournalState {
             .ok_or_else(|| MSG_SAVE_FAILED.to_string())?;
         let before = study.clone(); // pre-mutation snapshot for undo (Story 2.9)
         apply(&mut study);
+        // Issue #34 (FR51): the save also appends the durable snapshot — same transaction,
+        // deduplicated (a no-op re-save records no phantom history entry).
+        let now = self.clock.now();
         let result = {
             let journal = self
                 .journal
                 .as_mut()
                 .expect("journal presence checked above");
-            journal.put_study(&study)
+            journal.put_study_with_history(&study, &now)
         };
         match result {
             Ok(()) => {
@@ -571,12 +583,15 @@ impl JournalState {
         if !apply(&mut study.judgment) {
             return Err(MSG_SAVE_FAILED.to_string());
         }
+        // Issue #34 (FR51): the save also appends the durable snapshot — same transaction,
+        // deduplicated (a no-op re-save records no phantom history entry).
+        let now = self.clock.now();
         let result = {
             let journal = self
                 .journal
                 .as_mut()
                 .expect("journal presence checked above");
-            journal.put_study(&study)
+            journal.put_study_with_history(&study, &now)
         };
         match result {
             Ok(()) => {
