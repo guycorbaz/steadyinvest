@@ -638,9 +638,11 @@ mod tests {
         // Story 6.9 adds the Réglages fallback rows (the section caption, the three field
         // labels Prix/Fondamentaux/Taux de change, the three « Aucun repli » chips, the
         // EODHD/Twelve Data chip occurrences across the price/fundamentals/fx rows): +12 = 442.
-        // Floor strict.
+        // Issue #95 adds the four « étude indisponible » read-failure variants (the holdings
+        // register row, the non-classé reason, the candidate line, the confront overlay —
+        // a read FAILURE must never state an absence): +4 = 446. Floor strict.
         assert!(
-            total >= 442,
+            total >= 446,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

@@ -87,10 +87,14 @@ pub(crate) fn refresh_holdings(
         .map(|h| {
             // Auto-match the holding to the most-recent saved study of the same ticker AND currency
             // (issue #81 — a cross-currency study must not lend this row its price / stop); `None` →
-            // a neutral "no linked study" row, never an error.
-            let study = state
-                .study_id_for_ticker_in_currency(&h.security_ticker, h.currency.as_deref())
-                .and_then(|sid| state.get_study(sid));
+            // a neutral "no linked study" row, never an error. Issue #95 tri-state: a read FAILURE
+            // marks the row « étude indisponible », never « aucune étude liée ».
+            let (study, study_unavailable) = match state
+                .try_matched_study_in_currency(&h.security_ticker, h.currency.as_deref())
+            {
+                Ok(found) => (found, false),
+                Err(_) => (None, true),
+            };
             let f = freshness
                 .get(&h.security_ticker.to_uppercase())
                 .cloned()
@@ -159,6 +163,7 @@ pub(crate) fn refresh_holdings(
                 purchase_price: h.purchase_price.clone().into(),
                 currency: currency.into(),
                 linked: study.is_some(),
+                study_unavailable,
                 study_link: study_link.into(),
                 zone: zone.into(),
                 current_price: current_price.into(),
@@ -468,6 +473,9 @@ pub(crate) fn refresh_holdings(
                     }
                     state::UnclassifiedReason::Unconvertible => {
                         ("unconvertible", SharedString::new())
+                    }
+                    state::UnclassifiedReason::StudyUnavailable => {
+                        ("study-unavailable", SharedString::new())
                     }
                 };
                 UnclassifiedLine {

@@ -18,17 +18,23 @@ use super::{
 
 impl JournalState {
     /// The deterministic `created_at, id`-ordered study summaries (empty on no-journal / read error).
+    /// Absence-blind — a consumer that STATES absence to the user must use
+    /// [`Self::try_list_studies`] instead (issue #95).
     pub fn list_studies(&self) -> Vec<StudySummary> {
+        self.try_list_studies().unwrap_or_default()
+    }
+
+    /// Fallible listing (issue #95): `Ok(rows)` — possibly empty, a true absence — or `Err` on a
+    /// read FAILURE, so a consumer can say « indisponible » instead of the factually wrong
+    /// « aucune étude ». No journal open → `Ok(empty)` (a true absence, not a failure).
+    pub fn try_list_studies(&self) -> Result<Vec<StudySummary>, String> {
         let Some(journal) = self.journal.as_ref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        match journal.list_studies() {
-            Ok(rows) => rows,
-            Err(error) => {
-                tracing::warn!("list_studies failed: {error}");
-                Vec::new()
-            }
-        }
+        journal.list_studies().map_err(|error| {
+            tracing::warn!("list_studies failed: {error}");
+            error.to_string()
+        })
     }
 
     /// Archive a study (Story 2.12, FR54): flip `status` to `"archived"` so it leaves the default
@@ -136,15 +142,22 @@ impl JournalState {
     }
 
     /// Reopen a study by id with its **full** persisted state (FR2). `None` when absent or on a
-    /// read error (logged).
+    /// read error (logged). Absence-blind — a consumer that STATES absence to the user must use
+    /// [`Self::try_get_study`] instead (issue #95).
     pub fn get_study(&self, id: Uuid) -> Option<Study> {
-        let journal = self.journal.as_ref()?;
-        match journal.get_study(id) {
-            Ok(found) => found,
-            Err(error) => {
-                tracing::warn!("get_study({id}) failed: {error}");
-                None
-            }
-        }
+        self.try_get_study(id).ok().flatten()
+    }
+
+    /// Fallible reopen (issue #95): `Ok(Some)` found, `Ok(None)` truly absent (also when no
+    /// journal is open), `Err` on a read FAILURE (logged) — so a consumer can say
+    /// « indisponible » instead of the factually wrong « n'existe pas ».
+    pub fn try_get_study(&self, id: Uuid) -> Result<Option<Study>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(None);
+        };
+        journal.get_study(id).map_err(|error| {
+            tracing::warn!("get_study({id}) failed: {error}");
+            error.to_string()
+        })
     }
 }

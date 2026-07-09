@@ -622,6 +622,7 @@ pub fn confront_chart(view: &ConfrontView, format: NumberFormat) -> ConfrontStat
     if !view.available {
         return ConfrontState {
             available: false,
+            unavailable: view.unavailable,
             chart_w: CHART_W,
             chart_h: CHART_H,
             actual_commands: Default::default(),
@@ -685,6 +686,7 @@ pub fn confront_chart(view: &ConfrontView, format: NumberFormat) -> ConfrontStat
     let label = |d: rust_decimal::Decimal| format_scaled(d, DisplayField::Price, format);
     ConfrontState {
         available: true,
+        unavailable: false,
         chart_w: CHART_W,
         chart_h: CHART_H,
         actual_commands: actual_cmd.into(),
@@ -1200,6 +1202,7 @@ mod tests {
     ) -> crate::state::ConfrontView {
         crate::state::ConfrontView {
             available,
+            unavailable: false,
             decision_date: "2026-03-09".to_string(),
             forecast_high: high.map(money).map(|m| m.as_decimal()),
             forecast_low: low.map(money).map(|m| m.as_decimal()),

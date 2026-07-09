@@ -59,6 +59,9 @@ pub enum CandidateData {
     Insufficient,
     /// No saved study matches the watch item (neither its link nor the ticker).
     NoStudy,
+    /// The study lookup FAILED (issue #95) — a study may well exist, so « aucune étude »
+    /// would be factually wrong; the UI says « étude indisponible ».
+    StudyUnavailable,
 }
 
 /// One watchlist candidate with its neutral facts (Story 6.8). Exact `Decimal`s — the wiring
@@ -189,29 +192,36 @@ impl JournalState {
         let mut candidates: Vec<(usize, ReplacementCandidate)> = Vec::new();
         for (index, item) in items.into_iter().enumerate() {
             // The 4.1 link rule: the explicit study link first, else the case-insensitive
-            // most-recent same-ticker study.
-            let study = item
-                .study_id
-                .and_then(|sid| self.get_study(sid))
-                .or_else(|| {
-                    self.study_id_for_ticker(&item.security_ticker)
-                        .and_then(|sid| self.get_study(sid))
-                });
+            // most-recent same-ticker study. Issue #95 tri-state: a read FAILURE anywhere in
+            // the chain is « étude indisponible », never « aucune étude ».
+            let study: Result<Option<_>, String> = (|| {
+                if let Some(sid) = item.study_id
+                    && let Some(study) = self.try_get_study(sid)?
+                {
+                    return Ok(Some(study));
+                }
+                match self.try_study_id_for_ticker(&item.security_ticker)? {
+                    Some(sid) => self.try_get_study(sid),
+                    None => Ok(None),
+                }
+            })();
+            let no_study_candidate = |data: CandidateData| ReplacementCandidate {
+                ticker: item.security_ticker.clone(),
+                study_id: None,
+                data,
+                zone_key: String::new(),
+                in_buy_zone: false,
+                distance_above_buy_pct: None,
+                ud_ratio: None,
+                currency: None,
+                held_share_pct: None,
+                currency_share_pct: None,
+                currency_missing_pair: None,
+            };
             let candidate = match study {
-                None => ReplacementCandidate {
-                    ticker: item.security_ticker.clone(),
-                    study_id: None,
-                    data: CandidateData::NoStudy,
-                    zone_key: String::new(),
-                    in_buy_zone: false,
-                    distance_above_buy_pct: None,
-                    ud_ratio: None,
-                    currency: None,
-                    held_share_pct: None,
-                    currency_share_pct: None,
-                    currency_missing_pair: None,
-                },
-                Some(study) => {
+                Err(_) => no_study_candidate(CandidateData::StudyUnavailable),
+                Ok(None) => no_study_candidate(CandidateData::NoStudy),
+                Ok(Some(study)) => {
                     let snapshot = engine::build_snapshot(&study).ok();
                     let price = engine::money_dec(study.judgment.current_price);
                     let (zone, distance, ud) = match &snapshot {
@@ -275,7 +285,8 @@ impl JournalState {
             candidates.push((index, candidate));
         }
         // The pinned order (AC1). Rank: 0 in-zone · 1 above-with-distance · 2 insufficient ·
-        // 3 no-study; within a rank the watchlist position (then distance for rank 1).
+        // 3 no-study (issue #95: a failed lookup shares this last rank); within a rank the
+        // watchlist position (then distance for rank 1).
         let rank = |c: &ReplacementCandidate| -> u8 {
             if c.in_buy_zone {
                 0

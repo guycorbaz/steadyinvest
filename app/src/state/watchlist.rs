@@ -25,42 +25,81 @@ impl JournalState {
     /// The most-recent saved study whose ticker matches `ticker` **case-insensitively** (Story 4.1
     /// watchlist link auto-match), or `None`. `list_studies` is ascending by `created_at`, so the
     /// last match is the newest. Case-insensitive so a watched `"nesn"` still finds the `"NESN"`
-    /// study (tickers are stored as entered, not normalized).
+    /// study (tickers are stored as entered, not normalized). Absence-blind — a consumer that
+    /// STATES absence must use [`Self::try_study_id_for_ticker`] (issue #95).
     pub fn study_id_for_ticker(&self, ticker: &str) -> Option<Uuid> {
-        self.list_studies()
+        self.try_study_id_for_ticker(ticker).ok().flatten()
+    }
+
+    /// Fallible [`Self::study_id_for_ticker`] (issue #95): `Ok(None)` is a true no-match, `Err` a
+    /// read failure — so « aucune étude » is never stated over a failed listing.
+    pub fn try_study_id_for_ticker(&self, ticker: &str) -> Result<Option<Uuid>, String> {
+        Ok(self
+            .try_list_studies()?
             .into_iter()
             .rev()
             .find(|s| s.security_ticker.eq_ignore_ascii_case(ticker))
-            .map(|s| s.id)
+            .map(|s| s.id))
     }
 
     /// Issue #81: like [`Self::study_id_for_ticker`], but a holding auto-match ALSO requires the same
     /// currency — so a CHF holding never links a USD study of the same ticker (which would then price
     /// its sale / ratchet its stop / display its register row at the wrong-currency figure). A holding
     /// with **no** declared currency (`None`) falls back to the ticker-only match (today's behaviour).
-    /// The watchlist link (no currency) keeps using [`Self::study_id_for_ticker`].
+    /// The watchlist link (no currency) keeps using [`Self::study_id_for_ticker`]. Absence-blind —
+    /// a consumer that STATES absence must use [`Self::try_matched_study_in_currency`] (issue #95).
     pub fn study_id_for_ticker_in_currency(
         &self,
         ticker: &str,
         currency: Option<&str>,
     ) -> Option<Uuid> {
+        self.try_study_id_for_ticker_in_currency(ticker, currency)
+            .ok()
+            .flatten()
+    }
+
+    /// Fallible [`Self::study_id_for_ticker_in_currency`] (issue #95): `Ok(None)` is a true
+    /// no-match, `Err` a read failure — including a candidate whose payload could not be parsed
+    /// (the absence-blind version silently skipped it).
+    pub fn try_study_id_for_ticker_in_currency(
+        &self,
+        ticker: &str,
+        currency: Option<&str>,
+    ) -> Result<Option<Uuid>, String> {
         // No declared currency → keep the cheap ticker-only match (today's behaviour).
         let Some(currency) = currency else {
-            return self.study_id_for_ticker(ticker);
+            return self.try_study_id_for_ticker(ticker);
         };
         // The currency lives in the JSON payload (not an indexed summary column), so load only the
         // same-ticker candidates — usually 0–2 — newest-first, and take the first currency match.
-        self.list_studies()
+        for summary in self
+            .try_list_studies()?
             .into_iter()
             .rev()
             .filter(|s| s.security_ticker.eq_ignore_ascii_case(ticker))
-            .find_map(|s| {
-                let study = self.get_study(s.id)?;
-                study
-                    .native_currency
-                    .eq_ignore_ascii_case(currency)
-                    .then_some(study.id)
-            })
+        {
+            let Some(study) = self.try_get_study(summary.id)? else {
+                continue; // deleted between the listing and the read — a true absence
+            };
+            if study.native_currency.eq_ignore_ascii_case(currency) {
+                return Ok(Some(study.id));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The tri-state holding→study auto-match (issue #95): `Ok(Some)` the matched study,
+    /// `Ok(None)` truly none — the only case a consumer may state « aucune étude liée » —
+    /// `Err` a read failure (« indisponible »).
+    pub fn try_matched_study_in_currency(
+        &self,
+        ticker: &str,
+        currency: Option<&str>,
+    ) -> Result<Option<steadyinvest_contract::Study>, String> {
+        match self.try_study_id_for_ticker_in_currency(ticker, currency)? {
+            Some(sid) => self.try_get_study(sid),
+            None => Ok(None),
+        }
     }
 
     /// Add a watched security (FR34) — appended at the end. Id/timestamp from the injected sources
