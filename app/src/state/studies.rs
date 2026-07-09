@@ -150,6 +150,34 @@ impl JournalState {
         self.try_get_study(id).ok().flatten()
     }
 
+    /// The study's FR51 snapshot summaries, oldest first (issue #34, PR 2) — fallible from day
+    /// one (the #95 discipline): `Err` is a read FAILURE the panel states as « indisponible »,
+    /// never an empty-looking timeline. No journal open → `Ok(empty)`.
+    pub fn try_list_study_history(
+        &self,
+        study_id: Uuid,
+    ) -> Result<Vec<steadyinvest_persistence::JudgmentSnapshotSummary>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        journal.list_judgment_snapshots(study_id).map_err(|error| {
+            tracing::warn!("list_judgment_snapshots({study_id}) failed: {error}");
+            error.to_string()
+        })
+    }
+
+    /// One FR51 snapshot's full state (issue #34, PR 2) — same tri-state contract as
+    /// [`Self::try_get_study`].
+    pub fn try_get_history_snapshot(&self, id: Uuid) -> Result<Option<Study>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(None);
+        };
+        journal.get_judgment_snapshot(id).map_err(|error| {
+            tracing::warn!("get_judgment_snapshot({id}) failed: {error}");
+            error.to_string()
+        })
+    }
+
     /// Fallible reopen (issue #95): `Ok(Some)` found, `Ok(None)` truly absent (also when no
     /// journal is open), `Err` on a read FAILURE (logged) — so a consumer can say
     /// « indisponible » instead of the factually wrong « n'existe pas ».

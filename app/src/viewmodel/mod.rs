@@ -6,6 +6,7 @@ pub mod engine;
 pub mod entry;
 pub mod form;
 pub mod format;
+pub mod history;
 pub mod refresh;
 pub mod studies;
 pub mod verify;

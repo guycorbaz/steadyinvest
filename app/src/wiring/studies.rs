@@ -157,6 +157,120 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             });
     }
 
+    // ── Issue #34 (FR51, PR 2) — the durable « Historique » timeline of the open study: open /
+    // close the read-only panel, expand one entry to its avant → après detail. The rows rebuild
+    // on open and, while open, after every mutation (via `push_form` — the panel never shows a
+    // stale timeline beside a fresh form). ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let current_study = Rc::clone(current_study);
+        ui.global::<Studies>().on_open_history(move || {
+            let ui = ui_weak.unwrap();
+            let Some(id) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id) else {
+                return;
+            };
+            ui.global::<Studies>().set_history_open(true);
+            crate::wiring::push::push_history(
+                &ui,
+                &journal_state.borrow(),
+                id,
+                config.borrow().number_format,
+            );
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        ui.global::<Studies>().on_close_history(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            studies.set_history_open(false);
+            studies.set_history_rows(ModelRc::new(VecModel::from(
+                Vec::<crate::HistoryEntryRow>::new(),
+            )));
+            studies.set_history_detail_id(SharedString::new());
+            studies
+                .set_history_detail_lines(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let current_study = Rc::clone(current_study);
+        ui.global::<Studies>().on_toggle_history_entry(move |id| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            // A second click on the expanded entry collapses it.
+            if studies.get_history_detail_id() == id {
+                studies.set_history_detail_id(SharedString::new());
+                studies.set_history_detail_lines(ModelRc::new(VecModel::from(
+                    Vec::<SharedString>::new(),
+                )));
+                return;
+            }
+            let Some(study_id) = current_study.borrow().clone() else {
+                return;
+            };
+            let (Ok(study_id), Ok(snapshot_id)) =
+                (Uuid::parse_str(&study_id), Uuid::parse_str(&id))
+            else {
+                return;
+            };
+            let state = journal_state.borrow();
+            let format = config.borrow().number_format;
+            // The detail diffs THIS snapshot against its predecessor — located by the listing
+            // order (oldest first). Any read failure marks the whole panel « indisponible »
+            // (the #95 discipline), never a silently empty detail.
+            let detail = (|| -> Result<Vec<String>, String> {
+                let summaries = state.try_list_study_history(study_id)?;
+                let index = summaries
+                    .iter()
+                    .position(|s| s.id == snapshot_id)
+                    .ok_or_else(String::new)?; // vanished between renders — treat as unavailable
+                let next = state
+                    .try_get_history_snapshot(snapshot_id)?
+                    .ok_or_else(String::new)?;
+                let prev = match index.checked_sub(1) {
+                    Some(i) => Some(
+                        state
+                            .try_get_history_snapshot(summaries[i].id)?
+                            .ok_or_else(String::new)?,
+                    ),
+                    None => None,
+                };
+                Ok(viewmodel::history::history_detail(
+                    prev.as_ref(),
+                    &next,
+                    format,
+                ))
+            })();
+            match detail {
+                Ok(lines) => {
+                    studies.set_history_detail_id(id);
+                    studies.set_history_detail_lines(ModelRc::new(VecModel::from(
+                        lines
+                            .into_iter()
+                            .map(SharedString::from)
+                            .collect::<Vec<_>>(),
+                    )));
+                }
+                Err(_) => {
+                    studies.set_history_unavailable(true);
+                    studies.set_history_detail_id(SharedString::new());
+                    studies
+                        .set_history_detail_lines(ModelRc::new(VecModel::from(
+                            Vec::<SharedString>::new(),
+                        )));
+                }
+            }
+        });
+    }
+
     // ── Story 5.2 (FR59) — export / import a single study as a portable file. The envelope is the
     // serialized data contract + schema_version + integrity hash (NOT a raw .db); `contract` owns the
     // envelope, `app` owns the file I/O. Path-based for now — the native picker is Story 5.5. ──

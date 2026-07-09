@@ -646,10 +646,26 @@ mod tests {
         // Transactions/Masquer, the empty state, the three kind nouns, the qty×price /
         // Frais / Retenue / net templates, the five form placeholders, « Enregistrer un
         // achat »): +20 = 466. Issue #65 adds the import-arbitration banner actions
-        // (« Confirmer l'import » + an « Annuler » occurrence): +2 = 468. Floor strict.
+        // (« Confirmer l'import » + an « Annuler » occurrence): +2 = 468. Issue #34 (PR 2) adds
+        // the « Historique » panel (the toggle pair, the panel title, the unavailable + empty
+        // states, the per-entry Détail/Masquer pair): +7 = 475. Floor strict.
         assert!(
-            total >= 468,
+            total >= 475,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
+        );
+    }
+
+    /// Issue #34 (FR51, PR 2): the « Historique » timeline builds its French lines in Rust (the
+    /// verdict-trace precedent) — its vocabulary is inventoried and scanned like engine's.
+    #[test]
+    fn history_user_facing_labels_are_neutral_no_banned_verb() {
+        for label in crate::viewmodel::history::HISTORY_USER_FACING_LABELS {
+            assert_neutral(label, "viewmodel/history.rs (timeline labels)");
+        }
+        assert_eq!(
+            crate::viewmodel::history::HISTORY_USER_FACING_LABELS.len(),
+            17,
+            "history.rs label inventory changed — register the new label"
         );
     }
 

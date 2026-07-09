@@ -446,6 +446,17 @@ export struct TraceState {
 // Study-state axis (Story 2.2 create → list → reopen; Story 2.3 adds the faithful form + the
 // fold/regime view-state). Owned by the Rust side (`main.rs` wires the callbacks against
 // `state::JournalState` and `config::AppConfig`); the UI only renders what Rust pushes here.
+// Issue #34 (FR51, PR 2): one « Historique » timeline entry — newest first; `first-of-day` marks
+// the day-header position; `summary` is the Rust-built neutral one-liner (posture-inventoried
+// vocabulary; values are data).
+export struct HistoryEntryRow {
+    id: string,
+    day: string,          // AAAA-MM-JJ
+    first-of-day: bool,
+    time: string,         // HH:MM ("" on a malformed stamp)
+    summary: string,
+}
+
 export global Studies {
     // The current list (deterministic created_at,id order from persistence). Empty = none yet.
     in-out property <[StudyRow]> rows;
@@ -622,6 +633,21 @@ export global Studies {
     //    is empty; the controls disable on `!can-undo` / `!can-redo`.
     callback undo();
     callback redo();
+    // ── Issue #34 (FR51, PR 2) — the durable « Historique » timeline of the open study. Rows are
+    //    NEWEST first; `first-of-day` marks where the day header renders; `summary` and the detail
+    //    lines are Rust-built neutral French (the verdict-trace precedent — vocabulary inventoried
+    //    by the posture gate). `history-unavailable` is a READ FAILURE (the #95 discipline —
+    //    « indisponible », never an empty-looking timeline); an EMPTY list on an old study is
+    //    honest (its history starts at its next save). One expanded entry at a time
+    //    (`history-detail-id`); its lines are computed on demand.
+    in-out property <bool> history-open;
+    in-out property <bool> history-unavailable;
+    in-out property <[HistoryEntryRow]> history-rows;
+    in-out property <string> history-detail-id;
+    in-out property <[string]> history-detail-lines;
+    callback open-history();
+    callback close-history();
+    callback toggle-history-entry(string); // snapshot id → expand (or collapse if already open)
     // ── Story 2.9 — scenario compare: open (seed alternate = current), set the alternate est-high-EPS
     //    (recompute the alternate outcome, non-committing), and close (discard the alternate).
     callback open-compare();
