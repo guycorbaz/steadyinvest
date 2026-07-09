@@ -5779,3 +5779,57 @@ fn request_import_is_guarded_and_maps_envelope_rejections() {
         "the peek refuses exactly what the import would"
     );
 }
+
+// ── Issue #34 (FR51, PR 1) — every effective save lands in the durable history ──
+
+#[test]
+fn every_effective_save_lands_in_the_durable_history_cross_reopen() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("journal.db");
+    let mut state = watch_state(&dir, 0x340);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let count = |s: &JournalState| {
+        s.journal
+            .as_ref()
+            .unwrap()
+            .list_judgment_snapshots(id)
+            .unwrap()
+            .len()
+    };
+    assert_eq!(count(&state), 1, "the creation opens the timeline");
+
+    state
+        .edit_cell(id, 4, entry::FIELD_SALES, Some(money("1000")))
+        .unwrap();
+    assert_eq!(count(&state), 2, "a cell edit appends");
+    state
+        .edit_cell(id, 4, entry::FIELD_SALES, Some(money("1000")))
+        .unwrap();
+    assert_eq!(
+        count(&state),
+        2,
+        "a value-identical re-save is deduplicated"
+    );
+
+    state.undo(id).unwrap();
+    assert_eq!(
+        count(&state),
+        3,
+        "an undo is a real state change — it lands in the history (cadrage decision)"
+    );
+
+    // Durable ACROSS reopen — the whole point of FR51 (the 2.9 undo stack resets here).
+    drop(state);
+    let reopened = open_state(&path);
+    assert_eq!(
+        reopened
+            .journal
+            .as_ref()
+            .unwrap()
+            .list_judgment_snapshots(id)
+            .unwrap()
+            .len(),
+        3,
+        "the history survives the reopen"
+    );
+}

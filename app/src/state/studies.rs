@@ -117,7 +117,9 @@ impl JournalState {
             self.clock.now(),
         );
         let id = study.id;
-        match journal.put_study(&study) {
+        // Issue #34 (FR51): the creation IS the timeline's first entry — the durable history
+        // starts at the all-`None` state, same transaction as the row itself.
+        match journal.put_study_with_history(&study, &study.created_at) {
             Ok(()) => Ok(id),
             // The newer-schema guard can also fire here (defense in depth); name it neutrally.
             Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
