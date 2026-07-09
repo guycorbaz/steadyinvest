@@ -21,6 +21,8 @@ export component PortfolioScreen inherits Rectangle {
     // Story 6.1 (FR37): draft names for adding / renaming a portfolio.
     property <string> draft-portfolio-name;
     property <string> draft-rename;
+    // Issue #84: the « Positions vendues » section is collapsed by default (pure-Slint toggle).
+    property <bool> sold-open: false;
 
     function reset-draft() {
         root.draft-ticker = "";
@@ -968,6 +970,178 @@ export component PortfolioScreen inherits Rectangle {
                       }
                   }
               }
+            }
+        }
+
+        // ── Issue #84 (Story 6.3 defer): « Positions vendues » — the retired holdings, collapsed
+        // by default. Each row states the neutral facts (ticker, sold day, currency) and opens its
+        // ledger READ-ONLY through the same `ledger-holding-id` mechanism as the register; the one
+        // write offered is a re-buy (the record-buy rail), which re-opens the position — it moves
+        // back to the register above, the ledger keeping the full history. ──
+        if Holdings.sold-rows.length > 0: HorizontalLayout {
+            alignment: start;
+            ActionButton {
+                label: root.sold-open
+                    ? @tr("Masquer les positions vendues")
+                    : @tr("Positions vendues ({})", Holdings.sold-rows.length);
+                enabled: true;
+                clicked => { root.sold-open = !root.sold-open; }
+            }
+        }
+        if root.sold-open && Holdings.sold-rows.length > 0: VerticalLayout {
+            spacing: Tokens.space-8;
+            for srow in Holdings.sold-rows: sold-row := Rectangle {
+                // The re-buy form drafts (per row, transient — the register's txn-draft pattern).
+                property <string> rebuy-date;
+                property <string> rebuy-quantity;
+                property <string> rebuy-price;
+                property <string> rebuy-fees;
+                property <string> rebuy-rationale;
+                function reset-rebuy-draft() {
+                    self.rebuy-date = "";
+                    self.rebuy-quantity = "";
+                    self.rebuy-price = "";
+                    self.rebuy-fees = "";
+                    self.rebuy-rationale = "";
+                }
+                background: Tokens.surface-alt;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+                border-radius: Tokens.radius;
+                VerticalLayout {
+                    padding: Tokens.space-12;
+                    spacing: Tokens.space-8;
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: @tr("{} — vendue le {}", srow.ticker, srow.sold-date);
+                            color: Tokens.text-high;
+                            font-size: Tokens.font-body;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        ActionButton {
+                            label: Holdings.ledger-holding-id == srow.id
+                                ? @tr("Masquer les transactions") : @tr("Transactions");
+                            enabled: true;
+                            clicked => {
+                                if (Holdings.ledger-holding-id == srow.id) {
+                                    Holdings.close-ledger();
+                                } else {
+                                    sold-row.reset-rebuy-draft();
+                                    Holdings.open-ledger(srow.id);
+                                }
+                            }
+                        }
+                    }
+                    if Holdings.ledger-holding-id == srow.id: VerticalLayout {
+                        spacing: Tokens.space-8;
+                        if Holdings.ledger-rows.length == 0: Text {
+                            text: @tr("Aucune transaction enregistrée pour cette position.");
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                        }
+                        // Read-only history (the product decision: lecture + ré-achat only —
+                        // editing a retired ledger happens after the position is active again).
+                        for lrow in Holdings.ledger-rows: HorizontalLayout {
+                            spacing: Tokens.space-8;
+                            Text {
+                                text: lrow.date;
+                                color: Tokens.text-mid;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: lrow.kind == "buy" ? @tr("Achat")
+                                    : lrow.kind == "dividend" ? @tr("Dividende")
+                                    : @tr("Vente");
+                                color: Tokens.text-high;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: @tr("{} × {} {}", lrow.quantity, lrow.unit-price, lrow.currency);
+                                color: Tokens.text-mid;
+                                font-family: Tokens.font-numeric;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: lrow.kind == "dividend"
+                                    ? @tr("Retenue : {}", lrow.fees) : @tr("Frais : {}", lrow.fees);
+                                color: Tokens.text-mid;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                            }
+                            if lrow.net != "": Text {
+                                text: @tr("net {} {}", lrow.net, lrow.currency);
+                                color: Tokens.text-high;
+                                font-family: Tokens.font-numeric;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: lrow.rationale;
+                                color: Tokens.text-mid;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                        // The re-buy form — the record-buy rail re-opens the position.
+                        Text {
+                            text: @tr("Racheter : un achat rouvre la position, qui revient au registre avec son historique.");
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                        }
+                        HorizontalLayout {
+                            spacing: Tokens.space-8;
+                            Text {
+                                text: srow.currency;
+                                color: Tokens.text-mid;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                            }
+                            TextField {
+                                placeholder: @tr("Date (AAAA-MM-JJ, vide = aujourd'hui)");
+                                text <=> sold-row.rebuy-date;
+                                horizontal-stretch: 1;
+                            }
+                            TextField {
+                                placeholder: @tr("Quantité");
+                                text <=> sold-row.rebuy-quantity;
+                                horizontal-stretch: 1;
+                            }
+                            TextField {
+                                placeholder: @tr("Prix unitaire");
+                                text <=> sold-row.rebuy-price;
+                                horizontal-stretch: 1;
+                            }
+                            TextField {
+                                placeholder: @tr("Frais (vide = 0)");
+                                text <=> sold-row.rebuy-fees;
+                                horizontal-stretch: 1;
+                            }
+                            TextField {
+                                placeholder: @tr("Raison (facultative)");
+                                text <=> sold-row.rebuy-rationale;
+                                horizontal-stretch: 1;
+                            }
+                            ActionButton {
+                                label: @tr("Enregistrer un achat");
+                                enabled: !Holdings.read-only
+                                    && sold-row.rebuy-quantity != "" && sold-row.rebuy-price != "";
+                                clicked => {
+                                    if (Holdings.record-buy(srow.id, sold-row.rebuy-date,
+                                            sold-row.rebuy-quantity, sold-row.rebuy-price,
+                                            sold-row.rebuy-fees, sold-row.rebuy-rationale)) {
+                                        sold-row.reset-rebuy-draft();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

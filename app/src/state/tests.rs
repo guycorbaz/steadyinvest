@@ -5494,3 +5494,104 @@ fn an_unreadable_study_makes_the_confront_unavailable_never_no_closes() {
     assert!(!absent.available);
     assert!(!absent.unavailable, "a true absence stays the empty state");
 }
+
+// ── Issue #84 — « Positions vendues » : sold holdings stay reachable; a re-buy re-opens ──
+
+#[test]
+fn sold_holdings_lists_retired_positions_and_leaves_the_register_alone() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x841);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("ROG", "5", "200", "CHF").unwrap();
+    let nesn = state.list_holdings()[0].id;
+    assert!(state.sold_holdings().is_empty(), "nothing sold yet");
+
+    assert_eq!(
+        state.sell_holding(nesn, "", "", "CHF"),
+        Ok(MSG_HOLDING_SOLD)
+    );
+    let sold = state.sold_holdings();
+    assert_eq!(sold.len(), 1);
+    assert_eq!(sold[0].id, nesn);
+    assert_eq!(
+        sold[0].sold_at.as_deref().map(|s| &s[..10]),
+        Some("2026-06-27"),
+        "the sold DAY comes from the injected clock"
+    );
+    assert_eq!(
+        state.list_holdings().len(),
+        1,
+        "the register keeps only the active position"
+    );
+    assert!(
+        !state.holding_ledger(nesn).is_empty(),
+        "the retired ledger stays readable (the #84 surface reads it)"
+    );
+}
+
+#[test]
+fn a_buy_on_a_retired_holding_reopens_the_position_with_a_fresh_wac() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x842);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    assert_eq!(state.sell_holding(id, "", "", "CHF"), Ok(MSG_HOLDING_SOLD));
+    assert!(state.list_holdings().is_empty());
+
+    // The re-buy rail (product decision 2026-07-03): a buy on the retired holding re-opens it.
+    state
+        .record_buy_for(id, "2026-06-28", "5", "120", "0", "retour", "CHF")
+        .unwrap();
+    let holdings = state.list_holdings();
+    assert_eq!(holdings.len(), 1, "the position is back in the register");
+    assert_eq!(holdings[0].id, id, "the SAME holding — not a new row");
+    assert_eq!(holdings[0].quantity, "5");
+    assert_eq!(
+        holdings[0].purchase_price, "120",
+        "the WAC restarts from the re-buy (Appendix A through a zero position)"
+    );
+    assert!(
+        state.sold_holdings().is_empty(),
+        "no longer a sold position"
+    );
+    // The one ledger keeps the FULL history: opening buy, retiring sell, re-buy.
+    let kinds: Vec<Option<String>> = state
+        .holding_ledger(id)
+        .iter()
+        .map(|t| t.kind.clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            Some("buy".to_string()),
+            Some("sell".to_string()),
+            Some("buy".to_string())
+        ],
+        "opening → retiring sell → re-buy, on one ledger"
+    );
+}
+
+#[test]
+fn a_rebuy_is_still_guarded_read_only_and_validated() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x843);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    assert_eq!(state.sell_holding(id, "", "", "CHF"), Ok(MSG_HOLDING_SOLD));
+
+    state.read_only = true;
+    assert_eq!(
+        state.record_buy_for(id, "", "5", "120", "", "", "CHF"),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+    state.read_only = false;
+    assert_eq!(
+        state.record_buy_for(id, "", "0", "120", "", "", "CHF"),
+        Err(MSG_HOLDING_INVALID_NUMBER.to_string()),
+        "the ledger validations apply to a re-buy unchanged"
+    );
+    assert!(
+        state.list_holdings().is_empty(),
+        "a refused re-buy re-opens nothing"
+    );
+}

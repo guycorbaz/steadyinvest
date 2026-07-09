@@ -17,7 +17,7 @@ use crate::viewmodel::format::NumberFormat;
 use crate::wiring::{Session, persist};
 use crate::{
     BankCarRow, CapitalAtRiskRow, ConcentrationLine, HoldingRow, Holdings, LedgerRow, MainWindow,
-    PortfolioRow, SizeMixLine, UnclassifiedLine,
+    PortfolioRow, SizeMixLine, SoldRow, UnclassifiedLine,
 };
 use crate::{fetch, state, viewmodel};
 
@@ -182,6 +182,27 @@ pub(crate) fn refresh_holdings(
     holdings.set_holding_count(items.len() as i32);
     holdings.set_rows(ModelRc::new(VecModel::from(rows)));
     holdings.set_read_only(state.is_read_only());
+
+    // ── Issue #84: the « Positions vendues » section — retired holdings, most recently sold
+    // first. Read-only facts (ticker, sold day, currency); the ledger opens through the same
+    // `ledger-holding-id` mechanism as the register, and the re-buy rides the record-buy rail. ──
+    let sold_rows: Vec<SoldRow> = state
+        .sold_holdings()
+        .iter()
+        .map(|h| SoldRow {
+            id: h.id.to_string().into(),
+            ticker: h.security_ticker.clone().into(),
+            currency: crate::state::effective_currency(h, &reference_currency).into(),
+            // The sold DAY (the stamp is RFC3339); a malformed stamp falls back to the full string.
+            sold_date: h
+                .sold_at
+                .as_deref()
+                .map(|s| s.get(..10).unwrap_or(s))
+                .unwrap_or_default()
+                .into(),
+        })
+        .collect();
+    holdings.set_sold_rows(ModelRc::new(VecModel::from(sold_rows)));
 
     // Story 4.6 (FR43) / Story 6.2 (FR38): the portfolio capital-at-risk — now a **per-currency**
     // subtotal (the holdings can differ in currency, so a single mixed total is forbidden until FX
@@ -578,15 +599,18 @@ pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uui
 }
 
 /// Re-sync the ledger panel after a mutation (2026-07-02 review): re-push the rows while the
-/// holding is still in the active register; CLEAR the two globals when the mutation retired it
-/// (the row — and the panel inside it — left the register; stale globals must not resurface on
-/// the next render).
+/// holding still has a row somewhere — the active register OR the « Positions vendues » section
+/// (issue #84: a retiring sell moves the open panel to the sold row instead of orphaning it, and
+/// a re-buy moves it back); CLEAR the two globals only when the holding left both surfaces
+/// (deleted / other portfolio — stale globals must not resurface on the next render).
 pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_id: Uuid) {
     let open_for = ui.global::<Holdings>().get_ledger_holding_id();
     if open_for.as_str() != holding_id.to_string() {
         return;
     }
-    if state.list_holdings().iter().any(|h| h.id == holding_id) {
+    if state.list_holdings().iter().any(|h| h.id == holding_id)
+        || state.sold_holdings().iter().any(|h| h.id == holding_id)
+    {
         push_ledger(ui, state, holding_id);
     } else {
         let holdings = ui.global::<Holdings>();
