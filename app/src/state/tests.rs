@@ -5595,3 +5595,54 @@ fn a_rebuy_is_still_guarded_read_only_and_validated() {
         "a refused re-buy re-opens nothing"
     );
 }
+
+// ── Issue #67 — a raw copy of a live journal (non-empty sibling -wal) refuses to restore ──
+
+#[test]
+fn request_restore_refuses_an_uncheckpointed_backup_and_parks_nothing() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x670);
+    make_backup(&dir, "rawcopy.db", 0xC0FFEE, false);
+    // Simulate the hand-rolled raw copy of a LIVE journal: committed frames still in a sibling
+    // -wal the `.db` file does not contain.
+    std::fs::write(dir.path().join("rawcopy.db-wal"), b"uncheckpointed frames").unwrap();
+
+    assert_eq!(
+        state.request_restore(dir.path().join("rawcopy.db").to_str().unwrap()),
+        Err(MSG_RESTORE_UNCHECKPOINTED.to_string()),
+        "the honest cause is named — never a silent partial restore"
+    );
+    assert!(!state.has_pending_restore(), "a hard refusal parks nothing");
+    assert!(
+        state.confirm_restore().is_err(),
+        "confirm cannot fire on nothing"
+    );
+}
+
+#[test]
+fn confirm_restore_recheck_catches_a_wal_that_appeared_after_the_assessment() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x671);
+    let live_version = state.logical_version_or_zero();
+    make_backup(&dir, "src.db", 0xC0FFEE, false);
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    // TOCTOU: between the assessment and the confirm, the file becomes a live journal's raw copy.
+    std::fs::write(
+        dir.path().join("src.db-wal"),
+        b"frames written after parking",
+    )
+    .unwrap();
+
+    assert_eq!(
+        state.confirm_restore(),
+        Err(MSG_RESTORE_UNCHECKPOINTED.to_string()),
+        "the confirm-time re-validation refuses too"
+    );
+    assert_eq!(
+        state.logical_version_or_zero(),
+        live_version,
+        "the live journal was never touched"
+    );
+}

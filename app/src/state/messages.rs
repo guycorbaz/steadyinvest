@@ -328,6 +328,9 @@ pub const MSG_RESTORE_NOT_A_JOURNAL: &str =
     "Le fichier n'est pas un journal valide ; rien n'a été restauré.";
 pub const MSG_RESTORE_UNREADABLE: &str =
     "Le fichier de sauvegarde est illisible ; rien n'a été restauré.";
+/// Issue #67: a non-empty sibling `-wal` = a raw copy of a live journal — its most recent
+/// writes are NOT in the `.db` file, so restoring it would silently drop them.
+pub const MSG_RESTORE_UNCHECKPOINTED: &str = "La sauvegarde est accompagnée d'un fichier -wal non vidé : ses écritures les plus récentes n'y figurent pas. Recréez la sauvegarde depuis l'application ; rien n'a été restauré.";
 /// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
 pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (journal {jid}, version {ver}) ? {reason}Le journal actuel sera remplacé.";
 pub const MSG_RESTORE_REASON_STALE: &str =
@@ -639,6 +642,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_RESTORE_NEWER_SCHEMA,
     MSG_RESTORE_NOT_A_JOURNAL,
     MSG_RESTORE_UNREADABLE,
+    MSG_RESTORE_UNCHECKPOINTED,
     MSG_RESTORE_CONFIRM,
     MSG_RESTORE_REASON_STALE,
     MSG_RESTORE_REASON_FOREIGN,
