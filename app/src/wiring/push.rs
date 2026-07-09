@@ -136,6 +136,64 @@ pub(crate) fn push_form(
             studies.set_notice(state::MSG_NORMALIZE_FAILED.into());
         }
     }
+
+    // Issue #34 (FR51, PR 2): an OPEN « Historique » panel re-syncs with every persisted edit —
+    // the timeline must never sit stale beside the fresh form. A closed panel costs nothing.
+    if ui.global::<Studies>().get_history_open() {
+        push_history(ui, state, study.id, format);
+    }
+}
+
+/// Rebuild the « Historique » timeline rows for a study (issue #34, FR51 — PR 2): list the
+/// snapshot series, load each state, and push the newest-first day-grouped entries. A read
+/// failure ANYWHERE (listing or a payload) marks the panel « indisponible » (the #95 discipline —
+/// never an empty-looking timeline over a failure); an old study's truly empty series renders the
+/// honest empty state. The expanded detail is collapsed on every rebuild (its entry may have
+/// shifted); the user re-expands at will.
+pub(crate) fn push_history(
+    ui: &MainWindow,
+    state: &JournalState,
+    study_id: uuid::Uuid,
+    format: NumberFormat,
+) {
+    let studies = ui.global::<Studies>();
+    let loaded = (|| -> Result<Vec<(uuid::Uuid, String, steadyinvest_contract::Study)>, String> {
+        let summaries = state.try_list_study_history(study_id)?;
+        let mut loaded = Vec::with_capacity(summaries.len());
+        for summary in summaries {
+            let study = state
+                .try_get_history_snapshot(summary.id)?
+                // Vanished between the list and the read — a failure, not an absence.
+                .ok_or_else(String::new)?;
+            loaded.push((summary.id, summary.created_at.0, study));
+        }
+        Ok(loaded)
+    })();
+    match loaded {
+        Ok(loaded) => {
+            let rows: Vec<crate::HistoryEntryRow> =
+                viewmodel::history::history_entries(&loaded, format)
+                    .into_iter()
+                    .map(|e| crate::HistoryEntryRow {
+                        id: e.id.to_string().into(),
+                        day: e.day.into(),
+                        first_of_day: e.first_of_day,
+                        time: e.time.into(),
+                        summary: e.summary.into(),
+                    })
+                    .collect();
+            studies.set_history_unavailable(false);
+            studies.set_history_rows(ModelRc::new(VecModel::from(rows)));
+        }
+        Err(_) => {
+            studies.set_history_unavailable(true);
+            studies.set_history_rows(ModelRc::new(VecModel::from(
+                Vec::<crate::HistoryEntryRow>::new(),
+            )));
+        }
+    }
+    studies.set_history_detail_id(SharedString::new());
+    studies.set_history_detail_lines(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
 }
 
 /// A LIVE, NON-persisted recompute frame for a §1 judgment-line drag (Story 2.8, NFR-P1). Builds ONE

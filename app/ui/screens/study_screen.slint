@@ -286,6 +286,95 @@ export component StudyScreen inherits Rectangle {
                     enabled: !Studies.fetching && !Studies.demo-active;
                     clicked => { Studies.fetch-provider(); }
                 }
+                // Issue #34 (FR51) — the durable « Historique » timeline (read-only panel below).
+                ActionButton {
+                    label: Studies.history-open ? @tr("Masquer l'historique") : @tr("Historique");
+                    enabled: !Studies.demo-active;
+                    clicked => {
+                        if (Studies.history-open) {
+                            Studies.close-history();
+                        } else {
+                            Studies.open-history();
+                        }
+                    }
+                }
+            }
+
+            // ── Issue #34 (FR51, PR 2) — the durable history timeline: what changed and when,
+            // across reopens (Journey 2b). Read-only; newest first, grouped by day; one entry
+            // expands at a time to its avant → après detail. A READ FAILURE says « indisponible »
+            // (the #95 discipline); an old study's empty timeline states its honest start. ──
+            if Studies.history-open: Rectangle {
+                background: Tokens.surface-alt;
+                border-width: Tokens.border;
+                border-color: Tokens.separator;
+                border-radius: Tokens.radius;
+                VerticalLayout {
+                    padding: Tokens.space-12;
+                    spacing: Tokens.space-8;
+                    Text {
+                        text: @tr("Historique de l'étude");
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-body;
+                        font-weight: Tokens.weight-semibold;
+                    }
+                    if Studies.history-unavailable: Text {
+                        text: @tr("L'historique n'a pas pu être lu ; il est indisponible.");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        wrap: word-wrap;
+                    }
+                    if !Studies.history-unavailable && Studies.history-rows.length == 0: Text {
+                        text: @tr("Aucune entrée pour le moment ; l'historique de cette étude commence à sa prochaine modification.");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        wrap: word-wrap;
+                    }
+                    for hentry in Studies.history-rows: VerticalLayout {
+                        spacing: Tokens.space-8;
+                        if hentry.first-of-day: Text {
+                            text: hentry.day;
+                            color: Tokens.text-mid;
+                            font-family: Tokens.font-numeric;
+                            font-size: Tokens.font-caption;
+                        }
+                        HorizontalLayout {
+                            spacing: Tokens.space-8;
+                            Text {
+                                text: hentry.time;
+                                color: Tokens.text-mid;
+                                font-family: Tokens.font-numeric;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: hentry.summary;
+                                color: Tokens.text-high;
+                                font-size: Tokens.font-caption;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                wrap: word-wrap;
+                            }
+                            ActionButton {
+                                label: Studies.history-detail-id == hentry.id
+                                    ? @tr("Masquer le détail") : @tr("Détail");
+                                enabled: true;
+                                clicked => { Studies.toggle-history-entry(hentry.id); }
+                            }
+                        }
+                        if Studies.history-detail-id == hentry.id: VerticalLayout {
+                            padding-left: Tokens.space-24;
+                            spacing: Tokens.space-8;
+                            for line in Studies.history-detail-lines: Text {
+                                text: line;
+                                color: Tokens.text-mid;
+                                font-family: Tokens.font-numeric;
+                                font-size: Tokens.font-caption;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
             }
 
             // ── Story 2.13 — read-only demonstration banner (FR62): a neutral, fact-stating notice
