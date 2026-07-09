@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use super::{
     JournalState, MSG_NO_JOURNAL, MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY,
-    MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL, MSG_RESTORE_UNREADABLE, MSG_SAVE_FAILED,
-    path_with_suffix, same_file_path, sync_mode_for,
+    MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL, MSG_RESTORE_UNCHECKPOINTED,
+    MSG_RESTORE_UNREADABLE, MSG_SAVE_FAILED, path_with_suffix, same_file_path, sync_mode_for,
 };
 
 /// How a candidate backup compares to the current journal (Story 5.4, AC2).
@@ -31,6 +31,11 @@ pub enum RestoreVerdict {
     NewerSchema { found: i64, supported: u32 },
     /// `PRAGMA integrity_check` failed (hard refusal).
     IntegrityFailed,
+    /// Issue #67: a non-empty sibling `-wal` sits next to the backup — a raw copy of a live,
+    /// un-checkpointed journal. Its WAL-resident commits are invisible to the validation AND to
+    /// the restore copy, so applying it would silently drop them (hard refusal — the honest fix
+    /// is re-creating the backup from the app, whose `create_backup` checkpoints first).
+    UncheckpointedWal,
 }
 
 /// A backup assessed against the current journal (Story 5.4) — the backup's surfaced identity plus the
@@ -81,6 +86,18 @@ impl JournalState {
                 found: info.file_user_version,
                 supported: info.supported_version,
             }
+        } else if info.uncheckpointed_wal
+            && !self
+                .path
+                .as_deref()
+                .is_some_and(|live| same_file_path(live, Path::new(backup_path)))
+        {
+            // Issue #67: everything validated above reflects only the last-checkpointed state —
+            // the version surfaced would lie about the backup's real contents. Refuse. The one
+            // exception is the LIVE journal chosen as its own "backup": its open handle keeps a
+            // legitimate -wal, and the confirm path no-ops on the same-path guard before any copy
+            // could drop anything.
+            RestoreVerdict::UncheckpointedWal
         } else {
             match self.journal.as_ref() {
                 // No journal open → nothing to clash with; a forward restore.
@@ -118,6 +135,7 @@ impl JournalState {
             Err(match verdict {
                 RestoreVerdict::IntegrityFailed => MSG_RESTORE_INTEGRITY.to_string(),
                 RestoreVerdict::NewerSchema { .. } => MSG_RESTORE_NEWER_SCHEMA.to_string(),
+                RestoreVerdict::UncheckpointedWal => MSG_RESTORE_UNCHECKPOINTED.to_string(),
                 _ => MSG_RESTORE_UNREADABLE.to_string(),
             })
         }
@@ -154,6 +172,11 @@ impl JournalState {
         }
         if info.is_newer_schema() {
             return Err(MSG_RESTORE_NEWER_SCHEMA.to_string());
+        }
+        // Issue #67 holds at confirm time too (TOCTOU): a `-wal` that appeared beside the parked
+        // path since the assessment means the file is now a live journal's raw copy — refuse.
+        if info.uncheckpointed_wal {
+            return Err(MSG_RESTORE_UNCHECKPOINTED.to_string());
         }
 
         // Checkpoint the live journal so its `.db` is self-contained, then drop the handle (one

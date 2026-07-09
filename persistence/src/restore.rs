@@ -15,9 +15,16 @@
 //!
 //! **Backup unit = a checkpointed, single-file `.db`.** Both inspect and restore consider only the
 //! main `.db` (inspect opens `immutable=1`, which ignores any sibling `-wal`). App-made backups are
-//! safe: [`Journal::checkpoint`](crate::Journal::checkpoint) truncates the WAL before the copy. A
-//! hand-rolled backup that copied a *live* (un-checkpointed) journal **without** its `-wal` can lose
-//! the WAL-resident commits silently — tracked as a follow-up (carry/validate a backup's `-wal`).
+//! safe: [`Journal::checkpoint`](crate::Journal::checkpoint) truncates the WAL before the copy.
+//!
+//! Issue #67: a hand-rolled raw copy of a *live* (un-checkpointed) journal splits committed data
+//! across a sibling `-wal` that `immutable=1` never reads — so everything inspect validated
+//! (integrity, version, identity) reflects only the last-checkpointed state, and a restore would
+//! silently drop the WAL-resident commits. [`inspect_backup`] therefore FLAGS a **non-empty**
+//! sibling `-wal` (`BackupInfo::uncheckpointed_wal`) so the caller can refuse with the honest
+//! cause ("re-create the backup from the app") rather than restore a file that lies about its
+//! contents. An empty (zero-length) `-wal` — what `wal_checkpoint(TRUNCATE)` leaves behind — is
+//! fine: the main `.db` is self-contained then.
 
 use crate::error::{Error, Result};
 use crate::migrations;
@@ -38,6 +45,11 @@ pub struct BackupInfo {
     pub supported_version: u32,
     /// `true` when `PRAGMA integrity_check` returned `"ok"`.
     pub integrity_ok: bool,
+    /// Issue #67: `true` when a **non-empty** sibling `-wal` sits next to the backup — the file is
+    /// a raw copy of a live, un-checkpointed journal, and everything above reflects only its
+    /// last-checkpointed state (the WAL-resident commits are invisible to the `immutable=1` open).
+    /// A restore would silently drop them; the caller must refuse.
+    pub uncheckpointed_wal: bool,
 }
 
 impl BackupInfo {
@@ -77,12 +89,20 @@ pub fn inspect_backup(path: impl AsRef<Path>) -> Result<BackupInfo> {
 
     let (journal_id, logical_version) = read_meta(&conn)?;
 
+    // Issue #67: a non-empty sibling `-wal` means the backup is a raw copy of a live journal whose
+    // WAL-resident commits everything above did NOT see (`immutable=1` skips WAL recovery). A
+    // zero-length `-wal` (the `wal_checkpoint(TRUNCATE)` leftover) is self-contained and fine.
+    let mut wal = path.as_os_str().to_os_string();
+    wal.push("-wal");
+    let uncheckpointed_wal = std::fs::metadata(&wal).is_ok_and(|m| m.len() > 0);
+
     Ok(BackupInfo {
         journal_id,
         logical_version,
         file_user_version,
         supported_version,
         integrity_ok,
+        uncheckpointed_wal,
     })
 }
 
@@ -229,6 +249,36 @@ mod tests {
         assert_eq!(
             v1, reopened,
             "inspection left the backup's version untouched"
+        );
+    }
+
+    /// Issue #67: a NON-EMPTY sibling `-wal` (a raw copy of a live, un-checkpointed journal) is
+    /// flagged — the `immutable=1` inspection saw only the last-checkpointed state, so restoring
+    /// the `.db` alone would silently drop the WAL-resident commits. The zero-length `-wal` that
+    /// `wal_checkpoint(TRUNCATE)` leaves behind is self-contained and NOT flagged.
+    #[test]
+    fn a_nonempty_sibling_wal_flags_the_backup_as_uncheckpointed() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("copy.db");
+        Journal::create(&path, Uuid::from_u128(0x67), &ts("2026-07-09T00:00:00Z")).unwrap();
+
+        assert!(
+            !inspect_backup(&path).unwrap().uncheckpointed_wal,
+            "no sidecar at all — self-contained"
+        );
+
+        let mut wal = path.as_os_str().to_os_string();
+        wal.push("-wal");
+        std::fs::write(&wal, b"").unwrap();
+        assert!(
+            !inspect_backup(&path).unwrap().uncheckpointed_wal,
+            "a zero-length -wal (the checkpoint TRUNCATE leftover) is self-contained"
+        );
+
+        std::fs::write(&wal, b"wal frames the .db does not contain").unwrap();
+        assert!(
+            inspect_backup(&path).unwrap().uncheckpointed_wal,
+            "a non-empty sibling -wal is flagged — the validation reflects only the checkpointed state"
         );
     }
 

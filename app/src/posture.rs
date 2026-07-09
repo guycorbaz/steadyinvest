@@ -733,9 +733,11 @@ mod tests {
         // Issue #35 adds the max-year-window notice (MSG_YEARS_MAX — the extend-history cap): 117 + 1 = 118.
         // Issue #63 adds the export-unreadable notice (MSG_EXPORT_UNREADABLE — a present-but-unreadable
         // study told apart from a truly absent one): 118 + 1 = 119.
+        // Issue #67 adds the uncheckpointed-backup refusal (MSG_RESTORE_UNCHECKPOINTED — a raw copy
+        // of a live journal whose -wal holds commits the .db lacks): 119 + 1 = 120.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            119,
+            120,
             "state.rs message inventory changed — register the new notice"
         );
     }
