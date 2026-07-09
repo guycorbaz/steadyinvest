@@ -154,6 +154,9 @@ export component PortfolioScreen inherits Rectangle {
                     Text {
                         text: candidate.data == "no-study"
                             ? @tr("{} — aucune étude", candidate.ticker)
+                            // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
+                            : candidate.data == "study-unavailable"
+                            ? @tr("{} — étude indisponible", candidate.ticker)
                             : candidate.data == "insufficient"
                                 ? @tr("{} — données insuffisantes", candidate.ticker)
                                 : candidate.in-buy-zone
@@ -388,6 +391,9 @@ export component PortfolioScreen inherits Rectangle {
             for unclassified in Holdings.size-unclassified-rows: Text {
                 text: unclassified.reason-key == "no-study"
                     ? @tr("{} — non classé (aucune étude)", unclassified.ticker)
+                    // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
+                    : unclassified.reason-key == "study-unavailable"
+                    ? @tr("{} — non classé (étude indisponible)", unclassified.ticker)
                     : unclassified.reason-key == "no-sales"
                         ? @tr("{} — non classé (chiffre d'affaires indisponible)", unclassified.ticker)
                         : unclassified.reason-key == "missing-rate"
@@ -588,7 +594,9 @@ export component PortfolioScreen inherits Rectangle {
                     alignment: center;
                     horizontal-stretch: 1;
                     Text {
-                        text: !row.linked ? @tr("Aucune étude liée")
+                        // Issue #95: a FAILED study read is « indisponible », never « aucune étude liée ».
+                        text: row.study-unavailable ? @tr("Étude indisponible")
+                            : !row.linked ? @tr("Aucune étude liée")
                             : row.zone == "buy" ? @tr("◆ {}", Labels.zone-buy)
                             : row.zone == "neutral" ? @tr("◆ {}", Labels.zone-hold)
                             : row.zone == "sell" ? @tr("◆ {}", Labels.zone-sell)

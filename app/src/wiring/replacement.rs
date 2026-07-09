@@ -75,6 +75,7 @@ fn push_candidates(ui: &MainWindow, state: &JournalState) {
                 CandidateData::Ok => "ok",
                 CandidateData::Insufficient => "insufficient",
                 CandidateData::NoStudy => "no-study",
+                CandidateData::StudyUnavailable => "study-unavailable",
             }
             .into(),
             zone: c.zone_key.into(),

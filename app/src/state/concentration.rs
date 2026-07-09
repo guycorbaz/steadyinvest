@@ -46,6 +46,9 @@ pub enum UnclassifiedReason {
     /// A rate exists but the checked conversion could not state the figure (overflow) — the
     /// sales are present, so neither `NoSales` nor `MissingRate` would be true.
     Unconvertible,
+    /// The study lookup FAILED (issue #95) — a study may well exist, so « aucune étude »
+    /// would be factually wrong; the UI says « étude indisponible ».
+    StudyUnavailable,
 }
 
 /// One unclassifiable security, with its named reason.
@@ -230,9 +233,21 @@ impl JournalState {
         let mut slot_large: Option<Decimal> = Some(Decimal::ZERO);
         let mut unclassified: Vec<UnclassifiedRow> = Vec::new();
         for (ticker, acc) in &by_ticker {
-            let study = self
-                .study_id_for_ticker(ticker)
-                .and_then(|sid| self.get_study(sid));
+            // Issue #95 tri-state: a read FAILURE is « étude indisponible », never « aucune
+            // étude » (the absence-blind lookup conflated the two).
+            let study = match self
+                .try_study_id_for_ticker(ticker)
+                .and_then(|sid| sid.map_or(Ok(None), |sid| self.try_get_study(sid)))
+            {
+                Ok(found) => found,
+                Err(_) => {
+                    unclassified.push(UnclassifiedRow {
+                        ticker: ticker.clone(),
+                        reason: UnclassifiedReason::StudyUnavailable,
+                    });
+                    continue;
+                }
+            };
             let Some(study) = study else {
                 unclassified.push(UnclassifiedRow {
                     ticker: ticker.clone(),

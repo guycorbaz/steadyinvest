@@ -48,7 +48,9 @@ export component ConfrontOverlay inherits Rectangle {
                 font-size: Tokens.font-caption;
             }
 
-            // ── Calm empty state: not enough recorded closes (or no forecast band) to compare yet. ──
+            // ── Calm empty state: not enough recorded closes (or no forecast band) to compare yet.
+            // Issue #95: a FAILED study read states « indisponible » — never the « pas encore de
+            // cours » claim a true absence shows. ──
             if !Confront.state.available: Rectangle {
                 height: 160px;
                 background: Tokens.surface-alt;
@@ -56,7 +58,9 @@ export component ConfrontOverlay inherits Rectangle {
                 border-color: Tokens.separator;
                 border-radius: Tokens.radius;
                 Text {
-                    text: @tr("Pas encore de cours enregistrés depuis la décision. Les cours se mémorisent au fil des actualisations de prix.");
+                    text: Confront.state.unavailable
+                        ? @tr("L'étude n'a pas pu être lue ; la confrontation est indisponible.")
+                        : @tr("Pas encore de cours enregistrés depuis la décision. Les cours se mémorisent au fil des actualisations de prix.");
                     color: Tokens.text-low;
                     font-size: Tokens.font-caption;
                     horizontal-alignment: center;

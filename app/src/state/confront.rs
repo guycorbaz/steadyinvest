@@ -20,6 +20,9 @@ use super::JournalState;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfrontView {
     pub available: bool,
+    /// Issue #95: true when the study READ failed — the overlay says « étude indisponible »,
+    /// never the factually wrong « pas encore de cours enregistrés » empty state.
+    pub unavailable: bool,
     /// The decision date (`study.created_at`, `YYYY-MM-DD`) the band is anchored at.
     pub decision_date: String,
     /// The recorded §4 forecast band bounds (read-only from the stored judgment — no verdict recompute).
@@ -42,16 +45,21 @@ impl JournalState {
     /// band, not a re-decision. `available` is false (neutral empty state) when there is no cached
     /// post-decision close or the study has no forecast band.
     pub fn confront(&self, study_id: Uuid) -> ConfrontView {
-        let empty = |decision_date: String| ConfrontView {
+        let empty = |unavailable: bool, decision_date: String| ConfrontView {
             available: false,
+            unavailable,
             decision_date,
             forecast_high: None,
             forecast_low: None,
             horizon_years: steadyinvest_core::method::FORECAST_HORIZON_YEARS,
             actual: Vec::new(),
         };
-        let Some(study) = self.get_study(study_id) else {
-            return empty(String::new());
+        // Issue #95 tri-state: a read FAILURE is « étude indisponible », never the « pas encore
+        // de cours enregistrés » empty state a true absence would show.
+        let study = match self.try_get_study(study_id) {
+            Ok(Some(study)) => study,
+            Ok(None) => return empty(false, String::new()),
+            Err(_) => return empty(true, String::new()),
         };
         let decision_date: String = study.created_at.0.chars().take(10).collect();
 
@@ -78,6 +86,7 @@ impl JournalState {
         let available = !actual.is_empty() && forecast_high.is_some() && forecast_low.is_some();
         ConfrontView {
             available,
+            unavailable: false,
             decision_date,
             forecast_high,
             forecast_low,

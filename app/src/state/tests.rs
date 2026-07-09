@@ -5073,6 +5073,7 @@ fn an_unclassifiable_security_lands_in_the_honest_bucket_with_its_reason() {
                 UnclassifiedReason::NoStudy => "NoStudy",
                 UnclassifiedReason::NoSales => "NoSales",
                 UnclassifiedReason::Unconvertible => "Unconvertible",
+                UnclassifiedReason::StudyUnavailable => "StudyUnavailable",
                 UnclassifiedReason::MissingRate(_) => unreachable!(),
             }
         ),
@@ -5381,4 +5382,115 @@ fn exposure_excludes_sold_holdings_and_is_none_without_a_journal() {
         state.replacement_candidates("CHF").is_none(),
         "the candidates read refuses too — « indisponible », never « liste vide »"
     );
+}
+
+// ── Issue #95 — a study READ FAILURE is « indisponible », never « n'existe pas » ──
+
+/// Make a saved study present-but-unreadable: bump its stored `schema_version` past this build's
+/// (the #63 vehicle — `list_studies` reads only indexed columns so the row stays listed, but any
+/// payload read fails with `NewerRowSchema`).
+fn make_study_unreadable(state: &mut JournalState, id: Uuid) {
+    let mut future = state.get_study(id).expect("the study exists");
+    future.schema_version = steadyinvest_contract::SCHEMA_VERSION + 1;
+    state.journal.as_mut().unwrap().put_study(&future).unwrap();
+}
+
+#[test]
+fn try_get_study_distinguishes_a_read_failure_from_a_true_absence() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x951);
+    let id = state.create_study("NESN", "CHF").unwrap();
+
+    assert_eq!(
+        state.try_get_study(Uuid::from_u128(0xDEAD)),
+        Ok(None),
+        "a missing id is a TRUE absence"
+    );
+    make_study_unreadable(&mut state, id);
+    assert!(
+        state.try_get_study(id).is_err(),
+        "a present-but-unreadable row is a FAILURE, never Ok(None)"
+    );
+    assert_eq!(
+        state.get_study(id),
+        None,
+        "the absence-blind wrapper still flattens (its consumers state nothing)"
+    );
+    assert!(
+        state.try_study_id_for_ticker("NESN").is_ok(),
+        "the ticker match reads only the listing — still fine"
+    );
+    assert!(
+        state
+            .try_matched_study_in_currency("NESN", Some("CHF"))
+            .is_err(),
+        "the holding auto-match needs the payload — a failed read surfaces as Err"
+    );
+    assert!(
+        state.try_matched_study_in_currency("NESN", None).is_err(),
+        "the currency-less match resolves the id then reads the payload — Err too"
+    );
+}
+
+#[test]
+fn an_unreadable_study_is_unclassified_as_unavailable_never_no_study() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x952);
+    state.add_holding("NESN", "1", "100", "CHF").unwrap();
+    let id = state.create_study("NESN", "CHF").unwrap();
+    make_study_unreadable(&mut state, id);
+
+    let (small, medium) = bounds();
+    let view = state.journal_diversification("CHF", small, medium);
+    assert_eq!(view.unclassified.len(), 1);
+    assert!(
+        matches!(
+            view.unclassified[0].reason,
+            UnclassifiedReason::StudyUnavailable
+        ),
+        "the study EXISTS — « aucune étude » would be factually wrong"
+    );
+}
+
+#[test]
+fn an_unreadable_study_makes_the_candidate_unavailable_never_no_study() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x953);
+    state.add_watch_item("NESN", None).unwrap();
+    state.add_watch_item("ROG", None).unwrap();
+    let id = state.create_study("NESN", "CHF").unwrap();
+    make_study_unreadable(&mut state, id);
+
+    let candidates = state.replacement_candidates("CHF").unwrap();
+    let nesn = candidates.iter().find(|c| c.ticker == "NESN").unwrap();
+    assert_eq!(
+        nesn.data,
+        CandidateData::StudyUnavailable,
+        "the study EXISTS — « aucune étude » would be factually wrong"
+    );
+    assert_eq!(nesn.study_id, None, "no openable study is offered");
+    let rog = candidates.iter().find(|c| c.ticker == "ROG").unwrap();
+    assert_eq!(
+        rog.data,
+        CandidateData::NoStudy,
+        "a TRUE absence keeps its honest bucket"
+    );
+}
+
+#[test]
+fn an_unreadable_study_makes_the_confront_unavailable_never_no_closes() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x954);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    make_study_unreadable(&mut state, id);
+
+    let view = state.confront(id);
+    assert!(!view.available);
+    assert!(
+        view.unavailable,
+        "a read failure names itself — never the « pas encore de cours » empty state"
+    );
+    let absent = state.confront(Uuid::from_u128(0xDEAD));
+    assert!(!absent.available);
+    assert!(!absent.unavailable, "a true absence stays the empty state");
 }

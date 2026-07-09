@@ -93,7 +93,8 @@ export struct SizeMixLine {
 
 // Story 6.7: one held security that could NOT be classified by size — an honest bucket, never a
 // default class. `reason-key` crosses as a key ("no-study" | "no-sales" | "missing-rate" |
-// "unconvertible"); `missing` names the pair for "missing-rate" ("" otherwise).
+// "unconvertible" | "study-unavailable" — issue #95: a failed study read, distinct from a true
+// absence); `missing` names the pair for "missing-rate" ("" otherwise).
 export struct UnclassifiedLine {
     ticker: string,
     reason-key: string,
@@ -101,7 +102,8 @@ export struct UnclassifiedLine {
 }
 
 // Story 6.8 (FR48): one replacement candidate from the watchlist. Facts only, formatted in Rust
-// via the locale path; `data` crosses as a key ("ok" | "insufficient" | "no-study"); `zone` is
+// via the locale path; `data` crosses as a key ("ok" | "insufficient" | "no-study" |
+// "study-unavailable" — issue #95: a failed study read, distinct from a true absence); `zone` is
 // the engine zone key (Labels nouns at render — no hue, §4 owns the zone colours); the two
 // `*-flagged` murmurs use the 6.7 threshold band (an absent share never flags).
 export struct CandidateRow {
@@ -306,6 +308,9 @@ export struct PeChartState {
 // shared linear-price viewbox. `available == false` → a neutral empty state.
 export struct ConfrontState {
     available: bool,
+    // Issue #95: the study READ failed — « étude indisponible », never the « pas encore de
+    // cours » empty state a true absence shows.
+    unavailable: bool,
     chart-w: float,
     chart-h: float,
     actual-commands: string,            // the actual close trajectory polyline
@@ -886,6 +891,9 @@ export struct HoldingRow {
     // ("buy"/"neutral"/"sell"/"" — "" shows "—", outside the band or undefined). `current-price` and
     // `as-of` are display strings; `stale` marks a failed/older last refresh.
     linked: bool,
+    // Issue #95: the study auto-match READ failed — the row says « étude indisponible »,
+    // never the factually wrong « aucune étude liée ».
+    study-unavailable: bool,
     study-link: string,
     zone: string,
     current-price: string,
