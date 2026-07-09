@@ -29,7 +29,8 @@ mod watchlist;
 
 pub use error::{Error, Result};
 pub use export::{
-    ImportSummary, JournalExport, JournalSnapshot, StudyRecord, inspect_journal_envelope,
+    ImportSummary, JournalExport, JournalSnapshot, JudgmentSnapshotRecord, StudyRecord,
+    inspect_journal_envelope,
 };
 pub use fx::FxRateItem;
 pub use holdings::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
