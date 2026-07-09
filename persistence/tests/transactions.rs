@@ -30,6 +30,7 @@ fn seed_holding(journal: &mut Journal) -> Uuid {
             "10",
             "100",
             "CHF",
+            None,
             &ts("2026-06-29T10:00:00Z"),
         )
         .expect("add holding");
@@ -445,6 +446,7 @@ fn update_transaction_refuses_a_row_belonging_to_another_holding() {
             "5",
             "250",
             "CHF",
+            None,
             &ts("2026-06-29T09:30:00Z"),
         )
         .expect("second holding");

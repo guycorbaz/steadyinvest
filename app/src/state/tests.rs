@@ -440,7 +440,9 @@ fn journal_export_import_round_trips_into_a_fresh_journal() {
     let mut state_a = watch_state(&dir_a, 0x530);
     let study_id = state_a.create_study("NESN", "CHF").unwrap();
     state_a.add_watch_item("NESN", Some(study_id)).unwrap();
-    state_a.add_holding("NESN", "10", "100.00", "CHF").unwrap();
+    state_a
+        .add_holding("NESN", "10", "100.00", "CHF", "")
+        .unwrap();
     let envelope = state_a.export_journal().expect("export succeeds");
 
     // Import into a fresh, empty journal B (a different dir → a different journal_id).
@@ -464,9 +466,9 @@ fn multiple_portfolios_round_trip_through_the_whole_journal_export() {
     // Story 6.1 / AC4: more than one portfolio must survive the 5.3 export/import unchanged.
     let dir_a = TempDir::new().unwrap();
     let mut state_a = watch_state(&dir_a, 0x612);
-    state_a.add_holding("NESN", "10", "100", "CHF").unwrap(); // creates + fills the default portfolio
+    state_a.add_holding("NESN", "10", "100", "CHF", "").unwrap(); // creates + fills the default portfolio
     let pf2 = state_a.add_portfolio("PostFinance").unwrap();
-    state_a.add_holding("ROG", "5", "248", "CHF").unwrap(); // lands in the active (PostFinance)
+    state_a.add_holding("ROG", "5", "248", "CHF", "").unwrap(); // lands in the active (PostFinance)
     assert_eq!(state_a.list_portfolios().len(), 2);
     let envelope = state_a.export_journal().expect("export succeeds");
 
@@ -2309,7 +2311,7 @@ fn apply_holding_price_sets_current_price_only_and_moves_the_zone() {
 fn set_holding_trailing_stop_validates_seeds_from_purchase_price_and_clears() {
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x55, "2026-06-28T10:00:00Z");
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
 
     // Out-of-range / non-numeric pct → refused, nothing written.
@@ -2348,7 +2350,7 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
     let mut state = undo_state(&dir, 0x56, "2026-06-28T10:00:00Z");
     // A holding linked to a study of the same ticker (so the ratchet keys on the study's price).
     let study = state.create_study("NESN", "CHF").unwrap();
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     // Seed a 20% stop → level 80 (from purchase 100, no current_price yet).
     state.set_holding_trailing_stop(id, "20").unwrap();
@@ -2385,8 +2387,8 @@ fn portfolio_capital_at_risk_sums_below_cost_stops_and_invested() {
     // `watch_state` uses a SEQUENTIAL idgen — two holdings get distinct ids (a FixedIdGen would
     // collide on the second insert).
     let mut state = watch_state(&dir, 0x570);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("ROG", "20", "50", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("ROG", "20", "50", "CHF", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // NESN: a 15% stop with no study → level 85 (below cost 100) → (100−85)×10 = 150.
     state.set_holding_trailing_stop(ids[0], "15").unwrap();
@@ -2415,8 +2417,8 @@ fn capital_at_risk_groups_by_currency_without_a_cross_currency_total() {
     // returns a per-currency bucket each, never a mixed total (FX only at consolidation, FR28).
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x620);
-    state.add_holding("ASML", "10", "100", "EUR").unwrap();
-    state.add_holding("AAPL", "20", "50", "USD").unwrap();
+    state.add_holding("ASML", "10", "100", "EUR", "").unwrap();
+    state.add_holding("AAPL", "20", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // A 15% stop on each → EUR level 85 (CaR (100−85)×10 = 150); USD level 42.5 (CaR (50−42.5)×20 = 150).
     state.set_holding_trailing_stop(ids[0], "15").unwrap();
@@ -2440,7 +2442,9 @@ fn an_unsupported_holding_currency_is_refused_with_a_neutral_notice() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x622);
     assert_eq!(
-        state.add_holding("NESN", "10", "100", "XXX").unwrap_err(),
+        state
+            .add_holding("NESN", "10", "100", "XXX", "")
+            .unwrap_err(),
         MSG_HOLDING_INVALID_CURRENCY.to_string()
     );
     assert!(
@@ -2456,7 +2460,7 @@ fn adding_a_portfolio_makes_it_active_and_scopes_the_register() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x610);
     // The first holding lazily creates the default portfolio (the active one).
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let default_id = state.active_portfolio().expect("a default portfolio").id;
     assert_eq!(state.list_holdings().len(), 1);
 
@@ -2473,7 +2477,7 @@ fn adding_a_portfolio_makes_it_active_and_scopes_the_register() {
     );
 
     // A holding added now lands in the active (PostFinance), not the default.
-    state.add_holding("ROG", "5", "248", "CHF").unwrap();
+    state.add_holding("ROG", "5", "248", "CHF", "").unwrap();
     let active_tickers: Vec<_> = state
         .list_holdings()
         .iter()
@@ -2499,7 +2503,7 @@ fn adding_a_portfolio_makes_it_active_and_scopes_the_register() {
 fn deleting_a_portfolio_is_guarded_and_reselects() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x611);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap(); // creates + fills the default
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap(); // creates + fills the default
     let default_id = state.active_portfolio().unwrap().id;
     let bank2 = state.add_portfolio("PostFinance").unwrap(); // empty, now active
 
@@ -2529,8 +2533,8 @@ fn deleting_a_portfolio_is_guarded_and_reselects() {
 fn sell_holding_records_the_sell_and_drops_it_from_the_register() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x470);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("ROG", "20", "50", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("ROG", "20", "50", "CHF", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // NESN gets a 15% stop (no study) → level 85, below cost 100 → CaR 150 before the sell.
     state.set_holding_trailing_stop(ids[0], "15").unwrap();
@@ -2565,7 +2569,7 @@ fn sell_holding_stamps_the_holdings_own_currency_not_the_reference() {
     // fallback for a pre-6.2 legacy (NULL-currency) row.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x622);
-    state.add_holding("AAPL", "5", "150", "USD").unwrap();
+    state.add_holding("AAPL", "5", "150", "USD", "").unwrap();
     let id = state.list_holdings()[0].id;
 
     state
@@ -2596,7 +2600,7 @@ fn sell_holding_stamps_the_holdings_own_currency_not_the_reference() {
 fn sell_holding_refuses_an_absent_id() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x471);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let ghost = Uuid::from_u128(0xDEAD);
     assert!(
         state.sell_holding(ghost, "", "", "CHF").is_err(),
@@ -2611,7 +2615,7 @@ fn sell_holding_refuses_an_absent_id() {
 fn a_buy_on_a_legacy_holding_materializes_the_opening_once_and_re_averages() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x630);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
 
     // First buy: 10 @ 110, fees 10 → opening (10 @ 100) materialized + buy → 20 @ 105.5.
@@ -2658,7 +2662,7 @@ fn a_buy_on_a_legacy_holding_materializes_the_opening_once_and_re_averages() {
 fn a_partial_sell_reduces_the_quantity_and_keeps_the_holding_active() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x631);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
 
     let notice = state
@@ -2690,7 +2694,7 @@ fn a_partial_sell_reduces_the_quantity_and_keeps_the_holding_active() {
 fn an_over_sell_is_refused_neutrally_and_writes_nothing() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x632);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
 
     assert_eq!(
@@ -2713,7 +2717,7 @@ fn an_over_sell_is_refused_neutrally_and_writes_nothing() {
 fn deleting_the_retiring_sell_un_retires_the_holding() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x633);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state
         .sell_holding(id, "", "", "CHF")
@@ -2744,7 +2748,7 @@ fn deleting_the_retiring_sell_un_retires_the_holding() {
 fn an_edit_that_makes_history_impossible_is_refused() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x634);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state
         .sell_holding(id, "4", "", "CHF")
@@ -2784,7 +2788,7 @@ fn an_edit_that_makes_history_impossible_is_refused() {
 fn ledger_writes_are_refused_on_a_read_only_journal() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x635);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state.read_only = true;
     assert_eq!(
@@ -2805,7 +2809,7 @@ fn ledger_writes_are_refused_on_a_read_only_journal() {
 fn a_bad_date_or_amount_on_a_buy_is_refused_neutrally() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x636);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     assert_eq!(
         state.record_buy_for(id, "02/07/2026", "1", "1", "", "", "CHF"),
@@ -2828,7 +2832,7 @@ fn a_bad_date_or_amount_on_a_buy_is_refused_neutrally() {
 fn a_dividend_records_as_cash_and_touches_neither_position_nor_opening() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x640);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
 
     // Explicit withholding (10.50 on a 30 gross).
@@ -2870,7 +2874,7 @@ fn a_dividend_records_as_cash_and_touches_neither_position_nor_opening() {
 fn an_empty_withholding_auto_computes_at_the_configured_rate() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x641);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
 
     // "" at the default 35 % → 10 × 3 × 0.35 = 10.5.
@@ -2897,7 +2901,7 @@ fn an_empty_withholding_auto_computes_at_the_configured_rate() {
 fn a_withholding_exceeding_the_gross_refuses_neutrally() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x642);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     assert_eq!(
         state.record_dividend_for(id, "", "10", "3", "30.01", "", "CHF", "35"),
@@ -2910,8 +2914,8 @@ fn a_withholding_exceeding_the_gross_refuses_neutrally() {
 fn reinvestable_cash_groups_per_currency_and_counts_sold_holdings() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x643);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("AAPL", "5", "150", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "5", "150", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
 
     // CHF: net 19.5 (30 gross − 10.5). USD: net 6 (2×3 gross − 0).
@@ -2943,7 +2947,7 @@ fn reinvestable_cash_groups_per_currency_and_counts_sold_holdings() {
 fn a_dividend_on_a_retired_holding_is_refused_at_the_v1_entry_point() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x644);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state.sell_holding(id, "", "", "CHF").unwrap();
     assert_eq!(
@@ -2960,7 +2964,7 @@ fn editing_a_dividends_withholding_beyond_its_gross_is_refused() {
     // Review HIGH (all three layers): the record-path invariant holds on EDIT too.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x645);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state
         .record_dividend_for(id, "2026-07-01", "10", "3", "10.5", "", "CHF", "35")
@@ -2981,7 +2985,7 @@ fn mutating_a_dividend_only_ledger_touches_neither_opening_nor_position() {
     // « Achat » nor rewrite/retire the stored aggregate (the replay would read an empty position).
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x646);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state
         .record_dividend_for(id, "2026-07-01", "10", "3", "0", "", "CHF", "35")
@@ -3027,7 +3031,7 @@ fn a_sell_after_a_dividend_first_ledger_still_materializes_the_opening() {
     // dividend row must not suppress the opening when a SELL arrives.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x647);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state
         .record_dividend_for(id, "2026-07-01", "10", "3", "0", "", "CHF", "35")
@@ -3060,7 +3064,7 @@ fn one_invalid_dividend_row_does_not_erase_its_currency_bucket() {
     // foreign 5.3 import) is skipped PER ROW; the bucket keeps its valid cash.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x648);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state
         .record_dividend_for(id, "2026-07-01", "10", "3", "10.5", "", "CHF", "35")
@@ -3102,7 +3106,7 @@ fn deleting_the_opening_buy_that_sells_depend_on_is_refused_not_reinvented() {
     // nothing changed (previously: a phantom 6@100 opening appeared and the position dropped to 2).
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x63A);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state
         .sell_holding(id, "4", "", "CHF")
@@ -3134,14 +3138,14 @@ fn a_ledger_backed_holding_refuses_direct_quantity_price_currency_edits() {
     // desynchronize it. Ticker-only edits stay allowed (not ledger-derived).
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x63B);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state
         .record_buy_for(id, "2026-07-01", "10", "110", "0", "", "CHF")
         .expect("the buy records");
 
     assert_eq!(
-        state.update_holding(id, "NESN", "4", "105", "CHF"),
+        state.update_holding(id, "NESN", "4", "105", "CHF", ""),
         Err(MSG_LEDGER_BACKED.to_string()),
         "a direct quantity edit is refused"
     );
@@ -3159,6 +3163,7 @@ fn a_ledger_backed_holding_refuses_direct_quantity_price_currency_edits() {
             &stored.quantity,
             &stored.purchase_price,
             "CHF",
+            "",
         )
         .expect("a ticker-only edit is fine");
     assert_eq!(state.list_holdings()[0].security_ticker, "NESN.SW");
@@ -3170,7 +3175,7 @@ fn a_ledger_form_sell_records_the_explicit_price_and_fees() {
     // date and fees — unlike the trigger sell (study price, fees 0).
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x63C);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
 
     let notice = state
@@ -3204,7 +3209,7 @@ fn impossible_calendar_dates_are_refused() {
     // Review MED: Feb 30 / Apr 31 / year 0000 must refuse (the copy promises AAAA-MM-JJ réel).
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x63D);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     for bad in ["2026-02-30", "2026-04-31", "0000-01-01", "2026-13-01"] {
         assert_eq!(
@@ -3225,7 +3230,7 @@ fn editing_only_the_rationale_of_a_legacy_sell_keeps_its_timestamp() {
     // visible DATE unchanged must keep the stamp verbatim (no silent same-day reorder).
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x63E);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     // A 4.7-style whole-position sell (wall-clock occurred_at, no ledger materialization).
     let sell_id = Uuid::from_u128(0x47);
@@ -3271,8 +3276,8 @@ fn add_holding_persists_lazily_creates_one_portfolio_and_lists_in_order() {
         "no holdings, no portfolio yet"
     );
 
-    state.add_holding("NESN", "10", "95.40", "CHF").unwrap();
-    state.add_holding("ROG", "5", "248.10", "CHF").unwrap();
+    state.add_holding("NESN", "10", "95.40", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "248.10", "CHF", "").unwrap();
     let rows = state.list_holdings();
     assert_eq!(
         rows.iter()
@@ -3292,24 +3297,26 @@ fn holding_amounts_are_validated_and_bad_input_writes_nothing() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x431);
     assert_eq!(
-        state.add_holding("  ", "10", "5", "CHF").unwrap_err(),
+        state.add_holding("  ", "10", "5", "CHF", "").unwrap_err(),
         MSG_HOLDING_INVALID_TICKER
     );
     assert_eq!(
-        state.add_holding("NESN", "abc", "5", "CHF").unwrap_err(),
+        state
+            .add_holding("NESN", "abc", "5", "CHF", "")
+            .unwrap_err(),
         MSG_HOLDING_INVALID_NUMBER
     );
     assert_eq!(
-        state.add_holding("NESN", "0", "5", "CHF").unwrap_err(),
+        state.add_holding("NESN", "0", "5", "CHF", "").unwrap_err(),
         MSG_HOLDING_INVALID_NUMBER,
         "quantity must be strictly positive"
     );
     assert_eq!(
-        state.add_holding("NESN", "-2", "5", "CHF").unwrap_err(),
+        state.add_holding("NESN", "-2", "5", "CHF", "").unwrap_err(),
         MSG_HOLDING_INVALID_NUMBER
     );
     assert_eq!(
-        state.add_holding("NESN", "2", "-5", "CHF").unwrap_err(),
+        state.add_holding("NESN", "2", "-5", "CHF", "").unwrap_err(),
         MSG_HOLDING_INVALID_NUMBER,
         "price must be non-negative"
     );
@@ -3317,14 +3324,14 @@ fn holding_amounts_are_validated_and_bad_input_writes_nothing() {
     // capital-at-risk overlay never has to clamp a persisted holding into a misleading total.
     assert_eq!(
         state
-            .add_holding("NESN", "10000000000", "100000000000000000000", "CHF")
+            .add_holding("NESN", "10000000000", "100000000000000000000", "CHF", "")
             .unwrap_err(),
         MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
         "qty 1e10 × price 1e20 (the overflow case) is refused on write"
     );
     assert_eq!(
         state
-            .add_holding("NESN", "1000000000001", "1", "CHF")
+            .add_holding("NESN", "1000000000001", "1", "CHF", "")
             .unwrap_err(),
         MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
         "quantity just over a trillion is refused"
@@ -3334,11 +3341,11 @@ fn holding_amounts_are_validated_and_bad_input_writes_nothing() {
         "no invalid input wrote a row"
     );
     // A free purchase (price 0) is allowed (e.g. a gift/spin-off).
-    state.add_holding("FREE", "1", "0", "CHF").unwrap();
+    state.add_holding("FREE", "1", "0", "CHF", "").unwrap();
     assert_eq!(state.list_holdings().len(), 1);
     // The bound is inclusive: exactly a trillion (the ceiling) is still accepted.
     state
-        .add_holding("BIG", "1000000000000", "1000000000000", "CHF")
+        .add_holding("BIG", "1000000000000", "1000000000000", "CHF", "")
         .unwrap();
     assert_eq!(
         state.list_holdings().len(),
@@ -3352,11 +3359,11 @@ fn edit_and_delete_holding_round_trip_and_survive_reopen() {
     let dir = TempDir::new().unwrap();
     let id = {
         let mut state = watch_state(&dir, 0x432);
-        state.add_holding("NESN", "10", "95.40", "CHF").unwrap();
-        state.add_holding("ROG", "5", "248.10", "CHF").unwrap();
+        state.add_holding("NESN", "10", "95.40", "CHF", "").unwrap();
+        state.add_holding("ROG", "5", "248.10", "CHF", "").unwrap();
         let nesn = state.list_holdings()[0].id;
         state
-            .update_holding(nesn, "NESN.SW", "12", "96.00", "CHF")
+            .update_holding(nesn, "NESN.SW", "12", "96.00", "CHF", "")
             .unwrap();
         let rog = state.list_holdings()[1].id;
         state.delete_holding(rog).unwrap();
@@ -4572,9 +4579,9 @@ fn manual_fx_validation_refuses_neutrally() {
 fn foreign_currencies_in_use_covers_all_portfolio_holdings_minus_the_reference() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x652);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("AAPL", "5", "150", "USD").unwrap();
-    state.add_holding("ASML", "2", "600", "EUR").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "5", "150", "USD", "").unwrap();
+    state.add_holding("ASML", "2", "600", "EUR", "").unwrap();
     // A SOLD USD holding still counts (its history feeds the 6.6 consolidation).
     let usd_id = state
         .list_holdings()
@@ -4677,7 +4684,7 @@ fn an_off_list_holding_currency_never_poisons_the_fetch_pair_set() {
     // Review MED: an imported "SEK" holding must not put an unfetchable pair into the set.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x656);
-    state.add_holding("AAPL", "5", "150", "USD").unwrap();
+    state.add_holding("AAPL", "5", "150", "USD", "").unwrap();
     // Plant an off-list currency straight at persistence (the import path's freedom).
     let pid = state.active_portfolio().unwrap().id;
     state
@@ -4691,6 +4698,7 @@ fn an_off_list_holding_currency_never_poisons_the_fetch_pair_set() {
             "10",
             "50",
             "SEK",
+            None,
             &Timestamp("2026-06-27T15:00:00Z".to_string()),
         )
         .unwrap();
@@ -4719,14 +4727,14 @@ fn the_consolidation_converts_per_bank_and_globally_with_exact_rates() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x660);
     // Bank 1 (the default): CHF 10@100 stop 85 → CaR 150; USD 4@50 stop 40 → CaR 40.
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     state.set_holding_trailing_stop(ids[0], "15").unwrap();
     state.set_holding_trailing_stop(ids[1], "20").unwrap();
     // Bank 2: EUR 10@20 stop 15 → CaR 50.
     let bank2 = state.add_portfolio("PostFinance").unwrap();
-    state.add_holding("ASML", "10", "20", "EUR").unwrap();
+    state.add_holding("ASML", "10", "20", "EUR", "").unwrap();
     let eur_id = state.list_holdings()[0].id;
     state.set_holding_trailing_stop(eur_id, "25").unwrap();
     let _ = bank2;
@@ -4769,8 +4777,8 @@ fn the_consolidation_converts_per_bank_and_globally_with_exact_rates() {
 fn a_missing_pair_absents_the_bank_and_the_global_by_name() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x661);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     state.set_holding_trailing_stop(ids[1], "20").unwrap();
     // NO USD→CHF rate stored.
@@ -4799,12 +4807,12 @@ fn a_missing_pair_absents_the_bank_and_the_global_by_name() {
 fn reference_buckets_convert_at_identity_and_sold_holdings_stay_excluded() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x662);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     state.set_holding_trailing_stop(id, "15").unwrap();
     // A sold USD holding: no rate stored for USD, but a sold position carries no risk — it must
     // neither require the pair nor block the global.
-    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     let usd_id = state
         .list_holdings()
         .iter()
@@ -4846,7 +4854,16 @@ fn inject_raw_holding(
         .journal
         .as_mut()
         .unwrap()
-        .add_holding(id, portfolio_id, ticker, qty, price, currency, &created_at)
+        .add_holding(
+            id,
+            portfolio_id,
+            ticker,
+            qty,
+            price,
+            currency,
+            None,
+            &created_at,
+        )
         .unwrap();
 }
 
@@ -4888,9 +4905,9 @@ fn unstopped_exposure_counts_holdings_without_a_stop_per_currency() {
     // "0 % at risk". This neutral fact names the un-protected exposure per currency instead.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x610);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap(); // 1000 CHF, no stop
-    state.add_holding("ABBN", "5", "40", "CHF").unwrap(); // 200 CHF, will be stopped
-    state.add_holding("AAPL", "2", "150", "USD").unwrap(); // 300 USD, no stop
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap(); // 1000 CHF, no stop
+    state.add_holding("ABBN", "5", "40", "CHF", "").unwrap(); // 200 CHF, will be stopped
+    state.add_holding("AAPL", "2", "150", "USD", "").unwrap(); // 300 USD, no stop
     let abbn = state
         .list_holdings()
         .into_iter()
@@ -4939,10 +4956,10 @@ fn unstopped_exposure_counts_holdings_without_a_stop_per_currency() {
 /// USD→CHF 0.5 → AAPL = 100 CHF; NESN = 1500 CHF across banks; global = 1600 CHF.
 fn diversification_fixture(dir: &TempDir, seed: u128) -> JournalState {
     let mut state = watch_state(dir, seed);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     state.add_portfolio("PostFinance").unwrap();
-    state.add_holding("NESN", "5", "100", "CHF").unwrap();
+    state.add_holding("NESN", "5", "100", "CHF", "").unwrap();
     state
         .upsert_manual_fx_rate("USD", "0.5", "2026-06-27", "CHF")
         .unwrap();
@@ -4989,8 +5006,8 @@ fn a_ticker_held_at_two_banks_is_one_concentration_line_with_an_exact_share() {
 fn a_missing_rate_absents_the_security_and_the_denominator_by_name() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x671);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("AAPL", "4", "50", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     // No USD→CHF rate stored.
     let (small, medium) = bounds();
     let view = state.journal_diversification("CHF", small, medium);
@@ -5059,9 +5076,11 @@ fn an_unclassifiable_security_lands_in_the_honest_bucket_with_its_reason() {
     // NOSTUDY: held, no study at all. NOSALES: a study with no sales value. EURSALES: a study
     // whose sales are in EUR — and no EUR→CHF rate stored (the holding itself is CHF, so its
     // INVESTED still converts at identity; only the CLASSIFICATION refuses).
-    state.add_holding("NOSTUDY", "1", "100", "CHF").unwrap();
-    state.add_holding("NOSALES", "1", "100", "CHF").unwrap();
-    state.add_holding("EURSALES", "1", "100", "CHF").unwrap();
+    state.add_holding("NOSTUDY", "1", "100", "CHF", "").unwrap();
+    state.add_holding("NOSALES", "1", "100", "CHF", "").unwrap();
+    state
+        .add_holding("EURSALES", "1", "100", "CHF", "")
+        .unwrap();
     state.create_study("NOSALES", "CHF").unwrap();
     let eur_study = state.create_study("EURSALES", "EUR").unwrap();
     state
@@ -5118,7 +5137,7 @@ fn a_nonpositive_latest_sales_refuses_to_classify() {
     // « non classé » bucket.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x677);
-    state.add_holding("NEG", "1", "100", "CHF").unwrap();
+    state.add_holding("NEG", "1", "100", "CHF", "").unwrap();
     let study = state.create_study("NEG", "CHF").unwrap();
     state
         .edit_cell(study, 4, entry::FIELD_SALES, Some(money("-5")))
@@ -5140,8 +5159,8 @@ fn a_sold_holding_is_excluded_from_concentration() {
     // invested capital.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x674);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("GONE", "5", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("GONE", "5", "100", "CHF", "").unwrap();
     let gone = state
         .list_holdings()
         .iter()
@@ -5161,7 +5180,7 @@ fn a_sold_holding_is_excluded_from_concentration() {
 fn a_checked_overflow_absents_the_share_and_the_total_never_corrupts() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x675);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     // cost × qty overflows Decimal — the checked product is absent, never saturated into a share.
     // Injected raw (issue #60): the write bound now refuses such input, so overflow at render only
     // arises from pre-existing / externally-edited data — which is exactly what this guards.
@@ -5304,8 +5323,8 @@ fn held_share_and_currency_exposure_facts_join_the_candidate() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x682);
     // Held: NESN 6@100 CHF (600) + AAPL 8@100 USD × 0.5 = 400 CHF → global 1000.
-    state.add_holding("NESN", "6", "100", "CHF").unwrap();
-    state.add_holding("AAPL", "8", "100", "USD").unwrap();
+    state.add_holding("NESN", "6", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "8", "100", "USD", "").unwrap();
     state
         .upsert_manual_fx_rate("USD", "0.5", "2026-06-27", "CHF")
         .unwrap();
@@ -5347,8 +5366,8 @@ fn held_share_and_currency_exposure_facts_join_the_candidate() {
 fn currency_exposure_refuses_honestly_on_a_missing_pair() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x683);
-    state.add_holding("NESN", "6", "100", "CHF").unwrap();
-    state.add_holding("AAPL", "8", "100", "USD").unwrap();
+    state.add_holding("NESN", "6", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "8", "100", "USD", "").unwrap();
     // No USD→CHF rate stored.
     let exposure = state.journal_currency_exposure("CHF").unwrap();
     assert!(!exposure.global_positive, "the total could not be formed");
@@ -5379,8 +5398,8 @@ fn currency_exposure_refuses_honestly_on_a_missing_pair() {
 fn exposure_excludes_sold_holdings_and_is_none_without_a_journal() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x684);
-    state.add_holding("NESN", "6", "100", "CHF").unwrap();
-    state.add_holding("GONE", "4", "100", "CHF").unwrap();
+    state.add_holding("NESN", "6", "100", "CHF", "").unwrap();
+    state.add_holding("GONE", "4", "100", "CHF", "").unwrap();
     let gone = state
         .list_holdings()
         .iter()
@@ -5457,7 +5476,7 @@ fn try_get_study_distinguishes_a_read_failure_from_a_true_absence() {
 fn an_unreadable_study_is_unclassified_as_unavailable_never_no_study() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x952);
-    state.add_holding("NESN", "1", "100", "CHF").unwrap();
+    state.add_holding("NESN", "1", "100", "CHF", "").unwrap();
     let id = state.create_study("NESN", "CHF").unwrap();
     make_study_unreadable(&mut state, id);
 
@@ -5522,8 +5541,8 @@ fn an_unreadable_study_makes_the_confront_unavailable_never_no_closes() {
 fn sold_holdings_lists_retired_positions_and_leaves_the_register_alone() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x841);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
-    state.add_holding("ROG", "5", "200", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "200", "CHF", "").unwrap();
     let nesn = state.list_holdings()[0].id;
     assert!(state.sold_holdings().is_empty(), "nothing sold yet");
 
@@ -5554,7 +5573,7 @@ fn sold_holdings_lists_retired_positions_and_leaves_the_register_alone() {
 fn a_buy_on_a_retired_holding_reopens_the_position_with_a_fresh_wac() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x842);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     assert_eq!(state.sell_holding(id, "", "", "CHF"), Ok(MSG_HOLDING_SOLD));
     assert!(state.list_holdings().is_empty());
@@ -5596,7 +5615,7 @@ fn a_buy_on_a_retired_holding_reopens_the_position_with_a_fresh_wac() {
 fn a_rebuy_is_still_guarded_read_only_and_validated() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x843);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     assert_eq!(state.sell_holding(id, "", "", "CHF"), Ok(MSG_HOLDING_SOLD));
 
@@ -5706,7 +5725,7 @@ fn a_confirmed_older_import_does_not_resurrect_a_sold_holding() {
     // arbitration + post-import re-derivation must keep the position retired.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x651);
-    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     let envelope = state.export_journal().unwrap(); // sold_at NULL, quantity 10, no transactions
     assert_eq!(state.sell_holding(id, "", "", "CHF"), Ok(MSG_HOLDING_SOLD));
@@ -5895,5 +5914,70 @@ fn a_below_band_candidate_states_the_fact_and_keeps_its_rank() {
             .collect::<Vec<_>>(),
         vec!["NEAR", "BELOW"],
         "the pinned order is unchanged (distance-stated before insufficient)"
+    );
+}
+
+// ── Issue #98 (FR48, PR 1) — the holding's sector: manual entry, trim/NULL rule, round-trip ──
+
+#[test]
+fn a_holdings_sector_round_trips_and_a_cleared_field_reads_as_absent() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("journal.db");
+    let mut state = watch_state(&dir, 0x980);
+    state
+        .add_holding("NESN", "10", "100", "CHF", "  Consumer Defensive  ")
+        .unwrap();
+    state.add_holding("ROG", "5", "200", "CHF", "").unwrap();
+
+    let holdings = state.list_holdings();
+    assert_eq!(
+        holdings[0].sector.as_deref(),
+        Some("Consumer Defensive"),
+        "trimmed and stored"
+    );
+    assert_eq!(
+        holdings[1].sector, None,
+        "an empty field is NULL — « non renseigné », never an empty string"
+    );
+
+    // Edit sets it; clearing re-opens the slot (the provider may fill it — PR 2).
+    let rog = holdings[1].id;
+    state
+        .update_holding(rog, "ROG", "5", "200", "CHF", "Healthcare")
+        .unwrap();
+    assert_eq!(
+        state.list_holdings()[1].sector.as_deref(),
+        Some("Healthcare")
+    );
+    state
+        .update_holding(rog, "ROG", "5", "200", "CHF", "")
+        .unwrap();
+    assert_eq!(state.list_holdings()[1].sector, None, "cleared → NULL");
+
+    // Durable across reopen (the v7 column, not an in-memory fact).
+    drop(state);
+    let reopened = open_state(&path);
+    assert_eq!(
+        reopened.list_holdings()[0].sector.as_deref(),
+        Some("Consumer Defensive")
+    );
+}
+
+#[test]
+fn a_holdings_sector_travels_in_the_journal_envelope() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x981);
+    state
+        .add_holding("NESN", "10", "100", "CHF", "Consumer Defensive")
+        .unwrap();
+    let envelope = state.export_journal().unwrap();
+
+    let dir2 = TempDir::new().unwrap();
+    let mut target = watch_state_with_journal_id(&dir2, 0x982, 0xFEED98);
+    target.import_journal(&envelope).unwrap();
+    assert_eq!(
+        target.list_holdings()[0].sector.as_deref(),
+        Some("Consumer Defensive"),
+        "the #78 additive rail carries the sector"
     );
 }

@@ -81,6 +81,7 @@ fn populated_journal() -> (tempfile::TempDir, Journal) {
             "10",
             "100.00",
             "CHF",
+            None,
             &ts("2026-06-04T00:00:00Z"),
         )
         .unwrap();
@@ -92,6 +93,7 @@ fn populated_journal() -> (tempfile::TempDir, Journal) {
             "5",
             "250.00",
             "CHF",
+            None,
             &ts("2026-06-05T00:00:00Z"),
         )
         .unwrap();
@@ -225,6 +227,7 @@ fn a_holdings_currency_round_trips_including_a_legacy_none() {
                 quantity: "3".to_string(),
                 purchase_price: "620.00".to_string(),
                 currency: Some("EUR".to_string()),
+                sector: None,
                 trailing_stop_pct: None,
                 trailing_stop_level: None,
                 sold_at: None,
@@ -237,6 +240,7 @@ fn a_holdings_currency_round_trips_including_a_legacy_none() {
                 quantity: "1".to_string(),
                 purchase_price: "10.00".to_string(),
                 currency: None, // a pre-6.2 holding
+                sector: None,
                 trailing_stop_pct: None,
                 trailing_stop_level: None,
                 sold_at: None,
@@ -310,6 +314,7 @@ fn ledger_buy_and_partial_sell_rows_round_trip_through_export_import() {
             "10",
             "100",
             "CHF",
+            None,
             &ts("2026-06-04T00:00:00Z"),
         )
         .unwrap();

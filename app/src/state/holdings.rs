@@ -216,6 +216,7 @@ impl JournalState {
         quantity: &str,
         purchase_price: &str,
         currency: &str,
+        sector: &str,
     ) -> Result<(), String> {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
@@ -228,6 +229,10 @@ impl JournalState {
             return Err(MSG_HOLDING_INVALID_CURRENCY.to_string());
         }
         let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
+        // Issue #98 (FR48): the sector is free text — trimmed; empty = NULL (« non renseigné »,
+        // an honest absence the provider may later fill — PR 2).
+        let sector = sector.trim();
+        let sector = (!sector.is_empty()).then_some(sector);
         let portfolio_id = self.active_portfolio_or_default()?.id;
         let id = self.idgen.new_id();
         let created_at = self.clock.now();
@@ -240,6 +245,7 @@ impl JournalState {
                 &quantity,
                 &purchase_price,
                 currency,
+                sector,
                 &created_at,
             )
             .map(|_| ())
@@ -262,6 +268,7 @@ impl JournalState {
         quantity: &str,
         purchase_price: &str,
         currency: &str,
+        sector: &str,
     ) -> Result<(), String> {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
@@ -295,9 +302,13 @@ impl JournalState {
                 }
             }
         }
+        // Issue #98 (FR48): same trim/NULL rule as the add rail — a cleared field re-opens the
+        // slot for the provider (PR 2).
+        let sector = sector.trim();
+        let sector = (!sector.is_empty()).then_some(sector);
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal
-            .update_holding(id, ticker, &quantity, &purchase_price, currency)
+            .update_holding(id, ticker, &quantity, &purchase_price, currency, sector)
             .map_err(watch_error)
     }
 

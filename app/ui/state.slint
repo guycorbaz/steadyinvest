@@ -933,6 +933,9 @@ export struct HoldingRow {
     // Story 6.2 (FR38): the currency this holding is denominated in ("CHF" | "EUR" | …). Shown beside
     // every amount; a pre-6.2 holding is read under the reference currency (coalesced in Rust).
     currency: string,
+    // Issue #98 (FR48): the holding's sector — provider-reported or manual ("" = non renseigné);
+    // shown as a caption and prefilled in the edit form.
+    sector: string,
     // Story 4.4 (FR40): the auto-matched study's zone + freshness. `linked` is false when no saved
     // study matches the ticker (neutral "no study" state). `zone` is the key crossed from Rust
     // ("buy"/"neutral"/"sell"/"" — "" shows "—", outside the band or undefined). `current-price` and
@@ -991,10 +994,11 @@ export global Holdings {
     // capital-at-risk panel so "0 % du capital investi" (no stop set) is not misread as "no downside".
     // Empty when every holding is stop-protected.
     in-out property <[string]> unstopped-exposure;
-    // ticker, quantity, purchase-price, currency → written? (so the form keeps the user's input on refusal)
-    callback add-holding(string, string, string, string) -> bool;
-    // id, ticker, quantity, purchase-price, currency → written?
-    callback edit-holding(string, string, string, string, string) -> bool;
+    // ticker, quantity, purchase-price, currency, sector ("" = non renseigné) → written?
+    // (so the form keeps the user's input on refusal)
+    callback add-holding(string, string, string, string, string) -> bool;
+    // id, ticker, quantity, purchase-price, currency, sector → written?
+    callback edit-holding(string, string, string, string, string, string) -> bool;
     callback remove-holding(string); // id
     // Story 4.4 (FR40): user-initiated price refresh for every linked holding (off the UI thread).
     callback refresh-prices();

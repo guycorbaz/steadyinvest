@@ -650,9 +650,10 @@ mod tests {
         // the « Historique » panel (the toggle pair, the panel title, the unavailable + empty
         // states, the per-entry Détail/Masquer pair): +7 = 475. Issue #48 adds the three
         // below-band fact lines (watchlist, register zone slot, candidate line): +3 = 478.
-        // Floor strict.
+        // Issue #98 (PR 1) adds the holding-form « Secteur (facultatif) » placeholder and the
+        // register's « Secteur : {} » caption: +2 = 480. Floor strict.
         assert!(
-            total >= 478,
+            total >= 480,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

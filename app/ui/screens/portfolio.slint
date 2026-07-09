@@ -17,6 +17,8 @@ export component PortfolioScreen inherits Rectangle {
     // Story 6.2 (FR38): the chosen currency for the holding being added/edited (defaults to the
     // reference currency; overwritten with the row's currency when editing).
     property <string> draft-currency: Holdings.reference-currency;
+    // Issue #98 (FR48): the holding's sector ("" = non renseigné — the provider may fill it later).
+    property <string> draft-sector;
     property <string> editing-id;
     // Story 6.1 (FR37): draft names for adding / renaming a portfolio.
     property <string> draft-portfolio-name;
@@ -29,6 +31,7 @@ export component PortfolioScreen inherits Rectangle {
         root.draft-quantity = "";
         root.draft-price = "";
         root.draft-currency = Holdings.reference-currency;
+        root.draft-sector = "";
         root.editing-id = "";
     }
 
@@ -457,6 +460,13 @@ export component PortfolioScreen inherits Rectangle {
                 text <=> root.draft-price;
                 horizontal-stretch: 1;
             }
+            // Issue #98 (FR48): free text; empty = « non renseigné » (the provider fills the
+            // void at the next study fetch — PR 2; a manual value always wins).
+            TextField {
+                placeholder: @tr("Secteur (facultatif)");
+                text <=> root.draft-sector;
+                horizontal-stretch: 1;
+            }
             ActionButton {
                 label: root.editing-id == "" ? @tr("Ajouter") : @tr("Enregistrer");
                 enabled: !Holdings.read-only && root.draft-ticker != "";
@@ -464,11 +474,11 @@ export component PortfolioScreen inherits Rectangle {
                     // Reset the form ONLY when the write was accepted — a refused add/edit (bad
                     // number / empty symbol / unsupported currency) keeps the user's input to correct.
                     if (root.editing-id == "") {
-                        if (Holdings.add-holding(root.draft-ticker, root.draft-quantity, root.draft-price, root.draft-currency)) {
+                        if (Holdings.add-holding(root.draft-ticker, root.draft-quantity, root.draft-price, root.draft-currency, root.draft-sector)) {
                             root.reset-draft();
                         }
                     } else {
-                        if (Holdings.edit-holding(root.editing-id, root.draft-ticker, root.draft-quantity, root.draft-price, root.draft-currency)) {
+                        if (Holdings.edit-holding(root.editing-id, root.draft-ticker, root.draft-quantity, root.draft-price, root.draft-currency, root.draft-sector)) {
                             root.reset-draft();
                         }
                     }
@@ -591,6 +601,13 @@ export component PortfolioScreen inherits Rectangle {
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
                 }
+                // Issue #98 (FR48): the sector fact, when known (a caption — neutral ink).
+                if row.sector != "": Text {
+                    text: @tr("Secteur : {}", row.sector);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
                 // ── Story 4.4 (FR40): the matched study's zone + present price + freshness. The zone
                 // marker is NEUTRAL ink + a glyph — never a buy/hold/sell hue (those stay geofenced to
                 // the open study's §4 zone bar, Story 4.2 rule). A holding with no linked study shows a
@@ -692,6 +709,7 @@ export component PortfolioScreen inherits Rectangle {
                         root.draft-quantity = row.quantity;
                         root.draft-price = row.purchase-price;
                         root.draft-currency = row.currency;
+                        root.draft-sector = row.sector;
                     }
                 }
                 ActionButton {
