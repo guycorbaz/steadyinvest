@@ -235,15 +235,31 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Prefs>().on_import_journal(move |path| {
             let ui = ui_weak.unwrap();
+            let prefs = ui.global::<Prefs>();
             let notice = match std::fs::read_to_string(path.as_str()) {
-                Ok(json) => match journal_state.borrow_mut().import_journal(&json) {
-                    Ok(summary) => state::journal_imported_message(&summary),
-                    Err(message) => message,
+                // Issue #65: the arbitration gate — an OLDER same-journal envelope parks behind a
+                // confirm banner instead of silently snapping shared entities back.
+                Ok(json) => match journal_state.borrow_mut().request_import_journal(&json) {
+                    Ok(state::ImportRequest::Applied(summary)) => {
+                        prefs.set_import_confirm("".into());
+                        state::journal_imported_message(&summary)
+                    }
+                    Ok(state::ImportRequest::NeedsConfirm { source, current }) => {
+                        prefs.set_import_confirm(
+                            state::import_confirm_message(source, current).into(),
+                        );
+                        prefs.set_journal_status("".into());
+                        return; // nothing applied yet — no re-render needed
+                    }
+                    Err(message) => {
+                        prefs.set_import_confirm("".into());
+                        message
+                    }
                 },
                 // An unreadable path is the malformed/unreadable case — a neutral refusal, no panic.
                 Err(_) => state::MSG_IMPORT_MALFORMED.to_string(),
             };
-            ui.global::<Prefs>().set_journal_status(notice.into());
+            prefs.set_journal_status(notice.into());
             // A whole-journal import can touch every surface — re-render them all (dashboard,
             // watchlist, portfolio). Prune any stale per-holding freshness for tickers no longer held.
             let state = journal_state.borrow();
@@ -261,6 +277,48 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 &holding_dismissed.borrow(),
                 format,
             );
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
+        ui.global::<Prefs>().on_confirm_import(move || {
+            let ui = ui_weak.unwrap();
+            let result = journal_state.borrow_mut().confirm_import_journal();
+            let prefs = ui.global::<Prefs>();
+            prefs.set_import_confirm("".into());
+            let notice = match result {
+                Ok(summary) => state::journal_imported_message(&summary),
+                Err(message) => message,
+            };
+            prefs.set_journal_status(notice.into());
+            // The confirmed merge can touch every surface — same re-render as a direct import.
+            let state = journal_state.borrow();
+            let format = config.borrow().number_format;
+            retain_held_freshness(&holding_freshness, &state);
+            refresh_studies(&ui, &state);
+            refresh_watchlist(&ui, &state);
+            crate::wiring::fx::push_fx_rates(&ui, &state);
+            crate::wiring::replacement::clear_candidates(&ui);
+            refresh_holdings(
+                &ui,
+                &state,
+                &holding_freshness.borrow(),
+                &holding_dismissed.borrow(),
+                format,
+            );
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Prefs>().on_cancel_import(move || {
+            let ui = ui_weak.unwrap();
+            journal_state.borrow_mut().cancel_import_journal();
+            ui.global::<Prefs>().set_import_confirm("".into());
         });
     }
 

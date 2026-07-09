@@ -776,6 +776,11 @@ export global Prefs {
     // User intents — handled in Rust (export reads the journal; import verifies + applies atomically).
     callback export-journal();
     callback import-journal(string); // path to a whole-journal envelope file
+    // Issue #65: the arbitration prompt for an OLDER same-journal import ("" = no banner) — the
+    // version regression is stated and explicitly confirmed, never merged silently.
+    in-out property <string> import-confirm;
+    callback confirm-import();
+    callback cancel-import();
     // ── Story 5.4 — backup / restore of the raw .db (FR61) ──
     // Latest neutral backup/restore outcome (set by Rust).
     in-out property <string> restore-status;

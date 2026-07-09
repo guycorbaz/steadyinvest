@@ -152,6 +152,18 @@ fn parse_and_verify(text: &str) -> std::result::Result<JournalSnapshot, ImportEr
     Ok(snapshot)
 }
 
+/// Peek an envelope's identity **without applying anything** (issue #65): the full
+/// [`parse_and_verify`] gate (integrity + `schema_version` + parse — the peek refuses exactly what
+/// the import would), then just the `(journal_id, logical_version)` pair the caller arbitrates
+/// with (same journal + an OLDER version = a regression the user must confirm; the merge-import
+/// would otherwise silently snap shared entities back to their old state).
+pub fn inspect_journal_envelope(
+    text: &str,
+) -> std::result::Result<(Uuid, u64), steadyinvest_contract::ImportError> {
+    let snapshot = parse_and_verify(text)?;
+    Ok((snapshot.journal_id, snapshot.logical_version))
+}
+
 impl Journal {
     /// Read the complete journal into a [`JournalSnapshot`] (Story 5.3). Includes sold holdings and
     /// each study's lifecycle status. Deterministic order throughout (stable hash).

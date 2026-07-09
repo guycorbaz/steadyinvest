@@ -645,9 +645,10 @@ mod tests {
         // the « Racheter : … » caption, and second occurrences of the ledger vocabulary:
         // Transactions/Masquer, the empty state, the three kind nouns, the qty×price /
         // Frais / Retenue / net templates, the five form placeholders, « Enregistrer un
-        // achat »): +20 = 466. Floor strict.
+        // achat »): +20 = 466. Issue #65 adds the import-arbitration banner actions
+        // (« Confirmer l'import » + an « Annuler » occurrence): +2 = 468. Floor strict.
         assert!(
-            total >= 466,
+            total >= 468,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -735,9 +736,11 @@ mod tests {
         // study told apart from a truly absent one): 118 + 1 = 119.
         // Issue #67 adds the uncheckpointed-backup refusal (MSG_RESTORE_UNCHECKPOINTED — a raw copy
         // of a live journal whose -wal holds commits the .db lacks): 119 + 1 = 120.
+        // Issue #65 adds the older-import arbitration prompt (MSG_IMPORT_CONFIRM — a same-journal
+        // version regression is stated and confirmed, never merged silently): 120 + 1 = 121.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            120,
+            121,
             "state.rs message inventory changed — register the new notice"
         );
     }

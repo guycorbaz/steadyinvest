@@ -40,6 +40,26 @@ fn undo_state(dir: &TempDir, seed: u128, ts: &str) -> JournalState {
     state
 }
 
+/// Like [`watch_state`] but with a caller-chosen **journal id** — for the foreign-envelope
+/// arbitration tests (issue #65: a foreign journal has no version axis to compare).
+fn watch_state_with_journal_id(dir: &TempDir, seed: u128, jid: u128) -> JournalState {
+    let path = dir.path().join("journal.db");
+    if !path.exists() {
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(jid),
+                &Timestamp("2026-06-14T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+    }
+    let clock: Box<dyn Clock> = Box::new(FixedClock(Timestamp("2026-06-27T15:00:00Z".to_string())));
+    let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
+    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    state
+}
+
 /// Like [`undo_state`] but with a **sequential** id source — for tests that create several
 /// entities (Story 4.1 watchlist: each `add_watch_item` needs a distinct id).
 fn watch_state(dir: &TempDir, seed: u128) -> JournalState {
@@ -5644,5 +5664,118 @@ fn confirm_restore_recheck_catches_a_wal_that_appeared_after_the_assessment() {
         state.logical_version_or_zero(),
         live_version,
         "the live journal was never touched"
+    );
+}
+
+// ── Issue #65 — import d'un journal plus ancien : arbitrage de version + agrégats re-dérivés ──
+
+#[test]
+fn an_older_same_journal_import_parks_behind_a_confirm_and_applies_nothing() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x650);
+    let envelope = state.export_journal().unwrap();
+    // Advance the live journal past the envelope's version.
+    state.create_study("NESN", "CHF").unwrap();
+
+    let request = state.request_import_journal(&envelope).unwrap();
+    let ImportRequest::NeedsConfirm { source, current } = request else {
+        panic!("an older same-journal envelope must ask for a confirm, got {request:?}");
+    };
+    assert!(
+        source < current,
+        "the regression is stated: {source} < {current}"
+    );
+    assert_eq!(
+        state.list_studies().len(),
+        1,
+        "nothing was applied while parked"
+    );
+
+    state.cancel_import_journal();
+    assert!(
+        state.confirm_import_journal().is_err(),
+        "cancel discarded the parked envelope — confirm has nothing to apply"
+    );
+}
+
+#[test]
+fn a_confirmed_older_import_does_not_resurrect_a_sold_holding() {
+    // THE issue scenario: export → sell locally → re-import the older envelope. The upsert alone
+    // would blank `sold_at` (a resurrected register row beside a surviving SELL transaction); the
+    // arbitration + post-import re-derivation must keep the position retired.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x651);
+    state.add_holding("NESN", "10", "100", "CHF").unwrap();
+    let id = state.list_holdings()[0].id;
+    let envelope = state.export_journal().unwrap(); // sold_at NULL, quantity 10, no transactions
+    assert_eq!(state.sell_holding(id, "", "", "CHF"), Ok(MSG_HOLDING_SOLD));
+
+    let request = state.request_import_journal(&envelope).unwrap();
+    assert!(matches!(request, ImportRequest::NeedsConfirm { .. }));
+    let summary = state.confirm_import_journal().unwrap();
+    assert_eq!(summary.holdings, 1, "the envelope's holding was merged");
+
+    assert!(
+        state.list_holdings().is_empty(),
+        "the sold position must NOT resurrect into the register"
+    );
+    let sold = state.sold_holdings();
+    assert_eq!(sold.len(), 1, "it stays a sold position");
+    assert_eq!(
+        sold[0].quantity, "0",
+        "the aggregate was re-derived from the surviving ledger, not left at the imported 10"
+    );
+    let kinds: Vec<Option<String>> = state
+        .holding_ledger(id)
+        .iter()
+        .map(|t| t.kind.clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![Some("buy".to_string()), Some("sell".to_string())],
+        "the local ledger survived the merge untouched"
+    );
+}
+
+#[test]
+fn a_same_version_or_foreign_envelope_applies_without_a_confirm() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x652);
+    state.create_study("NESN", "CHF").unwrap();
+
+    // Same journal, same version — no regression, applied straight away.
+    let envelope = state.export_journal().unwrap();
+    assert!(matches!(
+        state.request_import_journal(&envelope).unwrap(),
+        ImportRequest::Applied(_)
+    ));
+
+    // A FOREIGN journal's envelope (the FR60 seed case) has no version axis to compare — applied.
+    let foreign_dir = TempDir::new().unwrap();
+    let mut foreign = watch_state_with_journal_id(&foreign_dir, 0x653, 0xFEED);
+    foreign.create_study("ROG", "CHF").unwrap();
+    let foreign_envelope = foreign.export_journal().unwrap();
+    assert!(matches!(
+        state.request_import_journal(&foreign_envelope).unwrap(),
+        ImportRequest::Applied(_)
+    ));
+    assert_eq!(state.list_studies().len(), 2, "the foreign study merged in");
+}
+
+#[test]
+fn request_import_is_guarded_and_maps_envelope_rejections() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x654);
+    let envelope = state.export_journal().unwrap();
+    state.read_only = true;
+    assert_eq!(
+        state.request_import_journal(&envelope).unwrap_err(),
+        MSG_READ_ONLY_WRITE.to_string()
+    );
+    state.read_only = false;
+    assert_eq!(
+        state.request_import_journal("not json at all").unwrap_err(),
+        MSG_IMPORT_MALFORMED.to_string(),
+        "the peek refuses exactly what the import would"
     );
 }

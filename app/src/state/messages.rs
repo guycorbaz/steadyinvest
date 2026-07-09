@@ -315,6 +315,10 @@ pub const MSG_JOURNAL_EXPORTED: &str = "Le journal a été exporté.";
 /// trailing `(source : journal {jid}, version {ver})` clause surfaces the imported file's identity so
 /// the user sees whether it is the **same** journal (an update) or a **foreign** seed (AC3).
 pub const MSG_JOURNAL_IMPORTED: &str = "Le journal a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s). (source : journal {jid}, version {ver})";
+/// Issue #65: the arbitration prompt for an OLDER same-journal envelope (a `{n}`-substitution
+/// template; [`import_confirm_message`] fills it). The merge would snap shared entities back to
+/// their old state — never applied silently.
+pub const MSG_IMPORT_CONFIRM: &str = "Importer ce fichier (version {b}) ? Il est plus ancien que le journal actuel (version {c}) : les éléments communs reprendront leur état de l'époque ; les transactions locales restent enregistrées et les positions sont recalculées. Rien n'a encore été importé.";
 
 /// Backup / restore copy (Story 5.4, FR61) — fact-stating, posture-gated. The backup/restore unit is
 /// the raw `.db`; a restore validates integrity + schema-version + identity BEFORE any overwrite and
@@ -355,6 +359,15 @@ pub fn journal_stale_message(seen: u64, here: u64) -> String {
     MSG_JOURNAL_STALE
         .replace("{seen}", &seen.to_string())
         .replace("{here}", &here.to_string())
+}
+
+/// The neutral arbitration prompt for an older same-journal import (issue #65) — a
+/// `{n}`-substitution of [`MSG_IMPORT_CONFIRM`] surfacing the version pair (FR-61 spirit: the
+/// regression is stated, never applied silently).
+pub fn import_confirm_message(source: u64, current: u64) -> String {
+    MSG_IMPORT_CONFIRM
+        .replace("{b}", &source.to_string())
+        .replace("{c}", &current.to_string())
 }
 
 /// The neutral confirm prompt for a restore (a `{n}`-substitution of [`MSG_RESTORE_CONFIRM`] +
@@ -633,6 +646,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_IMPORT_INTEGRITY,
     MSG_IMPORT_VERSION,
     MSG_IMPORT_MALFORMED,
+    MSG_IMPORT_CONFIRM,
     MSG_JOURNAL_EXPORTED,
     MSG_JOURNAL_IMPORTED,
     MSG_BACKUP_CREATED,
