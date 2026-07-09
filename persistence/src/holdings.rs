@@ -384,6 +384,26 @@ impl Journal {
         Ok(())
     }
 
+    /// Fill the sector of every SAME-ticker holding whose sector is still empty (issue #98,
+    /// FR48 — the provider-fill rail): `UPDATE … WHERE sector IS NULL`, case-insensitive on the
+    /// ticker, across ALL portfolios (a company fact is journal-wide). A manual sector is never
+    /// touched (the app's precedence decision: the provider fills only the void). Returns the
+    /// number of rows filled; bumps the version only when something changed.
+    pub fn fill_holdings_sector_if_empty(&mut self, ticker: &str, sector: &str) -> Result<usize> {
+        self.check_writable()?;
+        let tx = self.conn.transaction()?;
+        let changed = tx.execute(
+            "UPDATE holdings SET sector = ?2
+             WHERE upper(security_ticker) = upper(?1) AND sector IS NULL",
+            rusqlite::params![ticker, sector],
+        )?;
+        if changed > 0 {
+            bump_logical_version(&tx)?;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     /// Remove a holding (FR36). One transaction; bumps the version only on a real removal (an
     /// absent id is an idempotent no-op). Refuses (typed [`Error::CorruptPayload`]-free, neutral
     /// [`Error::HoldingHasTransactions`]) while transaction rows still reference the holding —

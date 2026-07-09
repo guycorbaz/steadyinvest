@@ -92,6 +92,8 @@ impl MarketDataProvider for TwelveDataProvider {
             latest_session_date,
             // Issue #113: Twelve Data's fundamentals are None by design (Story 7.4) — no TTM EPS either.
             ttm_eps: None,
+            // Twelve Data's fundamentals here are price-derived — no company sector (issue #98).
+            sector: None,
         })
     }
 

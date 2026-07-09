@@ -129,6 +129,7 @@ fn fetched_custom(
         latest_price: None,
         latest_session_date: None,
         ttm_eps: None,
+        sector: None,
     }
 }
 
@@ -265,6 +266,7 @@ fn provider_fetch_drops_the_in_progress_year_without_annual_statements() {
         latest_price: None,
         latest_session_date: None,
         ttm_eps: None,
+        sector: None,
     };
 
     state.apply_provider_refresh(id, &fetched).unwrap();
@@ -5979,5 +5981,50 @@ fn a_holdings_sector_travels_in_the_journal_envelope() {
         target.list_holdings()[0].sector.as_deref(),
         Some("Consumer Defensive"),
         "the #78 additive rail carries the sector"
+    );
+}
+
+// ── Issue #98 (FR48, PR 2) — the provider fills only the EMPTY sector of same-ticker holdings ──
+
+#[test]
+fn a_study_fetch_fills_only_the_empty_sector_of_same_ticker_holdings() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x983);
+    state.add_holding("nesn", "10", "100", "CHF", "").unwrap(); // case-insensitive match
+    state
+        .add_holding("NESN", "5", "100", "CHF", "Mon secteur")
+        .unwrap(); // manual — never overwritten
+    state.add_holding("ROG", "5", "200", "CHF", "").unwrap(); // other ticker — untouched
+    let id = state.create_study("NESN", "CHF").unwrap();
+
+    let fetched = FetchedFinancials {
+        sector: Some("Consumer Defensive".to_string()),
+        ..fetched_for(&[2021, 2022, 2023, 2024])
+    };
+    state.apply_provider_refresh(id, &fetched).unwrap();
+
+    let holdings = state.list_holdings();
+    assert_eq!(
+        holdings[0].sector.as_deref(),
+        Some("Consumer Defensive"),
+        "the empty same-ticker sector is filled (case-insensitive)"
+    );
+    assert_eq!(
+        holdings[1].sector.as_deref(),
+        Some("Mon secteur"),
+        "a manual sector always wins — the provider never overwrites"
+    );
+    assert_eq!(
+        holdings[2].sector, None,
+        "another ticker's holding is untouched"
+    );
+
+    // A fetch with NO sector changes nothing (an absence is never a clear).
+    let no_sector = fetched_custom(&[2021, 2022, 2023, 2024], 1000, 5, 100, 50, "cafe2");
+    state.apply_provider_refresh(id, &no_sector).unwrap();
+    assert_eq!(
+        state.list_holdings()[0].sector.as_deref(),
+        Some("Consumer Defensive"),
+        "an absent provider sector clears nothing"
     );
 }

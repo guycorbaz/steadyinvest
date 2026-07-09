@@ -28,6 +28,10 @@ pub struct FetchedFinancials {
     /// Trailing-twelve-months EPS (Issue #113) — the current-P/E denominator. A present market fact
     /// (like `latest_price`), excluded from `digest` (a moving figure must not churn the hash).
     pub ttm_eps: Option<Decimal>,
+    /// The company's sector (issue #98, FR48 — provider-reported, `None` when not exposed).
+    /// Excluded from `digest` like the other non-annual facts; the app fills only the void
+    /// (a manual sector always wins).
+    pub sector: Option<String>,
 }
 
 /// Which field a fetch serves (Story 6.9, FR26) — the fallback chain is configured PER field
@@ -150,6 +154,7 @@ pub async fn fetch_canonical(
         latest_price,
         latest_session_date,
         ttm_eps,
+        sector,
     } = provider.fetch_fundamentals(ticker, api_key).await?;
     let canonical = normalize(financials)?;
     let digest = dependency_digest(provider.tag(), ticker, &canonical);
@@ -159,6 +164,7 @@ pub async fn fetch_canonical(
         latest_price,
         latest_session_date,
         ttm_eps,
+        sector,
     })
 }
 
@@ -251,6 +257,8 @@ pub struct FakeProvider {
     fx_session_date: Option<String>,
     /// The canned trailing-twelve-months EPS (Issue #113) — drives current-P/E tests.
     ttm_eps: Option<Decimal>,
+    /// The canned company sector (issue #98) — drives the provider-fill tests.
+    sector: Option<String>,
 }
 
 impl FakeProvider {
@@ -263,6 +271,7 @@ impl FakeProvider {
             fx_rate: None,
             fx_session_date: None,
             ttm_eps: None,
+            sector: None,
         }
     }
 
@@ -278,6 +287,7 @@ impl FakeProvider {
             fx_rate: None,
             fx_session_date: None,
             ttm_eps: None,
+            sector: None,
         }
     }
 
@@ -307,6 +317,12 @@ impl FakeProvider {
         self.ttm_eps = ttm_eps;
         self
     }
+
+    /// Give the fake a canned company sector (issue #98 — drives the provider-fill tests).
+    pub fn with_sector(mut self, sector: Option<&str>) -> Self {
+        self.sector = sector.map(str::to_string);
+        self
+    }
 }
 
 impl MarketDataProvider for FakeProvider {
@@ -320,6 +336,7 @@ impl MarketDataProvider for FakeProvider {
             latest_price: self.latest_price,
             latest_session_date: self.latest_session_date.clone(),
             ttm_eps: self.ttm_eps,
+            sector: self.sector.clone(),
         })
     }
 
