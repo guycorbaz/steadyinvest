@@ -223,7 +223,18 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
     }
     // Total horizontal span in "year units": the historical years plus the forecast horizon, so the
     // forecast point sits at the right edge (x == CHART_W).
-    let span = (n as f64 - 1.0) + f64::from(FORECAST_HORIZON_YEARS);
+    //
+    // Issue #35: a TRAILING year with nothing this chart plots (no sales, no EPS, no high price —
+    // « Ajouter une année » before any entry) must not reserve an x-slot: it shifted the whole
+    // history left on the click, before any figure existed. Only the plotted prefix spans; a
+    // trailing year enters the span the moment its first plottable figure lands. The drag mapping
+    // is untouched (vertical-only — the span drives x placement, never the y↔value inverse), and a
+    // non-trailing gap year rightly keeps its slot (the series' time axis stays honest).
+    let n_plotted = years
+        .iter()
+        .rposition(|cy| cy.sales.is_some() || cy.eps.is_some() || cy.high_price.is_some())
+        .map_or(0, |i| i + 1);
+    let span = (n_plotted.max(1) as f64 - 1.0) + f64::from(FORECAST_HORIZON_YEARS);
     let x_hist = |i: usize| x_for(i as f64, span);
 
     // Per-series (x, value) points.
@@ -506,7 +517,13 @@ pub fn pe_chart(frame: &StudyFrame, judgment: &Judgment, format: NumberFormat) -
     if per.is_empty() {
         return pe_chart_unavailable();
     }
-    let n = per.len();
+    // Issue #35 (the §1 rule): a TRAILING year with no computed P/E must not reserve an x-slot —
+    // only the plotted prefix spans. A non-trailing gap year keeps its slot (honest time axis);
+    // the judged-level drag is untouched (the levels are full-width horizontals, vertical-only).
+    let n = per
+        .iter()
+        .rposition(|yv| yv.high_pe.is_some() || yv.low_pe.is_some())
+        .map_or(1, |i| i + 1);
     let x_of = |i: usize| -> f32 {
         if n <= 1 {
             CHART_W / 2.0
@@ -1282,5 +1299,77 @@ mod tests {
         );
         assert_eq!(chart.judgment_y, -1.0);
         assert!(chart.eps_commands.is_empty());
+    }
+
+    /// Issue #35: a trailing to-fill year (« Ajouter une année », nothing entered yet) reserves NO
+    /// x-slot — the §1 geometry is IDENTICAL with and without it, so the history does not shift
+    /// left on the click. The slot appears only once a plottable figure lands in that year.
+    #[test]
+    fn a_trailing_empty_year_reserves_no_slot_in_the_growth_chart() {
+        let filled = || -> Vec<YearData> {
+            (2021..=2025)
+                .enumerate()
+                .map(|(i, y)| year(y, &format!("{}", 4 + i)))
+                .collect()
+        };
+        let mut extended = filled();
+        // The production « Ajouter une année » constructor — all four canonical cells to-fill.
+        extended.push(crate::viewmodel::entry::tofill_year(2026, prov()));
+
+        let j = || judgment(Some(money("9")));
+        let without_frame = build_frame(&study(filled(), j())).expect("normalizes");
+        let with_frame = build_frame(&study(extended, j())).expect("normalizes");
+        let without = growth_chart(&without_frame, NumberFormat::Comma);
+        let with = growth_chart(&with_frame, NumberFormat::Comma);
+
+        assert_eq!(
+            with.eps_commands, without.eps_commands,
+            "the EPS history must not shift left on the un-filled extension"
+        );
+        assert_eq!(with.sales_commands, without.sales_commands);
+        assert_eq!(with.price_commands, without.price_commands);
+        assert_eq!(
+            with.judgment_commands, without.judgment_commands,
+            "the forecast line keeps its origin"
+        );
+        let fans = |c: &GrowthChartState| -> Vec<String> {
+            c.fan_commands.iter().map(|s| s.to_string()).collect()
+        };
+        assert_eq!(fans(&with), fans(&without), "the fan keeps its origin");
+        assert_eq!(
+            (with.axis_min, with.axis_max),
+            (without.axis_min, without.axis_max),
+            "the drag scale is untouched"
+        );
+    }
+
+    /// Issue #35, the same rule on the §3 P/E chart: a trailing to-fill year computes no P/E and
+    /// must not reserve an x-slot — the polylines are identical with and without it.
+    #[test]
+    fn a_trailing_empty_year_reserves_no_slot_in_the_pe_chart() {
+        let filled = || -> Vec<YearData> {
+            (2021..=2025)
+                .enumerate()
+                .map(|(i, y)| year(y, &format!("{}", 4 + i)))
+                .collect()
+        };
+        let mut extended = filled();
+        extended.push(crate::viewmodel::entry::tofill_year(2026, prov()));
+
+        let j = judgment(Some(money("9")));
+        let without_frame = build_frame(&study(filled(), j.clone())).expect("normalizes");
+        let with_frame = build_frame(&study(extended, j.clone())).expect("normalizes");
+        let without = pe_chart(&without_frame, &j, NumberFormat::Comma);
+        let with = pe_chart(&with_frame, &j, NumberFormat::Comma);
+
+        assert_eq!(
+            with.high_pe_commands, without.high_pe_commands,
+            "the high-P/E polyline must not shift left"
+        );
+        assert_eq!(with.low_pe_commands, without.low_pe_commands);
+        assert_eq!(
+            (with.axis_min, with.axis_max),
+            (without.axis_min, without.axis_max)
+        );
     }
 }
