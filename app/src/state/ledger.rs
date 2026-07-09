@@ -851,6 +851,73 @@ impl JournalState {
         Ok(())
     }
 
+    /// Re-derive every holding's materialized aggregate from its (possibly merged) ledger —
+    /// issue #65, called after a whole-journal import. The merge upserts the ENVELOPE's
+    /// `quantity`/`purchase_price`/`sold_at` while local ledger rows survive (import never
+    /// deletes), so the stored aggregate can disagree with the rows it is supposed to
+    /// materialize — the register would show the imported values until the next ledger mutation
+    /// silently snapped them back. Rules:
+    /// - only a **self-contained** ledger (has a buy row) re-derives; a pre-6.3 legacy ledger
+    ///   (no buy row) keeps its stored aggregate — that aggregate IS the opening (module doc);
+    /// - the replay is the pure 6.3 derivation; `sold_at` follows the replayed quantity
+    ///   ([`Self::retired_at_for`] — zero keeps/stamps the retire, positive un-retires);
+    /// - an unreadable or impossible history (a merge of diverged histories can over-sell) is a
+    ///   per-holding defensive SKIP (logged): the imported aggregate stands rather than a panic
+    ///   or a half-derived write. Best-effort by design — display surfaces re-read afterward.
+    pub(crate) fn rederive_position_aggregates(&mut self) {
+        let Some(journal) = self.journal.as_ref() else {
+            return;
+        };
+        let holdings = journal.list_all_holdings().unwrap_or_default();
+        let now = self.clock.now();
+        for holding in holdings {
+            let Ok(rows) = self.ledger_rows_strict(holding.id) else {
+                tracing::warn!("rederive: ledger of {} unreadable — skipped", holding.id);
+                continue;
+            };
+            // A dividend-only or legacy (no-buy) ledger derives no position — the stored
+            // aggregate stands (the 6.3/6.4 conventions).
+            if !rows.iter().any(|r| r.kind.as_deref() == Some(KIND_BUY)) {
+                continue;
+            }
+            let Ok(candidates) = rows.iter().map(candidate_of).collect::<Result<Vec<_>, _>>()
+            else {
+                tracing::warn!("rederive: a row of {} did not parse — skipped", holding.id);
+                continue;
+            };
+            let Ok(basis) = replay(candidates) else {
+                tracing::warn!(
+                    "rederive: the merged history of {} does not replay — skipped",
+                    holding.id
+                );
+                continue;
+            };
+            let quantity = basis.quantity.normalize().to_string();
+            let avg_cost = basis.avg_cost.normalize().to_string();
+            let retired_at = self.retired_at_for(&basis, &holding, &now.0);
+            if holding.quantity == quantity
+                && holding.purchase_price == avg_cost
+                && holding.sold_at == retired_at
+            {
+                continue; // already truthful — no write, no version bump
+            }
+            let Some(journal) = self.journal.as_mut() else {
+                return;
+            };
+            if let Err(error) = journal.set_position_aggregate(
+                holding.id,
+                &quantity,
+                &avg_cost,
+                retired_at.as_deref(),
+            ) {
+                tracing::warn!(
+                    "rederive: aggregate write for {} failed: {error}",
+                    holding.id
+                );
+            }
+        }
+    }
+
     /// The holding's retired state implied by a replayed position: an empty position keeps its
     /// existing `sold_at` (or stamps now when the mutation just emptied it); a non-empty position
     /// is active (`None` — un-retire).

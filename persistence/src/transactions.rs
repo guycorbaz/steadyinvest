@@ -237,6 +237,31 @@ impl Journal {
         Ok(entry.to_item(holding_id, KIND_BUY, now))
     }
 
+    /// Rewrite a holding's **materialized position aggregate** — `quantity`, `purchase_price`
+    /// (the WAC) and `sold_at` — in one guarded UPDATE + version bump (issue #65). The app calls
+    /// this after a whole-journal merge-import, where the upserted aggregate can disagree with
+    /// the MERGED ledger (local rows survive an import; the envelope's aggregate reflects only
+    /// its own rows): the caller re-derives via `core::risk` (no arithmetic here — the
+    /// calc-agnostic layer rule) and lands the truthful triple. `retired_at = None` clears the
+    /// retire stamp (an active position).
+    pub fn set_position_aggregate(
+        &mut self,
+        holding_id: Uuid,
+        quantity: &str,
+        avg_cost: &str,
+        retired_at: Option<&str>,
+    ) -> Result<()> {
+        self.check_writable()?;
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "UPDATE holdings SET quantity = ?2, purchase_price = ?3, sold_at = ?4 WHERE id = ?1",
+            rusqlite::params![holding_id.to_string(), quantity, avg_cost, retired_at],
+        )?;
+        bump_logical_version(&tx)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Record one **SELL of part (or all) of a position** and land the caller-computed remaining
     /// quantity **atomically** (Story 6.3, FR39). In a single transaction: the optional `opening`
     /// materialization (AC5, a `kind = "buy"` row), the `kind = "sell"` row for `entry`, then the

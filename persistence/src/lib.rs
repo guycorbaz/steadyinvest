@@ -28,7 +28,9 @@ mod util;
 mod watchlist;
 
 pub use error::{Error, Result};
-pub use export::{ImportSummary, JournalExport, JournalSnapshot, StudyRecord};
+pub use export::{
+    ImportSummary, JournalExport, JournalSnapshot, StudyRecord, inspect_journal_envelope,
+};
 pub use fx::FxRateItem;
 pub use holdings::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
 pub use journal::{Journal, JournalMode, clear_lock, lock_is_stale};

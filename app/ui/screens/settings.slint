@@ -392,6 +392,32 @@ export component SettingsScreen inherits Rectangle {
                     }
                 }
 
+                // Issue #65 — arbitration banner: an OLDER same-journal file is a version
+                // regression; it is stated and explicitly confirmed, never merged silently.
+                if Prefs.import-confirm != "": VerticalLayout {
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: Prefs.import-confirm;
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-caption;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-8;
+
+                        ActionButton {
+                            label: @tr("Confirmer l'import");
+                            clicked => { Prefs.confirm-import(); }
+                        }
+                        ActionButton {
+                            label: @tr("Annuler");
+                            clicked => { Prefs.cancel-import(); }
+                        }
+                    }
+                }
+
                 if Prefs.journal-status != "": Text {
                     text: Prefs.journal-status;
                     color: Tokens.text-mid;

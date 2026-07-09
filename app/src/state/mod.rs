@@ -57,6 +57,7 @@ mod tests;
 pub use cells::*;
 pub use concentration::*;
 pub use confront::*;
+pub use export_import::ImportRequest;
 pub(crate) use holdings::effective_currency;
 pub use journal_io::*;
 pub use messages::*;
@@ -109,6 +110,10 @@ pub struct JournalState {
     /// A validated backup parked awaiting confirmation (Story 5.4): a restore is **never applied
     /// silently** (FR61) — `request_restore` parks the candidate, `confirm_restore` applies it.
     pending_restore: Option<PendingRestore>,
+    /// A validated whole-journal envelope parked awaiting confirmation (issue #65): an OLDER
+    /// same-journal import is a version regression the user must confirm —
+    /// `request_import_journal` parks the text, `confirm_import_journal` applies it.
+    pending_import: Option<String>,
     /// The user-selected **active** portfolio (Story 6.1, FR37). `None` = use the first portfolio
     /// (deterministic). `main.rs` loads it from / persists it to `AppConfig.active_portfolio_id`; it
     /// is in-memory here (validated against the live portfolio list by [`Self::active_portfolio`]).
@@ -158,6 +163,7 @@ impl JournalState {
                             idgen,
                             history: UndoHistory::default(),
                             pending_restore: None,
+                            pending_import: None,
                             active_portfolio_id: None,
                         },
                         read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
@@ -193,6 +199,7 @@ impl JournalState {
                     idgen,
                     history: UndoHistory::default(),
                     pending_restore: None,
+                    pending_import: None,
                     active_portfolio_id: None,
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
@@ -222,6 +229,7 @@ impl JournalState {
                         idgen,
                         history: UndoHistory::default(),
                         pending_restore: None,
+                        pending_import: None,
                         active_portfolio_id: None,
                     },
                     read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
@@ -238,6 +246,7 @@ impl JournalState {
                         idgen,
                         history: UndoHistory::default(),
                         pending_restore: None,
+                        pending_import: None,
                         active_portfolio_id: None,
                     },
                     Some(format!("{MSG_SAVE_FAILED} {error}")),
