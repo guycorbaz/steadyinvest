@@ -245,6 +245,7 @@ fn a_holdings_currency_round_trips_including_a_legacy_none() {
         ],
         transactions: Vec::new(),
         fx_rates: Vec::new(),
+        judgment_snapshots: Vec::new(),
     };
     let envelope = envelope_json(&snapshot);
 
@@ -701,4 +702,105 @@ fn fx_rates_round_trip_and_an_old_file_without_the_array_still_imports() {
         .import_journal(&old_envelope)
         .expect("a pre-6.5 file (no fx_rates array) imports fine");
     assert_eq!(summary.fx_rates, 0);
+}
+
+// ── Issue #34 (FR51, PR 3) — the durable history travels in the envelope ──
+
+#[test]
+fn the_history_round_trips_byte_faithfully_and_reads_back_as_a_timeline() {
+    let (_dir, mut source) = empty_journal("source.db", 0x34A);
+    let jid = source.id();
+    let original = study(jid, 0x1, "NESN");
+    source
+        .put_study_with_history(&original, &ts("2026-07-09T08:00:00Z"))
+        .unwrap();
+    let mut changed = original.clone();
+    changed.rationale = Some("Raison consignée.".to_string());
+    source
+        .put_study_with_history(&changed, &ts("2026-07-09T09:00:00Z"))
+        .unwrap();
+    let source_rows = source.list_judgment_snapshots(original.id).unwrap();
+    assert_eq!(source_rows.len(), 2);
+
+    let (_dir2, mut target) = empty_journal("target.db", 0x34B);
+    let summary = target
+        .import_journal(&source.export_journal().unwrap())
+        .unwrap();
+    assert_eq!(
+        summary.judgment_snapshots, 2,
+        "the summary counts the history"
+    );
+
+    let target_rows = target.list_judgment_snapshots(original.id).unwrap();
+    assert_eq!(
+        target_rows, source_rows,
+        "ids, stamps and versions round-trip identically"
+    );
+    assert_eq!(
+        target.get_judgment_snapshot(target_rows[1].id).unwrap(),
+        Some(changed),
+        "each historical state reads back exactly"
+    );
+    // Idempotent — a re-import updates nothing new.
+    let again = target
+        .import_journal(&source.export_journal().unwrap())
+        .unwrap();
+    assert_eq!(again.judgment_snapshots, 2);
+    assert_eq!(
+        target.list_judgment_snapshots(original.id).unwrap().len(),
+        2
+    );
+}
+
+#[test]
+fn a_history_less_journal_exports_without_the_field_and_an_old_file_imports_fine() {
+    // The #78 additive rail, both directions.
+    let (_dir, mut j) = empty_journal("plain.db", 0x34C);
+    j.put_study(&study(j.id(), 0x2, "ROG")).unwrap(); // plain save — no history
+    let envelope: JournalExport = serde_json::from_str(&j.export_journal().unwrap()).unwrap();
+    assert!(
+        !envelope.payload.contains("judgment_snapshots"),
+        "an empty series is omitted, so a pre-#34 build still reads this export"
+    );
+
+    // An OLD file (the field absent) imports into THIS build — serde default.
+    let (_dir2, mut target) = empty_journal("old-target.db", 0x34D);
+    let summary = target.import_journal(&j.export_journal().unwrap()).unwrap();
+    assert_eq!(summary.judgment_snapshots, 0);
+}
+
+#[test]
+fn a_history_row_referencing_an_absent_study_is_malformed_and_writes_nothing() {
+    let (_dir, mut source) = empty_journal("bad-source.db", 0x34E);
+    let s = study(source.id(), 0x3, "NOVN");
+    source
+        .put_study_with_history(&s, &ts("2026-07-09T08:00:00Z"))
+        .unwrap();
+    let mut snapshot = snapshot_of(&source);
+    snapshot.studies.clear(); // the history now dangles
+    let (_dir2, mut target) = empty_journal("bad-target.db", 0x34F);
+    assert!(matches!(
+        target.import_journal(&envelope_json(&snapshot)),
+        Err(Error::ImportMalformed { .. })
+    ));
+    assert!(target.list_judgment_snapshots(s.id).unwrap().is_empty());
+}
+
+#[test]
+fn a_newer_schema_history_row_is_rejected_up_front() {
+    let (_dir, mut source) = empty_journal("newer-source.db", 0x350);
+    let s = study(source.id(), 0x4, "ABBN");
+    source
+        .put_study_with_history(&s, &ts("2026-07-09T08:00:00Z"))
+        .unwrap();
+    let mut snapshot = snapshot_of(&source);
+    snapshot.judgment_snapshots[0].schema_version = i64::from(SCHEMA_VERSION) + 1;
+    let (_dir2, mut target) = empty_journal("newer-target.db", 0x351);
+    assert!(
+        matches!(
+            target.import_journal(&envelope_json(&snapshot)),
+            Err(Error::ImportVersion { .. })
+        ),
+        "a row this build could never read back must not poison the timeline"
+    );
 }

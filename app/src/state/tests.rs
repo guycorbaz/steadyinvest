@@ -531,6 +531,7 @@ fn journal_import_maps_each_rejection_to_its_neutral_notice_and_writes_nothing()
 fn journal_imported_message_fills_the_counts() {
     let summary = ImportSummary {
         fx_rates: 0,
+        judgment_snapshots: 0,
         source_journal_id: Uuid::from_u128(1),
         source_logical_version: 7,
         studies: 3,

@@ -18,8 +18,9 @@
 //!   Import is a **merge/seed**, not a destructive replace — the current journal survives and absorbs
 //!   the file. (Destructive restore-from-backup is Story 5.4.)
 //!
-//! `fx_rates` is inert until Epic 6 (no FX) and the FR51 `judgments` time-series is deferred (#34) —
-//! neither is part of the v1 snapshot; the current judgment travels inside each [`Study`] blob.
+//! Post-v1 additions ride the #78 additive rail (`#[serde(default)]` + `skip_serializing_if`):
+//! `fx_rates` landed with Epic 6, the FR51 `judgments` time-series with issue #34 (PR 3). The
+//! CURRENT judgment still travels inside each [`Study`] blob; the time-series carries the past.
 
 use crate::error::{Error, Result};
 use crate::fx::FxRateItem;
@@ -30,7 +31,7 @@ use crate::util::bump_logical_version;
 use crate::watchlist::WatchItem;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use steadyinvest_contract::{ImportError, SCHEMA_VERSION, Study, sha256_hex};
+use steadyinvest_contract::{ImportError, SCHEMA_VERSION, Study, Timestamp, sha256_hex};
 use uuid::Uuid;
 
 /// One study plus its lifecycle `status` (the indexed column, not part of the [`Study`] blob — so it
@@ -47,8 +48,8 @@ pub struct StudyRecord {
 /// and OSes); no `HashMap`/`BTreeMap` anywhere.
 ///
 /// `deny_unknown_fields` makes a **newer-format** file that adds a future **entity ARRAY** (a new
-/// top-level field here, e.g. a hypothetical `judgments`) a typed **rejection** rather than a
-/// silent partial import that drops the unknown collection.
+/// top-level field here) a typed **rejection** rather than a silent partial import that drops the
+/// unknown collection.
 ///
 /// Issue #78 (decided 2026-07-08, product/architecture): this guarantee is **envelope-level only**.
 /// The per-entity item types (`HoldingItem`/`PortfolioItem`/`WatchItem`/`TransactionItem`) do NOT
@@ -78,6 +79,25 @@ pub struct JournalSnapshot {
     /// (`deny_unknown_fields` above) — never a silent drop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fx_rates: Vec<FxRateItem>,
+    /// The FR51 durable-history snapshots (issue #34, PR 3) — the same #78 additive rail as
+    /// `fx_rates`: an OLD file (no array) imports fine; a history-less journal exports WITHOUT
+    /// the array (a pre-#34 build still reads it); a file that DOES carry history is a typed
+    /// rejection on an old build — never a silent drop of the time-series.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judgment_snapshots: Vec<JudgmentSnapshotRecord>,
+}
+
+/// One FR51 snapshot row, exported **byte-faithfully** (issue #34, PR 3): `payload` is the RAW
+/// stored study-state JSON string — never re-parsed/re-serialized on export, so an old-schema
+/// historical state crosses exactly as the journal holds it (a time-series is an archive; its
+/// `schema_version` column keeps describing its own payload truthfully).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JudgmentSnapshotRecord {
+    pub id: Uuid,
+    pub study_id: Uuid,
+    pub created_at: Timestamp,
+    pub schema_version: i64,
+    pub payload: String,
 }
 
 /// The on-disk whole-journal export envelope. `payload` is the canonical serialized
@@ -107,6 +127,8 @@ pub struct ImportSummary {
     pub holdings: usize,
     pub transactions: usize,
     pub fx_rates: usize,
+    /// The FR51 history snapshots the file carried (issue #34, PR 3; `0` for a pre-#34 file).
+    pub judgment_snapshots: usize,
 }
 
 /// Serialize a snapshot into its envelope JSON. The hash is taken over the **payload** (the snapshot
@@ -196,7 +218,44 @@ impl Journal {
             holdings: self.list_all_holdings()?,
             transactions: self.list_all_transactions()?,
             fx_rates: self.list_fx_rates()?,
+            judgment_snapshots: self.all_judgment_snapshot_rows()?,
         })
+    }
+
+    /// Every FR51 snapshot row, raw and deterministic (issue #34, PR 3): ordered by
+    /// `(study_id, created_at, rowid)` so the canonical serialization — and its hash — is stable;
+    /// payloads cross **byte-faithfully** (no parse, no re-serialization — an archive).
+    fn all_judgment_snapshot_rows(&self) -> Result<Vec<JudgmentSnapshotRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, study_id, created_at, schema_version, payload FROM judgments
+             ORDER BY study_id, created_at, rowid",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, study_id, created_at, schema_version, payload) = row?;
+            let parse = |text: &str| {
+                Uuid::parse_str(text).map_err(|e| Error::CorruptJournalMeta {
+                    detail: format!("judgments id {text:?} is not a valid UUID: {e}"),
+                })
+            };
+            out.push(JudgmentSnapshotRecord {
+                id: parse(&id)?,
+                study_id: parse(&study_id)?,
+                created_at: Timestamp(created_at),
+                schema_version,
+                payload,
+            });
+        }
+        Ok(out)
     }
 
     /// Export the whole journal to its portable envelope JSON (Story 5.3, FR60) — the serialized data
@@ -284,6 +343,44 @@ impl Journal {
                     rec.status,
                     study.schema_version,
                     payload,
+                ],
+            )?;
+        }
+
+        // FR51 history snapshots (issue #34, PR 3) — after studies (the `judgments.study_id` FK).
+        // A snapshot referencing a study absent from the file is a **malformed** snapshot (the
+        // whole import rolls back); a row written by a NEWER schema is rejected up front (the same
+        // rule as the studies gate — it would poison the timeline read otherwise). Upsert by id:
+        // byte-faithful and idempotent (a re-import updates nothing new).
+        let study_ids: std::collections::HashSet<Uuid> =
+            snapshot.studies.iter().map(|r| r.study.id).collect();
+        for js in &snapshot.judgment_snapshots {
+            if !study_ids.contains(&js.study_id) {
+                return Err(Error::ImportMalformed {
+                    detail: "a history snapshot references a study absent from the snapshot"
+                        .to_string(),
+                });
+            }
+            if js.schema_version > i64::from(SCHEMA_VERSION) {
+                return Err(Error::ImportVersion {
+                    found: u32::try_from(js.schema_version).unwrap_or(u32::MAX),
+                    supported: SCHEMA_VERSION,
+                });
+            }
+            tx.execute(
+                "INSERT INTO judgments (id, study_id, created_at, schema_version, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(id) DO UPDATE SET
+                     study_id = excluded.study_id,
+                     created_at = excluded.created_at,
+                     schema_version = excluded.schema_version,
+                     payload = excluded.payload",
+                rusqlite::params![
+                    js.id.to_string(),
+                    js.study_id.to_string(),
+                    js.created_at.0,
+                    js.schema_version,
+                    js.payload
                 ],
             )?;
         }
@@ -474,7 +571,8 @@ impl Journal {
             || !snapshot.holdings.is_empty()
             || !snapshot.transactions.is_empty()
             || !snapshot.portfolios.is_empty()
-            || !snapshot.fx_rates.is_empty();
+            || !snapshot.fx_rates.is_empty()
+            || !snapshot.judgment_snapshots.is_empty();
         if applied {
             bump_logical_version(&tx)?;
         }
@@ -491,6 +589,7 @@ impl Journal {
             portfolios: portfolio_inserted,
             holdings: snapshot.holdings.len(),
             transactions: snapshot.transactions.len(),
+            judgment_snapshots: snapshot.judgment_snapshots.len(),
         })
     }
 }
