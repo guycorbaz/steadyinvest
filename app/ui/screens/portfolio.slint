@@ -201,6 +201,35 @@ export component PortfolioScreen inherits Rectangle {
                         font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
+                    // ── Issue #98 (FR48): the sector re-concentration facts — the currency
+                    // block's exact mirror. An unknown sector is STATED (« non renseigné »,
+                    // the 2026-07-09 decision), never silent; an absent share never flags. ──
+                    if candidate.study-id != "" && candidate.sector == "": Text {
+                        text: @tr("secteur : non renseigné");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    if candidate.sector-missing != "": Text {
+                        text: @tr("secteur {} : exposition indisponible (taux manquant {})", candidate.sector, candidate.sector-missing);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    if candidate.sector-missing == "" && candidate.sector-share != "": Text {
+                        text: candidate.sector-flagged
+                            ? @tr("secteur {} : déjà {} % du capital · seuil {} % approché ou atteint", candidate.sector, candidate.sector-share, Holdings.concentration-threshold-display)
+                            : @tr("secteur {} : déjà {} % du capital", candidate.sector, candidate.sector-share);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    if candidate.sector != "" && candidate.sector-missing == "" && candidate.sector-share == "": Text {
+                        text: @tr("secteur {} : exposition indisponible", candidate.sector);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
                     if candidate.currency-missing != "": Text {
                         text: @tr("devise {} : exposition indisponible (taux manquant {})", candidate.currency, candidate.currency-missing);
                         color: Tokens.text-mid;
@@ -234,6 +263,13 @@ export component PortfolioScreen inherits Rectangle {
                         enabled: true;
                         clicked => { Holdings.go-to-studies(); }
                     }
+                }
+                // Issue #98 (FR48): the sector blind spot, stated once at panel level — the
+                // « non renseigné » bucket keeps the denominator whole (2026-07-09 decision).
+                if Holdings.candidates-sector-unlabeled != "": Text {
+                    text: @tr("secteur non renseigné : {} % du capital investi", Holdings.candidates-sector-unlabeled);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
                 }
                 if Holdings.candidates-rates != "": Text {
                     text: @tr("Convertis aux taux : {}", Holdings.candidates-rates);

@@ -48,6 +48,50 @@ impl CurrencyExposure {
     }
 }
 
+/// One sector's share of the TOTAL invested capital (issue #98, FR48) — the sector twin of
+/// [`CurrencyShare`]. `sector = None` is the « non renseigné » bucket (the 2026-07-09 decision:
+/// unsectored holdings form a VISIBLE share — the denominator stays the total invested capital,
+/// never a partial total).
+pub struct SectorShare {
+    pub sector: Option<String>,
+    pub share_pct: Option<Decimal>,
+    pub missing_pair: Option<String>,
+}
+
+/// The journal-wide per-sector exposure (issue #98, FR48): one row per held sector plus the
+/// « non renseigné » bucket when unsectored holdings exist. Conversion uses the same latest
+/// stored rates as [`CurrencyExposure`] (the same held currencies → the same FR28 footnote
+/// pairs — no second footnote needed).
+pub struct SectorExposure {
+    pub rows: Vec<SectorShare>,
+    pub global_positive: bool,
+}
+
+impl SectorExposure {
+    /// The exposure fact for `sector`: its held share, or an HONEST zero when the journal holds
+    /// nothing in it and the total is known — `(None, None)` when the total is absent (an absent
+    /// fact never flags, never passes as zero). The [`CurrencyExposure::share_for`] contract.
+    pub fn share_for(&self, sector: &str) -> (Option<Decimal>, Option<String>) {
+        match self
+            .rows
+            .iter()
+            .find(|r| r.sector.as_deref() == Some(sector))
+        {
+            Some(row) => (row.share_pct, row.missing_pair.clone()),
+            None => (self.global_positive.then_some(Decimal::ZERO), None),
+        }
+    }
+
+    /// The « non renseigné » bucket's share (the visible blind spot) — `None` when every active
+    /// holding carries a sector, or when the share could not be stated.
+    pub fn unlabeled_share(&self) -> Option<Decimal> {
+        self.rows
+            .iter()
+            .find(|r| r.sector.is_none())
+            .and_then(|r| r.share_pct)
+    }
+}
+
 /// Which facts a candidate could state (Story 6.8, AC1) — honest buckets, never dropped rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CandidateData {
@@ -87,6 +131,15 @@ pub struct ReplacementCandidate {
     /// The candidate's ALREADY-HELD share of the total invested capital (Story 6.7 rows) —
     /// present only when the ticker is currently held and its share could be stated.
     pub held_share_pct: Option<Decimal>,
+    /// Issue #98 (FR48): the candidate's sector — from a same-ticker holding (a company fact,
+    /// journal-wide, sold ones included). `None` = « secteur : non renseigné » (stated, never
+    /// silent — the 2026-07-09 decision).
+    pub sector: Option<String>,
+    /// The share of the total invested capital already in the candidate's sector (issue #98) —
+    /// absent when the sector is unknown or the share could not be stated.
+    pub sector_share_pct: Option<Decimal>,
+    /// Names the missing pair when the sector share is absent for that reason.
+    pub sector_missing_pair: Option<String>,
     /// The share of the total invested capital already denominated in the study's currency.
     pub currency_share_pct: Option<Decimal>,
     /// Names the missing pair when the currency share is absent for that reason.
@@ -169,6 +222,99 @@ impl JournalState {
         })
     }
 
+    /// The journal-wide per-sector invested exposure (issue #98, FR48): ALL active holdings of
+    /// EVERY portfolio, each converted to the reference at the LATEST stored rate (identity for
+    /// the reference), grouped by `holdings.sector` — `None` = the « non renseigné » bucket, a
+    /// VISIBLE share (2026-07-09 decision: the denominator is the total invested capital, never
+    /// a partial one). A missing pair absents every sector holding that currency (named) AND the
+    /// global. An unparseable stored decimal is skipped defensively (the 6.7 posture). `None` =
+    /// the view could not be built at all (no journal / a failed read).
+    pub fn journal_sector_exposure(&self, reference_currency: &str) -> Option<SectorExposure> {
+        use std::collections::BTreeMap;
+        let journal = self.journal.as_ref()?;
+        let portfolios = journal.list_portfolios().ok()?;
+        let mut all_holdings = Vec::new();
+        for portfolio in portfolios {
+            match journal.list_holdings(portfolio.id) {
+                Ok(mut holdings) => all_holdings.append(&mut holdings),
+                Err(_) => return None,
+            }
+        }
+        // One rate lookup per currency (memoized): Some(rate) usable, None missing/invalid.
+        let mut rate_memo: BTreeMap<String, Option<Decimal>> = BTreeMap::new();
+        // Per-sector accumulator: (amount — None once any member could not state, missing pair).
+        let mut buckets: BTreeMap<Option<String>, (Option<Decimal>, Option<String>)> =
+            BTreeMap::new();
+        for h in &all_holdings {
+            let (Ok(avg_cost), Ok(quantity)) = (
+                Decimal::from_str_exact(&h.purchase_price),
+                Decimal::from_str_exact(&h.quantity),
+            ) else {
+                continue; // unreachable through the validated write path — the 6.7 posture
+            };
+            let native = avg_cost.checked_mul(quantity);
+            let currency = super::effective_currency(h, reference_currency);
+            let (converted, missing) = if currency == reference_currency {
+                (native, None)
+            } else {
+                let rate = rate_memo
+                    .entry(currency.clone())
+                    .or_insert_with(|| {
+                        journal
+                            .latest_fx_rate(&currency, reference_currency, None)
+                            .ok()
+                            .flatten()
+                            .and_then(|r| Decimal::from_str_exact(&r.rate).ok())
+                            .filter(|r| r.is_sign_positive() && !r.is_zero())
+                    })
+                    .to_owned();
+                match rate {
+                    Some(rate) => (
+                        native.and_then(|n| steadyinvest_core::risk::convert(n, rate)),
+                        None,
+                    ),
+                    None => (None, Some(format!("{currency} → {reference_currency}"))),
+                }
+            };
+            let bucket = buckets
+                .entry(h.sector.clone())
+                .or_insert((Some(Decimal::ZERO), None));
+            bucket.0 = match (bucket.0, converted) {
+                (Some(sum), Some(v)) => sum.checked_add(v),
+                _ => None,
+            };
+            if bucket.1.is_none() {
+                bucket.1 = missing;
+            }
+        }
+        // The checked global — None as soon as one bucket is (never a partial total, 6.6 rule).
+        let global = buckets
+            .values()
+            .try_fold(Decimal::ZERO, |acc, (amount, _)| {
+                acc.checked_add((*amount)?)
+            });
+        // Deterministic rows: named sectors in BTreeMap order, « non renseigné » (None) first by
+        // Option ordering — moved last for display honesty (the blind spot closes the list).
+        let mut rows: Vec<SectorShare> = buckets
+            .into_iter()
+            .map(|(sector, (amount, missing_pair))| SectorShare {
+                sector,
+                share_pct: amount.zip(global).and_then(|(a, g)| share_pct(a, g)),
+                missing_pair,
+            })
+            .collect();
+        rows.sort_by(|a, b| match (&a.sector, &b.sector) {
+            (Some(x), Some(y)) => x.cmp(y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        });
+        Some(SectorExposure {
+            rows,
+            global_positive: global.is_some_and(|g| g > Decimal::ZERO),
+        })
+    }
+
     /// The FR48 replacement candidates (Story 6.8, AC1): one per watch item, in the PINNED
     /// order — in-buy-zone first (watchlist position tiebreak), then ascending relative
     /// distance above the buy zone, then « données insuffisantes », then « aucune étude ».
@@ -190,6 +336,19 @@ impl JournalState {
         let diversification =
             self.journal_diversification(reference_currency, small_max, medium_max);
         let exposure = self.journal_currency_exposure(reference_currency);
+        // Issue #98 (FR48): the sector twin of the currency exposure, plus the ticker → sector
+        // label map (a company fact — journal-wide, sold holdings included, first labeled row
+        // wins deterministically: list_all_holdings is (created_at, id)-ordered).
+        let sector_exposure = self.journal_sector_exposure(reference_currency);
+        let sector_by_ticker: std::collections::HashMap<String, String> = self
+            .journal
+            .as_ref()?
+            .list_all_holdings()
+            .ok()?
+            .into_iter()
+            .filter_map(|h| h.sector.map(|s| (h.security_ticker.to_uppercase(), s)))
+            .rev() // first labeled row wins on duplicate tickers (rev + collect keeps the first)
+            .collect();
 
         let items = self.journal.as_ref()?.list_watch_items().ok()?;
         let mut candidates: Vec<(usize, ReplacementCandidate)> = Vec::new();
@@ -215,6 +374,9 @@ impl JournalState {
                 zone_key: String::new(),
                 in_buy_zone: false,
                 below_band: false,
+                sector: None,
+                sector_share_pct: None,
+                sector_missing_pair: None,
                 distance_above_buy_pct: None,
                 ud_ratio: None,
                 currency: None,
@@ -282,6 +444,16 @@ impl JournalState {
                         .as_ref()
                         .map(|e| e.share_for(&currency))
                         .unwrap_or((None, None));
+                    // Issue #98 (FR48): the sector fact — labeled from a same-ticker holding;
+                    // unknown stays an honest None (« secteur : non renseigné » in the UI).
+                    let sector = sector_by_ticker
+                        .get(&item.security_ticker.to_uppercase())
+                        .cloned();
+                    let (sector_share_pct, sector_missing_pair) = match (&sector, &sector_exposure)
+                    {
+                        (Some(sector), Some(exposure)) => exposure.share_for(sector),
+                        _ => (None, None),
+                    };
                     ReplacementCandidate {
                         ticker: item.security_ticker.clone(),
                         study_id: Some(study.id),
@@ -292,6 +464,9 @@ impl JournalState {
                         distance_above_buy_pct: distance,
                         ud_ratio: ud,
                         currency: Some(currency),
+                        sector,
+                        sector_share_pct,
+                        sector_missing_pair,
                         held_share_pct,
                         currency_share_pct,
                         currency_missing_pair,

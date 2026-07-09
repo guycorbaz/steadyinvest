@@ -121,6 +121,12 @@ export struct CandidateRow {
     distance: string,        // formatted % above the buy zone ("" inside the zone / unknown)
     ud: string,              // formatted "N:1" ratio ("" when Undefined/Unknown)
     currency: string,
+    // Issue #98 (FR48): the candidate's sector ("" = non renseigné — stated, never silent) and
+    // its journal-wide invested share, the sector twin of the currency facts below.
+    sector: string,
+    sector-share: string,    // formatted % ("" when absent)
+    sector-flagged: bool,
+    sector-missing: string,  // named pair when the sector share is absent for a missing rate
     held-share: string,      // formatted % ("" when not held or absent)
     held-flagged: bool,
     currency-share: string,  // formatted % ("" when absent)
@@ -1090,6 +1096,9 @@ export global Holdings {
     //    after a successful sell (both paths), manually via the trigger-panel « Candidats »;
     //    session-only, cleared on journal switch, re-synced while open. ──
     in-out property <[CandidateRow]> candidate-rows;
+    // Issue #98 (FR48): the « non renseigné » sector bucket's share of the invested capital
+    // ("" = none) — the visible blind spot line of the candidates panel.
+    in-out property <string> candidates-sector-unlabeled;
     in-out property <bool> candidates-visible;
     in-out property <string> candidates-context; // the sold/triggering ticker ("" = manual open)
     // true ONLY when the panel was opened by a RECORDED sell (the two sell hooks) — the

@@ -651,9 +651,12 @@ mod tests {
         // states, the per-entry Détail/Masquer pair): +7 = 475. Issue #48 adds the three
         // below-band fact lines (watchlist, register zone slot, candidate line): +3 = 478.
         // Issue #98 (PR 1) adds the holding-form « Secteur (facultatif) » placeholder and the
-        // register's « Secteur : {} » caption: +2 = 480. Floor strict.
+        // register's « Secteur : {} » caption: +2 = 480. Issue #98 (PR 3) adds the six sector
+        // exposure lines on the candidates panel (non-renseigné per candidate, missing-rate,
+        // flagged + plain share, indisponible, the panel-level blind-spot line): +6 = 486.
+        // Floor strict.
         assert!(
-            total >= 480,
+            total >= 486,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
