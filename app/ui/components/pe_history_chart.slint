@@ -166,21 +166,22 @@ export component PeHistoryChart inherits Rectangle {
                     viewbox-height: root.chart.chart-h;
                 }
 
-                // ── The right-edge drag strip: the grab target for the ACTIVE judged level. A
-                //    GENEROUS mouse target (strip-w wide), deliberately wider than the line. ──
+                // ── The drag strip: the grab target for the ACTIVE judged level. A GENEROUS mouse
+                //    target (strip-w wide), deliberately wider than the line. Issue #187 (same fix
+                //    as the §1 growth chart): the strip is CENTRED on the level line's right end
+                //    (`chart-w` in design px, clamped into the plot) — anchored at the stretched
+                //    plot's right edge it would sit far from the visible grip square, whose press
+                //    would then pan the enclosing Flickable instead of dragging. ──
                 pe-strip-bg := Rectangle {
-                    x: parent.width - root.strip-w;
+                    x: Math.clamp(root.chart.chart-w * 1px - root.strip-w / 2, 0px, parent.width - root.strip-w);
                     width: root.strip-w;
                     height: parent.height;
                     background: Tokens.surface-alt.with-alpha(pe-strip.has-hover ? 0.6 : 0.3);
 
-                    // ONE grip + caption, on the active context's judged level. Issue #29 (the same
-                    // fix as the §1 growth chart's grip): the level line above renders 1:1 in plot-px
-                    // (viewbox-width bound to the plot's real width, #118), so its right end sits at
-                    // literal pixel `chart-w` from the plot's LEFT edge — not the strip's own
-                    // midpoint (the strip is anchored to the plot's right edge, a fixed distance
-                    // away). Align to `chart-w - pe-strip-bg.x`, allowed to render OUTSIDE the
-                    // strip's own background (no `clip: true` here; only the plot has one).
+                    // ONE grip + caption, on the active context's judged level. Issue #29: the grip's
+                    // `x` is `chart-w` translated into the strip's own coordinate space (with the
+                    // #187 anchoring the two normally coincide at the strip's midpoint; the
+                    // translation still covers the clamped-at-the-edges case).
                     if root.active-y >= 0.0: Rectangle {
                         width: Tokens.chart-grip;
                         height: Tokens.chart-grip;
@@ -209,6 +210,12 @@ export component PeHistoryChart inherits Rectangle {
 
                     pe-strip := TouchArea {
                         mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                        // Issue #187: the enclosing Flickable captures a gesture at press time, so it
+                        // must already be non-interactive when the press lands — hover is the earliest
+                        // signal.
+                        changed has-hover => {
+                            Studies.judgment-hover = self.has-hover;
+                        }
                         moved => {
                             Studies.pe-judgment-moved(root.drag-field, self.mouse-y);
                         }

@@ -595,6 +595,12 @@ export global Studies {
     // True while the user holds the §1 judgment endpoint — the enclosing form `Flickable` disables its
     // scroll so the vertical drag is not stolen (set on pointer-down, cleared on release).
     in-out property <bool> judgment-dragging;
+    // Issue #187: true while the pointer HOVERS a chart drag strip. The Flickable captures a gesture
+    // at press time, so flipping `judgment-dragging` inside the strip's own pointer-down arrives too
+    // late — the scroll has already grabbed the drag. Disabling the Flickable on hover puts it out of
+    // the way BEFORE the press. `judgment-dragging` stays load-bearing: it keeps the Flickable off
+    // when a live drag wanders outside the strip (hover flips false mid-drag).
+    in-out property <bool> judgment-hover;
     // Issue #121: which §1 EPS judgment the single drag handle currently edits — "est_high_eps" or
     // "est_low_eps". The context selector sets it; the chart shows the grip on that line only (all the
     // lines stay drawn). A pure UI selection — it changes nothing until the user actually drags.
