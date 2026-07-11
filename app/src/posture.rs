@@ -783,7 +783,7 @@ mod tests {
         }
         assert_eq!(
             crate::viewmodel::engine::USER_FACING_LABELS.len(),
-            22,
+            23,
             "engine.rs label inventory changed — register the new label"
         );
     }

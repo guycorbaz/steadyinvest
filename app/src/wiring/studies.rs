@@ -63,7 +63,6 @@ fn safe_stem(ticker: &str) -> String {
 /// Rebuild the dashboard list from the journal and mirror the read-only flag into the `Studies`
 /// global. Called on startup and after every create.
 pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
-    use steadyinvest_core::rounding::DisplayField;
     let studies = ui.global::<Studies>();
     // The dashboard view state (search/sort/filter) lives on the `Studies` global — read it back and
     // curate the persistence summaries (Story 2.12). Deterministic, pure (`viewmodel::studies::curate`).
@@ -87,14 +86,16 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
         // "à compléter" flag — no second engine pass. A study that fails to normalize is "unknown":
         // absent potential ("—") and NOT flagged incomplete (a broken normalize must not shout).
         let snapshot = crate::viewmodel::engine::build_snapshot(&study).ok();
-        let value = snapshot
-            .as_ref()
-            .and_then(|snap| snap.outputs().returns.projected_total_annualized_return_pct);
-        let display = match value {
-            Some(v) => format!(
-                "{} %",
-                crate::viewmodel::format::format_scaled(v, DisplayField::Percent, format)
-            ),
+        // Issue #189: when ONLY the dividend history is missing (EPS chain judged) the total is
+        // withheld by the core (absence ≠ 0) — the column then shows and sorts on the annualised
+        // appreciation alone, marked « (hors div.) » by `fmt_total_return`.
+        let return_outputs = snapshot.as_ref().map(|snap| &snap.outputs().returns);
+        let value = return_outputs.and_then(|r| {
+            r.projected_total_annualized_return_pct
+                .or_else(|| r.appreciation_only_potential())
+        });
+        let display = match return_outputs {
+            Some(r) => crate::viewmodel::engine::fmt_total_return(r, format),
             None => crate::viewmodel::form::EMPTY_SLOT.to_string(),
         };
         let incomplete = snapshot

@@ -412,9 +412,28 @@ pub struct ReturnOutputs {
     pub avg_yield_pct: Option<Decimal>,
     /// `(forecast_high − current_price) / current_price × 100`.
     pub projected_appreciation_pct: Option<Decimal>,
+    /// Annualised appreciation percent alone (`((high/current)^(1/horizon) − 1) × 100`,
+    /// §9-guarded) — the first term of the total below. Exposed separately so callers can
+    /// present an honest appreciation-only potential when the yield term is unknown
+    /// (issue #189); the total itself still requires both terms (absence ≠ 0).
+    pub projected_annualized_appreciation_pct: Option<Decimal>,
     /// Annualised appreciation percent (`((high/current)^(1/horizon) − 1) × 100`, §9-guarded)
     /// **plus** average yield percent (gross dividend, study side).
     pub projected_total_annualized_return_pct: Option<Decimal>,
+}
+
+impl ReturnOutputs {
+    /// The appreciation-only potential (issue #189): the annualised appreciation term alone,
+    /// but ONLY when the total is withheld solely for a missing dividend history — the EPS
+    /// chain must be judged (`avg_annual_eps` known) so an incomplete judgment (no EPS-growth
+    /// figure) still reads as unknown, never as an appreciation-only number. Display-side
+    /// fallback; the total itself stays `None` (absence ≠ 0).
+    pub fn appreciation_only_potential(&self) -> Option<Decimal> {
+        if self.projected_total_annualized_return_pct.is_some() || self.avg_annual_eps.is_none() {
+            return None;
+        }
+        self.projected_annualized_appreciation_pct
+    }
 }
 
 /// The full deterministic SSG output set (FR4): five sections + flags, findings, confidence
