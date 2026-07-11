@@ -272,27 +272,24 @@ export component GrowthChart inherits Rectangle {
                 viewbox-height: root.chart.chart-h;
             }
 
-            // ── The right-edge drag strip: the grab target for the future endpoint. mouse-y spans
-            //    the full height, so it maps 1:1 to the viewbox-y the adapter inverts. A GENEROUS
-            //    mouse target (strip-w wide) is deliberately wider than the line itself — easy to
-            //    grab regardless of where the line actually ends. ──
+            // ── The drag strip: the grab target for the future endpoint. mouse-y spans the full
+            //    height, so it maps 1:1 to the viewbox-y the adapter inverts. A GENEROUS mouse
+            //    target (strip-w wide) is deliberately wider than the line itself. Issue #187: the
+            //    strip is CENTRED on the line's endpoint x (`judgment-x`, clamped into the plot) —
+            //    the series render 1:1 in design px (#118), so on a stretched plot the endpoint sits
+            //    left of the right edge; a touch target anchored at the right edge would leave the
+            //    visible grip square unclickable and the press would pan the enclosing Flickable. ──
             strip := Rectangle {
-                x: parent.width - root.strip-w;
+                x: Math.clamp(root.chart.judgment-x * 1px - root.strip-w / 2, 0px, parent.width - root.strip-w);
                 width: root.strip-w;
                 height: parent.height;
                 background: Tokens.surface-alt.with-alpha(strip-touch.has-hover ? 0.6 : 0.3);
 
                 // Issue #121: ONE grip + caption, on the ACTIVE context's endpoint (est-high or est-low).
-                // Issue #29: the trend-line `Path` above renders 1:1 in plot-px (viewbox-width is bound
-                // to the plot's real width, #118), so its endpoint sits at literal pixel `judgment-x`
-                // from the PLOT's left edge — NOT at the strip's own midpoint (the strip is anchored to
-                // the plot's right edge, a fixed distance away, so the two only coincide when the plot
-                // happens to render exactly `chart-w` px wide). Aligning the grip's `x` to
-                // `judgment-x - strip.x` (i.e. `judgment-x` translated into the strip's own coordinate
-                // space) makes the marker sit exactly under the line's endpoint regardless of plot
-                // width — deliberately allowed to render OUTSIDE the strip's own background (this
-                // Rectangle has no `clip: true`; only the plot does), so it stays correct even when the
-                // strip's highlight box and the line's endpoint are far apart.
+                // Issue #29: the grip's `x` is `judgment-x` translated into the strip's own coordinate
+                // space, so the marker sits exactly under the line's endpoint regardless of plot width
+                // (with the #187 anchoring above the two normally coincide at the strip's midpoint;
+                // the translation still covers the clamped-at-the-edges case).
                 if root.active-y >= 0.0: Rectangle {
                     width: Tokens.chart-grip;
                     height: Tokens.chart-grip;
@@ -322,6 +319,11 @@ export component GrowthChart inherits Rectangle {
 
                 strip-touch := TouchArea {
                     mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                    // Issue #187: the enclosing Flickable captures a gesture at press time, so it must
+                    // already be non-interactive when the press lands — hover is the earliest signal.
+                    changed has-hover => {
+                        Studies.judgment-hover = self.has-hover;
+                    }
                     moved => {
                         Studies.judgment-moved(root.drag-field, self.mouse-y);
                     }

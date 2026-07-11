@@ -241,9 +241,11 @@ export component StudyScreen inherits Rectangle {
         Flickable {
         vertical-stretch: 1;
         viewport-height: content.preferred-height;
-        // While the §1 judgment endpoint is held, yield the scroll so the vertical drag is not stolen
-        // by the form's flick (Story 2.8). The flag flips on the chart handle's pointer down/up.
-        interactive: !Studies.judgment-dragging;
+        // While the pointer hovers a chart drag strip — or holds its endpoint — yield the scroll so
+        // the vertical drag is not stolen by the form's flick (Story 2.8, issue #187). The Flickable
+        // captures a gesture at PRESS time, so the hover flag must put it out of the way before the
+        // press lands; the dragging flag then keeps it off while a live drag wanders off the strip.
+        interactive: !Studies.judgment-dragging && !Studies.judgment-hover;
 
         content := VerticalLayout {
             alignment: start;
@@ -259,6 +261,7 @@ export component StudyScreen inherits Rectangle {
                     clicked => {
                         Studies.study-open = false;
                         Studies.judgment-dragging = false; // clear any stuck drag flag (review P5)
+                        Studies.judgment-hover = false; // and the #187 hover flag with it
                         Studies.demo-active = false; // leaving the read-only demo (Story 2.13)
                     }
                 }
