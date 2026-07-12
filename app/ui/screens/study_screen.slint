@@ -674,14 +674,28 @@ export component StudyScreen inherits Rectangle {
                         field-key: "sales_growth";
                         value: Studies.judgment.sales-growth;
                         suffix: "%";
+                        suggestion: Studies.judgment-suggestions.sales-growth;
                     }
                     VerticalLayout {
                         spacing: Tokens.space-4;
+                        alignment: start;
                         JudgmentField {
                             label: @tr("Croissance projetée du BPA");
                             field-key: "eps_growth";
                             value: Studies.judgment.eps-growth;
                             suffix: "%";
+                            suggestion: Studies.judgment-suggestions.eps-growth;
+                        }
+                        // 2026-07-12: the field's ROLE stated permanently — it is NOT redundant with
+                        // the dragged curves: the §5 average-annual-EPS (→ rendement moyen) always
+                        // reads it, and the §1 line derives from it only while no direct high EPS is
+                        // set. Without this caption the field reads as a duplicate of the drag.
+                        Text {
+                            text: @tr("nécessaire au rendement moyen du §5");
+                            color: Tokens.text-low;
+                            font-size: Tokens.font-caption;
+                            width: 200px;
+                            wrap: word-wrap;
                         }
                         // Issue #31: direct wins over derived (core::ssg::growth::compute), so once a
                         // direct "BPA estimé haut" is also set, THIS line ignores the growth % — a
@@ -826,11 +840,13 @@ export component StudyScreen inherits Rectangle {
                         label: @tr("PER haut moyen jugé");
                         field-key: "high_pe";
                         value: Studies.judgment.high-pe;
+                        suggestion: Studies.judgment-suggestions.high-pe;
                     }
                     JudgmentField {
                         label: @tr("PER bas moyen jugé");
                         field-key: "low_pe";
                         value: Studies.judgment.low-pe;
+                        suggestion: Studies.judgment-suggestions.low-pe;
                     }
                 }
             }

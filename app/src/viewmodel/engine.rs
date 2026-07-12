@@ -34,8 +34,8 @@ use crate::viewmodel::entry;
 use crate::viewmodel::form::EMPTY_SLOT;
 use crate::viewmodel::format::{NumberFormat, format_scaled};
 use crate::{
-    GrowthComputed, JudgmentFields, MgmtComputed, PeComputed, ReturnComputed, RiskComputed,
-    ScenarioCompareState, ScenarioOutcome, TraceState, VerdictState, ZoneBarState,
+    GrowthComputed, JudgmentFields, JudgmentSuggestions, MgmtComputed, PeComputed, ReturnComputed,
+    RiskComputed, ScenarioCompareState, ScenarioOutcome, TraceState, VerdictState, ZoneBarState,
 };
 
 // ── contract → core construction (relocated to `report::form` in Story 5.6) ──
@@ -288,6 +288,28 @@ pub fn growth_computed(outputs: &SsgOutputs, format: NumberFormat) -> GrowthComp
     GrowthComputed {
         sales_cagr: fmt_pct(outputs.growth.sales_cagr_pct, format).into(),
         eps_cagr: fmt_pct(outputs.growth.eps_cagr_pct, format).into(),
+    }
+}
+
+/// Historical values proposed for the EMPTY judgment fields (2026-07-12): the §1 historical CAGRs
+/// (→ the projected sales/EPS growth inputs) and the §3 P/E averages (→ the judged avg high/low
+/// P/E). `""` when the historical figure is unknown — no proposal is shown (never the em-dash: an
+/// empty string hides the chip, a dash would render a nonsense proposal). Formatted with the SAME
+/// per-field display scale as the entry fields, so an adopted value round-trips through
+/// `set-judgment` exactly like typed text — adoption is an explicit user gesture and therefore a
+/// judgment (the #23 rail; nothing is prefilled silently).
+pub fn judgment_suggestions(outputs: &SsgOutputs, format: NumberFormat) -> JudgmentSuggestions {
+    let opt = |v: Option<Decimal>, field: DisplayField| -> slint::SharedString {
+        match v {
+            Some(d) => format_scaled(d, field, format).into(),
+            None => slint::SharedString::new(),
+        }
+    };
+    JudgmentSuggestions {
+        sales_growth: opt(outputs.growth.sales_cagr_pct, DisplayField::Percent),
+        eps_growth: opt(outputs.growth.eps_cagr_pct, DisplayField::Percent),
+        high_pe: opt(outputs.valuation.avg_high_pe, DisplayField::PeRatio),
+        low_pe: opt(outputs.valuation.avg_low_pe, DisplayField::PeRatio),
     }
 }
 
@@ -915,6 +937,37 @@ mod tests {
         );
         s.years = years;
         s
+    }
+
+    /// 2026-07-12: the « hist. » proposals mirror the §1 historical CAGRs and §3 P/E averages
+    /// (per-field display scale, so an adopted value round-trips through set-judgment like typed
+    /// text), and an UNKNOWN figure yields the empty string — the chip is hidden, never an
+    /// em-dash proposal.
+    #[test]
+    fn judgment_suggestions_mirror_history_and_hide_unknowns() {
+        let format = NumberFormat::default();
+        // Flat 5-year history: eps 5, high 100, low 50 every year → avg high P/E 20, avg low P/E
+        // 10, and both CAGRs exactly 0 %.
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let study = study_with(years, full_judgment());
+        let snap = build_snapshot(&study).expect("normalizes");
+        let s = judgment_suggestions(snap.outputs(), format);
+        let scaled = |v: &str, f: DisplayField| {
+            format_scaled(Decimal::from_str_exact(v).unwrap(), f, format)
+        };
+        assert_eq!(s.high_pe.as_str(), scaled("20", DisplayField::PeRatio));
+        assert_eq!(s.low_pe.as_str(), scaled("10", DisplayField::PeRatio));
+        assert_eq!(s.sales_growth.as_str(), scaled("0", DisplayField::Percent));
+        assert_eq!(s.eps_growth.as_str(), scaled("0", DisplayField::Percent));
+
+        // A single-year history: the CAGRs are unknown (n = 0) → EMPTY proposals (no chip); the
+        // one-year P/E "averages" are still known and proposed.
+        let study = study_with(vec![year(2025, validated_cell)], full_judgment());
+        let snap = build_snapshot(&study).expect("normalizes");
+        let s = judgment_suggestions(snap.outputs(), format);
+        assert_eq!(s.sales_growth.as_str(), "");
+        assert_eq!(s.eps_growth.as_str(), "");
+        assert_eq!(s.high_pe.as_str(), scaled("20", DisplayField::PeRatio));
     }
 
     /// 5 fully-validated-fresh usable years + complete judgment → Verdict::Full, and the adapter's

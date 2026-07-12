@@ -244,6 +244,18 @@ export struct GrowthComputed {
     eps-cagr: string,
 }
 
+// Historical values proposed for the EMPTY judgment fields (2026-07-12): the §1 historical CAGRs
+// (→ projected sales/EPS growth) and the §3 P/E averages (→ judged avg high/low P/E), formatted;
+// "" when unknown (no proposal shown). Adopting one is an EXPLICIT user gesture — the « hist. »
+// chip under the field — so the act of adoption IS the judgment (the #23 rail: a judgment is
+// validated by the act of entry; nothing is ever prefilled silently).
+export struct JudgmentSuggestions {
+    sales-growth: string,
+    eps-growth: string,
+    high-pe: string,
+    low-pe: string,
+}
+
 // ── Story 2.8 — the §1 interactive semi-log growth chart ──
 // One 1→200 semi-log axis tick: its decade label + the viewbox-y it sits at.
 export struct AxisTick {
@@ -591,6 +603,9 @@ export global Studies {
     // still missing). A JudgmentField highlights itself when its key is in this set, so the user sees
     // exactly which inputs to fill; empty for a Full verdict. Pushed alongside the verdict.
     in-out property <[string]> required-fields;
+    // Historical values proposed for the empty judgment fields (see JudgmentSuggestions) — pushed
+    // from the same coherent frame as the computed §1/§3 results.
+    in-out property <JudgmentSuggestions> judgment-suggestions;
     // ── Story 2.8 — the §1 interactive growth chart geometry (pre-computed by `viewmodel/chart.rs`).
     in-out property <GrowthChartState> growth-chart;
     // True while the user holds the §1 judgment endpoint — the enclosing form `Flickable` disables its
