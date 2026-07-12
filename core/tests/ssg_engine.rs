@@ -319,10 +319,86 @@ fn worked_example_section_5_returns() {
     );
     // (44.78976/18)^(1/5) = 2.48832^0.2 = 1.2 exactly ⇒ 20% annualised, + avg yield.
     assert_close(
+        r.projected_annualized_appreciation_pct,
+        "20",
+        "0.000000000000001",
+        "annualised appreciation term alone (issue #189 exposure)",
+    );
+    assert_close(
         r.projected_total_annualized_return_pct,
         "23.277441533666666666666666667",
         "0.000000000000001",
         "20% annualised appreciation + 3.2774…% average yield",
+    );
+}
+
+/// Issue #189: a no-dividend payer with an ABSENT dividend history (cells empty, not 0). The
+/// yield chain is honestly unknown ⇒ the total stays withheld (absence ≠ 0), but the annualised
+/// appreciation term — computable from prices and judgment alone — is exposed on its own so the
+/// display side can show an appreciation-only potential.
+#[test]
+fn absent_dividend_history_withholds_total_but_exposes_annualized_appreciation() {
+    // The tutorial years with the dividend cells (and PTP/BVPS) left ABSENT — not 0.
+    let no_div_year = |year: i32, sales: &str, eps: &str, high: &str, low: &str| {
+        let mut y = RawYear::empty(year);
+        y.sales = amt(sales);
+        y.eps = amt(eps);
+        y.high_price = amt(high);
+        y.low_price = amt(low);
+        y
+    };
+    let financials = canonical(vec![
+        no_div_year(2021, "1000", "1.00", "20.00", "10.00"),
+        no_div_year(2022, "1100", "1.10", "22.00", "11.00"),
+        no_div_year(2023, "1210", "1.21", "24.20", "12.10"),
+        no_div_year(2024, "1331", "1.331", "26.62", "13.31"),
+        no_div_year(2025, "1464.1", "1.4641", "29.282", "14.641"),
+    ]);
+    let mut judgment = tutorial_judgment();
+    judgment.present_full_year_dividend = None;
+    let out = compute(&financials, &judgment, &tutorial_observations());
+    let r = &out.returns;
+    assert_eq!(r.avg_annual_dividend, None, "payout unknown ⇒ no dividend");
+    assert_eq!(r.avg_yield_pct, None, "yield term honestly unknown");
+    assert_eq!(
+        r.projected_total_annualized_return_pct, None,
+        "total withheld: absence ≠ 0"
+    );
+    assert_close(
+        r.projected_annualized_appreciation_pct,
+        "20",
+        "0.000000000000001",
+        "appreciation term computable without any dividend data",
+    );
+    assert_close(
+        r.appreciation_only_potential(),
+        "20",
+        "0.000000000000001",
+        "EPS chain judged + only dividends missing ⇒ the appreciation-only fallback applies",
+    );
+
+    // Counter-case: dividends PRESENT but the EPS-growth judgment missing — the yield term is
+    // unknown for a judgment reason, so the appreciation-only fallback must NOT apply (an
+    // incomplete judgment keeps reading as unknown).
+    let mut incomplete = tutorial_judgment();
+    incomplete.projected_eps_growth_pct = None;
+    let out = compute(
+        &tutorial_financials(),
+        &incomplete,
+        &tutorial_observations(),
+    );
+    assert_eq!(
+        out.returns.projected_total_annualized_return_pct, None,
+        "no judged EPS growth ⇒ total withheld"
+    );
+    assert!(
+        out.returns.projected_annualized_appreciation_pct.is_some(),
+        "the appreciation term itself is still computable"
+    );
+    assert_eq!(
+        out.returns.appreciation_only_potential(),
+        None,
+        "incomplete judgment ⇒ no appreciation-only fallback"
     );
 }
 

@@ -227,7 +227,7 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     ));
     doc.line(&format!(
         "Rendement annualisé total projeté : {}",
-        pct(outputs.returns.projected_total_annualized_return_pct),
+        total_return(&outputs.returns),
     ));
     doc.gap(8.0);
 
@@ -265,6 +265,21 @@ fn pct(v: Option<Decimal>) -> String {
             "{} %",
             round_for_display(d, DisplayField::Percent).normalize()
         ),
+    }
+}
+
+/// The §5 projected total (issue #189): the full total when both terms are known; when ONLY the
+/// dividend history is missing (`ReturnOutputs::appreciation_only_potential`), the annualised
+/// appreciation alone with the honest « (hors div.) » marker — mirrors `app`'s
+/// `fmt_total_return`.
+fn total_return(r: &steadyinvest_core::ssg::ReturnOutputs) -> String {
+    match (
+        r.projected_total_annualized_return_pct,
+        r.appreciation_only_potential(),
+    ) {
+        (Some(total), _) => pct(Some(total)),
+        (None, Some(appreciation)) => format!("{} (hors div.)", pct(Some(appreciation))),
+        (None, None) => pct(None),
     }
 }
 

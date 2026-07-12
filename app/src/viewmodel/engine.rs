@@ -27,7 +27,7 @@ use rust_decimal::prelude::ToPrimitive;
 use steadyinvest_contract::{ForecastLowOption as CForecastLowOption, Money, Study};
 use steadyinvest_core::normalize::{Finding, PlausibilityKey};
 use steadyinvest_core::rounding::DisplayField;
-use steadyinvest_core::ssg::{CalcFinding, SsgOutputs, Trend, UpsideDownside, Zone};
+use steadyinvest_core::ssg::{CalcFinding, ReturnOutputs, SsgOutputs, Trend, UpsideDownside, Zone};
 use steadyinvest_core::verdict::{GateState, GatedInput, OpenGate, StudySnapshot, Verdict};
 
 use crate::viewmodel::entry;
@@ -221,6 +221,25 @@ fn fmt_pct(value: Option<Decimal>, format: NumberFormat) -> String {
     }
 }
 
+/// The §5 projected-total display (issue #189): the full total when both terms are known; when
+/// ONLY the dividend history is missing (`ReturnOutputs::appreciation_only_potential`), the
+/// annualised appreciation alone with the honest « (hors div.) » marker — a fully judged
+/// no-dividend study must not read as incomplete, and an incomplete judgment must keep its
+/// em-dash. The core keeps the total itself `None` (absence ≠ 0); the marker is display-side.
+pub fn fmt_total_return(r: &ReturnOutputs, format: NumberFormat) -> String {
+    match (
+        r.projected_total_annualized_return_pct,
+        r.appreciation_only_potential(),
+    ) {
+        (Some(total), _) => fmt_pct(Some(total), format),
+        (None, Some(appreciation)) => format!(
+            "{} ({TOTAL_RETURN_NO_DIV})",
+            fmt_pct(Some(appreciation), format)
+        ),
+        (None, None) => EMPTY_SLOT.to_string(),
+    }
+}
+
 /// A [`Trend`] → a fact-stating glyph + noun (never colour): "↑ hausse" / "→ stable" / "↓ baisse".
 /// `None` → em-dash. The arrows are language-neutral glyphs; the nouns are scanned (see
 /// [`USER_FACING_LABELS`]).
@@ -325,7 +344,7 @@ pub fn return_computed(outputs: &SsgOutputs, format: NumberFormat) -> ReturnComp
     ReturnComputed {
         present_yield: fmt_pct(r.present_yield_pct, format).into(),
         avg_yield: fmt_pct(r.avg_yield_pct, format).into(),
-        total_return: fmt_pct(r.projected_total_annualized_return_pct, format).into(),
+        total_return: fmt_total_return(r, format).into(),
     }
 }
 
@@ -435,11 +454,7 @@ pub fn verdict_badge(
             format,
         )
         .into(),
-        projected_return: fmt_pct(
-            outputs.returns.projected_total_annualized_return_pct,
-            format,
-        )
-        .into(),
+        projected_return: fmt_total_return(&outputs.returns, format).into(),
         appreciation: fmt_pct(outputs.returns.projected_appreciation_pct, format).into(),
         ud_ratio: fmt_ud(&r.upside_downside, format).into(),
         present_zone: zone_key(r.present_price_zone).into(),
@@ -476,11 +491,7 @@ pub fn scenario_outcome(snapshot: &StudySnapshot, format: NumberFormat) -> Scena
         neutral_top: neutral_top.into(),
         present_zone: zone_key(r.present_price_zone).into(),
         ud_ratio: fmt_ud(&r.upside_downside, format).into(),
-        projected_return: fmt_pct(
-            outputs.returns.projected_total_annualized_return_pct,
-            format,
-        )
-        .into(),
+        projected_return: fmt_total_return(&outputs.returns, format).into(),
     }
 }
 
@@ -781,6 +792,10 @@ pub const TRACE_VERDICT_FORMULA: &str = "zones §4 + ratio H/B + appréciation �
 /// The FR8 low-confidence reason carried onto the verdict surface (Story 2.7, AC1). Fact-stating,
 /// no imperative — scanned by the posture gate alongside the other engine labels.
 pub const CONFIDENCE_LOW: &str = "Historique insuffisant — confiance réduite";
+/// The appreciation-only marker on the §5 projected total (issue #189): shown when the yield term
+/// is unknown (no dividend history) but the annualised appreciation is computable. Fact-stating,
+/// no imperative — scanned by the posture gate alongside the other engine labels.
+pub const TOTAL_RETURN_NO_DIV: &str = "hors div.";
 
 /// Every Story-2.6 Rust-side user-facing label, exposed so the crate-local posture gate (FR13)
 /// scans them for banned verbs alongside the `@tr()` literals and `state::USER_FACING_MESSAGES`.
@@ -808,6 +823,7 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TRACE_RULE_PREFIX,
     TRACE_VERDICT_FORMULA,
     CONFIDENCE_LOW,
+    TOTAL_RETURN_NO_DIV,
 ];
 
 #[cfg(test)]
@@ -1019,6 +1035,50 @@ mod tests {
         assert_eq!(
             judgment_to_gate_state(Some(money("1"))),
             GateState::ValidatedFresh
+        );
+    }
+
+    /// Issue #189: the §5 total display — full total when both terms are known; annualised
+    /// appreciation with the « (hors div.) » marker when ONLY the dividend history is missing
+    /// (EPS chain judged); the faithful em-dash otherwise — including an incomplete judgment
+    /// where the appreciation term alone is computable.
+    #[test]
+    fn fmt_total_return_falls_back_to_appreciation_with_marker() {
+        let dec = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let returns = |total: Option<&str>, appreciation: Option<&str>, avg_eps: Option<&str>| {
+            ReturnOutputs {
+                present_yield_pct: None,
+                avg_annual_eps: avg_eps.map(dec),
+                avg_annual_dividend: None,
+                avg_yield_pct: None,
+                projected_appreciation_pct: None,
+                projected_annualized_appreciation_pct: appreciation.map(dec),
+                projected_total_annualized_return_pct: total.map(dec),
+            }
+        };
+        let format = NumberFormat::default();
+        assert_eq!(
+            fmt_total_return(&returns(Some("23.28"), Some("20"), Some("2")), format),
+            fmt_pct(Some(dec("23.28")), format),
+            "both terms known → the plain total, no marker"
+        );
+        assert_eq!(
+            fmt_total_return(&returns(None, Some("20"), Some("2")), format),
+            format!(
+                "{} ({TOTAL_RETURN_NO_DIV})",
+                fmt_pct(Some(dec("20")), format)
+            ),
+            "EPS chain judged, only dividends missing → appreciation alone, honestly marked"
+        );
+        assert_eq!(
+            fmt_total_return(&returns(None, Some("20"), None), format),
+            EMPTY_SLOT,
+            "incomplete judgment (no avg EPS) → em-dash, no fallback"
+        );
+        assert_eq!(
+            fmt_total_return(&returns(None, None, None), format),
+            EMPTY_SLOT,
+            "nothing computable → em-dash, never 0"
         );
     }
 

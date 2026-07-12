@@ -49,6 +49,7 @@ pub(super) fn compute(
         avg_annual_dividend: None,
         avg_yield_pct: None,
         projected_appreciation_pct: None,
+        projected_annualized_appreciation_pct: None,
         projected_total_annualized_return_pct: None,
     };
     let Some(current) = judgment.current_price else {
@@ -75,11 +76,12 @@ pub(super) fn compute(
     let projected_appreciation_pct = risk_reward
         .forecast_high
         .and_then(|high| over_current_pct(high - current));
+    let projected_annualized_appreciation_pct = risk_reward
+        .forecast_high
+        .and_then(|high| annualized_appreciation_pct(current, high));
     // Both percent terms before summing (spec §5: annualised appreciation PLUS average yield,
     // gross dividend on the study side).
-    let projected_total_annualized_return_pct = risk_reward
-        .forecast_high
-        .and_then(|high| annualized_appreciation_pct(current, high))
+    let projected_total_annualized_return_pct = projected_annualized_appreciation_pct
         .zip(avg_yield_pct)
         .and_then(|(appreciation, yield_pct)| appreciation.checked_add(yield_pct));
 
@@ -89,6 +91,7 @@ pub(super) fn compute(
         avg_annual_dividend,
         avg_yield_pct,
         projected_appreciation_pct,
+        projected_annualized_appreciation_pct,
         projected_total_annualized_return_pct,
     }
 }
