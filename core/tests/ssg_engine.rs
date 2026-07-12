@@ -960,3 +960,48 @@ fn identical_inputs_produce_identical_outputs() {
         compute(&financials, &judgment, &observations)
     );
 }
+
+/// 2026-07-12: the « plus bas sévère récent » UI entry proposal = the LOWEST low price over the
+/// SAME last-5-usable-years window §3 averages over — an older, out-of-window low does not count
+/// (the proposal must stay « récent »), and no usable year ⇒ `None` (no proposal, never 0).
+#[test]
+fn recent_severe_low_proposal_is_the_window_minimum() {
+    use steadyinvest_core::ssg::recent_severe_low_proposal;
+    // 6 usable years: the OLDEST (2020, low 5) falls OUT of the 5-year window; the window's
+    // lows are 10/11/9/12/13 → the proposal is 9, not 5.
+    let fin = canonical(vec![
+        full_year(2020, "1000", "1.00", "20.00", "5.00", "0.30", "120", "5.00"),
+        full_year(
+            2021, "1000", "1.00", "20.00", "10.00", "0.30", "120", "5.00",
+        ),
+        full_year(
+            2022, "1000", "1.00", "20.00", "11.00", "0.30", "120", "5.00",
+        ),
+        full_year(2023, "1000", "1.00", "20.00", "9.00", "0.30", "120", "5.00"),
+        full_year(
+            2024, "1000", "1.00", "20.00", "12.00", "0.30", "120", "5.00",
+        ),
+        full_year(
+            2025, "1000", "1.00", "20.00", "13.00", "0.30", "120", "5.00",
+        ),
+    ]);
+    assert_eq!(recent_severe_low_proposal(&fin.years), Some(d("9.00")));
+
+    // A shorter usable history still proposes (window shrinks, FR8)…
+    let two = canonical(vec![
+        full_year(
+            2024, "1000", "1.00", "20.00", "12.00", "0.30", "120", "5.00",
+        ),
+        full_year(
+            2025, "1000", "1.00", "20.00", "13.00", "0.30", "120", "5.00",
+        ),
+    ]);
+    assert_eq!(recent_severe_low_proposal(&two.years), Some(d("12.00")));
+
+    // …and an unusable-only history proposes nothing (low prices present but sales absent ⇒
+    // the year is not usable ⇒ no window, `None` — never a number from unusable data).
+    let mut bare = RawYear::empty(2025);
+    bare.low_price = amt("7.00");
+    let unusable = canonical(vec![bare]);
+    assert_eq!(recent_severe_low_proposal(&unusable.years), None);
+}
