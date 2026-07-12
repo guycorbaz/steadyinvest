@@ -62,14 +62,17 @@ export component JudgmentField inherits VerticalLayout {
             border-color: input.has-focus ? Tokens.focus : Tokens.separator;
             forward-focus: input;
 
-            // Issue #114: the "à saisir" ring when this input is an OPEN judgment gate (a
-            // load-bearing input the verdict is still waiting on). Border-only overlay → never hides
-            // the value; suppressed while focused so the focus ring wins; clears as soon as the field
-            // is filled (the verdict drops the gate → `required-fields` no longer lists this key).
-            // Amber (`Tokens.attention`) since 2026-07-12 — the neutral grey ring was not findable;
-            // this is the one deliberate colour spend outside the §4 zones.
-            for k in Studies.required-fields: Rectangle {
-                visible: k == root.field-key && !input.has-focus;
+            // The "à saisir" ring on EVERY empty judgment field (2026-07-12, superseding the
+            // #114 verdict-gate scope): a judgment input is manual by definition, so an empty one
+            // is exactly « un champ à compléter à la main » — including the non-load-bearing ones
+            // (dividende courant, plus bas sévère, croissances) whose absence withholds §5 outputs
+            // without ever opening a verdict gate. Border-only overlay → never hides the value;
+            // suppressed while focused so the focus ring wins; clears with the first committed
+            // value. Amber (`Tokens.attention`) — the one deliberate colour spend outside the §4
+            // zones. Known trade-off (user-accepted): a no-dividend company keeps its dividend
+            // field ringed.
+            Rectangle {
+                visible: input.text == "" && !input.has-focus;
                 width: 100%;
                 height: 100%;
                 border-radius: Tokens.radius;
