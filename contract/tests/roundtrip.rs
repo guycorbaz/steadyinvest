@@ -156,11 +156,12 @@ fn study() -> impl Strategy<Value = Study> {
         proptest::collection::vec(year_data(), 0..3),
         judgment(),
         proptest::option::of(token()),
+        proptest::option::of(token()),
         token(),
         any::<u32>(),
     )
         .prop_map(
-            |(id, jid, ticker, cur, years, judgment, rationale, ts, sv)| Study {
+            |(id, jid, ticker, cur, years, judgment, rationale, company_name, ts, sv)| Study {
                 id: Uuid::from_u128(id),
                 journal_id: Uuid::from_u128(jid),
                 security_ticker: ticker,
@@ -168,6 +169,7 @@ fn study() -> impl Strategy<Value = Study> {
                 years,
                 judgment,
                 rationale,
+                company_name,
                 created_at: Timestamp(ts),
                 schema_version: sv,
             },

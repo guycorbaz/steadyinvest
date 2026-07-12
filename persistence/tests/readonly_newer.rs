@@ -36,6 +36,7 @@ fn minimal_study(id: u128, journal_id: Uuid) -> Study {
             ttm_eps: None,
         },
         rationale: None,
+        company_name: None,
         created_at: ts("2026-06-12T08:30:00Z"),
         schema_version: SCHEMA_VERSION,
     }

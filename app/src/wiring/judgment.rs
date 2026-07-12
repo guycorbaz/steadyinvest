@@ -94,6 +94,39 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         });
     }
 
+    // ── 2026-07-12 — commit the header card's company name. Exact mirror of `on_set_rationale`:
+    //    parse-free free text → `state::set_company_name` (trims → Some/None, atomic, undoable) →
+    //    re-read + `push_form`. ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let current_study = Rc::clone(current_study);
+        ui.global::<Studies>().on_set_company_name(move |text| {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            let result = journal_state
+                .borrow_mut()
+                .set_company_name(id, Some(text.to_string()));
+            match result {
+                Ok(()) => {
+                    studies.set_notice(SharedString::new());
+                    if let Some(study) = journal_state.borrow().get_study(id) {
+                        push_form(&ui, &journal_state.borrow(), &study, format);
+                    }
+                }
+                Err(message) => studies.set_notice(message.into()),
+            }
+        });
+    }
+
     // ── Story 2.11 — extend the projection (FR3): the annual roll-forward. Mirrors `on_set_rationale`:
     //    structural (no payload) → `state::extend_history` (appends `latest_year + 1`, atomic, undoable)
     //    → re-read + `push_form` (the grid re-renders with the new ToFill column; undo flags refresh). ──

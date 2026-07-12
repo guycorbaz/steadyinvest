@@ -139,6 +139,8 @@ pub fn header(study: &Study) -> FormHeader {
         created_at: created_at_date(&study.created_at).into(),
         // `core::METHOD_VERSION` is a `&'static str` identity constant, NOT a verdict — display.
         method_version: steadyinvest_core::METHOD_VERSION.into(),
+        // 2026-07-12: the header card's company name ("" when unset → the field shows its placeholder).
+        company_name: study.company_name.clone().unwrap_or_default().into(),
     }
 }
 

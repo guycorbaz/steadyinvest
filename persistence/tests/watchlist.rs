@@ -191,6 +191,7 @@ fn deleting_a_linked_study_clears_the_watchlist_link() {
             ttm_eps: None,
         },
         rationale: None,
+        company_name: None,
         created_at: ts("2026-06-27T00:00:00Z"),
         schema_version: SCHEMA_VERSION,
     };

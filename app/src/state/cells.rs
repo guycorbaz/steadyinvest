@@ -465,6 +465,16 @@ impl JournalState {
         })
     }
 
+    /// Commit the header card's company name (2026-07-12). Same rail as [`Self::set_rationale`]:
+    /// free text trimmed → `Some`/`None` (empty ⇒ absence, never `Some("")`), atomic + guarded +
+    /// undoable via [`Self::mutate_study`]. User's own text — never posture-scanned.
+    pub fn set_company_name(&mut self, study_id: Uuid, text: Option<String>) -> Result<(), String> {
+        let normalized = text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+        self.mutate_study(study_id, move |study| {
+            study.company_name = normalized;
+        })
+    }
+
     /// Extend the study's data window forward by one year (Story 2.11, FR3): the **annual roll-forward**
     /// ritual. Appends a fresh [`entry::tofill_year`] column for `latest_year + 1` (all cells
     /// [`Coverage::ToFill`], no value computed — adding a year is structure, not calculation). The
