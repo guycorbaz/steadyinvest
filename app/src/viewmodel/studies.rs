@@ -28,31 +28,37 @@ pub struct StudyReturn {
     pub display: String,
     pub incomplete: bool,
     pub zone: &'static str,
+    /// 2026-07-12 — the study's user-entered company name (empty when unset), shown after the
+    /// ticker on the list row. Owned (read off the full study during refresh, not the summary).
+    pub company_name: String,
 }
 
 impl Default for StudyReturn {
     /// An unknown potential: no sort value, and the app's faithful em-dash (never `0`) for display —
     /// so a study missing from the map (or one that withholds the return) reads "—", not blank. Not
     /// flagged incomplete: absence from the map is "unknown", never a false "à compléter" shout.
-    /// No zone either — absent facts stay absent.
+    /// No zone or company name either — absent facts stay absent.
     fn default() -> Self {
         StudyReturn {
             value: None,
             display: crate::viewmodel::form::EMPTY_SLOT.to_string(),
             incomplete: false,
             zone: "",
+            company_name: String::new(),
         }
     }
 }
 
 /// Map one summary row into the Slint `StudyRow` (id stringified, date trimmed to the day, status
 /// verbatim, the pre-formatted potential-return string — "—" when the study withholds it — the
-/// issue #148 `incomplete` flag driving the "à compléter" marker, and the present-price zone key).
+/// issue #148 `incomplete` flag driving the "à compléter" marker, the present-price zone key, and
+/// the company name shown after the ticker).
 pub fn to_row(
     summary: &StudySummary,
     potential_return: &str,
     incomplete: bool,
     zone: &str,
+    company_name: &str,
 ) -> StudyRow {
     StudyRow {
         id: summary.id.to_string().into(),
@@ -62,6 +68,7 @@ pub fn to_row(
         potential_return: potential_return.into(),
         incomplete,
         zone: zone.into(),
+        company_name: company_name.into(),
     }
 }
 
@@ -163,7 +170,13 @@ pub fn curate(
     kept.iter()
         .map(|s| {
             let facts = returns.get(&s.id).unwrap_or(&empty);
-            to_row(s, facts.display.as_str(), facts.incomplete, facts.zone)
+            to_row(
+                s,
+                facts.display.as_str(),
+                facts.incomplete,
+                facts.zone,
+                facts.company_name.as_str(),
+            )
         })
         .collect()
 }
@@ -207,6 +220,7 @@ mod tests {
             display: display.to_string(),
             incomplete: false,
             zone: "",
+            company_name: String::new(),
         }
     }
 
@@ -400,6 +414,7 @@ mod tests {
                 display: "—".to_string(),
                 incomplete: true,
                 zone: "",
+                company_name: String::new(),
             },
         );
         // id 2 (ROG) deliberately absent → defaults to not incomplete.
