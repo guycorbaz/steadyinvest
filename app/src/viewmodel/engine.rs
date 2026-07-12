@@ -90,6 +90,42 @@ pub fn study_below_forecast_band(study: &Study) -> bool {
     })
 }
 
+/// Neutral data-integrity signal (2026-07-12): the current price sits WILDLY outside the latest
+/// usable year's own trading range — a factor-3 gap either way. It flags an internally
+/// **inconsistent** study — a stale or mis-scaled fetched price, a wrong symbol resolution, or an
+/// unadjusted split between the current price and the historical series — WITHOUT blaming either
+/// side (both cannot be right). The purpose is trust: an out-of-scale price silently inflates the
+/// §4/§5 potential into a rosy-but-false number, so the study must say « à vérifier » rather than
+/// present it as fact. `false` without a current price or a latest-year high/low range.
+pub fn current_price_out_of_scale(
+    series: &[normalize::CanonicalYear],
+    current_price: Option<Decimal>,
+) -> bool {
+    let Some(price) = current_price else {
+        return false;
+    };
+    // The most recent usable year that carries BOTH a high and a low price — the natural anchor
+    // for "where the security trades now" (an ancient year's range is not comparable to today).
+    let Some(year) = series
+        .iter()
+        .rev()
+        .find(|y| y.high_price.is_some() && y.low_price.is_some())
+    else {
+        return false;
+    };
+    let (Some(high), Some(low)) = (year.high_price, year.low_price) else {
+        return false;
+    };
+    if high <= Decimal::ZERO || low <= Decimal::ZERO {
+        return false;
+    }
+    let three = Decimal::from(3u32);
+    // price < low/3  ⟺  price·3 < low ; and price > high·3. Egregious-only (factor 3) so a merely
+    // fast-moving security since its last fiscal year never trips a false alarm.
+    price.checked_mul(three).is_some_and(|p3| p3 < low)
+        || price > high.checked_mul(three).unwrap_or(high)
+}
+
 // ── Plausibility surfacing (Story 2.7) — map the engine's two finding sets to UI cell addresses ──
 
 /// Where a plausibility finding attaches on the faithful form. A `Cell` finding draws the inline §2/§3
@@ -1054,6 +1090,28 @@ mod tests {
             ..outputs(None)
         };
         assert_eq!(zone_position_key(&no_band, Some(d("80"))), "");
+    }
+
+    /// 2026-07-12: the data-integrity flag fires ONLY on an egregious (factor-3) mismatch between
+    /// the current price and the latest year's own range — a merely fast-moving price does not
+    /// trip it; no price / no range never fires.
+    #[test]
+    fn current_price_out_of_scale_flags_only_egregious_mismatch() {
+        // `validated_cell` builds every year with high 100 / low 50 → latest range [50, 100].
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let series = build_frame(&study_with(years, full_judgment()))
+            .expect("normalizes")
+            .series;
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        // In range, and merely-low/merely-high (still within [50/3, 100·3]) → NOT flagged.
+        assert!(!current_price_out_of_scale(&series, Some(d("60"))));
+        assert!(!current_price_out_of_scale(&series, Some(d("40"))));
+        assert!(!current_price_out_of_scale(&series, Some(d("250"))));
+        // Egregious: below 50/3 ≈ 16.7, or above 100·3 = 300 → flagged (the SQN shape).
+        assert!(current_price_out_of_scale(&series, Some(d("10"))));
+        assert!(current_price_out_of_scale(&series, Some(d("400"))));
+        // No price → never fires.
+        assert!(!current_price_out_of_scale(&series, None));
     }
 
     /// 5 fully-validated-fresh usable years + complete judgment → Verdict::Full, and the adapter's

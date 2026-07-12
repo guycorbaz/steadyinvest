@@ -101,6 +101,13 @@ pub(crate) fn push_form(
                 &frame.series,
                 format,
             ));
+            // Data-integrity flag: the current price wildly out of scale vs the historical range
+            // (a mis-scaled/stale fetch or wrong symbol) — surfaced amber so the inflated §4/§5
+            // potential is flagged « à vérifier », never presented as fact.
+            studies.set_current_price_out_of_scale(engine::current_price_out_of_scale(
+                &frame.series,
+                study.judgment.current_price.map(|m| m.as_decimal()),
+            ));
             // Story 2.8 — the §1 interactive growth chart geometry (from the SAME coherent frame).
             studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
             // Issue #115 — the §3 P/E-history chart (historical high/low P/E + draggable judged levels).
@@ -136,6 +143,7 @@ pub(crate) fn push_form(
             studies.set_risk_computed(RiskComputed::default());
             studies.set_return_computed(ReturnComputed::default());
             studies.set_judgment_suggestions(JudgmentSuggestions::default());
+            studies.set_current_price_out_of_scale(false);
             studies.set_zone_bar(ZoneBarState::default());
             studies.set_verdict(VerdictState::default());
             studies.set_growth_chart(viewmodel::chart::unavailable());

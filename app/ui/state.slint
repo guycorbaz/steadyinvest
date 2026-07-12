@@ -616,6 +616,10 @@ export global Studies {
     // Historical values proposed for the empty judgment fields (see JudgmentSuggestions) — pushed
     // from the same coherent frame as the computed §1/§3 results.
     in-out property <JudgmentSuggestions> judgment-suggestions;
+    // 2026-07-12: the current price is wildly out of scale vs the historical range (a mis-scaled /
+    // stale fetch or wrong symbol) → the §4 field carries an amber « à vérifier » signal so the
+    // inflated §4/§5 potential is never taken as fact.
+    in-out property <bool> current-price-out-of-scale;
     // ── Story 2.8 — the §1 interactive growth chart geometry (pre-computed by `viewmodel/chart.rs`).
     in-out property <GrowthChartState> growth-chart;
     // True while the user holds the §1 judgment endpoint — the enclosing form `Flickable` disables its
