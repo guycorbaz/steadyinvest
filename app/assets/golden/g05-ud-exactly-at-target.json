@@ -4,7 +4,7 @@
     "title": "U/D ratio exactly 3.0: the at-or-above comparator is met, the flag stays quiet",
     "description": "The worked-example series with the current price constructed so the upside/downside ratio is exactly 3.0 (the method target). The verdict criterion uses at-or-above, so exactly 3.0 is Met; the ud_below_target flag uses strictly-below, so it is NOT raised. All four criteria are Met - a quality-value candidate at the exact boundary.",
     "provenance": "Hand-computed 2026-06-11 from the g01 paper derivation. Solving (44.78976 - c) / (c - 12.6) = 3 gives c = (44.78976 + 3 x 12.6) / 4 = 82.58976 / 4 = 20.64744 (terminating by construction; cross-checked by substituting back: numerator 24.14232 = 3 x denominator 8.04744... no - denominator 20.64744 - 12.6 = 8.04744, 3 x 8.04744 = 24.14232 = 44.78976 - 20.64744). Current P/E = 20.64744 / 1.60 = 12.90465 exactly; relative value = 12.90465 / 15 x 100 = 86.031 exactly. Present yield = 0.45 / 20.64744 x 100 = 2.1794470 (long division, cross-checked 20.64744 x 0.021794470 = 0.45000007). Average yield = 0.58993947606 / 20.64744 x 100 = 2.8572040 (cross-checked 20.64744 x 0.028572040 = 0.58993944). Appreciation = 24.14232 / 20.64744 x 100 = 116.92646 (cross-checked 20.64744 x 1.1692646 = 24.142318). Annualised: (2.1692646)^(1/5) = 1.1675155 via ln/exp, cross-checked by the 5th power (2.169274, within 5e-6 relative); total = 16.75155 + 2.8572040 = 19.6088.",
-    "method_version": "ssg-1.0.0",
+    "method_version": "ssg-1.1.0",
     "fixture_format_version": 1
   },
   "input": {

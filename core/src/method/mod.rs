@@ -256,7 +256,7 @@ mod tests {
     /// assertion prints the new value).
     #[test]
     fn method_fingerprint_is_pinned_to_version() {
-        const EXPECTED: &str = "f79e3c11227094ac8543376224cf2421d7f4d95082507cc6bf34d9395cd61d1d";
+        const EXPECTED: &str = "be55b103e462fb2ef191cefecb425c115e2499fd70651f48822cfffe252e287b";
         assert_eq!(
             method_fingerprint(),
             EXPECTED,

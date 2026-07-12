@@ -4,7 +4,7 @@
     "title": "Relative value exactly 100: strict < criterion unmet AND the >= flag raised",
     "description": "The worked-example series with the current price at 24, making the current P/E exactly the 5-year average P/E (relative value exactly 100). One fixture proves both normative comparators at the ceiling: the relative_value_below_ceiling criterion (strict <) is a measured Unmet, while the relative_value_high flag (>=) fires. The price lands in the Neutral zone and the U/D ratio falls below target.",
     "provenance": "Hand-computed 2026-06-11 from the g01 paper derivation. Current price 24 makes current P/E = 24 / 1.60 = 15 = average P/E, so relative value = 100 exactly. U/D = (44.78976 - 24) / (24 - 12.6) = 20.78976 / 11.4 = 1.8236631579 (cross-checked 11.4 x 1.8236631579 = 20.78976000). Zone: 24 > buy_top 23.32992 and 24 <= neutral_top 34.05984 -> Neutral. Present yield = 0.45 / 24 x 100 = 1.875 exactly. Average yield = 0.58993947606 / 24 x 100 = 2.4580811503 (terminating: 0.58993947606 / 24 = 0.0245808115025). Appreciation = 20.78976 / 24 x 100 = 86.624 exactly. Annualised: (1.86624)^(1/5) = 1.1329050 via ln/exp (ln 1.86624 = 0.6239257 computed two ways), cross-checked by the 5th power (1.866241, within 1e-6); total = 13.29050 + 2.4580812 = 15.7486.",
-    "method_version": "ssg-1.0.0",
+    "method_version": "ssg-1.1.0",
     "fixture_format_version": 1
   },
   "input": {

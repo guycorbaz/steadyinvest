@@ -4,7 +4,7 @@
     "title": "Present price exactly on buy_top: the Buy interval is closed",
     "description": "The worked-example series with the current price set exactly to the top of the first zone (23.32992). The Buy interval is closed at its top per the normative comparators, so the zone is still Buy; the U/D ratio is exactly 2 by construction (the price sits one third up the range), raising ud_below_target and leaving the U/D criterion Unmet; appreciation drops below 100% so the candidate fact is false.",
     "provenance": "Hand-computed 2026-06-11 from the g01 paper derivation. buy_top = 12.6 + 32.18976 / 3 = 23.32992 (terminating by construction - the range is divisible by 3 at this precision). At that price: U/D = (44.78976 - 23.32992) / (23.32992 - 12.6) = (2 x third) / third = 2 exactly. Current P/E = 23.32992 / 1.60 = 14.5812 exactly; relative value = 14.5812 / 15 x 100 = 97.208 exactly. Present yield = 0.45 / 23.32992 x 100 = 1.9288534 (long division, cross-checked 23.32992 x 0.019288534 = 0.45000001). Average yield = 0.58993947606 / 23.32992 x 100 = 2.5286820 (cross-checked 23.32992 x 0.02528682 = 0.58993902 + remainder). Appreciation = 21.45984 / 23.32992 x 100 = 91.98420 (cross-checked 23.32992 x 0.9198420 = 21.459835). Annualised: (1.9198420)^(1/5) = 1.1393394 via ln/exp, cross-checked by raising 1.1393394 back to the 5th power (= 1.9198447, within 2e-6 relative); total = 13.93394 + 2.5286820 = 16.4626 (tolerance 0.5% >> derivation error).",
-    "method_version": "ssg-1.0.0",
+    "method_version": "ssg-1.1.0",
     "fixture_format_version": 1
   },
   "input": {

@@ -4,4 +4,4 @@
 //! Invariant, a `method_version` change re-addresses (invalidates) every derived verdict.
 
 /// Semver-like identifier of the SSG method this build implements.
-pub const METHOD_VERSION: &str = "ssg-1.0.0";
+pub const METHOD_VERSION: &str = "ssg-1.1.0";

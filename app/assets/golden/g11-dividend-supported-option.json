@@ -4,7 +4,7 @@
     "title": "Forecast-low option (d): the price the dividend will support",
     "description": "The worked-example series with the section-4 forecast low taken from option (d): present full-year dividend divided by the average high yield. With a 3% average high yield and a 0.45 dividend the supported price is exactly 15; the range 29.78976 divides into terminating thirds. All four verdict criteria remain Met.",
     "provenance": "Hand-computed 2026-06-11 from the g01 paper derivation with one change: forecast low = 0.45 / (3 / 100) = 15 exactly (option (d); the 3% average high yield is the constant per-year dividend / low price = 0.03 of the series). Range 44.78976 - 15 = 29.78976; third 9.92992 (terminating, cross-checked 3 x 9.92992 = 29.78976); bounds 24.92992 and 34.85984. U/D = (44.78976 - 18) / (18 - 15) = 26.78976 / 3 = 8.92992 exactly. All other sections are unchanged from g01's paper derivation.",
-    "method_version": "ssg-1.0.0",
+    "method_version": "ssg-1.1.0",
     "fixture_format_version": 1
   },
   "input": {

@@ -4,7 +4,7 @@
     "title": "Forecast-low option (c): a recent severe market low",
     "description": "The worked-example series with the section-4 forecast low taken from option (c), a user-supplied recent severe market low of 11.5. The zone thirds are non-terminating (range 33.28976 / 3); all four verdict criteria remain Met.",
     "provenance": "Hand-computed 2026-06-11 from the g01 paper derivation with one change: forecast low = 11.5 (the option (c) judgment input, passed through verbatim). Range 44.78976 - 11.5 = 33.28976; third 11.0965866666...; bounds by re-adding: 11.5 + third = 22.5965866667, + third = 33.6931733333. U/D = (44.78976 - 18) / (18 - 11.5) = 26.78976 / 6.5 = 4.1215015385 (cross-checked 6.5 x 4.1215015385 = 26.78976000). All other sections are unchanged from g01's paper derivation (the forecast low feeds only section 4).",
-    "method_version": "ssg-1.0.0",
+    "method_version": "ssg-1.1.0",
     "fixture_format_version": 1
   },
   "input": {

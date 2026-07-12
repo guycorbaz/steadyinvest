@@ -84,7 +84,7 @@ fn check_all_over_the_real_bundle_reports_in_input_order_and_isolates_failures()
     // Mixed bundle: a stale-method study appended at the end fails alone.
     let stale = tampered(
         G01,
-        "\"method_version\": \"ssg-1.0.0\"",
+        "\"method_version\": \"ssg-1.1.0\"",
         "\"method_version\": \"ssg-0.9.9\"",
     );
     studies.push(serde_json::from_str(&stale).expect("stale variant parses"));

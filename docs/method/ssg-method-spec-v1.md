@@ -1,6 +1,6 @@
 # steadyinvest — SSG Method Specification (v1)
 
-**`method_version`: `ssg-1.0.0`**
+**`method_version`: `ssg-1.1.0`**
 **Status:** authoritative oracle for the calculation engine (`steadyinvest-core`) and its golden tests.
 **Independent project — not affiliated with NAIC / BetterInvesting.** This document specifies the
 *method* (formulas, ratios, thresholds — which are not protectable). It uses **neutral labels** and
@@ -16,6 +16,13 @@ and the SSG Handbook.
 
 All calculations run in the **security's native currency** (FX only at the portfolio layer, out of
 scope here). All money/ratio math is **exact decimal** (`rust_decimal`), never `f32`/`f64`.
+
+**Version history**
+
+| `method_version` | Change |
+|---|---|
+| `ssg-1.0.0` | Initial normative spec. |
+| `ssg-1.1.0` | **Additive, zero behavioral change.** Absorbed as normative text the interpretations recorded while implementing Stories 1.7–1.9 (issues #12, #13, #15) — every rule marked *(absorbed at ssg-1.1.0)* below was already the engine's behavior under `ssg-1.0.0`. |
 
 ---
 
@@ -35,6 +42,23 @@ quarter sales/EPS (optional). Outputs:
   **estimated low EPS** for the forecast horizon (default 5 years). EPS may be projected directly or
   via the revenue projection ("preferred procedure"). [Tutorial p10–11, p17–18]
 
+Normative details *(absorbed at ssg-1.1.0)*:
+- **Endpoints CAGR:** `n` = the calendar-year span between the **first and last usable years**
+  (`last.year − first.year`); gaps in the reported series compound across. `n = 0`, `start ≤ 0`,
+  `end ≤ 0` (zero is neither sign) or a sign-crossing ⇒ the CAGR is **unknown** — the §9 guard runs
+  **before** any fractional power is taken.
+- **Estimated high EPS:** a direct `estimated_high_eps` judgment wins; otherwise derived as
+  `latest_usable_eps × (1 + g_eps/100)^horizon` (exact integer power), the base being the EPS of the
+  **most recent usable year**.
+- **Estimated low EPS is direct-only:** a low-EPS judgment is not a growth projection; absent ⇒
+  **unknown**.
+- **Projection with growth < −100 %/yr ⇒ unknown** (the growth factor turns negative; no power is
+  taken on a negative base).
+- **Quarterly % change with a year-ago value ≤ 0 or absent ⇒ unknown** (a non-positive base has no
+  meaningful percent change).
+- **Quarterly observations bypass normalization:** they are caller-supplied in post-split,
+  native-currency terms.
+
 ### §2 — Management
 For each year and as a **5-year average** + **trend** (up / even / down):
 - **% pre-tax profit on sales (PTP)** = `pre_tax_profit / sales × 100`. If only after-tax net profit
@@ -42,6 +66,14 @@ For each year and as a **5-year average** + **trend** (up / even / down):
 - **% earned on equity (ROE)** = `eps / book_value_per_share × 100`. [Tutorial p12]
 - 5-year average = arithmetic mean of the last 5 usable years. Trend = comparison of recent years to
   the 5-year average (see quality flags). [Tutorial p12]
+
+Normative details *(absorbed at ssg-1.1.0)*:
+- **Trend reading:** "recent years vs the average" = the **latest usable year's** ratio compared to
+  the 5-year average, with the ±0.5 pp even-band **inclusive** (`≤` ⇒ even).
+- **Averaging window:** the last 5 **usable** years; within the window, a year whose ratio is
+  `unknown` is excluded from the mean (mean over the remaining years).
+- **PTP with `sales ≤ 0`:** raises `negative_or_zero_denominator` — the §3 key extends to a
+  present-but-non-positive **sales** denominator.
 
 ### §3 — Price–Earnings history (last 5 years)
 Per year, then averaged over 5 years:
@@ -53,6 +85,11 @@ Per year, then averaged over 5 years:
 - **Average % payout** = mean of 5 yearly payouts. **Average low price** = mean of 5 yearly low prices.
 - **Current P/E** = `current_price / (Σ last 4 quarterly EPS)`. [Tutorial p15–16]
 - **Relative value** = `current_pe / average_pe × 100` (ideal < 100%). [Tutorial p16]
+
+Normative details *(absorbed at ssg-1.1.0)*:
+- **Current P/E with TTM EPS ≤ 0** also raises `negative_or_zero_denominator` (context `ttm_eps`,
+  study-level), mirroring the per-year EPS-denominator rule (see also §9).
+- **Average low price carries no exclusion rule:** mean of the window's low prices **as reported**.
 
 ### §4 — Risk & reward (zoning)
 - **Forecast high price** = `avg_high_pe(judged) × estimated_high_eps`. [Tutorial p17]
@@ -69,21 +106,41 @@ Per year, then averaged over 5 years:
 - **Upside/downside ratio (U/D)** = `(forecast_high − current_price) / (current_price − forecast_low)`.
   [Tutorial p20]
 
+Normative details *(absorbed at ssg-1.1.0)*:
+- **Option (d) divisor:** the §3 **5-year average high yield** (`avg_high_yield_pct`); option (d) is
+  **not selectable** when that average is ≤ 0 **or unknown**.
+- **Present price outside `[forecast_low, forecast_high]` ⇒ zone unknown** (zones are defined only
+  over the range). A price above the high side raises **no** finding — the §4 constraint binds only
+  the low side.
+- **Degenerate range (`forecast_high ≤ forecast_low`) ⇒ zones and U/D unknown**, never inverted
+  bands. A range so small the thirds collapse at `Decimal`'s 28-digit precision limit is likewise
+  treated as degenerate (strict zone ordering by construction, NFR-C3).
+
 ### §5 — 5-year potential
 - **Present yield** = `present_full_year_dividend / current_price × 100`. [Tutorial p21]
-- **Average annual EPS (next 5 yrs)** = mean of projected yearly EPS (or the middle-year projected EPS).
+- **Average annual EPS (next 5 yrs)** = **mean of the projected yearly EPS** — the normative
+  deterministic pick *(absorbed at ssg-1.1.0; the tutorial's middle-year alternative is NOT used)*.
 - **Average annual dividend** = `avg_annual_eps × avg_payout_pct/100`. [Tutorial p21]
 - **Average yield** = `average_annual_dividend / current_price × 100`. [Tutorial p21]
 - **Projected price appreciation %** = `(forecast_high − current_price) / current_price × 100`.
 - **Projected total annualised return %** = annualised appreciation (current_price → forecast_high over
   the horizon) **plus** average yield. (Study return projection uses the **gross** dividend.)
 
+Normative details *(absorbed at ssg-1.1.0)*:
+- **`current_price` absent or ≤ 0 ⇒ every §5 output is unknown** (each §5 formula divides by, or is
+  relative to, the current price).
+- **The total requires both terms:** the annualised appreciation AND the average yield must both be
+  known; either `unknown` ⇒ the total is `unknown` — never a silent 0-yield assumption. (Display
+  layers may separately surface the appreciation-only figure, honestly marked; that is presentation,
+  not method.)
+
 ### Verdict (derived, neutral — see FR13)
 A **fact-only** verdict states the present-price zone and the supporting figures. A study is a
 "quality-and-value" candidate when ALL hold (these are *facts surfaced*, never a recommendation):
 - U/D ratio ≥ **3.0** [Tutorial p20]; **and** relative value < **100%**; **and** present price in the
-  **Buy** zone; **and** projected appreciation implies roughly doubling over 5 years (≈ 15%/yr).
-  [Tutorial p20]
+  **Buy** zone; **and** projected appreciation implies roughly doubling over 5 years (≈ 15%/yr) —
+  normative comparator: projected appreciation **≥ 100 %**, inclusive, consistent with the U/D
+  `≥ 3.0` criterion *(absorbed at ssg-1.1.0)*. [Tutorial p20]
 The verdict is **degraded/withheld** when a load-bearing input is unvalidated or the study is
 low-confidence (FR12 — see §5/§6 below).
 
@@ -100,7 +157,7 @@ Quality flags are **methodology** signals (distinct from plausibility warnings).
 | `roe_trend_declining` | 5-yr ROE trend is **down** | warn |
 | `roe_low` | latest ROE < **10%** | info |
 | `eps_lags_sales` | EPS CAGR < sales CAGR (margin compression) | info |
-| `high_debt` | total debt is sizeable vs the firm's own history (flag for review; no hard ratio in v1) | info |
+| `high_debt` | total debt is sizeable vs the firm's own history (flag for review; no hard ratio in v1). **Not raisable in v1** *(absorbed at ssg-1.1.0)*: the canonical financials carry no debt field, so the engine has no input to compare — the key stays pinned in the catalog (a typed-key test asserts it is the only unraisable entry); adding a debt input is a future contract + normalize + engine change. | info |
 | `projected_high_pe_aggressive` | judged future **high P/E > 20** | warn |
 | `projected_high_pe_implausible` | judged future **high P/E > 25** → re-evaluate | warn |
 | `ud_below_target` | U/D ratio < **3.0** | info |
@@ -126,6 +183,28 @@ Plausibility issues are **input-data** warnings (distinct from quality flags and
 | `low_price_above_current` | a selected forecast low price > current price (violates the §4 constraint) |
 
 Plausibility warnings never block computation; they surface at the cell.
+
+**`split_series_break` — normative detection rule** *(absorbed at ssg-1.1.0; quantifies
+"inconsistent with sales")*:
+
+- Detection runs on the **post-adjustment** series (declared splits already applied): a correctly
+  declared split never trips the detector.
+- Per field (`eps`, `high_price`, `low_price`), year `t` is flagged when its y/y factor is
+  **≥ 1.5 or ≤ 0.67 — boundary values included** (normative comparators, §7), **and** the sales y/y
+  factor does **not** move beyond the same band **in the same direction**: an up-jump is "explained"
+  only if the sales factor is also ≥ 1.5; a down-jump only if sales is also ≤ 0.67. **Absent** sales
+  (either year missing, or prior-year sales = 0 ⇒ no factor) or an **opposite/in-band** sales move ⇒
+  still flagged.
+- A `None`/zero **prior-year** value yields **no factor and no flag** (absence of evidence is not
+  evidence — and no division panic).
+- Only **calendar-consecutive** years compare (`t = t−1 + 1`); a gap in the reported series is not
+  "year-over-year".
+- **Flag only** — values pass through unchanged; the system never auto-corrects.
+- The low bound is **pinned at `0.67`**, deliberately not the non-terminating exact reciprocal `2/3`
+  (marginally more sensitive on the down side; kept as the normative constant).
+- A **sign-crossing** factor (e.g. EPS −1.00 → +1.10, factor −1.1 ≤ 0.67) satisfies the rule and is
+  flagged: a sign-crossing is a notable series event worth surfacing even when no split is suspected
+  (flag-only, never blocking).
 
 ---
 
@@ -163,6 +242,10 @@ defined price bands and are permitted; the ban targets **imperative verbs** dire
 *(This is a posture gate verified by a targeted test over system strings — not a blanket grep over all
 text.)*
 
+The zone-label exemption **extends to zone-derived field-path nouns** in golden deviation reports
+(`risk_reward.zones.buy_top`, `verdict_facts.present_price_in_buy_zone`) — nouns naming the
+user-defined bands, gated by a `core::golden`-local posture test *(absorbed at ssg-1.1.0)*.
+
 ## 7. Golden tolerance (FR9 / NFR-C2)
 
 - **Zoning and the categorical verdict must match EXACTLY** (Buy/Neutral/Sell; quality-candidate
@@ -171,6 +254,21 @@ text.)*
   This is the **fixed method default** (`core::method::golden_relative_tolerance`); a test may compare
   with a tighter local epsilon, but changing this constant is a method change (it is fingerprinted).
   [PRD NFR-C2]
+
+Golden-fixture policy *(absorbed at ssg-1.1.0)*:
+- **Stale `method_version` ⇒ check failure.** A fixture whose `meta.method_version ≠ METHOD_VERSION`
+  fails its check with a single `meta.method_version` deviation, **before** any comparison runs. A
+  golden derived under an older method is re-validated by hand at each method bump — never silently
+  replayed against the new method.
+- **`fixture_format_version`** is a fourth version axis scoped to fixtures (distinct from
+  `schema_version`, `METHOD_VERSION` and the app version), pinned to **1**; any other value is a
+  parse error.
+- In a fixture's `expected` block, the per-year tables (`management.per_year`, `valuation.per_year`)
+  and `normalize_findings` are **optional** (omitted = not asserted). Every other expected field is
+  presence-enforced: an **omitted** required field is a parse error; an explicit **`null`** means
+  "expected unknown".
+- App-bundled goldens (`app/assets/golden/`) are a **byte-identical full copy** of the CI fixtures,
+  enforced by a drift test (distinct *role*, not distinct content).
 
 > **Normative comparators.** The operators in the threshold tables below and in §2 are **normative** —
 > the engine must use exactly the stated comparator (`>`, `≥`, `<`, `≤`). The `core` constants pin the
@@ -215,5 +313,6 @@ division-by-zero panic.
 
 ## Change control
 Any edit to a formula, threshold, the banned-verb list, the tolerance, the rounding mode, or a display
-scale **must** bump `METHOD_VERSION` (next: `ssg-1.1.0` for additive, `ssg-2.0.0` for breaking). The
-`core` change-detection test will fail until the version is bumped and the snapshot regenerated.
+scale **must** bump `METHOD_VERSION` (next: `ssg-1.2.0` for additive, `ssg-2.0.0` for breaking). The
+`core` change-detection test will fail until the version is bumped and the snapshot regenerated, and
+every golden fixture's `meta.method_version` must be re-validated by hand (§7).
