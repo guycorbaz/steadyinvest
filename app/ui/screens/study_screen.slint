@@ -925,6 +925,17 @@ export component StudyScreen inherits Rectangle {
                     }
                 }
 
+                // 2026-07-12: data-integrity signal — the current price is wildly out of scale vs
+                // the historical range (a mis-scaled/stale fetch or wrong symbol). It silently
+                // inflates the §4/§5 potential, so it is flagged in AMBER (attention, NOT a §4 zone
+                // hue) — the study must say « à vérifier », never present a rosy-but-false number.
+                if Studies.current-price-out-of-scale: Text {
+                    text: @tr("⚠ Signalement : le prix actuel s'écarte fortement de la plage de cours historique — données à vérifier avant toute conclusion.");
+                    color: Tokens.attention;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+
                 // Story 2.7 — a study-level plausibility finding (low_price_above_current, year-less)
                 // anchors here near the forecast-low surface, not a §2/§3 cell. Neutral fact-stating
                 // text, silent by default (AC6). "" key → hidden.
