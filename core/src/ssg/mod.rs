@@ -87,13 +87,30 @@ fn mean(values: &[Decimal]) -> Option<Decimal> {
 /// the §2/§3 averaging window. Computation still runs on the smaller window (FR8); the
 /// `low_confidence` state is carried separately.
 fn last_usable_window(financials: &CanonicalFinancials) -> Vec<&CanonicalYear> {
-    let usable: Vec<&CanonicalYear> = financials
-        .years
+    last_usable_window_of(&financials.years)
+}
+
+/// Slice-shaped body of [`last_usable_window`], shared with the UI-proposal helper below.
+fn last_usable_window_of(years: &[CanonicalYear]) -> Vec<&CanonicalYear> {
+    let usable: Vec<&CanonicalYear> = years
         .iter()
         .filter(|y| matches!(y.usability, YearUsability::Usable))
         .collect();
     let start = usable.len().saturating_sub(USABLE_YEARS_FLOOR as usize);
     usable[start..].to_vec()
+}
+
+/// A UI **entry proposal** (2026-07-12), NOT an SSG §-output: the LOWEST low price over the same
+/// last-5-usable-years window §3 averages over — the natural historical anchor for the « plus bas
+/// sévère récent » judgment input (the low of the window's worst correction). Deliberately kept
+/// OUT of [`SsgOutputs`] (no golden/report surface — adopting it is a judgment, the value itself
+/// is not a method result); it lives in `core` so the app never computes anything itself.
+/// `None` when no usable year carries a low price.
+pub fn recent_severe_low_proposal(years: &[CanonicalYear]) -> Option<Decimal> {
+    last_usable_window_of(years)
+        .iter()
+        .filter_map(|y| y.low_price)
+        .min()
 }
 
 /// Raise the computable quality flags (FR7) with the spec's normative comparators (§2/§7),

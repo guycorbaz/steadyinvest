@@ -25,7 +25,7 @@
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use steadyinvest_contract::{ForecastLowOption as CForecastLowOption, Money, Study};
-use steadyinvest_core::normalize::{Finding, PlausibilityKey};
+use steadyinvest_core::normalize::{self, Finding, PlausibilityKey};
 use steadyinvest_core::rounding::DisplayField;
 use steadyinvest_core::ssg::{CalcFinding, ReturnOutputs, SsgOutputs, Trend, UpsideDownside, Zone};
 use steadyinvest_core::verdict::{GateState, GatedInput, OpenGate, StudySnapshot, Verdict};
@@ -292,13 +292,19 @@ pub fn growth_computed(outputs: &SsgOutputs, format: NumberFormat) -> GrowthComp
 }
 
 /// Historical values proposed for the EMPTY judgment fields (2026-07-12): the §1 historical CAGRs
-/// (→ the projected sales/EPS growth inputs) and the §3 P/E averages (→ the judged avg high/low
-/// P/E). `""` when the historical figure is unknown — no proposal is shown (never the em-dash: an
-/// empty string hides the chip, a dash would render a nonsense proposal). Formatted with the SAME
+/// (→ the projected sales/EPS growth inputs), the §3 P/E averages (→ the judged avg high/low
+/// P/E) and the window's lowest low price (→ « plus bas sévère récent », computed by
+/// `core::ssg::recent_severe_low_proposal` on the frame's canonical series — never here). `""`
+/// when the historical figure is unknown — no proposal is shown (never the em-dash: an empty
+/// string hides the chip, a dash would render a nonsense proposal). Formatted with the SAME
 /// per-field display scale as the entry fields, so an adopted value round-trips through
 /// `set-judgment` exactly like typed text — adoption is an explicit user gesture and therefore a
 /// judgment (the #23 rail; nothing is prefilled silently).
-pub fn judgment_suggestions(outputs: &SsgOutputs, format: NumberFormat) -> JudgmentSuggestions {
+pub fn judgment_suggestions(
+    outputs: &SsgOutputs,
+    series: &[normalize::CanonicalYear],
+    format: NumberFormat,
+) -> JudgmentSuggestions {
     let opt = |v: Option<Decimal>, field: DisplayField| -> slint::SharedString {
         match v {
             Some(d) => format_scaled(d, field, format).into(),
@@ -310,6 +316,10 @@ pub fn judgment_suggestions(outputs: &SsgOutputs, format: NumberFormat) -> Judgm
         eps_growth: opt(outputs.growth.eps_cagr_pct, DisplayField::Percent),
         high_pe: opt(outputs.valuation.avg_high_pe, DisplayField::PeRatio),
         low_pe: opt(outputs.valuation.avg_low_pe, DisplayField::PeRatio),
+        recent_severe_low: opt(
+            steadyinvest_core::ssg::recent_severe_low_proposal(series),
+            DisplayField::Price,
+        ),
     }
 }
 
@@ -950,8 +960,8 @@ mod tests {
         // 10, and both CAGRs exactly 0 %.
         let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
         let study = study_with(years, full_judgment());
-        let snap = build_snapshot(&study).expect("normalizes");
-        let s = judgment_suggestions(snap.outputs(), format);
+        let frame = build_frame(&study).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
         let scaled = |v: &str, f: DisplayField| {
             format_scaled(Decimal::from_str_exact(v).unwrap(), f, format)
         };
@@ -959,15 +969,24 @@ mod tests {
         assert_eq!(s.low_pe.as_str(), scaled("10", DisplayField::PeRatio));
         assert_eq!(s.sales_growth.as_str(), scaled("0", DisplayField::Percent));
         assert_eq!(s.eps_growth.as_str(), scaled("0", DisplayField::Percent));
+        // The « plus bas sévère récent » proposal = the window's lowest low (flat 50s → 50).
+        assert_eq!(
+            s.recent_severe_low.as_str(),
+            scaled("50", DisplayField::Price)
+        );
 
         // A single-year history: the CAGRs are unknown (n = 0) → EMPTY proposals (no chip); the
-        // one-year P/E "averages" are still known and proposed.
+        // one-year P/E "averages" and lowest low are still known and proposed.
         let study = study_with(vec![year(2025, validated_cell)], full_judgment());
-        let snap = build_snapshot(&study).expect("normalizes");
-        let s = judgment_suggestions(snap.outputs(), format);
+        let frame = build_frame(&study).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
         assert_eq!(s.sales_growth.as_str(), "");
         assert_eq!(s.eps_growth.as_str(), "");
         assert_eq!(s.high_pe.as_str(), scaled("20", DisplayField::PeRatio));
+        assert_eq!(
+            s.recent_severe_low.as_str(),
+            scaled("50", DisplayField::Price)
+        );
     }
 
     /// 5 fully-validated-fresh usable years + complete judgment → Verdict::Full, and the adapter's

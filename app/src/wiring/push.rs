@@ -96,7 +96,11 @@ pub(crate) fn push_form(
             )));
             // The historical values proposed for the empty judgment fields (« hist. » chips) — from
             // the SAME coherent frame as the §1/§3 computed results they mirror.
-            studies.set_judgment_suggestions(engine::judgment_suggestions(outputs, format));
+            studies.set_judgment_suggestions(engine::judgment_suggestions(
+                outputs,
+                &frame.series,
+                format,
+            ));
             // Story 2.8 — the §1 interactive growth chart geometry (from the SAME coherent frame).
             studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
             // Issue #115 — the §3 P/E-history chart (historical high/low P/E + draggable judged levels).
