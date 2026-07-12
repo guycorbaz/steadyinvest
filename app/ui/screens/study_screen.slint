@@ -929,7 +929,7 @@ export component StudyScreen inherits Rectangle {
 
                 CalcRow { label: @tr("Rendement courant"); formula: @tr("div. ÷ prix × 100"); result: Studies.return-computed.present-yield; }
                 CalcRow { label: @tr("Rendement moyen 5 ans"); formula: ""; result: Studies.return-computed.avg-yield; }
-                CalcRow { label: @tr("Appréciation annualisée"); formula: @tr("appr.% ÷ 5"); result: FormConst.empty-slot; }
+                CalcRow { label: @tr("Appréciation annualisée"); formula: @tr("(haut ÷ prix)^(1∕5) − 1"); result: Studies.return-computed.annualized-appreciation; }
                 CalcRow { label: @tr("Rendement annuel total"); formula: @tr("appréciation + rendement moyen"); result: Studies.return-computed.total-return; }
             }
 

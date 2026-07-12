@@ -344,6 +344,7 @@ pub fn return_computed(outputs: &SsgOutputs, format: NumberFormat) -> ReturnComp
     ReturnComputed {
         present_yield: fmt_pct(r.present_yield_pct, format).into(),
         avg_yield: fmt_pct(r.avg_yield_pct, format).into(),
+        annualized_appreciation: fmt_pct(r.projected_annualized_appreciation_pct, format).into(),
         total_return: fmt_total_return(r, format).into(),
     }
 }
