@@ -32,6 +32,8 @@ export struct StudyRow {
     // 2026-07-12: the present-price zone key ("buy" | "neutral" | "sell"; "" = unknown/outside the
     // band) — a dot in the zone's own §4 hue + the localized noun on the list row.
     zone: string,
+    // 2026-07-12: the user-entered company name shown after the ticker ("" when unset).
+    company-name: string,
 }
 
 // One watchlist row (Story 4.1, FR34). `linked` is the authoritative link state (the cell's

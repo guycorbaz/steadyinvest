@@ -118,6 +118,8 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
                 display,
                 incomplete,
                 zone,
+                // The user-entered company name shown after the ticker on the list row (2026-07-12).
+                company_name: study.company_name.clone().unwrap_or_default(),
             },
         );
     }

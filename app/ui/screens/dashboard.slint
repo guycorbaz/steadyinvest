@@ -62,13 +62,31 @@ component StudyListRow inherits Rectangle {
         padding-right: Tokens.space-12;
         spacing: Tokens.space-12;
 
-        Text {
-            text: root.entry.ticker;
-            color: Tokens.text-high;
-            font-size: Tokens.font-body;
-            font-weight: Tokens.weight-medium;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
+        // Identity column (2026-07-12): fixed width so every row's ticker+name cell is the same
+        // size. Ticker in high ink; the user-entered company name follows in muted ink, elided
+        // when long. "" name → just the ticker.
+        Rectangle {
+            width: 360px;
+            background: transparent;
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+                alignment: start;
+                Text {
+                    text: root.entry.ticker;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-body;
+                    font-weight: Tokens.weight-medium;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.entry.company-name;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
         }
         // Fixed-width slot (2026-07-12): a shorter/absent date must never shift the columns after
         // it — the slot is always reserved, only its content varies.
@@ -109,32 +127,50 @@ component StudyListRow inherits Rectangle {
         }
         // Issue #107: the estimated potential (§5 projected total annualized return) — a neutral FACT,
         // no hue, right-aligned tabular figures; "—" when the study withholds it. Also the sort key.
-        Text {
-            text: root.entry.potential-return;
-            color: Tokens.text-mid;
-            font-family: Tokens.font-numeric;
-            font-size: Tokens.font-caption;
-            horizontal-alignment: right;
-            vertical-alignment: center;
-            min-width: Tokens.space-48 + Tokens.space-24;
+        // Fixed-width slot (2026-07-12) so the column aligns across every row.
+        Rectangle {
+            width: 100px;
+            background: transparent;
+            Text {
+                text: root.entry.potential-return;
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                width: 100%;
+            }
         }
         // Issue #148: a neutral "à compléter" marker when the study still has a MISSING load-bearing
         // input (verdict Withheld) — so an unfinished study is evident from the list, before opening
-        // it. NEUTRAL ink only (no hue — the colour budget is the §4 zones); the same open gates that
-        // drive the in-form field highlight (#114) decide this, so the list and the form agree.
-        if root.entry.incomplete: Text {
-            text: @tr("à compléter");
-            color: Tokens.text-mid;
-            font-size: Tokens.font-caption;
-            font-italic: true;
-            vertical-alignment: center;
+        // it. NEUTRAL ink only (no hue — the colour budget is the §4 zones). Fixed-width slot ALWAYS
+        // reserved (2026-07-12): the text shows only when incomplete, but the column keeps its place
+        // so a complete study never shifts the status/actions after it.
+        Rectangle {
+            width: 110px;
+            background: transparent;
+            Text {
+                text: root.entry.incomplete ? @tr("à compléter") : "";
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                font-italic: true;
+                vertical-alignment: center;
+            }
         }
-        Text {
-            text: root.entry.status;
-            color: Tokens.text-low;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
+        // Status — fixed-width slot so the column aligns across rows.
+        Rectangle {
+            width: 90px;
+            background: transparent;
+            Text {
+                text: root.entry.status;
+                color: Tokens.text-low;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
         }
+        // Flexible spacer (2026-07-12): absorbs the remaining width so the fixed data columns stay
+        // left-aligned as a table and the action cluster sits at the right edge.
+        Rectangle { horizontal-stretch: 1; background: transparent; }
         // ── Story 2.12 — lifecycle actions. These sit on top of the row's TouchArea (declared after
         //    it), so their own TouchAreas consume the click — opening the row needs the ticker area. ──
         if root.entry.status != "archived": ActionButton {
