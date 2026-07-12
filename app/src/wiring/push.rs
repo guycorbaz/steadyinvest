@@ -10,8 +10,8 @@ use crate::config::StudyViewState;
 use crate::state::JournalState;
 use crate::viewmodel::format::NumberFormat;
 use crate::{
-    GrowthComputed, MainWindow, MgmtComputed, PeComputed, ReturnComputed, RiskComputed, Studies,
-    VerdictState, ZoneBarState,
+    GrowthComputed, JudgmentSuggestions, MainWindow, MgmtComputed, PeComputed, ReturnComputed,
+    RiskComputed, Studies, VerdictState, ZoneBarState,
 };
 use crate::{regime, state, viewmodel};
 
@@ -94,6 +94,9 @@ pub(crate) fn push_form(
             studies.set_required_fields(ModelRc::new(VecModel::from(
                 engine::required_judgment_fields(snapshot),
             )));
+            // The historical values proposed for the empty judgment fields (« hist. » chips) — from
+            // the SAME coherent frame as the §1/§3 computed results they mirror.
+            studies.set_judgment_suggestions(engine::judgment_suggestions(outputs, format));
             // Story 2.8 — the §1 interactive growth chart geometry (from the SAME coherent frame).
             studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
             // Issue #115 — the §3 P/E-history chart (historical high/low P/E + draggable judged levels).
@@ -128,6 +131,7 @@ pub(crate) fn push_form(
             studies.set_pe_computed(PeComputed::default());
             studies.set_risk_computed(RiskComputed::default());
             studies.set_return_computed(ReturnComputed::default());
+            studies.set_judgment_suggestions(JudgmentSuggestions::default());
             studies.set_zone_bar(ZoneBarState::default());
             studies.set_verdict(VerdictState::default());
             studies.set_growth_chart(viewmodel::chart::unavailable());

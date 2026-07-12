@@ -18,8 +18,15 @@ export component JudgmentField inherits VerticalLayout {
     in property <string> value;
     in property <string> placeholder;
     in property <string> suffix; // e.g. "%" — caption only, never sent back
+    // A historical value proposed for this field when EMPTY ("" = no proposal): shown as a small
+    // « hist. » chip under the box; clicking commits it through the SAME set-judgment path as
+    // typing (the adoption gesture IS the judgment — the #23 rail, never a silent prefill).
+    in property <string> suggestion;
 
     spacing: Tokens.space-4;
+    // Pack label/box/chip at the top: in a row whose height is set by a taller sibling (the §1
+    // growth column with its captions), the default stretch would spread them apart vertically.
+    alignment: start;
 
     // Re-seed the input from the model after a persisted re-push (Studies.judgment changed).
     //
@@ -55,18 +62,19 @@ export component JudgmentField inherits VerticalLayout {
             border-color: input.has-focus ? Tokens.focus : Tokens.separator;
             forward-focus: input;
 
-            // Issue #114: a neutral "à saisir" ring when this input is an OPEN judgment gate (a
+            // Issue #114: the "à saisir" ring when this input is an OPEN judgment gate (a
             // load-bearing input the verdict is still waiting on). Border-only overlay → never hides
             // the value; suppressed while focused so the focus ring wins; clears as soon as the field
-            // is filled (the verdict drops the gate → `required-fields` no longer lists this key). No
-            // hue — the colour budget is the §4 zones only.
+            // is filled (the verdict drops the gate → `required-fields` no longer lists this key).
+            // Amber (`Tokens.attention`) since 2026-07-12 — the neutral grey ring was not findable;
+            // this is the one deliberate colour spend outside the §4 zones.
             for k in Studies.required-fields: Rectangle {
                 visible: k == root.field-key && !input.has-focus;
                 width: 100%;
                 height: 100%;
                 border-radius: Tokens.radius;
                 border-width: Tokens.focus-border;
-                border-color: Tokens.text-mid;
+                border-color: Tokens.attention;
                 background: transparent;
             }
 
@@ -113,6 +121,30 @@ export component JudgmentField inherits VerticalLayout {
             color: Tokens.text-low;
             font-size: Tokens.font-caption;
             vertical-alignment: center;
+        }
+    }
+    // The « hist. » proposal chip — visible only while the field is EMPTY and a historical value
+    // exists. One click commits the proposal through the SAME `set-judgment` path as typing (the
+    // gesture is the judgment); the chip disappears with the commit (the field is no longer empty).
+    if root.value == "" && root.suggestion != "": chip := Rectangle {
+        width: 140px;
+        height: Tokens.row-height * 0.8;
+        border-radius: Tokens.radius;
+        border-width: Tokens.border;
+        border-color: chip-touch.has-hover ? Tokens.text-mid : Tokens.separator;
+        background: transparent;
+        chip-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                Studies.set-judgment(root.field-key, root.suggestion);
+            }
+        }
+        Text {
+            text: @tr("↩ hist. {}", root.suggestion);
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+            horizontal-alignment: center;
         }
     }
 }

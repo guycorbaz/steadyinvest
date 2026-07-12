@@ -13,7 +13,7 @@ import "../assets/fonts/IBMPlexSans-SemiBold.ttf";
 
 import { Tokens } from "tokens.slint";
 import { Labels, Prefs, Studies, StudyRow, FormHeader, PeRow, GridCellState, MgmtRow } from "state.slint";
-import { JudgmentFields, GrowthComputed, MgmtComputed, PeComputed, RiskComputed, ReturnComputed, ZoneBarState, VerdictState, TraceState } from "state.slint";
+import { JudgmentFields, JudgmentSuggestions, GrowthComputed, MgmtComputed, PeComputed, RiskComputed, ReturnComputed, ZoneBarState, VerdictState, TraceState } from "state.slint";
 import { AxisTick, GrowthChartState } from "state.slint";
 import { ScenarioOutcome, ScenarioCompareState } from "state.slint";
 import { Verify, FixtureLine } from "state.slint";
@@ -31,7 +31,7 @@ import { SettingsScreen } from "screens/settings.slint";
 // Re-export the globals + form structs so the Rust side (theme.rs, labels.rs, regime.rs, state.rs,
 // viewmodel/form.rs, main.rs) can reach them.
 export { Tokens, Labels, Prefs, Studies, StudyRow, FormHeader, PeRow, GridCellState, MgmtRow }
-export { JudgmentFields, GrowthComputed, MgmtComputed, PeComputed, RiskComputed, ReturnComputed, ZoneBarState, VerdictState, TraceState }
+export { JudgmentFields, JudgmentSuggestions, GrowthComputed, MgmtComputed, PeComputed, RiskComputed, ReturnComputed, ZoneBarState, VerdictState, TraceState }
 export { AxisTick, GrowthChartState }
 export { ScenarioOutcome, ScenarioCompareState }
 export { Verify, FixtureLine }
