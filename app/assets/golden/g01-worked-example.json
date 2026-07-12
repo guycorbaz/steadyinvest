@@ -4,7 +4,7 @@
     "title": "Tutorial-style worked example (Story 1.8) promoted to a golden",
     "description": "Five usable years of exact 10%/yr sales and EPS growth (powers of 1.1), constant high P/E 20 / low P/E 10 / payout 30% / ROE 20%, PTP margin marching 12% down to 8%. Fullest expected coverage including both per-year tables. Quality-value candidate: all four criteria Met.",
     "provenance": "Hand-computed for Story 1.8 (core/tests/ssg_engine.rs), BEFORE the engine was written, from the spec formulas in docs/method/ssg-method-spec-v1.md: every series is an exact power of 1.1, so CAGRs are exactly 10%; ratios were derived on paper and cross-checked section by section (e.g. forecast high 18 x 2.48832 = 44.78976; zone third 32.18976 / 3 = 10.72992; U/D 26.78976 / 5.4 = 4.96106...; 2.48832 = 1.2^5 so the annualised appreciation is exactly 20%). Promoted verbatim - never engine output.",
-    "method_version": "ssg-1.0.0",
+    "method_version": "ssg-1.1.0",
     "fixture_format_version": 1
   },
   "input": {

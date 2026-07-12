@@ -181,7 +181,7 @@ fn control_numeric_tolerance_boundary() {
 #[test]
 fn control_stale_method_version_fails() {
     let json = tampered(
-        "\"method_version\": \"ssg-1.0.0\"",
+        "\"method_version\": \"ssg-1.1.0\"",
         "\"method_version\": \"ssg-0.9.9\"",
     );
     let report = check_str(&json);

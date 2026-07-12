@@ -4,7 +4,7 @@
     "title": "Quality-value candidate with forecast-low option (b): average low price",
     "description": "The worked-example series with the section-4 forecast low taken from option (b), the average low price of the last 5 usable years (12.2102). All four verdict criteria are Met - a quality-value candidate. The zone thirds are non-terminating (range 32.57956 / 3), demonstrating that hand-computed bounds at 10+ significant digits sit far inside the method tolerance.",
     "provenance": "Hand-computed 2026-06-11 from the Story 1.8 worked-example values (see g01) with one change: forecast low = average low price (10 + 11 + 12.1 + 13.31 + 14.641) / 5 = 61.051 / 5 = 12.2102 (cross-checked: 5 x 12.2102 = 61.051). Range 44.78976 - 12.2102 = 32.57956; third 10.8598533333...; bounds cross-checked by re-adding (12.2102 + third = 23.0700533333; + third = 33.9299066667). U/D = 26.78976 / 5.7898 = 4.6270614 (cross-checked 5.7898 x 4.6270614 = 26.789762). All other sections are unchanged from g01's paper derivation.",
-    "method_version": "ssg-1.0.0",
+    "method_version": "ssg-1.1.0",
     "fixture_format_version": 1
   },
   "input": {

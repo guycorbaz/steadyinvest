@@ -814,7 +814,7 @@ mod tests {
             format!(
                 r#"{{
                     "id": "x", "title": "t", "description": "d", "provenance": "p",
-                    "method_version": "ssg-1.0.0", "fixture_format_version": {v}
+                    "method_version": "ssg-1.1.0", "fixture_format_version": {v}
                 }}"#
             )
         };

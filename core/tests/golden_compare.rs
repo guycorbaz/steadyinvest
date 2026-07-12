@@ -14,7 +14,7 @@ const MINIMAL_STUDY: &str = r#"{
         "title": "minimal",
         "description": "no years - every output unknown",
         "provenance": "trivial by construction: no usable data exists",
-        "method_version": "ssg-1.0.0",
+        "method_version": "ssg-1.1.0",
         "fixture_format_version": 1
     },
     "input": {
@@ -124,7 +124,7 @@ fn minimal_all_unknown_study_passes() {
 /// A fixture pinned to another method version fails its check (never silently replayed).
 #[test]
 fn stale_method_version_fails_the_check() {
-    let stale = MINIMAL_STUDY.replace("\"ssg-1.0.0\"", "\"ssg-0.9.0\"");
+    let stale = MINIMAL_STUDY.replace("\"ssg-1.1.0\"", "\"ssg-0.9.0\"");
     assert_ne!(stale, MINIMAL_STUDY, "the replacement must have applied");
     let study: GoldenStudy = serde_json::from_str(&stale).expect("still parses");
     let report = check(&study);
