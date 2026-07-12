@@ -144,6 +144,8 @@ export component ZoneBar inherits Rectangle {
                 text: root.bar.present-zone == "buy" ? Labels.zone-buy
                     : root.bar.present-zone == "neutral" ? Labels.zone-hold
                     : root.bar.present-zone == "sell" ? Labels.zone-sell
+                    : root.bar.present-zone == "below" ? @tr("Sous la bande")
+                    : root.bar.present-zone == "above" ? @tr("Au-dessus de la bande")
                     : "—";
                 color: Tokens.text-mid;
                 font-size: Tokens.font-caption;

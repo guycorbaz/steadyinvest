@@ -274,6 +274,30 @@ pub fn zone_key(zone: Option<Zone>) -> &'static str {
     }
 }
 
+/// The richer present-price **position** key (2026-07-12): inside the forecast band it is the
+/// zone (`"buy"|"neutral"|"sell"`); OUTSIDE the band it is a distinct honest state —
+/// `"below"` (price under the forecast low) or `"above"` (price over the forecast high) — NOT a
+/// forced buy/sell, because the SSG method defines zones only within the band. `""` when there is
+/// no band (degenerate / missing inputs) or no current price. Supersedes [`zone_key`] on the
+/// surfaces that want to state the out-of-band fact instead of a blank.
+pub fn zone_position_key(
+    r: &steadyinvest_core::ssg::RiskRewardOutputs,
+    price: Option<Decimal>,
+) -> &'static str {
+    if let Some(zone) = r.present_price_zone {
+        return match zone {
+            Zone::Buy => "buy",
+            Zone::Neutral => "neutral",
+            Zone::Sell => "sell",
+        };
+    }
+    match (r.zones.as_ref(), price) {
+        (Some(bounds), Some(p)) if p < bounds.forecast_low => "below",
+        (Some(bounds), Some(p)) if p > bounds.forecast_high => "above",
+        _ => "",
+    }
+}
+
 /// The verdict integrity state crossed to `.slint` as an enum-derived string (never the domain enum).
 fn verdict_state(verdict: &Verdict) -> &'static str {
     match verdict {
@@ -426,10 +450,13 @@ pub fn zone_bar(study: &Study, snapshot: &StudySnapshot, format: NumberFormat) -
         };
     };
     // Layout-only normalized marker position (geometry, not a decision number): where the current
-    // price sits within [forecast_low, forecast_high]. Out of range / unknown → no marker (-1).
+    // price sits within [forecast_low, forecast_high]. 2026-07-12: a price OUTSIDE the band no
+    // longer hides the marker — `clamp(0,1)` pins it to the band edge (bottom = below, top =
+    // above), so the honest out-of-band state (`present_zone` "below"/"above") has a visible
+    // marker. Still -1 (no marker) only when there is no price at all.
     let span = zones.forecast_high - zones.forecast_low;
-    let marker_pos = match (r.present_price_zone, current_price) {
-        (Some(_), Some(price)) if span > Decimal::ZERO => {
+    let marker_pos = match current_price {
+        Some(price) if span > Decimal::ZERO => {
             let frac = (price - zones.forecast_low) / span;
             frac.to_f32().unwrap_or(-1.0).clamp(0.0, 1.0)
         }
@@ -443,7 +470,7 @@ pub fn zone_bar(study: &Study, snapshot: &StudySnapshot, format: NumberFormat) -
         neutral_top: format_scaled(zones.neutral_top, DisplayField::Price, format).into(),
         forecast_high: format_scaled(zones.forecast_high, DisplayField::Price, format).into(),
         present_price: fmt(current_price, DisplayField::Price, format).into(),
-        present_zone: zone_key(r.present_price_zone).into(),
+        present_zone: zone_position_key(r, current_price).into(),
         marker_pos,
     }
 }
@@ -987,6 +1014,46 @@ mod tests {
             s.recent_severe_low.as_str(),
             scaled("50", DisplayField::Price)
         );
+    }
+
+    /// 2026-07-12: inside the band, `zone_position_key` is the zone; OUTSIDE it, the honest
+    /// distinct state « below » / « above » (never a forced buy/sell); "" without a band or price.
+    #[test]
+    fn zone_position_key_states_out_of_band_below_and_above() {
+        use steadyinvest_core::ssg::{RiskRewardOutputs, UpsideDownside, ZoneBounds};
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let bounds = ZoneBounds {
+            forecast_low: d("100"),
+            buy_top: d("120"),
+            neutral_top: d("140"),
+            forecast_high: d("160"),
+        };
+        let outputs = |zone: Option<Zone>| RiskRewardOutputs {
+            forecast_high: Some(d("160")),
+            forecast_low: Some(d("100")),
+            zones: Some(bounds.clone()),
+            present_price_zone: zone,
+            upside_downside: UpsideDownside::Unknown,
+        };
+        // Inside the band → the zone itself (present_price_zone is Some there).
+        assert_eq!(
+            zone_position_key(&outputs(Some(Zone::Buy)), Some(d("110"))),
+            "buy"
+        );
+        assert_eq!(
+            zone_position_key(&outputs(Some(Zone::Sell)), Some(d("150"))),
+            "sell"
+        );
+        // Outside the band → the honest distinct state (the core returns present_price_zone None).
+        assert_eq!(zone_position_key(&outputs(None), Some(d("80"))), "below");
+        assert_eq!(zone_position_key(&outputs(None), Some(d("200"))), "above");
+        // No price → nothing; no band at all → nothing even with a price.
+        assert_eq!(zone_position_key(&outputs(None), None), "");
+        let no_band = RiskRewardOutputs {
+            zones: None,
+            ..outputs(None)
+        };
+        assert_eq!(zone_position_key(&no_band, Some(d("80"))), "");
     }
 
     /// 5 fully-validated-fresh usable years + complete judgment → Verdict::Full, and the adapter's

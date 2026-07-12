@@ -101,12 +101,16 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
         let incomplete = snapshot
             .as_ref()
             .is_some_and(crate::viewmodel::engine::study_incomplete);
-        // 2026-07-12: the present-price zone off the SAME snapshot — the list dot + noun.
-        let zone = crate::viewmodel::engine::zone_key(
-            snapshot
-                .as_ref()
-                .and_then(|snap| snap.outputs().risk_reward.present_price_zone),
-        );
+        // 2026-07-12: the present-price zone/position off the SAME snapshot — the list noun.
+        // buy/neutral/sell inside the band; below/above outside it (an honest distinct state, not
+        // a blank and not a forced buy/sell); "" when there is no band or no price.
+        let zone = match &snapshot {
+            Some(snap) => crate::viewmodel::engine::zone_position_key(
+                &snap.outputs().risk_reward,
+                study.judgment.current_price.map(|m| m.as_decimal()),
+            ),
+            None => "",
+        };
         returns.insert(
             summary.id,
             viewmodel::studies::StudyReturn {
