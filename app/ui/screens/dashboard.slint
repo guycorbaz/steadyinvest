@@ -84,18 +84,20 @@ component StudyListRow inherits Rectangle {
             }
         }
         // The present-price zone at a glance — the localized noun (permitted zone nouns, FR13) in
-        // the zone's OWN §4 hue (2026-07-12: replaces the separate colour dot — the text itself now
-        // carries the same meaning the §4 zone bar does). Fixed-width slot ALWAYS reserved so an
-        // unknown/outside-band study (blank slot) never shifts the columns after it — never a
-        // guessed zone, just an empty one that still takes its place. Widened past the dot-era
-        // 140px so "Zone de maintien" (the longest label) never clips.
+        // the zone's OWN §4 hue (2026-07-12: the text itself carries the same meaning the §4 zone
+        // bar does). OUTSIDE the band (« Sous la bande » / « Au-dessus de la bande ») is a distinct
+        // honest state in NEUTRAL ink — never a forced buy/sell (the SSG method defines zones only
+        // within the band). Fixed-width slot ALWAYS reserved so a study never shifts the columns
+        // after it; wide enough for the longest label (« Au-dessus de la bande »).
         Rectangle {
-            width: 160px;
+            width: 200px;
             background: transparent;
             Text {
                 text: root.entry.zone == "buy" ? @tr("Zone d'achat")
                     : root.entry.zone == "sell" ? @tr("Zone de vente")
                     : root.entry.zone == "neutral" ? @tr("Zone de maintien")
+                    : root.entry.zone == "below" ? @tr("Sous la bande")
+                    : root.entry.zone == "above" ? @tr("Au-dessus de la bande")
                     : "";
                 color: root.entry.zone == "buy" ? Tokens.zone-buy
                     : root.entry.zone == "sell" ? Tokens.zone-sell
