@@ -94,6 +94,10 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
     ui.on_screen_activated(move |index| {
         let ui = ui_weak.unwrap();
         match index {
+            // Études: the list's per-row §5 potential / « à compléter » / zone re-derive from the
+            // CURRENT studies (2026-07-12: they were startup-only — finishing an analysis and
+            // coming back showed stale rows).
+            0 => crate::wiring::studies::refresh_studies(&ui, &journal_state.borrow()),
             // Liste de suivi: the per-item buy-zone flags re-derive from the CURRENT studies.
             1 => crate::wiring::watchlist::refresh_watchlist(&ui, &journal_state.borrow()),
             // Portefeuille: zones/prices/triggers + the 6.7/6.8 blocks re-derive (this also
