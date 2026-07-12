@@ -83,34 +83,26 @@ component StudyListRow inherits Rectangle {
                 vertical-alignment: center;
             }
         }
-        // The present-price zone at a glance — a dot in the zone's own §4 hue plus the localized
-        // noun (the zone labels are permitted nouns, FR13). Fixed-width slot ALWAYS reserved
-        // (2026-07-12) so an unknown/outside-band study (blank slot, dot hidden) never shifts the
-        // columns after it — never a guessed zone, just an empty one that still takes its place.
+        // The present-price zone at a glance — the localized noun (permitted zone nouns, FR13) in
+        // the zone's OWN §4 hue (2026-07-12: replaces the separate colour dot — the text itself now
+        // carries the same meaning the §4 zone bar does). Fixed-width slot ALWAYS reserved so an
+        // unknown/outside-band study (blank slot) never shifts the columns after it — never a
+        // guessed zone, just an empty one that still takes its place. Widened past the dot-era
+        // 140px so "Zone de maintien" (the longest label) never clips.
         Rectangle {
-            width: 140px;
+            width: 160px;
             background: transparent;
-            HorizontalLayout {
-                spacing: Tokens.space-4;
-                alignment: start;
-                Rectangle {
-                    width: 10px;
-                    height: 10px;
-                    border-radius: 5px;
-                    visible: root.entry.zone != "";
-                    background: root.entry.zone == "buy" ? Tokens.zone-buy
-                        : root.entry.zone == "sell" ? Tokens.zone-sell
-                        : Tokens.zone-hold;
-                }
-                Text {
-                    text: root.entry.zone == "buy" ? @tr("Zone d'achat")
-                        : root.entry.zone == "sell" ? @tr("Zone de vente")
-                        : root.entry.zone == "neutral" ? @tr("Zone de maintien")
-                        : "";
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
-                    vertical-alignment: center;
-                }
+            Text {
+                text: root.entry.zone == "buy" ? @tr("Zone d'achat")
+                    : root.entry.zone == "sell" ? @tr("Zone de vente")
+                    : root.entry.zone == "neutral" ? @tr("Zone de maintien")
+                    : "";
+                color: root.entry.zone == "buy" ? Tokens.zone-buy
+                    : root.entry.zone == "sell" ? Tokens.zone-sell
+                    : root.entry.zone == "neutral" ? Tokens.zone-hold
+                    : Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
             }
         }
         // Issue #107: the estimated potential (§5 projected total annualized return) — a neutral FACT,
