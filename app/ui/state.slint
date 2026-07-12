@@ -29,6 +29,9 @@ export struct StudyRow {
     // neutral "à compléter" marker so an unfinished study is evident from the list, before opening it.
     // Distinct from the ambiguous "—" potential (a complete study may also withhold its return).
     incomplete: bool,
+    // 2026-07-12: the present-price zone key ("buy" | "neutral" | "sell"; "" = unknown/outside the
+    // band) — a dot in the zone's own §4 hue + the localized noun on the list row.
+    zone: string,
 }
 
 // One watchlist row (Story 4.1, FR34). `linked` is the authoritative link state (the cell's
@@ -541,6 +544,10 @@ export global Studies {
     // user's typed input on a recoverable refusal (blank field / read-only / save failure).
     callback create-study(string, string) -> bool; // ticker, native-currency → written?
     callback open-study(string); // row id (stringified UUID)
+    // 2026-07-12: rebuild the dashboard rows (per-row §5 potential / « à compléter » / zone) —
+    // invoked by the in-form « Retour aux études » button, which flips `study-open` in pure Slint
+    // and therefore never passes through `screen-activated`.
+    callback list-refresh-requested();
     // Story 5.2 (FR59): export one study to a portable file (id) / import a study from a file path.
     callback export-study(string);
     callback import-study(string);

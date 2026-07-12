@@ -101,12 +101,19 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
         let incomplete = snapshot
             .as_ref()
             .is_some_and(crate::viewmodel::engine::study_incomplete);
+        // 2026-07-12: the present-price zone off the SAME snapshot — the list dot + noun.
+        let zone = crate::viewmodel::engine::zone_key(
+            snapshot
+                .as_ref()
+                .and_then(|snap| snap.outputs().risk_reward.present_price_zone),
+        );
         returns.insert(
             summary.id,
             viewmodel::studies::StudyReturn {
                 value,
                 display,
                 incomplete,
+                zone,
             },
         );
     }
@@ -156,6 +163,18 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 // Report whether a study was written so the UI keeps the user's input on refusal.
                 written
             });
+    }
+
+    // 2026-07-12: the in-form « Retour aux études » button flips `study-open` in pure Slint and
+    // never passes through `screen-activated` — this explicit intent re-derives the list rows
+    // (per-row §5 potential / « à compléter » / zone) from the edits made in the form.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Studies>().on_list_refresh_requested(move || {
+            let ui = ui_weak.unwrap();
+            refresh_studies(&ui, &journal_state.borrow());
+        });
     }
 
     // ── Issue #34 (FR51, PR 2) — the durable « Historique » timeline of the open study: open /

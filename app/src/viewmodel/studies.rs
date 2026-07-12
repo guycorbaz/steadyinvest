@@ -19,31 +19,41 @@ use crate::state::created_at_date;
 ///   sorting (`None` when the study withholds it — sorts LAST, never a top pick) and the already-
 ///   locale-formatted `display` string ("—" when absent);
 /// - issue #148 — `incomplete`: the study still has a MISSING load-bearing input (verdict `Withheld`),
-///   the list-level "à compléter" signal.
+///   the list-level "à compléter" signal;
+/// - 2026-07-12 — `zone`: the present-price zone key (`engine::zone_key`), the list-level coloured
+///   dot + noun ("" = unknown/outside the band → nothing shown, never a guess).
 #[derive(Debug, Clone)]
 pub struct StudyReturn {
     pub value: Option<Decimal>,
     pub display: String,
     pub incomplete: bool,
+    pub zone: &'static str,
 }
 
 impl Default for StudyReturn {
     /// An unknown potential: no sort value, and the app's faithful em-dash (never `0`) for display —
     /// so a study missing from the map (or one that withholds the return) reads "—", not blank. Not
     /// flagged incomplete: absence from the map is "unknown", never a false "à compléter" shout.
+    /// No zone either — absent facts stay absent.
     fn default() -> Self {
         StudyReturn {
             value: None,
             display: crate::viewmodel::form::EMPTY_SLOT.to_string(),
             incomplete: false,
+            zone: "",
         }
     }
 }
 
 /// Map one summary row into the Slint `StudyRow` (id stringified, date trimmed to the day, status
-/// verbatim, the pre-formatted potential-return string — "—" when the study withholds it — and the
-/// issue #148 `incomplete` flag driving the "à compléter" marker).
-pub fn to_row(summary: &StudySummary, potential_return: &str, incomplete: bool) -> StudyRow {
+/// verbatim, the pre-formatted potential-return string — "—" when the study withholds it — the
+/// issue #148 `incomplete` flag driving the "à compléter" marker, and the present-price zone key).
+pub fn to_row(
+    summary: &StudySummary,
+    potential_return: &str,
+    incomplete: bool,
+    zone: &str,
+) -> StudyRow {
     StudyRow {
         id: summary.id.to_string().into(),
         ticker: summary.security_ticker.clone().into(),
@@ -51,6 +61,7 @@ pub fn to_row(summary: &StudySummary, potential_return: &str, incomplete: bool) 
         status: summary.status.clone().into(),
         potential_return: potential_return.into(),
         incomplete,
+        zone: zone.into(),
     }
 }
 
@@ -152,7 +163,7 @@ pub fn curate(
     kept.iter()
         .map(|s| {
             let facts = returns.get(&s.id).unwrap_or(&empty);
-            to_row(s, facts.display.as_str(), facts.incomplete)
+            to_row(s, facts.display.as_str(), facts.incomplete, facts.zone)
         })
         .collect()
 }
@@ -195,6 +206,7 @@ mod tests {
             value: Some(Decimal::from_str_exact(value).unwrap()),
             display: display.to_string(),
             incomplete: false,
+            zone: "",
         }
     }
 
@@ -387,6 +399,7 @@ mod tests {
                 value: None,
                 display: "—".to_string(),
                 incomplete: true,
+                zone: "",
             },
         );
         // id 2 (ROG) deliberately absent → defaults to not incomplete.

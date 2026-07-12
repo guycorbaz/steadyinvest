@@ -263,6 +263,9 @@ export component StudyScreen inherits Rectangle {
                         Studies.judgment-dragging = false; // clear any stuck drag flag (review P5)
                         Studies.judgment-hover = false; // and the #187 hover flag with it
                         Studies.demo-active = false; // leaving the read-only demo (Story 2.13)
+                        // 2026-07-12: the list re-derives its rows (§5 potential / zone) from the
+                        // edits made in this form — this pure-Slint path bypasses screen-activated.
+                        Studies.list-refresh-requested();
                     }
                 }
                 // Story 2.9 — undo/redo of any judgment or grid edit (also Ctrl+Z / Ctrl+Y below).
