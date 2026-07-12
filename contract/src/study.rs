@@ -117,6 +117,11 @@ pub struct Study {
     /// First-class decision rationale (FR49) — the "why".
     #[serde(default)]
     pub rationale: Option<String>,
+    /// User-entered company name shown on the study header card (2026-07-12). Free text, optional;
+    /// `#[serde(default)]` keeps studies written before this field loadable (they read `None`). A
+    /// future fetch may pre-fill it, but it is user-editable by design (no fetch dependency).
+    #[serde(default)]
+    pub company_name: Option<String>,
     /// When the study was created (RFC3339 UTC).
     pub created_at: Timestamp,
     /// The [`SCHEMA_VERSION`] the study was written under.
@@ -141,6 +146,7 @@ impl Study {
             years: Vec::new(),
             judgment,
             rationale: None,
+            company_name: None,
             created_at,
             schema_version: SCHEMA_VERSION,
         }

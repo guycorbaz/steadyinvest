@@ -167,6 +167,8 @@ export struct FormHeader {
     currency: string,
     created-at: string,
     method-version: string,
+    // 2026-07-12: user-entered company name for the header card ("" when unset → placeholder).
+    company-name: string,
 }
 
 // One data cell's full presentation state (Story 2.4). Money still crosses as an already-formatted
@@ -708,6 +710,8 @@ export global Studies {
     //    text only. The user's own words are NOT posture-scanned — only the label/placeholder are.
     in-out property <string> rationale;
     callback set-rationale(string);
+    // 2026-07-12: commit the header card's company name (free text; empty → cleared to absence).
+    callback set-company-name(string);
 
     // ── Story 2.11 — extend the projection (FR3): the annual roll-forward. Appends the next actual
     //    fiscal year as a new ToFill column (`latest_year + 1`); the engine re-bases its canonical

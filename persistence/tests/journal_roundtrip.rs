@@ -93,6 +93,7 @@ fn study(id: u128, journal_id: Uuid, ticker: &str) -> Study {
         ],
         judgment: judgment(),
         rationale: Some("Margin trend noted; demand steady.".to_string()),
+        company_name: None,
         created_at: ts("2026-06-12T08:30:00Z"),
         schema_version: steadyinvest_contract::SCHEMA_VERSION,
     }

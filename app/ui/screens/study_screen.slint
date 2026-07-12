@@ -192,6 +192,75 @@ component CalcRow inherits HorizontalLayout {
     }
 }
 
+// One key figure on the header card (2026-07-12): a small caption label over its value. All values
+// are already-formatted strings read from the existing computed globals — no calculation here.
+component KeyFigure inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: Tokens.space-4;
+    Text {
+        text: root.label;
+        color: Tokens.text-low;
+        font-size: Tokens.font-caption;
+    }
+    Text {
+        text: root.value == "" ? FormConst.empty-slot : root.value;
+        color: Tokens.text-high;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-body;
+    }
+}
+
+// The header card's editable company-name field (2026-07-12): a single-line free-text entry
+// committed to `Studies.set-company-name` on Enter and on focus-out (the commit-on-focus-out
+// discipline). Empty → cleared to absence. Re-seeds from the model on every re-push (issue #32
+// pattern). The user's own text is NEVER posture-scanned — only the placeholder is (FR13).
+component CompanyNameField inherits Rectangle {
+    in property <string> value;
+    height: Tokens.row-height;
+    width: 260px;
+    border-radius: Tokens.radius;
+    background: Tokens.surface-alt;
+    border-width: input.has-focus ? Tokens.focus-border : Tokens.border;
+    border-color: input.has-focus ? Tokens.focus : Tokens.separator;
+    forward-focus: input;
+    changed value => {
+        input.text = root.value;
+    }
+    placeholder := Text {
+        text: @tr("Nom de l'entreprise");
+        color: Tokens.text-low;
+        font-size: Tokens.font-body;
+        x: Tokens.space-8;
+        vertical-alignment: center;
+        visible: input.text == "";
+    }
+    input := TextInput {
+        color: Tokens.text-high;
+        selection-background-color: Tokens.focus;
+        font-family: Tokens.font-ui;
+        font-size: Tokens.font-body;
+        single-line: true;
+        vertical-alignment: center;
+        x: Tokens.space-8;
+        width: parent.width - Tokens.space-8 * 2;
+        height: 100%;
+        init => {
+            self.text = root.value;
+        }
+        accepted => {
+            if (self.text != root.value) {
+                Studies.set-company-name(self.text);
+            }
+        }
+        changed has-focus => {
+            if (!self.has-focus && self.text != root.value) {
+                Studies.set-company-name(self.text);
+            }
+        }
+    }
+}
+
 
 export component StudyScreen inherits Rectangle {
     in property <FormHeader> header: Studies.form-header;
@@ -588,15 +657,21 @@ export component StudyScreen inherits Rectangle {
                     padding: Tokens.space-16;
                     spacing: Tokens.space-12;
 
-                    // Identity line: ticker · devise · créée le · méthode.
+                    // Identity line: ticker + editable company name · devise · créée le · méthode.
                     HorizontalLayout {
                         spacing: Tokens.space-16;
-                        Text {
-                            text: root.header.ticker;
-                            color: Tokens.text-high;
-                            font-size: Tokens.font-h2;
-                            font-weight: Tokens.weight-semibold;
-                            vertical-alignment: center;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: Tokens.space-4;
+                            Text {
+                                text: root.header.ticker;
+                                color: Tokens.text-high;
+                                font-size: Tokens.font-h2;
+                                font-weight: Tokens.weight-semibold;
+                            }
+                            // 2026-07-12: user-editable company name (persisted; a fetch may pre-fill
+                            // it later). Empty → placeholder « Nom de l'entreprise ».
+                            CompanyNameField { value: root.header.company-name; }
                         }
                         VerticalLayout {
                             alignment: center;
@@ -621,6 +696,24 @@ export component StudyScreen inherits Rectangle {
                             horizontal-alignment: right;
                             horizontal-stretch: 1;
                         }
+                    }
+
+                    Rectangle { height: Tokens.border; background: Tokens.separator; }
+
+                    // Key figures at a glance (2026-07-12) — all already-computed strings read from
+                    // the existing globals (no calculation here). "—" when a figure is withheld.
+                    HorizontalLayout {
+                        spacing: Tokens.space-24;
+                        alignment: start;
+                        KeyFigure {
+                            label: @tr("Prix actuel");
+                            value: Studies.judgment.current-price == "" ? "" : Studies.judgment.current-price + " " + root.header.currency;
+                        }
+                        KeyFigure { label: @tr("PER courant"); value: Studies.pe-computed.current-pe; }
+                        KeyFigure { label: @tr("Valeur relative"); value: Studies.pe-computed.relative-value; }
+                        KeyFigure { label: @tr("Rendement courant"); value: Studies.return-computed.present-yield; }
+                        KeyFigure { label: @tr("Croissance BPA (TCAC)"); value: Studies.growth-computed.eps-cagr; }
+                        KeyFigure { label: @tr("Potentiel 5 ans"); value: Studies.return-computed.total-return; }
                     }
 
                     Rectangle { height: Tokens.border; background: Tokens.separator; }
