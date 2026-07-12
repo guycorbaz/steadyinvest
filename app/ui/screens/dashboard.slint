@@ -70,36 +70,48 @@ component StudyListRow inherits Rectangle {
             vertical-alignment: center;
             horizontal-stretch: 1;
         }
-        Text {
-            text: root.entry.created-at;
-            color: Tokens.text-mid;
-            font-family: Tokens.font-numeric;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
-        }
-        // 2026-07-12: the present-price zone at a glance — a dot in the zone's own §4 hue plus the
-        // localized noun (the zone labels are permitted nouns, FR13). "" (unknown / outside the
-        // band) renders nothing — never a guessed zone. The hue restates the §4 zone bar's meaning,
-        // not a new colour channel.
-        if root.entry.zone != "": Rectangle {
-            width: 10px;
+        // Fixed-width slot (2026-07-12): a shorter/absent date must never shift the columns after
+        // it — the slot is always reserved, only its content varies.
+        Rectangle {
+            width: 90px;
             background: transparent;
-            Rectangle {
-                width: 10px;
-                height: 10px;
-                border-radius: 5px;
-                background: root.entry.zone == "buy" ? Tokens.zone-buy
-                    : root.entry.zone == "sell" ? Tokens.zone-sell
-                    : Tokens.zone-hold;
+            Text {
+                text: root.entry.created-at;
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
             }
         }
-        if root.entry.zone != "": Text {
-            text: root.entry.zone == "buy" ? @tr("Zone d'achat")
-                : root.entry.zone == "sell" ? @tr("Zone de vente")
-                : @tr("Zone de maintien");
-            color: Tokens.text-mid;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
+        // The present-price zone at a glance — a dot in the zone's own §4 hue plus the localized
+        // noun (the zone labels are permitted nouns, FR13). Fixed-width slot ALWAYS reserved
+        // (2026-07-12) so an unknown/outside-band study (blank slot, dot hidden) never shifts the
+        // columns after it — never a guessed zone, just an empty one that still takes its place.
+        Rectangle {
+            width: 140px;
+            background: transparent;
+            HorizontalLayout {
+                spacing: Tokens.space-4;
+                alignment: start;
+                Rectangle {
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 5px;
+                    visible: root.entry.zone != "";
+                    background: root.entry.zone == "buy" ? Tokens.zone-buy
+                        : root.entry.zone == "sell" ? Tokens.zone-sell
+                        : Tokens.zone-hold;
+                }
+                Text {
+                    text: root.entry.zone == "buy" ? @tr("Zone d'achat")
+                        : root.entry.zone == "sell" ? @tr("Zone de vente")
+                        : root.entry.zone == "neutral" ? @tr("Zone de maintien")
+                        : "";
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+            }
         }
         // Issue #107: the estimated potential (§5 projected total annualized return) — a neutral FACT,
         // no hue, right-aligned tabular figures; "—" when the study withholds it. Also the sort key.
