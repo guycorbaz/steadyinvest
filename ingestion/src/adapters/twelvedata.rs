@@ -72,13 +72,14 @@ impl MarketDataProvider for TwelveDataProvider {
     ) -> Result<RawFetch, ProviderError> {
         let key = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
         // Issue #70: the wire symbol is the per-provider spelling of the stored canonical ticker
-        // (`.US` → bare; other venues verbatim). The original `ticker` is kept for error identity.
-        let symbol = equity_symbol(ticker);
+        // (`.US` → bare; pinned venues → `&mic_code=`; unknown venues verbatim). The original
+        // `ticker` is kept for error identity.
+        let symbol = symbol_query(ticker);
         // Daily series → per-year high/low + the latest close. `outputsize` covers several years of
         // bars; `order=desc` is pinned explicitly so `latest_close` (which reads `values[0]`) is the
         // most-recent bar regardless of the API's default ordering. Free tier serves SIX/global equities.
         let url = format!(
-            "{}/time_series?symbol={symbol}&interval=1day&outputsize=5000&order=desc&apikey={key}",
+            "{}/time_series?{symbol}&interval=1day&outputsize=5000&order=desc&apikey={key}",
             self.base_url
         );
         let series = self.get_json(&url, ticker).await?;
@@ -104,9 +105,9 @@ impl MarketDataProvider for TwelveDataProvider {
     ) -> Result<Option<DatedClose>, ProviderError> {
         // The price-only path (holdings refresh, Story-5.1 price history): the cheap `/price` endpoint.
         let key = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
-        // Issue #70: per-provider wire symbol (see `equity_symbol`); original `ticker` kept for errors.
-        let symbol = equity_symbol(ticker);
-        let url = format!("{}/price?symbol={symbol}&apikey={key}", self.base_url);
+        // Issue #70: per-provider wire symbol (see `symbol_query`); original `ticker` kept for errors.
+        let symbol = symbol_query(ticker);
+        let url = format!("{}/price?{symbol}&apikey={key}", self.base_url);
         let body = self.get_json(&url, ticker).await?;
         // Issue #72: the bare `/price` body has NO date, so the close is undated (`session_date: None`)
         // and the caller keys the confront cache by the clock day. (The dated path is `/time_series`.)
@@ -204,20 +205,58 @@ pub fn fx_pair_symbol(base: &str, quote: &str) -> String {
     format!("{base}/{quote}")
 }
 
-/// PURE: the Twelve Data equity **wire** symbol for a stored canonical ticker (issue #70). The stored
-/// ticker follows EODHD's `TICKER.EXCHANGE` convention, but Twelve Data expects the **bare** symbol
-/// for a US listing. Only the UNAMBIGUOUS US virtual-exchange suffix `.US` is stripped
-/// (`AAPL.US` → `AAPL`, only the trailing exchange, so `BRK.B.US` → `BRK.B`). Any other exchange
-/// suffix (`.SW`, `.PA`, …) is left **verbatim**: mapping it to a Twelve Data listing venue would be
-/// a guess, and a wrong venue would silently fetch the wrong exchange's price — the project's
-/// "absent, never wrong" rail. Such a symbol simply surfaces the neutral no-data notice on Twelve
-/// Data (never a crash, never a wrong price). A symbol with no suffix passes through unchanged.
-pub fn equity_symbol(ticker: &str) -> String {
+/// PURE: the pinned EODHD-venue-suffix → ISO 10383 **MIC** table (issue #70). Only venues whose
+/// EODHD code and MIC are both unambiguous are listed — a MIC strictly filters the listing venue on
+/// Twelve Data, so a correct entry can never fetch another exchange's price, and an *absent* entry
+/// falls back to the verbatim-symbol rail (neutral no-data notice, never a venue guess). Extending
+/// the table is a one-line, test-pinned change.
+fn venue_mic(suffix: &str) -> Option<&'static str> {
+    // EODHD `TICKER.<code>` → operating MIC (ISO 10383).
+    Some(match suffix.to_ascii_uppercase().as_str() {
+        "SW" => "XSWX",    // SIX Swiss Exchange
+        "PA" => "XPAR",    // Euronext Paris
+        "L" => "XLON",     // London Stock Exchange
+        "XETRA" => "XETR", // Deutsche Börse Xetra
+        "F" => "XFRA",     // Börse Frankfurt (floor)
+        "AS" => "XAMS",    // Euronext Amsterdam
+        "BR" => "XBRU",    // Euronext Brussels
+        "LS" => "XLIS",    // Euronext Lisbon
+        "IR" => "XDUB",    // Euronext Dublin
+        "MC" => "XMAD",    // Bolsa de Madrid
+        "MI" => "XMIL",    // Borsa Italiana (Milan)
+        "VI" => "XWBO",    // Wiener Börse
+        "ST" => "XSTO",    // Nasdaq Stockholm
+        "OL" => "XOSL",    // Oslo Børs
+        "CO" => "XCSE",    // Nasdaq Copenhagen
+        "HE" => "XHEL",    // Nasdaq Helsinki
+        "TO" => "XTSE",    // Toronto Stock Exchange
+        "V" => "XTSX",     // TSX Venture
+        "HK" => "XHKG",    // Hong Kong Stock Exchange
+        "AU" => "XASX",    // Australian Securities Exchange
+        _ => return None,
+    })
+}
+
+/// PURE: the Twelve Data equity **query fragment** for a stored canonical ticker (issue #70). The
+/// stored ticker follows EODHD's `TICKER.EXCHANGE` convention; Twelve Data expects the bare symbol
+/// plus, for a non-US listing, an explicit venue:
+/// - the UNAMBIGUOUS US virtual-exchange suffix `.US` is stripped (`AAPL.US` → `symbol=AAPL`; only
+///   the trailing exchange, so `BRK.B.US` → `symbol=BRK.B`);
+/// - a suffix in the pinned [`venue_mic`] table pins the venue by MIC
+///   (`NESN.SW` → `symbol=NESN&mic_code=XSWX`) — deterministic, never a guess;
+/// - any OTHER suffix is left **verbatim** (`symbol=NESN.XX`): an unmapped venue surfaces the
+///   neutral no-data notice on Twelve Data (never a crash, never the wrong exchange's price — the
+///   "absent, never wrong" rail). A symbol with no suffix passes through unchanged.
+pub fn symbol_query(ticker: &str) -> String {
     match ticker.rsplit_once('.') {
         Some((base, exchange)) if !base.is_empty() && exchange.eq_ignore_ascii_case("US") => {
-            base.to_string()
+            format!("symbol={base}")
         }
-        _ => ticker.to_string(),
+        Some((base, exchange)) if !base.is_empty() => match venue_mic(exchange) {
+            Some(mic) => format!("symbol={base}&mic_code={mic}"),
+            None => format!("symbol={ticker}"),
+        },
+        _ => format!("symbol={ticker}"),
     }
 }
 
@@ -349,16 +388,32 @@ mod tests {
     }
 
     #[test]
-    fn equity_symbol_strips_only_the_unambiguous_us_suffix() {
-        // Issue #70: EODHD-canonical `.US` → Twelve Data's bare symbol; every other exchange suffix
-        // is left verbatim (no venue guess → never the wrong exchange's price).
-        assert_eq!(equity_symbol("AAPL.US"), "AAPL");
-        assert_eq!(equity_symbol("aapl.us"), "aapl"); // the suffix match is case-insensitive
-        assert_eq!(equity_symbol("BRK.B.US"), "BRK.B"); // only the TRAILING exchange is removed
-        assert_eq!(equity_symbol("NESN.SW"), "NESN.SW"); // ambiguous venue: verbatim, not guessed
-        assert_eq!(equity_symbol("MC.PA"), "MC.PA");
-        assert_eq!(equity_symbol("AAPL"), "AAPL"); // already bare — unchanged
-        assert_eq!(equity_symbol(".US"), ".US"); // degenerate: no base → verbatim, never ""
+    fn symbol_query_strips_us_and_pins_known_venues_by_mic() {
+        // Issue #70: EODHD-canonical `.US` → Twelve Data's bare symbol; a pinned venue suffix →
+        // `&mic_code=` (deterministic table, never a guess); an UNKNOWN suffix stays verbatim
+        // (neutral no-data notice → never the wrong exchange's price).
+        assert_eq!(symbol_query("AAPL.US"), "symbol=AAPL");
+        assert_eq!(symbol_query("aapl.us"), "symbol=aapl"); // the suffix match is case-insensitive
+        assert_eq!(symbol_query("BRK.B.US"), "symbol=BRK.B"); // only the TRAILING exchange is removed
+        assert_eq!(symbol_query("NESN.SW"), "symbol=NESN&mic_code=XSWX"); // SIX pinned by MIC
+        assert_eq!(symbol_query("nesn.sw"), "symbol=nesn&mic_code=XSWX"); // venue match too
+        assert_eq!(symbol_query("MC.PA"), "symbol=MC&mic_code=XPAR"); // Euronext Paris
+        assert_eq!(symbol_query("SHEL.L"), "symbol=SHEL&mic_code=XLON"); // London
+        assert_eq!(symbol_query("SAP.XETRA"), "symbol=SAP&mic_code=XETR"); // Xetra
+        assert_eq!(symbol_query("RY.TO"), "symbol=RY&mic_code=XTSE"); // Toronto
+        assert_eq!(symbol_query("NESN.XX"), "symbol=NESN.XX"); // unmapped venue: verbatim
+        assert_eq!(symbol_query("BRK.B"), "symbol=BRK.B"); // `.B` is not a venue → verbatim
+        assert_eq!(symbol_query("AAPL"), "symbol=AAPL"); // already bare — unchanged
+        assert_eq!(symbol_query(".US"), "symbol=.US"); // degenerate: no base → verbatim, never ""
+        assert_eq!(symbol_query("EUR/CHF"), "symbol=EUR/CHF"); // the FX pair path is untouched
+    }
+
+    #[test]
+    fn venue_mic_table_is_case_insensitive_and_absent_for_unknown() {
+        assert_eq!(venue_mic("SW"), Some("XSWX"));
+        assert_eq!(venue_mic("sw"), Some("XSWX"));
+        assert_eq!(venue_mic("XX"), None);
+        assert_eq!(venue_mic("US"), None); // `.US` is handled upstream (bare symbol, no MIC)
     }
 
     #[test]
