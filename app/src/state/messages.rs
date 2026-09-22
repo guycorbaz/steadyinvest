@@ -19,18 +19,18 @@ pub const MSG_BLANK_TICKER: &str = "Le symbole est vide ; aucune étude n'a ét�
 pub const MSG_BLANK_CURRENCY: &str = "La devise est vide ; aucune étude n'a été enregistrée.";
 /// A write was attempted on a read-only (newer-schema) journal.
 pub const MSG_READ_ONLY_WRITE: &str =
-    "Journal en lecture seule (schéma plus récent) ; l'écriture n'a pas eu lieu.";
+    "Dossier en lecture seule (schéma plus récent) ; l'écriture n'a pas eu lieu.";
 /// No journal is open at all (even the default could not be prepared).
-pub const MSG_NO_JOURNAL: &str = "Aucun journal n'est ouvert ; l'écriture n'a pas eu lieu.";
+pub const MSG_NO_JOURNAL: &str = "Aucun dossier n'est ouvert ; l'écriture n'a pas eu lieu.";
 /// Startup: the open journal is read-only because its file was written by a newer schema.
 pub const MSG_STARTUP_READ_ONLY: &str =
-    "Le journal a été écrit par un schéma plus récent ; il est ouvert en lecture seule.";
+    "Le dossier a été écrit par un schéma plus récent ; il est ouvert en lecture seule.";
 /// Startup: the configured journal file was unreadable, so the default journal is in use instead.
 pub const MSG_CONFIGURED_UNREADABLE: &str =
-    "Le journal configuré est illisible ; le journal par défaut est utilisé.";
+    "Le dossier configuré est illisible ; le dossier par défaut est utilisé.";
 /// Startup: no journal directory is available from the OS (the default path cannot be computed).
 pub const MSG_NO_DATA_DIR: &str =
-    "Aucun emplacement de journal n'est disponible ; les études ne sont pas enregistrées.";
+    "Aucun emplacement de dossier n'est disponible ; les études ne sont pas enregistrées.";
 /// A save failed for a reason other than the read-only / identity guards (cause appended).
 pub const MSG_SAVE_FAILED: &str = "L'enregistrement a échoué.";
 /// The system clipboard could not be read for a paste-a-column (Story 2.4).
@@ -218,7 +218,7 @@ pub const MSG_FX_NO_PAIRS: &str =
 /// Raised when the journal changed while a rates refresh was in flight — the fetched rates were
 /// discarded, never written into the newly-opened journal (2026-07-02 review).
 pub const MSG_FX_JOURNAL_CHANGED: &str =
-    "Le journal a changé pendant l'actualisation ; les taux n'ont pas été enregistrés.";
+    "Le dossier a changé pendant l'actualisation ; les taux n'ont pas été enregistrés.";
 /// Raised when the manual base currency is not one of the supported set (a CURRENCY problem, not
 /// a rate problem — 2026-07-02 review); nothing is written.
 pub const MSG_FX_INVALID_CURRENCY: &str =
@@ -310,48 +310,48 @@ pub const MSG_IMPORT_MALFORMED: &str =
 /// hash; import verifies both before applying, atomically (never partially). The integrity/version/
 /// malformed rejections reuse the single-study [`MSG_IMPORT_INTEGRITY`]/[`MSG_IMPORT_VERSION`]/
 /// [`MSG_IMPORT_MALFORMED`] notices (same taxonomy).
-pub const MSG_JOURNAL_EXPORTED: &str = "Le journal a été exporté.";
+pub const MSG_JOURNAL_EXPORTED: &str = "Le dossier a été exporté.";
 /// Substitution template (the const is posture-scanned; [`journal_imported_message`] fills it). The
 /// trailing `(source : journal {jid}, version {ver})` clause surfaces the imported file's identity so
 /// the user sees whether it is the **same** journal (an update) or a **foreign** seed (AC3).
-pub const MSG_JOURNAL_IMPORTED: &str = "Le journal a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s). (source : journal {jid}, version {ver})";
+pub const MSG_JOURNAL_IMPORTED: &str = "Le dossier a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s). (source : dossier {jid}, version {ver})";
 /// Issue #65: the arbitration prompt for an OLDER same-journal envelope (a `{n}`-substitution
 /// template; [`import_confirm_message`] fills it). The merge would snap shared entities back to
 /// their old state — never applied silently.
-pub const MSG_IMPORT_CONFIRM: &str = "Importer ce fichier (version {b}) ? Il est plus ancien que le journal actuel (version {c}) : les éléments communs reprendront leur état de l'époque ; les transactions locales restent enregistrées et les positions sont recalculées. Rien n'a encore été importé.";
+pub const MSG_IMPORT_CONFIRM: &str = "Importer ce fichier (version {b}) ? Il est plus ancien que le dossier actuel (version {c}) : les éléments communs reprendront leur état de l'époque ; les transactions locales restent enregistrées et les positions sont recalculées. Rien n'a encore été importé.";
 
 /// Backup / restore copy (Story 5.4, FR61) — fact-stating, posture-gated. The backup/restore unit is
 /// the raw `.db`; a restore validates integrity + schema-version + identity BEFORE any overwrite and
 /// is never applied silently (a stale/foreign restore is gated behind a confirm).
-pub const MSG_BACKUP_CREATED: &str = "La sauvegarde du journal a été créée.";
-pub const MSG_RESTORE_DONE: &str = "Le journal a été restauré depuis la sauvegarde.";
-pub const MSG_RESTORE_FAILED: &str = "La restauration a échoué ; le journal n'a pas été remplacé.";
+pub const MSG_BACKUP_CREATED: &str = "La sauvegarde du dossier a été créée.";
+pub const MSG_RESTORE_DONE: &str = "Le dossier a été restauré depuis la sauvegarde.";
+pub const MSG_RESTORE_FAILED: &str = "La restauration a échoué ; le dossier n'a pas été remplacé.";
 pub const MSG_RESTORE_INTEGRITY: &str = "Le fichier de sauvegarde est corrompu (échec du contrôle d'intégrité) ; rien n'a été restauré.";
 pub const MSG_RESTORE_NEWER_SCHEMA: &str = "La sauvegarde provient d'une version plus récente de l'application ; cette version ne sait pas la lire ; rien n'a été restauré.";
 pub const MSG_RESTORE_NOT_A_JOURNAL: &str =
-    "Le fichier n'est pas un journal valide ; rien n'a été restauré.";
+    "Le fichier n'est pas un dossier valide ; rien n'a été restauré.";
 pub const MSG_RESTORE_UNREADABLE: &str =
     "Le fichier de sauvegarde est illisible ; rien n'a été restauré.";
 /// Issue #67: a non-empty sibling `-wal` = a raw copy of a live journal — its most recent
 /// writes are NOT in the `.db` file, so restoring it would silently drop them.
 pub const MSG_RESTORE_UNCHECKPOINTED: &str = "La sauvegarde est accompagnée d'un fichier -wal non vidé : ses écritures les plus récentes n'y figurent pas. Recréez la sauvegarde depuis l'application ; rien n'a été restauré.";
 /// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
-pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (journal {jid}, version {ver}) ? {reason}Le journal actuel sera remplacé.";
+pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (dossier {jid}, version {ver}) ? {reason}Le dossier actuel sera remplacé.";
 pub const MSG_RESTORE_REASON_STALE: &str =
-    "Cette sauvegarde (version {b}) est plus ancienne que le journal actuel (version {c}). ";
-pub const MSG_RESTORE_REASON_FOREIGN: &str = "Cette sauvegarde appartient à un autre journal. ";
+    "Cette sauvegarde (version {b}) est plus ancienne que le dossier actuel (version {c}). ";
+pub const MSG_RESTORE_REASON_FOREIGN: &str = "Cette sauvegarde appartient à un autre dossier. ";
 
 /// Journal-location copy (Story 5.5, FR66) — fact-stating, posture-gated. The location picker, recent
 /// journals, single-instance lock and sync-folder safety.
-pub const MSG_JOURNAL_OPENED: &str = "Le journal a été ouvert.";
-pub const MSG_JOURNAL_CREATED: &str = "Le nouveau journal a été créé et ouvert.";
-pub const MSG_JOURNAL_OPEN_FAILED: &str = "Le journal n'a pas pu être ouvert.";
-pub const MSG_JOURNAL_LOCKED: &str = "Ce journal est déjà ouvert dans une autre fenêtre ou un autre processus ; il n'a pas été ouvert.";
+pub const MSG_JOURNAL_OPENED: &str = "Le dossier a été ouvert.";
+pub const MSG_JOURNAL_CREATED: &str = "Le nouveau dossier a été créé et ouvert.";
+pub const MSG_JOURNAL_OPEN_FAILED: &str = "Le dossier n'a pas pu être ouvert.";
+pub const MSG_JOURNAL_LOCKED: &str = "Ce dossier est déjà ouvert dans une autre fenêtre ou un autre processus ; il n'a pas été ouvert.";
 pub const MSG_JOURNAL_LOCK_RECLAIMABLE: &str =
-    "Ce journal porte un verrou laissé par une session interrompue ; le verrou peut être levé.";
-pub const MSG_SYNC_FOLDER_WARNING: &str = "Ce dossier est synchronisé : le journal est ouvert en mode sûr (sans fichier annexe). Un journal en local avec des sauvegardes versionnées dans ce dossier reste l'approche recommandée.";
+    "Ce dossier porte un verrou laissé par une session interrompue ; le verrou peut être levé.";
+pub const MSG_SYNC_FOLDER_WARNING: &str = "Cet emplacement est synchronisé : le dossier est ouvert en mode sûr (sans fichier annexe). Un dossier en local avec des sauvegardes versionnées dans cet emplacement reste l'approche recommandée.";
 /// Substitution template (the const is posture-scanned; [`journal_stale_message`] fills it).
-pub const MSG_JOURNAL_STALE: &str = "Ce journal semble plus ancien que ce que vous aviez vu (vu version {seen}, ici version {here}).";
+pub const MSG_JOURNAL_STALE: &str = "Ce dossier semble plus ancien que ce que vous aviez vu (vu version {seen}, ici version {here}).";
 
 /// The neutral stale-on-reopen notice (Story 5.5) — a `{n}`-substitution of [`MSG_JOURNAL_STALE`]
 /// surfacing the last-seen vs on-disk versions, so a regressed journal is flagged (not blocked).

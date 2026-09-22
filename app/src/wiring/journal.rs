@@ -335,8 +335,8 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_pick_and_import_journal(move || {
             let ui = ui_weak.unwrap();
             let mut dialog = rfd::FileDialog::new()
-                .set_title("Importer un journal")
-                .add_filter("Journal exporté (JSON)", &["json"]);
+                .set_title("Importer un dossier")
+                .add_filter("Dossier exporté (JSON)", &["json"]);
             if let Some(dir) = default_exports_dir().filter(|d| d.is_dir()) {
                 dialog = dialog.set_directory(dir);
             }
@@ -472,8 +472,8 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_pick_and_open_journal(move || {
             let ui = ui_weak.unwrap();
             let Some(path) = rfd::FileDialog::new()
-                .set_title("Ouvrir un journal")
-                .add_filter("journal", &["db"])
+                .set_title("Ouvrir un dossier")
+                .add_filter("Dossier (.db)", &["db"])
                 .pick_file()
             else {
                 return; // the user cancelled the dialog
@@ -506,9 +506,9 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_pick_and_create_journal(move || {
             let ui = ui_weak.unwrap();
             let Some(path) = rfd::FileDialog::new()
-                .set_title("Créer un journal")
-                .add_filter("journal", &["db"])
-                .set_file_name("journal.db")
+                .set_title("Créer un dossier")
+                .add_filter("Dossier (.db)", &["db"])
+                .set_file_name("dossier.db")
                 .save_file()
             else {
                 return;
