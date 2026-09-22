@@ -35,7 +35,13 @@ export component PortfolioScreen inherits Rectangle {
         root.editing-id = "";
     }
 
-    VerticalLayout {
+    // On-display walk (2026-09-22): the screen scrolls, like Études and Réglages — a long register + an open
+    // ledger pushed the transaction entry row below the window edge, unreachable. The inner layout keeps
+    // its original indentation on purpose (a re-indent would bury this one-line fix in a 1 200-line diff).
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
         alignment: start;
         padding: Tokens.space-24;
         spacing: Tokens.space-16;
@@ -1202,6 +1208,7 @@ export component PortfolioScreen inherits Rectangle {
                     }
                 }
             }
+        }
         }
     }
 }
