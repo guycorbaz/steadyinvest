@@ -299,7 +299,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
 
     // ── Story 5.2 (FR59) — export / import a single study as a portable file. The envelope is the
     // serialized data contract + schema_version + integrity hash (NOT a raw .db); `contract` owns the
-    // envelope, `app` owns the file I/O. Path-based for now — the native picker is Story 5.5. ──
+    // envelope, `app` owns the file I/O. Import is picker-fed (below) but stays path-based. ──
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
@@ -386,6 +386,27 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             ui.global::<Studies>().set_notice(notice.into());
             refresh_studies(&ui, &journal_state.borrow());
+        });
+    }
+
+    {
+        // Native `rfd` open picker on the UI thread (modal — the established rail, cf. the journal
+        // open/create dialogs). It feeds the SAME path-based `import-study` callback, so the verify-
+        // before-write logic has one code path (headless-tested); cancel → no notice, nothing read.
+        let ui_weak = ui.as_weak();
+        ui.global::<Studies>().on_pick_and_import_study(move || {
+            let ui = ui_weak.unwrap();
+            let mut dialog = rfd::FileDialog::new()
+                .set_title("Importer une étude")
+                .add_filter("Étude exportée (JSON)", &["json"]);
+            if let Some(dir) = default_exports_dir().filter(|d| d.is_dir()) {
+                dialog = dialog.set_directory(dir);
+            }
+            let Some(path) = dialog.pick_file() else {
+                return; // the user cancelled the dialog
+            };
+            ui.global::<Studies>()
+                .invoke_import_study(path.to_string_lossy().as_ref().into());
         });
     }
 

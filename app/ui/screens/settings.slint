@@ -357,7 +357,7 @@ export component SettingsScreen inherits Rectangle {
             }
 
             // ── Story 5.3 (FR60) — export / import the WHOLE journal as a portable, versioned,
-            // integrity-checked file. Path-based for now (the native picker is Story 5.5). Export
+            // integrity-checked file. Import goes through the native picker (the `rfd` rail). Export
             // writes to the OS data dir's exports/ folder; import verifies + applies atomically. ──
             SettingsPanel {
                 title: @tr("Journal complet");
@@ -379,16 +379,13 @@ export component SettingsScreen inherits Rectangle {
                     }
                 }
 
-                journalpath := TextField {
-                    placeholder: @tr("Chemin du fichier à importer");
-                }
                 HorizontalLayout {
                     alignment: start;
                     spacing: Tokens.space-8;
 
                     ActionButton {
-                        label: @tr("Importer un journal");
-                        clicked => { Prefs.import-journal(journalpath.text); }
+                        label: @tr("Importer un journal…");
+                        clicked => { Prefs.pick-and-import-journal(); }
                     }
                 }
 
@@ -448,16 +445,13 @@ export component SettingsScreen inherits Rectangle {
                     }
                 }
 
-                restorepath := TextField {
-                    placeholder: @tr("Chemin de la sauvegarde à restaurer");
-                }
                 HorizontalLayout {
                     alignment: start;
                     spacing: Tokens.space-8;
 
                     ActionButton {
-                        label: @tr("Restaurer");
-                        clicked => { Prefs.request-restore(restorepath.text); }
+                        label: @tr("Restaurer une sauvegarde…");
+                        clicked => { Prefs.pick-and-restore-backup(); }
                     }
                 }
 
