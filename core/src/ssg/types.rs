@@ -381,6 +381,22 @@ pub struct ZoneBounds {
     pub forecast_high: Decimal,
 }
 
+/// The four §4 forecast-low candidates (a)–(d), each computed independently of the option the
+/// user selected (issue #213 — the NAIC form shows them side by side BEFORE the choice; the choice
+/// is a judgment made by comparing them). Every candidate degrades to `None` when its own input is
+/// unknown, with the same §9 guards as the selected value ((d) needs a POSITIVE average high yield).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForecastLowCandidates {
+    /// (a) `judged_avg_low_pe × estimated_low_eps`.
+    pub avg_low_pe_times_eps: Option<Decimal>,
+    /// (b) the mean of the §3 window's low prices.
+    pub avg_low_price_last_5y: Option<Decimal>,
+    /// (c) the judged « plus bas sévère récent ».
+    pub recent_severe_low: Option<Decimal>,
+    /// (d) `present_full_year_dividend / (avg_high_yield_pct / 100)`.
+    pub dividend_supported: Option<Decimal>,
+}
+
 /// §4 Risk & reward outputs (spec §4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RiskRewardOutputs {
@@ -388,6 +404,8 @@ pub struct RiskRewardOutputs {
     pub forecast_high: Option<Decimal>,
     /// The user-selected option (a)–(d); §9 guards applied.
     pub forecast_low: Option<Decimal>,
+    /// All four candidates (issue #213) — `forecast_low` is the one the option selects.
+    pub low_candidates: ForecastLowCandidates,
     /// `None` when either forecast is unknown or the range is degenerate
     /// (`forecast_high ≤ forecast_low`) — never inverted bands.
     pub zones: Option<ZoneBounds>,

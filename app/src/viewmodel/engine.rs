@@ -371,15 +371,30 @@ pub fn judgment_suggestions(
             None => slint::SharedString::new(),
         }
     };
+    // Issue #214: the est-low EPS proposal = the low edge of the least-squares seed band the §1
+    // chart already positions its handle on (adopting it is the judgment — the seed itself never
+    // flows into §4); the dividend proposal = the latest year with a known dividend per share.
+    let eps_points: Vec<(i32, Decimal)> = series
+        .iter()
+        .filter_map(|y| y.eps.map(|e| (y.year, e)))
+        .collect();
+    let est_low_eps = steadyinvest_core::ssg::least_squares_log_eps_band(
+        &eps_points,
+        steadyinvest_core::method::FORECAST_HORIZON_YEARS,
+    )
+    .map(|band| band.low);
+    let dividend = series.iter().rev().find_map(|y| y.dividend_per_share);
     JudgmentSuggestions {
         sales_growth: opt(outputs.growth.sales_cagr_pct, DisplayField::Percent),
         eps_growth: opt(outputs.growth.eps_cagr_pct, DisplayField::Percent),
+        est_low_eps: opt(est_low_eps, DisplayField::PerShare),
         high_pe: opt(outputs.valuation.avg_high_pe, DisplayField::PeRatio),
         low_pe: opt(outputs.valuation.avg_low_pe, DisplayField::PeRatio),
         recent_severe_low: opt(
             steadyinvest_core::ssg::recent_severe_low_proposal(series),
             DisplayField::Price,
         ),
+        dividend: opt(dividend, DisplayField::PerShare),
     }
 }
 
@@ -419,12 +434,53 @@ pub fn pe_computed(outputs: &SsgOutputs, format: NumberFormat) -> PeComputed {
     }
 }
 
-/// The §4 risk/reward computed results (forecast high/low, U/D, appreciation).
+/// The §4 risk/reward computed results (forecast high/low, the four low candidates, U/D,
+/// appreciation). Issue #213: each candidate (a)–(d) carries its value ("" when unknown) AND a
+/// reason KEY for the absence — the words live in Slint (posture-gated), the key names the
+/// missing input: "est_low_eps" | "low_pe" | "low_prices" | "severe_low" | "dividend" | "yield" | "".
 pub fn risk_computed(outputs: &SsgOutputs, format: NumberFormat) -> RiskComputed {
     let r = &outputs.risk_reward;
+    let c = &r.low_candidates;
+    let price = |v: Option<Decimal>| -> slint::SharedString {
+        v.map(|d| format_scaled(d, DisplayField::Price, format))
+            .unwrap_or_default()
+            .into()
+    };
+    let why = |value: Option<Decimal>, reason: &'static str| -> slint::SharedString {
+        if value.is_some() { "" } else { reason }.into()
+    };
+    // (a): the est-low EPS is the usual gap (a pure judgment), else the judged low P/E.
+    let why_a = if c.avg_low_pe_times_eps.is_some() {
+        ""
+    } else if outputs.growth.estimated_low_eps.is_none() {
+        "est_low_eps"
+    } else {
+        "low_pe"
+    };
+    // (d): a non-positive / unknown average high yield is named first (the §9 guard); with a
+    // usable yield, the only remaining gap is the dividend judgment.
+    let why_d = if c.dividend_supported.is_some() {
+        ""
+    } else if outputs
+        .valuation
+        .avg_high_yield_pct
+        .is_none_or(|y| y <= Decimal::ZERO)
+    {
+        "yield"
+    } else {
+        "dividend"
+    };
     RiskComputed {
         forecast_high: fmt(r.forecast_high, DisplayField::Price, format).into(),
         forecast_low: fmt(r.forecast_low, DisplayField::Price, format).into(),
+        low_a: price(c.avg_low_pe_times_eps),
+        low_a_why: why_a.into(),
+        low_b: price(c.avg_low_price_last_5y),
+        low_b_why: why(c.avg_low_price_last_5y, "low_prices"),
+        low_c: price(c.recent_severe_low),
+        low_c_why: why(c.recent_severe_low, "severe_low"),
+        low_d: price(c.dividend_supported),
+        low_d_why: why_d.into(),
         ud_ratio: fmt_ud(&r.upside_downside, format).into(),
         appreciation: fmt_pct(outputs.returns.projected_appreciation_pct, format).into(),
     }
@@ -1037,6 +1093,18 @@ mod tests {
             s.recent_severe_low.as_str(),
             scaled("50", DisplayField::Price)
         );
+        // Issue #214: a flat EPS history fits a flat seed band → the est-low proposal is known
+        // (the seed's low edge), and the dividend proposal is the latest year's dividend.
+        assert_ne!(
+            s.est_low_eps.as_str(),
+            "",
+            "a fittable history proposes an est-low EPS"
+        );
+        assert_eq!(
+            s.dividend.as_str(),
+            scaled("2", DisplayField::PerShare),
+            "the latest known dividend per share (the fixture's 2)"
+        );
 
         // A single-year history: the CAGRs are unknown (n = 0) → EMPTY proposals (no chip); the
         // one-year P/E "averages" and lowest low are still known and proposed.
@@ -1070,6 +1138,7 @@ mod tests {
             zones: Some(bounds.clone()),
             present_price_zone: zone,
             upside_downside: UpsideDownside::Unknown,
+            low_candidates: Default::default(),
         };
         // Inside the band → the zone itself (present_price_zone is Some there).
         assert_eq!(

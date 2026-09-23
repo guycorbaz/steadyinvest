@@ -26,10 +26,10 @@ mod valuation;
 
 pub use growth::{EpsSeedBand, endpoints_cagr_pct, least_squares_log_eps_band, project};
 pub use types::{
-    CalcFinding, CriterionFact, ForecastLowOption, GrowthOutputs, JudgmentInputs,
-    ManagementOutputs, QualityFlagKey, QuarterlyObservations, ReturnOutputs, RiskRewardOutputs,
-    SsgOutputs, Trend, UpsideDownside, ValuationOutputs, VerdictFacts, YearRatios, YearValuation,
-    Zone, ZoneBounds,
+    CalcFinding, CriterionFact, ForecastLowCandidates, ForecastLowOption, GrowthOutputs,
+    JudgmentInputs, ManagementOutputs, QualityFlagKey, QuarterlyObservations, ReturnOutputs,
+    RiskRewardOutputs, SsgOutputs, Trend, UpsideDownside, ValuationOutputs, VerdictFacts,
+    YearRatios, YearValuation, Zone, ZoneBounds,
 };
 
 use crate::method::{
