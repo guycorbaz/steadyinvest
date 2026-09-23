@@ -935,6 +935,74 @@ export global Confront {
 // strings (never a float/Decimal); `quantity`/`purchase-price` are the canonical decimal spellings.
 // One portfolio in the selector (Story 6.1, FR37) — "one per bank/account". `id` is the stringified
 // UUID, `name` the user's label. The active one is `Holdings.active-portfolio-id`.
+// ── The modal dialog (the UX pass, 2026-09-23) — ONE overlay, three variants, driven by pure
+//    Slint state that Rust also reaches (`wiring::dialog::refuse`). The routing rule: a REFUSAL
+//    (the user acted, the write did not happen, the cause is named) is a `notice` the user
+//    acknowledges; a destructive gesture is a `confirm`; every data entry/edit is a `form` with a
+//    title, one explanatory sentence and labelled fields. A persistent STATE is never a dialog
+//    (StatusBand); an OUTCOME (« … a été enregistré. ») stays an inline notice (F4 slot rule). ──
+export global Dialog {
+    in-out property <string> kind;        // "" (hidden) | "notice" | "confirm" | "form"
+    in-out property <string> title;       // "" on a notice = the default « Action refusée »
+    in-out property <string> body;        // the message (notice/confirm) or the explanatory sentence (form)
+    in-out property <string> form-id;     // which form the overlay mounts (see ModalDialog)
+    in-out property <string> action;      // confirm: what the verb does (ModalDialog dispatches)
+    in-out property <string> verb;        // confirm: the destructive verb's label
+    in-out property <string> target-id;   // the holding / transaction / portfolio the form or verb acts on
+    in-out property <string> context;     // a fact shown under the sentence (the amounts' currency, a linked study…)
+    in-out property <string> field-error; // a refusal raised BY the open form (kept inline, next to the fields)
+    in-out property <bool> flag;          // form-specific (stop: the holding already has a stop)
+    // The form drafts — one set, reset on every open.
+    in-out property <string> draft-ticker;
+    in-out property <string> draft-quantity;
+    in-out property <string> draft-price;
+    in-out property <string> draft-fees;
+    in-out property <string> draft-date;
+    in-out property <string> draft-rationale;
+    in-out property <string> draft-currency;
+    in-out property <string> draft-sector;
+    in-out property <string> draft-name;
+
+    public function close() {
+        self.kind = "";
+        self.form-id = "";
+        self.action = "";
+        self.field-error = "";
+    }
+    public function notice(message: string) {
+        self.title = "";
+        self.body = message;
+        self.kind = "notice";
+    }
+    public function confirm(title: string, body: string, verb: string, action: string, target: string) {
+        self.title = title;
+        self.body = body;
+        self.verb = verb;
+        self.action = action;
+        self.target-id = target;
+        self.kind = "confirm";
+    }
+    public function form(id: string, title: string, body: string, target: string, context: string) {
+        self.draft-ticker = "";
+        self.draft-quantity = "";
+        self.draft-price = "";
+        self.draft-fees = "";
+        self.draft-date = "";
+        self.draft-rationale = "";
+        self.draft-currency = "";
+        self.draft-sector = "";
+        self.draft-name = "";
+        self.flag = false;
+        self.field-error = "";
+        self.form-id = id;
+        self.title = title;
+        self.body = body;
+        self.target-id = target;
+        self.context = context;
+        self.kind = "form";
+    }
+}
+
 export struct PortfolioRow {
     id: string,
     name: string,
@@ -996,6 +1064,10 @@ export struct HoldingRow {
     // never the factually wrong « aucune étude liée ».
     study-unavailable: bool,
     study-link: string,
+    // The UX pass: when no study matches ticker+currency but one exists for the ticker in ANOTHER
+    // currency, that currency ("" otherwise) — the register names the mismatch instead of a bare
+    // « Aucune étude liée » (the on-display walk's CHF-vs-USD trap).
+    study-other-currency: string,
     zone: string,
     // Issue #48 (FR35): the price sits BELOW the matched study's forecast band — a distinct
     // neutral fact; mutually exclusive with a defined `zone`.
@@ -1055,12 +1127,12 @@ export global Holdings {
     callback refresh-prices();
     callback cancel-refresh();                     // issue #100: drain the in-flight refresh batch
     // Story 4.5 (FR42): set/clear a holding's trailing-stop percentage (id, pct — "" clears).
-    callback set-trailing-stop(string, string);
+    callback set-trailing-stop(string, string) -> bool; // → written? (a dialog closes only then)
     // Story 4.7 (FR46/FR47) + Story 6.3 (FR39): record a sell on a neutral trigger (id, quantity,
     // rationale). An empty quantity sells the WHOLE position (the 4.7 flow); a smaller one is a
     // partial sell — the holding stays with the reduced quantity. The app never auto-sells.
     // Dismiss hides a trigger's action panel for the session (id).
-    callback sell-holding(string, string, string);
+    callback sell-holding(string, string, string) -> bool; // → sold? (a dialog closes only then)
     callback dismiss-trigger(string);
     // ── Story 6.3 (FR39): the transaction ledger of ONE opened holding. `ledger-holding-id` is ""
     //    while no ledger is shown; rows are pushed by Rust on open and after every mutation. The
@@ -1071,12 +1143,7 @@ export global Holdings {
     // every register re-render. The section is collapsed by default (pure-Slint toggle in the
     // screen); a sold row's ledger reuses `open-ledger` / `ledger-rows` above.
     in-out property <[SoldRow]> sold-rows;
-    // Issue #86: deleting a ledger row rewrites the cost basis (and can retire/un-retire the
-    // position) irreversibly — so it goes through the house confirm-before-act overlay (the 2.12
-    // destructive-delete pattern). The row's « Supprimer » parks its id here + raises the overlay;
-    // the overlay's Confirmer calls `delete-transaction(pending-id)`. Pure-Slint state (no push).
-    in-out property <bool> ledger-delete-confirm-visible;
-    in-out property <string> ledger-delete-pending-id;
+    // Issue #86: deleting a ledger row is irreversible → the Dialog confirm variant (the UX pass).
     callback open-ledger(string);   // holding id → push rows + show
     callback close-ledger();
     // holding id, date (AAAA-MM-JJ, "" = today), quantity, unit price, fees ("" = 0), rationale → recorded?
@@ -1133,9 +1200,14 @@ export global Holdings {
     in-out property <[PortfolioRow]> portfolios;
     in-out property <string> active-portfolio-id;
     callback select-portfolio(string);          // id → make active
-    callback add-portfolio(string);             // name
-    callback rename-portfolio(string, string);  // id, name
+    callback add-portfolio(string) -> bool;             // name → created?
+    callback rename-portfolio(string, string) -> bool;  // id, name → renamed?
     callback delete-portfolio(string);          // id
+    // The UX pass: the add-position dialog looks the study up as the symbol is typed — its
+    // native currency (the picker's default, so a USD study never gets a CHF position by
+    // reflex) and its company name ("" when no study / no name). Read-only lookups.
+    pure callback study-currency-for(string) -> string;
+    pure callback study-name-for(string) -> string;
     // ── Story 6.8 (FR48): the replacement-candidates panel — a PORTFOLIO-LEVEL pushed state
     //    (a whole-position sell removes its row, so the panel outlives it). Auto-opened by Rust
     //    after a successful sell (both paths), manually via the trigger-panel « Candidats »;

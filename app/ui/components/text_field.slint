@@ -9,6 +9,7 @@ export component TextField inherits Rectangle {
     in-out property <string> text <=> input.text;
     out property <bool> has-focus <=> input.has-focus;
     callback accepted();
+    callback edited();
 
     height: Tokens.row-height + Tokens.space-4;
     border-radius: Tokens.radius;
@@ -45,6 +46,9 @@ export component TextField inherits Rectangle {
                 single-line: true;
                 accepted => {
                     root.accepted();
+                }
+                edited => {
+                    root.edited();
                 }
             }
         }

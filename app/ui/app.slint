@@ -21,8 +21,10 @@ import { Watchlist, WatchRow } from "state.slint";
 import { Holdings, HoldingRow, PortfolioRow, BankCarRow, ConcentrationLine, SizeMixLine, UnclassifiedLine, CandidateRow } from "state.slint";
 import { Fx, FxRateRow } from "state.slint";
 import { Confront, ConfrontState } from "state.slint";
+import { Dialog } from "state.slint";
 import { NavItem } from "components/nav_item.slint";
 import { ConfrontOverlay } from "components/confront_overlay.slint";
+import { ModalDialog } from "components/modal_dialog.slint";
 import { DashboardScreen } from "screens/dashboard.slint";
 import { WatchlistScreen } from "screens/watchlist.slint";
 import { PortfolioScreen } from "screens/portfolio.slint";
@@ -39,6 +41,7 @@ export { Watchlist, WatchRow }
 export { Holdings, HoldingRow, PortfolioRow, BankCarRow, ConcentrationLine, SizeMixLine, UnclassifiedLine, CandidateRow }
 export { Fx, FxRateRow }
 export { Confront, ConfrontState }
+export { Dialog }
 
 export component MainWindow inherits Window {
     title: @tr("steadyinvest");
@@ -159,6 +162,13 @@ export component MainWindow inherits Window {
     // ── The confront overlay (Story 5.1, FR50) — floats above the whole shell when opened from a
     //    study row. Read-only; dismissed by the scrim, the Fermer button, or Escape. ──
     if Confront.open: ConfrontOverlay {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    // ── The modal dialog (the UX pass) — refusals to acknowledge, confirmations, entry forms.
+    //    Above everything, including the confront overlay; dismissed by Esc, the scrim or Annuler. ──
+    if Dialog.kind != "": ModalDialog {
         width: parent.width;
         height: parent.height;
     }

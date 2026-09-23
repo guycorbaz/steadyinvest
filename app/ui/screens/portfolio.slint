@@ -1,168 +1,175 @@
-// Portefeuille — the single-portfolio holdings register (Story 4.3, FR36). Add / edit / remove a
-// holding (symbole, quantité, prix d'achat) in the global reference currency (FR63). Neutral, no
-// advice, no zone hues (no zone is computed here — that's Story 4.4). Intents → Rust (validate +
-// persist + re-render).
+// Portefeuille — the holdings register (Story 4.3, FR36) and its risk overlay (Epics 4 + 6), laid
+// out by the UX pass (2026-09-23) in titled cards: Portefeuilles · Candidats · Capital à risque ·
+// Dividendes nets · Consolidation · Concentration et taille · Positions · Positions vendues.
+// Every data ENTRY (position, buy, sell, dividend, stop, portfolio) opens a `Dialog` form; every
+// destructive gesture a `Dialog` confirm; every persistent STATE (missing rate, unclassified, no
+// linked study, a threshold murmur) is a `StatusBand`; a written OUTCOME stays the inline notice.
+// Neutral, no advice, no zone hues (Story 4.2 rule). Intents → Rust (validate + persist + re-render).
 
 import { Tokens } from "../tokens.slint";
-import { Holdings, HoldingRow, PortfolioRow, CapitalAtRiskRow, Labels, Prefs } from "../state.slint";
+import { Dialog, Holdings, HoldingRow, PortfolioRow, CapitalAtRiskRow, Labels, Prefs } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
-import { TextField } from "../components/text_field.slint";
+import { PanelCard } from "../components/panel_card.slint";
+import { StatusBand } from "../components/status_band.slint";
+
+// A neutral fact line in the numeric face (the cards' body lines).
+component FactLine inherits Text {
+    color: Tokens.text-high;
+    font-family: Tokens.font-numeric;
+    font-size: Tokens.font-caption;
+    wrap: word-wrap;
+}
+
+// A caption line (a header inside a card, or a footnote).
+component CaptionLine inherits Text {
+    color: Tokens.text-mid;
+    font-size: Tokens.font-caption;
+    wrap: word-wrap;
+}
 
 export component PortfolioScreen inherits Rectangle {
-    // Draft fields for the add/edit form. `editing-id` is "" when adding, or the row id being edited.
-    property <string> draft-ticker;
-    property <string> draft-quantity;
-    property <string> draft-price;
-    // Story 6.2 (FR38): the chosen currency for the holding being added/edited (defaults to the
-    // reference currency; overwritten with the row's currency when editing).
-    property <string> draft-currency: Holdings.reference-currency;
-    // Issue #98 (FR48): the holding's sector ("" = non renseigné — the provider may fill it later).
-    property <string> draft-sector;
-    property <string> editing-id;
-    // Story 6.1 (FR37): draft names for adding / renaming a portfolio.
-    property <string> draft-portfolio-name;
-    property <string> draft-rename;
     // Issue #84: the « Positions vendues » section is collapsed by default (pure-Slint toggle).
     property <bool> sold-open: false;
 
-    function reset-draft() {
-        root.draft-ticker = "";
-        root.draft-quantity = "";
-        root.draft-price = "";
-        root.draft-currency = Holdings.reference-currency;
-        root.draft-sector = "";
-        root.editing-id = "";
+    // ── The dialog openers (the @tr titles/sentences live HERE, posture-gated like every string). ──
+    function open-add-holding() {
+        Dialog.form("holding-add", @tr("Ajouter une position"),
+            @tr("La position est rattachée à l'étude du même symbole et de la même devise ; c'est elle qui donne la zone et le prix actuel."),
+            "", "");
+        Dialog.draft-currency = Holdings.reference-currency;
+    }
+    function open-edit-holding(row: HoldingRow) {
+        Dialog.form("holding-edit", @tr("Modifier la position {}", row.ticker),
+            @tr("Une position adossée à un registre de transactions garde sa quantité, son prix et sa devise ; seuls le symbole et le secteur sont modifiables ici."),
+            row.id, "");
+        Dialog.draft-ticker = row.ticker;
+        Dialog.draft-quantity = row.quantity;
+        Dialog.draft-price = row.purchase-price;
+        Dialog.draft-currency = row.currency;
+        Dialog.draft-sector = row.sector;
+    }
+    function open-buy(id: string, ticker: string, currency: string) {
+        Dialog.form("buy", @tr("Achat de {}", ticker),
+            @tr("Un achat augmente la position et recalcule son prix moyen d'achat."),
+            id, @tr("Montants en {}", currency));
+    }
+    function open-rebuy(id: string, ticker: string, currency: string) {
+        Dialog.form("buy", @tr("Rachat de {}", ticker),
+            @tr("Un achat rouvre la position, qui revient au registre avec tout son historique."),
+            id, @tr("Montants en {}", currency));
+    }
+    function open-sell(id: string, ticker: string, currency: string) {
+        Dialog.form("sell", @tr("Vente de {}", ticker),
+            @tr("Une vente partielle garde la position ; une vente totale la retire du registre, où elle reste consultable sous « Positions vendues »."),
+            id, @tr("Montants en {}", currency));
+    }
+    function open-dividend(id: string, ticker: string, currency: string) {
+        Dialog.form("dividend", @tr("Dividende de {}", ticker),
+            @tr("Le brut par action est multiplié par les actions concernées ; la retenue à la source en est déduite pour donner le net réinvestissable."),
+            id, @tr("Montants en {}", currency));
+    }
+    function open-stop(row: HoldingRow) {
+        Dialog.form("stop", @tr("Seuil suiveur de {}", row.ticker),
+            @tr("Le seuil se calcule depuis le plus haut atteint par le cours ; quand le cours passe dessous, la position le signale — elle n'est jamais vendue d'elle-même."),
+            row.id, row.has-stop ? @tr("Seuil actuel : {} % ({} {})", row.stop-pct, row.stop-level, row.currency) : "");
+        Dialog.draft-price = row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
+        Dialog.flag = row.has-stop;
+    }
+    function open-sell-trigger(row: HoldingRow) {
+        Dialog.form("sell-trigger", @tr("Vente de {}", row.ticker),
+            @tr("La vente est enregistrée au prix actuel de l'étude liée ; une quantité vide vend toute la position."),
+            row.id, row.current-price != "" ? @tr("Prix actuel : {} {}", row.current-price, row.currency) : "");
     }
 
-    // On-display walk (2026-09-22): the screen scrolls, like Études and Réglages — a long register + an open
-    // ledger pushed the transaction entry row below the window edge, unreachable. The inner layout keeps
-    // its original indentation on purpose (a re-indent would bury this one-line fix in a 1 200-line diff).
     Flickable {
         viewport-height: content.preferred-height;
 
         content := VerticalLayout {
-        alignment: start;
-        padding: Tokens.space-24;
-        spacing: Tokens.space-16;
+            alignment: start;
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
 
-        Text {
-            text: @tr("Portefeuille");
-            color: Tokens.text-high;
-            font-size: Tokens.font-h2;
-            font-weight: Tokens.weight-semibold;
-        }
+            Text {
+                text: @tr("Portefeuille");
+                color: Tokens.text-high;
+                font-size: Tokens.font-h2;
+                font-weight: Tokens.weight-semibold;
+            }
 
-        // ── Story 6.1 (FR37): multiple portfolios — one per bank/account. The selector picks the
-        //    active one; the register below shows its holdings. Add / rename / delete are guarded. ──
-        // A horizontal Flickable so many portfolios scroll rather than clip off the window edge.
-        if Holdings.portfolios.length > 1: Flickable {
-            height: Tokens.row-height + Tokens.space-8;
-            viewport-width: chips.preferred-width;
-            viewport-height: self.height;
-            chips := HorizontalLayout {
-                spacing: Tokens.space-8;
-                alignment: start;
-                for p in Holdings.portfolios: ChoiceChip {
-                    label: p.name;
-                    selected: p.id == Holdings.active-portfolio-id;
-                    activated => { Holdings.select-portfolio(p.id); }
+            // ── Story 6.1 (FR37): multiple portfolios — one per bank/account. The selector picks the
+            //    active one; the register below shows its holdings. Add / rename go through a form
+            //    dialog; delete through a confirm (its guards refuse with a notice). ──
+            PanelCard {
+                title: @tr("Portefeuilles");
+                subtitle: @tr("Un portefeuille par banque ou compte ; devise de référence : {} (modifiable dans Réglages).", Holdings.reference-currency);
+
+                if Holdings.portfolios.length > 1: Flickable {
+                    height: Tokens.row-height + Tokens.space-8;
+                    viewport-width: chips.preferred-width;
+                    viewport-height: self.height;
+                    chips := HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        alignment: start;
+                        for p in Holdings.portfolios: ChoiceChip {
+                            label: p.name;
+                            selected: p.id == Holdings.active-portfolio-id;
+                            activated => { Holdings.select-portfolio(p.id); }
+                        }
+                    }
                 }
-            }
-        }
-        // Add a portfolio (name field). Disabled read-only or when the name is blank.
-        HorizontalLayout {
-            spacing: Tokens.space-8;
-            add-name := TextField {
-                placeholder: @tr("Nom du portefeuille (ex. UBS — compte titres)");
-                text <=> root.draft-portfolio-name;
-                horizontal-stretch: 1;
-            }
-            ActionButton {
-                label: @tr("Ajouter un portefeuille");
-                enabled: !Holdings.read-only && root.draft-portfolio-name != "";
-                clicked => {
-                    Holdings.add-portfolio(root.draft-portfolio-name);
-                    root.draft-portfolio-name = "";
-                }
-            }
-        }
-        // Rename / delete the active portfolio (the guards surface neutral notices on refusal).
-        HorizontalLayout {
-            spacing: Tokens.space-8;
-            rename-field := TextField {
-                placeholder: @tr("Renommer le portefeuille actif");
-                text <=> root.draft-rename;
-                horizontal-stretch: 1;
-            }
-            ActionButton {
-                label: @tr("Renommer");
-                enabled: !Holdings.read-only && root.draft-rename != "" && Holdings.active-portfolio-id != "";
-                clicked => {
-                    Holdings.rename-portfolio(Holdings.active-portfolio-id, root.draft-rename);
-                    root.draft-rename = "";
-                }
-            }
-            ActionButton {
-                label: @tr("Supprimer le portefeuille");
-                enabled: !Holdings.read-only && Holdings.active-portfolio-id != "";
-                clicked => { Holdings.delete-portfolio(Holdings.active-portfolio-id); }
-            }
-        }
-
-        // The reference currency the amounts are read in (FR63) — set in Réglages. A fact, not a control.
-        Text {
-            text: @tr("Devise de référence : {} (modifiable dans Réglages)", Holdings.reference-currency);
-            color: Tokens.text-mid;
-            font-size: Tokens.font-caption;
-        }
-
-        // ── Story 6.8 (FR48): the replacement-candidates panel — watchlist candidates nearest
-        // to / inside their Buy zone, with neutral re-concentration FACTS. Auto-opened after a
-        // sell, or via « Candidats » on a trigger; the app surfaces facts, never « buy this one ».
-        // Ink only — the zone is stated in words (Labels nouns); no hue outside §4. ──
-        if Holdings.candidates-visible: Rectangle {
-            background: Tokens.surface;
-            border-radius: Tokens.radius;
-            border-width: Tokens.border;
-            border-color: Tokens.separator;
-
-            VerticalLayout {
-                padding: Tokens.space-12;
-                spacing: Tokens.space-8;
                 HorizontalLayout {
-                    spacing: Tokens.space-16;
-                    Text {
-                        text: Holdings.candidates-sold
-                            ? @tr("Vente enregistrée : {} — candidats de la liste de suivi", Holdings.candidates-context)
-                            : Holdings.candidates-context != ""
-                                ? @tr("Candidats de remplacement pour {} (liste de suivi)", Holdings.candidates-context)
-                                : @tr("Candidats de remplacement (liste de suivi)");
-                        color: Tokens.text-high;
-                        font-size: Tokens.font-body;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                        wrap: word-wrap;
+                    alignment: start;
+                    spacing: Tokens.space-8;
+                    ActionButton {
+                        label: @tr("Ajouter un portefeuille…");
+                        enabled: !Holdings.read-only;
+                        clicked => {
+                            Dialog.form("portfolio-add", @tr("Ajouter un portefeuille"),
+                                @tr("Un portefeuille regroupe les positions d'une banque ou d'un compte ; la consolidation les additionne toutes."),
+                                "", "");
+                        }
                     }
                     ActionButton {
-                        label: @tr("Fermer");
-                        enabled: true;
-                        clicked => { Holdings.close-candidates(); }
+                        label: @tr("Renommer…");
+                        enabled: !Holdings.read-only && Holdings.active-portfolio-id != "";
+                        clicked => {
+                            Dialog.form("portfolio-rename", @tr("Renommer le portefeuille"), "", Holdings.active-portfolio-id, "");
+                        }
+                    }
+                    ActionButton {
+                        label: @tr("Supprimer le portefeuille");
+                        enabled: !Holdings.read-only && Holdings.active-portfolio-id != "";
+                        clicked => {
+                            Dialog.confirm(@tr("Supprimer ce portefeuille ?"),
+                                @tr("Un portefeuille qui contient un historique de positions n'est pas supprimé ; le dernier portefeuille non plus."),
+                                @tr("Supprimer"), "delete-portfolio", Holdings.active-portfolio-id);
+                        }
                     }
                 }
-                if Holdings.candidates-unavailable: Text {
+            }
+
+            // ── Story 6.8 (FR48): the replacement-candidates panel — watchlist candidates nearest
+            // to / inside their Buy zone, with neutral re-concentration FACTS. Auto-opened after a
+            // sell, or via « Candidats » on a trigger; the app surfaces facts, never « buy this one ».
+            // Ink only — the zone is stated in words (Labels nouns); no hue outside §4. ──
+            if Holdings.candidates-visible: PanelCard {
+                title: Holdings.candidates-sold
+                    ? @tr("Vente enregistrée : {} — candidats de la liste de suivi", Holdings.candidates-context)
+                    : Holdings.candidates-context != ""
+                        ? @tr("Candidats de remplacement pour {} (liste de suivi)", Holdings.candidates-context)
+                        : @tr("Candidats de remplacement (liste de suivi)");
+
+                if Holdings.candidates-unavailable: StatusBand {
+                    icon: "⊘";
                     text: @tr("Liste de suivi indisponible.");
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
                 }
-                if Holdings.candidate-rows.length == 0 && !Holdings.candidates-unavailable: Text {
+                if Holdings.candidate-rows.length == 0 && !Holdings.candidates-unavailable: CaptionLine {
                     text: @tr("La liste de suivi est vide.");
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
                 }
                 for candidate in Holdings.candidate-rows: HorizontalLayout {
                     spacing: Tokens.space-8;
-                    Text {
+                    FactLine {
                         text: candidate.data == "no-study"
                             ? @tr("{} — aucune étude", candidate.ticker)
                             // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
@@ -185,78 +192,55 @@ export component PortfolioScreen inherits Rectangle {
                                             : candidate.zone == "sell"
                                                 ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-sell)
                                                 : @tr("{} — zone : {}", candidate.ticker, Labels.zone-buy);
-                        color: Tokens.text-high;
-                        font-family: Tokens.font-numeric;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
-                        wrap: word-wrap;
                     }
-                    if candidate.ud != "": Text {
+                    if candidate.ud != "": FactLine {
                         text: @tr("H/B {}", candidate.ud);
-                        color: Tokens.text-high;
-                        font-family: Tokens.font-numeric;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
-                    if candidate.held-share != "": Text {
+                    if candidate.held-share != "": CaptionLine {
                         text: candidate.held-flagged
                             ? @tr("déjà détenu : {} % du capital · seuil {} % approché ou atteint", candidate.held-share, Holdings.concentration-threshold-display)
                             : @tr("déjà détenu : {} % du capital", candidate.held-share);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
                     // ── Issue #98 (FR48): the sector re-concentration facts — the currency
                     // block's exact mirror. An unknown sector is STATED (« non renseigné »,
                     // the 2026-07-09 decision), never silent; an absent share never flags. ──
-                    if candidate.study-id != "" && candidate.sector == "": Text {
+                    if candidate.study-id != "" && candidate.sector == "": CaptionLine {
                         text: @tr("secteur : non renseigné");
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
-                    if candidate.sector-missing != "": Text {
+                    if candidate.sector-missing != "": CaptionLine {
                         text: @tr("secteur {} : exposition indisponible (taux manquant {})", candidate.sector, candidate.sector-missing);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
-                    if candidate.sector-missing == "" && candidate.sector-share != "": Text {
+                    if candidate.sector-missing == "" && candidate.sector-share != "": CaptionLine {
                         text: candidate.sector-flagged
                             ? @tr("secteur {} : déjà {} % du capital · seuil {} % approché ou atteint", candidate.sector, candidate.sector-share, Holdings.concentration-threshold-display)
                             : @tr("secteur {} : déjà {} % du capital", candidate.sector, candidate.sector-share);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
-                    if candidate.sector != "" && candidate.sector-missing == "" && candidate.sector-share == "": Text {
+                    if candidate.sector != "" && candidate.sector-missing == "" && candidate.sector-share == "": CaptionLine {
                         text: @tr("secteur {} : exposition indisponible", candidate.sector);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
-                    if candidate.currency-missing != "": Text {
+                    if candidate.currency-missing != "": CaptionLine {
                         text: @tr("devise {} : exposition indisponible (taux manquant {})", candidate.currency, candidate.currency-missing);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
-                    if candidate.currency-missing == "" && candidate.currency-share != "": Text {
+                    if candidate.currency-missing == "" && candidate.currency-share != "": CaptionLine {
                         text: candidate.currency-flagged
                             ? @tr("devise {} : déjà {} % du capital · seuil {} % approché ou atteint", candidate.currency, candidate.currency-share, Holdings.concentration-threshold-display)
                             : @tr("devise {} : déjà {} % du capital", candidate.currency, candidate.currency-share);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
                     // The exposure could not be stated at all (the shares' total is absent for a
                     // reason named on ANOTHER currency's line, or unformed) — an honest absence,
                     // never a silently missing fact.
-                    if candidate.currency != "" && candidate.currency-missing == "" && candidate.currency-share == "": Text {
+                    if candidate.currency != "" && candidate.currency-missing == "" && candidate.currency-share == "": CaptionLine {
                         text: @tr("devise {} : exposition indisponible", candidate.currency);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
                         vertical-alignment: center;
                     }
                     if candidate.study-id != "": ActionButton {
@@ -272,935 +256,445 @@ export component PortfolioScreen inherits Rectangle {
                 }
                 // Issue #98 (FR48): the sector blind spot, stated once at panel level — the
                 // « non renseigné » bucket keeps the denominator whole (2026-07-09 decision).
-                if Holdings.candidates-sector-unlabeled != "": Text {
+                if Holdings.candidates-sector-unlabeled != "": CaptionLine {
                     text: @tr("secteur non renseigné : {} % du capital investi", Holdings.candidates-sector-unlabeled);
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
                 }
-                if Holdings.candidates-rates != "": Text {
+                if Holdings.candidates-rates != "": CaptionLine {
                     text: @tr("Convertis aux taux : {}", Holdings.candidates-rates);
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    ActionButton {
+                        label: @tr("Fermer");
+                        enabled: true;
+                        clicked => { Holdings.close-candidates(); }
+                    }
                 }
             }
-        }
 
-        // Story 4.6 (FR43) / Story 6.2 (FR38): the portfolio's capital-at-risk — a neutral fact (no
-        // hue, no action), shown PER currency. Holdings can differ in currency, so there is no mixed
-        // global total (FX only at consolidation, Story 6.5/6.6). The "% du capital investi" clause is
-        // dropped for a currency with nothing invested.
-        if Holdings.capital-at-risk-by-currency.length > 0: VerticalLayout {
-            spacing: Tokens.space-4;
-            Text {
-                text: @tr("Capital à risque par devise :");
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            for car in Holdings.capital-at-risk-by-currency: Text {
-                text: car.pct != ""
-                    ? @tr("{} {} ({} % du capital investi)", car.amount, car.currency, car.pct)
-                    : @tr("{} {}", car.amount, car.currency);
-                color: Tokens.text-high;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-            }
-            // Issue #61: the un-protected exposure — a softer neutral caveat so a "0 %" CaR is not
-            // read as safety. Already-formatted, posture-gated strings from Rust (no @tr here).
-            for line in Holdings.unstopped-exposure: Text {
-                text: line;
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-                wrap: word-wrap;
-            }
-        }
+            // Story 4.6 (FR43) / Story 6.2 (FR38): the portfolio's capital-at-risk — a neutral fact (no
+            // hue, no action), shown PER currency. Holdings can differ in currency, so there is no mixed
+            // global total (FX only at consolidation, Story 6.5/6.6). The "% du capital investi" clause is
+            // dropped for a currency with nothing invested. Issue #61: the un-protected exposure is a
+            // STATE band, so a "0 %" CaR is never read as safety.
+            if Holdings.capital-at-risk-by-currency.length > 0: PanelCard {
+                title: @tr("Capital à risque");
+                subtitle: @tr("Par devise : ce que les seuils suiveurs laissent exposé, en part du capital investi dans cette devise.");
 
-        // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — the study keeps the
-        // gross (method fidelity); this is what is actually available to reinvest after the
-        // withholding at source. No mixed-currency total (FX is Story 6.5). A neutral fact.
-        if Holdings.reinvestable-cash.length > 0: VerticalLayout {
-            spacing: Tokens.space-4;
-            Text {
-                text: @tr("Dividendes nets perçus (réinvestissables) :");
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
+                for line in Holdings.unstopped-exposure: StatusBand {
+                    icon: "◦";
+                    text: line;
+                }
+                for car in Holdings.capital-at-risk-by-currency: FactLine {
+                    text: car.pct != ""
+                        ? @tr("{} {} ({} % du capital investi)", car.amount, car.currency, car.pct)
+                        : @tr("{} {}", car.amount, car.currency);
+                }
             }
-            for cash in Holdings.reinvestable-cash: Text {
-                text: @tr("{} {}", cash.amount, cash.currency);
-                color: Tokens.text-high;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-            }
-        }
 
-        // ── Story 6.6 (FR44): the consolidation hierarchy — per bank, then the global total, in
-        // the reference currency; FX applied ONLY here (the per-currency lines above stay
-        // native). Every converted figure's rates are named below (FR28 inspectability). ──
-        if Holdings.consolidation-banks.length > 0: VerticalLayout {
-            spacing: Tokens.space-4;
-            Text {
-                text: @tr("Consolidation (toutes banques, en {}) :", Holdings.reference-currency);
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
+            // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — the study keeps the
+            // gross (method fidelity); this is what is actually available to reinvest after the
+            // withholding at source. No mixed-currency total (FX is Story 6.5). A neutral fact.
+            if Holdings.reinvestable-cash.length > 0: PanelCard {
+                title: @tr("Dividendes nets perçus (réinvestissables)");
+                for cash in Holdings.reinvestable-cash: FactLine {
+                    text: @tr("{} {}", cash.amount, cash.currency);
+                }
             }
-            for bank in Holdings.consolidation-banks: Text {
-                text: bank.missing != ""
-                    ? @tr("{} — indisponible : taux manquant {}", bank.name, bank.missing)
-                    : bank.unavailable
-                        ? @tr("{} — indisponible", bank.name)
-                        : bank.pct != ""
-                            ? @tr("{} — {} ({} % du capital investi)", bank.name, bank.amount, bank.pct)
-                            : @tr("{} — {}", bank.name, bank.amount);
-                color: Tokens.text-high;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.consolidation-global != "": Text {
-                text: Holdings.consolidation-global-pct != ""
-                    ? @tr("Total global : {} ({} % du capital investi)",
-                        Holdings.consolidation-global, Holdings.consolidation-global-pct)
-                    : @tr("Total global : {}", Holdings.consolidation-global);
-                color: Tokens.text-high;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.consolidation-global == "" && Holdings.consolidation-missing != "": Text {
-                text: @tr("Total global indisponible : taux manquant {}", Holdings.consolidation-missing);
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.consolidation-global == "" && Holdings.consolidation-missing == "": Text {
-                text: @tr("Total global indisponible");
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.consolidation-rates != "": Text {
-                text: @tr("Convertis aux taux : {}", Holdings.consolidation-rates);
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-        }
 
-        // ── Story 6.7 (FR45): concentration against the TOTAL invested capital — per security,
-        // aggregated across ALL banks and currencies (largest share first) — plus the
-        // diversify-by-size mix against the configured table. Neutral facts; the near-threshold
-        // murmur is stated in the line's own words (ink only, no hue — colour budget). ──
-        if Holdings.concentration-rows.length > 0 || Holdings.concentration-unavailable: VerticalLayout {
-            spacing: Tokens.space-4;
-            Text {
-                text: @tr("Concentration (part du capital total investi, en {}) :", Holdings.reference-currency);
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.concentration-unavailable: Text {
-                text: @tr("Concentration indisponible");
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            for line in Holdings.concentration-rows: Text {
-                text: line.missing != ""
-                    ? @tr("{} — indisponible : taux manquant {}", line.ticker, line.missing)
-                    : line.amount == ""
-                        ? @tr("{} — indisponible", line.ticker)
-                        : line.flagged
-                            ? @tr("{} — {} ({} % du capital total · seuil {} % approché ou atteint)",
-                                line.ticker, line.amount, line.share, Holdings.concentration-threshold-display)
-                            : line.share != ""
-                                ? @tr("{} — {} ({} % du capital total)", line.ticker, line.amount, line.share)
-                                : @tr("{} — {}", line.ticker, line.amount);
-                color: Tokens.text-high;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.concentration-global-absent && Holdings.concentration-missing != "": Text {
-                text: @tr("Parts indisponibles : taux manquant {}", Holdings.concentration-missing);
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.concentration-global-absent && Holdings.concentration-missing == "": Text {
-                text: @tr("Parts indisponibles");
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.size-mix-rows.length > 0: Text {
-                text: @tr("Répartition par taille (chiffre d'affaires) :");
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            for mix in Holdings.size-mix-rows: Text {
-                text: mix.share != ""
-                    ? @tr("{} — {} % (cible {} %)",
-                        mix.class-key == "small" ? @tr("Petite") : mix.class-key == "medium" ? @tr("Moyenne") : @tr("Grande"),
-                        mix.share, mix.target)
-                    : @tr("{} — indisponible (cible {} %)",
-                        mix.class-key == "small" ? @tr("Petite") : mix.class-key == "medium" ? @tr("Moyenne") : @tr("Grande"),
-                        mix.target);
-                color: Tokens.text-high;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-            }
-            for unclassified in Holdings.size-unclassified-rows: Text {
-                text: unclassified.reason-key == "no-study"
-                    ? @tr("{} — non classé (aucune étude)", unclassified.ticker)
-                    // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
-                    : unclassified.reason-key == "study-unavailable"
-                    ? @tr("{} — non classé (étude indisponible)", unclassified.ticker)
-                    : unclassified.reason-key == "no-sales"
-                        ? @tr("{} — non classé (chiffre d'affaires indisponible)", unclassified.ticker)
-                        : unclassified.reason-key == "missing-rate"
-                            ? @tr("{} — non classé (taux manquant {})", unclassified.ticker, unclassified.missing)
-                            : @tr("{} — non classé (conversion impossible)", unclassified.ticker);
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-            if Holdings.concentration-rates != "": Text {
-                text: @tr("Convertis aux taux : {}", Holdings.concentration-rates);
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-            }
-        }
+            // ── Story 6.6 (FR44): the consolidation hierarchy — per bank, then the global total, in
+            // the reference currency; FX applied ONLY here (the per-currency lines above stay
+            // native). Every converted figure's rates are named below (FR28 inspectability). ──
+            if Holdings.consolidation-banks.length > 0: PanelCard {
+                title: @tr("Consolidation (toutes banques, en {})", Holdings.reference-currency);
 
-        // ── Manual price refresh (Story 4.4, FR40) — user-initiated; never background-polled. ──
-        HorizontalLayout {
-            alignment: start;
-            spacing: Tokens.space-8;
-            ActionButton {
-                // Disabled while a refresh is in flight (issue #52) — no double-click duplicate jobs.
-                label: Holdings.refreshing ? @tr("Rafraîchissement…") : @tr("Rafraîchir les prix");
-                enabled: !Holdings.read-only && Holdings.holding-count > 0 && !Holdings.refreshing;
-                clicked => { Holdings.refresh-prices(); }
+                if Holdings.consolidation-global == "" && Holdings.consolidation-missing != "": StatusBand {
+                    icon: "◦";
+                    text: @tr("Total global indisponible : taux manquant {}", Holdings.consolidation-missing);
+                }
+                if Holdings.consolidation-global == "" && Holdings.consolidation-missing == "": StatusBand {
+                    icon: "⊘";
+                    text: @tr("Total global indisponible");
+                }
+                for bank in Holdings.consolidation-banks: FactLine {
+                    text: bank.missing != ""
+                        ? @tr("{} — indisponible : taux manquant {}", bank.name, bank.missing)
+                        : bank.unavailable
+                            ? @tr("{} — indisponible", bank.name)
+                            : bank.pct != ""
+                                ? @tr("{} — {} ({} % du capital investi)", bank.name, bank.amount, bank.pct)
+                                : @tr("{} — {}", bank.name, bank.amount);
+                }
+                if Holdings.consolidation-global != "": FactLine {
+                    text: Holdings.consolidation-global-pct != ""
+                        ? @tr("Total global : {} ({} % du capital investi)",
+                            Holdings.consolidation-global, Holdings.consolidation-global-pct)
+                        : @tr("Total global : {}", Holdings.consolidation-global);
+                }
+                if Holdings.consolidation-rates != "": CaptionLine {
+                    text: @tr("Convertis aux taux : {}", Holdings.consolidation-rates);
+                }
             }
-            // Issue #100: the paced batch counts up (n/t) and can be cancelled instead of a frozen wait.
-            if Holdings.refreshing: Text {
-                text: Holdings.refresh-progress;
-                color: Tokens.text-mid;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-                vertical-alignment: center;
-            }
-            if Holdings.refreshing: ActionButton {
-                label: @tr("Annuler");
-                enabled: true;
-                clicked => { Holdings.cancel-refresh(); }
-            }
-        }
 
-        // ── Add / edit a holding ──
-        HorizontalLayout {
-            spacing: Tokens.space-8;
-            TextField {
-                placeholder: @tr("Symbole");
-                text <=> root.draft-ticker;
-                horizontal-stretch: 1;
-            }
-            TextField {
-                placeholder: @tr("Quantité");
-                text <=> root.draft-quantity;
-                horizontal-stretch: 1;
-            }
-            TextField {
-                placeholder: @tr("Prix d'achat");
-                text <=> root.draft-price;
-                horizontal-stretch: 1;
-            }
-            // Issue #98 (FR48): free text; empty = « non renseigné » (the provider fills the
-            // void at the next study fetch — PR 2; a manual value always wins).
-            TextField {
-                placeholder: @tr("Secteur (facultatif)");
-                text <=> root.draft-sector;
-                horizontal-stretch: 1;
-            }
-            ActionButton {
-                label: root.editing-id == "" ? @tr("Ajouter") : @tr("Enregistrer");
-                enabled: !Holdings.read-only && root.draft-ticker != "";
-                clicked => {
-                    // Reset the form ONLY when the write was accepted — a refused add/edit (bad
-                    // number / empty symbol / unsupported currency) keeps the user's input to correct.
-                    if (root.editing-id == "") {
-                        if (Holdings.add-holding(root.draft-ticker, root.draft-quantity, root.draft-price, root.draft-currency, root.draft-sector)) {
-                            root.reset-draft();
-                        }
-                    } else {
-                        if (Holdings.edit-holding(root.editing-id, root.draft-ticker, root.draft-quantity, root.draft-price, root.draft-currency, root.draft-sector)) {
-                            root.reset-draft();
-                        }
-                    }
-                }
-            }
-            if root.editing-id != "": ActionButton {
-                label: @tr("Annuler");
-                enabled: true;
-                clicked => { root.reset-draft(); }
-            }
-        }
-        // Story 6.2 (FR38): the holding's currency — a fixed allow-list picker (chips from Rust's
-        // config::SUPPORTED_CURRENCIES). Stored native, never converted (FX only at consolidation).
-        HorizontalLayout {
-            spacing: Tokens.space-8;
-            alignment: start;
-            Text {
-                text: @tr("Devise :");
-                color: Tokens.text-mid;
-                font-size: Tokens.font-caption;
-                vertical-alignment: center;
-            }
-            for c in Holdings.supported-currencies: ChoiceChip {
-                label: c;
-                selected: c == root.draft-currency;
-                activated => { root.draft-currency = c; }
-            }
-        }
+            // ── Story 6.7 (FR45): concentration against the TOTAL invested capital — per security,
+            // aggregated across ALL banks and currencies (largest share first) — plus the
+            // diversify-by-size mix against the configured table. Neutral facts; the near-threshold
+            // murmur and every « non classé » reason are STATE bands (ink only, no hue). ──
+            if Holdings.concentration-rows.length > 0 || Holdings.concentration-unavailable: PanelCard {
+                title: @tr("Concentration et taille");
+                subtitle: @tr("Part de chaque titre dans le capital total investi (toutes banques, en {}), puis la répartition par taille d'entreprise d'après le chiffre d'affaires de l'étude liée.", Holdings.reference-currency);
 
-        if Holdings.notice != "": Text {
-            text: Holdings.notice;
-            color: Tokens.text-mid;
-            font-size: Tokens.font-caption;
-        }
+                if Holdings.concentration-unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Concentration indisponible");
+                }
+                if Holdings.concentration-global-absent && Holdings.concentration-missing != "": StatusBand {
+                    icon: "◦";
+                    text: @tr("Parts indisponibles : taux manquant {}", Holdings.concentration-missing);
+                }
+                if Holdings.concentration-global-absent && Holdings.concentration-missing == "": StatusBand {
+                    icon: "⊘";
+                    text: @tr("Parts indisponibles");
+                }
+                for line in Holdings.concentration-rows: VerticalLayout {
+                    spacing: Tokens.space-4;
+                    if line.missing != "": StatusBand {
+                        icon: "◦";
+                        text: @tr("{} — indisponible : taux manquant {}", line.ticker, line.missing);
+                    }
+                    if line.missing == "" && line.amount == "": StatusBand {
+                        icon: "⊘";
+                        text: @tr("{} — indisponible", line.ticker);
+                    }
+                    if line.missing == "" && line.amount != "" && line.flagged: StatusBand {
+                        icon: "⚠";
+                        text: @tr("{} — {} ({} % du capital total · seuil {} % approché ou atteint)",
+                            line.ticker, line.amount, line.share, Holdings.concentration-threshold-display);
+                    }
+                    if line.missing == "" && line.amount != "" && !line.flagged: FactLine {
+                        text: line.share != ""
+                            ? @tr("{} — {} ({} % du capital total)", line.ticker, line.amount, line.share)
+                            : @tr("{} — {}", line.ticker, line.amount);
+                    }
+                }
+                if Holdings.size-mix-rows.length > 0: CaptionLine {
+                    text: @tr("Répartition par taille (chiffre d'affaires) :");
+                }
+                // The walk's « rien ne s'affiche » : every class at 0 % because NOTHING is
+                // classified — the reason bands below explain it, this band says it first.
+                if Holdings.size-mix-rows.length > 0 && Holdings.size-unclassified-rows.length == Holdings.concentration-rows.length: StatusBand {
+                    icon: "◦";
+                    text: @tr("Aucune position n'a pu être classée par taille ; les parts ci-dessous sont à 0 % pour cette raison.");
+                }
+                for unclassified in Holdings.size-unclassified-rows: StatusBand {
+                    icon: "◦";
+                    text: unclassified.reason-key == "no-study"
+                        ? @tr("{} — non classé (aucune étude)", unclassified.ticker)
+                        // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
+                        : unclassified.reason-key == "study-unavailable"
+                        ? @tr("{} — non classé (étude indisponible)", unclassified.ticker)
+                        : unclassified.reason-key == "no-sales"
+                            ? @tr("{} — non classé (chiffre d'affaires indisponible)", unclassified.ticker)
+                            : unclassified.reason-key == "missing-rate"
+                                ? @tr("{} — non classé (taux manquant {})", unclassified.ticker, unclassified.missing)
+                                : @tr("{} — non classé (conversion impossible)", unclassified.ticker);
+                }
+                for mix in Holdings.size-mix-rows: FactLine {
+                    text: mix.share != ""
+                        ? @tr("{} — {} % (cible {} %)",
+                            mix.class-key == "small" ? @tr("Petite") : mix.class-key == "medium" ? @tr("Moyenne") : @tr("Grande"),
+                            mix.share, mix.target)
+                        : @tr("{} — indisponible (cible {} %)",
+                            mix.class-key == "small" ? @tr("Petite") : mix.class-key == "medium" ? @tr("Moyenne") : @tr("Grande"),
+                            mix.target);
+                }
+                if Holdings.concentration-rates != "": CaptionLine {
+                    text: @tr("Convertis aux taux : {}", Holdings.concentration-rates);
+                }
+            }
 
-        // ── Empty state ──
-        if Holdings.holding-count == 0: Text {
-            text: @tr("Aucune position pour le moment ; ajoutez-en une ci-dessus.");
-            color: Tokens.text-mid;
-            font-size: Tokens.font-body;
-        }
+            // ── The register: the active portfolio's positions. Add → form dialog; refresh (Story
+            //    4.4, FR40) user-initiated, never background-polled; the outcome notice slot. ──
+            PanelCard {
+                title: @tr("Positions");
 
-        // ── The register ──
-        for row[index] in Holdings.rows: hrow := Rectangle {
-            // Per-row draft for the trailing-stop % field (Story 4.5): pre-filled with the holding's
-            // current stop, or the Réglages default when none is set yet.
-            property <string> stop-draft: row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
-            // Issue #58 — once `stop-field.text <=> stop-draft` binds two-way, the FIRST keystroke
-            // severs the declarative default above for the lifetime of this component instance. A
-            // `Holdings.rows` rebuild (add/remove/reorder) reuses instances, so a stale draft could
-            // survive onto a DIFFERENT holding, or a just-committed row could keep showing its
-            // pre-commit text. Local scalar mirrors so `changed` can observe them (a `changed`
-            // callback needs a plain property path, not a dotted repeater-row expression):
-            property <string> row-id: row.id;
-            property <string> row-stop-pct: row.stop-pct;
-            property <bool> row-has-stop: row.has-stop;
-            // Identity change (repeater reused this instance for a different holding) — always
-            // reset, focus or not: a draft typed for the PREVIOUS holding is meaningless here.
-            changed row-id => {
-                self.stop-draft = row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
-            }
-            // Same holding, its stop changed underneath (a commit went through) — reset only when
-            // the field is not focused, so an in-progress edit is never clobbered (the RationaleNote
-            // / JudgmentField keep-input discipline).
-            changed row-stop-pct => {
-                if (!stop-field.has-focus) {
-                    self.stop-draft = row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
-                }
-            }
-            changed row-has-stop => {
-                if (!stop-field.has-focus) {
-                    self.stop-draft = row.has-stop ? row.stop-pct : Prefs.default-trailing-stop-pct;
-                }
-            }
-            // Per-row draft for an optional sell rationale (Story 4.7) — captured with the
-            // "Enregistrer une vente" action.
-            property <string> sell-rationale;
-            // Story 6.3 (FR39): the sell quantity — empty sells the WHOLE position (the 4.7 flow).
-            property <string> sell-quantity;
-            // Story 6.3 (FR39): the ledger form drafts. `txn-editing-id` is "" while the form
-            // records a NEW buy; a row's "Modifier" loads it for an edit instead.
-            property <string> txn-editing-id;
-            property <string> txn-date;
-            property <string> txn-quantity;
-            property <string> txn-price;
-            property <string> txn-fees;
-            property <string> txn-rationale;
-            function reset-txn-draft() {
-                self.txn-editing-id = "";
-                self.txn-date = "";
-                self.txn-quantity = "";
-                self.txn-price = "";
-                self.txn-fees = "";
-                self.txn-rationale = "";
-            }
-            background: Tokens.surface-alt;
-            border-radius: Tokens.radius;
-            min-height: 96px;
-            VerticalLayout {
-              HorizontalLayout {
-                padding-left: Tokens.space-12;
-                padding-right: Tokens.space-12;
-                spacing: Tokens.space-12;
-                Text {
-                    text: row.ticker;
-                    color: Tokens.text-high;
-                    font-size: Tokens.font-body;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                Text {
-                    text: @tr("Quantité : {}", row.quantity);
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: @tr("Prix d'achat : {} {}", row.purchase-price, row.currency);
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
-                    vertical-alignment: center;
-                }
-                // Issue #98 (FR48): the sector fact, when known (a caption — neutral ink).
-                if row.sector != "": Text {
-                    text: @tr("Secteur : {}", row.sector);
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
-                    vertical-alignment: center;
-                }
-                // ── Story 4.4 (FR40): the matched study's zone + present price + freshness. The zone
-                // marker is NEUTRAL ink + a glyph — never a buy/hold/sell hue (those stay geofenced to
-                // the open study's §4 zone bar, Story 4.2 rule). A holding with no linked study shows a
-                // neutral "no study" hint and no zone. ──
-                VerticalLayout {
-                    alignment: center;
-                    horizontal-stretch: 1;
-                    Text {
-                        // Issue #95: a FAILED study read is « indisponible », never « aucune étude liée ».
-                        // Issue #48: a price BELOW the recorded band is its own neutral fact.
-                        text: row.study-unavailable ? @tr("Étude indisponible")
-                            : !row.linked ? @tr("Aucune étude liée")
-                            : row.zone == "buy" ? @tr("◆ {}", Labels.zone-buy)
-                            : row.zone == "neutral" ? @tr("◆ {}", Labels.zone-hold)
-                            : row.zone == "sell" ? @tr("◆ {}", Labels.zone-sell)
-                            : row.below-band ? @tr("◆ Sous la bande de prévision")
-                            : "—";
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
-                    }
-                    if row.linked && row.current-price != "": Text {
-                        text: @tr("Prix actuel : {} {}", row.current-price, row.currency);
-                        color: Tokens.text-high;
-                        font-family: Tokens.font-numeric;
-                        font-size: Tokens.font-caption;
-                    }
-                    // Freshness murmur (Story 3.3/3.5 vocabulary): "périmé" after a failed/older refresh,
-                    // else "à jour le {}" once a successful refresh has stamped an as-of timestamp.
-                    if row.linked && row.stale: Text {
-                        text: @tr("◦ périmé");
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
-                    }
-                    if row.linked && !row.stale && row.as-of != "": Text {
-                        text: @tr("à jour le {}", row.as-of);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
-                    }
-                }
-                // ── Story 4.5 (FR42): the trailing stop — a neutral fact + a set/clear control. The
-                // stop never carries a hue (geofenced); a breach is a neutral fact, never an action
-                // (the sell/raise-stop sheet is Story 4.7). ──
-                VerticalLayout {
-                    alignment: center;
-                    horizontal-stretch: 1;
-                    if row.has-stop: Text {
-                        text: @tr("Stop {}% : {} {}", row.stop-pct, row.stop-level, row.currency);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
-                    }
-                    if row.has-stop && row.stop-breached: Text {
-                        text: @tr("◆ sous le stop");
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
-                    }
-                    if row.has-stop && !row.stop-breached && row.stop-distance != "": Text {
-                        text: @tr("à {} {} au-dessus", row.stop-distance, row.currency);
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
-                    }
-                    HorizontalLayout {
-                        spacing: Tokens.space-8;
-                        stop-field := TextField {
-                            placeholder: @tr("Seuil %");
-                            text <=> hrow.stop-draft;
-                            horizontal-stretch: 1;
-                        }
-                        ActionButton {
-                            label: row.has-stop ? @tr("Mettre à jour") : @tr("Définir le stop");
-                            enabled: !Holdings.read-only && hrow.stop-draft != "";
-                            clicked => { Holdings.set-trailing-stop(row.id, hrow.stop-draft); }
-                        }
-                        if row.has-stop: ActionButton {
-                            label: @tr("Retirer le stop");
-                            enabled: !Holdings.read-only;
-                            clicked => { Holdings.set-trailing-stop(row.id, ""); }
-                        }
-                    }
-                }
-                // Story 6.3 (FR39): show/hide this holding's transaction ledger (one at a time).
-                ActionButton {
-                    label: Holdings.ledger-holding-id == row.id
-                        ? @tr("Masquer les transactions") : @tr("Transactions");
-                    clicked => {
-                        if (Holdings.ledger-holding-id == row.id) {
-                            Holdings.close-ledger();
-                        } else {
-                            hrow.reset-txn-draft();
-                            Holdings.open-ledger(row.id);
-                        }
-                    }
-                }
-                ActionButton {
-                    label: @tr("Modifier");
-                    enabled: !Holdings.read-only;
-                    clicked => {
-                        root.editing-id = row.id;
-                        root.draft-ticker = row.ticker;
-                        root.draft-quantity = row.quantity;
-                        root.draft-price = row.purchase-price;
-                        root.draft-currency = row.currency;
-                        root.draft-sector = row.sector;
-                    }
-                }
-                ActionButton {
-                    label: @tr("Retirer");
-                    enabled: !Holdings.read-only;
-                    clicked => {
-                        if (root.editing-id == row.id) {
-                            root.reset-draft();
-                        }
-                        Holdings.remove-holding(row.id);
-                    }
-                }
-              }
-              // ── Story 4.7 (FR46/FR47): the neutral trigger + its manual actions. Shown only while the
-              // holding fires a trigger and the user hasn't dismissed it. Neutral ink, no hue — the app
-              // never auto-acts: Vendre / Relever le stop / Ignorer are each an explicit user choice. The
-              // stop trigger takes priority over the Sell zone (the kind is decided in core::risk). ──
-              if row.trigger-kind != "" && !row.dismissed: HorizontalLayout {
-                  padding-left: Tokens.space-12;
-                  padding-right: Tokens.space-12;
-                  padding-bottom: Tokens.space-8;
-                  spacing: Tokens.space-8;
-                  Text {
-                      text: row.trigger-kind == "stop"
-                          ? @tr("Le prix a atteint votre stop.")
-                          : @tr("Le prix est dans la zone de vente.");
-                      color: Tokens.text-high;
-                      font-size: Tokens.font-caption;
-                      vertical-alignment: center;
-                      horizontal-stretch: 1;
-                  }
-                  // Story 6.3 (FR39): the sell quantity — empty = the whole position (4.7 flow),
-                  // a smaller number records a PARTIAL sell and the position stays.
-                  TextField {
-                      placeholder: @tr("Quantité (vide = tout)");
-                      text <=> hrow.sell-quantity;
-                      horizontal-stretch: 1;
-                  }
-                  TextField {
-                      placeholder: @tr("Raison (facultative)");
-                      text <=> hrow.sell-rationale;
-                      horizontal-stretch: 1;
-                  }
-                  ActionButton {
-                      label: @tr("Enregistrer une vente");
-                      enabled: !Holdings.read-only;
-                      clicked => { Holdings.sell-holding(row.id, hrow.sell-quantity, hrow.sell-rationale); }
-                  }
-                  ActionButton {
-                      label: @tr("Relever le stop");
-                      enabled: !Holdings.read-only && hrow.stop-draft != "";
-                      clicked => { Holdings.set-trailing-stop(row.id, hrow.stop-draft); }
-                  }
-                  // Story 6.8 (FR48): the same surfacing, BEFORE deciding — a sell-zone entry or
-                  // a stop breach is a redeployment moment too.
-                  ActionButton {
-                      label: @tr("Candidats");
-                      enabled: true;
-                      clicked => { Holdings.open-candidates(row.ticker); }
-                  }
-                  ActionButton {
-                      label: @tr("Ignorer");
-                      enabled: true;
-                      clicked => { Holdings.dismiss-trigger(row.id); }
-                  }
-              }
-              // ── Story 6.3 (FR39): the holding's transaction ledger — buys and (partial) sells,
-              // editable and deletable; the position's quantity and weighted-average cost derive
-              // from it. The row currency is the holding's (FR28) — displayed, never chosen. ──
-              if Holdings.ledger-holding-id == row.id: VerticalLayout {
-                  padding-left: Tokens.space-12;
-                  padding-right: Tokens.space-12;
-                  padding-bottom: Tokens.space-8;
-                  spacing: Tokens.space-8;
-                  // Issue #86: confirm-before-act for the irreversible row delete (the 2.12 destructive
-                  // pattern) — the row's « Supprimer » parks its id + raises this; it recalculates the
-                  // cost basis and can retire/un-retire the position, so it is never a one-click act.
-                  if Holdings.ledger-delete-confirm-visible: Rectangle {
-                      background: Tokens.surface;
-                      border-width: Tokens.focus-border;
-                      border-color: Tokens.focus;
-                      border-radius: Tokens.radius;
-                      HorizontalLayout {
-                          padding: Tokens.space-12;
-                          spacing: Tokens.space-16;
-                          Text {
-                              text: @tr("Supprimer cette transaction ? Le coût de revient de la position est recalculé ; cette suppression est définitive.");
-                              color: Tokens.text-high;
-                              font-size: Tokens.font-body;
-                              vertical-alignment: center;
-                              wrap: word-wrap;
-                              horizontal-stretch: 1;
-                          }
-                          ActionButton {
-                              label: @tr("Supprimer définitivement");
-                              clicked => {
-                                  Holdings.delete-transaction(Holdings.ledger-delete-pending-id);
-                                  Holdings.ledger-delete-confirm-visible = false;
-                                  Holdings.ledger-delete-pending-id = "";
-                              }
-                          }
-                          ActionButton {
-                              label: @tr("Annuler");
-                              clicked => {
-                                  Holdings.ledger-delete-confirm-visible = false;
-                                  Holdings.ledger-delete-pending-id = "";
-                              }
-                          }
-                      }
-                  }
-                  if Holdings.ledger-rows.length == 0: Text {
-                      text: @tr("Aucune transaction enregistrée pour cette position.");
-                      color: Tokens.text-mid;
-                      font-size: Tokens.font-caption;
-                  }
-                  for lrow in Holdings.ledger-rows: HorizontalLayout {
-                      spacing: Tokens.space-8;
-                      Text {
-                          text: lrow.date;
-                          color: Tokens.text-mid;
-                          font-size: Tokens.font-caption;
-                          vertical-alignment: center;
-                      }
-                      Text {
-                          text: lrow.kind == "buy" ? @tr("Achat")
-                              : lrow.kind == "dividend" ? @tr("Dividende")
-                              : @tr("Vente");
-                          color: Tokens.text-high;
-                          font-size: Tokens.font-caption;
-                          vertical-alignment: center;
-                      }
-                      Text {
-                          text: @tr("{} × {} {}", lrow.quantity, lrow.unit-price, lrow.currency);
-                          color: Tokens.text-mid;
-                          font-family: Tokens.font-numeric;
-                          font-size: Tokens.font-caption;
-                          vertical-alignment: center;
-                      }
-                      Text {
-                          // On a dividend row the fees column IS the withholding (Story 6.4).
-                          text: lrow.kind == "dividend"
-                              ? @tr("Retenue : {}", lrow.fees) : @tr("Frais : {}", lrow.fees);
-                          color: Tokens.text-mid;
-                          font-size: Tokens.font-caption;
-                          vertical-alignment: center;
-                      }
-                      if lrow.net != "": Text {
-                          text: @tr("net {} {}", lrow.net, lrow.currency);
-                          color: Tokens.text-high;
-                          font-family: Tokens.font-numeric;
-                          font-size: Tokens.font-caption;
-                          vertical-alignment: center;
-                      }
-                      Text {
-                          text: lrow.rationale;
-                          color: Tokens.text-mid;
-                          font-size: Tokens.font-caption;
-                          vertical-alignment: center;
-                          horizontal-stretch: 1;
-                      }
-                      ActionButton {
-                          label: @tr("Modifier");
-                          enabled: !Holdings.read-only;
-                          clicked => {
-                              hrow.txn-editing-id = lrow.id;
-                              hrow.txn-date = lrow.date;
-                              hrow.txn-quantity = lrow.quantity;
-                              hrow.txn-price = lrow.unit-price;
-                              hrow.txn-fees = lrow.fees;
-                              hrow.txn-rationale = lrow.rationale;
-                          }
-                      }
-                      ActionButton {
-                          label: @tr("Supprimer");
-                          enabled: !Holdings.read-only;
-                          clicked => {
-                              if (hrow.txn-editing-id == lrow.id) {
-                                  hrow.reset-txn-draft();
-                              }
-                              // Issue #86: park the row + raise the confirm overlay (never a one-click
-                              // irreversible delete).
-                              Holdings.ledger-delete-pending-id = lrow.id;
-                              Holdings.ledger-delete-confirm-visible = true;
-                          }
-                      }
-                  }
-                  // The buy/sell/dividend/edit form: records a NEW entry while `txn-editing-id`
-                  // is "", otherwise applies the loaded row's edit (its kind and currency stay
-                  // what they are). The amounts are in the holding's own currency (FR28) — shown
-                  // read-only beside the fields, never chosen here.
-                  // Story 6.4 (AC4): the dividend semantics of the shared fields, stated ON the
-                  // form (the « Frais (vide = 0) » placeholder is a BUY/SELL fact — for a
-                  // dividend, empty auto-computes the Réglages withholding).
-                  Text {
-                      text: @tr("Dividende : quantité = actions (vide = toute la position) · prix = brut par action · frais = retenue (vide = taux par défaut)");
-                      color: Tokens.text-mid;
-                      font-size: Tokens.font-caption;
-                  }
-                  HorizontalLayout {
-                      spacing: Tokens.space-8;
-                      Text {
-                          text: row.currency;
-                          color: Tokens.text-mid;
-                          font-size: Tokens.font-caption;
-                          vertical-alignment: center;
-                      }
-                      TextField {
-                          placeholder: @tr("Date (AAAA-MM-JJ, vide = aujourd'hui)");
-                          text <=> hrow.txn-date;
-                          horizontal-stretch: 1;
-                      }
-                      TextField {
-                          placeholder: @tr("Quantité");
-                          text <=> hrow.txn-quantity;
-                          horizontal-stretch: 1;
-                      }
-                      TextField {
-                          placeholder: @tr("Prix unitaire");
-                          text <=> hrow.txn-price;
-                          horizontal-stretch: 1;
-                      }
-                      TextField {
-                          placeholder: @tr("Frais (vide = 0)");
-                          text <=> hrow.txn-fees;
-                          horizontal-stretch: 1;
-                      }
-                      TextField {
-                          placeholder: @tr("Raison (facultative)");
-                          text <=> hrow.txn-rationale;
-                          horizontal-stretch: 1;
-                      }
-                      ActionButton {
-                          label: hrow.txn-editing-id == ""
-                              ? @tr("Enregistrer un achat") : @tr("Mettre à jour la transaction");
-                          enabled: !Holdings.read-only
-                              && hrow.txn-quantity != "" && hrow.txn-price != "";
-                          clicked => {
-                              if (hrow.txn-editing-id == "") {
-                                  if (Holdings.record-buy(row.id, hrow.txn-date, hrow.txn-quantity,
-                                          hrow.txn-price, hrow.txn-fees, hrow.txn-rationale)) {
-                                      hrow.reset-txn-draft();
-                                  }
-                              } else {
-                                  if (Holdings.update-transaction(hrow.txn-editing-id, hrow.txn-date,
-                                          hrow.txn-quantity, hrow.txn-price, hrow.txn-fees,
-                                          hrow.txn-rationale)) {
-                                      hrow.reset-txn-draft();
-                                  }
-                              }
-                          }
-                      }
-                      // Story 6.3 review decision (FR39): an ordinary sell with an EXPLICIT unit
-                      // price — the one actually obtained — plus date/fees/raison from the form.
-                      if hrow.txn-editing-id == "": ActionButton {
-                          label: @tr("Enregistrer une vente");
-                          enabled: !Holdings.read-only
-                              && hrow.txn-quantity != "" && hrow.txn-price != "";
-                          clicked => {
-                              if (Holdings.record-sell(row.id, hrow.txn-date, hrow.txn-quantity,
-                                      hrow.txn-price, hrow.txn-fees, hrow.txn-rationale)) {
-                                  hrow.reset-txn-draft();
-                              }
-                          }
-                      }
-                      // Story 6.4 (FR41): a dividend — quantity = shares paid on (empty = the
-                      // whole current position), price field = GROSS per share, fees field =
-                      // retenue ("" = auto at the Réglages rate).
-                      if hrow.txn-editing-id == "": ActionButton {
-                          label: @tr("Enregistrer un dividende");
-                          enabled: !Holdings.read-only && hrow.txn-price != "";
-                          clicked => {
-                              if (Holdings.record-dividend(row.id, hrow.txn-date, hrow.txn-quantity,
-                                      hrow.txn-price, hrow.txn-fees, hrow.txn-rationale)) {
-                                  hrow.reset-txn-draft();
-                              }
-                          }
-                      }
-                      if hrow.txn-editing-id != "": ActionButton {
-                          label: @tr("Abandonner la modification");
-                          clicked => { hrow.reset-txn-draft(); }
-                      }
-                  }
-              }
-            }
-        }
-
-        // ── Issue #84 (Story 6.3 defer): « Positions vendues » — the retired holdings, collapsed
-        // by default. Each row states the neutral facts (ticker, sold day, currency) and opens its
-        // ledger READ-ONLY through the same `ledger-holding-id` mechanism as the register; the one
-        // write offered is a re-buy (the record-buy rail), which re-opens the position — it moves
-        // back to the register above, the ledger keeping the full history. ──
-        if Holdings.sold-rows.length > 0: HorizontalLayout {
-            alignment: start;
-            ActionButton {
-                label: root.sold-open
-                    ? @tr("Masquer les positions vendues")
-                    : @tr("Positions vendues ({})", Holdings.sold-rows.length);
-                enabled: true;
-                clicked => { root.sold-open = !root.sold-open; }
-            }
-        }
-        if root.sold-open && Holdings.sold-rows.length > 0: VerticalLayout {
-            spacing: Tokens.space-8;
-            for srow in Holdings.sold-rows: sold-row := Rectangle {
-                // The re-buy form drafts (per row, transient — the register's txn-draft pattern).
-                property <string> rebuy-date;
-                property <string> rebuy-quantity;
-                property <string> rebuy-price;
-                property <string> rebuy-fees;
-                property <string> rebuy-rationale;
-                function reset-rebuy-draft() {
-                    self.rebuy-date = "";
-                    self.rebuy-quantity = "";
-                    self.rebuy-price = "";
-                    self.rebuy-fees = "";
-                    self.rebuy-rationale = "";
-                }
-                background: Tokens.surface-alt;
-                border-width: Tokens.border;
-                border-color: Tokens.separator;
-                border-radius: Tokens.radius;
-                VerticalLayout {
-                    padding: Tokens.space-12;
+                HorizontalLayout {
+                    alignment: start;
                     spacing: Tokens.space-8;
-                    HorizontalLayout {
+                    ActionButton {
+                        label: @tr("Ajouter une position…");
+                        enabled: !Holdings.read-only;
+                        clicked => { root.open-add-holding(); }
+                    }
+                    ActionButton {
+                        // Disabled while a refresh is in flight (issue #52) — no double-click duplicate jobs.
+                        label: Holdings.refreshing ? @tr("Rafraîchissement…") : @tr("Rafraîchir les prix");
+                        enabled: !Holdings.read-only && Holdings.holding-count > 0 && !Holdings.refreshing;
+                        clicked => { Holdings.refresh-prices(); }
+                    }
+                    // Issue #100: the paced batch counts up (n/t) and can be cancelled instead of a frozen wait.
+                    if Holdings.refreshing: FactLine {
+                        text: Holdings.refresh-progress;
+                        vertical-alignment: center;
+                    }
+                    if Holdings.refreshing: ActionButton {
+                        label: @tr("Annuler");
+                        enabled: true;
+                        clicked => { Holdings.cancel-refresh(); }
+                    }
+                }
+
+                // The OUTCOME slot (« … a été enregistré. ») — refusals go to the Dialog, never here.
+                if Holdings.notice != "": CaptionLine {
+                    text: Holdings.notice;
+                }
+
+                // ── Empty state ──
+                if Holdings.holding-count == 0: Text {
+                    text: @tr("Aucune position pour le moment ; « Ajouter une position… » en crée une.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-body;
+                    wrap: word-wrap;
+                }
+
+                // ── The rows ──
+                for row[index] in Holdings.rows: hrow := Rectangle {
+                    background: Tokens.surface-alt;
+                    border-width: Tokens.border;
+                    border-color: Tokens.separator;
+                    border-radius: Tokens.radius;
+                    VerticalLayout {
+                        padding: Tokens.space-12;
                         spacing: Tokens.space-8;
-                        Text {
-                            text: @tr("{} — vendue le {}", srow.ticker, srow.sold-date);
-                            color: Tokens.text-high;
-                            font-size: Tokens.font-body;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        ActionButton {
-                            label: Holdings.ledger-holding-id == srow.id
-                                ? @tr("Masquer les transactions") : @tr("Transactions");
-                            enabled: true;
-                            clicked => {
-                                if (Holdings.ledger-holding-id == srow.id) {
-                                    Holdings.close-ledger();
-                                } else {
-                                    sold-row.reset-rebuy-draft();
-                                    Holdings.open-ledger(srow.id);
+
+                        // The facts line + the row actions.
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            Text {
+                                text: row.ticker;
+                                color: Tokens.text-high;
+                                font-size: Tokens.font-body;
+                                font-weight: Tokens.weight-semibold;
+                                vertical-alignment: center;
+                            }
+                            CaptionLine {
+                                text: @tr("Quantité : {}", row.quantity);
+                                vertical-alignment: center;
+                            }
+                            CaptionLine {
+                                text: @tr("Prix d'achat : {} {}", row.purchase-price, row.currency);
+                                vertical-alignment: center;
+                            }
+                            // Issue #98 (FR48): the sector fact, when known (a caption — neutral ink).
+                            if row.sector != "": CaptionLine {
+                                text: @tr("Secteur : {}", row.sector);
+                                vertical-alignment: center;
+                            }
+                            // ── Story 4.4 (FR40): the matched study's zone + present price + freshness.
+                            // The zone marker is NEUTRAL ink + a glyph — never a buy/hold/sell hue. ──
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                if row.linked: CaptionLine {
+                                    text: row.zone == "buy" ? @tr("◆ {}", Labels.zone-buy)
+                                        : row.zone == "neutral" ? @tr("◆ {}", Labels.zone-hold)
+                                        : row.zone == "sell" ? @tr("◆ {}", Labels.zone-sell)
+                                        // Issue #48: a price BELOW the recorded band is its own neutral fact.
+                                        : row.below-band ? @tr("◆ Sous la bande de prévision")
+                                        : "—";
+                                }
+                                if row.linked && row.current-price != "": FactLine {
+                                    text: @tr("Prix actuel : {} {}", row.current-price, row.currency);
+                                }
+                                // Freshness murmur (Story 3.3/3.5 vocabulary): "périmé" after a failed/older
+                                // refresh, else "à jour le {}" once a successful refresh has stamped an as-of.
+                                if row.linked && row.stale: CaptionLine {
+                                    text: @tr("◦ périmé");
+                                }
+                                if row.linked && !row.stale && row.as-of != "": CaptionLine {
+                                    text: @tr("à jour le {}", row.as-of);
+                                }
+                            }
+                            // ── Story 4.5 (FR42): the trailing stop — a neutral fact; set/clear in a dialog. ──
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                if row.has-stop: CaptionLine {
+                                    text: @tr("Stop {}% : {} {}", row.stop-pct, row.stop-level, row.currency);
+                                }
+                                if row.has-stop && row.stop-breached: CaptionLine {
+                                    text: @tr("◆ sous le stop");
+                                }
+                                if row.has-stop && !row.stop-breached && row.stop-distance != "": CaptionLine {
+                                    text: @tr("à {} {} au-dessus", row.stop-distance, row.currency);
+                                }
+                            }
+                            ActionButton {
+                                label: row.has-stop ? @tr("Seuil…") : @tr("Définir un seuil…");
+                                enabled: !Holdings.read-only;
+                                clicked => { root.open-stop(row); }
+                            }
+                            // Story 6.3 (FR39): show/hide this holding's transaction ledger (one at a time).
+                            ActionButton {
+                                label: Holdings.ledger-holding-id == row.id
+                                    ? @tr("Masquer les transactions") : @tr("Transactions");
+                                clicked => {
+                                    if (Holdings.ledger-holding-id == row.id) {
+                                        Holdings.close-ledger();
+                                    } else {
+                                        Holdings.open-ledger(row.id);
+                                    }
+                                }
+                            }
+                            ActionButton {
+                                label: @tr("Modifier…");
+                                enabled: !Holdings.read-only;
+                                clicked => { root.open-edit-holding(row); }
+                            }
+                            ActionButton {
+                                label: @tr("Retirer");
+                                enabled: !Holdings.read-only;
+                                clicked => {
+                                    Dialog.confirm(@tr("Retirer la position {} ?", row.ticker),
+                                        @tr("La position et son registre de transactions sont retirés du portefeuille ; cette suppression est définitive."),
+                                        @tr("Retirer"), "remove-holding", row.id);
                                 }
                             }
                         }
-                    }
-                    if Holdings.ledger-holding-id == srow.id: VerticalLayout {
-                        spacing: Tokens.space-8;
-                        if Holdings.ledger-rows.length == 0: Text {
-                            text: @tr("Aucune transaction enregistrée pour cette position.");
-                            color: Tokens.text-mid;
-                            font-size: Tokens.font-caption;
+
+                        // ── STATE bands: the study link, named with its cause. ──
+                        // Issue #95: a FAILED study read is « indisponible », never « aucune étude liée ».
+                        if row.study-unavailable: StatusBand {
+                            icon: "⊘";
+                            text: @tr("Étude indisponible : la zone et le prix actuel ne peuvent pas être lus.");
                         }
-                        // Read-only history (the product decision: lecture + ré-achat only —
-                        // editing a retired ledger happens after the position is active again).
-                        for lrow in Holdings.ledger-rows: HorizontalLayout {
+                        if !row.study-unavailable && !row.linked && row.study-other-currency != "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Aucune étude liée : l'étude {} est en {} et cette position en {} ; une étude ne se lie qu'à une position de même devise.", row.ticker, row.study-other-currency, row.currency);
+                        }
+                        if !row.study-unavailable && !row.linked && row.study-other-currency == "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Aucune étude liée : sans étude {}, la position n'a ni zone ni prix actuel.", row.ticker);
+                        }
+
+                        // ── Story 4.7 (FR46/FR47): the neutral trigger + its manual actions. Shown only
+                        // while the holding fires a trigger and the user hasn't dismissed it. The app never
+                        // auto-acts: Vendre / Relever le stop / Ignorer are each an explicit user choice. ──
+                        if row.trigger-kind != "" && !row.dismissed: HorizontalLayout {
                             spacing: Tokens.space-8;
-                            Text {
-                                text: lrow.date;
-                                color: Tokens.text-mid;
-                                font-size: Tokens.font-caption;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: lrow.kind == "buy" ? @tr("Achat")
-                                    : lrow.kind == "dividend" ? @tr("Dividende")
-                                    : @tr("Vente");
-                                color: Tokens.text-high;
-                                font-size: Tokens.font-caption;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: @tr("{} × {} {}", lrow.quantity, lrow.unit-price, lrow.currency);
-                                color: Tokens.text-mid;
-                                font-family: Tokens.font-numeric;
-                                font-size: Tokens.font-caption;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: lrow.kind == "dividend"
-                                    ? @tr("Retenue : {}", lrow.fees) : @tr("Frais : {}", lrow.fees);
-                                color: Tokens.text-mid;
-                                font-size: Tokens.font-caption;
-                                vertical-alignment: center;
-                            }
-                            if lrow.net != "": Text {
-                                text: @tr("net {} {}", lrow.net, lrow.currency);
-                                color: Tokens.text-high;
-                                font-family: Tokens.font-numeric;
-                                font-size: Tokens.font-caption;
-                                vertical-alignment: center;
-                            }
-                            Text {
-                                text: lrow.rationale;
-                                color: Tokens.text-mid;
-                                font-size: Tokens.font-caption;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
-                        }
-                        // The re-buy form — the record-buy rail re-opens the position.
-                        Text {
-                            text: @tr("Racheter : un achat rouvre la position, qui revient au registre avec son historique.");
-                            color: Tokens.text-mid;
-                            font-size: Tokens.font-caption;
-                        }
-                        HorizontalLayout {
-                            spacing: Tokens.space-8;
-                            Text {
-                                text: srow.currency;
-                                color: Tokens.text-mid;
-                                font-size: Tokens.font-caption;
-                                vertical-alignment: center;
-                            }
-                            TextField {
-                                placeholder: @tr("Date (AAAA-MM-JJ, vide = aujourd'hui)");
-                                text <=> sold-row.rebuy-date;
-                                horizontal-stretch: 1;
-                            }
-                            TextField {
-                                placeholder: @tr("Quantité");
-                                text <=> sold-row.rebuy-quantity;
-                                horizontal-stretch: 1;
-                            }
-                            TextField {
-                                placeholder: @tr("Prix unitaire");
-                                text <=> sold-row.rebuy-price;
-                                horizontal-stretch: 1;
-                            }
-                            TextField {
-                                placeholder: @tr("Frais (vide = 0)");
-                                text <=> sold-row.rebuy-fees;
-                                horizontal-stretch: 1;
-                            }
-                            TextField {
-                                placeholder: @tr("Raison (facultative)");
-                                text <=> sold-row.rebuy-rationale;
+                            StatusBand {
+                                icon: "⚠";
+                                text: row.trigger-kind == "stop"
+                                    ? @tr("Le prix a atteint votre stop.")
+                                    : @tr("Le prix est dans la zone de vente.");
                                 horizontal-stretch: 1;
                             }
                             ActionButton {
-                                label: @tr("Enregistrer un achat");
-                                enabled: !Holdings.read-only
-                                    && sold-row.rebuy-quantity != "" && sold-row.rebuy-price != "";
-                                clicked => {
-                                    if (Holdings.record-buy(srow.id, sold-row.rebuy-date,
-                                            sold-row.rebuy-quantity, sold-row.rebuy-price,
-                                            sold-row.rebuy-fees, sold-row.rebuy-rationale)) {
-                                        sold-row.reset-rebuy-draft();
+                                label: @tr("Vente…");
+                                enabled: !Holdings.read-only;
+                                clicked => { root.open-sell-trigger(row); }
+                            }
+                            ActionButton {
+                                label: @tr("Relever le stop…");
+                                enabled: !Holdings.read-only;
+                                clicked => { root.open-stop(row); }
+                            }
+                            // Story 6.8 (FR48): the same surfacing, BEFORE deciding — a sell-zone entry or
+                            // a stop breach is a redeployment moment too.
+                            ActionButton {
+                                label: @tr("Candidats");
+                                enabled: true;
+                                clicked => { Holdings.open-candidates(row.ticker); }
+                            }
+                            ActionButton {
+                                label: @tr("Ignorer");
+                                enabled: true;
+                                clicked => { Holdings.dismiss-trigger(row.id); }
+                            }
+                        }
+
+                        // ── Story 6.3 (FR39): the holding's transaction ledger — buys and (partial) sells,
+                        // editable and deletable; the position's quantity and weighted-average cost derive
+                        // from it. The operations open their own dialogs (the UX pass). ──
+                        if Holdings.ledger-holding-id == row.id: VerticalLayout {
+                            spacing: Tokens.space-8;
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: Tokens.space-8;
+                                ActionButton {
+                                    label: @tr("Achat…");
+                                    enabled: !Holdings.read-only;
+                                    clicked => { root.open-buy(row.id, row.ticker, row.currency); }
+                                }
+                                ActionButton {
+                                    label: @tr("Vente…");
+                                    enabled: !Holdings.read-only;
+                                    clicked => { root.open-sell(row.id, row.ticker, row.currency); }
+                                }
+                                ActionButton {
+                                    label: @tr("Dividende…");
+                                    enabled: !Holdings.read-only;
+                                    clicked => { root.open-dividend(row.id, row.ticker, row.currency); }
+                                }
+                            }
+                            if Holdings.ledger-rows.length == 0: CaptionLine {
+                                text: @tr("Aucune transaction enregistrée pour cette position.");
+                            }
+                            for lrow in Holdings.ledger-rows: HorizontalLayout {
+                                spacing: Tokens.space-8;
+                                CaptionLine {
+                                    text: lrow.date;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: lrow.kind == "buy" ? @tr("Achat")
+                                        : lrow.kind == "dividend" ? @tr("Dividende")
+                                        : @tr("Vente");
+                                    color: Tokens.text-high;
+                                    font-size: Tokens.font-caption;
+                                    vertical-alignment: center;
+                                }
+                                FactLine {
+                                    text: @tr("{} × {} {}", lrow.quantity, lrow.unit-price, lrow.currency);
+                                    vertical-alignment: center;
+                                }
+                                CaptionLine {
+                                    // On a dividend row the fees column IS the withholding (Story 6.4).
+                                    text: lrow.kind == "dividend"
+                                        ? @tr("Retenue : {}", lrow.fees) : @tr("Frais : {}", lrow.fees);
+                                    vertical-alignment: center;
+                                }
+                                if lrow.net != "": FactLine {
+                                    text: @tr("net {} {}", lrow.net, lrow.currency);
+                                    vertical-alignment: center;
+                                }
+                                CaptionLine {
+                                    text: lrow.rationale;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                ActionButton {
+                                    label: @tr("Modifier…");
+                                    enabled: !Holdings.read-only;
+                                    clicked => {
+                                        Dialog.form("txn-edit", @tr("Modifier la transaction du {}", lrow.date),
+                                            @tr("Le type et la devise de la transaction ne changent pas ; la position est recalculée depuis son registre."),
+                                            lrow.id, @tr("Montants en {}", lrow.currency));
+                                        Dialog.draft-date = lrow.date;
+                                        Dialog.draft-quantity = lrow.quantity;
+                                        Dialog.draft-price = lrow.unit-price;
+                                        Dialog.draft-fees = lrow.fees;
+                                        Dialog.draft-rationale = lrow.rationale;
+                                    }
+                                }
+                                ActionButton {
+                                    label: @tr("Supprimer");
+                                    enabled: !Holdings.read-only;
+                                    clicked => {
+                                        // Issue #86: never a one-click irreversible delete.
+                                        Dialog.confirm(@tr("Supprimer cette transaction ?"),
+                                            @tr("Le coût de revient de la position est recalculé ; cette suppression est définitive."),
+                                            @tr("Supprimer définitivement"), "delete-transaction", lrow.id);
                                     }
                                 }
                             }
@@ -1208,7 +702,104 @@ export component PortfolioScreen inherits Rectangle {
                     }
                 }
             }
-        }
+
+            // ── Issue #84 (Story 6.3 defer): « Positions vendues » — the retired holdings, collapsed
+            // by default. Each row states the neutral facts (ticker, sold day, currency) and opens its
+            // ledger READ-ONLY through the same `ledger-holding-id` mechanism as the register; the one
+            // write offered is a re-buy (the record-buy rail), which re-opens the position. ──
+            if Holdings.sold-rows.length > 0: PanelCard {
+                title: @tr("Positions vendues ({})", Holdings.sold-rows.length);
+
+                HorizontalLayout {
+                    alignment: start;
+                    ActionButton {
+                        label: root.sold-open ? @tr("Masquer") : @tr("Afficher");
+                        enabled: true;
+                        clicked => { root.sold-open = !root.sold-open; }
+                    }
+                }
+                if root.sold-open: VerticalLayout {
+                    spacing: Tokens.space-8;
+                    for srow in Holdings.sold-rows: Rectangle {
+                        background: Tokens.surface-alt;
+                        border-width: Tokens.border;
+                        border-color: Tokens.separator;
+                        border-radius: Tokens.radius;
+                        VerticalLayout {
+                            padding: Tokens.space-12;
+                            spacing: Tokens.space-8;
+                            HorizontalLayout {
+                                spacing: Tokens.space-8;
+                                Text {
+                                    text: @tr("{} — vendue le {}", srow.ticker, srow.sold-date);
+                                    color: Tokens.text-high;
+                                    font-size: Tokens.font-body;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                ActionButton {
+                                    label: Holdings.ledger-holding-id == srow.id
+                                        ? @tr("Masquer les transactions") : @tr("Transactions");
+                                    enabled: true;
+                                    clicked => {
+                                        if (Holdings.ledger-holding-id == srow.id) {
+                                            Holdings.close-ledger();
+                                        } else {
+                                            Holdings.open-ledger(srow.id);
+                                        }
+                                    }
+                                }
+                                ActionButton {
+                                    label: @tr("Rachat…");
+                                    enabled: !Holdings.read-only;
+                                    clicked => { root.open-rebuy(srow.id, srow.ticker, srow.currency); }
+                                }
+                            }
+                            if Holdings.ledger-holding-id == srow.id: VerticalLayout {
+                                spacing: Tokens.space-8;
+                                if Holdings.ledger-rows.length == 0: CaptionLine {
+                                    text: @tr("Aucune transaction enregistrée pour cette position.");
+                                }
+                                // Read-only history (the product decision: lecture + ré-achat only —
+                                // editing a retired ledger happens after the position is active again).
+                                for lrow in Holdings.ledger-rows: HorizontalLayout {
+                                    spacing: Tokens.space-8;
+                                    CaptionLine {
+                                        text: lrow.date;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: lrow.kind == "buy" ? @tr("Achat")
+                                            : lrow.kind == "dividend" ? @tr("Dividende")
+                                            : @tr("Vente");
+                                        color: Tokens.text-high;
+                                        font-size: Tokens.font-caption;
+                                        vertical-alignment: center;
+                                    }
+                                    FactLine {
+                                        text: @tr("{} × {} {}", lrow.quantity, lrow.unit-price, lrow.currency);
+                                        vertical-alignment: center;
+                                    }
+                                    CaptionLine {
+                                        text: lrow.kind == "dividend"
+                                            ? @tr("Retenue : {}", lrow.fees) : @tr("Frais : {}", lrow.fees);
+                                        vertical-alignment: center;
+                                    }
+                                    if lrow.net != "": FactLine {
+                                        text: @tr("net {} {}", lrow.net, lrow.currency);
+                                        vertical-alignment: center;
+                                    }
+                                    CaptionLine {
+                                        text: lrow.rationale;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

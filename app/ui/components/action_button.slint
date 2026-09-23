@@ -7,6 +7,10 @@ import { Tokens } from "../tokens.slint";
 export component ActionButton inherits Rectangle {
     in property <string> label;
     in property <bool> enabled: true;
+    // Take the keyboard focus right after creation (a dialog's default button). Deferred by a
+    // tick: a `focus()` inside `init` of a conditionally created element is dropped before the
+    // element is attached to the window (observed 2026-09-23, Slint 1.17).
+    in property <bool> autofocus: false;
     callback clicked();
 
     accessible-role: button;
@@ -23,6 +27,7 @@ export component ActionButton inherits Rectangle {
     }
 
     height: Tokens.row-height + Tokens.space-4;
+    forward-focus: fs;
     horizontal-stretch: 0;
     min-width: Tokens.space-48 * 2;
     border-radius: Tokens.radius;
@@ -30,6 +35,15 @@ export component ActionButton inherits Rectangle {
     background: touch.pressed ? Tokens.surface : Tokens.surface-alt;
     border-width: fs.has-focus ? Tokens.focus-border : Tokens.border;
     border-color: fs.has-focus ? Tokens.focus : Tokens.separator;
+
+    Timer {
+        interval: 30ms;
+        running: root.autofocus;
+        triggered => {
+            self.running = false;
+            fs.focus();
+        }
+    }
 
     fs := FocusScope {
         enabled: root.enabled;
