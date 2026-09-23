@@ -140,20 +140,61 @@ pub(crate) fn reduce_high_low(
     bars: Option<&Value>,
     date_field: &str,
 ) -> (BTreeMap<i32, Decimal>, BTreeMap<i32, Decimal>) {
+    reduce_high_low_adjusted(bars, date_field, &[])
+}
+
+/// A dated share split as the provider lists it: `numerator` new shares for `denominator` old
+/// ones, effective on `date` (`"YYYY-MM-DD"`). Issue #217.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DatedSplit {
+    pub date: String,
+    pub numerator: u32,
+    pub denominator: u32,
+}
+
+/// The factor that brings a bar dated `date` into TODAY's shares: for every split dated strictly
+/// after the bar, multiply by `denominator / numerator` (a 10:1 split divides the pre-split prices
+/// by 10). ISO dates compare lexicographically. `None` on an (astronomically unlikely) overflow —
+/// the caller then drops the bar rather than mis-scale it.
+fn split_factor(date: &str, splits: &[DatedSplit]) -> Option<Decimal> {
+    let mut factor = Decimal::ONE;
+    for split in splits {
+        if split.date.as_str() > date {
+            factor = factor
+                .checked_mul(Decimal::from(split.denominator))?
+                .checked_div(Decimal::from(split.numerator))?;
+        }
+    }
+    Some(factor)
+}
+
+/// [`reduce_high_low`] with each DAILY bar first rebased into today's shares by the splits dated
+/// after it (issue #217): a provider that restates its per-share fundamentals but serves raw price
+/// bars would otherwise pair a post-split EPS with a pre-split price (NVDA: high P/E ≈ 3 400). The
+/// adjustment is per bar, not per year, so a mid-year split never mixes two share bases inside one
+/// yearly high/low. No splits → the raw reduce.
+pub(crate) fn reduce_high_low_adjusted(
+    bars: Option<&Value>,
+    date_field: &str,
+    splits: &[DatedSplit],
+) -> (BTreeMap<i32, Decimal>, BTreeMap<i32, Decimal>) {
     let mut highs: BTreeMap<i32, Decimal> = BTreeMap::new();
     let mut lows: BTreeMap<i32, Decimal> = BTreeMap::new();
     let Some(bars) = bars.and_then(Value::as_array) else {
         return (highs, lows);
     };
     for bar in bars {
-        let Some(year) = bar
-            .get(date_field)
-            .and_then(Value::as_str)
-            .and_then(year_of_date_key)
-        else {
+        let Some(date) = bar.get(date_field).and_then(Value::as_str) else {
             continue;
         };
-        if let Some(high) = dec(bar.get("high")) {
+        let Some(year) = year_of_date_key(date) else {
+            continue;
+        };
+        let Some(factor) = split_factor(date, splits) else {
+            continue;
+        };
+        let scaled = |v: Option<Decimal>| v.and_then(|d| d.checked_mul(factor));
+        if let Some(high) = scaled(dec(bar.get("high"))) {
             highs
                 .entry(year)
                 .and_modify(|m| {
@@ -163,7 +204,7 @@ pub(crate) fn reduce_high_low(
                 })
                 .or_insert(high);
         }
-        if let Some(low) = dec(bar.get("low")) {
+        if let Some(low) = scaled(dec(bar.get("low"))) {
             lows.entry(year)
                 .and_modify(|m| {
                     if low < *m {
@@ -223,6 +264,45 @@ mod tests {
         assert_eq!(year_of_date_key("2024-12-30"), Some(2024));
         assert_eq!(year_of_date_key("2024-12-30 15:30:00"), Some(2024));
         assert_eq!(year_of_date_key("bad"), None);
+    }
+
+    /// Issue #217: a 4:1 split on 2021-07-20 rebases the bars BEFORE it (÷4) and leaves the later
+    /// ones; a mid-year split keeps one share base inside the yearly high/low; two splits compound.
+    #[test]
+    fn reduce_high_low_adjusted_rebases_each_bar_by_the_splits_after_it() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let bars = json!([
+            { "date": "2020-06-01", "high": "800", "low": "400" },
+            { "date": "2021-03-01", "high": "600", "low": "500" },
+            { "date": "2021-09-01", "high": "220", "low": "180" },
+            { "date": "2024-03-01", "high": "1000", "low": "900" },
+            { "date": "2024-09-01", "high": "140", "low": "100" },
+        ]);
+        let splits = vec![
+            DatedSplit {
+                date: "2021-07-20".into(),
+                numerator: 4,
+                denominator: 1,
+            },
+            DatedSplit {
+                date: "2024-06-10".into(),
+                numerator: 10,
+                denominator: 1,
+            },
+        ];
+        let (h, l) = reduce_high_low_adjusted(Some(&bars), "date", &splits);
+        assert_eq!(h[&2020], d("20"), "800 ÷ 4 ÷ 10");
+        assert_eq!(l[&2020], d("10"));
+        // 2021: the March bar (pre-split) is 600 ÷ 40 = 15 / 12.5; the September bar (post-4:1,
+        // pre-10:1) is 220 ÷ 10 = 22 / 18 — the yearly high is the September one, not a raw 600.
+        assert_eq!(h[&2021], d("22"));
+        assert_eq!(l[&2021], d("12.5"));
+        // 2024: March ÷ 10 = 100 / 90; September untouched 140 / 100.
+        assert_eq!(h[&2024], d("140"));
+        assert_eq!(l[&2024], d("90"));
+        // No splits → the raw reduce, byte-for-byte the old behaviour.
+        let (h0, _) = reduce_high_low_adjusted(Some(&bars), "date", &[]);
+        assert_eq!(h0[&2020], d("800"));
     }
 
     #[test]
