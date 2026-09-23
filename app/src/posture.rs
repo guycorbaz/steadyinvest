@@ -774,9 +774,11 @@ mod tests {
         // of a live journal whose -wal holds commits the .db lacks): 119 + 1 = 120.
         // Issue #65 adds the older-import arbitration prompt (MSG_IMPORT_CONFIRM — a same-journal
         // version regression is stated and confirmed, never merged silently): 120 + 1 = 121.
+        // Issue #218 adds the no-study refusal for a position (MSG_HOLDING_NO_STUDY — a position is
+        // only added for a ticker with a study, in that study's currency): 121 + 1 = 122.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            121,
+            122,
             "state.rs message inventory changed — register the new notice"
         );
     }

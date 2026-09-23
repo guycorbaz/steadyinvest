@@ -1117,11 +1117,12 @@ export global Holdings {
     // capital-at-risk panel so "0 % du capital investi" (no stop set) is not misread as "no downside".
     // Empty when every holding is stop-protected.
     in-out property <[string]> unstopped-exposure;
-    // ticker, quantity, purchase-price, currency, sector ("" = non renseigné) → written?
-    // (so the form keeps the user's input on refusal)
-    callback add-holding(string, string, string, string, string) -> bool;
-    // id, ticker, quantity, purchase-price, currency, sector → written?
-    callback edit-holding(string, string, string, string, string, string) -> bool;
+    // Issue #218: a position exists only for a ticker with a study and takes that study's currency
+    // (no currency argument — the rail refuses a symbol without a study).
+    // ticker, quantity, purchase-price, sector ("" = non renseigné) → written?
+    callback add-holding(string, string, string, string) -> bool;
+    // id, ticker, quantity, purchase-price, sector → written?
+    callback edit-holding(string, string, string, string, string) -> bool;
     callback remove-holding(string); // id
     // Story 4.4 (FR40): user-initiated price refresh for every linked holding (off the UI thread).
     callback refresh-prices();

@@ -680,11 +680,12 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Holdings>()
-            .on_add_holding(move |ticker, quantity, price, currency, sector| {
+            .on_add_holding(move |ticker, quantity, price, sector| {
                 let ui = ui_weak.unwrap();
+                // Issue #218: the position takes its study's currency (refused without a study).
                 let result = journal_state
                     .borrow_mut()
-                    .add_holding(&ticker, &quantity, &price, &currency, &sector);
+                    .add_holding_linked(&ticker, &quantity, &price, &sector);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
@@ -783,15 +784,16 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
-        ui.global::<Holdings>().on_edit_holding(
-            move |id, ticker, quantity, price, currency, sector| {
+        ui.global::<Holdings>()
+            .on_edit_holding(move |id, ticker, quantity, price, sector| {
                 let ui = ui_weak.unwrap();
                 let Ok(id) = Uuid::parse_str(&id) else {
                     return false;
                 };
+                // Issue #218: the currency follows the ticker's study, never a picker.
                 let result = journal_state
                     .borrow_mut()
-                    .update_holding(id, &ticker, &quantity, &price, &currency, &sector);
+                    .update_holding_linked(id, &ticker, &quantity, &price, &sector);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
@@ -804,8 +806,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     format,
                 );
                 written
-            },
-        );
+            });
     }
     {
         let ui_weak = ui.as_weak();

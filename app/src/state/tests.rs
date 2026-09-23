@@ -2307,6 +2307,40 @@ fn apply_holding_price_sets_current_price_only_and_moves_the_zone() {
     );
 }
 
+// ── Issue #218 — a position only for a ticker with a study, in the study's currency ──
+
+#[test]
+fn a_linked_holding_requires_a_study_and_takes_its_currency() {
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x218, "2026-09-23T10:00:00Z");
+    // No study → refused with the named cause; nothing written.
+    assert_eq!(
+        state.add_holding_linked("NVDA.US", "10", "200", ""),
+        Err(MSG_HOLDING_NO_STUDY.to_string())
+    );
+    assert!(state.list_holdings().is_empty());
+    // A USD study → the position is USD whatever the reference currency, hence linked.
+    state.create_study("NVDA.US", "USD").unwrap();
+    state
+        .add_holding_linked("nvda.us", "10", "200", "")
+        .unwrap();
+    let holdings = state.list_holdings();
+    assert_eq!(holdings.len(), 1);
+    assert_eq!(holdings[0].currency.as_deref(), Some("USD"));
+    // An edit re-resolves the currency from the (possibly new) ticker's study.
+    let id = holdings[0].id;
+    assert_eq!(
+        state.update_holding_linked(id, "ROG.SW", "10", "200", ""),
+        Err(MSG_HOLDING_NO_STUDY.to_string()),
+        "a ticker without a study is refused on edit too"
+    );
+    state.create_study("ROG.SW", "CHF").unwrap();
+    state
+        .update_holding_linked(id, "ROG.SW", "10", "200", "")
+        .unwrap();
+    assert_eq!(state.list_holdings()[0].currency.as_deref(), Some("CHF"));
+}
+
 // ── Story 4.5 — trailing stop per holding (validate, seed, ratchet) ──
 
 #[test]
