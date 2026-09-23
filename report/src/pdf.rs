@@ -47,188 +47,418 @@ const PAGE_W: f32 = 595.0;
 const PAGE_H: f32 = 842.0;
 const MARGIN: f32 = 42.0;
 const FONT: f32 = 9.0;
+const SMALL: f32 = 7.5;
 const TITLE_FONT: f32 = 15.0;
 const HEAD_FONT: f32 = 11.0;
 const LINE_H: f32 = 13.0;
 const BOTTOM: f32 = MARGIN + 24.0; // keep clear of the footer disclaimer
 
-// ── chart geometry (issue #105 — vector graphics into the PDF, greyscale-safe) ──
-const CHART_H: f32 = 150.0; // §1 semi-log plot height (points)
+// ── chart geometry (issue #105 — vector graphics into the PDF, greyscale-safe; issue #207 — the
+//    §1 plot fills the rest of page 1, as on the printed form) ──
+const CHART_MIN_H: f32 = 150.0; // the §1 plot never gets shorter than this (points)
 const CHART_AXIS_W: f32 = 30.0; // left gutter for the y-axis decade labels
 const ZONEBAR_H: f32 = 26.0; // §4 zone bar height (points)
 const SERIES_PAD_DECADES: f64 = 0.12; // per-series head/foot room (issue #25)
 const MIN_SERIES_DECADES: f64 = 0.6; // a flat series still gets this much span (no false drama)
+// Issue #207: the growth guide lines of the printed form — compound rates from the last EPS point.
+const GUIDE_RATES_PCT: [u32; 6] = [5, 10, 15, 20, 25, 30];
 
 // ── grid tables (issue #104 — visible SSG grid) ──
-const CELL_PAD: f32 = 5.0; // left padding of text inside a grid cell
-// Column boundaries (left … right) for the 5-column (year + four figures) and 3-column tables.
-const COLS5: [f32; 6] = [
+const CELL_PAD: f32 = 5.0; // left/right padding of text inside a grid cell
+// Column boundaries (left … right) for the annexe table (year + seven figures).
+const COLS8: [f32; 9] = [
     MARGIN,
-    MARGIN + 62.0,
+    MARGIN + 42.0,
+    MARGIN + 112.0,
     MARGIN + 182.0,
-    MARGIN + 292.0,
-    MARGIN + 402.0,
+    MARGIN + 240.0,
+    MARGIN + 300.0,
+    MARGIN + 360.0,
+    MARGIN + 428.0,
     PAGE_W - MARGIN,
 ];
-const COLS3: [f32; 4] = [MARGIN, MARGIN + 150.0, MARGIN + 330.0, PAGE_W - MARGIN];
+// Issue #207: the §3 price–earnings table (year + the form's eight columns A–H).
+const COLS9: [f32; 10] = [
+    MARGIN,
+    MARGIN + 40.0,
+    MARGIN + 100.0,
+    MARGIN + 160.0,
+    MARGIN + 216.0,
+    MARGIN + 272.0,
+    MARGIN + 328.0,
+    MARGIN + 392.0,
+    MARGIN + 452.0,
+    PAGE_W - MARGIN,
+];
 const RULE_GRAY: f32 = 0.35; // the default rule/grid grey (restored after a chart)
 const GRID_GRAY: f32 = 0.75; // faint decade gridlines
+const GUIDE_GRAY: f32 = 0.82; // the growth guide lines (lighter than the grid)
 const SERIES_GRAY: f32 = 0.0; // series strokes (black; told apart by weight + dash, never hue)
 
 /// Render a study to a faithful, neutral, greyscale PDF (FR52). Read-only: it computes nothing the
 /// engine does not already compute, writes no journal, and needs no provider.
+///
+/// Issue #207 — the layout follows the printed two-page form: page 1 = the header block + the
+/// full-page §1 semi-log plot with its four growth lines; page 2 = §2 (years as columns), §3 (the
+/// eight columns A–H over the window, totals and averages, current P/E), §4 (the high price, the
+/// four low-price candidates and the one retained, the zoning, the upside/downside ratio, the price
+/// target), §5 (present yield, average yield, the total return); then the synthesis; then an annexe
+/// with every historical figure the form plots but does not tabulate.
 pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     let frame = crate::form::build_frame(study).map_err(ReportError::Normalize)?;
     let outputs = frame.snapshot.outputs();
+    let judgment = &study.judgment;
+    let current_price = judgment.current_price.map(|m| m.as_decimal());
 
     let mut doc = Doc::new();
 
-    // ── Header (neutral — NOT "Stock Selection Guide") ──
+    // ── Page 1 — the header block (neutral — NOT the form's wordmark) ──
     doc.title("Analyse de sélection de titre");
-    doc.line(&format!(
-        "Titre : {}   ·   Monnaie : {}   ·   Décision : {}",
-        // Issue #74: a pathological identifier is truncated so the header cannot run past the A4
-        // right edge (else it is silently clipped by the media box).
-        truncate(&study.security_ticker, 40),
-        truncate(&study.native_currency, 16),
-        date_prefix(&study.created_at.0),
-    ));
-    doc.gap(6.0);
-
-    // ── §1 Visual analysis (historical series) ──
-    doc.section("1. Analyse visuelle (historique)");
-    doc.grid_begin(study.years.len());
-    doc.grid_row(
-        &["Année", "Ventes", "BPA", "Cours haut", "Cours bas"],
-        &COLS5,
-        true,
-    );
-    for y in &study.years {
-        let (yr, sa, ep, hp, lp) = (
-            y.year.to_string(),
-            cell(y.sales.value, DisplayField::LargeMonetary),
-            cell(y.eps.value, DisplayField::PerShare),
-            cell(y.high_price.value, DisplayField::Price),
-            cell(y.low_price.value, DisplayField::Price),
-        );
-        doc.grid_row(&[&yr, &sa, &ep, &hp, &lp], &COLS5, false);
-    }
-    doc.grid_end(&COLS5);
-    doc.gap(3.0);
-    doc.line(&format!(
-        "Croissance annualisée — ventes : {}   ·   BPA : {}",
-        pct(outputs.growth.sales_cagr_pct),
-        pct(outputs.growth.eps_cagr_pct),
-    ));
-    doc.gap(4.0);
-    // Issue #105 — the semi-log growth chart (Sales/EPS/Price + est-high/low EPS projection).
-    doc.growth_chart(&frame);
-    doc.gap(6.0);
-
-    // ── §2 Management ──
-    doc.section("2. Évaluation de la gestion");
-    doc.grid_begin(outputs.management.per_year.len());
-    doc.grid_row(
-        &["Année", "% BAII / ventes", "% rendement c.p."],
-        &COLS3,
-        true,
-    );
-    for r in &outputs.management.per_year {
-        let (yr, ptp, roe) = (r.year.to_string(), pct(r.ptp_pct), pct(r.roe_pct));
-        doc.grid_row(&[&yr, &ptp, &roe], &COLS3, false);
-    }
-    doc.grid_end(&COLS3);
-    doc.gap(3.0);
-    doc.line(&format!(
-        "Moyennes — % BAII/ventes : {} ({})   ·   % rendement c.p. : {} ({})",
-        pct(outputs.management.avg_ptp_pct),
-        trend(outputs.management.ptp_trend),
-        pct(outputs.management.avg_roe_pct),
-        trend(outputs.management.roe_trend),
-    ));
-    doc.gap(6.0);
-
-    // ── §3 Price / earnings history ──
-    doc.section("3. Historique cours / bénéfice");
-    doc.grid_begin(outputs.valuation.per_year.len());
-    doc.grid_row(
-        &[
-            "Année",
-            "C/B haut",
-            "C/B bas",
-            "% distribution",
-            "% rendement",
+    // Issue #74: a pathological identifier is truncated so the header cannot run past the A4
+    // right edge (else it is silently clipped by the media box).
+    let company = study
+        .company_name
+        .as_deref()
+        .filter(|n| !n.trim().is_empty())
+        .map(|n| truncate(n, 48))
+        .unwrap_or_else(|| EM_DASH.to_string());
+    doc.header_box(&[
+        [
+            ("Société", company.as_str()),
+            ("Symbole", &truncate(&study.security_ticker, 24)),
+            ("Date", &date_prefix(&study.created_at.0)),
         ],
-        &COLS5,
-        true,
-    );
-    for v in &outputs.valuation.per_year {
-        let (yr, hpe, lpe, pay, yld) = (
-            v.year.to_string(),
-            num(v.high_pe),
-            num(v.low_pe),
-            pct(v.payout_pct),
-            pct(v.high_yield_pct),
-        );
-        doc.grid_row(&[&yr, &hpe, &lpe, &pay, &yld], &COLS5, false);
-    }
-    doc.grid_end(&COLS5);
-    doc.gap(3.0);
-    doc.line(&format!(
-        "Moyennes — C/B haut : {}   ·   C/B bas : {}   ·   C/B moyen : {}   ·   % distribution : {}",
-        num(outputs.valuation.avg_high_pe),
-        num(outputs.valuation.avg_low_pe),
-        num(outputs.valuation.avg_pe),
-        pct(outputs.valuation.avg_payout_pct),
-    ));
-    doc.gap(6.0);
-
-    // ── §4 Risk & reward ── (issue #104: the forecast lines + the zone bar stay together)
-    doc.keep_together(HEAD_FONT + 5.0 * LINE_H + ZONEBAR_H + 2.0 * LINE_H);
-    doc.section("4. Risque et rendement");
-    doc.line(&format!(
-        "Prévision — haute : {}   ·   basse : {}",
-        money(outputs.risk_reward.forecast_high),
-        money(outputs.risk_reward.forecast_low),
-    ));
-    match &outputs.risk_reward.zones {
-        Some(z) => {
-            doc.line(&format!(
-                "Zone basse : {} – {}   ·   Zone médiane : {} – {}   ·   Zone haute : {} – {}",
-                money(Some(z.forecast_low)),
-                money(Some(z.buy_top)),
-                money(Some(z.buy_top)),
-                money(Some(z.neutral_top)),
-                money(Some(z.neutral_top)),
-                money(Some(z.forecast_high)),
-            ));
-        }
-        None => doc.line("Zones : — (prévision incomplète ou plage dégénérée)"),
-    }
-    doc.line(&format!(
-        "Position du cours actuel : {}   ·   Rapport hausse / baisse : {}",
-        zone_label(outputs.risk_reward.present_price_zone),
-        upside(&outputs.risk_reward.upside_downside),
+        [
+            ("Monnaie", &truncate(&study.native_currency, 16)),
+            ("Données", &data_source(study)),
+            ("Préparé par", EM_DASH),
+        ],
+    ]);
+    // Capitalisation — the form's box; v1 carries only the latest book value per share.
+    let latest_bvps = study
+        .years
+        .iter()
+        .rev()
+        .find_map(|y| y.book_value_per_share.as_ref().and_then(|c| c.value))
+        .map(|m| m.as_decimal());
+    doc.small_line(&format!(
+        "Capitalisation — actions en circulation : {}   ·   actions privilégiées : {}   ·   dette à long terme : {}   ·   valeur comptable / action : {}",
+        EM_DASH,
+        EM_DASH,
+        EM_DASH,
+        fmt_dec(latest_bvps, DisplayField::PerShare),
     ));
     doc.gap(4.0);
-    // Issue #105 — the zone bar (low/median/high thirds + the current-price marker), greyscale-safe.
-    doc.zone_bar(
-        outputs.risk_reward.zones.as_ref(),
-        study.judgment.current_price.map(|m| m.as_decimal()),
+
+    // ── §1 — the full-page semi-log plot + the four growth lines ──
+    doc.section("1. Analyse visuelle des ventes, bénéfices et cours");
+    doc.growth_chart(&frame);
+    doc.gap(2.0);
+    doc.two_columns(
+        &format!(
+            "(1) Croissance historique des ventes : {}",
+            pct(outputs.growth.sales_cagr_pct)
+        ),
+        &format!(
+            "(3) Croissance historique du BPA : {}",
+            pct(outputs.growth.eps_cagr_pct)
+        ),
     );
+    doc.two_columns(
+        &format!(
+            "(2) Croissance estimée des ventes : {}",
+            pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal()))
+        ),
+        &format!(
+            "(4) Croissance estimée du BPA : {}",
+            pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal()))
+        ),
+    );
+    doc.new_page();
+
+    // ── Page 2 — §2 Management: the years as COLUMNS (the form's layout), the 5-yr average and
+    //    the trend at the right. ──
+    doc.section("2. Évaluation de la gestion");
+    {
+        let m = &outputs.management;
+        // The last ten reported years (the form has ten columns).
+        let rows: Vec<&steadyinvest_core::ssg::YearRatios> = m
+            .per_year
+            .iter()
+            .rev()
+            .take(10)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let n = rows.len().max(1);
+        let label_w = 150.0;
+        let avg_w = 48.0;
+        let trend_w = 56.0;
+        let year_w = (PAGE_W - 2.0 * MARGIN - label_w - avg_w - trend_w) / n as f32;
+        let mut edges = vec![MARGIN, MARGIN + label_w];
+        for i in 1..=n {
+            edges.push(MARGIN + label_w + year_w * i as f32);
+        }
+        edges.push(PAGE_W - MARGIN - trend_w);
+        edges.push(PAGE_W - MARGIN);
+        let mut head: Vec<String> = vec![String::new()];
+        head.extend(rows.iter().map(|r| r.year.to_string()));
+        if rows.is_empty() {
+            head.push(EM_DASH.to_string());
+        }
+        head.push("Moy. 5 ans".to_string());
+        head.push("Tendance".to_string());
+        let head_refs: Vec<&str> = head.iter().map(String::as_str).collect();
+        doc.grid_begin(2);
+        doc.grid_row_small(&head_refs, &edges, true, 1);
+        let mut ptp: Vec<String> = vec!["A · % marge avant impôt".to_string()];
+        ptp.extend(rows.iter().map(|r| pct_bare(r.ptp_pct)));
+        if rows.is_empty() {
+            ptp.push(EM_DASH.to_string());
+        }
+        ptp.push(pct_bare(m.avg_ptp_pct));
+        ptp.push(trend(m.ptp_trend).to_string());
+        let refs: Vec<&str> = ptp.iter().map(String::as_str).collect();
+        doc.grid_row_small(&refs, &edges, false, 1);
+        let mut roe: Vec<String> = vec!["B · % rendement des c. propres".to_string()];
+        roe.extend(rows.iter().map(|r| pct_bare(r.roe_pct)));
+        if rows.is_empty() {
+            roe.push(EM_DASH.to_string());
+        }
+        roe.push(pct_bare(m.avg_roe_pct));
+        roe.push(trend(m.roe_trend).to_string());
+        let refs: Vec<&str> = roe.iter().map(String::as_str).collect();
+        doc.grid_row_small(&refs, &edges, false, 1);
+        doc.grid_end(&edges);
+    }
+    doc.small_line("A = bénéfice avant impôt ÷ ventes × 100   ·   B = BPA ÷ valeur comptable par action × 100   ·   tendance = dernière année face à la moyenne");
     doc.gap(6.0);
 
-    // ── §5 Five-year potential ──
+    // ── §3 Price / earnings history — the form's columns A–H over the window, totals, averages,
+    //    the average and current P/E. ──
+    doc.section("3. Historique cours / bénéfice");
+    {
+        let v = &outputs.valuation;
+        doc.grid_begin(v.per_year.len() + 2);
+        doc.grid_row_num(
+            &[
+                "Année",
+                "A · Haut",
+                "B · Bas",
+                "C · BPA",
+                "D · A÷C",
+                "E · B÷C",
+                "F · Div.",
+                "G · F÷C %",
+                "H · F÷B %",
+            ],
+            &COLS9,
+            true,
+            1,
+        );
+        let (mut sum_d, mut sum_e, mut sum_g, mut sum_h) = (None, None, None, None);
+        for row in &v.per_year {
+            let cy = frame.series.iter().find(|y| y.year == row.year);
+            let (hp, lp, ep, dv) = match cy {
+                Some(y) => (y.high_price, y.low_price, y.eps, y.dividend_per_share),
+                None => (None, None, None, None),
+            };
+            let cells = [
+                row.year.to_string(),
+                money(hp),
+                money(lp),
+                fmt_dec(ep, DisplayField::PerShare),
+                num(row.high_pe),
+                num(row.low_pe),
+                fmt_dec(dv, DisplayField::PerShare),
+                pct(row.payout_pct),
+                pct(row.high_yield_pct),
+            ];
+            let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
+            doc.grid_row_num(&refs, &COLS9, false, 1);
+            sum_d = add_known(sum_d, row.high_pe);
+            sum_e = add_known(sum_e, row.low_pe);
+            sum_g = add_known(sum_g, row.payout_pct);
+            sum_h = add_known(sum_h, row.high_yield_pct);
+        }
+        let total = [
+            "Total".to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
+            num(sum_d),
+            num(sum_e),
+            String::new(),
+            pct(sum_g),
+            pct(sum_h),
+        ];
+        let refs: Vec<&str> = total.iter().map(String::as_str).collect();
+        doc.grid_row_num(&refs, &COLS9, false, 1);
+        let avg = [
+            "Moyenne".to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
+            num(v.avg_high_pe),
+            num(v.avg_low_pe),
+            String::new(),
+            pct(v.avg_payout_pct),
+            pct(v.avg_high_yield_pct),
+        ];
+        let refs: Vec<&str> = avg.iter().map(String::as_str).collect();
+        doc.grid_row_num(&refs, &COLS9, false, 1);
+        doc.grid_end(&COLS9);
+        doc.line(&format!(
+            "8 · C/B moyen (D et E) : {}   ·   9 · C/B actuel : {}   ·   valeur relative : {}",
+            num(v.avg_pe),
+            num(v.current_pe),
+            pct(v.relative_value_pct),
+        ));
+        doc.line(&format!(
+            "Cours actuel : {}   ·   plus haut de l'année en cours : {}   ·   plus bas de l'année en cours : {}",
+            money(current_price),
+            EM_DASH,
+            EM_DASH,
+        ));
+    }
+    doc.gap(6.0);
+
+    // ── §4 Risk & reward — the form's A–E with every intermediate figure ──
+    doc.keep_together(HEAD_FONT + 14.0 * LINE_H + ZONEBAR_H);
+    doc.section("4. Risque et rendement sur 5 ans");
+    {
+        let r = &outputs.risk_reward;
+        let c = &r.low_candidates;
+        let est_high = outputs.growth.estimated_high_eps;
+        let est_low = outputs.growth.estimated_low_eps;
+        doc.line(&format!(
+            "A · Prix haut à 5 ans : PER haut moyen {} × BPA estimé haut {} = {}",
+            num(judgment.judged_avg_high_pe.map(|m| m.as_decimal())),
+            fmt_dec(est_high, DisplayField::PerShare),
+            money(r.forecast_high),
+        ));
+        doc.line("B · Prix bas à 5 ans, les quatre candidats :");
+        doc.indent_line(&format!(
+            "(a) PER bas moyen {} × BPA estimé bas {} = {}",
+            num(judgment.judged_avg_low_pe.map(|m| m.as_decimal())),
+            fmt_dec(est_low, DisplayField::PerShare),
+            money(c.avg_low_pe_times_eps),
+        ));
+        doc.indent_line(&format!(
+            "(b) Prix bas moyen des 5 dernières années = {}",
+            money(c.avg_low_price_last_5y),
+        ));
+        doc.indent_line(&format!(
+            "(c) Plus bas sévère récent = {}",
+            money(c.recent_severe_low),
+        ));
+        doc.indent_line(&format!(
+            "(d) Prix soutenu par le dividende : dividende {} ÷ rendement haut moyen {} = {}",
+            fmt_dec(
+                judgment.present_full_year_dividend.map(|m| m.as_decimal()),
+                DisplayField::PerShare
+            ),
+            pct(outputs.valuation.avg_high_yield_pct),
+            money(c.dividend_supported),
+        ));
+        doc.indent_line(&format!(
+            "Prix bas retenu ({}) = {}",
+            option_label(judgment.forecast_low_option),
+            money(r.forecast_low),
+        ));
+        match &r.zones {
+            Some(z) => {
+                let range = z.forecast_high - z.forecast_low;
+                let third = z.buy_top - z.forecast_low;
+                doc.line(&format!(
+                    "C · Zonage : étendue {} − {} = {}   ·   un tiers = {}",
+                    money(Some(z.forecast_high)),
+                    money(Some(z.forecast_low)),
+                    money(Some(range)),
+                    money(Some(third)),
+                ));
+                doc.indent_line(&format!(
+                    "{} : {} à {}   ·   {} : {} à {}   ·   {} : {} à {}",
+                    ZONE_LOW,
+                    money(Some(z.forecast_low)),
+                    money(Some(z.buy_top)),
+                    ZONE_MID,
+                    money(Some(z.buy_top)),
+                    money(Some(z.neutral_top)),
+                    ZONE_HIGH,
+                    money(Some(z.neutral_top)),
+                    money(Some(z.forecast_high)),
+                ));
+                doc.indent_line(&format!(
+                    "Le cours actuel {} se situe : {}",
+                    money(current_price),
+                    zone_label(r.present_price_zone),
+                ));
+            }
+            None => doc.line("C · Zonage : — (prévision incomplète ou plage dégénérée)"),
+        }
+        doc.line(&format!(
+            "D · Ratio hausse / baisse : (prix haut {} − cours {}) ÷ (cours {} − prix bas {}) = {}",
+            money(r.forecast_high),
+            money(current_price),
+            money(current_price),
+            money(r.forecast_low),
+            upside(&r.upside_downside),
+        ));
+        doc.line(&format!(
+            "E · Objectif de cours : (prix haut {} ÷ cours {} × 100) − 100 = {} d'appréciation",
+            money(r.forecast_high),
+            money(current_price),
+            pct(outputs.returns.projected_appreciation_pct),
+        ));
+        doc.gap(4.0);
+        // Issue #105 — the zone bar (low/median/high thirds + the current-price marker).
+        doc.zone_bar(r.zones.as_ref(), current_price);
+    }
+    doc.gap(6.0);
+
+    // ── §5 Five-year potential — the form's A–C with the intermediate figures ──
+    doc.keep_together(HEAD_FONT + 7.0 * LINE_H);
     doc.section("5. Potentiel à 5 ans");
-    doc.line(&format!(
-        "Rendement présent : {}   ·   Appréciation projetée : {}",
-        pct(outputs.returns.present_yield_pct),
-        pct(outputs.returns.projected_appreciation_pct),
-    ));
-    doc.line(&format!(
-        "Rendement annualisé total projeté : {}",
-        total_return(&outputs.returns),
-    ));
+    {
+        let ret = &outputs.returns;
+        doc.line(&format!(
+            "A · Rendement présent : dividende {} ÷ cours {} × 100 = {}",
+            fmt_dec(
+                judgment.present_full_year_dividend.map(|m| m.as_decimal()),
+                DisplayField::PerShare
+            ),
+            money(current_price),
+            pct(ret.present_yield_pct),
+        ));
+        doc.line(&format!(
+            "B · Rendement moyen sur 5 ans : BPA moyen projeté {} × % distribution moyen {} = dividende moyen {}",
+            fmt_dec(ret.avg_annual_eps, DisplayField::PerShare),
+            pct(outputs.valuation.avg_payout_pct),
+            fmt_dec(ret.avg_annual_dividend, DisplayField::PerShare),
+        ));
+        doc.indent_line(&format!(
+            "dividende moyen {} ÷ cours {} × 100 = {}",
+            fmt_dec(ret.avg_annual_dividend, DisplayField::PerShare),
+            money(current_price),
+            pct(ret.avg_yield_pct),
+        ));
+        doc.line(&format!(
+            "C · Rendement annuel total estimé : appréciation sur 5 ans {}, soit {} annualisée",
+            pct(ret.projected_appreciation_pct),
+            pct(ret.projected_annualized_appreciation_pct),
+        ));
+        doc.indent_line(&format!(
+            "appréciation annualisée {} + rendement moyen {} = {}",
+            pct(ret.projected_annualized_appreciation_pct),
+            pct(ret.avg_yield_pct),
+            total_return(ret),
+        ));
+        doc.small_line(
+            "Les taux annualisés sont composés (et non simples) : (haut ÷ cours)^(1/5) − 1.",
+        );
+    }
     doc.gap(8.0);
 
     // ── Verdict (neutral) + flags ──
@@ -240,6 +470,50 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     if outputs.low_confidence {
         doc.line("Confiance réduite : moins d'années exploitables que le seuil de la méthode.");
     }
+
+    // ── Annexe — every historical figure (the form plots them; the table keeps the exact values) ──
+    doc.new_page();
+    doc.section("Annexe — données historiques");
+    doc.grid_begin(study.years.len());
+    doc.grid_row_num(
+        &[
+            "Année",
+            "Ventes",
+            "Bén. av. impôt",
+            "BPA",
+            "Cours haut",
+            "Cours bas",
+            "Div./action",
+            "Val. compt./act.",
+        ],
+        &COLS8,
+        true,
+        1,
+    );
+    for y in &study.years {
+        let cells = [
+            y.year.to_string(),
+            cell(y.sales.value, DisplayField::LargeMonetary),
+            cell(
+                y.pre_tax_profit.as_ref().and_then(|c| c.value),
+                DisplayField::LargeMonetary,
+            ),
+            cell(y.eps.value, DisplayField::PerShare),
+            cell(y.high_price.value, DisplayField::Price),
+            cell(y.low_price.value, DisplayField::Price),
+            cell(
+                y.dividend_per_share.as_ref().and_then(|c| c.value),
+                DisplayField::PerShare,
+            ),
+            cell(
+                y.book_value_per_share.as_ref().and_then(|c| c.value),
+                DisplayField::PerShare,
+            ),
+        ];
+        let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
+        doc.grid_row_num(&refs, &COLS8, false, 1);
+    }
+    doc.grid_end(&COLS8);
 
     Ok(doc.finish())
 }
@@ -265,6 +539,52 @@ fn pct(v: Option<Decimal>) -> String {
             "{} %",
             round_for_display(d, DisplayField::Percent).normalize()
         ),
+    }
+}
+
+/// A percentage without its unit — for a table whose header already says « % » (the §2 columns).
+fn pct_bare(v: Option<Decimal>) -> String {
+    fmt_dec(v, DisplayField::Percent)
+}
+
+/// A running sum over KNOWN values only (the form's « Total » row sums the filled cells; an unknown
+/// year is skipped, never counted as 0). `None` until the first known value.
+fn add_known(acc: Option<Decimal>, v: Option<Decimal>) -> Option<Decimal> {
+    match (acc, v) {
+        (Some(a), Some(b)) => a.checked_add(b),
+        (None, Some(b)) => Some(b),
+        (acc, None) => acc,
+    }
+}
+
+/// The §4 forecast-low option, named as on the screen's chips.
+fn option_label(option: steadyinvest_contract::ForecastLowOption) -> &'static str {
+    use steadyinvest_contract::ForecastLowOption as O;
+    match option {
+        O::AvgLowPeTimesEps => OPTION_A,
+        O::AvgLowPriceLast5y => OPTION_B,
+        O::RecentSevereLow => OPTION_C,
+        O::DividendSupported => OPTION_D,
+    }
+}
+
+/// Where the figures came from — the provider tag of the latest sales cell's provenance
+/// (`"{tag}:{sha}"`, Story 6.9) or « saisie manuelle » (data, not prose; never a path or key).
+fn data_source(study: &Study) -> String {
+    use steadyinvest_contract::Source;
+    let latest = study.years.iter().rev().find(|y| y.sales.value.is_some());
+    match latest {
+        Some(y) if y.sales.source == Source::Provider => y
+            .sales
+            .provenance
+            .hash_of_dependencies
+            .split(':')
+            .next()
+            .filter(|tag| !tag.is_empty() && tag.len() <= 24)
+            .map(|tag| format!("fournisseur {tag}"))
+            .unwrap_or_else(|| "fournisseur".to_string()),
+        Some(_) => "saisie manuelle".to_string(),
+        None => EM_DASH.to_string(),
     }
 }
 
@@ -301,10 +621,10 @@ fn trend(t: Option<Trend>) -> &'static str {
 
 fn zone_label(z: Option<Zone>) -> &'static str {
     match z {
-        Some(Zone::Buy) => "Zone basse",
-        Some(Zone::Neutral) => "Zone médiane",
-        Some(Zone::Sell) => "Zone haute",
-        None => "— (hors plage)",
+        Some(Zone::Buy) => "dans la zone basse",
+        Some(Zone::Neutral) => "dans la zone médiane",
+        Some(Zone::Sell) => "dans la zone haute",
+        None => "hors de la plage prévue",
     }
 }
 
@@ -353,15 +673,24 @@ const EM_DASH: &str = "—";
 //
 // `report` lives outside the `app` posture gate, so it guards its own neutrality: every static
 // user-facing string the PDF emits is listed in [`REPORT_USER_FACING`] (or is a `zone_label` /
-// `trend` / verdict const, all covered by the neutrality test). Add new strings here when you add
-// them to the layout — the test scans them against `core::method::BANNED_VERBS_{FR,EN}` and asserts
-// no NAIC wordmark, the same shared catalogs the app gate uses.
+// `trend` / verdict / option const, all covered by the neutrality test). Add new strings here when
+// you add them to the layout — the test scans them against `core::method::BANNED_VERBS_{FR,EN}` and
+// asserts no NAIC wordmark, the same shared catalogs the app gate uses.
 const VERDICT_FULL: &str = "Tous les critères validés et à jour";
 const VERDICT_PROVISIONAL: &str = "Provisoire — données à revérifier ou confiance réduite";
 const VERDICT_WITHHELD: &str = "En attente — au moins une donnée requise manque";
+const OPTION_A: &str = "PER bas × BPA bas";
+const OPTION_B: &str = "prix bas moyen 5 ans";
+const OPTION_C: &str = "plus bas sévère récent";
+const OPTION_D: &str = "soutenu par le dividende";
 
-// ── issue #105 — the embedded charts' neutral labels (greyscale legend + zone bands) ──
-const CHART_LEGEND: &str = "BPA (trait épais)   ·   Ventes (trait fin)   ·   Cours (tirets)   ·   projection (pointillés)   —   échelle propre par série (axe : BPA)";
+// ── issue #105 / #207 — the embedded charts' neutral labels (greyscale legend + zone bands) ──
+const CHART_LEGEND: &str = "BPA (trait épais)   ·   Ventes (trait fin)   ·   Cours haut–bas (barres)   ·   projection (pointillés)   ·   guides de croissance 5–30 % (gris clair)";
+const CHART_SCALE_NOTE: &str = "Échelle logarithmique, propre à chaque série (l'axe gradué est celui du BPA) ; les guides partent du dernier BPA connu.";
+const QUARTER_BOX_TITLE: &str = "Chiffres trimestriels récents";
+const QUARTER_LATEST: &str = "Dernier trimestre";
+const QUARTER_YEAR_AGO: &str = "Même trimestre, un an avant";
+const QUARTER_CHANGE: &str = "Variation";
 const ZONE_LOW: &str = "Zone basse";
 const ZONE_MID: &str = "Zone médiane";
 const ZONE_HIGH: &str = "Zone haute";
@@ -369,55 +698,119 @@ const CURRENT_PRICE: &str = "Cours actuel";
 
 #[cfg(test)]
 const REPORT_USER_FACING: &[&str] = &[
-    // Header.
+    // Header block.
     "Analyse de sélection de titre",
-    "Titre :",
-    "Monnaie :",
-    "Décision :",
+    "Société",
+    "Symbole",
+    "Date",
+    "Monnaie",
+    "Données",
+    "Préparé par",
+    "fournisseur",
+    "saisie manuelle",
+    "Capitalisation — actions en circulation :",
+    "actions privilégiées :",
+    "dette à long terme :",
+    "valeur comptable / action :",
     // Section titles (all expanded).
-    "1. Analyse visuelle (historique)",
+    "1. Analyse visuelle des ventes, bénéfices et cours",
     "2. Évaluation de la gestion",
     "3. Historique cours / bénéfice",
-    "4. Risque et rendement",
+    "4. Risque et rendement sur 5 ans",
     "5. Potentiel à 5 ans",
     "Synthèse",
-    // Column headers.
+    "Annexe — données historiques",
+    // §1 growth lines.
+    "(1) Croissance historique des ventes :",
+    "(2) Croissance estimée des ventes :",
+    "(3) Croissance historique du BPA :",
+    "(4) Croissance estimée du BPA :",
+    // §2.
+    "Moy. 5 ans",
+    "Tendance",
+    "A · % marge avant impôt",
+    "B · % rendement des c. propres",
+    "A = bénéfice avant impôt ÷ ventes × 100   ·   B = BPA ÷ valeur comptable par action × 100   ·   tendance = dernière année face à la moyenne",
+    // §3 column headers + rows.
     "Année",
+    "A · Haut",
+    "B · Bas",
+    "C · BPA",
+    "D · A÷C",
+    "E · B÷C",
+    "F · Div.",
+    "G · F÷C %",
+    "H · F÷B %",
+    "Total",
+    "Moyenne",
+    "8 · C/B moyen (D et E) :",
+    "9 · C/B actuel :",
+    "valeur relative :",
+    "Cours actuel :",
+    "plus haut de l'année en cours :",
+    "plus bas de l'année en cours :",
+    // §4.
+    "A · Prix haut à 5 ans : PER haut moyen",
+    "× BPA estimé haut",
+    "B · Prix bas à 5 ans, les quatre candidats :",
+    "(a) PER bas moyen",
+    "× BPA estimé bas",
+    "(b) Prix bas moyen des 5 dernières années =",
+    "(c) Plus bas sévère récent =",
+    "(d) Prix soutenu par le dividende : dividende",
+    "÷ rendement haut moyen",
+    "Prix bas retenu",
+    "C · Zonage : étendue",
+    "un tiers =",
+    "Le cours actuel",
+    "se situe :",
+    "C · Zonage : — (prévision incomplète ou plage dégénérée)",
+    "D · Ratio hausse / baisse : (prix haut",
+    "− cours",
+    "− prix bas",
+    "E · Objectif de cours : (prix haut",
+    "÷ cours",
+    "× 100) − 100 =",
+    "d'appréciation",
+    // §5.
+    "A · Rendement présent : dividende",
+    "B · Rendement moyen sur 5 ans : BPA moyen projeté",
+    "× % distribution moyen",
+    "= dividende moyen",
+    "dividende moyen",
+    "C · Rendement annuel total estimé : appréciation sur 5 ans",
+    ", soit",
+    "annualisée",
+    "appréciation annualisée",
+    "+ rendement moyen",
+    "Les taux annualisés sont composés (et non simples) : (haut ÷ cours)^(1/5) − 1.",
+    "(hors div.)",
+    // Synthèse.
+    "Position :",
+    "Confiance réduite : moins d'années exploitables que le seuil de la méthode.",
+    // Annexe columns.
     "Ventes",
+    "Bén. av. impôt",
     "BPA",
     "Cours haut",
     "Cours bas",
-    "% BAII / ventes",
-    "% rendement c.p.",
-    "C/B haut",
-    "C/B bas",
-    "% distribution",
-    "% rendement",
-    // Static prose fragments + lines.
-    "Croissance annualisée — ventes :",
-    "Moyennes — % BAII/ventes :",
-    "Moyennes — C/B haut :",
-    "C/B bas :",
-    "C/B moyen :",
-    "Prévision — haute :",
-    "basse :",
-    "Zone basse :",
-    "Zone médiane :",
-    "Zone haute :",
-    "Zones : — (prévision incomplète ou plage dégénérée)",
-    "Position du cours actuel :",
-    "Rapport hausse / baisse :",
-    "Rendement présent :",
-    "Appréciation projetée :",
-    "Rendement annualisé total projeté :",
-    "Position :",
-    "Confiance réduite : moins d'années exploitables que le seuil de la méthode.",
-    // Issue #105 — the embedded charts' labels.
+    "Div./action",
+    "Val. compt./act.",
+    // The embedded charts' labels.
     CHART_LEGEND,
+    CHART_SCALE_NOTE,
+    QUARTER_BOX_TITLE,
+    QUARTER_LATEST,
+    QUARTER_YEAR_AGO,
+    QUARTER_CHANGE,
     ZONE_LOW,
     ZONE_MID,
     ZONE_HIGH,
     CURRENT_PRICE,
+    OPTION_A,
+    OPTION_B,
+    OPTION_C,
+    OPTION_D,
     // Footer disclaimer (FR64).
     "Outil éducatif — ne constitue pas un conseil financier.",
     // The neutral render-failure message.
@@ -440,6 +833,8 @@ struct Doc {
     // Issue #74: the current table's column header, remembered on the header row so it can be
     // replayed at the top of each continuation page when the table spans a break.
     grid_header: Vec<String>,
+    // The font size of the grid being drawn (body, or caption for a wide table).
+    grid_font: f32,
 }
 
 impl Doc {
@@ -450,6 +845,7 @@ impl Doc {
             y: MARGIN,
             grid_top: MARGIN,
             grid_header: Vec::new(),
+            grid_font: FONT,
         }
     }
 
@@ -480,7 +876,7 @@ impl Doc {
     fn title(&mut self, s: &str) {
         self.ensure(TITLE_FONT + 10.0); // reserve the true advance (font + rule + gap)
         self.y += TITLE_FONT;
-        text(&mut self.cur, MARGIN, self.y, TITLE_FONT, s);
+        text_bold(&mut self.cur, MARGIN, self.y, TITLE_FONT, s);
         self.y += 6.0;
         hline(&mut self.cur, MARGIN, PAGE_W - MARGIN, self.y, 1.0);
         self.y += 4.0;
@@ -491,7 +887,7 @@ impl Doc {
         // a page foot with its table pushed to the next page.
         self.keep_together(HEAD_FONT + 5.0 * LINE_H);
         self.y += HEAD_FONT;
-        text(&mut self.cur, MARGIN, self.y, HEAD_FONT, s);
+        text_bold(&mut self.cur, MARGIN, self.y, HEAD_FONT, s);
         self.y += 4.0;
         hline(&mut self.cur, MARGIN, PAGE_W - MARGIN, self.y, 0.5);
         self.y += LINE_H - 4.0;
@@ -504,21 +900,78 @@ impl Doc {
         self.y += LINE_H - FONT;
     }
 
-    /// Issue #104 — start a boxed grid table. Reserve only the header + first row together (the
-    /// section heading already reserved a few rows), and record the table top so [`grid_end`] can
-    /// draw the outer box + column rules. Issue #74: a grid may now SPAN page breaks — instead of
-    /// forcing the whole table onto one page (which overflowed the page foot for 60+ year studies),
-    /// [`grid_row`] closes the box at a break and replays the header on the continuation page.
-    fn grid_begin(&mut self, _rows: usize) {
-        self.keep_together(2.0 * LINE_H + 4.0);
-        self.grid_top = self.y;
+    /// A caption-sized line (the form's small print: formulas, footnotes).
+    fn small_line(&mut self, s: &str) {
+        self.ensure(LINE_H - 2.0);
+        self.y += SMALL;
+        text(&mut self.cur, MARGIN, self.y, SMALL, s);
+        self.y += LINE_H - 2.0 - SMALL;
     }
 
-    /// One row of the current grid: each cell left-aligned inside its column (edges = column
-    /// boundaries, len = cells + 1). A header row is underlined across the table width and remembered
-    /// for replay. A data row that would cross the page foot closes the box on this page, starts a
-    /// new one, and re-emits the column header before drawing (issue #74).
-    fn grid_row(&mut self, cells: &[&str], edges: &[f32], head: bool) {
+    /// A body line indented under its lettered parent (the §4 candidates, the zoning lines).
+    fn indent_line(&mut self, s: &str) {
+        self.ensure(LINE_H);
+        self.y += FONT;
+        text(&mut self.cur, MARGIN + 18.0, self.y, FONT, s);
+        self.y += LINE_H - FONT;
+    }
+
+    /// Two facts on one line, at the left and at the page's middle (the form's paired growth lines).
+    fn two_columns(&mut self, left: &str, right: &str) {
+        self.ensure(LINE_H);
+        self.y += FONT;
+        text(&mut self.cur, MARGIN, self.y, FONT, left);
+        text(&mut self.cur, PAGE_W / 2.0 + 6.0, self.y, FONT, right);
+        self.y += LINE_H - FONT;
+    }
+
+    /// Issue #207 — the form's identity block: a boxed grid of `label : value` pairs, `rows` rows
+    /// of three pairs each. Labels in small print above the values, the box ruled between columns.
+    fn header_box(&mut self, rows: &[[(&str, &str); 3]]) {
+        let row_h = LINE_H + SMALL + 2.0;
+        let h = row_h * rows.len() as f32 + 4.0;
+        self.ensure(h + 4.0);
+        let (x0, x1) = (MARGIN, PAGE_W - MARGIN);
+        let col_w = (x1 - x0) / 3.0;
+        let top = self.y;
+        stroke_rect(&mut self.cur, x0, top, x1 - x0, h, 0.6);
+        for c in 1..3 {
+            vline(&mut self.cur, x0 + col_w * c as f32, top, top + h, 0.4);
+        }
+        for (r, row) in rows.iter().enumerate() {
+            let ry = top + 2.0 + row_h * r as f32;
+            if r > 0 {
+                hline(&mut self.cur, x0, x1, ry - 1.0, 0.4);
+            }
+            for (c, (label, value)) in row.iter().enumerate() {
+                let x = x0 + col_w * c as f32 + CELL_PAD;
+                text(&mut self.cur, x, ry + SMALL, SMALL, label);
+                text(&mut self.cur, x, ry + SMALL + FONT + 1.5, FONT, value);
+            }
+        }
+        self.y = top + h + 3.0;
+    }
+
+    /// A grid row whose cells from index `numeric_from` are RIGHT-aligned inside their column (the
+    /// form's figures line up on their units); the cells before stay left-aligned (labels).
+    fn grid_row_num(&mut self, cells: &[&str], edges: &[f32], head: bool, numeric_from: usize) {
+        self.grid_font = FONT;
+        self.grid_row_num_sized(cells, edges, head, numeric_from);
+    }
+
+    /// [`grid_row_num`] in the caption size (a wide table such as §2's ten year columns).
+    fn grid_row_small(&mut self, cells: &[&str], edges: &[f32], head: bool, numeric_from: usize) {
+        self.grid_font = SMALL;
+        self.grid_row_num_sized(cells, edges, head, numeric_from);
+    }
+
+    fn grid_row_num_sized(
+        &mut self,
+        cells: &[&str],
+        edges: &[f32],
+        head: bool,
+        numeric_from: usize,
+    ) {
         if head {
             self.grid_header = cells.iter().map(|s| s.to_string()).collect();
         } else if PAGE_H - self.y - LINE_H < BOTTOM {
@@ -527,19 +980,30 @@ impl Doc {
             self.grid_top = self.y;
             let header = self.grid_header.clone();
             let refs: Vec<&str> = header.iter().map(String::as_str).collect();
-            self.draw_grid_cells(&refs, edges, true);
+            self.draw_grid_cells_aligned(&refs, edges, true, numeric_from);
         }
-        self.draw_grid_cells(cells, edges, head);
+        self.draw_grid_cells_aligned(cells, edges, head, numeric_from);
     }
 
-    /// Draw one grid row's cells at the current cursor (no page-break logic) — the shared body of a
-    /// header replay and a normal [`grid_row`].
-    fn draw_grid_cells(&mut self, cells: &[&str], edges: &[f32], head: bool) {
-        self.y += FONT;
+    /// The body of [`grid_row_num`]: one row's cells at the cursor, the numeric ones right-aligned;
+    /// a header row is underlined across the table width.
+    fn draw_grid_cells_aligned(
+        &mut self,
+        cells: &[&str],
+        edges: &[f32],
+        head: bool,
+        numeric_from: usize,
+    ) {
+        let size = self.grid_font;
+        self.y += size;
         for (i, s) in cells.iter().enumerate() {
-            text(&mut self.cur, edges[i] + CELL_PAD, self.y, FONT, s);
+            if i >= numeric_from && i + 1 < edges.len() {
+                text_right(&mut self.cur, edges[i + 1] - CELL_PAD, self.y, size, s);
+            } else {
+                text(&mut self.cur, edges[i] + CELL_PAD, self.y, size, s);
+            }
         }
-        self.y += LINE_H - FONT;
+        self.y += LINE_H - size;
         if head {
             hline(
                 &mut self.cur,
@@ -549,6 +1013,15 @@ impl Doc {
                 0.6,
             );
         }
+    }
+
+    /// Issue #104 — start a boxed grid table. Reserve only the header + first row together (the
+    /// section heading already reserved a few rows), and record the table top so [`grid_end`] can
+    /// draw the outer box + column rules. Issue #74: a grid may SPAN page breaks — [`grid_row_num`]
+    /// closes the box at a break and replays the header on the continuation page.
+    fn grid_begin(&mut self, _rows: usize) {
+        self.keep_together(2.0 * LINE_H + 4.0);
+        self.grid_top = self.y;
     }
 
     /// Draw the grid's outer box from [`grid_top`] to the current cursor + a vertical rule at each
@@ -570,11 +1043,13 @@ impl Doc {
         self.y += 2.0;
     }
 
-    /// Issue #105 — the §1 semi-log growth chart. Sales / EPS / high-Price on ONE log scale (the
-    /// classic SSG semilog view), plus the est-high / est-low EPS projection from the last EPS point
-    /// to the forecast horizon. Greyscale-safe: the series are told apart by weight + dash (EPS thick
-    /// solid, Sales thin solid, Price dashed, projection dotted), NEVER colour. Nothing is drawn when
-    /// there is no plottable data (the tables already carry the em-dashes).
+    /// Issue #105 / #207 — the §1 semi-log growth chart, filling the rest of page 1 like the printed
+    /// form. Sales / EPS / Price on log scales (each series its own — issue #25; the EPS scale is the
+    /// labelled one), the yearly high–low PRICE as vertical bars, the est-high / est-low EPS
+    /// projection from the last EPS point to the forecast horizon, and the form's growth GUIDE lines
+    /// (5–30 % compound from the last EPS point, light grey, labelled at the right edge). Greyscale-
+    /// safe: weight + dash + shade, NEVER colour. Nothing is drawn when there is no plottable data
+    /// (the annexe already carries the em-dashes).
     fn growth_chart(&mut self, frame: &crate::form::StudyFrame) {
         let series = &frame.series;
         let outputs = frame.snapshot.outputs();
@@ -593,15 +1068,19 @@ impl Doc {
             };
         let sales = pts_of(&|cy| cy.sales);
         let eps = pts_of(&|cy| cy.eps);
-        let price = pts_of(&|cy| cy.high_price);
+        let highs = pts_of(&|cy| cy.high_price);
+        let lows = pts_of(&|cy| cy.low_price);
         let est_high = outputs.growth.estimated_high_eps.and_then(|d| d.to_f64());
         let est_low = outputs.growth.estimated_low_eps.and_then(|d| d.to_f64());
 
-        if series.is_empty() || (sales.is_empty() && eps.is_empty() && price.is_empty()) {
+        if series.is_empty() || (sales.is_empty() && eps.is_empty() && highs.is_empty()) {
             return;
         }
 
-        self.ensure(CHART_H + 2.0 * LINE_H + 10.0);
+        // The plot takes what is left of the page above the four growth lines + the legend.
+        let reserved_below = 5.0 * LINE_H + 16.0;
+        let chart_h = (PAGE_H - self.y - BOTTOM - reserved_below).max(CHART_MIN_H);
+        self.ensure(chart_h + reserved_below);
         let top = self.y;
         let x0 = MARGIN + CHART_AXIS_W;
         let x1 = PAGE_W - MARGIN;
@@ -611,22 +1090,27 @@ impl Doc {
         let px = |i: f64| x0 + ((i / span) * f64::from(plot_w)) as f32;
         let py = |v: f64, lmin: f64, lmax: f64| {
             let t = ((v.max(1e-9).log10() - lmin) / (lmax - lmin)).clamp(0.0, 1.0);
-            top + (f64::from(CHART_H) * (1.0 - t)) as f32
+            top + (f64::from(chart_h) * (1.0 - t)) as f32
         };
 
         // Issue #25 (multi-scale): each series on its OWN log range so none is crushed by another's
-        // magnitude. The EPS scale (the decision series + its projection) is the LABELLED one.
+        // magnitude. The EPS scale (the decision series, its projection and the guides) is labelled.
         let vals = |pts: &[(usize, f64)]| pts.iter().map(|p| p.1).collect::<Vec<f64>>();
         let sales_b = series_log_bounds(&vals(&sales));
-        let price_b = series_log_bounds(&vals(&price));
+        let mut price_vals = vals(&highs);
+        price_vals.extend(vals(&lows));
+        let price_b = series_log_bounds(&price_vals);
         let mut eps_scale_vals = vals(&eps);
         eps_scale_vals.extend(est_high.filter(|v| *v > 0.0));
         eps_scale_vals.extend(est_low.filter(|v| *v > 0.0));
+        // The steepest guide (30 % over the horizon from the last EPS) reserves headroom.
+        if let Some((_, lv)) = eps.last() {
+            eps_scale_vals.push(lv * 1.30f64.powi(FORECAST_HORIZON_YEARS as i32));
+        }
         let eps_b = series_log_bounds(&eps_scale_vals);
 
-        stroke_rect(&mut self.cur, x0, top, plot_w, CHART_H, 0.6);
-        // Gridlines + labels on the EPS scale (nice 1/2/5×10^k). Sales/Price live on their own scales
-        // (shape/trend, not absolute height — the table carries the exact figures), told apart below.
+        stroke_rect(&mut self.cur, x0, top, plot_w, chart_h, 0.6);
+        // Gridlines + labels on the EPS scale (nice 1/2/5×10^k).
         if let Some((lmin, lmax)) = eps_b {
             for (v, lbl) in nice_ticks(lmin, lmax) {
                 let gy = py(v, lmin, lmax);
@@ -634,7 +1118,54 @@ impl Doc {
                 text(&mut self.cur, MARGIN, gy + 2.5, 7.0, &lbl);
             }
         }
-        // Each series on its own scale (greyscale: weight + dash).
+        // Issue #207 — the growth guide lines: from the last historical EPS point, each rate compounded
+        // over the horizon, light grey, labelled at the right edge (the printed form's fan).
+        if let (Some((lmin, lmax)), Some((li, lv))) = (eps_b, eps.last().copied()) {
+            let (ox, oy) = (px(li as f64), py(lv, lmin, lmax));
+            for rate in GUIDE_RATES_PCT {
+                let end = lv * (1.0 + f64::from(rate) / 100.0).powi(FORECAST_HORIZON_YEARS as i32);
+                let ey = py(end, lmin, lmax);
+                polyline(
+                    &mut self.cur,
+                    &[(ox, oy), (px(span), ey)],
+                    0.4,
+                    GUIDE_GRAY,
+                    &[],
+                );
+                text(
+                    &mut self.cur,
+                    x1 - 19.0,
+                    ey - 2.0,
+                    5.5,
+                    &format!("{rate} %"),
+                );
+            }
+        }
+        // The yearly high–low price bars (price scale): a vertical segment with short caps.
+        if let Some((lmin, lmax)) = price_b {
+            for (i, hv) in &highs {
+                if let Some((_, lo)) = lows.iter().find(|(j, _)| j == i) {
+                    let x = px(*i as f64);
+                    let (yh, yl) = (py(*hv, lmin, lmax), py(*lo, lmin, lmax));
+                    polyline(&mut self.cur, &[(x, yh), (x, yl)], 0.8, SERIES_GRAY, &[]);
+                    polyline(
+                        &mut self.cur,
+                        &[(x - 2.0, yh), (x + 2.0, yh)],
+                        0.8,
+                        SERIES_GRAY,
+                        &[],
+                    );
+                    polyline(
+                        &mut self.cur,
+                        &[(x - 2.0, yl), (x + 2.0, yl)],
+                        0.8,
+                        SERIES_GRAY,
+                        &[],
+                    );
+                }
+            }
+        }
+        // The Sales (thin) and EPS (thick) lines, each on its own scale (greyscale: weight).
         let draw = |cur: &mut Content,
                     pts: &[(usize, f64)],
                     b: Option<(f64, f64)>,
@@ -649,7 +1180,6 @@ impl Doc {
             }
         };
         draw(&mut self.cur, &sales, sales_b, 0.8, &[]);
-        draw(&mut self.cur, &price, price_b, 0.8, &[3.0, 2.0]);
         draw(&mut self.cur, &eps, eps_b, 1.6, &[]);
         // Projection from the last EPS point to est-high / est-low at the horizon (dotted), EPS scale.
         if let (Some((lmin, lmax)), Some((li, lv))) = (eps_b, eps.last().copied()) {
@@ -673,18 +1203,36 @@ impl Doc {
                 );
             }
         }
+        // Issue #207 — the form's « recent quarterly figures » box, top-left inside the plot. v1
+        // carries no quarterly data: the box states the absence (em-dashes), never a guessed figure.
+        {
+            let (bx, by, bw, bh) = (x0 + 6.0, top + 6.0, 200.0, 4.0 * (SMALL + 3.0) + 8.0);
+            fill_rect(&mut self.cur, bx, by, bw, bh, 1.0);
+            stroke_rect(&mut self.cur, bx, by, bw, bh, 0.4);
+            let mut ty = by + 4.0 + SMALL;
+            text(&mut self.cur, bx + 4.0, ty, SMALL, QUARTER_BOX_TITLE);
+            text_right(&mut self.cur, bx + bw - 44.0, ty, SMALL, "Ventes");
+            text_right(&mut self.cur, bx + bw - 4.0, ty, SMALL, "BPA");
+            for label in [QUARTER_LATEST, QUARTER_YEAR_AGO, QUARTER_CHANGE] {
+                ty += SMALL + 3.0;
+                text(&mut self.cur, bx + 4.0, ty, SMALL, label);
+                text_right(&mut self.cur, bx + bw - 44.0, ty, SMALL, EM_DASH);
+                text_right(&mut self.cur, bx + bw - 4.0, ty, SMALL, EM_DASH);
+            }
+        }
         // Issue #104 — year labels along the x-axis (each historical year under its column).
         for (i, cy) in series.iter().enumerate() {
             text_centered(
                 &mut self.cur,
                 px(i as f64),
-                top + CHART_H + 9.0,
+                top + chart_h + 9.0,
                 6.5,
                 &cy.year.to_string(),
             );
         }
-        self.y = top + CHART_H + 13.0;
-        self.line(CHART_LEGEND);
+        self.y = top + chart_h + 13.0;
+        self.small_line(CHART_LEGEND);
+        self.small_line(CHART_SCALE_NOTE);
     }
 
     /// Issue #105 — the §4 zone bar. A horizontal band from forecast-low to forecast-high split into
@@ -789,21 +1337,25 @@ impl Doc {
         let catalog = Ref::new(1);
         let tree = Ref::new(2);
         let font = Ref::new(3);
-        // Two refs per page (page object + its content stream), after the three fixed refs.
+        let bold = Ref::new(4);
+        // Two refs per page (page object + its content stream), after the four fixed refs.
         let page_ids: Vec<Ref> = (0..self.pages.len())
-            .map(|i| Ref::new(4 + 2 * i as i32))
+            .map(|i| Ref::new(5 + 2 * i as i32))
             .collect();
         let content_ids: Vec<Ref> = (0..self.pages.len())
-            .map(|i| Ref::new(5 + 2 * i as i32))
+            .map(|i| Ref::new(6 + 2 * i as i32))
             .collect();
 
         pdf.catalog(catalog).pages(tree);
         pdf.pages(tree)
             .kids(page_ids.iter().copied())
             .count(self.pages.len() as i32);
-        // Helvetica (standard-14, no embedding) with WinAnsi so French accents render.
+        // Helvetica + Helvetica-Bold (standard-14, no embedding) with WinAnsi so French accents render.
         pdf.type1_font(font)
             .base_font(Name(b"Helvetica"))
+            .encoding_predefined(Name(b"WinAnsiEncoding"));
+        pdf.type1_font(bold)
+            .base_font(Name(b"Helvetica-Bold"))
             .encoding_predefined(Name(b"WinAnsiEncoding"));
 
         for (i, mut content) in self.pages.into_iter().enumerate() {
@@ -813,7 +1365,10 @@ impl Doc {
                 page.parent(tree)
                     .media_box(Rect::new(0.0, 0.0, PAGE_W, PAGE_H))
                     .contents(content_ids[i]);
-                page.resources().fonts().pair(Name(b"F0"), font);
+                let mut resources = page.resources();
+                let mut fonts = resources.fonts();
+                fonts.pair(Name(b"F0"), font);
+                fonts.pair(Name(b"F1"), bold);
             }
             pdf.stream(content_ids[i], &content.finish());
         }
@@ -837,6 +1392,23 @@ fn text(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
     let bytes = winansi(s);
     content.show(Str(&bytes));
     content.end_text();
+}
+
+/// [`text`] in Helvetica-Bold (the headings).
+fn text_bold(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
+    content.begin_text();
+    content.set_font(Name(b"F1"), size);
+    content.set_text_matrix([1.0, 0.0, 0.0, 1.0, x, PAGE_H - top_y]);
+    let bytes = winansi(s);
+    content.show(Str(&bytes));
+    content.end_text();
+}
+
+/// [`text`] with its RIGHT edge at `x_right` (the ~0.5 em Helvetica estimate, see
+/// [`text_centered`]) — the figures of a table line up on their units.
+fn text_right(content: &mut Content, x_right: f32, top_y: f32, size: f32, s: &str) {
+    let w = s.chars().count() as f32 * size * 0.5;
+    text(content, x_right - w, top_y, size, s);
 }
 
 /// A horizontal rule at top-origin `top_y`, in mid-grey.
@@ -971,6 +1543,7 @@ fn winansi(s: &str) -> Vec<u8> {
             0x2013 => 0x96,            // – en dash
             0x2026 => 0x85,            // … horizontal ellipsis (issue #74 truncation)
             0x2019 => 0x92,            // ’ right single quote
+            0x2212 => 0x2D,            // − minus sign → hyphen-minus (formulas)
             0x20AC => 0x80,            // € euro
             n if n <= 0x7F => n as u8, // ASCII
             // Latin-1 high range == WinAnsi (é è à ç ° …). The C1 controls 0x80–0x9F are NOT
