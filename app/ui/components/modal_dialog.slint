@@ -17,7 +17,6 @@ import { Tokens } from "../tokens.slint";
 import { Dialog, Holdings, Prefs, Studies, Watchlist, Fx } from "../state.slint";
 import { ActionButton } from "action_button.slint";
 import { TextField } from "text_field.slint";
-import { ChoiceChip } from "choice_chip.slint";
 import { StatusBand } from "status_band.slint";
 
 component LabeledField inherits VerticalLayout {
@@ -60,7 +59,8 @@ export component ModalDialog inherits Rectangle {
     function can-submit() -> bool {
         if (Holdings.read-only) { return false; }
         if (Dialog.form-id == "holding-add" || Dialog.form-id == "holding-edit") {
-            return Dialog.draft-ticker != "";
+            // Issue #218: only a ticker with a study can become a position.
+            return Dialog.draft-ticker != "" && Holdings.study-currency-for(Dialog.draft-ticker) != "";
         }
         if (Dialog.form-id == "buy" || Dialog.form-id == "sell" || Dialog.form-id == "txn-edit") {
             return Dialog.draft-quantity != "" && Dialog.draft-price != "";
@@ -82,9 +82,9 @@ export component ModalDialog inherits Rectangle {
     function submit() {
         if (!root.can-submit()) { return; }
         if (Dialog.form-id == "holding-add") {
-            if (Holdings.add-holding(Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-currency, Dialog.draft-sector)) { Dialog.close(); }
+            if (Holdings.add-holding(Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-sector)) { Dialog.close(); }
         } else if (Dialog.form-id == "holding-edit") {
-            if (Holdings.edit-holding(Dialog.target-id, Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-currency, Dialog.draft-sector)) { Dialog.close(); }
+            if (Holdings.edit-holding(Dialog.target-id, Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-sector)) { Dialog.close(); }
         } else if (Dialog.form-id == "buy") {
             if (Holdings.record-buy(Dialog.target-id, Dialog.draft-date, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-fees, Dialog.draft-rationale)) { Dialog.close(); }
         } else if (Dialog.form-id == "sell") {
@@ -262,31 +262,26 @@ export component ModalDialog inherits Rectangle {
                 if Dialog.kind == "form": VerticalLayout {
                     spacing: Tokens.space-12;
 
-                    // Position (add / edit): symbol → study lookup as you type; the currency picker
-                    // defaults to the matched study's native currency (the CHF-vs-USD trap).
+                    // Position (add / edit): symbol → study lookup as you type. Issue #218: the
+                    // position takes the study's currency — stated as a fact, never picked — and
+                    // « Enregistrer » stays disabled until a study matches (the reason is shown).
                     if Dialog.form-id == "holding-add" || Dialog.form-id == "holding-edit": VerticalLayout {
                         spacing: Tokens.space-12;
                         symbol := LabeledField {
-                            label: @tr("Symbole");
+                            label: @tr("Symbole (celui d'une étude existante)");
                             placeholder: @tr("p. ex. NESN.SW");
                             text <=> Dialog.draft-ticker;
                             autofocus: true;
-                            edited => {
-                                if (Dialog.form-id == "holding-add") {
-                                    if (Holdings.study-currency-for(Dialog.draft-ticker) != "") {
-                                        Dialog.draft-currency = Holdings.study-currency-for(Dialog.draft-ticker);
-                                    }
-                                }
-                            }
                             accepted => { root.submit(); }
                         }
-                        Text {
-                            text: Dialog.draft-ticker == "" ? ""
-                                : Holdings.study-currency-for(Dialog.draft-ticker) == ""
-                                    ? @tr("Aucune étude pour ce symbole ; la position n'aura ni zone ni prix actuel.")
-                                    : Holdings.study-name-for(Dialog.draft-ticker) != ""
-                                        ? @tr("Étude liée : {} ({})", Holdings.study-name-for(Dialog.draft-ticker), Holdings.study-currency-for(Dialog.draft-ticker))
-                                        : @tr("Étude liée : {} ({})", Dialog.draft-ticker, Holdings.study-currency-for(Dialog.draft-ticker));
+                        if Dialog.draft-ticker != "" && Holdings.study-currency-for(Dialog.draft-ticker) == "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Aucune étude pour ce symbole ; créez-la d'abord depuis Études, la position en prendra la devise.");
+                        }
+                        if Dialog.draft-ticker != "" && Holdings.study-currency-for(Dialog.draft-ticker) != "": Text {
+                            text: Holdings.study-name-for(Dialog.draft-ticker) != ""
+                                ? @tr("Étude liée : {} — devise de la position : {}", Holdings.study-name-for(Dialog.draft-ticker), Holdings.study-currency-for(Dialog.draft-ticker))
+                                : @tr("Étude liée : {} — devise de la position : {}", Dialog.draft-ticker, Holdings.study-currency-for(Dialog.draft-ticker));
                             color: Tokens.text-mid;
                             font-size: Tokens.font-caption;
                             wrap: word-wrap;
@@ -300,27 +295,12 @@ export component ModalDialog inherits Rectangle {
                                 accepted => { root.submit(); }
                             }
                             LabeledField {
-                                label: @tr("Prix d'achat unitaire");
+                                label: Holdings.study-currency-for(Dialog.draft-ticker) != ""
+                                    ? @tr("Prix d'achat unitaire ({})", Holdings.study-currency-for(Dialog.draft-ticker))
+                                    : @tr("Prix d'achat unitaire");
                                 placeholder: @tr("Prix moyen par action");
                                 text <=> Dialog.draft-price;
                                 accepted => { root.submit(); }
-                            }
-                        }
-                        VerticalLayout {
-                            spacing: Tokens.space-4;
-                            Text {
-                                text: @tr("Devise de la position (celle de l'étude à lier)");
-                                color: Tokens.text-mid;
-                                font-size: Tokens.font-caption;
-                            }
-                            HorizontalLayout {
-                                spacing: Tokens.space-8;
-                                alignment: start;
-                                for c in Holdings.supported-currencies: ChoiceChip {
-                                    label: c;
-                                    selected: c == Dialog.draft-currency;
-                                    activated => { Dialog.draft-currency = c; }
-                                }
                             }
                         }
                         LabeledField {

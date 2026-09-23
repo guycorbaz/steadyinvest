@@ -35,9 +35,8 @@ export component PortfolioScreen inherits Rectangle {
     // ── The dialog openers (the @tr titles/sentences live HERE, posture-gated like every string). ──
     function open-add-holding() {
         Dialog.form("holding-add", @tr("Ajouter une position"),
-            @tr("La position est rattachée à l'étude du même symbole et de la même devise ; c'est elle qui donne la zone et le prix actuel."),
+            @tr("Une position se crée pour un symbole qui a déjà une étude ; elle en prend la devise, et l'étude lui donne sa zone et son prix actuel."),
             "", "");
-        Dialog.draft-currency = Holdings.reference-currency;
     }
     function open-edit-holding(row: HoldingRow) {
         Dialog.form("holding-edit", @tr("Modifier la position {}", row.ticker),
@@ -46,7 +45,6 @@ export component PortfolioScreen inherits Rectangle {
         Dialog.draft-ticker = row.ticker;
         Dialog.draft-quantity = row.quantity;
         Dialog.draft-price = row.purchase-price;
-        Dialog.draft-currency = row.currency;
         Dialog.draft-sector = row.sector;
     }
     function open-buy(id: string, ticker: string, currency: string) {
