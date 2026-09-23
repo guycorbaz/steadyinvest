@@ -36,6 +36,12 @@ fn write_journal_export(journal_id: Uuid, json: &str) -> std::io::Result<std::pa
     Ok(path)
 }
 
+/// The `exports/` folder under the OS data dir — where the import pickers open by default (the user
+/// is free to browse anywhere). `None` when the OS exposes no data directory.
+fn default_exports_dir() -> Option<PathBuf> {
+    directories::ProjectDirs::from("", "", "steadyinvest").map(|d| d.data_dir().join("exports"))
+}
+
 /// Push the journal-location panel state into `Prefs` (Story 5.5): the current journal path + the
 /// recent-journals rows (the current one marked). A short `name` is the parent-dir + file name.
 pub(crate) fn render_journal_panel(ui: &MainWindow, state: &JournalState, config: &AppConfig) {
@@ -206,7 +212,7 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
     } = s;
     // ── Story 5.3 (FR60) — export / import the WHOLE journal as a portable file. Scales the 5.2
     // envelope to every entity + the (journal_id, version, hash) identity tuple; import verifies and
-    // applies atomically (never partially). Path-based for now — the native picker is Story 5.5. The
+    // applies atomically (never partially). Import is picker-fed (below) but stays path-based. The
     // actions live in Réglages (the Prefs global). ──
     {
         let ui_weak = ui.as_weak();
@@ -322,10 +328,30 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         });
     }
 
+    {
+        // Native `rfd` open picker → the SAME path-based `import-journal` callback (one verify-and-
+        // apply code path, headless-tested). Cancel → no notice, nothing read.
+        let ui_weak = ui.as_weak();
+        ui.global::<Prefs>().on_pick_and_import_journal(move || {
+            let ui = ui_weak.unwrap();
+            let mut dialog = rfd::FileDialog::new()
+                .set_title("Importer un dossier")
+                .add_filter("Dossier exporté (JSON)", &["json"]);
+            if let Some(dir) = default_exports_dir().filter(|d| d.is_dir()) {
+                dialog = dialog.set_directory(dir);
+            }
+            let Some(path) = dialog.pick_file() else {
+                return; // the user cancelled the dialog
+            };
+            ui.global::<Prefs>()
+                .invoke_import_journal(path.to_string_lossy().as_ref().into());
+        });
+    }
+
     // ── Story 5.4 (FR61) — backup / restore the raw .db. Create a self-contained .db backup; validate
     // a candidate backup (integrity + schema-version + identity) BEFORE any overwrite, surface its
     // (journal_id, version) + a stale/foreign warning, and apply only on explicit confirm (never
-    // silently). Path-based for now — the native picker is Story 5.5. ──
+    // silently). Restore is picker-fed (below) but stays path-based. ──
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
@@ -356,6 +382,27 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                     prefs.set_restore_status(message.into());
                 }
             }
+        });
+    }
+    {
+        // Native `rfd` open picker → the SAME path-based `request-restore` callback (validate-before-
+        // overwrite + the confirm banner stay the one code path). Opens in the `backups/` folder beside
+        // the live journal when it exists. Cancel → no notice, nothing parked.
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Prefs>().on_pick_and_restore_backup(move || {
+            let ui = ui_weak.unwrap();
+            let mut dialog = rfd::FileDialog::new()
+                .set_title("Restaurer une sauvegarde")
+                .add_filter("Sauvegarde (.db)", &["db"]);
+            if let Some(dir) = journal_state.borrow().backups_dir().filter(|d| d.is_dir()) {
+                dialog = dialog.set_directory(dir);
+            }
+            let Some(path) = dialog.pick_file() else {
+                return; // the user cancelled the dialog
+            };
+            ui.global::<Prefs>()
+                .invoke_request_restore(path.to_string_lossy().as_ref().into());
         });
     }
     {
@@ -425,8 +472,8 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_pick_and_open_journal(move || {
             let ui = ui_weak.unwrap();
             let Some(path) = rfd::FileDialog::new()
-                .set_title("Ouvrir un journal")
-                .add_filter("journal", &["db"])
+                .set_title("Ouvrir un dossier")
+                .add_filter("Dossier (.db)", &["db"])
                 .pick_file()
             else {
                 return; // the user cancelled the dialog
@@ -459,9 +506,9 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_pick_and_create_journal(move || {
             let ui = ui_weak.unwrap();
             let Some(path) = rfd::FileDialog::new()
-                .set_title("Créer un journal")
-                .add_filter("journal", &["db"])
-                .set_file_name("journal.db")
+                .set_title("Créer un dossier")
+                .add_filter("Dossier (.db)", &["db"])
+                .set_file_name("dossier.db")
                 .save_file()
             else {
                 return;

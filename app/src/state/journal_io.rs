@@ -73,17 +73,7 @@ impl JournalState {
         let version = journal
             .logical_version()
             .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
-        // Story 5.5: backups live beside the journal (a `backups/` sibling of the `.db`), so a
-        // user-selected location keeps its backups together. Fall back to the OS data dir only if the
-        // journal path has no parent (degenerate).
-        let dir = match live.parent() {
-            // A real parent directory (an absolute journal path) → backups sit beside the journal.
-            Some(parent) if !parent.as_os_str().is_empty() => parent.join("backups"),
-            // A bare/relative path with no real parent → the OS data dir (never the process CWD).
-            _ => directories::ProjectDirs::from("", "", "steadyinvest")
-                .map(|d| d.data_dir().join("backups"))
-                .ok_or(MSG_NO_DATA_DIR.to_string())?,
-        };
+        let dir = Self::backups_dir_for(live).ok_or(MSG_NO_DATA_DIR.to_string())?;
         std::fs::create_dir_all(&dir).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
         // Key the filename on (id, version, timestamp) so two backups never silently overwrite each
         // other — a same-version backup (e.g. one taken right after a restore) keeps its own file. The
@@ -92,6 +82,27 @@ impl JournalState {
         let dest = dir.join(format!("journal-{}-v{version}-{stamp}.db", journal.id()));
         std::fs::copy(live, &dest).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
         Ok(dest)
+    }
+
+    /// The `backups/` folder of the live journal (Story 5.5 rule, see [`Self::backups_dir_for`]) — where
+    /// the restore picker opens by default. `None` without a journal or an OS data dir.
+    pub fn backups_dir(&self) -> Option<PathBuf> {
+        self.path
+            .as_ref()
+            .and_then(|live| Self::backups_dir_for(live))
+    }
+
+    /// Story 5.5: backups live beside the journal (a `backups/` sibling of the `.db`), so a
+    /// user-selected location keeps its backups together. Fall back to the OS data dir only if the
+    /// journal path has no parent (degenerate). `None` only when that fallback has no data dir.
+    fn backups_dir_for(live: &std::path::Path) -> Option<PathBuf> {
+        match live.parent() {
+            // A real parent directory (an absolute journal path) → backups sit beside the journal.
+            Some(parent) if !parent.as_os_str().is_empty() => Some(parent.join("backups")),
+            // A bare/relative path with no real parent → the OS data dir (never the process CWD).
+            _ => directories::ProjectDirs::from("", "", "steadyinvest")
+                .map(|d| d.data_dir().join("backups")),
+        }
     }
 
     /// Close the current journal cleanly (Story 5.5): checkpoint its WAL, then drop the handle — which

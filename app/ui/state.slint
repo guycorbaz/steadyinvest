@@ -555,6 +555,7 @@ export global Studies {
     // Story 5.2 (FR59): export one study to a portable file (id) / import a study from a file path.
     callback export-study(string);
     callback import-study(string);
+    callback pick-and-import-study(); // rfd open .json → import-study (the picker runs in Rust)
     // Story 5.6 (FR52): export one study's faithful, neutral, greyscale PDF (id).
     callback export-study-pdf(string);
     // Fold/regime view-state intents (Story 2.3) — Rust mutates `AppConfig.study_view_state` and
@@ -856,6 +857,7 @@ export global Prefs {
     // User intents — handled in Rust (export reads the journal; import verifies + applies atomically).
     callback export-journal();
     callback import-journal(string); // path to a whole-journal envelope file
+    callback pick-and-import-journal(); // rfd open .json → import-journal (the picker runs in Rust)
     // Issue #65: the arbitration prompt for an OLDER same-journal import ("" = no banner) — the
     // version regression is stated and explicitly confirmed, never merged silently.
     in-out property <string> import-confirm;
@@ -869,6 +871,7 @@ export global Prefs {
     in-out property <string> restore-confirm;
     callback create-backup();
     callback request-restore(string); // path to a backup .db → validate + (maybe) park for confirm
+    callback pick-and-restore-backup(); // rfd open .db → request-restore (the picker runs in Rust)
     callback confirm-restore();
     callback cancel-restore();
     // ── Story 5.5 — journal location, recent journals & sync-safety (FR66) ──

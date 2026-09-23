@@ -438,22 +438,16 @@ export component DashboardScreen inherits Rectangle {
                 }
             }
 
-            // ── Story 5.2 (FR59): import a study from a portable export file (path-based — the native
-            // file picker is Story 5.5). The envelope's integrity + schema_version are verified before
-            // anything is written. ──
+            // ── Story 5.2 (FR59): import a study from a portable export file. The native picker runs
+            // in Rust (the established `rfd` rail); the envelope's integrity + schema_version are
+            // verified before anything is written. Cancel = a silent no-op. ──
             HorizontalLayout {
+                alignment: start;
                 spacing: Tokens.space-8;
-                import-path := TextField {
-                    placeholder: @tr("Chemin du fichier d'étude à importer");
-                    horizontal-stretch: 1;
-                }
                 ActionButton {
-                    label: @tr("Importer une étude");
-                    enabled: !Studies.read-only && import-path.text != "";
-                    clicked => {
-                        Studies.import-study(import-path.text);
-                        import-path.text = "";
-                    }
+                    label: @tr("Importer une étude…");
+                    enabled: !Studies.read-only;
+                    clicked => { Studies.pick-and-import-study(); }
                 }
             }
 
