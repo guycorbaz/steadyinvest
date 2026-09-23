@@ -163,10 +163,10 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 let written = result.is_ok();
                 match result {
                     Ok(_id) => studies.set_notice(SharedString::new()),
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => crate::wiring::dialog::refuse(&ui, &message),
                 }
                 refresh_studies(&ui, &journal_state.borrow());
-                // Report whether a study was written so the UI keeps the user's input on refusal.
+                // Report whether a study was written so the dialog closes only then.
                 written
             });
     }
@@ -309,14 +309,17 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             let Ok(uuid) = Uuid::parse_str(&id) else {
                 return;
             };
-            let notice = match journal_state.borrow().export_study(uuid) {
+            let outcome = match journal_state.borrow().export_study(uuid) {
                 Ok(json) => match write_study_export(uuid, &json) {
-                    Ok(path) => format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
-                    Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
+                    Ok(path) => Ok(format!("{} {}", state::MSG_STUDY_EXPORTED, path.display())),
+                    Err(e) => Err(format!("{} {e}", state::MSG_SAVE_FAILED)),
                 },
-                Err(message) => message,
+                Err(message) => Err(message),
             };
-            studies.set_notice(notice.into());
+            match outcome {
+                Ok(notice) => studies.set_notice(notice.into()),
+                Err(message) => crate::wiring::dialog::refuse(&ui, &message),
+            }
         });
     }
     {
@@ -335,12 +338,12 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             // Fetch + render BEFORE opening a dialog, so a study that does not compute never prompts
             // for a destination it can't fill.
             let Some(study) = journal_state.borrow().get_study(uuid) else {
-                studies.set_notice(state::MSG_SAVE_FAILED.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
                 return;
             };
             let Ok(bytes) = steadyinvest_report::render_study_pdf(&study) else {
                 // The study does not compute as entered — a neutral refusal, no panic, no leak.
-                studies.set_notice(state::MSG_SAVE_FAILED.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
                 return;
             };
             // Native save picker on the UI thread (modal — the established `rfd` pattern, cf. the
@@ -374,17 +377,20 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_import_study(move |path| {
             let ui = ui_weak.unwrap();
-            let notice = match std::fs::read_to_string(path.as_str()) {
+            let outcome = match std::fs::read_to_string(path.as_str()) {
                 Ok(json) => match journal_state.borrow_mut().import_study(&json) {
                     // Surface an overwrite of a pre-existing study distinctly from a fresh import.
-                    Ok((_id, true)) => state::MSG_STUDY_UPDATED.to_string(),
-                    Ok((_id, false)) => state::MSG_STUDY_IMPORTED.to_string(),
-                    Err(message) => message,
+                    Ok((_id, true)) => Ok(state::MSG_STUDY_UPDATED),
+                    Ok((_id, false)) => Ok(state::MSG_STUDY_IMPORTED),
+                    Err(message) => Err(message),
                 },
                 // An unreadable path is the malformed/unreadable case — a neutral refusal, no panic.
-                Err(_) => state::MSG_IMPORT_MALFORMED.to_string(),
+                Err(_) => Err(state::MSG_IMPORT_MALFORMED.to_string()),
             };
-            ui.global::<Studies>().set_notice(notice.into());
+            match outcome {
+                Ok(notice) => ui.global::<Studies>().set_notice(notice.into()),
+                Err(message) => crate::wiring::dialog::refuse(&ui, &message),
+            }
             refresh_studies(&ui, &journal_state.borrow());
         });
     }
@@ -577,9 +583,11 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 let message = state::study_action_confirm_message(&action, &study.security_ticker);
                 let destructive = action == "delete";
                 *pending_study_action.borrow_mut() = Some((action, id));
-                studies.set_study_action_message(message.into());
+                // The UX pass: the prompt is a modal confirm (the overlay derives the title and
+                // the verb from `study-action-destructive`); the 2.12 banner props keep the facts.
+                studies.set_study_action_message(message.clone().into());
                 studies.set_study_action_destructive(destructive);
-                studies.set_study_action_confirm_visible(true);
+                crate::wiring::dialog::confirm(&ui, "study-action", &message);
             });
     }
     {
@@ -624,7 +632,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                     // the watchlist so a linked row drops its (now-cleared) study link.
                     refresh_watchlist(&ui, &journal_state.borrow());
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
         });
     }
@@ -688,7 +696,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                     studies.set_demo_active(true);
                     studies.set_study_open(true);
                 }
-                Err(_) => studies.set_notice(state::MSG_DEMO_UNAVAILABLE.into()),
+                Err(_) => crate::wiring::dialog::refuse(&ui, state::MSG_DEMO_UNAVAILABLE),
             }
         });
     }

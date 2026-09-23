@@ -543,7 +543,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             // (Story 3.2 keychain + env fallback). No primary → the provider guard; a configured
             // primary whose whole chain lacks keys → the key guard (unchanged semantics).
             if config.borrow().preferred_provider == ProviderChoice::None {
-                studies.set_notice(state::MSG_PROVIDER_NONE.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_PROVIDER_NONE);
                 return;
             }
             let chain = resolve_chain(
@@ -551,7 +551,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 steadyinvest_ingestion::FieldKind::Fundamentals,
             );
             if chain.is_empty() {
-                studies.set_notice(state::MSG_PROVIDER_NO_KEY.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_PROVIDER_NO_KEY);
                 return;
             }
             studies.set_fetching(true);
@@ -590,7 +590,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             // successful save (the field cleared either way). Return `false` so the UI KEEPS the
             // field (nothing to clear) and shows the neutral notice.
             if key.trim().is_empty() {
-                prefs.set_provider_status(state::MSG_KEY_BLANK.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_KEY_BLANK);
                 return false;
             }
             match keychain::set_key(provider, key.trim()) {
@@ -603,7 +603,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 // silently discard the key the user just typed. Issue #44: name the actual cause
                 // (duplicate slot / over-long key / unavailable), not a flat "unavailable".
                 Err(error) => {
-                    prefs.set_provider_status(state::keychain_error_notice(error).into());
+                    crate::wiring::dialog::refuse(&ui, state::keychain_error_notice(error));
                     false
                 }
             }
@@ -621,7 +621,9 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     prefs.set_key_configured(false);
                     prefs.set_provider_status(state::MSG_KEY_DELETED.into());
                 }
-                Err(error) => prefs.set_provider_status(state::keychain_error_notice(error).into()),
+                Err(error) => {
+                    crate::wiring::dialog::refuse(&ui, state::keychain_error_notice(error))
+                }
             }
         });
     }
@@ -638,7 +640,9 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             };
             match keychain::delete_key(provider) {
                 Ok(()) => prefs.set_provider_status(state::MSG_KEY_DELETED.into()),
-                Err(error) => prefs.set_provider_status(state::keychain_error_notice(error).into()),
+                Err(error) => {
+                    crate::wiring::dialog::refuse(&ui, state::keychain_error_notice(error))
+                }
             }
             mirror_provider_prefs(&ui, config.borrow().preferred_provider);
         });
@@ -658,7 +662,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             }
             let api_key = resolve_provider_key(provider);
             if api_key.is_none() {
-                prefs.set_provider_status(state::MSG_PROVIDER_NO_KEY.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_PROVIDER_NO_KEY);
                 return;
             }
             // Off the UI thread: a minimal live fetch whose verdict returns via the outcome handler.

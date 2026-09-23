@@ -21,3 +21,16 @@ pub(crate) fn refuse(ui: &MainWindow, message: &str) {
         dialog.set_kind("notice".into());
     }
 }
+
+/// Raise a confirmation the user must answer: `action` names what the verb does (the overlay
+/// derives the title and the verb's label from it — the strings stay in Slint, posture-gated),
+/// `body` is the fact-stating prompt already worded by the state layer.
+pub(crate) fn confirm(ui: &MainWindow, action: &str, body: &str) {
+    let dialog = ui.global::<Dialog>();
+    dialog.set_title("".into());
+    dialog.set_verb("".into());
+    dialog.set_body(body.into());
+    dialog.set_action(action.into());
+    dialog.set_target_id("".into());
+    dialog.set_kind("confirm".into());
+}
