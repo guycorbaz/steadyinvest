@@ -8,36 +8,47 @@
 //! `low_price_above_current`.
 
 use super::types::{
-    CalcFinding, ForecastLowOption, GrowthOutputs, JudgmentInputs, RiskRewardOutputs,
-    UpsideDownside, ValuationOutputs, Zone, ZoneBounds,
+    CalcFinding, ForecastLowCandidates, ForecastLowOption, GrowthOutputs, JudgmentInputs,
+    RiskRewardOutputs, UpsideDownside, ValuationOutputs, Zone, ZoneBounds,
 };
 use crate::normalize::PlausibilityKey;
 use rust_decimal::Decimal;
 
-/// The §4 forecast low per the user-selected option. Each option degrades to `None` when its
-/// input is unknown; option (d) additionally requires a **positive** average high yield
-/// (spec §9 — division by a non-positive yield is not selectable).
-fn forecast_low(
+/// The four §4 forecast-low candidates (issue #213), each from its own inputs. Every candidate
+/// degrades to `None` when an input is unknown; option (d) additionally requires a **positive**
+/// average high yield (spec §9 — division by a non-positive yield is not selectable).
+fn low_candidates(
     judgment: &JudgmentInputs,
     growth: &GrowthOutputs,
     valuation: &ValuationOutputs,
-) -> Option<Decimal> {
-    match judgment.forecast_low_option {
-        ForecastLowOption::AvgLowPeTimesEps => judgment
-            .judged_avg_low_pe?
-            .checked_mul(growth.estimated_low_eps?),
-        ForecastLowOption::AvgLowPriceLast5y => valuation.avg_low_price,
-        ForecastLowOption::RecentSevereLow => judgment.recent_severe_low,
-        ForecastLowOption::DividendSupported => {
-            let yield_pct = valuation.avg_high_yield_pct?;
-            if yield_pct <= Decimal::ZERO {
-                return None;
-            }
-            let yield_fraction = yield_pct.checked_div(Decimal::ONE_HUNDRED)?;
-            judgment
-                .present_full_year_dividend?
-                .checked_div(yield_fraction)
+) -> ForecastLowCandidates {
+    let dividend_supported = valuation.avg_high_yield_pct.and_then(|yield_pct| {
+        if yield_pct <= Decimal::ZERO {
+            return None;
         }
+        let yield_fraction = yield_pct.checked_div(Decimal::ONE_HUNDRED)?;
+        judgment
+            .present_full_year_dividend?
+            .checked_div(yield_fraction)
+    });
+    ForecastLowCandidates {
+        avg_low_pe_times_eps: judgment
+            .judged_avg_low_pe
+            .zip(growth.estimated_low_eps)
+            .and_then(|(pe, eps)| pe.checked_mul(eps)),
+        avg_low_price_last_5y: valuation.avg_low_price,
+        recent_severe_low: judgment.recent_severe_low,
+        dividend_supported,
+    }
+}
+
+/// The §4 forecast low per the user-selected option — one of the four candidates.
+fn forecast_low(option: ForecastLowOption, candidates: &ForecastLowCandidates) -> Option<Decimal> {
+    match option {
+        ForecastLowOption::AvgLowPeTimesEps => candidates.avg_low_pe_times_eps,
+        ForecastLowOption::AvgLowPriceLast5y => candidates.avg_low_price_last_5y,
+        ForecastLowOption::RecentSevereLow => candidates.recent_severe_low,
+        ForecastLowOption::DividendSupported => candidates.dividend_supported,
     }
 }
 
@@ -91,7 +102,8 @@ pub(super) fn compute(
         .judged_avg_high_pe
         .zip(growth.estimated_high_eps)
         .and_then(|(pe, eps)| pe.checked_mul(eps));
-    let forecast_low = forecast_low(judgment, growth, valuation);
+    let low_candidates = low_candidates(judgment, growth, valuation);
+    let forecast_low = forecast_low(judgment.forecast_low_option, &low_candidates);
     let current = judgment.current_price;
 
     // §4 constraint check: a selected forecast low strictly above the current price violates
@@ -134,6 +146,7 @@ pub(super) fn compute(
     RiskRewardOutputs {
         forecast_high,
         forecast_low,
+        low_candidates,
         zones,
         present_price_zone,
         upside_downside,
@@ -195,6 +208,67 @@ mod tests {
             None,
             "above the range is unknown"
         );
+    }
+
+    /// Issue #213: the four candidates are computed independently of the selected option, each
+    /// from its own inputs, with the §9 guard on (d); the selected value IS the matching candidate.
+    #[test]
+    fn four_low_candidates_are_computed_independently_of_the_selection() {
+        let growth_with = |est_low: Option<Decimal>| GrowthOutputs {
+            sales_cagr_pct: None,
+            eps_cagr_pct: None,
+            quarterly_sales_change_pct: None,
+            quarterly_eps_change_pct: None,
+            estimated_high_eps: None,
+            estimated_low_eps: est_low,
+        };
+        let valuation_with = |yield_pct: Option<Decimal>| ValuationOutputs {
+            per_year: Vec::new(),
+            avg_high_pe: None,
+            avg_low_pe: None,
+            avg_pe: None,
+            avg_payout_pct: None,
+            avg_high_yield_pct: yield_pct,
+            avg_low_price: Some(d(30, 0)),
+            ttm_eps: None,
+            current_pe: None,
+            relative_value_pct: None,
+        };
+        let growth = growth_with(Some(d(2, 0)));
+        let valuation = valuation_with(Some(d(4, 0)));
+        let judgment = JudgmentInputs {
+            judged_avg_low_pe: Some(d(10, 0)),
+            recent_severe_low: Some(d(25, 0)),
+            present_full_year_dividend: Some(d(2, 0)),
+            forecast_low_option: ForecastLowOption::RecentSevereLow,
+            ..JudgmentInputs::empty()
+        };
+        let c = low_candidates(&judgment, &growth, &valuation);
+        assert_eq!(c.avg_low_pe_times_eps, Some(d(20, 0)), "(a) 10 × 2");
+        assert_eq!(
+            c.avg_low_price_last_5y,
+            Some(d(30, 0)),
+            "(b) the window mean"
+        );
+        assert_eq!(c.recent_severe_low, Some(d(25, 0)), "(c) the judgment");
+        assert_eq!(c.dividend_supported, Some(d(50, 0)), "(d) 2 / 0.04");
+        assert_eq!(
+            forecast_low(judgment.forecast_low_option, &c),
+            Some(d(25, 0)),
+            "the selected value is the matching candidate"
+        );
+        // A non-positive yield makes (d) unknown; the others are untouched.
+        let no_yield = valuation_with(Some(Decimal::ZERO));
+        let c = low_candidates(&judgment, &growth, &no_yield);
+        assert_eq!(
+            c.dividend_supported, None,
+            "§9: a non-positive yield is not selectable"
+        );
+        assert_eq!(c.avg_low_pe_times_eps, Some(d(20, 0)));
+        // A missing est-low EPS makes (a) unknown only.
+        let c = low_candidates(&judgment, &growth_with(None), &valuation);
+        assert_eq!(c.avg_low_pe_times_eps, None);
+        assert_eq!(c.avg_low_price_last_5y, Some(d(30, 0)));
     }
 
     #[test]

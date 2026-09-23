@@ -263,6 +263,16 @@ component CompanyNameField inherits Rectangle {
 
 
 export component StudyScreen inherits Rectangle {
+    // Issue #213: a §4 candidate's absence names its missing input (the key comes from Rust).
+    pure function low-why(key: string) -> string {
+        if (key == "est_low_eps") { return @tr("BPA estimé bas à saisir"); }
+        if (key == "low_pe") { return @tr("PER bas moyen à juger"); }
+        if (key == "low_prices") { return @tr("prix bas historiques indisponibles"); }
+        if (key == "severe_low") { return @tr("plus bas sévère récent à saisir"); }
+        if (key == "dividend") { return @tr("dividende annuel courant à saisir"); }
+        if (key == "yield") { return @tr("rendement haut moyen nul ou inconnu"); }
+        return FormConst.empty-slot;
+    }
     in property <FormHeader> header: Studies.form-header;
     in property <[PeRow]> pe-rows: Studies.pe-rows;
 
@@ -813,6 +823,8 @@ export component StudyScreen inherits Rectangle {
                         label: @tr("BPA estimé bas");
                         field-key: "est_low_eps";
                         value: Studies.judgment.est-low-eps;
+                        // Issue #214: the §1 seed band's low edge, adoptable in one click.
+                        suggestion: Studies.judgment-suggestions.est-low-eps;
                     }
                 }
             }
@@ -956,12 +968,13 @@ export component StudyScreen inherits Rectangle {
                 toggled(v) => { Studies.toggle-fold(3, v); }
 
                 CalcRow { label: @tr("A · Prix haut"); formula: @tr("PER haut moy. × BPA est. haut"); result: Studies.risk-computed.forecast-high; }
-                // The four forecast-low options expose only the SELECTED value in v1 (the engine
-                // returns one forecast-low); the individual (a)–(d) values stay caption-only em-dash.
-                CalcRow { label: @tr("B(a) · PER bas moy. × BPA est. bas"); formula: ""; result: FormConst.empty-slot; }
-                CalcRow { label: @tr("B(b) · Prix bas moyen 5 ans"); formula: ""; result: FormConst.empty-slot; }
-                CalcRow { label: @tr("B(c) · Plus bas sévère récent"); formula: ""; result: FormConst.empty-slot; }
-                CalcRow { label: @tr("B(d) · Soutenu par dividende"); formula: ""; result: FormConst.empty-slot; }
+                // Issue #213: the four candidates side by side (the NAIC form's B(a)–B(d)), each
+                // with its value or the NAMED missing input — never a bare dash — so the option
+                // choice below is made by comparing them.
+                CalcRow { label: @tr("B(a) · PER bas moy. × BPA est. bas"); formula: ""; result: Studies.risk-computed.low-a != "" ? Studies.risk-computed.low-a : root.low-why(Studies.risk-computed.low-a-why); }
+                CalcRow { label: @tr("B(b) · Prix bas moyen 5 ans"); formula: ""; result: Studies.risk-computed.low-b != "" ? Studies.risk-computed.low-b : root.low-why(Studies.risk-computed.low-b-why); }
+                CalcRow { label: @tr("B(c) · Plus bas sévère récent"); formula: ""; result: Studies.risk-computed.low-c != "" ? Studies.risk-computed.low-c : root.low-why(Studies.risk-computed.low-c-why); }
+                CalcRow { label: @tr("B(d) · Soutenu par dividende"); formula: ""; result: Studies.risk-computed.low-d != "" ? Studies.risk-computed.low-d : root.low-why(Studies.risk-computed.low-d-why); }
                 CalcRow { label: @tr("B · Prix bas prévu (sélectionné)"); formula: ""; result: Studies.risk-computed.forecast-low; }
                 CalcRow { label: @tr("D · Ratio hausse/baisse"); formula: ""; result: Studies.risk-computed.ud-ratio; }
                 CalcRow { label: @tr("E · Appréciation potentielle"); formula: ""; result: Studies.risk-computed.appreciation; }
@@ -1015,6 +1028,8 @@ export component StudyScreen inherits Rectangle {
                         label: @tr("Dividende annuel courant");
                         field-key: "dividend";
                         value: Studies.judgment.dividend;
+                        // Issue #214: the latest year's fetched dividend per share, adoptable.
+                        suggestion: Studies.judgment-suggestions.dividend;
                     }
                 }
 
