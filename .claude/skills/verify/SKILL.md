@@ -53,3 +53,10 @@ env -u WAYLAND_DISPLAY DISPLAY=:99 SLINT_BACKEND=winit-software \
 - "Exporter PDF" opens the xdg-desktop-portal file chooser → unavailable under Xvfb;
   the PDF path cannot be driven headlessly.
 - `DISPLAY=:0` is the user's real desktop — do not use it.
+- **Resize the window to the Xvfb screen right after launch** — winit opens it larger than
+  the screen (seen: 2451×1284 on a 1600×1000 Xvfb), so a screen's Flickable has more height
+  than its content and NOTHING scrolls; the wheel then looks broken when it is not:
+  `WID=$(xdotool search --pid $(cat app.pid) | tail -1); xdotool windowsize $WID 1600 900`.
+- The live config's `journal_path` may point to a dossier OTHER than the default
+  `~/.local/share/steadyinvest/journal.db` — read `~/.config/steadyinvest/config.json` first
+  and copy THAT file, or the copy will not show what the user sees.
