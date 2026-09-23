@@ -12,8 +12,8 @@ use uuid::Uuid;
 use super::{
     JournalState, MSG_HOLDING_AMOUNT_OUT_OF_RANGE, MSG_HOLDING_INVALID_CURRENCY,
     MSG_HOLDING_INVALID_NUMBER, MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER,
-    MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_HAS_HOLDINGS, MSG_PORTFOLIO_INVALID_NAME,
-    MSG_PORTFOLIO_LAST, MSG_READ_ONLY_WRITE, watch_error,
+    MSG_HOLDING_NO_STUDY, MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_HAS_HOLDINGS,
+    MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST, MSG_READ_ONLY_WRITE, watch_error,
 };
 
 impl JournalState {
@@ -203,6 +203,46 @@ impl JournalState {
         journal
             .ensure_portfolio(id, DEFAULT_PORTFOLIO_NAME, &created_at)
             .map_err(watch_error)
+    }
+
+    /// The currency a position for `ticker` MUST be in (issue #218): the native currency of the
+    /// saved study of that ticker. `Err(MSG_HOLDING_NO_STUDY)` when no study exists — a position is
+    /// never born unlinked (the on-display walk's CHF-vs-USD trap). A read failure surfaces as is.
+    fn study_currency_for_ticker(&self, ticker: &str) -> Result<String, String> {
+        let study_id = self
+            .try_study_id_for_ticker(ticker)?
+            .ok_or_else(|| MSG_HOLDING_NO_STUDY.to_string())?;
+        self.try_get_study(study_id)?
+            .map(|s| s.native_currency.to_uppercase())
+            .ok_or_else(|| MSG_HOLDING_NO_STUDY.to_string())
+    }
+
+    /// [`Self::add_holding`] in the currency of the ticker's study (issue #218): the UI rail — a
+    /// position can only be added for a ticker that has a study, and it takes that study's currency,
+    /// so it is linked from birth. The explicit-currency [`Self::add_holding`] stays for imports and
+    /// for pre-#218 data.
+    pub fn add_holding_linked(
+        &mut self,
+        ticker: &str,
+        quantity: &str,
+        purchase_price: &str,
+        sector: &str,
+    ) -> Result<(), String> {
+        let currency = self.study_currency_for_ticker(ticker.trim())?;
+        self.add_holding(ticker, quantity, purchase_price, &currency, sector)
+    }
+
+    /// [`Self::update_holding`] in the currency of the (possibly new) ticker's study (issue #218).
+    pub fn update_holding_linked(
+        &mut self,
+        id: Uuid,
+        ticker: &str,
+        quantity: &str,
+        purchase_price: &str,
+        sector: &str,
+    ) -> Result<(), String> {
+        let currency = self.study_currency_for_ticker(ticker.trim())?;
+        self.update_holding(id, ticker, quantity, purchase_price, &currency, sector)
     }
 
     /// Add a holding (FR36): a security symbol, a quantity, a purchase price and the `currency` it is

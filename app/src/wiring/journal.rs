@@ -160,8 +160,11 @@ fn finish_journal_switch(
                 prefs.set_journal_location_status(state::MSG_JOURNAL_LOCK_RECLAIMABLE.into());
                 prefs.set_journal_reclaim_path(attempted.display().to_string().into());
             } else {
-                prefs.set_journal_location_status(notice.into());
+                // An open/create that did not happen is a refusal (acknowledged); the panel's
+                // status line keeps only STATES (stale, sync, reclaimable lock).
+                prefs.set_journal_location_status("".into());
                 prefs.set_journal_reclaim_path("".into());
+                crate::wiring::dialog::refuse(ui, &notice);
             }
         }
     }
@@ -220,17 +223,24 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_export_journal(move || {
             let ui = ui_weak.unwrap();
             let state = journal_state.borrow();
-            let notice = match state.export_journal() {
+            let outcome = match state.export_journal() {
                 Ok(json) => match state.journal_id() {
                     Some(jid) => match write_journal_export(jid, &json) {
-                        Ok(path) => format!("{} {}", state::MSG_JOURNAL_EXPORTED, path.display()),
-                        Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
+                        Ok(path) => Ok(format!(
+                            "{} {}",
+                            state::MSG_JOURNAL_EXPORTED,
+                            path.display()
+                        )),
+                        Err(e) => Err(format!("{} {e}", state::MSG_SAVE_FAILED)),
                     },
-                    None => state::MSG_NO_JOURNAL.to_string(),
+                    None => Err(state::MSG_NO_JOURNAL.to_string()),
                 },
-                Err(message) => message,
+                Err(message) => Err(message),
             };
-            ui.global::<Prefs>().set_journal_status(notice.into());
+            match outcome {
+                Ok(notice) => ui.global::<Prefs>().set_journal_status(notice.into()),
+                Err(message) => crate::wiring::dialog::refuse(&ui, &message),
+            }
         });
     }
     {
@@ -242,30 +252,36 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_import_journal(move |path| {
             let ui = ui_weak.unwrap();
             let prefs = ui.global::<Prefs>();
-            let notice = match std::fs::read_to_string(path.as_str()) {
+            let outcome = match std::fs::read_to_string(path.as_str()) {
                 // Issue #65: the arbitration gate — an OLDER same-journal envelope parks behind a
-                // confirm banner instead of silently snapping shared entities back.
+                // modal confirm instead of silently snapping shared entities back.
                 Ok(json) => match journal_state.borrow_mut().request_import_journal(&json) {
                     Ok(state::ImportRequest::Applied(summary)) => {
                         prefs.set_import_confirm("".into());
-                        state::journal_imported_message(&summary)
+                        Ok(state::journal_imported_message(&summary))
                     }
                     Ok(state::ImportRequest::NeedsConfirm { source, current }) => {
-                        prefs.set_import_confirm(
-                            state::import_confirm_message(source, current).into(),
-                        );
+                        let prompt = state::import_confirm_message(source, current);
+                        prefs.set_import_confirm(prompt.clone().into());
                         prefs.set_journal_status("".into());
+                        crate::wiring::dialog::confirm(&ui, "confirm-import", &prompt);
                         return; // nothing applied yet — no re-render needed
                     }
                     Err(message) => {
                         prefs.set_import_confirm("".into());
-                        message
+                        Err(message)
                     }
                 },
                 // An unreadable path is the malformed/unreadable case — a neutral refusal, no panic.
-                Err(_) => state::MSG_IMPORT_MALFORMED.to_string(),
+                Err(_) => Err(state::MSG_IMPORT_MALFORMED.to_string()),
             };
-            prefs.set_journal_status(notice.into());
+            match outcome {
+                Ok(notice) => prefs.set_journal_status(notice.into()),
+                Err(message) => {
+                    prefs.set_journal_status("".into());
+                    crate::wiring::dialog::refuse(&ui, &message);
+                }
+            }
             // A whole-journal import can touch every surface — re-render them all (dashboard,
             // watchlist, portfolio). Prune any stale per-holding freshness for tickers no longer held.
             let state = journal_state.borrow();
@@ -296,11 +312,15 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             let result = journal_state.borrow_mut().confirm_import_journal();
             let prefs = ui.global::<Prefs>();
             prefs.set_import_confirm("".into());
-            let notice = match result {
-                Ok(summary) => state::journal_imported_message(&summary),
-                Err(message) => message,
-            };
-            prefs.set_journal_status(notice.into());
+            match result {
+                Ok(summary) => {
+                    prefs.set_journal_status(state::journal_imported_message(&summary).into())
+                }
+                Err(message) => {
+                    prefs.set_journal_status("".into());
+                    crate::wiring::dialog::refuse(&ui, &message);
+                }
+            }
             // The confirmed merge can touch every surface — same re-render as a direct import.
             let state = journal_state.borrow();
             let format = config.borrow().number_format;
@@ -373,13 +393,16 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             match journal_state.borrow_mut().request_restore(path.as_str()) {
                 // A confirmable restore is parked — reveal the confirm banner with the identity/warning.
                 Ok(assessment) => {
-                    prefs.set_restore_confirm(state::restore_confirm_message(&assessment).into());
+                    let prompt = state::restore_confirm_message(&assessment);
+                    prefs.set_restore_confirm(prompt.clone().into());
                     prefs.set_restore_status("".into());
+                    crate::wiring::dialog::confirm(&ui, "confirm-restore", &prompt);
                 }
-                // A hard refusal — show the cause, no banner.
+                // A hard refusal — acknowledged in the dialog, nothing parked.
                 Err(message) => {
                     prefs.set_restore_confirm("".into());
-                    prefs.set_restore_status(message.into());
+                    prefs.set_restore_status("".into());
+                    crate::wiring::dialog::refuse(&ui, &message);
                 }
             }
         });
@@ -424,11 +447,13 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 *current_study.borrow_mut() = None;
                 ui.global::<Studies>().set_study_open(false);
             }
-            let notice = match result {
-                Ok(()) => state::MSG_RESTORE_DONE.to_string(),
-                Err(message) => message,
-            };
-            prefs.set_restore_status(notice.into());
+            match result {
+                Ok(()) => prefs.set_restore_status(state::MSG_RESTORE_DONE.into()),
+                Err(message) => {
+                    prefs.set_restore_status("".into());
+                    crate::wiring::dialog::refuse(&ui, &message);
+                }
+            }
             // The whole journal changed — re-render every surface.
             let state = journal_state.borrow();
             let format = config.borrow().number_format;

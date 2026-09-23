@@ -665,9 +665,12 @@ mod tests {
         // all-unclassified band, the …-suffixed action labels) replace the five-placeholder ledger
         // row, the inline add/edit form, the trailing-stop field and the inline ledger-delete
         // confirm. The running tally above had drifted below what the scan actually finds, so the
-        // floor is RE-BASED on the measured total after this pass: 594. Floor strict.
+        // floor is RE-BASED on the measured total after this pass: 594. Its PR 2 (Liste de
+        // suivi card + add-value dialog, the Études card + create-study dialog, the Réglages
+        // FX-rate dialog, the derived confirm titles/verbs for the study action / older import /
+        // restore prompts) measures 612. Floor strict.
         assert!(
-            total >= 594,
+            total >= 612,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -771,9 +774,11 @@ mod tests {
         // of a live journal whose -wal holds commits the .db lacks): 119 + 1 = 120.
         // Issue #65 adds the older-import arbitration prompt (MSG_IMPORT_CONFIRM — a same-journal
         // version regression is stated and confirmed, never merged silently): 120 + 1 = 121.
+        // Issue #218 adds the no-study refusal for a position (MSG_HOLDING_NO_STUDY — a position is
+        // only added for a ticker with a study, in that study's currency): 121 + 1 = 122.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            121,
+            122,
             "state.rs message inventory changed — register the new notice"
         );
     }

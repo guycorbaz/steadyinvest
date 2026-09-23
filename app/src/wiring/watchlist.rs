@@ -74,7 +74,8 @@ fn apply_watch_result(ui: &MainWindow, state: &JournalState, result: Result<(), 
     let watchlist = ui.global::<Watchlist>();
     match result {
         Ok(()) => watchlist.set_notice(SharedString::new()),
-        Err(message) => watchlist.set_notice(message.into()),
+        // The UX pass: a refusal is acknowledged in the modal dialog, never a caption line.
+        Err(message) => crate::wiring::dialog::refuse(ui, &message),
     }
     refresh_watchlist(ui, state);
 }
@@ -105,7 +106,9 @@ pub(crate) fn wire_watchlist(ui: &MainWindow, s: &Session) {
         ui.global::<Watchlist>().on_add_watch(move |ticker| {
             let ui = ui_weak.unwrap();
             let result = journal_state.borrow_mut().add_watch_item(&ticker, None);
+            let written = result.is_ok();
             apply_watch_result(&ui, &journal_state.borrow(), result);
+            written
         });
     }
     {

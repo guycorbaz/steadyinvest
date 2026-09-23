@@ -14,10 +14,9 @@
 // closes only on a written result — the verify-before-write logic has one code path.
 
 import { Tokens } from "../tokens.slint";
-import { Dialog, Holdings, Prefs } from "../state.slint";
+import { Dialog, Holdings, Prefs, Studies, Watchlist, Fx } from "../state.slint";
 import { ActionButton } from "action_button.slint";
 import { TextField } from "text_field.slint";
-import { ChoiceChip } from "choice_chip.slint";
 import { StatusBand } from "status_band.slint";
 
 component LabeledField inherits VerticalLayout {
@@ -60,7 +59,8 @@ export component ModalDialog inherits Rectangle {
     function can-submit() -> bool {
         if (Holdings.read-only) { return false; }
         if (Dialog.form-id == "holding-add" || Dialog.form-id == "holding-edit") {
-            return Dialog.draft-ticker != "";
+            // Issue #218: only a ticker with a study can become a position.
+            return Dialog.draft-ticker != "" && Holdings.study-currency-for(Dialog.draft-ticker) != "";
         }
         if (Dialog.form-id == "buy" || Dialog.form-id == "sell" || Dialog.form-id == "txn-edit") {
             return Dialog.draft-quantity != "" && Dialog.draft-price != "";
@@ -70,6 +70,9 @@ export component ModalDialog inherits Rectangle {
         if (Dialog.form-id == "portfolio-add" || Dialog.form-id == "portfolio-rename") {
             return Dialog.draft-name != "";
         }
+        if (Dialog.form-id == "watch-add") { return Dialog.draft-ticker != ""; }
+        if (Dialog.form-id == "study-create") { return Dialog.draft-ticker != ""; }
+        if (Dialog.form-id == "fx-rate") { return Dialog.draft-ticker != "" && Dialog.draft-price != ""; }
         // sell-trigger: an empty quantity sells the whole position (the 4.7 flow).
         return true;
     }
@@ -79,9 +82,9 @@ export component ModalDialog inherits Rectangle {
     function submit() {
         if (!root.can-submit()) { return; }
         if (Dialog.form-id == "holding-add") {
-            if (Holdings.add-holding(Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-currency, Dialog.draft-sector)) { Dialog.close(); }
+            if (Holdings.add-holding(Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-sector)) { Dialog.close(); }
         } else if (Dialog.form-id == "holding-edit") {
-            if (Holdings.edit-holding(Dialog.target-id, Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-currency, Dialog.draft-sector)) { Dialog.close(); }
+            if (Holdings.edit-holding(Dialog.target-id, Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-sector)) { Dialog.close(); }
         } else if (Dialog.form-id == "buy") {
             if (Holdings.record-buy(Dialog.target-id, Dialog.draft-date, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-fees, Dialog.draft-rationale)) { Dialog.close(); }
         } else if (Dialog.form-id == "sell") {
@@ -98,7 +101,44 @@ export component ModalDialog inherits Rectangle {
             if (Holdings.add-portfolio(Dialog.draft-name)) { Dialog.close(); }
         } else if (Dialog.form-id == "portfolio-rename") {
             if (Holdings.rename-portfolio(Dialog.target-id, Dialog.draft-name)) { Dialog.close(); }
+        } else if (Dialog.form-id == "watch-add") {
+            if (Watchlist.add-watch(Dialog.draft-ticker)) { Dialog.close(); }
+        } else if (Dialog.form-id == "study-create") {
+            if (Studies.create-study(Dialog.draft-ticker, Dialog.draft-currency)) { Dialog.close(); }
+        } else if (Dialog.form-id == "fx-rate") {
+            if (Fx.add-rate(Dialog.draft-ticker, Dialog.draft-price, Dialog.draft-date)) { Dialog.close(); }
         }
+    }
+
+    // ── Cancel: the confirms Rust parked keep a pending action on their side — tell them. ──
+    function cancel() {
+        if (Dialog.kind == "confirm") {
+            if (Dialog.action == "study-action") { Studies.cancel-study-action(); }
+            else if (Dialog.action == "confirm-import") { Prefs.cancel-import(); }
+            else if (Dialog.action == "confirm-restore") { Prefs.cancel-restore(); }
+        }
+        Dialog.close();
+    }
+
+    // The confirm title and verb, derived from the action when Rust parked it (the strings stay
+    // here, posture-gated); a Slint-side opener passes its own title/verb.
+    function confirm-title() -> string {
+        if (Dialog.title != "") { return Dialog.title; }
+        if (Dialog.action == "study-action") {
+            return Studies.study-action-destructive ? @tr("Supprimer cette étude ?") : @tr("Confirmer cette action ?");
+        }
+        if (Dialog.action == "confirm-import") { return @tr("Importer un dossier plus ancien ?"); }
+        if (Dialog.action == "confirm-restore") { return @tr("Restaurer cette sauvegarde ?"); }
+        return "";
+    }
+    function confirm-verb() -> string {
+        if (Dialog.verb != "") { return Dialog.verb; }
+        if (Dialog.action == "study-action") {
+            return Studies.study-action-destructive ? @tr("Supprimer définitivement") : @tr("Confirmer");
+        }
+        if (Dialog.action == "confirm-import") { return @tr("Confirmer l'import"); }
+        if (Dialog.action == "confirm-restore") { return @tr("Confirmer la restauration"); }
+        return @tr("Confirmer");
     }
 
     // ── Confirm: close FIRST, then act — a guard's refusal (raised by Rust) then opens its own
@@ -113,6 +153,15 @@ export component ModalDialog inherits Rectangle {
         } else if (Dialog.action == "remove-holding") {
             Dialog.close();
             Holdings.remove-holding(Dialog.target-id);
+        } else if (Dialog.action == "study-action") {
+            Dialog.close();
+            Studies.confirm-study-action();
+        } else if (Dialog.action == "confirm-import") {
+            Dialog.close();
+            Prefs.confirm-import();
+        } else if (Dialog.action == "confirm-restore") {
+            Dialog.close();
+            Prefs.confirm-restore();
         } else {
             Dialog.close();
         }
@@ -123,14 +172,14 @@ export component ModalDialog inherits Rectangle {
     keys := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                Dialog.close();
+                root.cancel();
                 return accept;
             }
             reject
         }
 
         scrim := TouchArea {
-            clicked => { Dialog.close(); }
+            clicked => { root.cancel(); }
         }
 
         // The card — its own TouchArea swallows clicks so they never reach the scrim behind it.
@@ -158,7 +207,8 @@ export component ModalDialog inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Text {
-                        text: Dialog.title != "" ? Dialog.title
+                        text: Dialog.kind == "confirm" ? root.confirm-title()
+                            : Dialog.title != "" ? Dialog.title
                             : Dialog.kind == "notice" ? @tr("Action refusée") : "";
                         color: Tokens.text-high;
                         font-size: Tokens.font-h2;
@@ -198,11 +248,11 @@ export component ModalDialog inherits Rectangle {
                     spacing: Tokens.space-8;
                     ActionButton {
                         label: @tr("Annuler");
-                        clicked => { Dialog.close(); }
+                        clicked => { root.cancel(); }
                         autofocus: true;
                     }
                     ActionButton {
-                        label: Dialog.verb;
+                        label: root.confirm-verb();
                         enabled: !Holdings.read-only;
                         clicked => { root.run-confirm(); }
                     }
@@ -212,31 +262,26 @@ export component ModalDialog inherits Rectangle {
                 if Dialog.kind == "form": VerticalLayout {
                     spacing: Tokens.space-12;
 
-                    // Position (add / edit): symbol → study lookup as you type; the currency picker
-                    // defaults to the matched study's native currency (the CHF-vs-USD trap).
+                    // Position (add / edit): symbol → study lookup as you type. Issue #218: the
+                    // position takes the study's currency — stated as a fact, never picked — and
+                    // « Enregistrer » stays disabled until a study matches (the reason is shown).
                     if Dialog.form-id == "holding-add" || Dialog.form-id == "holding-edit": VerticalLayout {
                         spacing: Tokens.space-12;
                         symbol := LabeledField {
-                            label: @tr("Symbole");
+                            label: @tr("Symbole (celui d'une étude existante)");
                             placeholder: @tr("p. ex. NESN.SW");
                             text <=> Dialog.draft-ticker;
                             autofocus: true;
-                            edited => {
-                                if (Dialog.form-id == "holding-add") {
-                                    if (Holdings.study-currency-for(Dialog.draft-ticker) != "") {
-                                        Dialog.draft-currency = Holdings.study-currency-for(Dialog.draft-ticker);
-                                    }
-                                }
-                            }
                             accepted => { root.submit(); }
                         }
-                        Text {
-                            text: Dialog.draft-ticker == "" ? ""
-                                : Holdings.study-currency-for(Dialog.draft-ticker) == ""
-                                    ? @tr("Aucune étude pour ce symbole ; la position n'aura ni zone ni prix actuel.")
-                                    : Holdings.study-name-for(Dialog.draft-ticker) != ""
-                                        ? @tr("Étude liée : {} ({})", Holdings.study-name-for(Dialog.draft-ticker), Holdings.study-currency-for(Dialog.draft-ticker))
-                                        : @tr("Étude liée : {} ({})", Dialog.draft-ticker, Holdings.study-currency-for(Dialog.draft-ticker));
+                        if Dialog.draft-ticker != "" && Holdings.study-currency-for(Dialog.draft-ticker) == "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Aucune étude pour ce symbole ; créez-la d'abord depuis Études, la position en prendra la devise.");
+                        }
+                        if Dialog.draft-ticker != "" && Holdings.study-currency-for(Dialog.draft-ticker) != "": Text {
+                            text: Holdings.study-name-for(Dialog.draft-ticker) != ""
+                                ? @tr("Étude liée : {} — devise de la position : {}", Holdings.study-name-for(Dialog.draft-ticker), Holdings.study-currency-for(Dialog.draft-ticker))
+                                : @tr("Étude liée : {} — devise de la position : {}", Dialog.draft-ticker, Holdings.study-currency-for(Dialog.draft-ticker));
                             color: Tokens.text-mid;
                             font-size: Tokens.font-caption;
                             wrap: word-wrap;
@@ -250,27 +295,12 @@ export component ModalDialog inherits Rectangle {
                                 accepted => { root.submit(); }
                             }
                             LabeledField {
-                                label: @tr("Prix d'achat unitaire");
+                                label: Holdings.study-currency-for(Dialog.draft-ticker) != ""
+                                    ? @tr("Prix d'achat unitaire ({})", Holdings.study-currency-for(Dialog.draft-ticker))
+                                    : @tr("Prix d'achat unitaire");
                                 placeholder: @tr("Prix moyen par action");
                                 text <=> Dialog.draft-price;
                                 accepted => { root.submit(); }
-                            }
-                        }
-                        VerticalLayout {
-                            spacing: Tokens.space-4;
-                            Text {
-                                text: @tr("Devise de la position (celle de l'étude à lier)");
-                                color: Tokens.text-mid;
-                                font-size: Tokens.font-caption;
-                            }
-                            HorizontalLayout {
-                                spacing: Tokens.space-8;
-                                alignment: start;
-                                for c in Holdings.supported-currencies: ChoiceChip {
-                                    label: c;
-                                    selected: c == Dialog.draft-currency;
-                                    activated => { Dialog.draft-currency = c; }
-                                }
                             }
                         }
                         LabeledField {
@@ -422,6 +452,63 @@ export component ModalDialog inherits Rectangle {
                         }
                     }
 
+                    // A watched security (Story 4.1): one symbol.
+                    if Dialog.form-id == "watch-add": VerticalLayout {
+                        LabeledField {
+                            label: @tr("Symbole");
+                            placeholder: @tr("p. ex. NESN.SW");
+                            text <=> Dialog.draft-ticker;
+                            autofocus: true;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
+                    // A new study (Story 2.2): symbol + native currency (the currency of the
+                    // security's own figures; free text — a study may be in any currency).
+                    if Dialog.form-id == "study-create": HorizontalLayout {
+                        spacing: Tokens.space-12;
+                        LabeledField {
+                            label: @tr("Symbole");
+                            placeholder: @tr("p. ex. NESN.SW");
+                            text <=> Dialog.draft-ticker;
+                            autofocus: true;
+                            accepted => { root.submit(); }
+                        }
+                        LabeledField {
+                            label: @tr("Devise des chiffres");
+                            placeholder: @tr("p. ex. CHF");
+                            text <=> Dialog.draft-currency;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
+                    // A manual exchange rate (Story 6.5): base currency → the reference, dated.
+                    if Dialog.form-id == "fx-rate": VerticalLayout {
+                        spacing: Tokens.space-12;
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            LabeledField {
+                                label: @tr("Devise de départ");
+                                placeholder: @tr("p. ex. EUR");
+                                text <=> Dialog.draft-ticker;
+                                autofocus: true;
+                                accepted => { root.submit(); }
+                            }
+                            LabeledField {
+                                label: @tr("Taux vers {} (1 unité de départ = … {})", Prefs.reference-currency, Prefs.reference-currency);
+                                placeholder: @tr("p. ex. 0.95");
+                                text <=> Dialog.draft-price;
+                                accepted => { root.submit(); }
+                            }
+                        }
+                        LabeledField {
+                            label: @tr("Date du taux (vide = aujourd'hui)");
+                            placeholder: @tr("AAAA-MM-JJ");
+                            text <=> Dialog.draft-date;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
                     // A refusal raised by THIS form (Rust): inline, next to the fields, the text kept.
                     if Dialog.field-error != "": StatusBand {
                         icon: "⚠";
@@ -433,7 +520,7 @@ export component ModalDialog inherits Rectangle {
                         spacing: Tokens.space-8;
                         ActionButton {
                             label: @tr("Annuler");
-                            clicked => { Dialog.close(); }
+                            clicked => { root.cancel(); }
                         }
                         ActionButton {
                             label: @tr("Enregistrer");

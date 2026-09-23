@@ -8,10 +8,12 @@
 // Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
 import { Tokens } from "../tokens.slint";
-import { Labels, Studies, StudyRow, Confront } from "../state.slint";
+import { Dialog, Labels, Prefs, Studies, StudyRow, Confront } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
+import { PanelCard } from "../components/panel_card.slint";
+import { StatusBand } from "../components/status_band.slint";
 import { StudyScreen } from "study_screen.slint";
 
 // One list row: ticker + date + status, openable by click or keyboard (Enter/Space). Default
@@ -215,18 +217,6 @@ export component DashboardScreen inherits Rectangle {
         viewport-height: content.preferred-height;
 
         content := VerticalLayout {
-            // One submit path shared by the Créer button and the Enter key in either field. Declared
-            // here (not at component root) so it can reach the field ids, which live in this
-            // conditional branch. Clear the fields only when a study was actually written — a
-            // recoverable refusal keeps the user's input so they can fix it without retyping.
-            function submit-create() {
-                if (Studies.create-study(ticker.text, currency.text)) {
-                    ticker.text = "";
-                    currency.text = "";
-                    ticker.focus();
-                }
-            }
-
             alignment: start;
             padding: Tokens.space-24;
             spacing: Tokens.space-16;
@@ -238,81 +228,31 @@ export component DashboardScreen inherits Rectangle {
                 font-weight: Tokens.weight-semibold;
             }
 
-            // ── Create a study ──
+            // ── The UX pass (2026-09-23): one titled card; the create form is a Dialog form; the
+            //    2.12 archive/delete prompt is a Dialog confirm (Rust parks it); a refusal is
+            //    acknowledged in the Dialog; the notice slot keeps outcomes and startup states. ──
+            PanelCard {
+                title: @tr("Études");
+                subtitle: @tr("Une étude par titre, dans la devise de ses chiffres ; la liste s'ouvre d'un clic sur le symbole.");
+
             HorizontalLayout {
                 alignment: start;
                 spacing: Tokens.space-8;
-
-                ticker := TextField {
-                    placeholder: @tr("Symbole (p. ex. NESN)");
-                    width: 220px;
-                    accepted => {
-                        content.submit-create();
-                    }
-                }
-                currency := TextField {
-                    placeholder: @tr("Devise (p. ex. CHF)");
-                    width: 140px;
-                    accepted => {
-                        content.submit-create();
-                    }
-                }
-                create := ActionButton {
-                    label: @tr("Créer l'étude");
+                ActionButton {
+                    label: @tr("Créer une étude…");
                     enabled: !Studies.read-only;
                     clicked => {
-                        content.submit-create();
+                        Dialog.form("study-create", @tr("Créer une étude"),
+                            @tr("Le symbole est celui du fournisseur de données (p. ex. NESN.SW) ; la devise est celle dans laquelle les chiffres du titre sont publiés."),
+                            "", "");
+                        Dialog.draft-currency = Prefs.reference-currency;
                     }
                 }
             }
 
-            // ── Neutral banner (errors / read-only / startup notices) ──
-            if Studies.notice != "": Rectangle {
-                background: Tokens.surface;
-                border-radius: Tokens.radius;
-                border-width: Tokens.border;
-                border-color: Tokens.separator;
-
-                HorizontalLayout {
-                    padding: Tokens.space-12;
-                    Text {
-                        text: Studies.notice;
-                        color: Tokens.text-mid;
-                        font-size: Tokens.font-caption;
-                        wrap: word-wrap;
-                    }
-                }
-            }
-
-            // ── Story 2.12 — archive/delete confirmation banner (mirrors the §-screen unlock overlay;
-            //    a SEPARATE channel). Fact-stating, NO colour spent; the delete confirm is labeled as
-            //    an irreversible removal. Annuler mutates nothing. ──
-            if Studies.study-action-confirm-visible: Rectangle {
-                background: Tokens.surface;
-                border-width: Tokens.focus-border;
-                border-color: Tokens.focus;
-                border-radius: Tokens.radius;
-
-                HorizontalLayout {
-                    padding: Tokens.space-12;
-                    spacing: Tokens.space-16;
-                    Text {
-                        text: Studies.study-action-message;
-                        color: Tokens.text-high;
-                        font-size: Tokens.font-body;
-                        vertical-alignment: center;
-                        wrap: word-wrap;
-                        horizontal-stretch: 1;
-                    }
-                    ActionButton {
-                        label: Studies.study-action-destructive ? @tr("Supprimer définitivement") : @tr("Confirmer");
-                        clicked => { Studies.confirm-study-action(); }
-                    }
-                    ActionButton {
-                        label: @tr("Annuler");
-                        clicked => { Studies.cancel-study-action(); }
-                    }
-                }
+            if Studies.notice != "": StatusBand {
+                icon: "◦";
+                text: Studies.notice;
             }
 
             // ── Story 2.12 — search / sort / filter controls. Shown whenever the journal holds ANY
@@ -390,7 +330,7 @@ export component DashboardScreen inherits Rectangle {
                     font-weight: Tokens.weight-semibold;
                 }
                 Text {
-                    text: @tr("Créez votre première étude avec le champ ci-dessus, ou explorez l'étude de démonstration.");
+                    text: @tr("« Créer une étude… » en commence une, ou explorez l'étude de démonstration.");
                     color: Tokens.text-mid;
                     font-size: Tokens.font-body;
                     wrap: word-wrap;
@@ -436,6 +376,8 @@ export component DashboardScreen inherits Rectangle {
                         Confront.request(studyrow.id);
                     }
                 }
+            }
+
             }
 
             // ── Story 5.2 (FR59): import a study from a portable export file. The native picker runs

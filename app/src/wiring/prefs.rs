@@ -185,8 +185,8 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 } else if config::is_valid_trailing_stop_pct(value) {
                     Some(value.to_string())
                 } else {
-                    ui.global::<Prefs>()
-                        .set_risk_settings_status(crate::state::MSG_TRAILING_STOP_INVALID.into());
+                    ui.global::<Prefs>().set_risk_settings_status("".into());
+                    crate::wiring::dialog::refuse(&ui, crate::state::MSG_TRAILING_STOP_INVALID);
                     return;
                 };
                 config.borrow_mut().default_trailing_stop_pct = stored;
@@ -217,8 +217,8 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 } else if config::is_valid_withholding_rate_pct(value) {
                     Some(value.to_string())
                 } else {
-                    ui.global::<Prefs>()
-                        .set_risk_settings_status(crate::state::MSG_WITHHOLDING_INVALID.into());
+                    ui.global::<Prefs>().set_risk_settings_status("".into());
+                    crate::wiring::dialog::refuse(&ui, crate::state::MSG_WITHHOLDING_INVALID);
                     return;
                 };
                 config.borrow_mut().withholding_rate_pct = stored;
@@ -248,8 +248,8 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 } else if config::is_valid_trailing_stop_pct(value) {
                     Some(value.to_string())
                 } else {
-                    ui.global::<Prefs>()
-                        .set_risk_settings_status(crate::state::MSG_CONCENTRATION_INVALID.into());
+                    ui.global::<Prefs>().set_risk_settings_status("".into());
+                    crate::wiring::dialog::refuse(&ui, crate::state::MSG_CONCENTRATION_INVALID);
                     return;
                 };
                 config.borrow_mut().concentration_threshold_pct = stored;
@@ -280,7 +280,8 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
             move |small_max, medium_max, target_small, target_medium, target_large| {
                 let ui = ui_weak.unwrap();
                 let set_status = |msg: String| {
-                    ui.global::<Prefs>().set_risk_settings_status(msg.into());
+                    ui.global::<Prefs>().set_risk_settings_status("".into());
+                    crate::wiring::dialog::refuse(&ui, &msg);
                 };
                 // "" → None (that field's pinned default); a non-empty field must validate. Issue #96:
                 // on a bad value, record the FIRST offending field's label so the notice names it.

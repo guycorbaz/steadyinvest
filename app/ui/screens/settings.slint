@@ -4,7 +4,7 @@
 // swap and render in the numeric font, digits stacked to show tabular figures.
 
 import { Tokens } from "../tokens.slint";
-import { Fx, Holdings, Labels, Prefs, Verify, RecentJournalRow } from "../state.slint";
+import { Dialog, Fx, Holdings, Labels, Prefs, Verify, RecentJournalRow } from "../state.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { TextField } from "../components/text_field.slint";
@@ -368,31 +368,8 @@ export component SettingsScreen inherits Rectangle {
                     }
                 }
 
-                // Issue #65 — arbitration banner: an OLDER same-journal file is a version
-                // regression; it is stated and explicitly confirmed, never merged silently.
-                if Prefs.import-confirm != "": VerticalLayout {
-                    spacing: Tokens.space-8;
-
-                    Text {
-                        text: Prefs.import-confirm;
-                        color: Tokens.text-high;
-                        font-size: Tokens.font-caption;
-                        wrap: word-wrap;
-                    }
-                    HorizontalLayout {
-                        alignment: start;
-                        spacing: Tokens.space-8;
-
-                        ActionButton {
-                            label: @tr("Confirmer l'import");
-                            clicked => { Prefs.confirm-import(); }
-                        }
-                        ActionButton {
-                            label: @tr("Annuler");
-                            clicked => { Prefs.cancel-import(); }
-                        }
-                    }
-                }
+                // Issue #65 — the arbitration prompt for an OLDER same-journal file is a Dialog confirm
+                // (the UX pass): the version regression is stated and explicitly confirmed, never merged silently.
 
                 if Prefs.journal-status != "": Text {
                     text: Prefs.journal-status;
@@ -434,31 +411,8 @@ export component SettingsScreen inherits Rectangle {
                     }
                 }
 
-                // Confirm banner — revealed only while a restore is parked (the backup's identity +
-                // version + stale/foreign warning). Confirm replaces the live journal; cancel discards.
-                if Prefs.restore-confirm != "": VerticalLayout {
-                    spacing: Tokens.space-8;
-
-                    Text {
-                        text: Prefs.restore-confirm;
-                        color: Tokens.text-high;
-                        font-size: Tokens.font-caption;
-                        wrap: word-wrap;
-                    }
-                    HorizontalLayout {
-                        alignment: start;
-                        spacing: Tokens.space-8;
-
-                        ActionButton {
-                            label: @tr("Confirmer la restauration");
-                            clicked => { Prefs.confirm-restore(); }
-                        }
-                        ActionButton {
-                            label: @tr("Annuler");
-                            clicked => { Prefs.cancel-restore(); }
-                        }
-                    }
-                }
+                // The parked restore's prompt (identity + version + stale/foreign warning) is a Dialog
+                // confirm (the UX pass): confirm replaces the live dossier; cancel discards.
 
                 if Prefs.restore-status != "": Text {
                     text: Prefs.restore-status;
@@ -732,9 +686,6 @@ export component SettingsScreen inherits Rectangle {
             // NO conversion happens here — consolidation is Story 6.6.
             fx-panel := PanelCard {
                 title: @tr("Taux de change");
-                property <string> draft-base;
-                property <string> draft-rate;
-                property <string> draft-date;
 
                 VerticalLayout {
                     spacing: Tokens.space-8;
@@ -812,34 +763,15 @@ export component SettingsScreen inherits Rectangle {
                             clicked => { Fx.cancel-refresh(); }
                         }
                     }
-                    // Manual entry: base → the reference currency, at a dated rate.
+                    // Manual entry (a dated rate, source « manuel ») — a Dialog form (the UX pass).
                     HorizontalLayout {
-                        spacing: Tokens.space-8;
-                        TextField {
-                            placeholder: @tr("Devise (ex. EUR)");
-                            text <=> fx-panel.draft-base;
-                            width: 140px;
-                        }
-                        TextField {
-                            placeholder: @tr("Taux vers {}", Prefs.reference-currency);
-                            text <=> fx-panel.draft-rate;
-                            width: 180px;
-                        }
-                        TextField {
-                            placeholder: @tr("Date (AAAA-MM-JJ, vide = aujourd'hui)");
-                            text <=> fx-panel.draft-date;
-                            width: 260px;
-                        }
+                        alignment: start;
                         ActionButton {
-                            label: @tr("Enregistrer le taux");
-                            enabled: fx-panel.draft-base != "" && fx-panel.draft-rate != "";
+                            label: @tr("Ajouter un taux…");
                             clicked => {
-                                if (Fx.add-rate(fx-panel.draft-base, fx-panel.draft-rate,
-                                        fx-panel.draft-date)) {
-                                    fx-panel.draft-base = "";
-                                    fx-panel.draft-rate = "";
-                                    fx-panel.draft-date = "";
-                                }
+                                Dialog.form("fx-rate", @tr("Ajouter un taux de change"),
+                                    @tr("Le taux convertit une devise de départ vers la devise de référence, à une date ; la consolidation l'utilise tel quel."),
+                                    "", "");
                             }
                         }
                     }

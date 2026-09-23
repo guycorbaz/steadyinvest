@@ -654,7 +654,7 @@ development_status:
   epic-7: in-progress
   # The UX pass (Guy, 2026-09-23 — issue #208, spec PR #206): entry dialogs, acknowledged refusals,
   # panel cards, status bands. BLOCKS 7.1/7.2. PR 1 = components + Portefeuille; PR 2 = the other screens.
-  7-0-ux-pass-entry-dialogs-refusals-cards: in-progress
+  7-0-ux-pass-entry-dialogs-refusals-cards: review
   7-1-company-comparison: backlog
   7-2-portfolio-health-review: backlog
   7-3-discovery-screening-quick-screen: backlog

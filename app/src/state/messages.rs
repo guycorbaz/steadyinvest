@@ -114,6 +114,10 @@ pub const MSG_REFRESH_UNMATCHED_YEARS: &str =
 pub const MSG_WATCH_NO_STUDY: &str =
     "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études.";
 
+/// Issue #218 (Guy's decision, 2026-09-23): a position exists only for a ticker that has a study,
+/// in that study's currency — raised when no saved study matches the symbol; nothing is written.
+pub const MSG_HOLDING_NO_STUDY: &str = "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études, la position en prendra la devise.";
+
 /// Holdings register copy (Story 4.3, FR36) — fact-stating, posture-gated. Raised when a holding's
 /// quantity or price is not a valid number, or its symbol is empty; nothing is written.
 pub const MSG_HOLDING_INVALID_NUMBER: &str = "La quantité et le prix d'achat doivent être des nombres ; aucune position n'a été enregistrée.";
@@ -597,6 +601,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_CONTRADICTED,
     MSG_REFRESH_UNMATCHED_YEARS,
     MSG_WATCH_NO_STUDY,
+    MSG_HOLDING_NO_STUDY,
     MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
     MSG_UNSTOPPED_EXPOSURE,
