@@ -15,9 +15,11 @@ use std::collections::BTreeMap;
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde_json::Value;
-use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear, SplitEvent};
+use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear};
 
-use crate::adapters::common::{build_client, dec, get_json, reduce_high_low, year_of_date_key};
+use crate::adapters::common::{
+    DatedSplit, build_client, dec, get_json, reduce_high_low_adjusted, year_of_date_key,
+};
 use crate::error::ProviderError;
 use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
 
@@ -69,9 +71,17 @@ impl MarketDataProvider for EodhdProvider {
             "{}/eod/{ticker}?api_token={token}&period=d&fmt=json&order=a",
             self.base_url
         );
+        // Issue #217: the split history lives on its own endpoint (the fundamentals block carries
+        // only the LAST split). It rebases the raw price bars into today's shares — the per-share
+        // fundamentals EODHD serves are already restated.
+        let splits_url = format!(
+            "{}/splits/{ticker}?api_token={token}&fmt=json&from=1900-01-01",
+            self.base_url
+        );
         let fundamentals = get_json(&self.http, &fundamentals_url, ticker).await?;
         let prices = get_json(&self.http, &eod_url, ticker).await?;
-        let financials = map_eodhd(&fundamentals, &prices, ticker)?;
+        let splits = get_json(&self.http, &splits_url, ticker).await?;
+        let financials = map_eodhd(&fundamentals, &prices, &splits, ticker)?;
         // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
         // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
         // Issue #72: the bar carries its session `date`, threaded on for the confront cache key.
@@ -156,11 +166,18 @@ pub fn fx_pair_symbol(base: &str, quote: &str) -> String {
     format!("{base}{quote}.FOREX")
 }
 
-/// PURE: EODHD `/fundamentals` + `/eod` JSON → [`RawFinancials`]. No I/O. Missing fields stay
-/// `None` (never coerced to 0). The caller passes this straight to `core::normalize`.
+/// PURE: EODHD `/fundamentals` + `/eod` + `/splits` JSON → [`RawFinancials`]. No I/O. Missing
+/// fields stay `None` (never coerced to 0). The caller passes this straight to `core::normalize`.
+///
+/// Issue #217 — share splits: EODHD RESTATES its per-share fundamentals (`epsActual`, the balance-
+/// sheet shares behind the derived dividend and book value per share) into today's shares, but
+/// serves the daily price bars RAW. So the split history adjusts the price bars here, and the
+/// returned `splits` stay EMPTY: `normalize` must not rebase the already-restated per-share figures a
+/// second time.
 pub fn map_eodhd(
     fundamentals: &Value,
     prices: &Value,
+    splits: &Value,
     ticker: &str,
 ) -> Result<RawFinancials, ProviderError> {
     let currency = fundamentals
@@ -176,8 +193,10 @@ pub fn map_eodhd(
     let cash_flow = obj(fundamentals.pointer("/Financials/Cash_Flow/yearly"));
     let earnings = obj(fundamentals.pointer("/Earnings/Annual"));
 
-    // Per-year high/low reduced from the daily EOD bars (root array, `"date"`-keyed).
-    let (highs, lows) = reduce_high_low(Some(prices), "date");
+    // Per-year high/low reduced from the daily EOD bars (root array, `"date"`-keyed), each bar
+    // first rebased into today's shares by the splits dated after it (issue #217).
+    let split_history = map_split_history(splits);
+    let (highs, lows) = reduce_high_low_adjusted(Some(prices), "date", &split_history);
 
     // Union of every fiscal year mentioned by any section, ascending.
     let mut years_set: BTreeMap<i32, ()> = BTreeMap::new();
@@ -229,38 +248,48 @@ pub fn map_eodhd(
         })
         .collect();
 
-    let splits = map_splits(fundamentals);
-
     Ok(RawFinancials {
         native_currency: currency,
         years,
-        splits,
+        // Issue #217: the prices are already in today's shares and the per-share fundamentals come
+        // restated — nothing is left for `normalize` to rebase.
+        splits: Vec::new(),
     })
 }
 
-/// `SplitsDividends.Splits` is `{ "YYYY-MM-DD": "num/den" }` (e.g. `"4.000000/1.000000"`).
-fn map_splits(fundamentals: &Value) -> Vec<SplitEvent> {
-    let raw = obj(fundamentals.pointer("/SplitsDividends/Splits"));
+/// The `/splits/{ticker}` body is `[{ "date": "YYYY-MM-DD", "split": "num/den" }]` (e.g.
+/// `"4.000000/1.000000"`), ascending or not — sorted by date here. A malformed entry is dropped
+/// (never mis-applied); a non-array body yields no splits.
+fn map_split_history(body: &Value) -> Vec<DatedSplit> {
     let mut out = Vec::new();
-    for (date_key, v) in raw {
-        let (Some(year), Some(s)) = (year_of_date_key(date_key), v.as_str()) else {
+    let Some(rows) = body.as_array() else {
+        return out;
+    };
+    for row in rows {
+        let (Some(date), Some(ratio)) = (
+            row.get("date").and_then(Value::as_str),
+            row.get("split").and_then(Value::as_str),
+        ) else {
             continue;
         };
-        let mut parts = s.split('/');
+        if year_of_date_key(date).is_none() {
+            continue;
+        }
+        let mut parts = ratio.split('/');
         let num = parts.next().and_then(parse_split_part);
         let den = parts.next().and_then(parse_split_part);
         if let (Some(numerator), Some(denominator)) = (num, den)
             && numerator > 0
             && denominator > 0
         {
-            out.push(SplitEvent {
-                effective_year: year,
+            out.push(DatedSplit {
+                date: date.to_string(),
                 numerator,
                 denominator,
             });
         }
     }
-    out.sort_by_key(|s| s.effective_year);
+    out.sort_by(|a, b| a.date.cmp(&b.date));
     out
 }
 
@@ -409,7 +438,7 @@ mod tests {
                 } },
             }
         });
-        let fin = map_eodhd(&fundamentals, &json!([]), "AAPL.US").expect("maps");
+        let fin = map_eodhd(&fundamentals, &json!([]), &json!([]), "AAPL.US").expect("maps");
         let y = |year: i32| {
             fin.years
                 .iter()
@@ -449,6 +478,58 @@ mod tests {
             Some(Decimal::from_str_exact("0.9312").unwrap())
         );
         assert_eq!(latest_eod_close(&json!([])), None);
+    }
+
+    /// Issue #217: the `/splits` history rebases the RAW price bars into today's shares (the
+    /// pre-split years' highs/lows divide by the compounded ratio); the returned `splits` stay
+    /// empty so `normalize` never re-rebases the provider's already-restated per-share figures.
+    #[test]
+    fn map_eodhd_rebases_price_bars_by_the_split_history_and_passes_no_splits_on() {
+        let fundamentals = json!({
+            "General": { "CurrencyCode": "USD" },
+            "Earnings": { "Annual": {
+                "2020-01-26": { "epsActual": "0.1453" },
+                "2025-01-26": { "epsActual": "2.992" }
+            }}
+        });
+        let prices = json!([
+            { "date": "2020-01-15", "high": "589.07", "low": "180.68", "close": "500" },
+            { "date": "2025-01-15", "high": "212.19", "low": "86.62", "close": "200" }
+        ]);
+        let splits = json!([
+            { "date": "2024-06-10", "split": "10.000000/1.000000" },
+            { "date": "2021-07-20", "split": "4.000000/1.000000" },
+            { "date": "bad", "split": "2/1" }
+        ]);
+        let fin = map_eodhd(&fundamentals, &prices, &splits, "NVDA.US").expect("maps");
+        let y2020 = fin.years.iter().find(|y| y.year == 2020).expect("2020");
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        assert_eq!(
+            y2020.high_price.as_ref().map(|a| a.value),
+            Some(d("14.72675")),
+            "589.07 ÷ 40"
+        );
+        assert_eq!(
+            y2020.low_price.as_ref().map(|a| a.value),
+            Some(d("4.517")),
+            "180.68 ÷ 40"
+        );
+        // The EPS is taken as served (already restated) — never divided again.
+        assert_eq!(y2020.eps.as_ref().map(|a| a.value), Some(d("0.1453")));
+        let y2025 = fin.years.iter().find(|y| y.year == 2025).expect("2025");
+        assert_eq!(
+            y2025.high_price.as_ref().map(|a| a.value),
+            Some(d("212.19")),
+            "post-split: untouched"
+        );
+        assert!(
+            fin.splits.is_empty(),
+            "nothing left for normalize to rebase"
+        );
+        // The malformed row was dropped, the two real ones kept, sorted by date.
+        let history = map_split_history(&splits);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].date, "2021-07-20");
     }
 
     #[test]
