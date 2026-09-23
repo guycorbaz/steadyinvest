@@ -1,0 +1,43 @@
+// StatusBand — a persistent STATE you cannot miss, without spending colour (the UX pass,
+// 2026-09-23). A state describes a situation that exists regardless of the last gesture and lasts
+// while it exists (« taux manquant », « non classé », « aucune étude liée », a threshold murmur);
+// it is never a modal (a refusal is — see ModalDialog). Attention comes from placement (first row of
+// the card it concerns), a full-width surface-alt band with a border, and an ink glyph — never a hue.
+
+import { Tokens } from "../tokens.slint";
+
+export component StatusBand inherits Rectangle {
+    in property <string> text;
+    // The ink glyph: "◦" (a hollow dot — absent / missing / stale), "⚠" (a threshold murmur),
+    // "⊘" (indisponible — a read failure or an unformable figure).
+    in property <string> icon: "◦";
+
+    background: Tokens.surface-alt;
+    border-width: Tokens.border;
+    border-color: Tokens.separator;
+    border-radius: Tokens.radius;
+    height: row.preferred-height;
+
+    row := HorizontalLayout {
+        padding-left: Tokens.space-12;
+        padding-right: Tokens.space-12;
+        padding-top: Tokens.space-8;
+        padding-bottom: Tokens.space-8;
+        spacing: Tokens.space-12;
+
+        Text {
+            text: root.icon;
+            color: Tokens.text-high;
+            font-size: Tokens.font-body;
+            vertical-alignment: top;
+        }
+        Text {
+            text: root.text;
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+}

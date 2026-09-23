@@ -8,6 +8,7 @@ import { Fx, Holdings, Labels, Prefs, Verify, RecentJournalRow } from "../state.
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { TextField } from "../components/text_field.slint";
+import { PanelCard } from "../components/panel_card.slint";
 
 // One legend row (Story 2.13, FR57): the REAL marker beside its neutral meaning, so the legend can
 // never drift from what the cells actually show. The marker is ink only (its own token colour).
@@ -52,28 +53,6 @@ component GlossaryRow inherits VerticalLayout {
     }
 }
 
-component SettingsPanel inherits Rectangle {
-    in property <string> title;
-
-    background: Tokens.surface;
-    border-width: Tokens.border;
-    border-color: Tokens.separator;
-    border-radius: Tokens.radius;
-
-    VerticalLayout {
-        padding: Tokens.space-16;
-        spacing: Tokens.space-12;
-
-        Text {
-            text: root.title;
-            color: Tokens.text-high;
-            font-size: Tokens.font-h3;
-            font-weight: Tokens.weight-semibold;
-        }
-
-        @children
-    }
-}
 
 export component SettingsScreen inherits Rectangle {
     Flickable {
@@ -93,7 +72,7 @@ export component SettingsScreen inherits Rectangle {
 
             // ── Story 5.5 (FR66) — journal location, recent journals, single-instance lock &
             // sync-safety. Native dialogs pick the file/dir; switching is never journal-less. ──
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Emplacement du dossier");
 
                 Text {
@@ -161,7 +140,7 @@ export component SettingsScreen inherits Rectangle {
             // ── Story 3.2 — Fournisseur de données & clé API (FR25/FR63). No wizard: configured
             // as-needed here. The key VALUE never appears on screen — only a "configured" status —
             // and travels one-way into Rust via `key-saved` (NFR-S1). ──
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Fournisseur de données");
 
                 HorizontalLayout {
@@ -359,7 +338,7 @@ export component SettingsScreen inherits Rectangle {
             // ── Story 5.3 (FR60) — export / import the WHOLE journal as a portable, versioned,
             // integrity-checked file. Import goes through the native picker (the `rfd` rail). Export
             // writes to the OS data dir's exports/ folder; import verifies + applies atomically. ──
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Dossier complet");
 
                 Text {
@@ -425,7 +404,7 @@ export component SettingsScreen inherits Rectangle {
 
             // ── Story 5.4 (FR61) — backup / restore the raw .db. Validation runs BEFORE any overwrite
             // and a stale/foreign restore is gated behind the confirm banel — never applied silently. ──
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Sauvegarde & restauration");
 
                 Text {
@@ -489,7 +468,7 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Thème");
 
                 HorizontalLayout {
@@ -509,7 +488,7 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Vocabulaire de la méthode");
 
                 HorizontalLayout {
@@ -538,7 +517,7 @@ export component SettingsScreen inherits Rectangle {
 
             // Story 4.3 (FR63) — the single global reference currency the portfolio is read in. A
             // label only (no FX conversion in Epic 4); the open set is covered by quick picks.
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Devise de référence");
 
                 HorizontalLayout {
@@ -558,7 +537,7 @@ export component SettingsScreen inherits Rectangle {
 
             // Story 4.5 (FR42/FR63) — the default trailing-stop percentage the per-holding set-stop
             // control pre-fills. A threshold, not advice; empty = no default.
-            stop-panel := SettingsPanel {
+            stop-panel := PanelCard {
                 title: @tr("Seuil suiveur par défaut");
                 property <string> draft: Prefs.default-trailing-stop-pct;
 
@@ -595,7 +574,7 @@ export component SettingsScreen inherits Rectangle {
 
             // Story 6.4 (FR41) — the default dividend withholding rate the « Retenue » field
             // auto-computes with (Appendix A; CH impôt anticipé = 35). A fact, not advice.
-            withholding-panel := SettingsPanel {
+            withholding-panel := PanelCard {
                 title: @tr("Retenue à la source par défaut (dividendes)");
                 property <string> draft: Prefs.withholding-rate-pct;
 
@@ -625,7 +604,7 @@ export component SettingsScreen inherits Rectangle {
             // table (change-request): boundaries are compared against study sales CONVERTED to
             // the reference currency, in the same unit as entered in studies; targets are the
             // user's anchors (they need not sum to 100). Facts and thresholds — never advice.
-            size-panel := SettingsPanel {
+            size-panel := PanelCard {
                 title: @tr("Concentration et diversification par taille");
                 property <string> draft-threshold: Prefs.concentration-threshold-pct;
                 property <string> draft-small-max: Prefs.size-small-max;
@@ -751,7 +730,7 @@ export component SettingsScreen inherits Rectangle {
             // Story 6.5 (FR28) — dated, source-aware exchange rates: the stored list, the
             // user-initiated provider refresh (FR65), and manual entry (source « manuel »).
             // NO conversion happens here — consolidation is Story 6.6.
-            fx-panel := SettingsPanel {
+            fx-panel := PanelCard {
                 title: @tr("Taux de change");
                 property <string> draft-base;
                 property <string> draft-rate;
@@ -867,7 +846,7 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Format des nombres");
 
                 HorizontalLayout {
@@ -914,7 +893,7 @@ export component SettingsScreen inherits Rectangle {
             }
 
             // ── Story 2.13 — Légende des marqueurs (FR57): the same markers the cells/verdict show. ──
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Légende des marqueurs");
 
                 LegendRow {
@@ -958,7 +937,7 @@ export component SettingsScreen inherits Rectangle {
             }
 
             // ── Story 2.13 — Glossaire (FR62): neutral definitions of the key SSG terms. ──
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Glossaire");
 
                 GlossaryRow {
@@ -996,7 +975,7 @@ export component SettingsScreen inherits Rectangle {
             }
 
             // ── Story 2.13 — Vérifier le moteur (FR9): replay the bundled golden studies on demand. ──
-            SettingsPanel {
+            PanelCard {
                 title: @tr("Vérifier le moteur");
 
                 Text {

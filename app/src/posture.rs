@@ -183,6 +183,9 @@ mod tests {
         "△",
         // zone_bar / verdict: the em-dash "no value" marker
         "—",
+        // modal_dialog: the variant glyphs — a refusal to acknowledge, a form to fill
+        "⚠",
+        "✎",
         // single-space and punctuation-only separators (no prose, no verb)
         " ",
         " · ",
@@ -654,9 +657,17 @@ mod tests {
         // register's « Secteur : {} » caption: +2 = 480. Issue #98 (PR 3) adds the six sector
         // exposure lines on the candidates panel (non-renseigné per candidate, missing-rate,
         // flagged + plain share, indisponible, the panel-level blind-spot line): +6 = 486.
-        // Floor strict.
+        // The UX pass (2026-09-23, Portefeuille first): the ModalDialog component (its default
+        // « Action refusée » title, Compris/Annuler/Enregistrer, every labelled field + placeholder
+        // of the position / buy / sell / dividend / stop / portfolio forms, the study-lookup
+        // captions) and the carded Portefeuille screen (card titles + subtitles, the dialog
+        // openers' titles and explanatory sentences, the « Aucune étude liée » cause bands, the
+        // all-unclassified band, the …-suffixed action labels) replace the five-placeholder ledger
+        // row, the inline add/edit form, the trailing-stop field and the inline ledger-delete
+        // confirm. The running tally above had drifted below what the scan actually finds, so the
+        // floor is RE-BASED on the measured total after this pass: 594. Floor strict.
         assert!(
-            total >= 486,
+            total >= 594,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

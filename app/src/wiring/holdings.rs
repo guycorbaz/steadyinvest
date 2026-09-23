@@ -95,6 +95,19 @@ pub(crate) fn refresh_holdings(
                 Ok(found) => (found, false),
                 Err(_) => (None, true),
             };
+            // The UX pass: when nothing matched ticker+currency, name a same-ticker study in
+            // ANOTHER currency — « Aucune étude liée » then states its cause (the CHF-vs-USD
+            // trap of the on-display walk). Absence-blind lookup on purpose: a read failure is
+            // already `study_unavailable`, and this fact is a hint, never a claim.
+            let study_other_currency = if study.is_none() && !study_unavailable {
+                state
+                    .study_id_for_ticker(&h.security_ticker)
+                    .and_then(|id| state.get_study(id))
+                    .map(|s| s.native_currency.to_uppercase())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
             let f = freshness
                 .get(&h.security_ticker.to_uppercase())
                 .cloned()
@@ -166,6 +179,7 @@ pub(crate) fn refresh_holdings(
                 linked: study.is_some(),
                 study_unavailable,
                 study_link: study_link.into(),
+                study_other_currency: study_other_currency.into(),
                 zone: zone.into(),
                 // Issue #48 (FR35): the below-band neutral fact — mutually exclusive with a
                 // defined zone (the §4 zone is undefined outside the band).
@@ -598,10 +612,6 @@ pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uui
     let holdings = ui.global::<Holdings>();
     holdings.set_ledger_rows(ModelRc::new(VecModel::from(rows)));
     holdings.set_ledger_holding_id(holding_id.to_string().into());
-    // Issue #86: any pending delete-confirm belongs to the previous view of the ledger — clear it on
-    // (re)open so the overlay never lingers over a different holding / after the row it targeted is gone.
-    holdings.set_ledger_delete_confirm_visible(false);
-    holdings.set_ledger_delete_pending_id(SharedString::new());
 }
 
 /// Re-sync the ledger panel after a mutation (2026-07-02 review): re-push the rows while the
@@ -625,7 +635,9 @@ pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_i
     }
 }
 
-/// Surface a holdings write's outcome (neutral notice on refusal) and re-render the register.
+/// Surface a holdings write's outcome and re-render the register. A REFUSAL is routed to the modal
+/// dialog (the UX pass — acknowledged, or inline in the open form); a written result clears the
+/// outcome slot (its own success notice, when any, was set by the caller).
 fn apply_holdings_result(
     ui: &MainWindow,
     state: &JournalState,
@@ -637,7 +649,7 @@ fn apply_holdings_result(
     let holdings = ui.global::<Holdings>();
     match result {
         Ok(()) => holdings.set_notice(SharedString::new()),
-        Err(message) => holdings.set_notice(message.into()),
+        Err(message) => crate::wiring::dialog::refuse(ui, &message),
     }
     refresh_holdings(ui, state, freshness, dismissed, format);
 }
@@ -735,7 +747,9 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             let on_change = on_portfolio_change.clone();
             h.on_add_portfolio(move |name| {
                 let result = journal_state.borrow_mut().add_portfolio(&name).map(|_| ());
+                let written = result.is_ok();
                 on_change(result);
+                written
             });
         }
         {
@@ -746,7 +760,9 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     Ok(id) => journal_state.borrow_mut().rename_portfolio(id, &name),
                     Err(_) => Ok(()),
                 };
+                let written = result.is_ok();
                 on_change(result);
+                written
             });
         }
         {
@@ -818,6 +834,34 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             );
         });
     }
+    // ── The UX pass: the add-position dialog's read-only lookups — the study of that ticker (any
+    //    currency): its native currency seeds the picker (so a USD study never gets a CHF position
+    //    by reflex — the on-display walk's trap) and its company name is shown beside the symbol. ──
+    {
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Holdings>()
+            .on_study_currency_for(move |ticker| {
+                let state = journal_state.borrow();
+                state
+                    .study_id_for_ticker(ticker.trim())
+                    .and_then(|id| state.get_study(id))
+                    .map(|s| s.native_currency.to_uppercase())
+                    .unwrap_or_default()
+                    .into()
+            });
+    }
+    {
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Holdings>().on_study_name_for(move |ticker| {
+            let state = journal_state.borrow();
+            state
+                .study_id_for_ticker(ticker.trim())
+                .and_then(|id| state.get_study(id))
+                .and_then(|s| s.company_name)
+                .unwrap_or_default()
+                .into()
+        });
+    }
     // ── Story 4.4 (FR40) — manual price refresh for every linked holding, off the UI thread. One
     // job per UNIQUE linked ticker (reusing the Epic-3 worker); holdings with no matching study are
     // skipped. Only ever user-initiated (FR65 — no background polling). Outcomes route to the
@@ -852,14 +896,14 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     .collect()
             };
             if jobs.is_empty() {
-                holdings.set_notice(state::MSG_HOLDINGS_REFRESH_NONE.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_HOLDINGS_REFRESH_NONE);
                 return;
             }
             // Story 6.9 (FR26): the PRICE fallback chain, resolved once and shared by every
             // per-ticker job of this batch (the worker paces them within the declared limits).
             let primary = config.borrow().preferred_provider;
             if primary == ProviderChoice::None {
-                holdings.set_notice(state::MSG_PROVIDER_NONE.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_PROVIDER_NONE);
                 return;
             }
             let chain = crate::wiring::fetch::resolve_chain(
@@ -867,7 +911,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 steadyinvest_ingestion::FieldKind::Price,
             );
             if chain.is_empty() {
-                holdings.set_notice(state::MSG_PROVIDER_NO_KEY.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_PROVIDER_NO_KEY);
                 return;
             }
             // Issue #100: a fresh batch — clear any leftover cancel flag BEFORE sending jobs (the
@@ -923,11 +967,12 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             .on_set_trailing_stop(move |id, pct| {
                 let ui = ui_weak.unwrap();
                 let Ok(id) = Uuid::parse_str(&id) else {
-                    return;
+                    return false;
                 };
                 let result = journal_state
                     .borrow_mut()
                     .set_holding_trailing_stop(id, &pct);
+                let written = result.is_ok();
                 let format = config.borrow().number_format;
                 apply_holdings_result(
                     &ui,
@@ -937,6 +982,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     &holding_dismissed.borrow(),
                     format,
                 );
+                written
             });
     }
     // ── Story 4.7 (FR46/FR47) — record a sell on a neutral trigger / dismiss a trigger's panel. The
@@ -951,7 +997,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             .on_sell_holding(move |id, quantity, rationale| {
                 let ui = ui_weak.unwrap();
                 let Ok(uuid) = Uuid::parse_str(&id) else {
-                    return;
+                    return false;
                 };
                 // Story 6.8 (FR48): capture the ticker BEFORE the sell — a whole-position sell
                 // retires the row, and the candidates panel is headed by the sold ticker.
@@ -1014,6 +1060,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                         true,
                     );
                 }
+                sold
             });
     }
     {
@@ -1057,9 +1104,6 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             let holdings = ui.global::<Holdings>();
             holdings.set_ledger_rows(ModelRc::new(VecModel::from(Vec::<LedgerRow>::new())));
             holdings.set_ledger_holding_id(SharedString::new());
-            // Issue #86: close the panel → drop any pending delete-confirm too.
-            holdings.set_ledger_delete_confirm_visible(false);
-            holdings.set_ledger_delete_pending_id(SharedString::new());
         });
     }
     {

@@ -1,0 +1,37 @@
+// PanelCard — the titled card every screen groups its content in (the UX pass, 2026-09-23:
+// « Réglages reads fine because each subject sits in a titled card; Portefeuille was a flat column
+// of same-size lines »). Promoted from the Réglages-local `SettingsPanel` (Story 2.13) unchanged in
+// look: surface + separator border + radius, a semibold h3 title, an optional caption subtitle, then
+// the children. Ink only — a card carries no hue (colour budget).
+
+import { Tokens } from "../tokens.slint";
+
+export component PanelCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+
+    background: Tokens.surface;
+    border-width: Tokens.border;
+    border-color: Tokens.separator;
+    border-radius: Tokens.radius;
+
+    VerticalLayout {
+        padding: Tokens.space-16;
+        spacing: Tokens.space-12;
+
+        Text {
+            text: root.title;
+            color: Tokens.text-high;
+            font-size: Tokens.font-h3;
+            font-weight: Tokens.weight-semibold;
+        }
+        if root.subtitle != "": Text {
+            text: root.subtitle;
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            wrap: word-wrap;
+        }
+
+        @children
+    }
+}

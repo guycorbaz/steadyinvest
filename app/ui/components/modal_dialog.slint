@@ -1,0 +1,448 @@
+// ModalDialog — the ONE in-window overlay of the UX pass (2026-09-23), in three variants driven by
+// the `Dialog` global:
+//   notice  — a REFUSAL the user must acknowledge (« Compris »): the message names its cause.
+//   confirm — a destructive gesture needs an explicit yes (« Annuler » / the verb).
+//   form    — every data entry/edit: a title, ONE explanatory sentence, labelled fields (a label
+//             ABOVE each field, never a placeholder as the only label), a refusal raised by the form
+//             kept inline next to the fields (the user's text intact), « Annuler » / « Enregistrer ».
+// Built on the confront-overlay pattern (scrim, centred card, click outside = cancel). Keyboard:
+// Esc cancels, Enter in a field validates, the first field is focused on open; a destructive verb
+// never fires on a plain Enter. Ink only — attention comes from the scrim, the placement and a
+// glyph, never a hue (colour budget). Every user-visible string is French inside `@tr()`.
+//
+// The form's submit calls the SAME `Holdings` callbacks as before the pass (same arguments) and
+// closes only on a written result — the verify-before-write logic has one code path.
+
+import { Tokens } from "../tokens.slint";
+import { Dialog, Holdings, Prefs } from "../state.slint";
+import { ActionButton } from "action_button.slint";
+import { TextField } from "text_field.slint";
+import { ChoiceChip } from "choice_chip.slint";
+import { StatusBand } from "status_band.slint";
+
+component LabeledField inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in-out property <string> text <=> field.text;
+    // The form's first field takes the focus on open — deferred by a tick (see ActionButton).
+    in property <bool> autofocus: false;
+    callback accepted();
+    callback edited();
+
+    spacing: Tokens.space-4;
+    Timer {
+        interval: 30ms;
+        running: root.autofocus;
+        triggered => {
+            self.running = false;
+            field.focus();
+        }
+    }
+    Text {
+        text: root.label;
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+    }
+    field := TextField {
+        placeholder: root.placeholder;
+        accepted => { root.accepted(); }
+        edited => { root.edited(); }
+    }
+}
+
+export component ModalDialog inherits Rectangle {
+    // A dimming scrim over the whole window; a click outside the card cancels.
+    background: Tokens.bg.with-alpha(0.72);
+
+    // ── The form's validity (the button is disabled, and Enter is a no-op, until the required
+    //    fields are typed — the walk's « nothing happens » had a SILENT disabled button; here the
+    //    labels say what is required). ──
+    function can-submit() -> bool {
+        if (Holdings.read-only) { return false; }
+        if (Dialog.form-id == "holding-add" || Dialog.form-id == "holding-edit") {
+            return Dialog.draft-ticker != "";
+        }
+        if (Dialog.form-id == "buy" || Dialog.form-id == "sell" || Dialog.form-id == "txn-edit") {
+            return Dialog.draft-quantity != "" && Dialog.draft-price != "";
+        }
+        if (Dialog.form-id == "dividend") { return Dialog.draft-price != ""; }
+        if (Dialog.form-id == "stop") { return Dialog.draft-price != ""; }
+        if (Dialog.form-id == "portfolio-add" || Dialog.form-id == "portfolio-rename") {
+            return Dialog.draft-name != "";
+        }
+        // sell-trigger: an empty quantity sells the whole position (the 4.7 flow).
+        return true;
+    }
+
+    // ── Submit: the pre-pass callbacks, unchanged; close ONLY on a written result (a refusal
+    //    lands in `Dialog.field-error` through Rust and the form stays open with the text). ──
+    function submit() {
+        if (!root.can-submit()) { return; }
+        if (Dialog.form-id == "holding-add") {
+            if (Holdings.add-holding(Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-currency, Dialog.draft-sector)) { Dialog.close(); }
+        } else if (Dialog.form-id == "holding-edit") {
+            if (Holdings.edit-holding(Dialog.target-id, Dialog.draft-ticker, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-currency, Dialog.draft-sector)) { Dialog.close(); }
+        } else if (Dialog.form-id == "buy") {
+            if (Holdings.record-buy(Dialog.target-id, Dialog.draft-date, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-fees, Dialog.draft-rationale)) { Dialog.close(); }
+        } else if (Dialog.form-id == "sell") {
+            if (Holdings.record-sell(Dialog.target-id, Dialog.draft-date, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-fees, Dialog.draft-rationale)) { Dialog.close(); }
+        } else if (Dialog.form-id == "dividend") {
+            if (Holdings.record-dividend(Dialog.target-id, Dialog.draft-date, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-fees, Dialog.draft-rationale)) { Dialog.close(); }
+        } else if (Dialog.form-id == "txn-edit") {
+            if (Holdings.update-transaction(Dialog.target-id, Dialog.draft-date, Dialog.draft-quantity, Dialog.draft-price, Dialog.draft-fees, Dialog.draft-rationale)) { Dialog.close(); }
+        } else if (Dialog.form-id == "sell-trigger") {
+            if (Holdings.sell-holding(Dialog.target-id, Dialog.draft-quantity, Dialog.draft-rationale)) { Dialog.close(); }
+        } else if (Dialog.form-id == "stop") {
+            if (Holdings.set-trailing-stop(Dialog.target-id, Dialog.draft-price)) { Dialog.close(); }
+        } else if (Dialog.form-id == "portfolio-add") {
+            if (Holdings.add-portfolio(Dialog.draft-name)) { Dialog.close(); }
+        } else if (Dialog.form-id == "portfolio-rename") {
+            if (Holdings.rename-portfolio(Dialog.target-id, Dialog.draft-name)) { Dialog.close(); }
+        }
+    }
+
+    // ── Confirm: close FIRST, then act — a guard's refusal (raised by Rust) then opens its own
+    //    notice on top of nothing, never inside the confirm it answers. ──
+    function run-confirm() {
+        if (Dialog.action == "delete-transaction") {
+            Dialog.close();
+            Holdings.delete-transaction(Dialog.target-id);
+        } else if (Dialog.action == "delete-portfolio") {
+            Dialog.close();
+            Holdings.delete-portfolio(Dialog.target-id);
+        } else if (Dialog.action == "remove-holding") {
+            Dialog.close();
+            Holdings.remove-holding(Dialog.target-id);
+        } else {
+            Dialog.close();
+        }
+    }
+
+    // Esc cancels from anywhere inside the card (a field that does not handle Esc lets it
+    // propagate up to this scope).
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                Dialog.close();
+                return accept;
+            }
+            reject
+        }
+
+        scrim := TouchArea {
+            clicked => { Dialog.close(); }
+        }
+
+        // The card — its own TouchArea swallows clicks so they never reach the scrim behind it.
+        Rectangle {
+            width: min(720px, parent.width - 2 * Tokens.space-32);
+            height: min(card.preferred-height, parent.height - 2 * Tokens.space-16);
+            background: Tokens.surface;
+            border-width: Tokens.border;
+            border-color: Tokens.separator;
+            border-radius: Tokens.radius;
+
+            TouchArea { /* swallow clicks inside the card */ }
+
+            card := VerticalLayout {
+                padding: Tokens.space-24;
+                spacing: Tokens.space-16;
+
+                // ── Title row: a glyph names the variant (ink), then the title. ──
+                HorizontalLayout {
+                    spacing: Tokens.space-12;
+                    Text {
+                        text: Dialog.kind == "notice" ? "⚠" : Dialog.kind == "confirm" ? "?" : "✎";
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-h2;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: Dialog.title != "" ? Dialog.title
+                            : Dialog.kind == "notice" ? @tr("Action refusée") : "";
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-h2;
+                        font-weight: Tokens.weight-semibold;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+                if Dialog.body != "": Text {
+                    text: Dialog.body;
+                    color: Dialog.kind == "form" ? Tokens.text-mid : Tokens.text-high;
+                    font-size: Dialog.kind == "form" ? Tokens.font-caption : Tokens.font-body;
+                    wrap: word-wrap;
+                }
+                if Dialog.kind == "form" && Dialog.context != "": Text {
+                    text: Dialog.context;
+                    color: Tokens.text-mid;
+                    font-family: Tokens.font-numeric;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+
+                // ── notice ──
+                if Dialog.kind == "notice": HorizontalLayout {
+                    alignment: end;
+                    ActionButton {
+                        label: @tr("Compris");
+                        clicked => { Dialog.close(); }
+                        autofocus: true;
+                    }
+                }
+
+                // ── confirm — « Annuler » is the focused default; the verb needs a deliberate move. ──
+                if Dialog.kind == "confirm": HorizontalLayout {
+                    alignment: end;
+                    spacing: Tokens.space-8;
+                    ActionButton {
+                        label: @tr("Annuler");
+                        clicked => { Dialog.close(); }
+                        autofocus: true;
+                    }
+                    ActionButton {
+                        label: Dialog.verb;
+                        enabled: !Holdings.read-only;
+                        clicked => { root.run-confirm(); }
+                    }
+                }
+
+                // ── form ──
+                if Dialog.kind == "form": VerticalLayout {
+                    spacing: Tokens.space-12;
+
+                    // Position (add / edit): symbol → study lookup as you type; the currency picker
+                    // defaults to the matched study's native currency (the CHF-vs-USD trap).
+                    if Dialog.form-id == "holding-add" || Dialog.form-id == "holding-edit": VerticalLayout {
+                        spacing: Tokens.space-12;
+                        symbol := LabeledField {
+                            label: @tr("Symbole");
+                            placeholder: @tr("p. ex. NESN.SW");
+                            text <=> Dialog.draft-ticker;
+                            autofocus: true;
+                            edited => {
+                                if (Dialog.form-id == "holding-add") {
+                                    if (Holdings.study-currency-for(Dialog.draft-ticker) != "") {
+                                        Dialog.draft-currency = Holdings.study-currency-for(Dialog.draft-ticker);
+                                    }
+                                }
+                            }
+                            accepted => { root.submit(); }
+                        }
+                        Text {
+                            text: Dialog.draft-ticker == "" ? ""
+                                : Holdings.study-currency-for(Dialog.draft-ticker) == ""
+                                    ? @tr("Aucune étude pour ce symbole ; la position n'aura ni zone ni prix actuel.")
+                                    : Holdings.study-name-for(Dialog.draft-ticker) != ""
+                                        ? @tr("Étude liée : {} ({})", Holdings.study-name-for(Dialog.draft-ticker), Holdings.study-currency-for(Dialog.draft-ticker))
+                                        : @tr("Étude liée : {} ({})", Dialog.draft-ticker, Holdings.study-currency-for(Dialog.draft-ticker));
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            wrap: word-wrap;
+                        }
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            LabeledField {
+                                label: @tr("Quantité");
+                                placeholder: @tr("Nombre d'actions");
+                                text <=> Dialog.draft-quantity;
+                                accepted => { root.submit(); }
+                            }
+                            LabeledField {
+                                label: @tr("Prix d'achat unitaire");
+                                placeholder: @tr("Prix moyen par action");
+                                text <=> Dialog.draft-price;
+                                accepted => { root.submit(); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: Tokens.space-4;
+                            Text {
+                                text: @tr("Devise de la position (celle de l'étude à lier)");
+                                color: Tokens.text-mid;
+                                font-size: Tokens.font-caption;
+                            }
+                            HorizontalLayout {
+                                spacing: Tokens.space-8;
+                                alignment: start;
+                                for c in Holdings.supported-currencies: ChoiceChip {
+                                    label: c;
+                                    selected: c == Dialog.draft-currency;
+                                    activated => { Dialog.draft-currency = c; }
+                                }
+                            }
+                        }
+                        LabeledField {
+                            label: @tr("Secteur (facultatif — le fournisseur peut le renseigner)");
+                            placeholder: @tr("p. ex. Technology");
+                            text <=> Dialog.draft-sector;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
+                    // Buy / sell / edit a transaction: the amounts are in the holding's own
+                    // currency (FR28), named in `Dialog.context` above — displayed, never chosen.
+                    if Dialog.form-id == "buy" || Dialog.form-id == "sell" || Dialog.form-id == "txn-edit": VerticalLayout {
+                        spacing: Tokens.space-12;
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            txn-date := LabeledField {
+                                label: @tr("Date (vide = aujourd'hui)");
+                                placeholder: @tr("AAAA-MM-JJ");
+                                text <=> Dialog.draft-date;
+                                autofocus: true;
+                                accepted => { root.submit(); }
+                            }
+                            LabeledField {
+                                label: Dialog.form-id == "sell"
+                                    ? @tr("Quantité vendue (vide = toute la position)") : @tr("Quantité");
+                                placeholder: @tr("Nombre d'actions");
+                                text <=> Dialog.draft-quantity;
+                                accepted => { root.submit(); }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            LabeledField {
+                                label: Dialog.form-id == "buy" ? @tr("Prix unitaire payé")
+                                    : Dialog.form-id == "sell" ? @tr("Prix unitaire obtenu")
+                                    : @tr("Prix unitaire");
+                                placeholder: @tr("Par action");
+                                text <=> Dialog.draft-price;
+                                accepted => { root.submit(); }
+                            }
+                            LabeledField {
+                                label: @tr("Frais (vide = 0)");
+                                placeholder: @tr("Montant total des frais");
+                                text <=> Dialog.draft-fees;
+                                accepted => { root.submit(); }
+                            }
+                        }
+                        LabeledField {
+                            label: @tr("Raison (facultative)");
+                            placeholder: @tr("Ce qui motive l'opération");
+                            text <=> Dialog.draft-rationale;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
+                    // Dividend: shares paid on, GROSS per share, the withholding (empty = the
+                    // Réglages rate, stated in the label — not only in a hint).
+                    if Dialog.form-id == "dividend": VerticalLayout {
+                        spacing: Tokens.space-12;
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            div-date := LabeledField {
+                                label: @tr("Date (vide = aujourd'hui)");
+                                placeholder: @tr("AAAA-MM-JJ");
+                                text <=> Dialog.draft-date;
+                                autofocus: true;
+                                accepted => { root.submit(); }
+                            }
+                            LabeledField {
+                                label: @tr("Actions concernées (vide = toute la position)");
+                                placeholder: @tr("Nombre d'actions");
+                                text <=> Dialog.draft-quantity;
+                                accepted => { root.submit(); }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            LabeledField {
+                                label: @tr("Brut par action");
+                                placeholder: @tr("Dividende avant retenue");
+                                text <=> Dialog.draft-price;
+                                accepted => { root.submit(); }
+                            }
+                            LabeledField {
+                                label: @tr("Retenue à la source (vide = {} %)", Prefs.withholding-rate-pct);
+                                placeholder: @tr("Montant total retenu");
+                                text <=> Dialog.draft-fees;
+                                accepted => { root.submit(); }
+                            }
+                        }
+                        LabeledField {
+                            label: @tr("Raison (facultative)");
+                            placeholder: @tr("Ce qui motive l'opération");
+                            text <=> Dialog.draft-rationale;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
+                    // The trigger-panel sell (Story 4.7 flow): quantity + rationale, at the
+                    // matched study's present price.
+                    if Dialog.form-id == "sell-trigger": VerticalLayout {
+                        spacing: Tokens.space-12;
+                        trig-qty := LabeledField {
+                            label: @tr("Quantité vendue (vide = toute la position)");
+                            placeholder: @tr("Nombre d'actions");
+                            text <=> Dialog.draft-quantity;
+                            autofocus: true;
+                            accepted => { root.submit(); }
+                        }
+                        LabeledField {
+                            label: @tr("Raison (facultative)");
+                            placeholder: @tr("Ce qui motive l'opération");
+                            text <=> Dialog.draft-rationale;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
+                    // The trailing stop: one percentage; « Retirer le seuil » when one is set.
+                    if Dialog.form-id == "stop": VerticalLayout {
+                        spacing: Tokens.space-12;
+                        stop-pct := LabeledField {
+                            label: @tr("Seuil suiveur en % (défaut Réglages : {})", Prefs.default-trailing-stop-pct == "" ? "—" : Prefs.default-trailing-stop-pct);
+                            placeholder: @tr("0–100");
+                            text <=> Dialog.draft-price;
+                            autofocus: true;
+                            accepted => { root.submit(); }
+                        }
+                        if Dialog.flag: HorizontalLayout {
+                            alignment: start;
+                            ActionButton {
+                                label: @tr("Retirer le seuil");
+                                enabled: !Holdings.read-only;
+                                clicked => {
+                                    if (Holdings.set-trailing-stop(Dialog.target-id, "")) { Dialog.close(); }
+                                }
+                            }
+                        }
+                    }
+
+                    // A portfolio's name (add / rename).
+                    if Dialog.form-id == "portfolio-add" || Dialog.form-id == "portfolio-rename": VerticalLayout {
+                        pf-name := LabeledField {
+                            label: @tr("Nom du portefeuille");
+                            placeholder: @tr("p. ex. UBS — compte titres");
+                            text <=> Dialog.draft-name;
+                            autofocus: true;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
+                    // A refusal raised by THIS form (Rust): inline, next to the fields, the text kept.
+                    if Dialog.field-error != "": StatusBand {
+                        icon: "⚠";
+                        text: Dialog.field-error;
+                    }
+
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: Tokens.space-8;
+                        ActionButton {
+                            label: @tr("Annuler");
+                            clicked => { Dialog.close(); }
+                        }
+                        ActionButton {
+                            label: @tr("Enregistrer");
+                            enabled: root.can-submit();
+                            clicked => { root.submit(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

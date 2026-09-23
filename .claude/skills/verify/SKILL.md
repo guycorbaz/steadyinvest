@@ -60,3 +60,10 @@ env -u WAYLAND_DISPLAY DISPLAY=:99 SLINT_BACKEND=winit-software \
 - The live config's `journal_path` may point to a dossier OTHER than the default
   `~/.local/share/steadyinvest/journal.db` — read `~/.config/steadyinvest/config.json` first
   and copy THAT file, or the copy will not show what the user sees.
+- **Give the window X input focus before any keyboard input** — there is no window manager on
+  the Xvfb display, so the app never receives keyboard focus by itself; `xdotool type` / `key`
+  then silently go nowhere and the symptom reads like « the field ignores keystrokes » or « Esc
+  does nothing » (a false app bug, seen 2026-09-23):
+  `xdotool windowfocus --sync $WID; xdotool type --window $WID --delay 40 'NVDA.US'`.
+- A modal overlay's scrim does not stop wheel events: scrolling with a dialog open scrolls the
+  screen behind it (harmless, but do not read it as the dialog moving).

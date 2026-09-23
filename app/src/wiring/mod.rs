@@ -7,6 +7,7 @@
 //! (`persist`); everything else stays with its domain.
 
 pub(crate) mod cells;
+pub(crate) mod dialog;
 pub(crate) mod fetch;
 pub(crate) mod fx;
 pub(crate) mod holdings;
