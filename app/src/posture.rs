@@ -665,9 +665,12 @@ mod tests {
         // all-unclassified band, the …-suffixed action labels) replace the five-placeholder ledger
         // row, the inline add/edit form, the trailing-stop field and the inline ledger-delete
         // confirm. The running tally above had drifted below what the scan actually finds, so the
-        // floor is RE-BASED on the measured total after this pass: 594. Floor strict.
+        // floor is RE-BASED on the measured total after this pass: 594. Its PR 2 (Liste de
+        // suivi card + add-value dialog, the Études card + create-study dialog, the Réglages
+        // FX-rate dialog, the derived confirm titles/verbs for the study action / older import /
+        // restore prompts) measures 612. Floor strict.
         assert!(
-            total >= 594,
+            total >= 612,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

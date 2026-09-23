@@ -1,6 +1,6 @@
 # Story 7.0 — UX pass: entry dialogs, acknowledged refusals, panel cards (Portefeuille first)
 
-Status: in-progress (PR 1 of 2 — shared components + Portefeuille; PR 2 = Liste de suivi, Études list, Réglages)
+Status: review (PR 1 #211 — shared components + Portefeuille; PR 2 — Liste de suivi, Études list, Réglages)
 
 ## Story
 
@@ -59,9 +59,14 @@ by Guy 2026-09-23). Umbrella issue #208. Origin: the on-display walk 2026-09-22/
   the « … » suffix.
 - [x] **Task 4 — Réglages** keeps its look on `PanelCard` (`SettingsPanel` removed).
 - [x] **Task 5 — Gates + headless verification** (see Dev Notes).
-- [ ] **Task 6 — PR 2**: Liste de suivi (add-ticker dialog, cards), Études list (create-study
-  dialog, delete confirm), Réglages (refusals → dialog, manual FX-rate dialog, restore /
-  older-import confirms → Dialog).
+- [x] **Task 6 — PR 2**: Liste de suivi (« Valeurs suivies » card, « Ajouter une valeur… »
+  dialog, the buy-zone summary as a band, `add-watch` reports bool); Études list (one card,
+  « Créer une étude… » dialog with the reference currency prefilled, the 2.12 archive/delete
+  prompt parked by Rust as a Dialog confirm — title/verb derived in the overlay —, the notice
+  slot as a band); Réglages (the older-import and restore prompts as Dialog confirms, the
+  manual FX rate as a dialog, every validation / key / dossier / FX refusal through
+  `dialog::refuse`); `dialog::confirm` for the Rust-parked prompts; the overlay's `cancel()`
+  tells the parking side (`cancel-study-action` / `cancel-import` / `cancel-restore`).
 
 ## Dev Notes
 
@@ -88,3 +93,17 @@ by Guy 2026-09-23). Umbrella issue #208. Origin: the on-display walk 2026-09-22/
   refusal opens as « Action refusée » with the 6.1 message; « Compris » / Esc closes.
 - « Transactions » → « Dividende… » → the labelled form with « Retenue à la source (vide = 35 %) ».
 - Gates: fmt clean, clippy `-D warnings` clean, `cargo test --all` 821 passed.
+
+### Verification PR 2 (2026-09-23, headless, same copy)
+- Liste de suivi: the card; « Ajouter une valeur… » → typing `NVDA.US` + Enter writes the row
+  (« NVDA.US · Aucune étude liée · Lier une étude »).
+- Études: the card; « Créer une étude… » → Symbole + « Devise des chiffres » prefilled CHF;
+  « Archiver » → « Confirmer cette action ? / Archiver l'étude NVDA.US ? … » (Annuler focused).
+- Réglages: threshold `150` + Enregistrer → « Action refusée » with the 6.7 message;
+  « Ajouter un taux… » → the three labelled fields. @tr total measured 612 (floor re-based).
+- Kept on purpose: Réglages fields re-sync to the effective value after a refusal (#88/#93) —
+  the refused value is in the dialog's message, the field shows what is in force. The key-test
+  VERDICTS (« clé refusée », quota, inconclusive) stay a status line: a verdict is an outcome of
+  the test, not a refused write.
+- Pre-existing, not fixed here: at 1 600 px the Études row's five actions overflow the card
+  (the fixed-width columns of #204 need ~1 700 px); Guy's display is wider.

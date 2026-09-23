@@ -915,7 +915,7 @@ export global Watchlist {
     in-out property <int> in-buy-zone-count;
     in-out property <bool> read-only;
     in-out property <string> notice;
-    callback add-watch(string); // ticker
+    callback add-watch(string) -> bool; // ticker → written? (a dialog closes only then)
     callback remove-watch(string); // id
     callback move-watch(string, bool); // id, up?
     callback link-watch(string); // id → link to a same-ticker study

@@ -56,12 +56,12 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
             let reference = config.borrow().reference_currency_or_default();
             let primary = config.borrow().preferred_provider;
             if primary == crate::provider::ProviderChoice::None {
-                fx.set_notice(state::MSG_PROVIDER_NONE.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_PROVIDER_NONE);
                 return;
             }
             let foreign = journal_state.borrow().foreign_currencies_in_use(&reference);
             if foreign.is_empty() {
-                fx.set_notice(state::MSG_FX_NO_PAIRS.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_FX_NO_PAIRS);
                 return;
             }
             // Story 6.9 (FR26): the FX fallback chain, each member with its own key. The stamped
@@ -71,7 +71,7 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 steadyinvest_ingestion::FieldKind::Fx,
             );
             if chain.is_empty() {
-                fx.set_notice(state::MSG_PROVIDER_NO_KEY.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_PROVIDER_NO_KEY);
                 return;
             }
             let pairs: Vec<(String, String)> = foreign
@@ -99,7 +99,7 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 fx.set_refresh_progress(format!("0 / {pair_count}").into()); // issue #100
                 fx.set_notice(state::MSG_FX_REFRESHING.into());
             } else {
-                fx.set_notice(state::MSG_PROVIDER_OFFLINE.into());
+                crate::wiring::dialog::refuse(&ui, state::MSG_PROVIDER_OFFLINE);
             }
         });
     }
@@ -141,7 +141,7 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                         format,
                     );
                 }
-                Err(message) => fx.set_notice(message.into()),
+                Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
             written
         });
@@ -175,7 +175,7 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                         format,
                     );
                 }
-                Err(message) => fx.set_notice(message.into()),
+                Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
         });
     }
