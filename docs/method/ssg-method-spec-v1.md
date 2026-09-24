@@ -52,6 +52,13 @@ Normative details *(absorbed at ssg-1.1.0)*:
   **most recent usable year**.
 - **Estimated low EPS is direct-only:** a low-EPS judgment is not a growth projection; absent ⇒
   **unknown**.
+  *Recorded guidance (2026-09-24, from use — non-normative, the engine is unchanged):* the
+  estimated low EPS is the **downside case** over the horizon — the latest reported EPS, or lower
+  (a recession year), **never a point on the growth trend**. It multiplies the judged average low
+  P/E to give forecast-low option (a), so an over-optimistic low EPS lifts the forecast low above
+  the present price and the study reads « below the band » although the data are right (seen on a
+  fast-growing security: trend-low 18 vs latest EPS 4.09 → forecast low 619 vs price 225). The UI
+  proposes the latest EPS for this field and says so under it.
 - **Projection with growth < −100 %/yr ⇒ unknown** (the growth factor turns negative; no power is
   taken on a negative base).
 - **Quarterly % change with a year-ago value ≤ 0 or absent ⇒ unknown** (a non-positive base has no

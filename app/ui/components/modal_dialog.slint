@@ -18,6 +18,7 @@ import { Dialog, Holdings, Prefs, Studies, Watchlist, Fx } from "../state.slint"
 import { ActionButton } from "action_button.slint";
 import { TextField } from "text_field.slint";
 import { StatusBand } from "status_band.slint";
+import { Dropdown } from "dropdown.slint";
 
 component LabeledField inherits VerticalLayout {
     in property <string> label;
@@ -49,6 +50,26 @@ component LabeledField inherits VerticalLayout {
     }
 }
 
+component LabeledDropdown inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <[string]> options;
+    in-out property <string> value <=> field.value;
+    callback changed(string);
+
+    spacing: Tokens.space-4;
+    Text {
+        text: root.label;
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+    }
+    field := Dropdown {
+        options: root.options;
+        placeholder: root.placeholder;
+        changed(v) => { root.changed(v); }
+    }
+}
+
 export component ModalDialog inherits Rectangle {
     // A dimming scrim over the whole window; a click outside the card cancels.
     background: Tokens.bg.with-alpha(0.72);
@@ -71,7 +92,7 @@ export component ModalDialog inherits Rectangle {
             return Dialog.draft-name != "";
         }
         if (Dialog.form-id == "watch-add") { return Dialog.draft-ticker != ""; }
-        if (Dialog.form-id == "study-create") { return Dialog.draft-ticker != ""; }
+        if (Dialog.form-id == "study-create") { return Dialog.draft-ticker != "" && Dialog.draft-currency != ""; }
         if (Dialog.form-id == "fx-rate") { return Dialog.draft-ticker != "" && Dialog.draft-price != ""; }
         // sell-trigger: an empty quantity sells the whole position (the 4.7 flow).
         return true;
@@ -267,12 +288,15 @@ export component ModalDialog inherits Rectangle {
                     // « Enregistrer » stays disabled until a study matches (the reason is shown).
                     if Dialog.form-id == "holding-add" || Dialog.form-id == "holding-edit": VerticalLayout {
                         spacing: Tokens.space-12;
-                        symbol := LabeledField {
-                            label: @tr("Symbole (celui d'une étude existante)");
-                            placeholder: @tr("p. ex. NESN.SW");
-                            text <=> Dialog.draft-ticker;
-                            autofocus: true;
-                            accepted => { root.submit(); }
+                        LabeledDropdown {
+                            label: @tr("Symbole (une étude existante)");
+                            placeholder: Holdings.study-tickers.length == 0 ? @tr("aucune étude") : @tr("choisir un symbole");
+                            options: Holdings.study-tickers;
+                            value <=> Dialog.draft-ticker;
+                        }
+                        if Holdings.study-tickers.length == 0: StatusBand {
+                            icon: "◦";
+                            text: @tr("Aucune étude dans le dossier ; créez-la d'abord depuis Études, la position en prendra la devise.");
                         }
                         if Dialog.draft-ticker != "" && Holdings.study-currency-for(Dialog.draft-ticker) == "": StatusBand {
                             icon: "◦";
@@ -474,11 +498,11 @@ export component ModalDialog inherits Rectangle {
                             autofocus: true;
                             accepted => { root.submit(); }
                         }
-                        LabeledField {
+                        LabeledDropdown {
                             label: @tr("Devise des chiffres");
-                            placeholder: @tr("p. ex. CHF");
-                            text <=> Dialog.draft-currency;
-                            accepted => { root.submit(); }
+                            placeholder: @tr("choisir");
+                            options: Holdings.supported-currencies;
+                            value <=> Dialog.draft-currency;
                         }
                     }
 
@@ -487,12 +511,11 @@ export component ModalDialog inherits Rectangle {
                         spacing: Tokens.space-12;
                         HorizontalLayout {
                             spacing: Tokens.space-12;
-                            LabeledField {
+                            LabeledDropdown {
                                 label: @tr("Devise de départ");
-                                placeholder: @tr("p. ex. EUR");
-                                text <=> Dialog.draft-ticker;
-                                autofocus: true;
-                                accepted => { root.submit(); }
+                                placeholder: @tr("choisir");
+                                options: Holdings.supported-currencies;
+                                value <=> Dialog.draft-ticker;
                             }
                             LabeledField {
                                 label: @tr("Taux vers {} (1 unité de départ = … {})", Prefs.reference-currency, Prefs.reference-currency);
