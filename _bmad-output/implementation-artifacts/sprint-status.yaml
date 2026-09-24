@@ -656,7 +656,9 @@ development_status:
   # panel cards, status bands. BLOCKS 7.1/7.2. PR 1 = components + Portefeuille; PR 2 = the other screens.
   7-0-ux-pass-entry-dialogs-refusals-cards: review
   # 2026-09-24: 7-1 dev complete → review (spec PR #226; the comparison table + landscape PDF).
-  7-1-company-comparison: review
+  # 2026-09-24: 7-1 on-display check by Guy (« ok pour une première version ; des améliorations
+  #             seront à apporter à l'usage ») → done. PR #227 merged.
+  7-1-company-comparison: done
   7-2-portfolio-health-review: review
   7-3-discovery-screening-quick-screen: backlog
   7-4-additional-provider-adapters: done
