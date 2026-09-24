@@ -920,26 +920,28 @@ impl Doc {
     }
 
     pub(crate) fn line(&mut self, s: &str) {
-        self.ensure(LINE_H);
-        self.y += FONT;
-        text(&mut self.cur, MARGIN, self.y, FONT, s);
-        self.y += LINE_H - FONT;
+        self.prose(s, MARGIN, FONT, LINE_H);
     }
 
     /// A caption-sized line (the form's small print: formulas, footnotes).
     pub(crate) fn small_line(&mut self, s: &str) {
-        self.ensure(LINE_H - 2.0);
-        self.y += SMALL;
-        text(&mut self.cur, MARGIN, self.y, SMALL, s);
-        self.y += LINE_H - 2.0 - SMALL;
+        self.prose(s, MARGIN, SMALL, LINE_H - 2.0);
     }
 
     /// A body line indented under its lettered parent (the §4 candidates, the zoning lines).
     pub(crate) fn indent_line(&mut self, s: &str) {
-        self.ensure(LINE_H);
-        self.y += FONT;
-        text(&mut self.cur, MARGIN + 18.0, self.y, FONT, s);
-        self.y += LINE_H - FONT;
+        self.prose(s, MARGIN + 18.0, FONT, LINE_H);
+    }
+
+    /// One line of prose from `x`, wrapped at the right margin (the 7.5 walk: a reader's long note
+    /// ran off the page) — each further line takes another `line_h`.
+    fn prose(&mut self, s: &str, x: f32, size: f32, line_h: f32) {
+        for chunk in wrap_to_width(s, self.right() - x, size) {
+            self.ensure(line_h);
+            self.y += size;
+            text(&mut self.cur, x, self.y, size, &chunk);
+            self.y += line_h - size;
+        }
     }
 
     /// Two facts on one line, at the left and at the page's middle (the form's paired growth lines).
@@ -1876,6 +1878,23 @@ mod tests {
         // Accented letters take their base width; « i » is narrow, « î » too.
         assert_eq!(text_width("é", 10.0), text_width("e", 10.0));
         assert_eq!(text_width("î", 10.0), 2.78);
+    }
+
+    /// The 7.5 walk: a reader's long note ran off the page — a prose line now wraps at the margin.
+    #[test]
+    fn a_prose_line_longer_than_the_page_wraps() {
+        let mut doc = Doc::new();
+        let start = doc.y;
+        doc.line("court");
+        let one = doc.y - start;
+        let long = "Le haut de 2021 tient à un exercice exceptionnel ; la moyenne ajustée serait plutôt autour de 20, à revoir après les résultats annuels 2026, et encore une fois après.";
+        assert!(text_width(long, FONT) > doc.right() - MARGIN);
+        let before = doc.y;
+        doc.indent_line(long);
+        assert!(
+            doc.y - before >= 2.0 * one,
+            "the note took more than one line"
+        );
     }
 
     #[test]
