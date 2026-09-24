@@ -1,6 +1,6 @@
 # Story 7.3 — Examen rapide (Quick Screen / Stock Check List) + criblage de la liste de suivi
 
-Status: review (PR 1 — the examination; PR 2 — the criblage — to follow)
+Status: review (PR 1 — the examination, merged #231; PR 2 — the criblage — in review)
 
 Spec: `_bmad-output/planning-artifacts/story-7-3-quick-screen-spec.md` (PR #229, merged by Guy
 2026-09-24 without comment → the four defaults stand: the objective typed per session, the form's
@@ -48,8 +48,12 @@ so that a first look costs one screen and the study starts from the data the loo
   export), `WorkerJob::QuickScreen` + `WorkerOutcome::QuickScreen` in the fetch worker, the
   `Session.quick_screen` slot.
 - [x] **Task 4 — gates + headless verification** (below).
-- [ ] **Task 5 — PR 2, the criblage**: « Examiner la liste » on Liste de suivi (the batched run,
-  the « Criblage » card, per-row « Ouvrir l'examen », the quota stop).
+- [x] **Task 5 — PR 2, the criblage**: « Examiner la liste » on Liste de suivi (the batched run,
+  the « Criblage » card, per-row « Ouvrir l'examen », the quota stop). `WorkerJob::Screening`
+  (batch + row + the run's `stop` latch) / `WorkerOutcome::Screening` + `ScreeningSkipped`;
+  `viewmodel/screening.rs` (row states, `years_used`, the formatted row — tested);
+  `wiring/screening.rs` (plan, launch, outcome, open, close); the `QuickScreen.from-watchlist`
+  origin; `@tr` floor 850 → 892; messages inventory unchanged (139 — every new word is `@tr`).
 - [ ] **Task 6 — Guy's on-display check**: an examination from a study, one from a fetch, the PDF.
 
 ## Dev Notes
@@ -65,7 +69,7 @@ so that a first look costs one screen and the study starts from the data the loo
 
 ### Verification (2026-09-24, headless on a copy of Guy's dossier)
 - From the NESN.SW study: « Examen rapide » → the two ladders (2025/2024 vs 2020/2019, sales
-  rate 0,4 %, EPS −10,2 %, « le BPA a augmenté moins vite »), the five-row price record
+  rate 0,4 %, EPS −4,4 % [corrected 2026-09-24: « −10,2 % » is the report crate's demo study (EPS 2025 3,56 · 2024 4,13), not Guy's dossier, whose EPS (2025 3,51 · 2024 6,95 vs 2020 4,29 · 2019 8,84) give −4,45 %, as the screen and the criblage show], « le BPA a augmenté moins vite »), the five-row price record
   (totals 120,1 / 93,5, averages 24,0 / 18,7, average of averages 21,4), the three facts
   (−40,2 % vs the 2021 high, sold as high in 5 of 5 years, P/E 26,7 above 21,4); objective « 1 »
   → both rates « n'atteint pas »; the « oui » chip; « Retour à l'étude » lands on the study.
@@ -75,4 +79,37 @@ so that a first look costs one screen and the study starts from the data the loo
   récupérées ») and opened it. Finding fixed on the spot: the in-progress 2026 row (no sales,
   EPS 0) fed the EPS ladder and the price record — now dropped like the study apply path.
 - The demo PDF: two portrait pages, the four sections, the reader's fields, the footer.
+- Gates: fmt clean, clippy `-D warnings` clean, `cargo test --workspace` green.
+
+### PR 2 — the criblage (2026-09-24)
+
+Decisions taken in code (for Guy's review):
+- **The quota stop is latched by the worker**, not the UI: the row whose fetch returns the usage
+  limit and every row still queued behind it read « non examiné (limite d'usage) »; the card
+  carries a band saying the limit interrupted the run. Any other failure → « indisponible » on
+  that row only. The latch is per run (its own flag), independent of the holdings / FX cancel.
+- **A studied ticker** = the linked study, else the newest same-ticker study (the watch link's own
+  auto-match) — examined at once from its saved years, no fetch. « Étude : oui / non » reads that.
+- **A fetched row has no currency** (a watch item carries none): its examination names none and
+  offers no « Créer l'étude » (Études' « Examiner un titre » asks for the currency). The PDF head
+  then names the ticker alone.
+- **Re-launching** supersedes the run in flight (its queued rows drain unfetched, its late results
+  are ignored by batch number); « Fermer le criblage » does the same. Nothing is persisted.
+- **No provider** (« aucun ») → the unstudied rows read « indisponible » and the provider refusal
+  is shown once; the studied rows stand.
+
+Verification (headless, a copy of Guy's dossier with NESN.SW / ROG.SW / SCHN.SW watched, the
+isolated config's provider set to « aucun » — no real fetch, see the key warning):
+- « Examiner la liste » → the refusal « Aucun fournisseur de données n'est sélectionné… », then the
+  card: NESN.SW 6 / 6 · 0,4 % · −4,4 % · moins vite · au-dessus · −40,2 % · oui; ROG.SW
+  « indisponible » (no study, no provider), its « Ouvrir l'examen » disabled; SCHN.SW 6 / 6 ·
+  0,2 % · 4,6 % · plus vite · voisin · −13,0 % · oui. Watchlist order kept, no sort control.
+- « Ouvrir l'examen » on NESN.SW → the full examination « depuis l'étude », « ‹ Retour à la liste
+  de suivi », no « Créer l'étude »; Retour → Liste de suivi with the card still shown; « Fermer le
+  criblage » hides it; the Études nav lands on the list.
+- Walk finding fixed: the column heads wrapped and did not line up with the cells → shared fixed
+  column widths.
+- Not driven: a real fetched row and a real quota stop (they need Guy's key) — covered by the row
+  state tests (`failed_state`, the four row views); the worker's latch itself is inline in the
+  worker loop.
 - Gates: fmt clean, clippy `-D warnings` clean, `cargo test --workspace` green.

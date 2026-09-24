@@ -20,13 +20,18 @@ use crate::wiring::fetch::resolve_chain;
 use crate::wiring::studies::refresh_studies;
 use crate::{MainWindow, QuickPriceRow, QuickScreen, Studies};
 
-/// The examination of the moment (session only).
+/// The examination of the moment (session only). `Clone`: a criblage row keeps its own and hands
+/// a copy to the screen on « Ouvrir l'examen ».
+#[derive(Clone)]
 pub(crate) struct QuickScreenSession {
     pub(crate) ticker: String,
     pub(crate) currency: String,
     pub(crate) name: String,
     pub(crate) source: String,
     pub(crate) from_study: bool,
+    /// Opened from the watchlist's criblage → « Retour » lands on Liste de suivi, and no
+    /// « Créer l'étude » (a watched ticker carries no currency to create it in).
+    pub(crate) from_watchlist: bool,
     pub(crate) outputs: QuickScreenOutputs,
     /// The financials a fetch brought — « Créer l'étude » reuses them; `None` from a study.
     pub(crate) fetched: Option<FetchedFinancials>,
@@ -62,6 +67,7 @@ fn push(ui: &MainWindow, session: &QuickScreenSession, today: &str, format: Numb
     q.set_date(view.date.into());
     q.set_source(view.source.into());
     q.set_from_study(session.from_study);
+    q.set_from_watchlist(session.from_watchlist);
     q.set_sales_lines(strings(&view.sales.lines));
     q.set_sales_years(strings(&view.sales.years));
     q.set_sales_rate(view.sales.rate.into());
@@ -121,6 +127,70 @@ fn today(state: &JournalState) -> String {
     state.now().0.chars().take(10).collect()
 }
 
+/// The examination of fetched financials. Issue #109's rule, as the study apply path: a year
+/// without `sales` is the provider's price-only row for the fiscal year in progress — not an
+/// analysis year (its EPS would read 0 and its high would count as « sold as high »).
+pub(crate) fn session_from_fetch(
+    ticker: &str,
+    currency: &str,
+    fetched: FetchedFinancials,
+    effective: ProviderChoice,
+) -> QuickScreenSession {
+    let years: Vec<CanonicalYear> = fetched
+        .canonical
+        .years
+        .iter()
+        .filter(|y| y.sales.is_some())
+        .cloned()
+        .collect();
+    let outputs = examine(&years, fetched.latest_price, fetched.ttm_eps);
+    QuickScreenSession {
+        ticker: ticker.to_uppercase(),
+        currency: currency.to_string(),
+        name: String::new(),
+        source: state::MSG_QUICK_SOURCE_PROVIDER.replace("{provider}", effective.display_name()),
+        from_study: false,
+        from_watchlist: false,
+        outputs,
+        fetched: Some(fetched),
+    }
+}
+
+/// The examination of a saved study's own years (no fetch); `Err` = its series did not normalize.
+pub(crate) fn session_from_study(
+    study: &steadyinvest_contract::Study,
+) -> Result<QuickScreenSession, &'static str> {
+    let frame = build_frame(study).map_err(|_| state::MSG_NORMALIZE_FAILED)?;
+    let outputs = examine(
+        &frame.series,
+        study.judgment.current_price.map(|m| m.as_decimal()),
+        study.judgment.ttm_eps.map(|m| m.as_decimal()),
+    );
+    Ok(QuickScreenSession {
+        ticker: study.security_ticker.clone(),
+        currency: study.native_currency.clone(),
+        name: study.company_name.clone().unwrap_or_default(),
+        source: state::MSG_QUICK_SOURCE_STUDY.to_string(),
+        from_study: true,
+        from_watchlist: false,
+        outputs,
+        fetched: None,
+    })
+}
+
+/// Push `session` to the screen, keep it as the examination of the moment, open the screen.
+pub(crate) fn show(
+    ui: &MainWindow,
+    state: &JournalState,
+    format: NumberFormat,
+    slot: &Rc<std::cell::RefCell<Option<QuickScreenSession>>>,
+    session: QuickScreenSession,
+) {
+    push(ui, &session, &today(state), format);
+    *slot.borrow_mut() = Some(session);
+    ui.global::<Studies>().set_screen_open(true);
+}
+
 /// The worker's examination result (called from the fetch outcome handler).
 pub(crate) fn on_fetched(
     ui: &MainWindow,
@@ -139,30 +209,8 @@ pub(crate) fn on_fetched(
         }
         Ok(fetched) => {
             let currency = q.get_pick_currency().trim().to_uppercase();
-            // Issue #109's rule, as the study apply path: a year without `sales` is the provider's
-            // price-only row for the fiscal year in progress — not an analysis year (its EPS would
-            // read 0 and its high would count as « sold as high »). Same window, no drift.
-            let years: Vec<CanonicalYear> = fetched
-                .canonical
-                .years
-                .iter()
-                .filter(|y| y.sales.is_some())
-                .cloned()
-                .collect();
-            let outputs = examine(&years, fetched.latest_price, fetched.ttm_eps);
-            let session = QuickScreenSession {
-                ticker: ticker.to_uppercase(),
-                currency,
-                name: String::new(),
-                source: state::MSG_QUICK_SOURCE_PROVIDER
-                    .replace("{provider}", effective.display_name()),
-                from_study: false,
-                outputs,
-                fetched: Some(fetched),
-            };
-            push(ui, &session, &today(state), format);
-            *slot.borrow_mut() = Some(session);
-            ui.global::<Studies>().set_screen_open(true);
+            let session = session_from_fetch(&ticker, &currency, fetched, effective);
+            show(ui, state, format, slot, session);
         }
         Err(error) => {
             crate::wiring::dialog::refuse(ui, state::provider_failure_notice(&error));
@@ -272,28 +320,15 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
             else {
                 return;
             };
-            let Ok(frame) = build_frame(&study) else {
-                crate::wiring::dialog::refuse(&ui, state::MSG_NORMALIZE_FAILED);
-                return;
-            };
-            let outputs = examine(
-                &frame.series,
-                study.judgment.current_price.map(|m| m.as_decimal()),
-                study.judgment.ttm_eps.map(|m| m.as_decimal()),
-            );
-            let session = QuickScreenSession {
-                ticker: study.security_ticker.clone(),
-                currency: study.native_currency.clone(),
-                name: study.company_name.clone().unwrap_or_default(),
-                source: state::MSG_QUICK_SOURCE_STUDY.to_string(),
-                from_study: true,
-                outputs,
-                fetched: None,
+            let session = match session_from_study(&study) {
+                Ok(session) => session,
+                Err(message) => {
+                    crate::wiring::dialog::refuse(&ui, message);
+                    return;
+                }
             };
             let format = config.borrow().number_format;
-            push(&ui, &session, &today(&journal_state.borrow()), format);
-            *slot.borrow_mut() = Some(session);
-            ui.global::<Studies>().set_screen_open(true);
+            show(&ui, &journal_state.borrow(), format, &slot, session);
         });
     }
     {
@@ -303,8 +338,15 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         ui.global::<QuickScreen>().on_close(move || {
             let ui = ui_weak.unwrap();
             ui.global::<Studies>().set_screen_open(false);
-            let from_study = slot.borrow().as_ref().is_some_and(|s| s.from_study);
-            if !from_study {
+            let (from_study, from_watchlist) = slot
+                .borrow()
+                .as_ref()
+                .map_or((false, false), |s| (s.from_study, s.from_watchlist));
+            if from_watchlist {
+                // Back where the row was opened: Liste de suivi (its criblage card still shown).
+                ui.set_current_screen(1);
+                crate::wiring::watchlist::refresh_watchlist(&ui, &journal_state.borrow());
+            } else if !from_study {
                 refresh_studies(&ui, &journal_state.borrow());
             }
         });

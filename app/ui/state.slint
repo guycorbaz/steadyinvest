@@ -50,6 +50,21 @@ export struct WatchRow {
     below-band: bool,
 }
 
+// Story 7.3 (PR 2): one row of the watchlist « criblage » — the examination's facts as already-
+// formatted strings and keys (worded under @tr in the card). `state`: pending | done | unavailable
+// | quota. No rank, no pass / fail: the reader's objective is not applied here.
+export struct ScreeningRow {
+    ticker: string,
+    state: string,
+    years: string,
+    sales-rate: string,
+    eps-rate: string,
+    eps-vs-sales: string,   // eps | sales | same | ""
+    pe-position: string,    // higher | similar | lower | ""
+    price-vs-high: string,  // signed %, "" = unknown
+    has-study: bool,
+}
+
 // One stored exchange rate (Story 6.5, FR28): dated + source-aware, BASE → QUOTE (the reference
 // currency). `rate` is the exact TEXT spelling; display strings built in Rust.
 export struct FxRateRow {
@@ -942,6 +957,17 @@ export global Watchlist {
     callback move-watch(string, bool); // id, up?
     callback link-watch(string); // id → link to a same-ticker study
     callback unlink-watch(string); // id
+    // Story 7.3 (PR 2) — the criblage: the run's rows (the watchlist's order at launch), its
+    // progress, whether the usage limit stopped it.
+    in-out property <[ScreeningRow]> screening-rows;
+    in-out property <bool> screening-shown;
+    in-out property <bool> screening-running;
+    in-out property <int> screening-done;
+    in-out property <int> screening-total;
+    in-out property <bool> screening-quota;
+    callback screen-list();
+    callback open-screening(int); // row index → the full examination
+    callback close-screening();
 }
 
 // The confront overlay (Story 5.1, FR50): reopen a saved study to compare its recorded §4 forecast
@@ -1158,6 +1184,7 @@ export global QuickScreen {
     in-out property <string> date;
     in-out property <string> source;
     in-out property <bool> from-study;      // opened from a study → no « Créer l'étude »
+    in-out property <bool> from-watchlist;  // opened from the criblage → « Retour » to Liste de suivi
     in-out property <bool> fetching;
     in-out property <string> notice;
     // §1 / §2 ladders: ten lines each (row-major, "" = absent), the four years, the rate, the span.

@@ -81,6 +81,23 @@ pub struct FxRatesRequest {
     pub journal_id: Option<Uuid>,
 }
 
+/// One criblage row's fetch (Story 7.3, PR 2): `batch` identifies the run (a stale outcome of an
+/// earlier run is ignored), `index` the row, `stop` the run's quota latch.
+pub struct ScreeningRequest {
+    pub batch: u64,
+    pub index: usize,
+    pub request: FetchRequest,
+    pub stop: Arc<AtomicBool>,
+}
+
+/// Whether a chain's final error is the provider's usage limit (the criblage's stop condition).
+pub fn is_quota(error: &IngestionError) -> bool {
+    matches!(
+        error,
+        IngestionError::Provider(steadyinvest_ingestion::ProviderError::Quota { .. })
+    )
+}
+
 /// A job for the worker thread.
 pub enum WorkerJob {
     Fetch(FetchRequest),
@@ -88,6 +105,12 @@ pub enum WorkerJob {
     /// as [`WorkerJob::Fetch`] (`study_id` unused), routed to the examination screen and kept in
     /// the session only; nothing is written unless « Créer l'étude » follows.
     QuickScreen(FetchRequest),
+    /// Story 7.3 (PR 2): one row of the watchlist « criblage » — the same fundamentals fetch as
+    /// [`WorkerJob::QuickScreen`], tagged with its batch + row. The batch's `stop` flag is raised BY
+    /// THE WORKER on the first quota reply, so every row still queued behind it drains unfetched
+    /// ([`WorkerOutcome::ScreeningSkipped`]) — the quota stop, independent of the holdings / FX
+    /// cancel flag.
+    Screening(ScreeningRequest),
     /// A holdings PRICE refresh (Story 4.4 / issue #50): a price-only `/eod` fetch (no
     /// `/fundamentals`), routed to the holdings surface, not the open study screen.
     RefreshHolding(FetchRequest),
@@ -141,6 +164,18 @@ pub enum WorkerOutcome {
         ticker: String,
         result: Result<FetchedFinancials, IngestionError>,
         fell_back_to: Option<ProviderChoice>,
+    },
+    /// Story 7.3 (PR 2): one criblage row's fetch result.
+    Screening {
+        batch: u64,
+        index: usize,
+        result: Result<FetchedFinancials, IngestionError>,
+        fell_back_to: Option<ProviderChoice>,
+    },
+    /// Story 7.3 (PR 2): a criblage row the worker drained unfetched after the run's quota stop.
+    ScreeningSkipped {
+        batch: u64,
+        index: usize,
     },
     /// A holdings price-refresh result (Story 4.4) — routed to the holdings surface, not the study.
     HoldingFetch(HoldingPriceOutcome),
@@ -342,6 +377,34 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                         );
                         WorkerOutcome::QuickScreen {
                             ticker: req.ticker,
+                            result,
+                            fell_back_to,
+                        }
+                    }
+                    WorkerJob::Screening(job) if job.stop.load(Ordering::Relaxed) => {
+                        WorkerOutcome::ScreeningSkipped {
+                            batch: job.batch,
+                            index: job.index,
+                        }
+                    }
+                    WorkerJob::Screening(job) => {
+                        let req = &job.request;
+                        let (result, _, fell_back_to) = run_chain(
+                            &mut last_request,
+                            select,
+                            &req.chain,
+                            req.primary,
+                            |provider, key| {
+                                runtime.block_on(fetch_canonical(provider, &req.ticker, key))
+                            },
+                        );
+                        // The quota stop: latch BEFORE the next queued row is picked up.
+                        if result.as_ref().err().is_some_and(is_quota) {
+                            job.stop.store(true, Ordering::Relaxed);
+                        }
+                        WorkerOutcome::Screening {
+                            batch: job.batch,
+                            index: job.index,
                             result,
                             fell_back_to,
                         }

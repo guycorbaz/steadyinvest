@@ -1,10 +1,39 @@
+// Story 7.3 (PR 2): one criblage cell — a numeric fact, right-aligned, « — » when absent.
+component Cell inherits Text {
+    color: Tokens.text-high;
+    font-family: Tokens.font-numeric;
+    font-size: Tokens.font-caption;
+    horizontal-alignment: right;
+    vertical-alignment: center;
+}
+
+component Head inherits Text {
+    color: Tokens.text-mid;
+    font-size: Tokens.font-caption;
+    horizontal-alignment: right;
+    vertical-alignment: bottom;
+    wrap: word-wrap;
+}
+
+// The criblage's column widths, shared by the head and the rows so they line up.
+global Cols {
+    out property <length> ticker: 120px;
+    out property <length> years: 70px;
+    out property <length> rate: 110px;
+    out property <length> versus: 120px;
+    out property <length> pe: 170px;
+    out property <length> price: 170px;
+    out property <length> study: 60px;
+    out property <length> action: 170px;
+}
+
 // Liste de suivi (Story 4.1, FR34): add / link / reorder / remove watched securities, each
 // optionally linked to a saved study for its buy zone. Laid out by the UX pass (2026-09-23): one
 // titled card, the add goes through a form dialog, the buy-zone summary is a state band, a refusal
 // is acknowledged in the modal dialog. Neutral, no advice. Intents → Rust.
 
 import { Tokens } from "../tokens.slint";
-import { Dialog, Watchlist, WatchRow } from "../state.slint";
+import { Dialog, ScreeningRow, Watchlist, WatchRow } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
@@ -31,6 +60,7 @@ export component WatchlistScreen inherits Rectangle {
 
                 HorizontalLayout {
                     alignment: start;
+                    spacing: Tokens.space-8;
                     ActionButton {
                         label: @tr("Ajouter une valeur…");
                         enabled: !Watchlist.read-only;
@@ -39,6 +69,12 @@ export component WatchlistScreen inherits Rectangle {
                                 @tr("Le symbole est celui du fournisseur de données, p. ex. NESN.SW ; l'étude du même symbole se lie ensuite d'un clic."),
                                 "", "");
                         }
+                    }
+                    // Story 7.3 (PR 2): the criblage — the check list's facts for every watched title.
+                    ActionButton {
+                        label: @tr("Examiner la liste");
+                        enabled: Watchlist.count > 0 && !Watchlist.screening-running;
+                        clicked => { Watchlist.screen-list(); }
                     }
                 }
 
@@ -125,6 +161,119 @@ export component WatchlistScreen inherits Rectangle {
                             label: @tr("Retirer");
                             enabled: !Watchlist.read-only;
                             clicked => { Watchlist.remove-watch(row.id); }
+                        }
+                    }
+                }
+            }
+
+            // ── Story 7.3 (PR 2): the criblage — the watchlist's order, no rank, no sort, no
+            //    pass / fail (the reader's objective belongs to the full examination). ──
+            if Watchlist.screening-shown: PanelCard {
+                title: @tr("Criblage");
+                subtitle: @tr("L'examen rapide de chaque valeur suivie, dans l'ordre de la liste : des faits, sans classement ; l'étude suivante reste votre choix.");
+
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    Text {
+                        text: Watchlist.screening-running
+                            ? @tr("Examen en cours… {} sur {}", Watchlist.screening-done, Watchlist.screening-total)
+                            : @tr("{} valeur(s) examinée(s) ou signalée(s).", Watchlist.screening-total);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    ActionButton {
+                        label: @tr("Fermer le criblage");
+                        enabled: true;
+                        clicked => { Watchlist.close-screening(); }
+                    }
+                }
+
+                if Watchlist.screening-quota: StatusBand {
+                    icon: "◦";
+                    text: @tr("La limite d'usage du fournisseur a interrompu le criblage ; les valeurs restantes n'ont pas été examinées.");
+                }
+
+                // Header
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    padding-left: Tokens.space-12;
+                    padding-right: Tokens.space-12;
+                    Text {
+                        text: @tr("Symbole");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: bottom;
+                        width: Cols.ticker;
+                    }
+                    Head { text: @tr("Années"); width: Cols.years; }
+                    Head { text: @tr("Ventes, taux annuel"); width: Cols.rate; }
+                    Head { text: @tr("BPA, taux annuel"); width: Cols.rate; }
+                    Head { text: @tr("BPA face aux ventes"); width: Cols.versus; }
+                    Head { text: @tr("PER actuel face à la moyenne 5 ans"); width: Cols.pe; }
+                    Head { text: @tr("Cours face au haut d'il y a 5 ans"); width: Cols.price; }
+                    Head { text: @tr("Étude"); width: Cols.study; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle { width: Cols.action; }
+                }
+
+                for row[index] in Watchlist.screening-rows: Rectangle {
+                    background: Tokens.surface-alt;
+                    border-width: Tokens.border;
+                    border-color: Tokens.separator;
+                    border-radius: Tokens.radius;
+                    height: Tokens.row-height + Tokens.space-12;
+                    HorizontalLayout {
+                        padding-left: Tokens.space-12;
+                        padding-right: Tokens.space-12;
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: row.ticker;
+                            color: Tokens.text-high;
+                            font-size: Tokens.font-body;
+                            font-weight: Tokens.weight-semibold;
+                            vertical-alignment: center;
+                            width: Cols.ticker;
+                        }
+                        if row.state == "done": HorizontalLayout {
+                            spacing: Tokens.space-8;
+                            Cell { text: row.years; width: Cols.years; }
+                            Cell { text: row.sales-rate != "" ? row.sales-rate : "—"; width: Cols.rate; }
+                            Cell { text: row.eps-rate != "" ? row.eps-rate : "—"; width: Cols.rate; }
+                            Cell {
+                                width: Cols.versus;
+                                text: row.eps-vs-sales == "eps" ? @tr("plus vite")
+                                    : row.eps-vs-sales == "sales" ? @tr("moins vite")
+                                    : row.eps-vs-sales == "same" ? @tr("même rythme")
+                                    : "—";
+                            }
+                            Cell {
+                                width: Cols.pe;
+                                text: row.pe-position == "higher" ? @tr("au-dessus")
+                                    : row.pe-position == "similar" ? @tr("voisin")
+                                    : row.pe-position == "lower" ? @tr("au-dessous")
+                                    : "—";
+                            }
+                            Cell { text: row.price-vs-high != "" ? row.price-vs-high : "—"; width: Cols.price; }
+                            Cell { text: row.has-study ? @tr("oui") : @tr("non"); width: Cols.study; }
+                        }
+                        if row.state != "done": Text {
+                            text: row.state == "pending" ? @tr("examen en cours…")
+                                : row.state == "quota" ? @tr("non examiné (limite d'usage)")
+                                : @tr("indisponible");
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            vertical-alignment: center;
+                            // Under the facts' columns: the row's state, in place of its figures.
+                            width: Cols.years + Cols.rate * 2 + Cols.versus + Cols.pe + Cols.price + Cols.study + Tokens.space-8 * 6;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        ActionButton {
+                            label: @tr("Ouvrir l'examen");
+                            enabled: row.state == "done";
+                            width: Cols.action;
+                            clicked => { Watchlist.open-screening(index); }
                         }
                     }
                 }

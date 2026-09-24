@@ -20,6 +20,7 @@ pub(crate) mod push;
 pub(crate) mod quick_screen;
 pub(crate) mod replacement;
 pub(crate) mod review;
+pub(crate) mod screening;
 pub(crate) mod studies;
 pub(crate) mod watchlist;
 
@@ -57,6 +58,9 @@ pub(crate) struct Session {
     /// the objective changes, to export) and, after a fetch, the financials « Créer l'étude »
     /// reuses. Session-only, never persisted.
     pub(crate) quick_screen: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
+    /// Story 7.3 (PR 2): the watchlist's criblage run of the moment (rows + batch + quota latch).
+    /// Session-only, never persisted.
+    pub(crate) screening: Rc<RefCell<Option<crate::wiring::screening::ScreeningSession>>>,
     pub(crate) holding_freshness: Rc<RefCell<HoldingFreshnessMap>>,
     pub(crate) holding_dismissed: Rc<RefCell<std::collections::HashSet<String>>>,
     pub(crate) refresh_pending: Rc<RefCell<usize>>,
