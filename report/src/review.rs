@@ -6,7 +6,7 @@
 
 use pdf_writer::Content;
 
-use crate::pdf::{COLS8, Doc, EM_DASH, MARGIN, PAGE_W, SMALL};
+use crate::pdf::{Doc, EM_DASH, MARGIN, PAGE_W, SMALL};
 
 /// One line of a share block: a label (data — a sector, a currency, a bank, a ticker, or a size
 /// key `small` | `medium` | `large`), an amount, a share, a target, and a note (a missing pair or a
@@ -243,12 +243,27 @@ const REVIEW_USER_FACING: &[&str] = &[
     EMPTY_BLOCK,
 ];
 
+// The share blocks: label · amount · share · target, then the note — prose, left-aligned and
+// given the room (a note wraps inside its column, never across the rules).
 const COLS_SHARE: [f32; 6] = [
     MARGIN,
-    MARGIN + 190.0,
-    MARGIN + 290.0,
-    MARGIN + 350.0,
-    MARGIN + 410.0,
+    MARGIN + 150.0,
+    MARGIN + 235.0,
+    MARGIN + 285.0,
+    MARGIN + 335.0,
+    PAGE_W - MARGIN,
+];
+
+// The positions table: a symbol column wide enough for « NESN.SW », the banks, then the figures.
+const COLS_POSITIONS: [f32; 9] = [
+    MARGIN,
+    MARGIN + 62.0,
+    MARGIN + 142.0,
+    MARGIN + 212.0,
+    MARGIN + 254.0,
+    MARGIN + 334.0,
+    MARGIN + 394.0,
+    MARGIN + 439.0,
     PAGE_W - MARGIN,
 ];
 
@@ -298,11 +313,11 @@ fn share_block(doc: &mut Doc, title: &str, lines: &[ShareLine], with_target: boo
     }
     doc.grid_begin(lines.len());
     let target_head = if with_target { C_TARGET } else { "" };
-    doc.grid_row_num(
+    doc.grid_row_range(
         &[C_LABEL, C_AMOUNT, C_SHARE, target_head, C_NOTE],
         &COLS_SHARE,
         true,
-        1,
+        1..4,
     );
     for l in lines {
         let note = note_label(l);
@@ -318,7 +333,7 @@ fn share_block(doc: &mut Doc, title: &str, lines: &[ShareLine], with_target: boo
             note,
         ];
         let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
-        doc.grid_row_num(&refs, &COLS_SHARE, false, 1);
+        doc.grid_row_range(&refs, &COLS_SHARE, false, 1..4);
     }
     doc.grid_end(&COLS_SHARE);
     doc.gap(4.0);
@@ -332,18 +347,14 @@ fn or_dash(s: &str) -> String {
     }
 }
 
-fn study_label(l: &ReviewLine) -> String {
-    let base = match l.study.as_str() {
+/// The study's state in its (narrow) column; « confiance réduite » goes to the small-print line.
+fn study_label(l: &ReviewLine) -> &'static str {
+    match l.study.as_str() {
         "full" => STUDY_FULL,
         "provisional" => STUDY_PROVISIONAL,
         "withheld" => STUDY_WITHHELD,
         "unavailable" => STUDY_UNAVAILABLE,
         _ => STUDY_NONE,
-    };
-    if l.low_confidence {
-        format!("{base} · {LOW_CONFIDENCE}")
-    } else {
-        base.to_string()
     }
 }
 
@@ -421,7 +432,7 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             &[
                 P_TICKER, P_BANKS, P_INVESTED, P_SHARE, P_STUDY, P_ZONE, P_UD, P_RELATIVE,
             ],
-            &COLS8,
+            &COLS_POSITIONS,
             true,
             2,
         );
@@ -431,17 +442,20 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 l.banks.clone(),
                 or_dash(&l.invested),
                 or_dash(&l.share),
-                study_label(l),
+                study_label(l).to_string(),
                 zone_label(&l.zone).to_string(),
                 or_dash(&l.ud),
                 or_dash(&l.relative),
             ];
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
-            doc.grid_row_num(&refs, &COLS8, false, 2);
+            doc.grid_row_num(&refs, &COLS_POSITIONS, false, 2);
             // A second, small-print line under the row: the flags, the data state, the stop.
             let mut extra: Vec<String> = Vec::new();
             if !l.name.is_empty() {
                 extra.push(l.name.clone());
+            }
+            if l.low_confidence {
+                extra.push(LOW_CONFIDENCE.to_string());
             }
             if !l.flags.is_empty() {
                 extra.push(format!("{FLAGS_LABEL} {}", l.flags));
@@ -460,14 +474,9 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 "sell" => extra.push(TRIGGER_SELL.to_string()),
                 _ => {}
             }
-            doc.grid_row_small(
-                &["", &extra.join("   ·   ")],
-                &[MARGIN, MARGIN + 42.0, PAGE_W - MARGIN],
-                false,
-                9,
-            );
+            doc.grid_note_row(&extra.join("   ·   "), COLS_POSITIONS[1], &COLS_POSITIONS);
         }
-        doc.grid_end(&COLS8);
+        doc.grid_end(&COLS_POSITIONS);
     }
     doc.gap(6.0);
 

@@ -668,7 +668,11 @@ development_status:
   #             PR 2 (the criblage of the liste de suivi) to follow.
   7-3-discovery-screening-quick-screen: review
   7-4-additional-provider-adapters: done
-  7-5-pdf-print-other-forms: backlog
+  # 2026-09-24: 7-5 tested on Guy's dossier (headless): the comparison / review / examen rapide
+  #             PDFs carry the right figures; the layout defects found (column heads and notes
+  #             crossing the grid — a 0.5 em width estimate) fixed with the real Helvetica metrics
+  #             and wrapping cells → review; close as covered (spec 7.3 Q4) once Guy has seen it.
+  7-5-pdf-print-other-forms: review
   epic-7-retrospective: optional
 
   # ── Epic 8: Read-only AI clerk-of-memory & MCP façade [V] (story outlines) ──
