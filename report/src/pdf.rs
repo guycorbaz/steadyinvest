@@ -43,15 +43,15 @@ impl std::fmt::Display for ReportError {
 impl std::error::Error for ReportError {}
 
 // ── page geometry (A4 portrait, points) ──
-const PAGE_W: f32 = 595.0;
-const PAGE_H: f32 = 842.0;
-const MARGIN: f32 = 42.0;
-const FONT: f32 = 9.0;
-const SMALL: f32 = 7.5;
+pub(crate) const PAGE_W: f32 = 595.0;
+pub(crate) const PAGE_H: f32 = 842.0;
+pub(crate) const MARGIN: f32 = 42.0;
+pub(crate) const FONT: f32 = 9.0;
+pub(crate) const SMALL: f32 = 7.5;
 const TITLE_FONT: f32 = 15.0;
-const HEAD_FONT: f32 = 11.0;
-const LINE_H: f32 = 13.0;
-const BOTTOM: f32 = MARGIN + 24.0; // keep clear of the footer disclaimer
+pub(crate) const HEAD_FONT: f32 = 11.0;
+pub(crate) const LINE_H: f32 = 13.0;
+pub(crate) const BOTTOM: f32 = MARGIN + 24.0; // keep clear of the footer disclaimer
 
 // ── chart geometry (issue #105 — vector graphics into the PDF, greyscale-safe; issue #207 — the
 //    §1 plot fills the rest of page 1, as on the printed form) ──
@@ -66,7 +66,7 @@ const GUIDE_RATES_PCT: [u32; 6] = [5, 10, 15, 20, 25, 30];
 // ── grid tables (issue #104 — visible SSG grid) ──
 const CELL_PAD: f32 = 5.0; // left/right padding of text inside a grid cell
 // Column boundaries (left … right) for the annexe table (year + seven figures).
-const COLS8: [f32; 9] = [
+pub(crate) const COLS8: [f32; 9] = [
     MARGIN,
     MARGIN + 42.0,
     MARGIN + 112.0,
@@ -524,15 +524,15 @@ fn cell(v: Option<steadyinvest_contract::Money>, field: DisplayField) -> String 
     fmt_dec(v.map(|m| m.as_decimal()), field)
 }
 
-fn money(v: Option<Decimal>) -> String {
+pub(crate) fn money(v: Option<Decimal>) -> String {
     fmt_dec(v, DisplayField::Price)
 }
 
-fn num(v: Option<Decimal>) -> String {
+pub(crate) fn num(v: Option<Decimal>) -> String {
     fmt_dec(v, DisplayField::PeRatio)
 }
 
-fn pct(v: Option<Decimal>) -> String {
+pub(crate) fn pct(v: Option<Decimal>) -> String {
     match v {
         None => EM_DASH.to_string(),
         Some(d) => format!(
@@ -603,7 +603,7 @@ fn total_return(r: &steadyinvest_core::ssg::ReturnOutputs) -> String {
     }
 }
 
-fn fmt_dec(v: Option<Decimal>, field: DisplayField) -> String {
+pub(crate) fn fmt_dec(v: Option<Decimal>, field: DisplayField) -> String {
     match v {
         None => EM_DASH.to_string(),
         Some(d) => round_for_display(d, field).normalize().to_string(),
@@ -667,7 +667,7 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-const EM_DASH: &str = "—";
+pub(crate) const EM_DASH: &str = "—";
 
 // ── neutral user-facing string inventory (FR13) ──
 //
@@ -825,7 +825,7 @@ const REPORT_USER_FACING: &[&str] = &[
 
 /// Accumulates content across one or more A4 pages, tracking a top-origin cursor and starting a new
 /// page when the next line would cross the bottom margin.
-struct Doc {
+pub(crate) struct Doc {
     pages: Vec<Content>,
     cur: Content,
     y: f32,        // top-origin cursor (distance from the page top)
@@ -838,7 +838,7 @@ struct Doc {
 }
 
 impl Doc {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Doc {
             pages: Vec::new(),
             cur: new_page_content(),
@@ -850,14 +850,14 @@ impl Doc {
     }
 
     /// Ensure `need` points of vertical space remain on the current page; else start a new one.
-    fn ensure(&mut self, need: f32) {
+    pub(crate) fn ensure(&mut self, need: f32) {
         if PAGE_H - self.y - need < BOTTOM {
             self.new_page();
         }
     }
 
     /// Finish the page in progress and start a fresh one, resetting the cursor to the top margin.
-    fn new_page(&mut self) {
+    pub(crate) fn new_page(&mut self) {
         let finished = std::mem::replace(&mut self.cur, new_page_content());
         self.pages.push(finished);
         self.y = MARGIN;
@@ -865,15 +865,15 @@ impl Doc {
 
     /// Issue #104: reserve `need` points as ONE block so a heading + its table/chart never split
     /// across a page break (the §4 zone bar was orphaning). A no-op when the block already fits.
-    fn keep_together(&mut self, need: f32) {
+    pub(crate) fn keep_together(&mut self, need: f32) {
         self.ensure(need);
     }
 
-    fn gap(&mut self, h: f32) {
+    pub(crate) fn gap(&mut self, h: f32) {
         self.y += h;
     }
 
-    fn title(&mut self, s: &str) {
+    pub(crate) fn title(&mut self, s: &str) {
         self.ensure(TITLE_FONT + 10.0); // reserve the true advance (font + rule + gap)
         self.y += TITLE_FONT;
         text_bold(&mut self.cur, MARGIN, self.y, TITLE_FONT, s);
@@ -882,7 +882,7 @@ impl Doc {
         self.y += 4.0;
     }
 
-    fn section(&mut self, s: &str) {
+    pub(crate) fn section(&mut self, s: &str) {
         // Issue #104: a heading keeps room for its header + a few rows, so it never dangles alone at
         // a page foot with its table pushed to the next page.
         self.keep_together(HEAD_FONT + 5.0 * LINE_H);
@@ -893,7 +893,7 @@ impl Doc {
         self.y += LINE_H - 4.0;
     }
 
-    fn line(&mut self, s: &str) {
+    pub(crate) fn line(&mut self, s: &str) {
         self.ensure(LINE_H);
         self.y += FONT;
         text(&mut self.cur, MARGIN, self.y, FONT, s);
@@ -901,7 +901,7 @@ impl Doc {
     }
 
     /// A caption-sized line (the form's small print: formulas, footnotes).
-    fn small_line(&mut self, s: &str) {
+    pub(crate) fn small_line(&mut self, s: &str) {
         self.ensure(LINE_H - 2.0);
         self.y += SMALL;
         text(&mut self.cur, MARGIN, self.y, SMALL, s);
@@ -909,7 +909,7 @@ impl Doc {
     }
 
     /// A body line indented under its lettered parent (the §4 candidates, the zoning lines).
-    fn indent_line(&mut self, s: &str) {
+    pub(crate) fn indent_line(&mut self, s: &str) {
         self.ensure(LINE_H);
         self.y += FONT;
         text(&mut self.cur, MARGIN + 18.0, self.y, FONT, s);
@@ -917,7 +917,7 @@ impl Doc {
     }
 
     /// Two facts on one line, at the left and at the page's middle (the form's paired growth lines).
-    fn two_columns(&mut self, left: &str, right: &str) {
+    pub(crate) fn two_columns(&mut self, left: &str, right: &str) {
         self.ensure(LINE_H);
         self.y += FONT;
         text(&mut self.cur, MARGIN, self.y, FONT, left);
@@ -927,7 +927,7 @@ impl Doc {
 
     /// Issue #207 — the form's identity block: a boxed grid of `label : value` pairs, `rows` rows
     /// of three pairs each. Labels in small print above the values, the box ruled between columns.
-    fn header_box(&mut self, rows: &[[(&str, &str); 3]]) {
+    pub(crate) fn header_box(&mut self, rows: &[[(&str, &str); 3]]) {
         let row_h = LINE_H + SMALL + 2.0;
         let h = row_h * rows.len() as f32 + 4.0;
         self.ensure(h + 4.0);
@@ -954,13 +954,25 @@ impl Doc {
 
     /// A grid row whose cells from index `numeric_from` are RIGHT-aligned inside their column (the
     /// form's figures line up on their units); the cells before stay left-aligned (labels).
-    fn grid_row_num(&mut self, cells: &[&str], edges: &[f32], head: bool, numeric_from: usize) {
+    pub(crate) fn grid_row_num(
+        &mut self,
+        cells: &[&str],
+        edges: &[f32],
+        head: bool,
+        numeric_from: usize,
+    ) {
         self.grid_font = FONT;
         self.grid_row_num_sized(cells, edges, head, numeric_from);
     }
 
     /// [`grid_row_num`] in the caption size (a wide table such as §2's ten year columns).
-    fn grid_row_small(&mut self, cells: &[&str], edges: &[f32], head: bool, numeric_from: usize) {
+    pub(crate) fn grid_row_small(
+        &mut self,
+        cells: &[&str],
+        edges: &[f32],
+        head: bool,
+        numeric_from: usize,
+    ) {
         self.grid_font = SMALL;
         self.grid_row_num_sized(cells, edges, head, numeric_from);
     }
@@ -1019,7 +1031,7 @@ impl Doc {
     /// section heading already reserved a few rows), and record the table top so [`grid_end`] can
     /// draw the outer box + column rules. Issue #74: a grid may SPAN page breaks — [`grid_row_num`]
     /// closes the box at a break and replays the header on the continuation page.
-    fn grid_begin(&mut self, _rows: usize) {
+    pub(crate) fn grid_begin(&mut self, _rows: usize) {
         self.keep_together(2.0 * LINE_H + 4.0);
         self.grid_top = self.y;
     }
@@ -1038,7 +1050,7 @@ impl Doc {
     }
 
     /// Close the grid: box the final (or only) page's portion, then advance past it.
-    fn grid_end(&mut self, edges: &[f32]) {
+    pub(crate) fn grid_end(&mut self, edges: &[f32]) {
         self.close_grid_box(edges);
         self.y += 2.0;
     }
@@ -1328,7 +1340,7 @@ impl Doc {
         );
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    pub(crate) fn finish(mut self) -> Vec<u8> {
         // Close the page in progress.
         let last = std::mem::replace(&mut self.cur, Content::new());
         self.pages.push(last);
@@ -1385,7 +1397,7 @@ fn new_page_content() -> Content {
 
 /// Place `s` at top-origin `(x, top_y)` in Helvetica `size`, encoded as WinAnsi so French accents
 /// render. PDF's origin is bottom-left, so the y is flipped here.
-fn text(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
+pub(crate) fn text(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
     content.begin_text();
     content.set_font(Name(b"F0"), size);
     content.set_text_matrix([1.0, 0.0, 0.0, 1.0, x, PAGE_H - top_y]);
@@ -1395,7 +1407,7 @@ fn text(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
 }
 
 /// [`text`] in Helvetica-Bold (the headings).
-fn text_bold(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
+pub(crate) fn text_bold(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
     content.begin_text();
     content.set_font(Name(b"F1"), size);
     content.set_text_matrix([1.0, 0.0, 0.0, 1.0, x, PAGE_H - top_y]);
@@ -1406,13 +1418,13 @@ fn text_bold(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
 
 /// [`text`] with its RIGHT edge at `x_right` (the ~0.5 em Helvetica estimate, see
 /// [`text_centered`]) — the figures of a table line up on their units.
-fn text_right(content: &mut Content, x_right: f32, top_y: f32, size: f32, s: &str) {
+pub(crate) fn text_right(content: &mut Content, x_right: f32, top_y: f32, size: f32, s: &str) {
     let w = s.chars().count() as f32 * size * 0.5;
     text(content, x_right - w, top_y, size, s);
 }
 
 /// A horizontal rule at top-origin `top_y`, in mid-grey.
-fn hline(content: &mut Content, x1: f32, x2: f32, top_y: f32, width: f32) {
+pub(crate) fn hline(content: &mut Content, x1: f32, x2: f32, top_y: f32, width: f32) {
     let y = PAGE_H - top_y;
     content.set_line_width(width);
     content.move_to(x1, y);
@@ -1421,7 +1433,7 @@ fn hline(content: &mut Content, x1: f32, x2: f32, top_y: f32, width: f32) {
 }
 
 /// A vertical rule between top-origin `top_y1` and `top_y2` (issue #104 — grid column separators).
-fn vline(content: &mut Content, x: f32, top_y1: f32, top_y2: f32, width: f32) {
+pub(crate) fn vline(content: &mut Content, x: f32, top_y1: f32, top_y2: f32, width: f32) {
     content.set_line_width(width);
     content.move_to(x, PAGE_H - top_y1);
     content.line_to(x, PAGE_H - top_y2);
@@ -1458,7 +1470,7 @@ fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, gray: f32, da
 }
 
 /// A stroked rectangle outline at top-origin `(x, top_y)`, size `w × h`.
-fn stroke_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, width: f32) {
+pub(crate) fn stroke_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, width: f32) {
     content.set_line_width(width);
     content.rect(x, PAGE_H - top_y - h, w, h);
     content.stroke();
@@ -1466,7 +1478,7 @@ fn stroke_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, width:
 
 /// A grey-filled rectangle at top-origin `(x, top_y)`, size `w × h`. Restores the fill to black
 /// (text) after — the greyscale zone fills are the only non-black fill in the document.
-fn fill_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, gray: f32) {
+pub(crate) fn fill_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, gray: f32) {
     content.set_fill_gray(gray);
     content.rect(x, PAGE_H - top_y - h, w, h);
     content.fill_nonzero();
@@ -1475,7 +1487,7 @@ fn fill_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, gray: f3
 
 /// Helvetica is ~0.5 em wide on average — enough to CENTER a short label at `cx` without embedding
 /// font metrics (the labels are short and the box wide, so the estimate never overflows visibly).
-fn text_centered(content: &mut Content, cx: f32, top_y: f32, size: f32, s: &str) {
+pub(crate) fn text_centered(content: &mut Content, cx: f32, top_y: f32, size: f32, s: &str) {
     let w = s.chars().count() as f32 * size * 0.5;
     text(content, cx - w / 2.0, top_y, size, s);
 }

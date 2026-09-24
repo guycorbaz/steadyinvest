@@ -17,6 +17,7 @@ pub(crate) mod overlays;
 pub(crate) mod prefs;
 pub(crate) mod push;
 pub(crate) mod replacement;
+pub(crate) mod review;
 pub(crate) mod studies;
 pub(crate) mod watchlist;
 
@@ -113,6 +114,13 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
                     format,
                 );
             }
+            // Revue (Story 7.2): the whole roll-up re-derives on arrival.
+            3 => crate::wiring::review::push_review(
+                &ui,
+                &journal_state.borrow(),
+                &holding_freshness.borrow(),
+                &config.borrow(),
+            ),
             _ => {}
         }
     });

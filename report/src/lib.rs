@@ -10,5 +10,7 @@
 
 pub mod form;
 pub mod pdf;
+pub mod review;
 
 pub use pdf::{ReportError, render_study_pdf};
+pub use review::{DueLine, PortfolioReview, ReviewLine, ShareLine, render_portfolio_review};

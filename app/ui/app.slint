@@ -22,6 +22,7 @@ import { Holdings, HoldingRow, PortfolioRow, BankCarRow, ConcentrationLine, Size
 import { Fx, FxRateRow } from "state.slint";
 import { Confront, ConfrontState } from "state.slint";
 import { Dialog } from "state.slint";
+import { Review, ReviewShareRow, ReviewPositionRow, ReviewDueRow } from "state.slint";
 import { NavItem } from "components/nav_item.slint";
 import { ConfrontOverlay } from "components/confront_overlay.slint";
 import { ModalDialog } from "components/modal_dialog.slint";
@@ -29,6 +30,7 @@ import { DashboardScreen } from "screens/dashboard.slint";
 import { WatchlistScreen } from "screens/watchlist.slint";
 import { PortfolioScreen } from "screens/portfolio.slint";
 import { SettingsScreen } from "screens/settings.slint";
+import { ReviewScreen } from "screens/review.slint";
 
 // Re-export the globals + form structs so the Rust side (theme.rs, labels.rs, regime.rs, state.rs,
 // viewmodel/form.rs, main.rs) can reach them.
@@ -42,6 +44,7 @@ export { Holdings, HoldingRow, PortfolioRow, BankCarRow, ConcentrationLine, Size
 export { Fx, FxRateRow }
 export { Confront, ConfrontState }
 export { Dialog }
+export { Review, ReviewShareRow, ReviewPositionRow, ReviewDueRow }
 
 export component MainWindow inherits Window {
     title: @tr("steadyinvest");
@@ -62,6 +65,7 @@ export component MainWindow inherits Window {
         @tr("Études"),
         @tr("Liste de suivi"),
         @tr("Portefeuille"),
+        @tr("Revue"),
         @tr("Réglages"),
     ];
 
@@ -134,7 +138,8 @@ export component MainWindow inherits Window {
                 if root.current-screen == 0: DashboardScreen { }
                 if root.current-screen == 1: WatchlistScreen { }
                 if root.current-screen == 2: PortfolioScreen { }
-                if root.current-screen == 3: SettingsScreen { }
+                if root.current-screen == 3: ReviewScreen { }
+                if root.current-screen == 4: SettingsScreen { }
             }
         }
 

@@ -2341,6 +2341,70 @@ fn a_linked_holding_requires_a_study_and_takes_its_currency() {
     assert_eq!(state.list_holdings()[0].currency.as_deref(), Some("CHF"));
 }
 
+// ── Story 7.2 — the portfolio health review (composed read) ──
+
+#[test]
+fn portfolio_review_composes_positions_studies_and_counts() {
+    use rust_decimal::Decimal;
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x72); // sequential ids: several holdings + studies
+    // Two positions: NESN with a CHF study (linked), ROG without any study.
+    state.create_study("NESN", "CHF").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "200", "CHF", "").unwrap();
+    let review = state
+        .portfolio_review(
+            "CHF",
+            Decimal::from(1_000_000_000),
+            Decimal::from(10_000_000_000u64),
+        )
+        .expect("a readable dossier reviews");
+    assert_eq!(review.today.len(), 10, "a YYYY-MM-DD day");
+    assert_eq!(review.bank_count, 1);
+    assert_eq!(review.counts.positions, 2);
+    assert_eq!(review.counts.linked, 1);
+    // Largest invested first: NESN 1 000 CHF, ROG 1 000 CHF → ticker tiebreak (NESN < ROG).
+    assert_eq!(review.positions[0].ticker, "NESN");
+    assert!(matches!(review.positions[0].study, ReviewStudy::Linked(_)));
+    assert!(matches!(
+        review.positions[1].study,
+        ReviewStudy::None {
+            other_currency: None
+        }
+    ));
+    // An empty study is « en attente » (withheld) → due for review with that reason, not age
+    // (it was created today).
+    let linked = match &review.positions[0].study {
+        ReviewStudy::Linked(f) => f,
+        _ => unreachable!(),
+    };
+    assert_eq!(linked.verdict, "withheld");
+    assert_eq!(linked.last_saved, review.today, "created today");
+    assert!(
+        !linked.due_for_review,
+        "created today is not older than the cadence"
+    );
+    assert_eq!(review.counts.withheld, 1);
+    assert_eq!(review.due.len(), 1);
+    assert_eq!(review.due[0].reason, "withheld");
+    // The other-currency cause: a USD study for ROG does not link a CHF position, but is named.
+    state.create_study("ROG", "USD").unwrap();
+    let review = state
+        .portfolio_review(
+            "CHF",
+            Decimal::from(1_000_000_000),
+            Decimal::from(10_000_000_000u64),
+        )
+        .unwrap();
+    let rog = review.positions.iter().find(|p| p.ticker == "ROG").unwrap();
+    assert_eq!(
+        rog.study,
+        ReviewStudy::None {
+            other_currency: Some("USD".into())
+        }
+    );
+}
+
 // ── Story 4.5 — trailing stop per holding (validate, seed, ratchet) ──
 
 #[test]

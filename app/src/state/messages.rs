@@ -118,6 +118,35 @@ pub const MSG_WATCH_NO_STUDY: &str =
 /// in that study's currency — raised when no saved study matches the symbol; nothing is written.
 pub const MSG_HOLDING_NO_STUDY: &str = "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études, la position en prendra la devise.";
 
+/// Story 7.2 — the review's export outcome and the nine quality flags as neutral facts (the engine's
+/// `QualityFlagKey`s, worded once here so the review screen and its PDF share the inventory).
+pub const MSG_REVIEW_EXPORTED: &str = "La revue a été exportée.";
+pub const MSG_FLAG_PTP_TREND_DECLINING: &str = "marge avant impôt en baisse";
+pub const MSG_FLAG_ROE_TREND_DECLINING: &str = "rendement des capitaux propres en baisse";
+pub const MSG_FLAG_ROE_LOW: &str = "rendement des capitaux propres sous 10 %";
+pub const MSG_FLAG_EPS_LAGS_SALES: &str = "BPA en retard sur les ventes";
+pub const MSG_FLAG_HIGH_PE_AGGRESSIVE: &str = "PER haut jugé au-dessus de 20";
+pub const MSG_FLAG_HIGH_PE_IMPLAUSIBLE: &str = "PER haut jugé au-dessus de 25";
+pub const MSG_FLAG_UD_BELOW_TARGET: &str = "ratio hausse / baisse sous 3";
+pub const MSG_FLAG_UD_EXTREME: &str = "ratio hausse / baisse au-dessus de 20";
+pub const MSG_FLAG_RELATIVE_VALUE_HIGH: &str = "valeur relative à 100 % ou plus";
+
+/// The neutral wording of one engine quality flag (Story 7.2).
+pub fn quality_flag_label(key: steadyinvest_core::ssg::QualityFlagKey) -> &'static str {
+    use steadyinvest_core::ssg::QualityFlagKey as K;
+    match key {
+        K::PtpTrendDeclining => MSG_FLAG_PTP_TREND_DECLINING,
+        K::RoeTrendDeclining => MSG_FLAG_ROE_TREND_DECLINING,
+        K::RoeLow => MSG_FLAG_ROE_LOW,
+        K::EpsLagsSales => MSG_FLAG_EPS_LAGS_SALES,
+        K::ProjectedHighPeAggressive => MSG_FLAG_HIGH_PE_AGGRESSIVE,
+        K::ProjectedHighPeImplausible => MSG_FLAG_HIGH_PE_IMPLAUSIBLE,
+        K::UdBelowTarget => MSG_FLAG_UD_BELOW_TARGET,
+        K::UdExtreme => MSG_FLAG_UD_EXTREME,
+        K::RelativeValueHigh => MSG_FLAG_RELATIVE_VALUE_HIGH,
+    }
+}
+
 /// Holdings register copy (Story 4.3, FR36) — fact-stating, posture-gated. Raised when a holding's
 /// quantity or price is not a valid number, or its symbol is empty; nothing is written.
 pub const MSG_HOLDING_INVALID_NUMBER: &str = "La quantité et le prix d'achat doivent être des nombres ; aucune position n'a été enregistrée.";
@@ -602,6 +631,16 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_UNMATCHED_YEARS,
     MSG_WATCH_NO_STUDY,
     MSG_HOLDING_NO_STUDY,
+    MSG_REVIEW_EXPORTED,
+    MSG_FLAG_PTP_TREND_DECLINING,
+    MSG_FLAG_ROE_TREND_DECLINING,
+    MSG_FLAG_ROE_LOW,
+    MSG_FLAG_EPS_LAGS_SALES,
+    MSG_FLAG_HIGH_PE_AGGRESSIVE,
+    MSG_FLAG_HIGH_PE_IMPLAUSIBLE,
+    MSG_FLAG_UD_BELOW_TARGET,
+    MSG_FLAG_UD_EXTREME,
+    MSG_FLAG_RELATIVE_VALUE_HIGH,
     MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_AMOUNT_OUT_OF_RANGE,
     MSG_UNSTOPPED_EXPOSURE,

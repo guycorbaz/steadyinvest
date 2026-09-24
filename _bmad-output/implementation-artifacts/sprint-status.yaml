@@ -656,7 +656,7 @@ development_status:
   # panel cards, status bands. BLOCKS 7.1/7.2. PR 1 = components + Portefeuille; PR 2 = the other screens.
   7-0-ux-pass-entry-dialogs-refusals-cards: review
   7-1-company-comparison: backlog
-  7-2-portfolio-health-review: backlog
+  7-2-portfolio-health-review: review
   7-3-discovery-screening-quick-screen: backlog
   7-4-additional-provider-adapters: done
   7-5-pdf-print-other-forms: backlog

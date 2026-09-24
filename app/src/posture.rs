@@ -671,10 +671,12 @@ mod tests {
         // restore prompts) measures 612. The drop-down pass (Guy, 2026-09-24: constrained choices as
         // lists — the study currency, the FX base currency, the position symbol; their placeholders
         // and the « aucune étude dans le dossier » band) measures 620; the est-low EPS guidance
-        // (the caption under the field + the glossary entry, Guy 2026-09-24) measures 623. Floor
-        // strict.
+        // (the caption under the field + the glossary entry, Guy 2026-09-24) measures 623. Story
+        // 7.2 adds the « Revue » screen (the fifth destination, the card titles and subtitles, the
+        // share-block templates and their reason bands, the position rows' study / zone / data
+        // words, the due-list reasons, the counts) and measures 706. Floor strict.
         assert!(
-            total >= 623,
+            total >= 706,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -780,9 +782,11 @@ mod tests {
         // version regression is stated and confirmed, never merged silently): 120 + 1 = 121.
         // Issue #218 adds the no-study refusal for a position (MSG_HOLDING_NO_STUDY — a position is
         // only added for a ticker with a study, in that study's currency): 121 + 1 = 122.
+        // Story 7.2 adds the review's export outcome (MSG_REVIEW_EXPORTED) and the nine quality
+        // flags worded as neutral facts (MSG_FLAG_*): 122 + 10 = 132.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            122,
+            132,
             "state.rs message inventory changed — register the new notice"
         );
     }
