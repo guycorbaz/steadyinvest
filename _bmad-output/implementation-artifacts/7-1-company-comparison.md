@@ -1,6 +1,6 @@
 # Story 7.1 — Comparaison de sociétés (Company Comparison) + export (FR53)
 
-Status: review
+Status: done
 
 Spec: `_bmad-output/planning-artifacts/story-7-1-company-comparison-spec.md` (PR #226,
 validated by Guy 2026-09-24: the picker on the Études list, up to five studies, the thirty rows
@@ -47,7 +47,8 @@ never a walk through five studies with a notepad.
   cards, « Ouvrir l'étude » per column, « Retour »), `wiring/comparison.rs` (`push_comparison`,
   the export rail, open-study on top of the table).
 - [x] **Task 4 — gates + headless verification** (below).
-- [ ] **Task 5 — Guy's on-display check**: compare NVDA.US / NESN.SW / SCHN.SW, export the PDF.
+- [x] **Task 5 — Guy's on-display check** (2026-09-24): « ok pour une première version ; des
+  améliorations seront à apporter à l'usage ». Improvements will be filed as they surface in use.
 
 ## Dev Notes
 
