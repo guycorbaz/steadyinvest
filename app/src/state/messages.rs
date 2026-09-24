@@ -113,6 +113,8 @@ pub const MSG_REFRESH_UNMATCHED_YEARS: &str =
 /// but no saved study matches the watched ticker.
 pub const MSG_WATCH_NO_STUDY: &str =
     "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études.";
+/// Walk finding (2026-09-24): the same symbol twice on the watchlist is a slip, not a wish.
+pub const MSG_WATCH_DUPLICATE: &str = "Ce symbole est déjà dans la liste de suivi.";
 
 /// Issue #218 (Guy's decision, 2026-09-23): a position exists only for a ticker that has a study,
 /// in that study's currency — raised when no saved study matches the symbol; nothing is written.
@@ -631,6 +633,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_CONTRADICTED,
     MSG_REFRESH_UNMATCHED_YEARS,
     MSG_WATCH_NO_STUDY,
+    MSG_WATCH_DUPLICATE,
     MSG_HOLDING_NO_STUDY,
     MSG_REVIEW_EXPORTED,
     MSG_COMPARISON_EXPORTED,

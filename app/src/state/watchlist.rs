@@ -6,7 +6,10 @@
 use steadyinvest_persistence::WatchItem;
 use uuid::Uuid;
 
-use super::{JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, watch_error};
+use super::{
+    JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_WATCH_DUPLICATE,
+    watch_error,
+};
 
 impl JournalState {
     // ── Watchlist (Story 4.1, FR34) ──
@@ -111,6 +114,13 @@ impl JournalState {
         }
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        if self
+            .list_watch_items()
+            .iter()
+            .any(|w| w.security_ticker.eq_ignore_ascii_case(ticker))
+        {
+            return Err(MSG_WATCH_DUPLICATE.to_string());
         }
         let id = self.idgen.new_id();
         let created_at = self.clock.now();

@@ -461,7 +461,7 @@ impl Journal {
         let mut stmt = self.conn.prepare(
             "SELECT id, holding_id, occurred_at, quantity, unit_price, fees, currency,
                     kind, rationale, created_at
-             FROM transactions ORDER BY occurred_at, id",
+             FROM transactions ORDER BY occurred_at, created_at, id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -513,7 +513,7 @@ impl Journal {
         let mut stmt = self.conn.prepare(
             "SELECT id, holding_id, occurred_at, quantity, unit_price, fees, currency,
                     kind, rationale, created_at
-             FROM transactions WHERE holding_id = ?1 ORDER BY occurred_at, id",
+             FROM transactions WHERE holding_id = ?1 ORDER BY occurred_at, created_at, id",
         )?;
         let rows = stmt.query_map(rusqlite::params![holding_id.to_string()], |r| {
             Ok((

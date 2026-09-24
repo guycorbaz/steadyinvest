@@ -786,10 +786,11 @@ mod tests {
         // only added for a ticker with a study, in that study's currency): 121 + 1 = 122.
         // Story 7.2 adds the review's export outcome (MSG_REVIEW_EXPORTED) and the nine quality
         // flags worded as neutral facts (MSG_FLAG_*): 122 + 10 = 132. Story 7.1 adds the
-        // comparison's export outcome (MSG_COMPARISON_EXPORTED): 132 + 1 = 133.
+        // comparison's export outcome (MSG_COMPARISON_EXPORTED): 132 + 1 = 133. The walk of
+        // 2026-09-24 adds the watchlist duplicate refusal (MSG_WATCH_DUPLICATE): 134.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            133,
+            134,
             "state.rs message inventory changed — register the new notice"
         );
     }

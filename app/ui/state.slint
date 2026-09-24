@@ -1183,6 +1183,9 @@ export struct HoldingRow {
     ticker: string,
     quantity: string,
     purchase-price: string,
+    // The purchase price as displayed (locale, the price scale): the ledger's weighted average is an
+    // exact decimal with up to 28 digits — `purchase-price` keeps it for the edit form, this shows it.
+    purchase-price-text: string,
     // Story 6.2 (FR38): the currency this holding is denominated in ("CHF" | "EUR" | …). Shown beside
     // every amount; a pre-6.2 holding is read under the reference currency (coalesced in Rust).
     currency: string,

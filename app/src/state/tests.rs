@@ -2072,6 +2072,13 @@ fn add_watch_blank_ticker_is_refused_and_link_round_trips() {
         Some(study),
         "the study link round-trips through the app rail"
     );
+    // Walk finding (2026-09-24): the same symbol twice is refused, case-insensitively.
+    assert_eq!(
+        state.add_watch_item("nesn", None).unwrap_err(),
+        MSG_WATCH_DUPLICATE,
+        "a duplicate symbol is refused"
+    );
+    assert_eq!(state.list_watch_items().len(), 1);
     // Clearing it via update.
     let wid = watch_id(&state, "NESN");
     state.update_watch_item(wid, "NESN", None).unwrap();

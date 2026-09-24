@@ -13,13 +13,14 @@ use uuid::Uuid;
 
 use crate::provider::ProviderChoice;
 use crate::state::JournalState;
-use crate::viewmodel::format::NumberFormat;
+use crate::viewmodel::format::{NumberFormat, format_scaled};
 use crate::wiring::{Session, persist};
 use crate::{
     BankCarRow, CapitalAtRiskRow, ConcentrationLine, HoldingRow, Holdings, LedgerRow, MainWindow,
     PortfolioRow, SizeMixLine, SoldRow, UnclassifiedLine,
 };
 use crate::{fetch, state, viewmodel};
+use rust_decimal::Decimal;
 
 /// Transient (NOT persisted) per-ticker price-refresh freshness for the holdings register (Story
 /// 4.4, FR40): the outcome of the last manual refresh. Keyed by **upper-cased** ticker so it joins
@@ -174,6 +175,10 @@ pub(crate) fn refresh_holdings(
                 ticker: h.security_ticker.clone().into(),
                 quantity: h.quantity.clone().into(),
                 purchase_price: h.purchase_price.clone().into(),
+                purchase_price_text: Decimal::from_str_exact(&h.purchase_price)
+                    .map(|d| format_scaled(d, DisplayField::Price, format))
+                    .unwrap_or_else(|_| h.purchase_price.clone())
+                    .into(),
                 currency: currency.into(),
                 sector: h.sector.clone().unwrap_or_default().into(),
                 linked: study.is_some(),

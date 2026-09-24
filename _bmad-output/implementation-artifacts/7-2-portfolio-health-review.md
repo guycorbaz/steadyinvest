@@ -1,6 +1,6 @@
 # Story 7.2 — Revue de santé du portefeuille (Portfolio Health Review) + export (FR53)
 
-Status: review
+Status: done
 
 Spec: `_bmad-output/planning-artifacts/story-7-2-portfolio-health-review-spec.md` (PR #224,
 validated by Guy 2026-09-24 with the three defaults: a fifth nav destination, a fixed 12-month
@@ -49,7 +49,12 @@ so that a portfolio review is one screen of facts instead of a walk through ever
   chiffres), the fifth destination « Revue » (index 3; Réglages → 4), `wiring/review.rs`
   (`push_review` on activation, the export rail, « Ouvrir l'étude » / « Portefeuille »).
 - [x] **Task 4 — gates + headless verification** (below).
-- [ ] **Task 5 — Guy's on-display check**: open « Revue » on the real dossier, export the PDF.
+- [x] **Task 5 — check** (2026-09-24, headless walk on a copy of Guy's dossier, at Guy's request):
+  the eight cards render after the Portefeuille writes (positions 1 304 / 780 / 1 540 CHF, NESN
+  « provisoire · Zone d'achat · … · Signaux (5) », the NVDA currency cause, « Aucune étude à
+  revoir », the counts); adding a USD → CHF rate leaves NVDA « non classé » because the position
+  is in CHF and the study in USD (the #81 rule, not a rate matter). PDF export = the tested
+  renderer; the native picker is not driveable headless.
 
 ## Dev Notes
 

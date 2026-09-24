@@ -480,7 +480,7 @@ export component PortfolioScreen inherits Rectangle {
                                 vertical-alignment: center;
                             }
                             CaptionLine {
-                                text: @tr("Prix d'achat : {} {}", row.purchase-price, row.currency);
+                                text: @tr("Prix d'achat : {} {}", row.purchase-price-text, row.currency);
                                 vertical-alignment: center;
                             }
                             // Issue #98 (FR48): the sector fact, when known (a caption — neutral ink).
@@ -493,6 +493,9 @@ export component PortfolioScreen inherits Rectangle {
                             VerticalLayout {
                                 alignment: center;
                                 horizontal-stretch: 1;
+                                // A floor: without it the open ledger's wider toggle squeezed this
+                                // column to one glyph per line (walk finding, 2026-09-24).
+                                min-width: 170px;
                                 if row.linked: CaptionLine {
                                     text: row.zone == "buy" ? @tr("◆ {}", Labels.zone-buy)
                                         : row.zone == "neutral" ? @tr("◆ {}", Labels.zone-hold)
@@ -535,7 +538,7 @@ export component PortfolioScreen inherits Rectangle {
                             // Story 6.3 (FR39): show/hide this holding's transaction ledger (one at a time).
                             ActionButton {
                                 label: Holdings.ledger-holding-id == row.id
-                                    ? @tr("Masquer les transactions") : @tr("Transactions");
+                                    ? @tr("Masquer") : @tr("Transactions");
                                 clicked => {
                                     if (Holdings.ledger-holding-id == row.id) {
                                         Holdings.close-ledger();
@@ -737,7 +740,7 @@ export component PortfolioScreen inherits Rectangle {
                                 }
                                 ActionButton {
                                     label: Holdings.ledger-holding-id == srow.id
-                                        ? @tr("Masquer les transactions") : @tr("Transactions");
+                                        ? @tr("Masquer") : @tr("Transactions");
                                     enabled: true;
                                     clicked => {
                                         if (Holdings.ledger-holding-id == srow.id) {
