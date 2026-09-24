@@ -65,6 +65,7 @@ const GUIDE_RATES_PCT: [u32; 6] = [5, 10, 15, 20, 25, 30];
 
 // ── grid tables (issue #104 — visible SSG grid) ──
 const CELL_PAD: f32 = 5.0; // left/right padding of text inside a grid cell
+const GRID_INSET: f32 = 1.5; // the least clearance a cell's text keeps from its rules
 // Column boundaries (left … right) for the annexe table (year + seven figures).
 pub(crate) const COLS8: [f32; 9] = [
     MARGIN,
@@ -80,7 +81,7 @@ pub(crate) const COLS8: [f32; 9] = [
 // Issue #207: the §3 price–earnings table (year + the form's eight columns A–H).
 const COLS9: [f32; 10] = [
     MARGIN,
-    MARGIN + 40.0,
+    MARGIN + 46.0, // « Moyenne » (37 pt at 9 pt) fits between the rules
     MARGIN + 100.0,
     MARGIN + 160.0,
     MARGIN + 216.0,
@@ -835,6 +836,9 @@ pub(crate) struct Doc {
     grid_header: Vec<String>,
     // The font size of the grid being drawn (body, or caption for a wide table).
     grid_font: f32,
+    /// The vertical extents of the current grid's full-width note rows ([`Doc::grid_note_row`]):
+    /// the interior column rules are interrupted there, so they never cross the note's words.
+    grid_spans: Vec<(f32, f32)>,
     // The page size (points). Portrait A4 by default; `landscape()` swaps them (Story 7.1 — the
     // five-column comparison). The text primitives flip y against PAGE_H, so a landscape page's
     // content stream starts with a translate that maps that flip onto its own height.
@@ -860,6 +864,7 @@ impl Doc {
             grid_top: MARGIN,
             grid_header: Vec::new(),
             grid_font: FONT,
+            grid_spans: Vec::new(),
             page_w,
             page_h,
         }
@@ -915,26 +920,28 @@ impl Doc {
     }
 
     pub(crate) fn line(&mut self, s: &str) {
-        self.ensure(LINE_H);
-        self.y += FONT;
-        text(&mut self.cur, MARGIN, self.y, FONT, s);
-        self.y += LINE_H - FONT;
+        self.prose(s, MARGIN, FONT, LINE_H);
     }
 
     /// A caption-sized line (the form's small print: formulas, footnotes).
     pub(crate) fn small_line(&mut self, s: &str) {
-        self.ensure(LINE_H - 2.0);
-        self.y += SMALL;
-        text(&mut self.cur, MARGIN, self.y, SMALL, s);
-        self.y += LINE_H - 2.0 - SMALL;
+        self.prose(s, MARGIN, SMALL, LINE_H - 2.0);
     }
 
     /// A body line indented under its lettered parent (the §4 candidates, the zoning lines).
     pub(crate) fn indent_line(&mut self, s: &str) {
-        self.ensure(LINE_H);
-        self.y += FONT;
-        text(&mut self.cur, MARGIN + 18.0, self.y, FONT, s);
-        self.y += LINE_H - FONT;
+        self.prose(s, MARGIN + 18.0, FONT, LINE_H);
+    }
+
+    /// One line of prose from `x`, wrapped at the right margin (the 7.5 walk: a reader's long note
+    /// ran off the page) — each further line takes another `line_h`.
+    fn prose(&mut self, s: &str, x: f32, size: f32, line_h: f32) {
+        for chunk in wrap_to_width(s, self.right() - x, size) {
+            self.ensure(line_h);
+            self.y += size;
+            text(&mut self.cur, x, self.y, size, &chunk);
+            self.y += line_h - size;
+        }
     }
 
     /// Two facts on one line, at the left and at the page's middle (the form's paired growth lines).
@@ -998,6 +1005,20 @@ impl Doc {
         self.grid_row_num_sized(cells, edges, head, numeric_from);
     }
 
+    /// A grid row whose cells in `numeric` are RIGHT-aligned (the figures) and the others
+    /// left-aligned (labels, notes) — [`grid_row_num`] with an explicit range, for a table whose
+    /// last column is prose (the review's « Remarque »).
+    pub(crate) fn grid_row_range(
+        &mut self,
+        cells: &[&str],
+        edges: &[f32],
+        head: bool,
+        numeric: std::ops::Range<usize>,
+    ) {
+        self.grid_font = FONT;
+        self.grid_row_sized(cells, edges, head, numeric);
+    }
+
     fn grid_row_num_sized(
         &mut self,
         cells: &[&str],
@@ -1005,38 +1026,95 @@ impl Doc {
         head: bool,
         numeric_from: usize,
     ) {
+        self.grid_row_sized(cells, edges, head, numeric_from..usize::MAX);
+    }
+
+    fn grid_row_sized(
+        &mut self,
+        cells: &[&str],
+        edges: &[f32],
+        head: bool,
+        numeric: std::ops::Range<usize>,
+    ) {
+        let height = self.grid_row_height(cells, edges);
         if head {
             self.grid_header = cells.iter().map(|s| s.to_string()).collect();
-        } else if self.page_h - self.y - LINE_H < BOTTOM {
+        } else if self.page_h - self.y - height < BOTTOM {
             self.close_grid_box(edges);
             self.new_page();
             self.grid_top = self.y;
             let header = self.grid_header.clone();
             let refs: Vec<&str> = header.iter().map(String::as_str).collect();
-            self.draw_grid_cells_aligned(&refs, edges, true, numeric_from);
+            self.draw_grid_cells_aligned(&refs, edges, true, numeric.clone());
         }
-        self.draw_grid_cells_aligned(cells, edges, head, numeric_from);
+        self.draw_grid_cells_aligned(cells, edges, head, numeric);
     }
 
-    /// The body of [`grid_row_num`]: one row's cells at the cursor, the numeric ones right-aligned;
-    /// a header row is underlined across the table width.
+    /// Each cell's lines, wrapped to its column (a cell never crosses a rule). A text that fits
+    /// between the rules stays whole even if it eats into the padding (a narrow year column's
+    /// « 2016 »); only a longer one wraps at the padded width.
+    fn grid_cell_lines(&self, cells: &[&str], edges: &[f32]) -> Vec<Vec<String>> {
+        let size = self.grid_font;
+        cells
+            .iter()
+            .enumerate()
+            .map(|(i, s)| match edges.get(i + 1) {
+                Some(right) if text_width(s, size) > right - edges[i] - 2.0 * GRID_INSET => {
+                    wrap_to_width(s, right - edges[i] - 2.0 * CELL_PAD, size)
+                }
+                _ => vec![s.to_string()],
+            })
+            .collect()
+    }
+
+    /// The extra height a wrapped cell's further lines take.
+    fn grid_line_step(&self) -> f32 {
+        self.grid_font + 2.5
+    }
+
+    fn grid_row_height(&self, cells: &[&str], edges: &[f32]) -> f32 {
+        let lines = self
+            .grid_cell_lines(cells, edges)
+            .iter()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        LINE_H + (lines - 1) as f32 * self.grid_line_step()
+    }
+
+    /// The body of a grid row: its cells at the cursor, wrapped within their columns, the ones in
+    /// `numeric` right-aligned; a header row is underlined across the table width.
     fn draw_grid_cells_aligned(
         &mut self,
         cells: &[&str],
         edges: &[f32],
         head: bool,
-        numeric_from: usize,
+        numeric: std::ops::Range<usize>,
     ) {
         let size = self.grid_font;
-        self.y += size;
-        for (i, s) in cells.iter().enumerate() {
-            if i >= numeric_from && i + 1 < edges.len() {
-                text_right(&mut self.cur, edges[i + 1] - CELL_PAD, self.y, size, s);
-            } else {
-                text(&mut self.cur, edges[i] + CELL_PAD, self.y, size, s);
+        let step = self.grid_line_step();
+        let lines = self.grid_cell_lines(cells, edges);
+        let rows = lines.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let top = self.y + size;
+        for (i, cell_lines) in lines.iter().enumerate() {
+            for (k, line) in cell_lines.iter().enumerate() {
+                let y = top + k as f32 * step;
+                let Some(right) = edges.get(i + 1) else {
+                    text(&mut self.cur, edges[i] + CELL_PAD, y, size, line);
+                    continue;
+                };
+                // The padded position, shifted back inside the rules when the text is wider.
+                let w = text_width(line, size);
+                let x = if numeric.contains(&i) {
+                    right - CELL_PAD - w
+                } else {
+                    (edges[i] + CELL_PAD).min(right - GRID_INSET - w)
+                };
+                text(&mut self.cur, x.max(edges[i] + GRID_INSET), y, size, line);
             }
         }
-        self.y += LINE_H - size;
+        self.y = top + (rows - 1) as f32 * step + (LINE_H - size);
         if head {
             hline(
                 &mut self.cur,
@@ -1065,9 +1143,44 @@ impl Doc {
         let left = edges[0];
         let right = edges[edges.len() - 1];
         stroke_rect(&mut self.cur, left, top, right - left, bottom - top, 0.6);
+        // The interior rules run from the top down, skipping every note row's extent.
+        let mut spans = std::mem::take(&mut self.grid_spans);
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
         for e in &edges[1..edges.len() - 1] {
-            vline(&mut self.cur, *e, top, bottom, 0.4);
+            let mut from = top;
+            for (s_top, s_bottom) in &spans {
+                if *s_top > from {
+                    vline(&mut self.cur, *e, from, *s_top, 0.4);
+                }
+                from = from.max(*s_bottom);
+            }
+            if bottom > from {
+                vline(&mut self.cur, *e, from, bottom, 0.4);
+            }
         }
+    }
+
+    /// A small-print note under a grid row, spanning from `left` to the table's right edge and
+    /// wrapped there; the interior column rules stop above it and resume below (the review's
+    /// « Signaux · Données » line under each position).
+    pub(crate) fn grid_note_row(&mut self, s: &str, left: f32, edges: &[f32]) {
+        let right = edges[edges.len() - 1];
+        let outer = [edges[0], left, right];
+        self.grid_font = SMALL;
+        let height = self.grid_row_height(&["", s], &outer);
+        if self.page_h - self.y - height < BOTTOM {
+            self.close_grid_box(edges);
+            self.new_page();
+            self.grid_top = self.y;
+            let header = self.grid_header.clone();
+            let refs: Vec<&str> = header.iter().map(String::as_str).collect();
+            self.grid_font = FONT;
+            self.draw_grid_cells_aligned(&refs, edges, true, 2..usize::MAX);
+            self.grid_font = SMALL;
+        }
+        let from = self.y;
+        self.draw_grid_cells_aligned(&["", s], &outer, false, usize::MAX..usize::MAX);
+        self.grid_spans.push((from, self.y));
     }
 
     /// Close the grid: box the final (or only) page's portion, then advance past it.
@@ -1321,13 +1434,7 @@ impl Doc {
         text_centered(&mut self.cur, fx(buy), by, 7.0, &money(Some(z.buy_top)));
         text_centered(&mut self.cur, fx(neu), by, 7.0, &money(Some(z.neutral_top)));
         let hi_lbl = money(Some(z.forecast_high));
-        text(
-            &mut self.cur,
-            x1 - hi_lbl.chars().count() as f32 * 7.0 * 0.5,
-            by,
-            7.0,
-            &hi_lbl,
-        );
+        text_right(&mut self.cur, x1, by, 7.0, &hi_lbl);
 
         // Current-price marker: a vertical line through the bar + a caption above.
         if let Some(cp) = current_price.and_then(|d| d.to_f64()) {
@@ -1443,11 +1550,94 @@ pub(crate) fn text_bold(content: &mut Content, x: f32, top_y: f32, size: f32, s:
     content.end_text();
 }
 
-/// [`text`] with its RIGHT edge at `x_right` (the ~0.5 em Helvetica estimate, see
-/// [`text_centered`]) — the figures of a table line up on their units.
+/// [`text`] with its RIGHT edge at `x_right` (the real Helvetica widths, [`text_width`]) — the
+/// figures of a table line up on their units.
 pub(crate) fn text_right(content: &mut Content, x_right: f32, top_y: f32, size: f32, s: &str) {
-    let w = s.chars().count() as f32 * size * 0.5;
-    text(content, x_right - w, top_y, size, s);
+    text(content, x_right - text_width(s, size), top_y, size, s);
+}
+
+/// Helvetica advance widths for ASCII 32..=126, in 1/1000 em (Adobe's standard-14 AFM metrics —
+/// the font every PDF reader ships, so the numbers are exact, not an estimate).
+const HELVETICA_ASCII: [u16; 95] = [
+    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278,
+    278, // ' '…'/'
+    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, // '0'…'9'
+    278, 278, 584, 584, 584, 556, 1015, // ':'…'@'
+    667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, // 'A'…'M'
+    722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, // 'N'…'Z'
+    278, 278, 278, 469, 556, 333, // '['…'`'
+    556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, // 'a'…'m'
+    556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, // 'n'…'z'
+    334, 260, 334, 584, // '{'…'~'
+];
+
+/// One glyph's Helvetica width (1/1000 em) — accented letters take their base letter's width, as
+/// in the AFM; anything [`winansi`] cannot encode renders as '?' (556).
+fn glyph_width(c: char) -> u16 {
+    match c {
+        ' '..='~' => HELVETICA_ASCII[c as usize - 32],
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'è' | 'é' | 'ê' | 'ë' => 556,
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ù' | 'ú' | 'û' | 'ü' | 'ñ' => 556,
+        'ì' | 'í' | 'î' | 'ï' | 'Ì' | 'Í' | 'Î' | 'Ï' => 278,
+        'ç' | 'ý' | 'ÿ' => 500,
+        'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'È' | 'É' | 'Ê' | 'Ë' => 667,
+        'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' => 778,
+        'Ù' | 'Ú' | 'Û' | 'Ü' | 'Ç' | 'Ñ' => 722,
+        '—' | '…' => 1000,
+        '–' | '«' | '»' | '€' => 556,
+        '’' => 222,
+        '·' | '\u{a0}' => 278,
+        '°' => 400,
+        '×' | '÷' => 584,
+        '−' => 333, // encoded as the hyphen-minus
+        _ => 556,
+    }
+}
+
+/// The rendered width of `s` in Helvetica at `size` points.
+pub(crate) fn text_width(s: &str, size: f32) -> f32 {
+    s.chars().map(|c| f32::from(glyph_width(c))).sum::<f32>() * size / 1000.0
+}
+
+/// `s` cut to fit `width` points at `size`, ending with « … » when cut (never spilling over).
+pub(crate) fn fit(s: &str, width: f32, size: f32) -> String {
+    if text_width(s, size) <= width {
+        return s.to_string();
+    }
+    let room = width - text_width("…", size);
+    let mut out = String::new();
+    let mut used = 0.0;
+    for c in s.chars() {
+        let w = f32::from(glyph_width(c)) * size / 1000.0;
+        if used + w > room {
+            break;
+        }
+        used += w;
+        out.push(c);
+    }
+    format!("{}…", out.trim_end())
+}
+
+/// `s` broken at spaces into lines no wider than `width` points at `size`; a single word wider
+/// than the line is cut with « … » ([`fit`]). An empty `s` is one empty line.
+pub(crate) fn wrap_to_width(s: &str, width: f32, size: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in s.split(' ') {
+        let candidate = if line.is_empty() {
+            word.to_string()
+        } else {
+            format!("{line} {word}")
+        };
+        if line.is_empty() || text_width(&candidate, size) <= width {
+            line = candidate;
+        } else {
+            lines.push(fit(&line, width, size));
+            line = word.to_string();
+        }
+    }
+    lines.push(fit(&line, width, size));
+    lines
 }
 
 /// A horizontal rule at top-origin `top_y`, in mid-grey.
@@ -1512,11 +1702,9 @@ pub(crate) fn fill_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f3
     content.set_fill_gray(0.0);
 }
 
-/// Helvetica is ~0.5 em wide on average — enough to CENTER a short label at `cx` without embedding
-/// font metrics (the labels are short and the box wide, so the estimate never overflows visibly).
+/// [`text`] CENTERED on `cx` (the real Helvetica widths, [`text_width`]).
 pub(crate) fn text_centered(content: &mut Content, cx: f32, top_y: f32, size: f32, s: &str) {
-    let w = s.chars().count() as f32 * size * 0.5;
-    text(content, cx - w / 2.0, top_y, size, s);
+    text(content, cx - text_width(s, size) / 2.0, top_y, size, s);
 }
 
 /// Issue #25 (multi-scale): the log10 bounds of ONE series' own data range, padded by
@@ -1678,6 +1866,49 @@ mod tests {
             "the form has real content, got {}",
             bytes.len()
         );
+    }
+
+    /// The 7.5 walk: « NESN.SW (CHF) » measured at half an em per glyph came out ~20 % short, so
+    /// the right-aligned head started too far left and ran over the rule. The widths are the AFM's.
+    #[test]
+    fn text_width_uses_the_real_helvetica_metrics() {
+        // N722 E667 S667 N722 .278 S667 W944 space278 (333 C722 H722 F611 )333 = 7666
+        assert!((text_width("NESN.SW (CHF)", 10.0) - 76.66).abs() < 1e-3);
+        assert!(text_width("NESN.SW (CHF)", 10.0) > "NESN.SW (CHF)".len() as f32 * 5.0);
+        // Accented letters take their base width; « i » is narrow, « î » too.
+        assert_eq!(text_width("é", 10.0), text_width("e", 10.0));
+        assert_eq!(text_width("î", 10.0), 2.78);
+    }
+
+    /// The 7.5 walk: a reader's long note ran off the page — a prose line now wraps at the margin.
+    #[test]
+    fn a_prose_line_longer_than_the_page_wraps() {
+        let mut doc = Doc::new();
+        let start = doc.y;
+        doc.line("court");
+        let one = doc.y - start;
+        let long = "Le haut de 2021 tient à un exercice exceptionnel ; la moyenne ajustée serait plutôt autour de 20, à revoir après les résultats annuels 2026, et encore une fois après.";
+        assert!(text_width(long, FONT) > doc.right() - MARGIN);
+        let before = doc.y;
+        doc.indent_line(long);
+        assert!(
+            doc.y - before >= 2.0 * one,
+            "the note took more than one line"
+        );
+    }
+
+    #[test]
+    fn fit_and_wrap_never_exceed_the_width() {
+        assert_eq!(fit("Nestlé", 100.0, 9.0), "Nestlé");
+        let cut = fit("NVIDIA Corporation", 40.0, 9.0);
+        assert!(cut.ends_with('…'));
+        assert!(text_width(&cut, 9.0) <= 40.0);
+        let note = "non classé : chiffre d'affaires indisponible";
+        let lines = wrap_to_width(note, 120.0, 9.0);
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|l| text_width(l, 9.0) <= 120.0));
+        assert_eq!(lines.join(" "), note, "wrapping keeps every word");
+        assert_eq!(wrap_to_width("", 50.0, 9.0), vec![String::new()]);
     }
 
     #[test]

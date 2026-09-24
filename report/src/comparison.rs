@@ -3,7 +3,7 @@
 //! the figures (its one float→string boundary) and passes keys for the two worded rows (the
 //! zone, the study state); this module owns every label (its neutral inventory, tested).
 
-use crate::pdf::{Doc, EM_DASH, MARGIN, SMALL};
+use crate::pdf::{Doc, EM_DASH, MARGIN, SMALL, fit, wrap_to_width};
 
 /// One study's column: the header facts and the thirty rows (index 0 = the form's row 1).
 /// Rows 20 and 28 are keys carried in `zone` / `state` instead; their string slot stays `""`.
@@ -144,37 +144,6 @@ fn flag_words(c: &ComparisonColumn) -> Option<String> {
     Some(words.trim().to_string())
 }
 
-/// Clip to `max` characters with an ellipsis (character-counted; the cell is a fixed width).
-fn clip(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let cut: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{}…", cut.trim_end())
-    }
-}
-
-/// Greedy word wrap on spaces to `width` characters per line (never splits inside a word).
-fn wrap_words(s: &str, width: usize) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    for word in s.split(' ') {
-        let candidate_len =
-            cur.chars().count() + usize::from(!cur.is_empty()) + word.chars().count();
-        if !cur.is_empty() && candidate_len > width {
-            lines.push(std::mem::take(&mut cur));
-        }
-        if !cur.is_empty() {
-            cur.push(' ');
-        }
-        cur.push_str(word);
-    }
-    if !cur.is_empty() {
-        lines.push(cur);
-    }
-    lines
-}
-
 /// The cell of row `n` (1-based) for a column: the figure, the worded key rows, or the absence.
 fn cell(c: &ComparisonColumn, n: usize) -> String {
     if c.unavailable {
@@ -227,10 +196,10 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     for i in 1..=n {
         edges.push(MARGIN + label_w + col_w * i as f32);
     }
-    // Two header rows: « TICKER (CUR) » then the company name, clipped to its column (Helvetica
-    // at SMALL averages ~0.5 em per glyph; an over-long name is cut with an ellipsis, never
-    // allowed to spill into the neighbour's column).
-    let max_chars = ((col_w - 6.0) / (SMALL * 0.5)).max(4.0) as usize;
+    // Two header rows: « TICKER (CUR) » then the company name, cut to its column at the real
+    // Helvetica widths (an over-long name ends with an ellipsis, never spills into the
+    // neighbour's column; the grid wraps any other over-long cell inside its own).
+    let name_w = col_w - 10.0;
     let header: Vec<String> = std::iter::once(String::new())
         .chain(
             cols.iter()
@@ -239,7 +208,7 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
         .collect();
     let header_refs: Vec<&str> = header.iter().map(String::as_str).collect();
     let names: Vec<String> = std::iter::once(String::new())
-        .chain(cols.iter().map(|c| clip(&c.name, max_chars)))
+        .chain(cols.iter().map(|c| fit(&c.name, name_w, SMALL)))
         .collect();
     let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
     let any_name = cols.iter().any(|c| !c.name.is_empty());
@@ -274,9 +243,9 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
         .collect();
     if !listed.is_empty() {
         doc.section(FLAGS_TITLE);
-        let width_chars = ((doc.right() - MARGIN) / (SMALL * 0.5)) as usize;
+        let width = doc.right() - MARGIN;
         for (ticker, words) in listed {
-            for chunk in wrap_words(&format!("{ticker} : {words}"), width_chars) {
+            for chunk in wrap_to_width(&format!("{ticker} : {words}"), width, SMALL) {
                 doc.small_line(&chunk);
             }
         }
@@ -352,9 +321,6 @@ mod tests {
         c.rows[26] = "0".into();
         assert_eq!(cell(&c, 27), "0");
         assert_eq!(flag_words(&c), None);
-        assert_eq!(wrap_words("aa bb cc dd", 5), vec!["aa bb", "cc dd"]);
-        assert_eq!(clip("Nestlé", 10), "Nestlé");
-        assert_eq!(clip("NVIDIA Corporation", 8), "NVIDIA…");
         let mut t = column("T", false);
         t.rows[4] = "47,6 % · ↑ hausse".into();
         assert_eq!(cell(&t, 5), "47,6 % · hausse");

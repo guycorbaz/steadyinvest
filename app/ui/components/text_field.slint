@@ -22,8 +22,12 @@ export component TextField inherits Rectangle {
         padding-left: Tokens.space-12;
         padding-right: Tokens.space-12;
 
+        // The 7.5 walk: a long note widened the whole examen rapide screen — the field's minimum
+        // width followed its text. Now it keeps a fixed floor and the text scrolls behind the
+        // cursor (the std LineEdit's recipe), never pushing the layout.
         Rectangle {
             clip: true;
+            min-width: 120px;
 
             placeholder := Text {
                 text: root.placeholder;
@@ -32,18 +36,28 @@ export component TextField inherits Rectangle {
                 vertical-alignment: center;
                 horizontal-alignment: left;
                 width: 100%;
+                overflow: elide;
                 visible: input.text == "";
             }
 
             input := TextInput {
+                property <length> computed-x;
+                x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+                width: max(parent.width - self.text-cursor-width, self.preferred-width);
                 color: Tokens.text-high;
                 selection-background-color: Tokens.focus;
                 font-size: Tokens.font-body;
                 font-family: Tokens.font-ui;
                 vertical-alignment: center;
                 horizontal-alignment: left;
-                width: 100%;
                 single-line: true;
+                cursor-position-changed(cursor-position) => {
+                    if cursor-position.x + self.computed-x < 0px {
+                        self.computed-x = - cursor-position.x;
+                    } else if cursor-position.x + self.computed-x > parent.width - self.text-cursor-width {
+                        self.computed-x = parent.width - cursor-position.x - self.text-cursor-width;
+                    }
+                }
                 accepted => {
                     root.accepted();
                 }
