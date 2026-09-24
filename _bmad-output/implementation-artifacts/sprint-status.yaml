@@ -664,7 +664,9 @@ development_status:
   7-1-company-comparison: done
   # 2026-09-24: 7-2 checked in the same walk → done.
   7-2-portfolio-health-review: done
-  7-3-discovery-screening-quick-screen: backlog
+  # 2026-09-24: 7-3 spec (PR #229, merged by Guy) → PR 1 (the examination) dev complete → review;
+  #             PR 2 (the criblage of the liste de suivi) to follow.
+  7-3-discovery-screening-quick-screen: review
   7-4-additional-provider-adapters: done
   7-5-pdf-print-other-forms: backlog
   epic-7-retrospective: optional

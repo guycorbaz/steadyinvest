@@ -522,6 +522,9 @@ export global Studies {
     in-out property <bool> study-open;
     // Story 7.1: the comparison table is shown in place of the list (never over an open study).
     in-out property <bool> compare-open;
+    // Story 7.3: the « Examen rapide » is shown over the list OR over an open study (its
+    // « Retour » lands wherever it was opened from).
+    in-out property <bool> screen-open;
     // The header identity block + the §3 P/E table rows, built by `viewmodel/form.rs`.
     in-out property <FormHeader> form-header;
     in-out property <[PeRow]> pe-rows;
@@ -1135,6 +1138,72 @@ export global Comparison {
     callback close();              // back to the list
     callback export-pdf();
     callback open-study(string);   // study id → open (the comparison stays behind it)
+}
+
+// ── Story 7.3 — the « Examen rapide » (the beginner's check list): two ladders, the five-year
+//    price / P/E record, the reader's own fields, four conclusions worded as facts. Every figure
+//    arrives formatted; every worded fact arrives as a KEY worded here (@tr) and in the report. ──
+export struct QuickPriceRow {
+    year: string,
+    high: string,
+    low: string,
+    eps: string,
+    pe-high: string,
+    pe-low: string,
+}
+export global QuickScreen {
+    in-out property <string> ticker;
+    in-out property <string> name;
+    in-out property <string> currency;
+    in-out property <string> date;
+    in-out property <string> source;
+    in-out property <bool> from-study;      // opened from a study → no « Créer l'étude »
+    in-out property <bool> fetching;
+    in-out property <string> notice;
+    // §1 / §2 ladders: ten lines each (row-major, "" = absent), the four years, the rate, the span.
+    in-out property <[string]> sales-lines;
+    in-out property <[string]> sales-years;
+    in-out property <string> sales-rate;
+    in-out property <string> sales-span;
+    in-out property <bool> sales-unavailable;
+    in-out property <[string]> eps-lines;
+    in-out property <[string]> eps-years;
+    in-out property <string> eps-rate;
+    in-out property <string> eps-span;
+    in-out property <bool> eps-unavailable;
+    in-out property <string> eps-vs-sales;   // eps | sales | same | ""
+    // §3
+    in-out property <[QuickPriceRow]> price-rows;
+    in-out property <string> pe-high-total;
+    in-out property <string> pe-low-total;
+    in-out property <string> pe-high-avg;
+    in-out property <string> pe-low-avg;
+    in-out property <string> pe-avg-of-avgs;
+    in-out property <string> present-price;
+    in-out property <string> present-eps;
+    in-out property <string> present-pe;
+    in-out property <string> high-five-years-ago;
+    in-out property <string> price-vs-high-pct;   // signed, "" = unknown
+    in-out property <string> years-sold-as-high;
+    in-out property <string> pe-position;         // higher | similar | lower | ""
+    // The reader's fields (session only, echoed as typed).
+    in-out property <string> reasons;
+    in-out property <string> factors-continue;    // yes | less | no | ""
+    in-out property <string> pe-notes;
+    in-out property <string> objective;
+    in-out property <string> eps-will-meet;       // yes | no | ""
+    // §4, derived in Rust from the objective (keys: yes | no | "").
+    in-out property <string> sales-meets;
+    in-out property <string> eps-meets;
+    // The picker on Études.
+    in-out property <string> pick-ticker;
+    in-out property <string> pick-currency;
+    callback examine(string, string);   // ticker, currency → fetch, then open
+    callback examine-study();           // the open study's own years → open
+    callback close();
+    callback export-pdf();
+    callback create-study();
+    callback objective-edited(string);
 }
 
 export struct PortfolioRow {

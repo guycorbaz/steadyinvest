@@ -1,0 +1,315 @@
+// Examen rapide (Story 7.3): the beginner's check list — two six-year ladders, the five-year
+// price / P/E record, the reader's own fields, four conclusions worded as facts against the
+// reader's objective. It states, never recommends (FR13): no colour, no « acceptable ».
+
+import { Tokens } from "../tokens.slint";
+import { QuickScreen, QuickPriceRow, Studies } from "../state.slint";
+import { ActionButton } from "../components/action_button.slint";
+import { ChoiceChip } from "../components/choice_chip.slint";
+import { PanelCard } from "../components/panel_card.slint";
+import { StatusBand } from "../components/status_band.slint";
+import { TextField } from "../components/text_field.slint";
+
+component Fact inherits Text {
+    color: Tokens.text-high;
+    font-family: Tokens.font-numeric;
+    font-size: Tokens.font-caption;
+    horizontal-alignment: right;
+    vertical-alignment: center;
+}
+
+component Label inherits Text {
+    color: Tokens.text-mid;
+    font-size: Tokens.font-caption;
+    vertical-alignment: center;
+    wrap: word-wrap;
+}
+
+// One ladder line: the numbered label (with its year when it has one) and the figure.
+component LadderLine inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> year;
+    in property <string> value;
+    spacing: Tokens.space-8;
+    min-height: Tokens.row-height * 0.7;
+    Label {
+        text: root.year != "" ? @tr("{} ({})", root.label, root.year) : root.label;
+        horizontal-stretch: 1;
+    }
+    Fact {
+        text: root.value != "" ? root.value : "—";
+        width: 180px;
+    }
+}
+
+component Ladder inherits VerticalLayout {
+    in property <[string]> lines;
+    in property <[string]> years;
+    in property <string> rate;
+    in property <string> span;
+    in property <bool> unavailable;
+    in property <string> rate-label;
+    in property <string> recent-label;
+    in property <string> recent-prior-label;
+    in property <string> old-label;      // « … il y a {} ans » with the span
+    in property <string> old-prior-label;
+    spacing: Tokens.space-4;
+    pure function at(i: int) -> string { return i < root.lines.length ? root.lines[i] : ""; }
+    pure function year-at(i: int) -> string { return i < root.years.length ? root.years[i] : ""; }
+    pure function span-plus-one() -> string {
+        if (root.span == "5") { return "6"; }
+        if (root.span == "4") { return "5"; }
+        if (root.span == "3") { return "4"; }
+        if (root.span == "2") { return "3"; }
+        if (root.span == "1") { return "2"; }
+        return "";
+    }
+    if root.unavailable: StatusBand {
+        icon: "◦";
+        text: @tr("indisponible : moins de trois années exploitables");
+    }
+    if !root.unavailable: VerticalLayout {
+        spacing: Tokens.space-4;
+        LadderLine { label: root.recent-label; year: root.year-at(0); value: root.at(0); }
+        LadderLine { label: root.recent-prior-label; year: root.year-at(1); value: root.at(1); }
+        LadderLine { label: @tr("(3) Total de (1) + (2)"); value: root.at(2); }
+        LadderLine { label: @tr("(4) (3) divisé par 2"); value: root.at(3); }
+        LadderLine { label: @tr("{} {} ans", root.old-label, root.span); year: root.year-at(2); value: root.at(4); }
+        LadderLine { label: @tr("{} {} ans", root.old-prior-label, root.span-plus-one()); year: root.year-at(3); value: root.at(5); }
+        LadderLine { label: @tr("(7) Total de (5) + (6)"); value: root.at(6); }
+        LadderLine { label: @tr("(8) (7) divisé par 2"); value: root.at(7); }
+        LadderLine { label: @tr("(9) Hausse sur la période, (4) − (8)"); value: root.at(8); }
+        LadderLine { label: @tr("(10) Hausse en pour cent, (9) ÷ (8)"); value: root.at(9); }
+        HorizontalLayout {
+            spacing: Tokens.space-8;
+            min-height: Tokens.row-height * 0.8;
+            Text {
+                text: root.rate-label;
+                color: Tokens.text-high;
+                font-size: Tokens.font-body;
+                font-weight: Tokens.weight-semibold;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.rate != "" ? root.rate : "—";
+                color: Tokens.text-high;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-body;
+                font-weight: Tokens.weight-semibold;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                width: 180px;
+            }
+        }
+        Label { text: @tr("Base : deux moyennes de deux ans, à {} ans d'écart (formulaire : 5).", root.span); }
+    }
+}
+
+component PriceCell inherits Fact {
+    horizontal-stretch: 1;
+}
+
+export component QuickScreenScreen inherits Rectangle {
+    pure function meets-words(key: string) -> string {
+        if (key == "yes") { return @tr("atteint"); }
+        if (key == "no") { return @tr("n'atteint pas"); }
+        return "";
+    }
+    pure function pe-words() -> string {
+        if (QuickScreen.pe-position == "higher") { return @tr("au-dessus"); }
+        if (QuickScreen.pe-position == "similar") { return @tr("voisin"); }
+        if (QuickScreen.pe-position == "lower") { return @tr("au-dessous"); }
+        return "";
+    }
+
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            alignment: start;
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
+
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+                alignment: start;
+                ActionButton {
+                    label: QuickScreen.from-study ? @tr("‹ Retour à l'étude") : @tr("‹ Retour aux études");
+                    enabled: true;
+                    clicked => { QuickScreen.close(); }
+                }
+                ActionButton {
+                    label: @tr("Exporter PDF");
+                    enabled: true;
+                    clicked => { QuickScreen.export-pdf(); }
+                }
+                if !QuickScreen.from-study: ActionButton {
+                    label: @tr("Créer l'étude");
+                    enabled: true;
+                    clicked => { QuickScreen.create-study(); }
+                }
+            }
+            Text {
+                text: QuickScreen.name != ""
+                    ? @tr("Examen rapide — {} · {} ({})", QuickScreen.ticker, QuickScreen.name, QuickScreen.currency)
+                    : @tr("Examen rapide — {} ({})", QuickScreen.ticker, QuickScreen.currency);
+                color: Tokens.text-high;
+                font-size: Tokens.font-h2;
+                font-weight: Tokens.weight-semibold;
+            }
+            Label { text: @tr("Liste de contrôle pour débutant, un regard avant l'étude complète · au {} · {}", QuickScreen.date, QuickScreen.source); }
+            if QuickScreen.notice != "": Label { text: QuickScreen.notice; }
+
+            PanelCard {
+                title: @tr("1 · Ventes passées");
+                Ladder {
+                    lines: QuickScreen.sales-lines;
+                    years: QuickScreen.sales-years;
+                    rate: QuickScreen.sales-rate;
+                    span: QuickScreen.sales-span;
+                    unavailable: QuickScreen.sales-unavailable;
+                    rate-label: @tr("Taux annuel composé de croissance des ventes");
+                    recent-label: @tr("(1) Ventes de l'année la plus récente");
+                    recent-prior-label: @tr("(2) Ventes de l'année précédente");
+                    old-label: @tr("(5) Ventes il y a");
+                    old-prior-label: @tr("(6) Ventes il y a");
+                }
+            }
+            PanelCard {
+                title: @tr("2 · Bénéfice par action passé");
+                Ladder {
+                    lines: QuickScreen.eps-lines;
+                    years: QuickScreen.eps-years;
+                    rate: QuickScreen.eps-rate;
+                    span: QuickScreen.eps-span;
+                    unavailable: QuickScreen.eps-unavailable;
+                    rate-label: @tr("Taux annuel composé de croissance du BPA");
+                    recent-label: @tr("(1) BPA de l'année la plus récente");
+                    recent-prior-label: @tr("(2) BPA de l'année précédente");
+                    old-label: @tr("(5) BPA il y a");
+                    old-prior-label: @tr("(6) BPA il y a");
+                }
+                if QuickScreen.eps-vs-sales == "eps": StatusBand { icon: "◦"; text: @tr("Le BPA a augmenté plus vite que les ventes sur la période."); }
+                if QuickScreen.eps-vs-sales == "sales": StatusBand { icon: "◦"; text: @tr("Le BPA a augmenté moins vite que les ventes sur la période."); }
+                if QuickScreen.eps-vs-sales == "same": StatusBand { icon: "◦"; text: @tr("Le BPA et les ventes ont augmenté au même rythme sur la période."); }
+                Label { text: @tr("Raisons apparentes de l'écart et de la croissance passée (votre note, non enregistrée) :"); }
+                TextField {
+                    placeholder: @tr("p. ex. un nouveau produit, une reprise cyclique, une acquisition…");
+                    text <=> QuickScreen.reasons;
+                }
+                Label { text: @tr("Les facteurs de la croissance passée resteront-ils effectifs cinq ans ?"); }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    ChoiceChip { label: @tr("oui"); selected: QuickScreen.factors-continue == "yes"; activated => { QuickScreen.factors-continue = "yes"; } }
+                    ChoiceChip { label: @tr("oui, mais moins"); selected: QuickScreen.factors-continue == "less"; activated => { QuickScreen.factors-continue = "less"; } }
+                    ChoiceChip { label: @tr("non"); selected: QuickScreen.factors-continue == "no"; activated => { QuickScreen.factors-continue = "no"; } }
+                }
+            }
+            PanelCard {
+                title: @tr("3 · Cours de l'action");
+                HorizontalLayout {
+                    spacing: Tokens.space-24;
+                    alignment: start;
+                    Label { text: @tr("Cours actuel : {}", QuickScreen.present-price != "" ? QuickScreen.present-price : "—"); }
+                    Label { text: @tr("BPA actuel : {}", QuickScreen.present-eps != "" ? QuickScreen.present-eps : "—"); }
+                    Label { text: @tr("PER actuel : {}", QuickScreen.present-pe != "" ? QuickScreen.present-pe : "—"); }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    Label { text: @tr("Année"); width: 110px; }
+                    PriceCell { text: @tr("Cours haut (A)"); color: Tokens.text-mid; }
+                    PriceCell { text: @tr("Cours bas (B)"); color: Tokens.text-mid; }
+                    PriceCell { text: @tr("BPA (C)"); color: Tokens.text-mid; }
+                    PriceCell { text: @tr("PER au haut (A ÷ C)"); color: Tokens.text-mid; }
+                    PriceCell { text: @tr("PER au bas (B ÷ C)"); color: Tokens.text-mid; }
+                }
+                for r in QuickScreen.price-rows: HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    min-height: Tokens.row-height * 0.7;
+                    Label { text: r.year; width: 110px; }
+                    PriceCell { text: r.high != "" ? r.high : "—"; }
+                    PriceCell { text: r.low != "" ? r.low : "—"; }
+                    PriceCell { text: r.eps != "" ? r.eps : "—"; }
+                    PriceCell { text: r.pe-high != "" ? r.pe-high : "—"; }
+                    PriceCell { text: r.pe-low != "" ? r.pe-low : "—"; }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    min-height: Tokens.row-height * 0.7;
+                    Label { text: @tr("Totaux"); width: 110px; }
+                    PriceCell { text: ""; }
+                    PriceCell { text: ""; }
+                    PriceCell { text: ""; }
+                    PriceCell { text: QuickScreen.pe-high-total != "" ? QuickScreen.pe-high-total : "—"; }
+                    PriceCell { text: QuickScreen.pe-low-total != "" ? QuickScreen.pe-low-total : "—"; }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    min-height: Tokens.row-height * 0.7;
+                    Label { text: @tr("Moyennes"); width: 110px; }
+                    PriceCell { text: ""; }
+                    PriceCell { text: ""; }
+                    PriceCell { text: ""; }
+                    PriceCell { text: QuickScreen.pe-high-avg != "" ? QuickScreen.pe-high-avg : "—"; }
+                    PriceCell { text: QuickScreen.pe-low-avg != "" ? QuickScreen.pe-low-avg : "—"; }
+                }
+                Label { text: @tr("Moyenne des PER moyens haut et bas sur cinq ans : {}", QuickScreen.pe-avg-of-avgs != "" ? QuickScreen.pe-avg-of-avgs : "—"); }
+                if QuickScreen.price-vs-high-pct != "": StatusBand {
+                    icon: "◦";
+                    text: @tr("Cours actuel par rapport au cours haut d'il y a cinq ans ({}) : {}", QuickScreen.high-five-years-ago, QuickScreen.price-vs-high-pct);
+                }
+                if QuickScreen.years-sold-as-high != "": StatusBand {
+                    icon: "◦";
+                    text: @tr("L'action s'est vendue aussi haut que le cours actuel au cours de {} des cinq dernières années.", QuickScreen.years-sold-as-high);
+                }
+                if root.pe-words() != "": StatusBand {
+                    icon: "◦";
+                    text: @tr("Le PER actuel ({}) est {} de la moyenne des cinq ans ({}).", QuickScreen.present-pe, root.pe-words(), QuickScreen.pe-avg-of-avgs);
+                }
+                Label { text: @tr("PER inhabituels, moyenne à ajuster (votre note, non enregistrée) :"); }
+                TextField {
+                    placeholder: @tr("p. ex. le haut de 2021 tient à un exercice exceptionnel…");
+                    text <=> QuickScreen.pe-notes;
+                }
+            }
+            PanelCard {
+                title: @tr("4 · Conclusion");
+                subtitle: @tr("Contre votre objectif ; le formulaire pose les questions, vous y répondez.");
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    Label { text: @tr("Objectif de croissance annuelle (%)"); }
+                    TextField {
+                        placeholder: @tr("p. ex. 7");
+                        text <=> QuickScreen.objective;
+                        width: 160px;
+                        edited => { QuickScreen.objective-edited(QuickScreen.objective); }
+                    }
+                }
+                Label {
+                    text: QuickScreen.sales-meets != ""
+                        ? @tr("1. Le taux de croissance passé des ventes ({}) {} l'objectif.", QuickScreen.sales-rate, root.meets-words(QuickScreen.sales-meets))
+                        : @tr("1. Le taux de croissance passé des ventes ({}) : objectif non renseigné.", QuickScreen.sales-rate != "" ? QuickScreen.sales-rate : "—");
+                }
+                Label {
+                    text: QuickScreen.eps-meets != ""
+                        ? @tr("2. Le taux de croissance passé du BPA ({}) {} l'objectif.", QuickScreen.eps-rate, root.meets-words(QuickScreen.eps-meets))
+                        : @tr("2. Le taux de croissance passé du BPA ({}) : objectif non renseigné.", QuickScreen.eps-rate != "" ? QuickScreen.eps-rate : "—");
+                }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    Label { text: @tr("3. Croissance possible du BPA sur cinq ans, votre avis :"); }
+                    ChoiceChip { label: @tr("oui"); selected: QuickScreen.eps-will-meet == "yes"; activated => { QuickScreen.eps-will-meet = "yes"; } }
+                    ChoiceChip { label: @tr("non"); selected: QuickScreen.eps-will-meet == "no"; activated => { QuickScreen.eps-will-meet = "no"; } }
+                }
+                if root.pe-words() != "": Label { text: @tr("4. Le cours : PER actuel {} de la norme des cinq ans.", root.pe-words()); }
+                if root.pe-words() == "": Label { text: @tr("4. Le cours : PER actuel indisponible."); }
+                Label { text: @tr("Ce formulaire n'est pas une analyse suffisante ; il aide à poser les questions avant une étude complète."); }
+            }
+        }
+    }
+}

@@ -13,7 +13,7 @@
 // formula captions (`A÷C`, …) are static display text, not computed.
 
 import { Tokens } from "../tokens.slint";
-import { Studies, FormHeader, PeRow, MgmtRow, Warnings } from "../state.slint";
+import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen } from "../state.slint";
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
@@ -346,6 +346,12 @@ export component StudyScreen inherits Rectangle {
                         // edits made in this form — this pure-Slint path bypasses screen-activated.
                         Studies.list-refresh-requested();
                     }
+                }
+                // Story 7.3 — the beginner's check list on this study's own years (no fetch).
+                ActionButton {
+                    label: @tr("Examen rapide");
+                    enabled: !Studies.demo-active;
+                    clicked => { QuickScreen.examine-study(); }
                 }
                 // Story 2.9 — undo/redo of any judgment or grid edit (also Ctrl+Z / Ctrl+Y below).
                 ActionButton {

@@ -16,6 +16,9 @@ import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
 import { StudyScreen } from "study_screen.slint";
 import { ComparisonScreen } from "comparison.slint";
+import { QuickScreenScreen } from "quick_screen.slint";
+import { QuickScreen } from "../state.slint";
+import { TextField } from "../components/text_field.slint";
 import { Dropdown } from "../components/dropdown.slint";
 
 // One list row: ticker + date + status, openable by click or keyboard (Enter/Space). Default
@@ -213,12 +216,15 @@ component StudyListRow inherits Rectangle {
 export component DashboardScreen inherits Rectangle {
     // A reopened study mounts the faithful §1–§5 form (Story 2.3); otherwise the list + create flow
     // (2.2). The form's own "‹ Retour" control clears `study-open` to return here.
-    if Studies.study-open: StudyScreen { }
+    // Story 7.3: the examination sits on top of whatever opened it (the list or a study).
+    if Studies.screen-open: QuickScreenScreen { }
+
+    if Studies.study-open && !Studies.screen-open: StudyScreen { }
 
     // Story 7.1: the comparison table takes the list's place (an open study stays on top).
-    if !Studies.study-open && Studies.compare-open: ComparisonScreen { }
+    if !Studies.study-open && !Studies.screen-open && Studies.compare-open: ComparisonScreen { }
 
-    if !Studies.study-open && !Studies.compare-open: Flickable {
+    if !Studies.study-open && !Studies.screen-open && !Studies.compare-open: Flickable {
         viewport-height: content.preferred-height;
 
         content := VerticalLayout {
@@ -383,6 +389,33 @@ export component DashboardScreen inherits Rectangle {
                 }
             }
 
+            }
+
+            // ── Story 7.3: a look before a study — the beginner's check list on a fetched ticker. ──
+            PanelCard {
+                title: @tr("Examiner un titre");
+                subtitle: @tr("La liste de contrôle pour débutant sur un symbole du fournisseur, avant une étude complète ; rien n'est enregistré.");
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    TextField {
+                        placeholder: @tr("Symbole, p. ex. NESN.SW");
+                        text <=> QuickScreen.pick-ticker;
+                        width: 300px;
+                        accepted => { QuickScreen.examine(QuickScreen.pick-ticker, QuickScreen.pick-currency); }
+                    }
+                    Dropdown {
+                        options: Holdings.supported-currencies;
+                        value <=> QuickScreen.pick-currency;
+                        placeholder: @tr("devise");
+                        width: 160px;
+                    }
+                    ActionButton {
+                        label: QuickScreen.fetching ? @tr("Examen en cours…") : @tr("Examiner");
+                        enabled: !QuickScreen.fetching && QuickScreen.pick-ticker != "" && QuickScreen.pick-currency != "";
+                        clicked => { QuickScreen.examine(QuickScreen.pick-ticker, QuickScreen.pick-currency); }
+                    }
+                }
             }
 
             // ── Story 7.1: pick up to five studies to compare side by side (the comparison form). ──

@@ -182,6 +182,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         refresh_total,
         fetch_cancel,
         fetch_tx,
+        quick_screen,
         ..
     } = s;
     {
@@ -189,6 +190,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         let current_study = Rc::clone(current_study);
         let config = Rc::clone(config);
+        let quick_screen = Rc::clone(quick_screen);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
         let refresh_pending = Rc::clone(refresh_pending);
@@ -286,6 +288,25 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             render_open();
                         }
                     }
+                }
+                fetch::WorkerOutcome::QuickScreen {
+                    ticker,
+                    result,
+                    fell_back_to,
+                } => {
+                    // Story 7.3: the examination's fetch — session only, nothing written.
+                    let format = config.borrow().number_format;
+                    // The member that served (Story 6.9): the fallback when one ran, else the primary.
+                    let effective = fell_back_to.unwrap_or(config.borrow().preferred_provider);
+                    crate::wiring::quick_screen::on_fetched(
+                        &ui,
+                        &journal_state.borrow(),
+                        format,
+                        &quick_screen,
+                        ticker,
+                        result,
+                        effective,
+                    );
                 }
                 fetch::WorkerOutcome::HoldingFetch(outcome) => {
                     // Story 4.4 (FR40): a holdings price-refresh result → the holdings surface (NOT

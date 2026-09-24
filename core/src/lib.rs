@@ -12,6 +12,7 @@
 //! only from all-validated-and-fresh load-bearing inputs) live here too. This file also provides
 //! the cross-platform **determinism probe** that the CI determinism-hash gate relies on.
 
+pub mod checklist;
 pub mod golden;
 pub mod method;
 pub mod method_version;
