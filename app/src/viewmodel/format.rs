@@ -11,8 +11,14 @@ use steadyinvest_core::rounding::{DisplayField, round_for_display};
 /// True minus sign (U+2212) used for display — visually distinct from the ASCII hyphen.
 pub const MINUS_SIGN: char = '\u{2212}';
 
-/// Narrow no-break space (U+202F), the French thousands separator.
-const NARROW_NBSP: char = '\u{202F}';
+/// The French thousands separator. Typography wants the NARROW no-break space (U+202F), but the
+/// UI's default font has no glyph for it and drew « 1540 » in a status band while the numeric
+/// font drew « 1 540 » beside it (walk finding, 2026-09-24) — so the plain no-break space
+/// (U+00A0), which every font carries, is emitted; the paste parser accepts both.
+const NARROW_NBSP: char = '\u{00A0}';
+/// The typographic narrow variant (U+202F): never emitted, always accepted on parse (pasted
+/// columns from CH/EU sources carry it).
+const TYPOGRAPHIC_NARROW_NBSP: char = '\u{202F}';
 
 /// The two shipped presets: `Comma` → `1 234,56` (narrow no-break space + decimal comma),
 /// `Point` → `1,234.56` (comma thousands + decimal point).
@@ -131,7 +137,7 @@ pub fn parse_amount(input: &str, format: NumberFormat) -> Option<Money> {
             // Grouping separators are dropped: the preset's own, plus the narrow no-break space and
             // a plain ASCII space the user may type in its place.
             c if c == thousands => continue,
-            ' ' | NARROW_NBSP => continue,
+            ' ' | NARROW_NBSP | TYPOGRAPHIC_NARROW_NBSP => continue,
             // The decimal separator (preset-specific) becomes the canonical point.
             c if c == decimal => canonical.push('.'),
             // Accept the true minus sign as the ASCII hyphen.
@@ -150,7 +156,7 @@ mod tests {
     fn comma_preset_groups_with_narrow_nbsp_and_decimal_comma() {
         assert_eq!(
             format_amount("1234567.89", NumberFormat::Comma),
-            "1\u{202F}234\u{202F}567,89"
+            "1\u{00A0}234\u{00A0}567,89"
         );
     }
 
@@ -166,7 +172,7 @@ mod tests {
     fn negative_amounts_use_the_true_minus_sign() {
         assert_eq!(
             format_amount("-1234.5", NumberFormat::Comma),
-            "\u{2212}1\u{202F}234,5"
+            "\u{2212}1\u{00A0}234,5"
         );
         assert_eq!(
             format_amount("-1234.5", NumberFormat::Point),
@@ -214,6 +220,11 @@ mod tests {
         // The CH/EU case the Spike-A paste explicitly deferred: "1 234,56" (narrow NBSP + comma).
         assert_eq!(
             parse_amount("1\u{202F}234,56", NumberFormat::Comma),
+            Some(money("1234.56"))
+        );
+        // The plain no-break space the app itself emits round-trips too.
+        assert_eq!(
+            parse_amount("1\u{00A0}234,56", NumberFormat::Comma),
             Some(money("1234.56"))
         );
         // A user who types a plain ASCII space for the group separator is tolerated.
@@ -278,7 +289,7 @@ mod tests {
                 DisplayField::Price,
                 NumberFormat::Comma
             ),
-            "1\u{202F}234,57", // 1234.567 → half-up 2dp → 1234.57
+            "1\u{00A0}234,57", // 1234.567 → half-up 2dp → 1234.57
         );
         // Ratio field → 1 decimal; 3.05 → 3.1 (half-up, not banker's).
         assert_eq!(

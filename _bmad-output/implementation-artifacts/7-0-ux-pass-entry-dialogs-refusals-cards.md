@@ -107,3 +107,33 @@ by Guy 2026-09-23). Umbrella issue #208. Origin: the on-display walk 2026-09-22/
   the test, not a refused write.
 - Pre-existing, not fixed here: at 1 600 px the Études row's five actions overflow the card
   (the fixed-width columns of #204 need ~1 700 px); Guy's display is wider.
+
+### Walk (2026-09-24, headless on a copy of Guy's dossier — Guy did A.1 / A.2 on display, Claude the rest)
+- Portefeuille: Achat (5 × 80), Vente partielle (3 × 82), Dividende (12 × 3, retenue 12.6, net
+  23.4) through the forms, Enter validates, the outcome line names each write; « Modifier… » on a
+  transaction prefills date / quantity / price / fees; « Supprimer » confirms with Annuler focused
+  and a plain Enter deletes nothing; « Définir un seuil… » 10 % → « Stop 10 % : 69,39 CHF · à
+  7,71 CHF au-dessus ».
+- Liste de suivi: « Ajouter une valeur… » NESN.SW writes the row. Études: « Créer une étude… »
+  with the currency `Dropdown` (CHF). Réglages: « Ajouter un taux… » USD → CHF 0.8 through the
+  currency `Dropdown`, listed « USD → CHF 0.8 le 2026-09-24 (manuel) ».
+- **Fixed in the same PR** (findings of the walk):
+  1. after a ledger write the position's « Prix d'achat » showed the exact aggregate with
+     28 decimals (`108.66666…`) — the row now carries a display spelling
+     (`purchase-price-text`, locale + price scale); the raw value stays for the edit form;
+  2. the open ledger's wider toggle squeezed the zone / price column to one glyph per line and
+     the row grew tenfold — the column has a 170 px floor and the toggle reads « Masquer »;
+  3. the same symbol could be added twice to the watchlist — refused (« Ce symbole est déjà
+     dans la liste de suivi », `MSG_WATCH_DUPLICATE`, inventory 133 → 134, case-insensitive);
+  4. two transactions on the same day listed in random order (`ORDER BY occurred_at, id` with
+     v4 ids) — now `occurred_at, created_at, id`, so the ledger reads in entry order and the
+     replayed basis matches what is listed;
+  5. the « Seuil suiveur par défaut » field cut its placeholder (« Pourcentage (0–10 ») — widened;
+  6. the thousands separator: the UI default font has no glyph for U+202F, so a `StatusBand`
+     drew « 1540 CHF » beside a numeric line drawing « 1 540 » — the formatter now emits U+00A0
+     (every font carries it) and the paste parser accepts both.
+- Not defects, seen again: NVDA « non classé (chiffre d'affaires indisponible) » = the CHF
+  position vs the USD study (#81 link rule); the sector « Grande » on NVDA is a value typed in
+  the dossier (the sector field is free text on purpose).
+- Not exercised headless: the native save / open pickers (PDF export, import, restore) — Guy
+  exported PDFs on display during the 2026-09-22/23 walk.
