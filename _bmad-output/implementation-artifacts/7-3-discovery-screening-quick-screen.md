@@ -69,7 +69,7 @@ so that a first look costs one screen and the study starts from the data the loo
 
 ### Verification (2026-09-24, headless on a copy of Guy's dossier)
 - From the NESN.SW study: « Examen rapide » → the two ladders (2025/2024 vs 2020/2019, sales
-  rate 0,4 %, EPS −10,2 %, « le BPA a augmenté moins vite »), the five-row price record
+  rate 0,4 %, EPS −4,4 % [corrected 2026-09-24: « −10,2 % » was a mis-noting — the dossier's EPS (2025 3,51 · 2024 6,95 vs 2020 4,29 · 2019 8,84) give −4,45 %, as the screen and the criblage show], « le BPA a augmenté moins vite »), the five-row price record
   (totals 120,1 / 93,5, averages 24,0 / 18,7, average of averages 21,4), the three facts
   (−40,2 % vs the 2021 high, sold as high in 5 of 5 years, P/E 26,7 above 21,4); objective « 1 »
   → both rates « n'atteint pas »; the « oui » chip; « Retour à l'étude » lands on the study.
