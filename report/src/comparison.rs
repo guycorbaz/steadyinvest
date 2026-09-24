@@ -1,0 +1,388 @@
+//! Story 7.1 (FR53) — the company comparison as a neutral, greyscale, A4-LANDSCAPE PDF: up to
+//! five studies as columns, the comparison form's thirty rows in four groups. The `app` formats
+//! the figures (its one float→string boundary) and passes keys for the two worded rows (the
+//! zone, the study state); this module owns every label (its neutral inventory, tested).
+
+use crate::pdf::{Doc, EM_DASH, MARGIN, SMALL};
+
+/// One study's column: the header facts and the thirty rows (index 0 = the form's row 1).
+/// Rows 20 and 28 are keys carried in `zone` / `state` instead; their string slot stays `""`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComparisonColumn {
+    pub ticker: String,
+    pub name: String,
+    pub currency: String,
+    pub date: String,
+    /// The study could not be read — every row reads « indisponible ».
+    pub unavailable: bool,
+    pub rows: Vec<String>,
+    /// `buy` | `neutral` | `sell` | `below` | `above` | `""`.
+    pub zone: String,
+    /// `full` | `provisional` | `withheld` | `""`.
+    pub state: String,
+    pub low_confidence: bool,
+}
+
+/// The comparison, ready to lay out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Comparison {
+    pub date: String,
+    /// The selected studies are not all in one currency — prices stay native (FR28).
+    pub currency_mix: bool,
+    pub columns: Vec<ComparisonColumn>,
+}
+
+// ── the neutral inventory (FR13) ──
+const TITLE: &str = "Comparaison de sociétés";
+const DATE: &str = "Date";
+const CURRENCY_MIX: &str = "Les études comparées ne sont pas toutes dans la même monnaie : les cours restent dans la monnaie de chaque étude, sans conversion.";
+const UNAVAILABLE: &str = "indisponible";
+const G_GROWTH: &str = "Croissance (section 1)";
+const G_MANAGEMENT: &str = "Gestion (section 2)";
+const G_PRICE: &str = "Cours (sections 3 à 5)";
+const G_OTHER: &str = "Autres";
+const ROWS: [&str; 30] = [
+    "Croissance historique des ventes",
+    "Croissance estimée des ventes",
+    "Croissance historique du BPA",
+    "Croissance estimée du BPA",
+    "Marge avant impôt, moyenne 5 ans · tendance",
+    "Rendement des capitaux propres, moyenne 5 ans · tendance",
+    "Part du capital détenue par la direction",
+    "BPA total estimé sur 5 ans",
+    "Fourchette de cours sur 5 ans",
+    "Cours actuel",
+    "PER le plus haut",
+    "PER haut moyen",
+    "PER moyen",
+    "PER bas moyen",
+    "PER le plus bas",
+    "PER actuel",
+    "Zone basse",
+    "Zone médiane",
+    "Zone haute",
+    "Position du cours actuel",
+    "Ratio hausse / baisse",
+    "Rendement présent",
+    "Rendement annuel total estimé",
+    "Actions en circulation",
+    "Dilution potentielle",
+    "Taux de distribution moyen",
+    "Signaux de qualité",
+    "État de l'étude",
+    "Date des données",
+    "Place de cotation",
+];
+const ZONE_BUY: &str = "zone basse";
+const ZONE_NEUTRAL: &str = "zone médiane";
+const ZONE_SELL: &str = "zone haute";
+const ZONE_BELOW: &str = "sous la bande";
+const ZONE_ABOVE: &str = "au-dessus de la bande";
+const STATE_FULL: &str = "critères validés";
+const STATE_PROVISIONAL: &str = "provisoire";
+const STATE_WITHHELD: &str = "en attente";
+const LOW_CONFIDENCE: &str = "confiance réduite";
+const EMPTY: &str = "Aucune étude sélectionnée.";
+const FLAGS_TITLE: &str = "Signaux de qualité (ligne 27)";
+
+#[cfg(test)]
+const COMPARISON_USER_FACING: &[&str] = &[
+    TITLE,
+    DATE,
+    CURRENCY_MIX,
+    UNAVAILABLE,
+    G_GROWTH,
+    G_MANAGEMENT,
+    G_PRICE,
+    G_OTHER,
+    ZONE_BUY,
+    ZONE_NEUTRAL,
+    ZONE_SELL,
+    ZONE_BELOW,
+    ZONE_ABOVE,
+    STATE_FULL,
+    STATE_PROVISIONAL,
+    STATE_WITHHELD,
+    LOW_CONFIDENCE,
+    EMPTY,
+    FLAGS_TITLE,
+];
+
+fn zone_label(key: &str) -> &str {
+    match key {
+        "buy" => ZONE_BUY,
+        "neutral" => ZONE_NEUTRAL,
+        "sell" => ZONE_SELL,
+        "below" => ZONE_BELOW,
+        "above" => ZONE_ABOVE,
+        _ => EM_DASH,
+    }
+}
+
+fn state_label(c: &ComparisonColumn) -> String {
+    let base = match c.state.as_str() {
+        "full" => STATE_FULL,
+        "provisional" => STATE_PROVISIONAL,
+        "withheld" => STATE_WITHHELD,
+        _ => EM_DASH,
+    };
+    if c.low_confidence && base != EM_DASH {
+        format!("{base} · {LOW_CONFIDENCE}")
+    } else {
+        base.to_string()
+    }
+}
+
+/// Row 27 arrives as « N : flag · flag » (or « 0 »): the count before the colon is the cell;
+/// the words after it are listed under the grids.
+fn flag_count(row: &str) -> &str {
+    row.split_once(" : ").map(|(n, _)| n).unwrap_or(row).trim()
+}
+fn flag_words(c: &ComparisonColumn) -> Option<String> {
+    let row = c.rows.get(26)?;
+    let (_, words) = row.split_once(" : ")?;
+    Some(words.trim().to_string())
+}
+
+/// Clip to `max` characters with an ellipsis (character-counted; the cell is a fixed width).
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let cut: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{}…", cut.trim_end())
+    }
+}
+
+/// Greedy word wrap on spaces to `width` characters per line (never splits inside a word).
+fn wrap_words(s: &str, width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in s.split(' ') {
+        let candidate_len =
+            cur.chars().count() + usize::from(!cur.is_empty()) + word.chars().count();
+        if !cur.is_empty() && candidate_len > width {
+            lines.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(word);
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// The cell of row `n` (1-based) for a column: the figure, the worded key rows, or the absence.
+fn cell(c: &ComparisonColumn, n: usize) -> String {
+    if c.unavailable {
+        return UNAVAILABLE.to_string();
+    }
+    match n {
+        20 => zone_label(&c.zone).to_string(),
+        27 => c
+            .rows
+            .get(26)
+            .map(|r| flag_count(r))
+            .filter(|s| !s.is_empty())
+            .unwrap_or(EM_DASH)
+            .to_string(),
+        28 => state_label(c),
+        _ => c
+            .rows
+            .get(n - 1)
+            .filter(|s| !s.is_empty())
+            .map(|s| strip_arrows(s))
+            .unwrap_or_else(|| EM_DASH.to_string()),
+    }
+}
+
+/// The trend rows (5, 6) arrive as « 47,6 % · ↑ hausse »: the word carries the fact, the arrow
+/// has no glyph in the PDF's WinAnsi font, so it is dropped here (never rendered as « ? »).
+fn strip_arrows(s: &str) -> String {
+    s.replace("↑ ", "").replace("↓ ", "").replace("→ ", "")
+}
+
+/// Render the comparison (FR53): A4 landscape, deterministic, greyscale, neutral labels.
+pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
+    let mut doc = Doc::landscape();
+    doc.title(TITLE);
+    doc.small_line(&format!("{DATE} : {}", comparison.date));
+    if comparison.currency_mix {
+        doc.small_line(CURRENCY_MIX);
+    }
+    doc.gap(4.0);
+    let cols = &comparison.columns;
+    if cols.is_empty() {
+        doc.line(EMPTY);
+        return doc.finish();
+    }
+    // Column edges: the label column, then one column per study up to the right margin.
+    let label_w = 236.0;
+    let n = cols.len().max(1);
+    let col_w = (doc.right() - MARGIN - label_w) / n as f32;
+    let mut edges = vec![MARGIN, MARGIN + label_w];
+    for i in 1..=n {
+        edges.push(MARGIN + label_w + col_w * i as f32);
+    }
+    // Two header rows: « TICKER (CUR) » then the company name, clipped to its column (Helvetica
+    // at SMALL averages ~0.5 em per glyph; an over-long name is cut with an ellipsis, never
+    // allowed to spill into the neighbour's column).
+    let max_chars = ((col_w - 6.0) / (SMALL * 0.5)).max(4.0) as usize;
+    let header: Vec<String> = std::iter::once(String::new())
+        .chain(
+            cols.iter()
+                .map(|c| format!("{} ({})", c.ticker, c.currency)),
+        )
+        .collect();
+    let header_refs: Vec<&str> = header.iter().map(String::as_str).collect();
+    let names: Vec<String> = std::iter::once(String::new())
+        .chain(cols.iter().map(|c| clip(&c.name, max_chars)))
+        .collect();
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let any_name = cols.iter().any(|c| !c.name.is_empty());
+    let groups: [(&str, std::ops::RangeInclusive<usize>); 4] = [
+        (G_GROWTH, 1..=4),
+        (G_MANAGEMENT, 5..=7),
+        (G_PRICE, 8..=23),
+        (G_OTHER, 24..=30),
+    ];
+    for (title, range) in groups {
+        doc.section(title);
+        doc.grid_begin(range.end() - range.start() + 3);
+        doc.grid_row_small(&header_refs, &edges, true, 1);
+        if any_name {
+            doc.grid_row_small(&name_refs, &edges, true, 1);
+        }
+        for row in range {
+            let mut cells = vec![format!("({row}) {}", ROWS[row - 1])];
+            cells.extend(cols.iter().map(|c| cell(c, row)));
+            let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
+            doc.grid_row_small(&refs, &edges, false, 1);
+        }
+        doc.grid_end(&edges);
+        doc.gap(2.0);
+    }
+    // Row 27 in the grid carries the count only; the flags themselves are listed here, one
+    // paragraph per study, wrapped to the page (a flag's words never spill past the margin).
+    let listed: Vec<(&str, String)> = cols
+        .iter()
+        .filter(|c| !c.unavailable)
+        .filter_map(|c| flag_words(c).map(|w| (c.ticker.as_str(), w)))
+        .collect();
+    if !listed.is_empty() {
+        doc.section(FLAGS_TITLE);
+        let width_chars = ((doc.right() - MARGIN) / (SMALL * 0.5)) as usize;
+        for (ticker, words) in listed {
+            for chunk in wrap_words(&format!("{ticker} : {words}"), width_chars) {
+                doc.small_line(&chunk);
+            }
+        }
+    }
+    doc.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn column(ticker: &str, unavailable: bool) -> ComparisonColumn {
+        ComparisonColumn {
+            ticker: ticker.into(),
+            name: "Société".into(),
+            currency: "CHF".into(),
+            date: "2026-09-24".into(),
+            unavailable,
+            rows: (1..=30).map(|i| format!("v{i}")).collect(),
+            zone: "buy".into(),
+            state: "provisional".into(),
+            low_confidence: true,
+        }
+    }
+
+    #[test]
+    fn renders_a_landscape_deterministic_pdf() {
+        let c = Comparison {
+            date: "2026-09-24".into(),
+            currency_mix: true,
+            columns: vec![column("NESN.SW", false), column("ROG.SW", true)],
+        };
+        let a = render_comparison(&c);
+        let b = render_comparison(&c);
+        assert!(a.starts_with(b"%PDF-") && a.windows(5).any(|w| w == b"%%EOF"));
+        assert_eq!(a, b, "deterministic bytes");
+        // A4 landscape: the media box is 842 wide × 595 high.
+        assert!(
+            a.windows(18).any(|w| w.starts_with(b"/MediaBox [0 0 842")),
+            "landscape media box"
+        );
+    }
+
+    #[test]
+    fn the_key_rows_word_themselves_and_an_unavailable_column_says_so() {
+        let c = column("X", false);
+        assert_eq!(cell(&c, 20), ZONE_BUY);
+        assert_eq!(
+            cell(&c, 28),
+            format!("{STATE_PROVISIONAL} · {LOW_CONFIDENCE}")
+        );
+        assert_eq!(cell(&c, 1), "v1");
+        let u = column("Y", true);
+        assert_eq!(cell(&u, 1), UNAVAILABLE);
+        assert_eq!(cell(&u, 20), UNAVAILABLE);
+        // An empty figure is the em-dash, never a blank cell.
+        let mut e = column("Z", false);
+        e.rows[9] = String::new();
+        assert_eq!(cell(&e, 10), EM_DASH);
+    }
+
+    #[test]
+    fn row_27_keeps_the_count_in_the_cell_and_lists_the_words_below() {
+        let mut c = column("X", false);
+        c.rows[26] =
+            "3 : PER haut jugé au-dessus de la moyenne · ratio sous la cible · marge en baisse"
+                .into();
+        assert_eq!(cell(&c, 27), "3");
+        assert_eq!(
+            flag_words(&c).as_deref(),
+            Some("PER haut jugé au-dessus de la moyenne · ratio sous la cible · marge en baisse")
+        );
+        c.rows[26] = "0".into();
+        assert_eq!(cell(&c, 27), "0");
+        assert_eq!(flag_words(&c), None);
+        assert_eq!(wrap_words("aa bb cc dd", 5), vec!["aa bb", "cc dd"]);
+        assert_eq!(clip("Nestlé", 10), "Nestlé");
+        assert_eq!(clip("NVIDIA Corporation", 8), "NVIDIA…");
+        let mut t = column("T", false);
+        t.rows[4] = "47,6 % · ↑ hausse".into();
+        assert_eq!(cell(&t, 5), "47,6 % · hausse");
+    }
+
+    #[test]
+    fn an_empty_comparison_renders_calmly() {
+        let bytes = render_comparison(&Comparison::default());
+        assert!(bytes.starts_with(b"%PDF-"));
+    }
+
+    #[test]
+    fn comparison_strings_are_neutral_no_banned_verb_no_wordmark() {
+        use steadyinvest_core::method::{BANNED_VERBS_EN, BANNED_VERBS_FR};
+        for s in COMPARISON_USER_FACING
+            .iter()
+            .copied()
+            .chain(ROWS.iter().copied())
+        {
+            let lower = s.to_lowercase();
+            for token in lower.split(|c: char| !c.is_alphanumeric()) {
+                for banned in BANNED_VERBS_EN.iter().chain(BANNED_VERBS_FR.iter()) {
+                    assert_ne!(token, banned.to_lowercase(), "{s:?} contains {banned:?}");
+                }
+            }
+            for mark in ["NAIC", "Stock Selection Guide", "Better Investing", "SSG"] {
+                assert!(!s.contains(mark), "{s:?} carries {mark:?}");
+            }
+        }
+    }
+}

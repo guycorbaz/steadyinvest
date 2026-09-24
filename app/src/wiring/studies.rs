@@ -64,6 +64,20 @@ fn safe_stem(ticker: &str) -> String {
 /// global. Called on startup and after every create.
 pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     let studies = ui.global::<Studies>();
+    // Story 7.1: the comparison picker (and the add-position dialog) offer the dossier's study
+    // tickers — pushed here too, so the list screen never shows a stale drop-down.
+    {
+        let mut tickers: Vec<String> = state
+            .list_studies()
+            .into_iter()
+            .map(|s| s.security_ticker.to_uppercase())
+            .collect();
+        tickers.sort();
+        tickers.dedup();
+        let tickers: Vec<SharedString> = tickers.into_iter().map(SharedString::from).collect();
+        ui.global::<crate::Holdings>()
+            .set_study_tickers(ModelRc::new(VecModel::from(tickers)));
+    }
     // The dashboard view state (search/sort/filter) lives on the `Studies` global — read it back and
     // curate the persistence summaries (Story 2.12). Deterministic, pure (`viewmodel::studies::curate`).
     let summaries = state.list_studies();

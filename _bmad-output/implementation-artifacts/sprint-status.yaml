@@ -39,7 +39,7 @@
 # 7 [P3] / 8 [V] are deliberate story outlines (refine with create-epics-and-stories per phase).
 
 generated: 2026-06-09
-last_updated: 2026-09-23
+last_updated: 2026-09-24
 # 2026-09-23: ON-DISPLAY WALK DONE (retro gates F1 + F6, docs/on-display-walk-epics-5-6.md) — Guy walked
 #             A 5/5, B 10/10, C 6/6 (C5 quota not triggered) on 2026-09-22/23 after a 10-week pause.
 #             Fixed on the spot (PR #205): native rfd pickers for study import / dossier import /
@@ -655,7 +655,8 @@ development_status:
   # The UX pass (Guy, 2026-09-23 — issue #208, spec PR #206): entry dialogs, acknowledged refusals,
   # panel cards, status bands. BLOCKS 7.1/7.2. PR 1 = components + Portefeuille; PR 2 = the other screens.
   7-0-ux-pass-entry-dialogs-refusals-cards: review
-  7-1-company-comparison: backlog
+  # 2026-09-24: 7-1 dev complete → review (spec PR #226; the comparison table + landscape PDF).
+  7-1-company-comparison: review
   7-2-portfolio-health-review: review
   7-3-discovery-screening-quick-screen: backlog
   7-4-additional-provider-adapters: done

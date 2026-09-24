@@ -674,9 +674,11 @@ mod tests {
         // (the caption under the field + the glossary entry, Guy 2026-09-24) measures 623. Story
         // 7.2 adds the « Revue » screen (the fifth destination, the card titles and subtitles, the
         // share-block templates and their reason bands, the position rows' study / zone / data
-        // words, the due-list reasons, the counts) and measures 706. Floor strict.
+        // words, the due-list reasons, the counts) and measures 706. Story 7.1 adds the company
+        // comparison (the picker card on Études, the thirty row labels, the four group titles,
+        // the zone / state words, the currency-mix band) and measures 768. Floor strict.
         assert!(
-            total >= 706,
+            total >= 768,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -783,10 +785,11 @@ mod tests {
         // Issue #218 adds the no-study refusal for a position (MSG_HOLDING_NO_STUDY — a position is
         // only added for a ticker with a study, in that study's currency): 121 + 1 = 122.
         // Story 7.2 adds the review's export outcome (MSG_REVIEW_EXPORTED) and the nine quality
-        // flags worded as neutral facts (MSG_FLAG_*): 122 + 10 = 132.
+        // flags worded as neutral facts (MSG_FLAG_*): 122 + 10 = 132. Story 7.1 adds the
+        // comparison's export outcome (MSG_COMPARISON_EXPORTED): 132 + 1 = 133.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            132,
+            133,
             "state.rs message inventory changed — register the new notice"
         );
     }

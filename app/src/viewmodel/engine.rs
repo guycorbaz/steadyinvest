@@ -242,7 +242,7 @@ pub fn plausibility(
 
 /// `Option<Decimal>` → a grouped display string under `field`'s scale, or the faithful em-dash for
 /// `None` (NEVER `0`).
-fn fmt(value: Option<Decimal>, field: DisplayField, format: NumberFormat) -> String {
+pub(crate) fn fmt(value: Option<Decimal>, field: DisplayField, format: NumberFormat) -> String {
     match value {
         Some(v) => format_scaled(v, field, format),
         None => EMPTY_SLOT.to_string(),
@@ -250,7 +250,7 @@ fn fmt(value: Option<Decimal>, field: DisplayField, format: NumberFormat) -> Str
 }
 
 /// A percentage `Option<Decimal>` → "12,5 %", or the em-dash for `None`.
-fn fmt_pct(value: Option<Decimal>, format: NumberFormat) -> String {
+pub(crate) fn fmt_pct(value: Option<Decimal>, format: NumberFormat) -> String {
     match value {
         Some(v) => format!("{} %", format_scaled(v, DisplayField::Percent, format)),
         None => EMPTY_SLOT.to_string(),
@@ -279,7 +279,7 @@ pub fn fmt_total_return(r: &ReturnOutputs, format: NumberFormat) -> String {
 /// A [`Trend`] → a fact-stating glyph + noun (never colour): "↑ hausse" / "→ stable" / "↓ baisse".
 /// `None` → em-dash. The arrows are language-neutral glyphs; the nouns are scanned (see
 /// [`USER_FACING_LABELS`]).
-fn fmt_trend(trend: Option<Trend>) -> String {
+pub(crate) fn fmt_trend(trend: Option<Trend>) -> String {
     match trend {
         Some(Trend::Up) => format!("↑ {TREND_UP}"),
         Some(Trend::Even) => format!("→ {TREND_EVEN}"),
@@ -290,7 +290,7 @@ fn fmt_trend(trend: Option<Trend>) -> String {
 
 /// The U/D ratio as a fact-stating string: `Ratio(d)` → "3,4:1"; `Undefined`/`Unknown` → a stating
 /// em-dash (never a fabricated ratio).
-fn fmt_ud(ud: &UpsideDownside, format: NumberFormat) -> String {
+pub(crate) fn fmt_ud(ud: &UpsideDownside, format: NumberFormat) -> String {
     match ud {
         UpsideDownside::Ratio(d) => {
             format!("{}:1", format_scaled(*d, DisplayField::Ratio, format))
@@ -335,7 +335,7 @@ pub fn zone_position_key(
 }
 
 /// The verdict integrity state crossed to `.slint` as an enum-derived string (never the domain enum).
-fn verdict_state(verdict: &Verdict) -> &'static str {
+pub(crate) fn verdict_state(verdict: &Verdict) -> &'static str {
     match verdict {
         Verdict::Full(_) => "full",
         Verdict::Provisional(_) => "provisional",

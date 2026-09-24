@@ -121,6 +121,7 @@ pub const MSG_HOLDING_NO_STUDY: &str = "Aucune étude enregistrée pour ce symbo
 /// Story 7.2 — the review's export outcome and the nine quality flags as neutral facts (the engine's
 /// `QualityFlagKey`s, worded once here so the review screen and its PDF share the inventory).
 pub const MSG_REVIEW_EXPORTED: &str = "La revue a été exportée.";
+pub const MSG_COMPARISON_EXPORTED: &str = "La comparaison a été exportée.";
 pub const MSG_FLAG_PTP_TREND_DECLINING: &str = "marge avant impôt en baisse";
 pub const MSG_FLAG_ROE_TREND_DECLINING: &str = "rendement des capitaux propres en baisse";
 pub const MSG_FLAG_ROE_LOW: &str = "rendement des capitaux propres sous 10 %";
@@ -632,6 +633,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_WATCH_NO_STUDY,
     MSG_HOLDING_NO_STUDY,
     MSG_REVIEW_EXPORTED,
+    MSG_COMPARISON_EXPORTED,
     MSG_FLAG_PTP_TREND_DECLINING,
     MSG_FLAG_ROE_TREND_DECLINING,
     MSG_FLAG_ROE_LOW,
