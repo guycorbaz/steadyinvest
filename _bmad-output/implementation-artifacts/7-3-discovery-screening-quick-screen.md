@@ -1,6 +1,6 @@
 # Story 7.3 — Examen rapide (Quick Screen / Stock Check List) + criblage de la liste de suivi
 
-Status: review (PR 1 — the examination, merged #231; PR 2 — the criblage — in review)
+Status: done (PR 1 — the examination, #231; PR 2 — the criblage, #232; final test on main 2026-09-24)
 
 Spec: `_bmad-output/planning-artifacts/story-7-3-quick-screen-spec.md` (PR #229, merged by Guy
 2026-09-24 without comment → the four defaults stand: the objective typed per session, the form's
@@ -54,7 +54,9 @@ so that a first look costs one screen and the study starts from the data the loo
   `viewmodel/screening.rs` (row states, `years_used`, the formatted row — tested);
   `wiring/screening.rs` (plan, launch, outcome, open, close); the `QuickScreen.from-watchlist`
   origin; `@tr` floor 850 → 892; messages inventory unchanged (139 — every new word is `@tr`).
-- [ ] **Task 6 — Guy's on-display check**: an examination from a study, one from a fetch, the PDF.
+- [x] **Task 6 — the final check** (2026-09-24, on main, Guy's go to use his key): an examination
+  from a study, the criblage with one real EODHD fetch (ROG.SW), « Examiner un titre » →
+  « Créer l'étude » (2016–2025 CHF, no in-progress row), the PDFs.
 
 ## Dev Notes
 
