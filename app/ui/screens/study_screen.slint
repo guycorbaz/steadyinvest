@@ -819,12 +819,26 @@ export component StudyScreen inherits Rectangle {
                         field-key: "est_high_eps";
                         value: Studies.judgment.est-high-eps;
                     }
-                    JudgmentField {
-                        label: @tr("BPA estimé bas");
-                        field-key: "est_low_eps";
-                        value: Studies.judgment.est-low-eps;
-                        // Issue #214: the §1 seed band's low edge, adoptable in one click.
-                        suggestion: Studies.judgment-suggestions.est-low-eps;
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: Tokens.space-4;
+                        JudgmentField {
+                            label: @tr("BPA estimé bas");
+                            field-key: "est_low_eps";
+                            value: Studies.judgment.est-low-eps;
+                            // Issue #214: the latest EPS (the downside case), adoptable in one click.
+                            suggestion: Studies.judgment-suggestions.est-low-eps;
+                        }
+                        // 2026-09-24 (Guy, from use): the field's meaning stated where it is typed —
+                        // a low EPS taken from the growth trend lifts the forecast low above the
+                        // price and the study reads « sous la bande » although the data are right.
+                        Text {
+                            text: @tr("◦ cas de repli : le dernier BPA ou moins, jamais la tendance");
+                            color: Tokens.text-low;
+                            font-size: Tokens.font-caption;
+                            width: 200px;
+                            wrap: word-wrap;
+                        }
                     }
                 }
             }

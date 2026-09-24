@@ -670,9 +670,11 @@ mod tests {
         // FX-rate dialog, the derived confirm titles/verbs for the study action / older import /
         // restore prompts) measures 612. The drop-down pass (Guy, 2026-09-24: constrained choices as
         // lists — the study currency, the FX base currency, the position symbol; their placeholders
-        // and the « aucune étude dans le dossier » band) measures 620. Floor strict.
+        // and the « aucune étude dans le dossier » band) measures 620; the est-low EPS guidance
+        // (the caption under the field + the glossary entry, Guy 2026-09-24) measures 623. Floor
+        // strict.
         assert!(
-            total >= 620,
+            total >= 623,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
