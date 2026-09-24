@@ -2,6 +2,7 @@
 //! Nothing in here calculates — the Cardinal Rule keeps all arithmetic in `core`.
 
 pub mod chart;
+pub mod comparison;
 pub mod engine;
 pub mod entry;
 pub mod form;

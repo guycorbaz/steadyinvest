@@ -8,9 +8,11 @@
 //!   live form in `app` and the PDF here share ONE construction — no drift). `app` re-exports it.
 //! - [`pdf`] lays out the faithful, neutral, greyscale-safe SSG form with `pdf-writer`.
 
+pub mod comparison;
 pub mod form;
 pub mod pdf;
 pub mod review;
 
+pub use comparison::{Comparison, ComparisonColumn, render_comparison};
 pub use pdf::{ReportError, render_study_pdf};
 pub use review::{DueLine, PortfolioReview, ReviewLine, ShareLine, render_portfolio_review};

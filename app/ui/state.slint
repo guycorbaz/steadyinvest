@@ -520,6 +520,8 @@ export global Studies {
     // ── Reopened study → the faithful §1–§5 form (Story 2.3, replaces the 2.2 minimal restore) ──
     // True when a study is open (its form is mounted). False = the dashboard list view.
     in-out property <bool> study-open;
+    // Story 7.1: the comparison table is shown in place of the list (never over an open study).
+    in-out property <bool> compare-open;
     // The header identity block + the §3 P/E table rows, built by `viewmodel/form.rs`.
     in-out property <FormHeader> form-header;
     in-out property <[PeRow]> pe-rows;
@@ -1100,6 +1102,39 @@ export global Review {
     callback export-pdf();
     callback open-study(string);       // study id → Études + open
     callback go-to-portfolio();
+}
+
+// ── Story 7.1 — the company comparison: up to five studies as columns, the comparison form's
+//    thirty rows. `cells` is row-major (row 1 first), `cells[(row − 1) × column-count + col]`;
+//    rows 20 and 28 come from the column's `zone` / `state` keys (worded here). ──
+export struct ComparisonHeader {
+    ticker: string,
+    study-id: string,
+    name: string,
+    currency: string,
+    date: string,
+    unavailable: bool,
+    zone: string,           // buy | neutral | sell | below | above | ""
+    state: string,          // full | provisional | withheld | ""
+    low-confidence: bool,
+}
+export global Comparison {
+    in-out property <[ComparisonHeader]> columns;
+    in-out property <[string]> cells;
+    in-out property <int> column-count;
+    in-out property <bool> currency-mix;
+    in-out property <string> date;
+    in-out property <string> notice;
+    // The five picks (study tickers), from the Études list's drop-downs.
+    in-out property <string> pick1;
+    in-out property <string> pick2;
+    in-out property <string> pick3;
+    in-out property <string> pick4;
+    in-out property <string> pick5;
+    callback compare();            // build the table from the picks and open it
+    callback close();              // back to the list
+    callback export-pdf();
+    callback open-study(string);   // study id → open (the comparison stays behind it)
 }
 
 export struct PortfolioRow {

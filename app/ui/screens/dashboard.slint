@@ -8,13 +8,15 @@
 // Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
 import { Tokens } from "../tokens.slint";
-import { Dialog, Labels, Prefs, Studies, StudyRow, Confront } from "../state.slint";
+import { Comparison, Dialog, Holdings, Labels, Prefs, Studies, StudyRow, Confront } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
 import { StudyScreen } from "study_screen.slint";
+import { ComparisonScreen } from "comparison.slint";
+import { Dropdown } from "../components/dropdown.slint";
 
 // One list row: ticker + date + status, openable by click or keyboard (Enter/Space). Default
 // assistive action reopens the study. Story 2.12 adds lifecycle actions (archive/un-archive/delete)
@@ -213,7 +215,10 @@ export component DashboardScreen inherits Rectangle {
     // (2.2). The form's own "‹ Retour" control clears `study-open` to return here.
     if Studies.study-open: StudyScreen { }
 
-    if !Studies.study-open: Flickable {
+    // Story 7.1: the comparison table takes the list's place (an open study stays on top).
+    if !Studies.study-open && Studies.compare-open: ComparisonScreen { }
+
+    if !Studies.study-open && !Studies.compare-open: Flickable {
         viewport-height: content.preferred-height;
 
         content := VerticalLayout {
@@ -378,6 +383,36 @@ export component DashboardScreen inherits Rectangle {
                 }
             }
 
+            }
+
+            // ── Story 7.1: pick up to five studies to compare side by side (the comparison form). ──
+            PanelCard {
+                title: @tr("Comparer des études");
+                subtitle: @tr("Jusqu'à cinq études côte à côte, sur les trente lignes du formulaire de comparaison ; des faits, jamais un classement.");
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick1; placeholder: @tr("étude 1"); horizontal-stretch: 1; }
+                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick2; placeholder: @tr("étude 2"); horizontal-stretch: 1; }
+                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick3; placeholder: @tr("étude 3"); horizontal-stretch: 1; }
+                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick4; placeholder: @tr("étude 4"); horizontal-stretch: 1; }
+                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick5; placeholder: @tr("étude 5"); horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+                    ActionButton {
+                        label: @tr("Comparer");
+                        enabled: (Comparison.pick1 != "" ? 1 : 0) + (Comparison.pick2 != "" ? 1 : 0) + (Comparison.pick3 != "" ? 1 : 0) + (Comparison.pick4 != "" ? 1 : 0) + (Comparison.pick5 != "" ? 1 : 0) >= 2;
+                        clicked => { Studies.compare-open = true; }
+                    }
+                    ActionButton {
+                        label: @tr("Effacer");
+                        enabled: Comparison.pick1 != "" || Comparison.pick2 != "" || Comparison.pick3 != "" || Comparison.pick4 != "" || Comparison.pick5 != "";
+                        clicked => {
+                            Comparison.pick1 = ""; Comparison.pick2 = ""; Comparison.pick3 = ""; Comparison.pick4 = ""; Comparison.pick5 = "";
+                        }
+                    }
+                }
             }
 
             // ── Story 5.2 (FR59): import a study from a portable export file. The native picker runs

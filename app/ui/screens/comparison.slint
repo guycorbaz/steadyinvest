@@ -1,0 +1,184 @@
+// Comparaison de sociétés (Story 7.1): up to five studies side by side, the comparison form's
+// thirty rows in four groups. It compares, never ranks (FR13): no « best », no colour — ink and
+// words only; an absent figure is « — », a study that could not be read is « indisponible ».
+
+import { Tokens } from "../tokens.slint";
+import { Comparison, ComparisonHeader, Labels } from "../state.slint";
+import { ActionButton } from "../components/action_button.slint";
+import { PanelCard } from "../components/panel_card.slint";
+import { StatusBand } from "../components/status_band.slint";
+
+component Cell inherits Text {
+    color: Tokens.text-high;
+    font-family: Tokens.font-numeric;
+    font-size: Tokens.font-caption;
+    vertical-alignment: center;
+    horizontal-alignment: right;
+    wrap: word-wrap;
+}
+
+// One row: the numbered label, then one cell per column (row-major cells, keyed rows worded).
+component CmpRow inherits HorizontalLayout {
+    in property <int> number;
+    in property <string> label;
+    spacing: Tokens.space-8;
+    min-height: Tokens.row-height * 0.8;
+    Text {
+        text: @tr("({}) {}", root.number, root.label);
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+        vertical-alignment: center;
+        width: 380px;
+        wrap: word-wrap;
+    }
+    for c[i] in Comparison.columns: Cell {
+        text: c.unavailable ? @tr("indisponible")
+            : root.number == 20 ? root.zone-words(c.zone)
+            : root.number == 28 ? root.state-words(c)
+            : Comparison.cells[(root.number - 1) * Comparison.column-count + i] != ""
+                ? Comparison.cells[(root.number - 1) * Comparison.column-count + i]
+                : "—";
+        horizontal-stretch: 1;
+    }
+    pure function zone-words(key: string) -> string {
+        if (key == "buy") { return Labels.zone-buy; }
+        if (key == "neutral") { return Labels.zone-hold; }
+        if (key == "sell") { return Labels.zone-sell; }
+        if (key == "below") { return @tr("sous la bande"); }
+        if (key == "above") { return @tr("au-dessus de la bande"); }
+        return "—";
+    }
+    pure function state-words(c: ComparisonHeader) -> string {
+        if (c.state == "full") { return c.low-confidence ? @tr("critères validés · confiance réduite") : @tr("critères validés"); }
+        if (c.state == "provisional") { return c.low-confidence ? @tr("provisoire · confiance réduite") : @tr("provisoire"); }
+        if (c.state == "withheld") { return c.low-confidence ? @tr("en attente · confiance réduite") : @tr("en attente"); }
+        return "—";
+    }
+}
+
+export component ComparisonScreen inherits Rectangle {
+    // Re-derived on every mount (the #94 rule): opening and returning from a study both re-run it.
+    init => { Comparison.compare(); }
+
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            alignment: start;
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
+
+            HorizontalLayout {
+                spacing: Tokens.space-8;
+                alignment: start;
+                ActionButton {
+                    label: @tr("‹ Retour aux études");
+                    enabled: true;
+                    clicked => { Comparison.close(); }
+                }
+                ActionButton {
+                    label: @tr("Exporter PDF");
+                    enabled: Comparison.columns.length > 0;
+                    clicked => { Comparison.export-pdf(); }
+                }
+            }
+            Text {
+                text: @tr("Comparaison de sociétés — au {}", Comparison.date);
+                color: Tokens.text-high;
+                font-size: Tokens.font-h2;
+                font-weight: Tokens.weight-semibold;
+            }
+            if Comparison.notice != "": Text {
+                text: Comparison.notice;
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                wrap: word-wrap;
+            }
+            if Comparison.currency-mix: StatusBand {
+                icon: "◦";
+                text: @tr("Les études comparées ne sont pas toutes dans la même monnaie : les cours restent dans la monnaie de chaque étude, sans conversion.");
+            }
+            if Comparison.columns.length == 0: StatusBand {
+                icon: "◦";
+                text: @tr("Aucune étude sélectionnée ; choisissez-en au moins deux dans la liste des études.");
+            }
+
+            // The column headers: ticker — name (currency, date) + « Ouvrir l'étude ».
+            if Comparison.columns.length > 0: PanelCard {
+                title: @tr("Études comparées");
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    Rectangle { width: 380px; background: transparent; }
+                    for c in Comparison.columns: VerticalLayout {
+                        spacing: Tokens.space-4;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: c.ticker;
+                            color: Tokens.text-high;
+                            font-size: Tokens.font-body;
+                            font-weight: Tokens.weight-semibold;
+                            horizontal-alignment: right;
+                        }
+                        Text {
+                            text: c.name != "" ? @tr("{} · {} · {}", c.name, c.currency, c.date) : @tr("{} · {}", c.currency, c.date);
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            horizontal-alignment: right;
+                            wrap: word-wrap;
+                        }
+                        HorizontalLayout {
+                            alignment: end;
+                            if c.study-id != "": ActionButton {
+                                label: @tr("Ouvrir l'étude");
+                                enabled: true;
+                                clicked => { Comparison.open-study(c.study-id); }
+                            }
+                        }
+                    }
+                }
+            }
+            if Comparison.columns.length > 0: PanelCard {
+                title: @tr("Croissance (section 1)");
+                CmpRow { number: 1; label: @tr("Croissance historique des ventes"); }
+                CmpRow { number: 2; label: @tr("Croissance estimée des ventes"); }
+                CmpRow { number: 3; label: @tr("Croissance historique du BPA"); }
+                CmpRow { number: 4; label: @tr("Croissance estimée du BPA"); }
+            }
+            if Comparison.columns.length > 0: PanelCard {
+                title: @tr("Gestion (section 2)");
+                CmpRow { number: 5; label: @tr("Marge avant impôt, moyenne 5 ans · tendance"); }
+                CmpRow { number: 6; label: @tr("Rendement des capitaux propres, moyenne 5 ans · tendance"); }
+                CmpRow { number: 7; label: @tr("Part du capital détenue par la direction"); }
+            }
+            if Comparison.columns.length > 0: PanelCard {
+                title: @tr("Cours (sections 3 à 5)");
+                CmpRow { number: 8; label: @tr("BPA total estimé sur 5 ans"); }
+                CmpRow { number: 9; label: @tr("Fourchette de cours sur 5 ans"); }
+                CmpRow { number: 10; label: @tr("Cours actuel"); }
+                CmpRow { number: 11; label: @tr("PER le plus haut"); }
+                CmpRow { number: 12; label: @tr("PER haut moyen"); }
+                CmpRow { number: 13; label: @tr("PER moyen"); }
+                CmpRow { number: 14; label: @tr("PER bas moyen"); }
+                CmpRow { number: 15; label: @tr("PER le plus bas"); }
+                CmpRow { number: 16; label: @tr("PER actuel"); }
+                CmpRow { number: 17; label: @tr("Zone basse"); }
+                CmpRow { number: 18; label: @tr("Zone médiane"); }
+                CmpRow { number: 19; label: @tr("Zone haute"); }
+                CmpRow { number: 20; label: @tr("Position du cours actuel"); }
+                CmpRow { number: 21; label: @tr("Ratio hausse / baisse"); }
+                CmpRow { number: 22; label: @tr("Rendement présent"); }
+                CmpRow { number: 23; label: @tr("Rendement annuel total estimé"); }
+            }
+            if Comparison.columns.length > 0: PanelCard {
+                title: @tr("Autres");
+                CmpRow { number: 24; label: @tr("Actions en circulation"); }
+                CmpRow { number: 25; label: @tr("Dilution potentielle"); }
+                CmpRow { number: 26; label: @tr("Taux de distribution moyen"); }
+                CmpRow { number: 27; label: @tr("Signaux de qualité"); }
+                CmpRow { number: 28; label: @tr("État de l'étude"); }
+                CmpRow { number: 29; label: @tr("Date des données"); }
+                CmpRow { number: 30; label: @tr("Place de cotation"); }
+            }
+        }
+    }
+}

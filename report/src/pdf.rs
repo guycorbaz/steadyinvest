@@ -835,30 +835,51 @@ pub(crate) struct Doc {
     grid_header: Vec<String>,
     // The font size of the grid being drawn (body, or caption for a wide table).
     grid_font: f32,
+    // The page size (points). Portrait A4 by default; `landscape()` swaps them (Story 7.1 — the
+    // five-column comparison). The text primitives flip y against PAGE_H, so a landscape page's
+    // content stream starts with a translate that maps that flip onto its own height.
+    page_w: f32,
+    page_h: f32,
 }
 
 impl Doc {
     pub(crate) fn new() -> Self {
+        Self::with_page(PAGE_W, PAGE_H)
+    }
+
+    /// A4 landscape (Story 7.1): the comparison's five columns need the width.
+    pub(crate) fn landscape() -> Self {
+        Self::with_page(PAGE_H, PAGE_W)
+    }
+
+    fn with_page(page_w: f32, page_h: f32) -> Self {
         Doc {
             pages: Vec::new(),
-            cur: new_page_content(),
+            cur: fresh_content(page_h),
             y: MARGIN,
             grid_top: MARGIN,
             grid_header: Vec::new(),
             grid_font: FONT,
+            page_w,
+            page_h,
         }
+    }
+
+    /// The usable width (the right margin's x) — layouts author against it, never the constant.
+    pub(crate) fn right(&self) -> f32 {
+        self.page_w - MARGIN
     }
 
     /// Ensure `need` points of vertical space remain on the current page; else start a new one.
     pub(crate) fn ensure(&mut self, need: f32) {
-        if PAGE_H - self.y - need < BOTTOM {
+        if self.page_h - self.y - need < BOTTOM {
             self.new_page();
         }
     }
 
     /// Finish the page in progress and start a fresh one, resetting the cursor to the top margin.
     pub(crate) fn new_page(&mut self) {
-        let finished = std::mem::replace(&mut self.cur, new_page_content());
+        let finished = std::mem::replace(&mut self.cur, fresh_content(self.page_h));
         self.pages.push(finished);
         self.y = MARGIN;
     }
@@ -878,7 +899,7 @@ impl Doc {
         self.y += TITLE_FONT;
         text_bold(&mut self.cur, MARGIN, self.y, TITLE_FONT, s);
         self.y += 6.0;
-        hline(&mut self.cur, MARGIN, PAGE_W - MARGIN, self.y, 1.0);
+        hline(&mut self.cur, MARGIN, self.page_w - MARGIN, self.y, 1.0);
         self.y += 4.0;
     }
 
@@ -889,7 +910,7 @@ impl Doc {
         self.y += HEAD_FONT;
         text_bold(&mut self.cur, MARGIN, self.y, HEAD_FONT, s);
         self.y += 4.0;
-        hline(&mut self.cur, MARGIN, PAGE_W - MARGIN, self.y, 0.5);
+        hline(&mut self.cur, MARGIN, self.page_w - MARGIN, self.y, 0.5);
         self.y += LINE_H - 4.0;
     }
 
@@ -921,7 +942,7 @@ impl Doc {
         self.ensure(LINE_H);
         self.y += FONT;
         text(&mut self.cur, MARGIN, self.y, FONT, left);
-        text(&mut self.cur, PAGE_W / 2.0 + 6.0, self.y, FONT, right);
+        text(&mut self.cur, self.page_w / 2.0 + 6.0, self.y, FONT, right);
         self.y += LINE_H - FONT;
     }
 
@@ -931,7 +952,7 @@ impl Doc {
         let row_h = LINE_H + SMALL + 2.0;
         let h = row_h * rows.len() as f32 + 4.0;
         self.ensure(h + 4.0);
-        let (x0, x1) = (MARGIN, PAGE_W - MARGIN);
+        let (x0, x1) = (MARGIN, self.page_w - MARGIN);
         let col_w = (x1 - x0) / 3.0;
         let top = self.y;
         stroke_rect(&mut self.cur, x0, top, x1 - x0, h, 0.6);
@@ -986,7 +1007,7 @@ impl Doc {
     ) {
         if head {
             self.grid_header = cells.iter().map(|s| s.to_string()).collect();
-        } else if PAGE_H - self.y - LINE_H < BOTTOM {
+        } else if self.page_h - self.y - LINE_H < BOTTOM {
             self.close_grid_box(edges);
             self.new_page();
             self.grid_top = self.y;
@@ -1091,11 +1112,11 @@ impl Doc {
 
         // The plot takes what is left of the page above the four growth lines + the legend.
         let reserved_below = 5.0 * LINE_H + 16.0;
-        let chart_h = (PAGE_H - self.y - BOTTOM - reserved_below).max(CHART_MIN_H);
+        let chart_h = (self.page_h - self.y - BOTTOM - reserved_below).max(CHART_MIN_H);
         self.ensure(chart_h + reserved_below);
         let top = self.y;
         let x0 = MARGIN + CHART_AXIS_W;
-        let x1 = PAGE_W - MARGIN;
+        let x1 = self.page_w - MARGIN;
         let plot_w = x1 - x0;
         let n = series.len();
         let span = ((n as f64 - 1.0) + f64::from(FORECAST_HORIZON_YEARS)).max(1.0);
@@ -1263,7 +1284,7 @@ impl Doc {
             return;
         }
         self.ensure(ZONEBAR_H + 2.0 * LINE_H + 12.0);
-        let (x0, x1) = (MARGIN, PAGE_W - MARGIN);
+        let (x0, x1) = (MARGIN, self.page_w - MARGIN);
         let w = x1 - x0;
         let top = self.y + 10.0; // room above for the current-price marker label
         let fx =
@@ -1330,11 +1351,11 @@ impl Doc {
     }
 
     /// Stamp the footer disclaimer on a page's content (FR64 — every page).
-    fn footer(content: &mut Content) {
+    fn footer(content: &mut Content, page_h: f32) {
         text(
             content,
             MARGIN,
-            PAGE_H - MARGIN,
+            page_h - MARGIN,
             8.0,
             "Outil éducatif — ne constitue pas un conseil financier.",
         );
@@ -1370,12 +1391,13 @@ impl Doc {
             .base_font(Name(b"Helvetica-Bold"))
             .encoding_predefined(Name(b"WinAnsiEncoding"));
 
+        let (page_w, page_h) = (self.page_w, self.page_h);
         for (i, mut content) in self.pages.into_iter().enumerate() {
-            Doc::footer(&mut content);
+            Doc::footer(&mut content, page_h);
             {
                 let mut page = pdf.page(page_ids[i]);
                 page.parent(tree)
-                    .media_box(Rect::new(0.0, 0.0, PAGE_W, PAGE_H))
+                    .media_box(Rect::new(0.0, 0.0, page_w, page_h))
                     .contents(content_ids[i]);
                 let mut resources = page.resources();
                 let mut fonts = resources.fonts();
@@ -1388,8 +1410,13 @@ impl Doc {
     }
 }
 
-fn new_page_content() -> Content {
+/// A page's content stream: black text, mid-grey rules; on a non-A4-portrait page, a translate
+/// that maps the primitives' PAGE_H y-flip onto the page's own height (see `Doc::page_h`).
+fn fresh_content(page_h: f32) -> Content {
     let mut c = Content::new();
+    if (page_h - PAGE_H).abs() > 0.5 {
+        c.transform([1.0, 0.0, 0.0, 1.0, 0.0, page_h - PAGE_H]);
+    }
     c.set_fill_gray(0.0); // black text
     c.set_stroke_gray(0.35); // mid-grey rules (greyscale only)
     c
