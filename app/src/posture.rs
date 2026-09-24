@@ -668,9 +668,11 @@ mod tests {
         // floor is RE-BASED on the measured total after this pass: 594. Its PR 2 (Liste de
         // suivi card + add-value dialog, the Études card + create-study dialog, the Réglages
         // FX-rate dialog, the derived confirm titles/verbs for the study action / older import /
-        // restore prompts) measures 612. Floor strict.
+        // restore prompts) measures 612. The drop-down pass (Guy, 2026-09-24: constrained choices as
+        // lists — the study currency, the FX base currency, the position symbol; their placeholders
+        // and the « aucune étude dans le dossier » band) measures 620. Floor strict.
         assert!(
-            total >= 612,
+            total >= 620,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

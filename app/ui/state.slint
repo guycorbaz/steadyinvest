@@ -1226,6 +1226,9 @@ export global Holdings {
     // reflex) and its company name ("" when no study / no name). Read-only lookups.
     pure callback study-currency-for(string) -> string;
     pure callback study-name-for(string) -> string;
+    // Guy, 2026-09-24: the symbols a position can be added for (every study's ticker, unique,
+    // sorted) — the add-position dialog offers them as a drop-down list, never free text.
+    in-out property <[string]> study-tickers;
     // ── Story 6.8 (FR48): the replacement-candidates panel — a PORTFOLIO-LEVEL pushed state
     //    (a whole-position sell removes its row, so the panel outlives it). Auto-opened by Rust
     //    after a successful sell (both paths), manually via the trigger-panel « Candidats »;

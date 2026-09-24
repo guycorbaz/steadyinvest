@@ -371,18 +371,13 @@ pub fn judgment_suggestions(
             None => slint::SharedString::new(),
         }
     };
-    // Issue #214: the est-low EPS proposal = the low edge of the least-squares seed band the §1
-    // chart already positions its handle on (adopting it is the judgment — the seed itself never
-    // flows into §4); the dividend proposal = the latest year with a known dividend per share.
-    let eps_points: Vec<(i32, Decimal)> = series
-        .iter()
-        .filter_map(|y| y.eps.map(|e| (y.year, e)))
-        .collect();
-    let est_low_eps = steadyinvest_core::ssg::least_squares_log_eps_band(
-        &eps_points,
-        steadyinvest_core::method::FORECAST_HORIZON_YEARS,
-    )
-    .map(|band| band.low);
+    // Issue #214: the est-low EPS proposal = the LATEST known EPS — the method's downside case
+    // (« the lowest EPS you expect over the horizon: the current one, or lower »). The seed
+    // band's low edge was proposed first and misled on a growth stock (NVDA, 2026-09-24: a
+    // trend-low of 18 against a current 4.09 pushed the forecast low to 619 and the price
+    // « sous la bande »). Adopting stays the judgment. The dividend proposal = the latest year
+    // with a known dividend per share.
+    let est_low_eps = series.iter().rev().find_map(|y| y.eps);
     let dividend = series.iter().rev().find_map(|y| y.dividend_per_share);
     JudgmentSuggestions {
         sales_growth: opt(outputs.growth.sales_cagr_pct, DisplayField::Percent),
@@ -1093,12 +1088,12 @@ mod tests {
             s.recent_severe_low.as_str(),
             scaled("50", DisplayField::Price)
         );
-        // Issue #214: a flat EPS history fits a flat seed band → the est-low proposal is known
-        // (the seed's low edge), and the dividend proposal is the latest year's dividend.
-        assert_ne!(
+        // Issue #214: the est-low proposal is the latest EPS, the dividend proposal the latest
+        // year's dividend.
+        assert_eq!(
             s.est_low_eps.as_str(),
-            "",
-            "a fittable history proposes an est-low EPS"
+            scaled("5", DisplayField::PerShare),
+            "the est-low proposal is the latest EPS (the downside case)"
         );
         assert_eq!(
             s.dividend.as_str(),

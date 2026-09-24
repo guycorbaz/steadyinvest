@@ -202,6 +202,18 @@ pub(crate) fn refresh_holdings(
     holdings.set_holding_count(items.len() as i32);
     holdings.set_rows(ModelRc::new(VecModel::from(rows)));
     holdings.set_read_only(state.is_read_only());
+    // The symbols a position can be added for (issue #218 + the drop-down rule): every study's
+    // ticker, unique, sorted. Absence-blind (a read failure lists nothing; the dialog then states
+    // « aucune étude »).
+    let mut tickers: Vec<String> = state
+        .list_studies()
+        .into_iter()
+        .map(|s| s.security_ticker.to_uppercase())
+        .collect();
+    tickers.sort();
+    tickers.dedup();
+    let tickers: Vec<SharedString> = tickers.into_iter().map(SharedString::from).collect();
+    holdings.set_study_tickers(ModelRc::new(VecModel::from(tickers)));
 
     // ── Issue #84: the « Positions vendues » section — retired holdings, most recently sold
     // first. Read-only facts (ticker, sold day, currency); the ledger opens through the same
