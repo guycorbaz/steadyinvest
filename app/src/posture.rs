@@ -678,9 +678,11 @@ mod tests {
         // comparison (the picker card on Études, the thirty row labels, the four group titles,
         // the zone / state words, the currency-mix band) and measures 768. Story 7.3 adds the
         // « Examen rapide » (the picker card, the two ladders' labels, the price record, the
-        // reader's fields, the four conclusions) and measures 850. Floor strict.
+        // reader's fields, the four conclusions) and measures 850. Story 7.3 PR 2 adds the watchlist
+        // criblage (the button, the card, its column heads, the row states and fact words, the
+        // quota band, the « Retour à la liste de suivi » label) and measures 892. Floor strict.
         assert!(
-            total >= 850,
+            total >= 892,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

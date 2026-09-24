@@ -665,7 +665,8 @@ development_status:
   # 2026-09-24: 7-2 checked in the same walk → done.
   7-2-portfolio-health-review: done
   # 2026-09-24: 7-3 spec (PR #229, merged by Guy) → PR 1 (the examination) dev complete → review;
-  #             PR 2 (the criblage of the liste de suivi) to follow.
+  #             PR 2 (the criblage of the liste de suivi) dev complete → review; done after Guy's
+  #             on-display check.
   7-3-discovery-screening-quick-screen: review
   7-4-additional-provider-adapters: done
   7-5-pdf-print-other-forms: backlog

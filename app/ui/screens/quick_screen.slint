@@ -136,7 +136,8 @@ export component QuickScreenScreen inherits Rectangle {
                 spacing: Tokens.space-8;
                 alignment: start;
                 ActionButton {
-                    label: QuickScreen.from-study ? @tr("‹ Retour à l'étude") : @tr("‹ Retour aux études");
+                    label: QuickScreen.from-watchlist ? @tr("‹ Retour à la liste de suivi")
+                        : QuickScreen.from-study ? @tr("‹ Retour à l'étude") : @tr("‹ Retour aux études");
                     enabled: true;
                     clicked => { QuickScreen.close(); }
                 }
@@ -145,14 +146,16 @@ export component QuickScreenScreen inherits Rectangle {
                     enabled: true;
                     clicked => { QuickScreen.export-pdf(); }
                 }
-                if !QuickScreen.from-study: ActionButton {
+                if !QuickScreen.from-study && !QuickScreen.from-watchlist: ActionButton {
                     label: @tr("Créer l'étude");
                     enabled: true;
                     clicked => { QuickScreen.create-study(); }
                 }
             }
             Text {
-                text: QuickScreen.name != ""
+                // A criblage row without a study has no currency (the watchlist carries none).
+                text: QuickScreen.currency == "" ? @tr("Examen rapide — {}", QuickScreen.ticker)
+                    : QuickScreen.name != ""
                     ? @tr("Examen rapide — {} · {} ({})", QuickScreen.ticker, QuickScreen.name, QuickScreen.currency)
                     : @tr("Examen rapide — {} ({})", QuickScreen.ticker, QuickScreen.currency);
                 color: Tokens.text-high;

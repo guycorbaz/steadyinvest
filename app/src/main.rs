@@ -282,6 +282,7 @@ fn main() -> Result<(), slint::PlatformError> {
         drag_moved: Rc::clone(&drag_moved),
         compare_study: Rc::clone(&compare_study),
         quick_screen: Rc::clone(&quick_screen),
+        screening: Rc::new(RefCell::new(None)),
         holding_freshness: Rc::clone(&holding_freshness),
         holding_dismissed: Rc::clone(&holding_dismissed),
         refresh_pending: Rc::clone(&refresh_pending),
@@ -298,6 +299,7 @@ fn main() -> Result<(), slint::PlatformError> {
     wiring::review::wire_review(&ui, &session);
     wiring::comparison::wire_comparison(&ui, &session);
     wiring::quick_screen::wire_quick_screen(&ui, &session);
+    wiring::screening::wire_screening(&ui, &session);
     wiring::wire_navigation(&ui, &session);
     wiring::cells::wire_cells(&ui, &session);
     wiring::judgment::wire_judgment(&ui, &session);

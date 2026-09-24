@@ -266,10 +266,17 @@ pub fn render_quick_screen(q: &QuickScreen) -> Vec<u8> {
     let mut doc = Doc::new();
     doc.title(TITLE);
     doc.small_line(SUBTITLE);
-    let head = if q.name.is_empty() {
-        format!("{} ({})", q.ticker, q.currency)
+    // A criblage row without a study has no declared currency (the watchlist carries none): the
+    // head then names the ticker alone rather than an empty « () ».
+    let named = if q.name.is_empty() {
+        q.ticker.clone()
     } else {
-        format!("{} — {} ({})", q.ticker, q.name, q.currency)
+        format!("{} — {}", q.ticker, q.name)
+    };
+    let head = if q.currency.is_empty() {
+        named
+    } else {
+        format!("{named} ({})", q.currency)
     };
     doc.line(&head);
     doc.small_line(&format!(

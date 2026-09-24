@@ -183,6 +183,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         fetch_cancel,
         fetch_tx,
         quick_screen,
+        screening,
         ..
     } = s;
     {
@@ -191,6 +192,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         let config = Rc::clone(config);
         let quick_screen = Rc::clone(quick_screen);
+        let screening = Rc::clone(screening);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
         let refresh_pending = Rc::clone(refresh_pending);
@@ -306,6 +308,32 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         ticker,
                         result,
                         effective,
+                    );
+                }
+                fetch::WorkerOutcome::Screening {
+                    batch,
+                    index,
+                    result,
+                    fell_back_to,
+                } => {
+                    // Story 7.3 (PR 2): one criblage row — session only, nothing written.
+                    let format = config.borrow().number_format;
+                    let effective = fell_back_to.unwrap_or(config.borrow().preferred_provider);
+                    crate::wiring::screening::on_fetched(
+                        &ui,
+                        format,
+                        &screening,
+                        batch,
+                        index,
+                        Some(result),
+                        effective,
+                    );
+                }
+                fetch::WorkerOutcome::ScreeningSkipped { batch, index } => {
+                    let format = config.borrow().number_format;
+                    let effective = config.borrow().preferred_provider;
+                    crate::wiring::screening::on_fetched(
+                        &ui, format, &screening, batch, index, None, effective,
                     );
                 }
                 fetch::WorkerOutcome::HoldingFetch(outcome) => {
