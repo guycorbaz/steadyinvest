@@ -275,7 +275,8 @@ export component DashboardScreen inherits Rectangle {
 
                 search := TextField {
                     placeholder: @tr("Rechercher un symbole");
-                    width: 260px;
+                    // 300 px: the hint fits whole now that a field no longer grows with its text.
+                    width: 300px;
                     // Live filter as the user types; the field owns its text, Rust re-curates `rows`.
                     changed text => { Studies.set-search(self.text); }
                     accepted => { Studies.set-search(self.text); }
