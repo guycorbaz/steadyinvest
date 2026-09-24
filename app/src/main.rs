@@ -155,6 +155,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Story 2.9 — the saved study captured while the scenario-compare overlay is open, so the typed
     // alternate is recomputed against it WITHOUT persisting. `None` = the overlay is closed.
+    let quick_screen: Rc<RefCell<Option<wiring::quick_screen::QuickScreenSession>>> =
+        Rc::new(RefCell::new(None));
     let compare_study: Rc<RefCell<Option<steadyinvest_contract::Study>>> =
         Rc::new(RefCell::new(None));
 
@@ -279,6 +281,7 @@ fn main() -> Result<(), slint::PlatformError> {
         drag_study: Rc::clone(&drag_study),
         drag_moved: Rc::clone(&drag_moved),
         compare_study: Rc::clone(&compare_study),
+        quick_screen: Rc::clone(&quick_screen),
         holding_freshness: Rc::clone(&holding_freshness),
         holding_dismissed: Rc::clone(&holding_dismissed),
         refresh_pending: Rc::clone(&refresh_pending),
@@ -294,6 +297,7 @@ fn main() -> Result<(), slint::PlatformError> {
     wiring::replacement::wire_replacement(&ui, &session);
     wiring::review::wire_review(&ui, &session);
     wiring::comparison::wire_comparison(&ui, &session);
+    wiring::quick_screen::wire_quick_screen(&ui, &session);
     wiring::wire_navigation(&ui, &session);
     wiring::cells::wire_cells(&ui, &session);
     wiring::judgment::wire_judgment(&ui, &session);

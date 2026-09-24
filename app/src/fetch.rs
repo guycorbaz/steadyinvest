@@ -84,6 +84,10 @@ pub struct FxRatesRequest {
 /// A job for the worker thread.
 pub enum WorkerJob {
     Fetch(FetchRequest),
+    /// Story 7.3: an « Examen rapide » of a ticker with no study — the same fundamentals fetch
+    /// as [`WorkerJob::Fetch`] (`study_id` unused), routed to the examination screen and kept in
+    /// the session only; nothing is written unless « Créer l'étude » follows.
+    QuickScreen(FetchRequest),
     /// A holdings PRICE refresh (Story 4.4 / issue #50): a price-only `/eod` fetch (no
     /// `/fundamentals`), routed to the holdings surface, not the open study screen.
     RefreshHolding(FetchRequest),
@@ -132,6 +136,12 @@ pub struct FxRateOutcome {
 /// What the worker produces, marshalled back to the UI thread.
 pub enum WorkerOutcome {
     Fetch(FetchOutcome),
+    /// Story 7.3: the examination's fetch result — the ticker rides back (there is no study).
+    QuickScreen {
+        ticker: String,
+        result: Result<FetchedFinancials, IngestionError>,
+        fell_back_to: Option<ProviderChoice>,
+    },
     /// A holdings price-refresh result (Story 4.4) — routed to the holdings surface, not the study.
     HoldingFetch(HoldingPriceOutcome),
     /// The FX-rates refresh results (Story 6.5), one entry per requested pair — plus the
@@ -319,6 +329,22 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             result,
                             fell_back_to,
                         })
+                    }
+                    WorkerJob::QuickScreen(req) => {
+                        let (result, _, fell_back_to) = run_chain(
+                            &mut last_request,
+                            select,
+                            &req.chain,
+                            req.primary,
+                            |provider, key| {
+                                runtime.block_on(fetch_canonical(provider, &req.ticker, key))
+                            },
+                        );
+                        WorkerOutcome::QuickScreen {
+                            ticker: req.ticker,
+                            result,
+                            fell_back_to,
+                        }
                     }
                     WorkerJob::RefreshHolding(_) if worker_cancel.load(Ordering::Relaxed) => {
                         // Issue #100: the batch was cancelled — drain this queued per-ticker job without

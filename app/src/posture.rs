@@ -676,9 +676,11 @@ mod tests {
         // share-block templates and their reason bands, the position rows' study / zone / data
         // words, the due-list reasons, the counts) and measures 706. Story 7.1 adds the company
         // comparison (the picker card on Études, the thirty row labels, the four group titles,
-        // the zone / state words, the currency-mix band) and measures 768. Floor strict.
+        // the zone / state words, the currency-mix band) and measures 768. Story 7.3 adds the
+        // « Examen rapide » (the picker card, the two ladders' labels, the price record, the
+        // reader's fields, the four conclusions) and measures 850. Floor strict.
         assert!(
-            total >= 768,
+            total >= 850,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -787,10 +789,12 @@ mod tests {
         // Story 7.2 adds the review's export outcome (MSG_REVIEW_EXPORTED) and the nine quality
         // flags worded as neutral facts (MSG_FLAG_*): 122 + 10 = 132. Story 7.1 adds the
         // comparison's export outcome (MSG_COMPARISON_EXPORTED): 132 + 1 = 133. The walk of
-        // 2026-09-24 adds the watchlist duplicate refusal (MSG_WATCH_DUPLICATE): 134.
+        // 2026-09-24 adds the watchlist duplicate refusal (MSG_WATCH_DUPLICATE): 134. Story 7.3
+        // adds the examination's export / study-created outcomes, its two source words and its
+        // blank-symbol refusal: 139.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            134,
+            139,
             "state.rs message inventory changed — register the new notice"
         );
     }

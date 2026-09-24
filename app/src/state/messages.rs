@@ -124,6 +124,14 @@ pub const MSG_HOLDING_NO_STUDY: &str = "Aucune étude enregistrée pour ce symbo
 /// `QualityFlagKey`s, worded once here so the review screen and its PDF share the inventory).
 pub const MSG_REVIEW_EXPORTED: &str = "La revue a été exportée.";
 pub const MSG_COMPARISON_EXPORTED: &str = "La comparaison a été exportée.";
+pub const MSG_QUICK_SCREEN_EXPORTED: &str = "L'examen rapide a été exporté.";
+/// Story 7.3: « Créer l'étude » from an examination wrote the study with the fetched data.
+pub const MSG_QUICK_SCREEN_STUDY_CREATED: &str = "L'étude a été créée avec les données récupérées.";
+/// Story 7.3: where the examination's figures come from (the study's saved years, or a provider).
+pub const MSG_QUICK_SOURCE_STUDY: &str = "depuis l'étude";
+pub const MSG_QUICK_SOURCE_PROVIDER: &str = "fournisseur : {provider}";
+/// Story 7.3: the picked symbol is blank (no fetch).
+pub const MSG_QUICK_BLANK_TICKER: &str = "Le symbole est vide ; aucun examen n'a été lancé.";
 pub const MSG_FLAG_PTP_TREND_DECLINING: &str = "marge avant impôt en baisse";
 pub const MSG_FLAG_ROE_TREND_DECLINING: &str = "rendement des capitaux propres en baisse";
 pub const MSG_FLAG_ROE_LOW: &str = "rendement des capitaux propres sous 10 %";
@@ -637,6 +645,11 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDING_NO_STUDY,
     MSG_REVIEW_EXPORTED,
     MSG_COMPARISON_EXPORTED,
+    MSG_QUICK_SCREEN_EXPORTED,
+    MSG_QUICK_SCREEN_STUDY_CREATED,
+    MSG_QUICK_SOURCE_STUDY,
+    MSG_QUICK_SOURCE_PROVIDER,
+    MSG_QUICK_BLANK_TICKER,
     MSG_FLAG_PTP_TREND_DECLINING,
     MSG_FLAG_ROE_TREND_DECLINING,
     MSG_FLAG_ROE_LOW,

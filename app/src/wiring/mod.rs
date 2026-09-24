@@ -17,6 +17,7 @@ pub(crate) mod judgment;
 pub(crate) mod overlays;
 pub(crate) mod prefs;
 pub(crate) mod push;
+pub(crate) mod quick_screen;
 pub(crate) mod replacement;
 pub(crate) mod review;
 pub(crate) mod studies;
@@ -52,6 +53,10 @@ pub(crate) struct Session {
     pub(crate) drag_study: Rc<RefCell<Option<steadyinvest_contract::Study>>>,
     pub(crate) drag_moved: Rc<RefCell<bool>>,
     pub(crate) compare_study: Rc<RefCell<Option<steadyinvest_contract::Study>>>,
+    /// Story 7.3: the examination of the moment — its inputs (to re-word the conclusions when
+    /// the objective changes, to export) and, after a fetch, the financials « Créer l'étude »
+    /// reuses. Session-only, never persisted.
+    pub(crate) quick_screen: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
     pub(crate) holding_freshness: Rc<RefCell<HoldingFreshnessMap>>,
     pub(crate) holding_dismissed: Rc<RefCell<std::collections::HashSet<String>>>,
     pub(crate) refresh_pending: Rc<RefCell<usize>>,
