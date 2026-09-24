@@ -680,7 +680,8 @@ development_status:
   # 2026-09-24: retested twice (prose lines wrap, fields no longer widen a screen; PRs #233,
   #             #234); closed as covered by the 7.1 / 7.2 / 7.3 PDFs on Guy's go → done.
   7-5-pdf-print-other-forms: done
-  epic-7-retrospective: optional
+  # 2026-09-24: retro held (epic-7-retro-2026-09-24.md) — G1 catch-up review + G2 Epic-8 framing block Epic 8.
+  epic-7-retrospective: done
 
   # ── Epic 8: Read-only AI clerk-of-memory & MCP façade [V] (story outlines) ──
   epic-8: backlog
