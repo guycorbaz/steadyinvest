@@ -1,0 +1,264 @@
+// Revue — the portfolio health review (Story 7.2): one read-only roll-up of the whole dossier,
+// every bank and currency, in titled cards: répartition (taille / secteur / devise / banque),
+// concentration, one row per held ticker with its study's facts, the studies due for their
+// annual review, and counts. Facts only (FR13): no ranking, no score, no portfolio verdict; ink
+// and words, never a hue. Everything is pushed by Rust on activation (issue #94).
+
+import { Tokens } from "../tokens.slint";
+import { Review, ReviewShareRow, ReviewPositionRow, ReviewDueRow, Labels } from "../state.slint";
+import { ActionButton } from "../components/action_button.slint";
+import { PanelCard } from "../components/panel_card.slint";
+import { StatusBand } from "../components/status_band.slint";
+
+component FactLine inherits Text {
+    color: Tokens.text-high;
+    font-family: Tokens.font-numeric;
+    font-size: Tokens.font-caption;
+    wrap: word-wrap;
+}
+component CaptionLine inherits Text {
+    color: Tokens.text-mid;
+    font-size: Tokens.font-caption;
+    wrap: word-wrap;
+}
+
+// One share block: label — amount (share, cible); a band when a pair is missing, when the row is an
+// unclassified security (reason only), or when the share murmurs at the threshold.
+component ShareBlock inherits VerticalLayout {
+    in property <[ReviewShareRow]> rows;
+    in property <bool> with-target;
+    spacing: Tokens.space-4;
+    if rows.length == 0: CaptionLine { text: @tr("Aucune donnée."); }
+    for r in rows: VerticalLayout {
+        spacing: Tokens.space-4;
+        // The fact line — absent for a reason-only row (an unclassified security).
+        if r.reason == "": FactLine {
+            text: r.share != ""
+                ? (r.amount != ""
+                    ? (root.with-target && r.target != ""
+                        ? @tr("{} — {} ({} % · cible {} %)", root.label-of(r.label), r.amount, r.share, r.target)
+                        : @tr("{} — {} ({} %)", root.label-of(r.label), r.amount, r.share))
+                    : (root.with-target && r.target != ""
+                        ? @tr("{} — {} % (cible {} %)", root.label-of(r.label), r.share, r.target)
+                        : @tr("{} — {} %", root.label-of(r.label), r.share)))
+                : (r.amount != ""
+                    ? @tr("{} — {}", root.label-of(r.label), r.amount)
+                    : (r.missing != ""
+                        ? @tr("{} — indisponible : taux manquant {}", root.label-of(r.label), r.missing)
+                        : (root.with-target && r.target != ""
+                            ? @tr("{} — indisponible (cible {} %)", root.label-of(r.label), r.target)
+                            : @tr("{} — indisponible", root.label-of(r.label)))));
+        }
+        if r.reason != "": StatusBand {
+            icon: "◦";
+            text: r.reason == "no_study" ? @tr("{} — non classé (aucune étude)", r.label)
+                : r.reason == "study_unavailable" ? @tr("{} — non classé (étude indisponible)", r.label)
+                : r.reason == "no_sales" ? @tr("{} — non classé (chiffre d'affaires indisponible)", r.label)
+                : r.reason == "missing_rate" ? @tr("{} — non classé (taux manquant {})", r.label, r.missing)
+                : @tr("{} — non classé (conversion impossible)", r.label);
+        }
+        if r.reason == "" && r.flagged: StatusBand {
+            icon: "⚠";
+            text: @tr("{} — seuil {} % approché ou atteint", root.label-of(r.label), Review.threshold);
+        }
+    }
+    pure function label-of(key: string) -> string {
+        if (key == "small") { return @tr("Petite"); }
+        if (key == "medium") { return @tr("Moyenne"); }
+        if (key == "large") { return @tr("Grande"); }
+        if (key == "") { return @tr("non renseigné"); }
+        return key;
+    }
+}
+
+export component ReviewScreen inherits Rectangle {
+    pure function study-words(row: ReviewPositionRow) -> string {
+        if (row.study == "full") { return row.low-confidence ? @tr("critères validés · confiance réduite") : @tr("critères validés"); }
+        if (row.study == "provisional") { return row.low-confidence ? @tr("provisoire · confiance réduite") : @tr("provisoire"); }
+        if (row.study == "withheld") { return row.low-confidence ? @tr("en attente · confiance réduite") : @tr("en attente"); }
+        if (row.study == "unavailable") { return @tr("étude indisponible"); }
+        return @tr("aucune étude");
+    }
+    pure function zone-words(key: string) -> string {
+        if (key == "buy") { return Labels.zone-buy; }
+        if (key == "neutral") { return Labels.zone-hold; }
+        if (key == "sell") { return Labels.zone-sell; }
+        if (key == "below") { return @tr("sous la bande de prévision"); }
+        if (key == "above") { return @tr("au-dessus de la bande de prévision"); }
+        return "—";
+    }
+    pure function reason-words(key: string) -> string {
+        if (key == "age") { return @tr("dernière sauvegarde de plus de 12 mois"); }
+        if (key == "withheld") { return @tr("une donnée requise manque"); }
+        return @tr("confiance réduite");
+    }
+
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            alignment: start;
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
+
+            Text {
+                text: @tr("Revue de santé du portefeuille");
+                color: Tokens.text-high;
+                font-size: Tokens.font-h2;
+                font-weight: Tokens.weight-semibold;
+            }
+
+            if Review.unavailable: StatusBand {
+                icon: "⊘";
+                text: @tr("Revue indisponible : le dossier n'a pas pu être lu.");
+            }
+
+            if !Review.unavailable: PanelCard {
+                title: Review.dossier != "" ? @tr("Dossier {} — au {}", Review.dossier, Review.date) : @tr("Au {}", Review.date);
+                subtitle: @tr("Tout le dossier, toutes banques et devises, en {} ; des faits, jamais un jugement d'ensemble.", Review.reference-currency);
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+                    ActionButton {
+                        label: @tr("Exporter PDF");
+                        enabled: true;
+                        clicked => { Review.export-pdf(); }
+                    }
+                    ActionButton {
+                        label: @tr("Portefeuille");
+                        enabled: true;
+                        clicked => { Review.go-to-portfolio(); }
+                    }
+                }
+                FactLine {
+                    text: @tr("{} banque(s) · {} position(s) · {} avec une étude", Review.bank-count, Review.count-positions, Review.count-linked);
+                }
+                if Review.notice != "": CaptionLine { text: Review.notice; }
+                if Review.rates != "": CaptionLine { text: @tr("Convertis aux taux : {}", Review.rates); }
+            }
+
+            if !Review.unavailable: PanelCard {
+                title: @tr("Répartition par taille (chiffre d'affaires)");
+                ShareBlock { rows: Review.size-rows; with-target: true; }
+                ShareBlock { rows: Review.unclassified-rows; with-target: false; }
+            }
+            if !Review.unavailable: PanelCard {
+                title: @tr("Répartition par secteur");
+                if Review.sectors-unavailable: StatusBand { icon: "⊘"; text: @tr("Exposition par secteur indisponible."); }
+                if !Review.sectors-unavailable: ShareBlock { rows: Review.sector-rows; with-target: false; }
+            }
+            if !Review.unavailable: PanelCard {
+                title: @tr("Répartition par devise");
+                if Review.currencies-unavailable: StatusBand { icon: "⊘"; text: @tr("Exposition par devise indisponible."); }
+                if !Review.currencies-unavailable: ShareBlock { rows: Review.currency-rows; with-target: false; }
+            }
+            if !Review.unavailable: PanelCard {
+                title: @tr("Répartition par banque");
+                if Review.global-missing != "": StatusBand { icon: "◦"; text: @tr("Total global indisponible : taux manquant {}", Review.global-missing); }
+                ShareBlock { rows: Review.bank-rows; with-target: false; }
+                if Review.global-invested != "": FactLine { text: @tr("Total global : {}", Review.global-invested); }
+            }
+            if !Review.unavailable: PanelCard {
+                title: @tr("Concentration par titre");
+                subtitle: @tr("Part de chaque titre dans le capital total investi ; seuil de concentration : {} %.", Review.threshold);
+                if Review.concentration-unavailable: StatusBand { icon: "⊘"; text: @tr("Concentration indisponible"); }
+                if Review.concentration-missing != "": StatusBand { icon: "◦"; text: @tr("Parts indisponibles : taux manquant {}", Review.concentration-missing); }
+                ShareBlock { rows: Review.concentration-rows; with-target: false; }
+            }
+
+            if !Review.unavailable: PanelCard {
+                title: @tr("Positions et leurs études");
+                subtitle: @tr("Une ligne par titre détenu, toutes banques confondues, avec l'état de son étude tel que le moteur le calcule.");
+                if Review.positions.length == 0: CaptionLine { text: @tr("Aucune position."); }
+                for row in Review.positions: Rectangle {
+                    background: Tokens.surface-alt;
+                    border-width: Tokens.border;
+                    border-color: Tokens.separator;
+                    border-radius: Tokens.radius;
+                    VerticalLayout {
+                        padding: Tokens.space-12;
+                        spacing: Tokens.space-4;
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            Text {
+                                text: row.name != "" ? @tr("{} — {}", row.ticker, row.name) : row.ticker;
+                                color: Tokens.text-high;
+                                font-size: Tokens.font-body;
+                                font-weight: Tokens.weight-semibold;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            CaptionLine { text: row.banks; vertical-alignment: center; }
+                            FactLine {
+                                text: row.invested != ""
+                                    ? (row.share != "" ? @tr("{} ({} % du capital)", row.invested, row.share) : row.invested)
+                                    : (row.missing != "" ? @tr("montant indisponible : taux manquant {}", row.missing) : @tr("montant indisponible"));
+                                vertical-alignment: center;
+                            }
+                            if row.study-id != "": ActionButton {
+                                label: @tr("Ouvrir l'étude");
+                                enabled: true;
+                                clicked => { Review.open-study(row.study-id); }
+                            }
+                        }
+                        // The study line: its state, the zone, U/D, relative value.
+                        if row.study == "full" || row.study == "provisional" || row.study == "withheld": FactLine {
+                            text: @tr("Étude : {} · zone : {} · prix actuel : {} {} · H/B {} · valeur relative : {}",
+                                root.study-words(row), root.zone-words(row.zone), row.price, row.currency, row.ud, row.relative);
+                        }
+                        if row.study == "none" && row.other-currency != "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Aucune étude liée : l'étude {} est en {} et la position en {}.", row.ticker, row.other-currency, row.currency);
+                        }
+                        if row.study == "none" && row.other-currency == "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Aucune étude liée.");
+                        }
+                        if row.study == "unavailable": StatusBand {
+                            icon: "⊘";
+                            text: @tr("Étude indisponible : sa lecture a échoué.");
+                        }
+                        if row.flags != "": StatusBand {
+                            icon: "⚠";
+                            text: @tr("Signaux ({}) : {}", row.flag-count, row.flags);
+                        }
+                        HorizontalLayout {
+                            spacing: Tokens.space-12;
+                            alignment: start;
+                            if row.study-id != "": CaptionLine {
+                                text: row.stale ? @tr("◦ données périmées") : (row.as-of != "" ? @tr("données à jour le {}", row.as-of) : @tr("données : pas encore rafraîchies"));
+                            }
+                            if row.stop != "": CaptionLine {
+                                text: row.stop-breached ? @tr("seuil suiveur {} {} — sous le seuil", row.stop, row.currency) : @tr("seuil suiveur {} {}", row.stop, row.currency);
+                            }
+                            if row.trigger == "stop": CaptionLine { text: @tr("◆ Le prix a atteint votre stop."); }
+                            if row.trigger == "sell": CaptionLine { text: @tr("◆ Le prix est dans la zone de vente."); }
+                            if row.study-id != "": CaptionLine { text: @tr("dernière sauvegarde : {}", row.last-saved); }
+                        }
+                    }
+                }
+            }
+
+            if !Review.unavailable: PanelCard {
+                title: @tr("Études à revoir");
+                subtitle: @tr("Revue annuelle : plus de 12 mois depuis la dernière sauvegarde effective, une donnée requise manquante, ou une confiance réduite.");
+                if Review.due.length == 0: CaptionLine { text: @tr("Aucune étude à revoir."); }
+                for d in Review.due: HorizontalLayout {
+                    spacing: Tokens.space-12;
+                    FactLine { text: @tr("{} — {} (dernière sauvegarde : {})", d.ticker, root.reason-words(d.reason), d.date); vertical-alignment: center; horizontal-stretch: 1; }
+                    ActionButton {
+                        label: @tr("Ouvrir l'étude");
+                        enabled: true;
+                        clicked => { Review.open-study(d.study-id); }
+                    }
+                }
+            }
+
+            if !Review.unavailable: PanelCard {
+                title: @tr("En chiffres");
+                FactLine { text: @tr("{} positions · {} avec une étude · {} critères validés · {} provisoires · {} en attente", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld); }
+                FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur · {} à revoir", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached, Review.count-due); }
+            }
+        }
+    }
+}

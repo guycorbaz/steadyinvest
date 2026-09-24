@@ -47,6 +47,7 @@ mod messages;
 mod refresh;
 mod replacement;
 mod restore;
+mod review;
 mod studies;
 mod undo;
 mod watchlist;
@@ -64,6 +65,7 @@ pub use messages::*;
 pub use refresh::*;
 pub use replacement::*;
 pub use restore::*;
+pub use review::*;
 pub use undo::*;
 
 /// Where a default journal lives when the user has none yet: the OS **data** dir (NOT the config

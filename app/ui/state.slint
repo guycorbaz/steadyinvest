@@ -1020,6 +1020,88 @@ export global Dialog {
     }
 }
 
+// ── Story 7.2 — the portfolio health review (« Revue »): a read-only roll-up of the whole
+//    dossier, pushed by Rust on activation. Facts only — words and glyphs, no hue, no ranking.
+//    Keys (never prose) cross the boundary: study state, zone, data state, reasons; the screen
+//    turns them into @tr words. ──
+export struct ReviewShareRow {
+    label: string,     // a sector / currency / bank / ticker, or a size key small|medium|large ("" = non renseigné)
+    amount: string,
+    share: string,
+    target: string,
+    missing: string,   // the missing pair blocking the figure ("EUR → CHF"), "" when none
+    reason: string,    // "" | no_study | study_unavailable | no_sales | unconvertible (an unclassified size row)
+    flagged: bool,
+}
+export struct ReviewPositionRow {
+    ticker: string,
+    study-id: string,
+    name: string,
+    banks: string,
+    currency: string,
+    invested: string,
+    share: string,
+    missing: string,        // the missing pair(s) blocking the invested figure
+    study: string,          // full | provisional | withheld | none | unavailable
+    other-currency: string, // a same-ticker study in ANOTHER currency (study == none)
+    low-confidence: bool,
+    zone: string,           // buy | neutral | sell | below | above | ""
+    price: string,
+    ud: string,
+    relative: string,
+    flags: string,          // the flags worded by Rust (inventory), joined; "" = none
+    flag-count: int,
+    stale: bool,
+    as-of: string,
+    stop: string,
+    stop-breached: bool,
+    trigger: string,        // stop | sell | ""
+    last-saved: string,
+    due: bool,
+}
+export struct ReviewDueRow {
+    ticker: string,
+    study-id: string,
+    date: string,
+    reason: string,         // age | withheld | low_confidence
+}
+export global Review {
+    in-out property <bool> unavailable;
+    in-out property <string> dossier;
+    in-out property <string> date;
+    in-out property <string> reference-currency;
+    in-out property <int> bank-count;
+    in-out property <string> rates;
+    in-out property <[ReviewShareRow]> size-rows;
+    in-out property <[ReviewShareRow]> unclassified-rows;
+    in-out property <bool> sectors-unavailable;
+    in-out property <[ReviewShareRow]> sector-rows;
+    in-out property <bool> currencies-unavailable;
+    in-out property <[ReviewShareRow]> currency-rows;
+    in-out property <[ReviewShareRow]> bank-rows;
+    in-out property <string> global-invested;
+    in-out property <string> global-missing;
+    in-out property <[ReviewShareRow]> concentration-rows;
+    in-out property <string> concentration-missing;
+    in-out property <bool> concentration-unavailable;
+    in-out property <string> threshold;
+    in-out property <[ReviewPositionRow]> positions;
+    in-out property <[ReviewDueRow]> due;
+    in-out property <int> count-positions;
+    in-out property <int> count-linked;
+    in-out property <int> count-full;
+    in-out property <int> count-provisional;
+    in-out property <int> count-withheld;
+    in-out property <int> count-flagged;
+    in-out property <int> count-high-zone;
+    in-out property <int> count-stop-breached;
+    in-out property <int> count-due;
+    in-out property <string> notice;   // the export outcome (F4 slot)
+    callback export-pdf();
+    callback open-study(string);       // study id → Études + open
+    callback go-to-portfolio();
+}
+
 export struct PortfolioRow {
     id: string,
     name: string,
