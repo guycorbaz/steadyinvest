@@ -65,7 +65,7 @@ pub struct PriceRow {
     pub high: Option<Decimal>,
     pub low: Option<Decimal>,
     pub eps: Option<Decimal>,
-    /// (A ÷ C), (B ÷ C) — `None` on a missing or non-positive EPS.
+    /// (A ÷ C), (B ÷ C) — `None` on a missing or non-positive price or EPS.
     pub pe_high: Option<Decimal>,
     pub pe_low: Option<Decimal>,
 }
@@ -87,10 +87,19 @@ pub enum RateComparison {
 }
 
 /// The §3 price record and its facts.
+///
+/// Absence honesty (G1 review): the P/E totals and averages cover the SAME rows — those with both
+/// a high and a low P/E — and `pe_years` states how many; a « cinq ans » wording is the layout's
+/// only when `five_year_record` holds and the figure covers all five rows. A count over no row is
+/// `None`, never `0`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PriceRecord {
     /// The last five years with a price, oldest first.
     pub rows: Vec<PriceRow>,
+    /// `true` when `rows` are the form's five consecutive years.
+    pub five_year_record: bool,
+    /// The rows the P/E totals and averages cover (both P/Es present).
+    pub pe_years: u32,
     pub pe_high_total: Option<Decimal>,
     pub pe_low_total: Option<Decimal>,
     pub pe_high_avg: Option<Decimal>,
@@ -100,12 +109,15 @@ pub struct PriceRecord {
     pub present_price: Option<Decimal>,
     pub present_eps: Option<Decimal>,
     pub present_pe: Option<Decimal>,
-    /// The high of the oldest row (« the high price five years ago ») and the present price's
-    /// distance from it, in percent (positive = higher).
+    /// The high of the oldest row (« the high price five years ago » on a full record), its
+    /// year, and the present price's distance from it, in percent (positive = higher).
     pub high_five_years_ago: Option<Decimal>,
+    pub high_year: Option<i32>,
     pub price_vs_high_pct: Option<Decimal>,
-    /// « This stock has sold as high as the current price in N of the last 5 years ».
+    /// « This stock has sold as high as the current price in N of the last 5 years »: N over the
+    /// `high_years` rows whose high is known; `None` without a present price or any known high.
     pub years_sold_as_high: Option<u32>,
+    pub high_years: u32,
     pub pe_position: Option<PePosition>,
 }
 
@@ -164,8 +176,10 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
         (Some(r), Some(o)) => r.checked_sub(o),
         _ => None,
     };
+    // A non-positive old average has no meaningful « hausse en pour cent »: dividing by it would
+    // invert the sign (a recovery from −1 to +1 read as −200 %) — absent, never wrong (G1 review).
     let increase_pct = match (increase, old_avg) {
-        (Some(i), Some(o)) if o != Decimal::ZERO => i
+        (Some(i), Some(o)) if o > Decimal::ZERO => i
             .checked_div(o)
             .and_then(|q| q.checked_mul(Decimal::ONE_HUNDRED)),
         _ => None,
@@ -195,21 +209,27 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
     }
 }
 
+/// A P/E needs a positive price AND a positive EPS: a zero or negative price is a data fault, not
+/// a « PER de 0 » — absent, never wrong (G1 D review). Every P/E, and so every P/E average, is
+/// then positive when present.
 fn pe(price: Option<Decimal>, eps: Option<Decimal>) -> Option<Decimal> {
     match (price, eps) {
-        (Some(p), Some(e)) if e > Decimal::ZERO => p.checked_div(e),
+        (Some(p), Some(e)) if p > Decimal::ZERO && e > Decimal::ZERO => p.checked_div(e),
         _ => None,
     }
 }
 
-fn sum(values: impl Iterator<Item = Option<Decimal>>) -> (Option<Decimal>, u32) {
-    let mut total: Option<Decimal> = None;
-    let mut count = 0u32;
-    for v in values.flatten() {
-        total = Some(total.unwrap_or(Decimal::ZERO).checked_add(v).unwrap_or(v));
-        count += 1;
+/// The sum of every value; `None` for no value or on an overflow — never the values that fit
+/// passed off as the total (G1 review: an overflow used to restart the sum at the last value).
+fn total(values: impl Iterator<Item = Decimal>) -> Option<Decimal> {
+    let mut acc: Option<Decimal> = None;
+    for v in values {
+        acc = Some(match acc {
+            None => v,
+            Some(a) => a.checked_add(v)?,
+        });
     }
-    (total, count)
+    acc
 }
 
 fn price_record(
@@ -233,17 +253,27 @@ fn price_record(
             pe_low: pe(y.low_price, y.eps),
         })
         .collect();
-    let (pe_high_total, n_high) = sum(rows.iter().map(|r| r.pe_high));
-    let (pe_low_total, n_low) = sum(rows.iter().map(|r| r.pe_low));
-    let avg = |t: Option<Decimal>, n: u32| t.and_then(|t| t.checked_div(Decimal::from(n)));
-    let pe_high_avg = avg(pe_high_total, n_high);
-    let pe_low_avg = avg(pe_low_total, n_low);
+    let five_year_record =
+        rows.len() == 5 && rows.last().map(|r| r.year) == rows.first().map(|r| r.year + 4);
+    // The high and low P/E columns are summed over the SAME rows (both P/Es present), so the two
+    // averages — and their average — describe one set of years, whose count is stated.
+    let pe_pairs: Vec<(Decimal, Decimal)> = rows
+        .iter()
+        .filter_map(|r| Some((r.pe_high?, r.pe_low?)))
+        .collect();
+    let pe_years = pe_pairs.len() as u32;
+    let pe_high_total = total(pe_pairs.iter().map(|(h, _)| *h));
+    let pe_low_total = total(pe_pairs.iter().map(|(_, l)| *l));
+    let avg = |t: Option<Decimal>| t.and_then(|t| t.checked_div(Decimal::from(pe_years)));
+    let pe_high_avg = avg(pe_high_total);
+    let pe_low_avg = avg(pe_low_total);
     let pe_avg_of_avgs = match (pe_high_avg, pe_low_avg) {
         (Some(h), Some(l)) => h.checked_add(l).and_then(|s| s.checked_div(two())),
         _ => None,
     };
     let present_pe = pe(present_price, present_eps);
     let high_five_years_ago = rows.first().and_then(|r| r.high);
+    let high_year = rows.first().filter(|r| r.high.is_some()).map(|r| r.year);
     let price_vs_high_pct = match (present_price, high_five_years_ago) {
         (Some(p), Some(h)) if h > Decimal::ZERO => p
             .checked_sub(h)
@@ -251,7 +281,8 @@ fn price_record(
             .and_then(|q| q.checked_mul(Decimal::ONE_HUNDRED)),
         _ => None,
     };
-    let years_sold_as_high = present_price.map(|p| {
+    let high_years = rows.iter().filter(|r| r.high.is_some()).count() as u32;
+    let years_sold_as_high = present_price.filter(|_| high_years > 0).map(|p| {
         rows.iter()
             .filter(|r| r.high.is_some_and(|h| h >= p))
             .count() as u32
@@ -271,6 +302,8 @@ fn price_record(
     };
     PriceRecord {
         rows,
+        five_year_record,
+        pe_years,
         pe_high_total,
         pe_low_total,
         pe_high_avg,
@@ -280,8 +313,10 @@ fn price_record(
         present_eps,
         present_pe,
         high_five_years_ago,
+        high_year,
         price_vs_high_pct,
         years_sold_as_high,
+        high_years,
         pe_position,
     }
 }
@@ -466,5 +501,141 @@ mod tests {
         assert_eq!(out.price.rows[4].pe_high, None);
         assert_eq!(out.price.present_pe, None);
         assert_eq!(out.price.pe_position, None);
+        // A zero price yields no P/E either — never a « PER de 0 » averaged in.
+        let mut zero = years.clone();
+        zero[5].low_price = Some(d("0"));
+        let out = quick_screen(&zero, Some(d("0")), Some(d("5")));
+        assert_eq!(out.price.rows[4].pe_low, None);
+        assert_eq!(out.price.present_pe, None);
+        assert_eq!(out.price.pe_years, 4);
+    }
+
+    /// Six years whose two-year averages are `old` (2021–2022) and `recent` (2025–2026).
+    fn six_years_with_averages(old: &str, recent: &str) -> Vec<CanonicalYear> {
+        [
+            (2021, old),
+            (2022, old),
+            (2023, "1"),
+            (2024, "1"),
+            (2025, recent),
+            (2026, recent),
+        ]
+        .into_iter()
+        .map(|(y, s)| year(y, s, s, "10", "5"))
+        .collect()
+    }
+
+    /// Spec §6: the form's conversion table reproduced END TO END — six years through
+    /// `quick_screen`, the real ladder, the real rate (not the root helper alone).
+    #[test]
+    fn quick_screen_reproduces_the_forms_conversion_table() {
+        let rate = |recent: &str| {
+            let out = quick_screen(&six_years_with_averages("100", recent), None, None);
+            assert_eq!(out.sales.span_years, FORM_SPAN_YEARS);
+            out.sales.compound_rate_pct.unwrap()
+        };
+        // The table's own precision (whole percents): 27 % → 5 %, 271 % → 30 %.
+        assert_eq!(rate("127").round_dp(0), d("5"));
+        assert_eq!(rate("371").round_dp(0), d("30"));
+        // The screen's precision (one decimal): 27,6 % → 5,0 %, 271,3 % → 30,0 %.
+        assert_eq!(rate("127.6").round_dp(1), d("5.0"));
+        assert_eq!(rate("371.3").round_dp(1), d("30.0"));
+        let out = quick_screen(&six_years_with_averages("100", "127"), None, None);
+        assert_eq!(out.sales.increase_pct, Some(d("27")));
+    }
+
+    #[test]
+    fn a_non_positive_old_average_has_no_percentage_increase() {
+        // EPS −1 → +1: a recovery, never « −200 % » (G1 review).
+        let l = quick_screen(&six_years_with_averages("-1", "1"), None, None).eps;
+        assert_eq!(l.increase, Some(d("2")));
+        assert_eq!(l.increase_pct, None);
+        assert_eq!(l.compound_rate_pct, None);
+        let l = quick_screen(&six_years_with_averages("0", "1"), None, None).eps;
+        assert_eq!(l.increase_pct, None);
+    }
+
+    #[test]
+    fn the_pe_figures_cover_the_same_rows_and_say_how_many() {
+        let mut years = vec![
+            year(2022, "1", "2", "50", "30"),  // 25 / 15
+            year(2023, "1", "4", "80", "40"),  // 20 / 10
+            year(2024, "1", "4", "100", "60"), // 25 / 15
+            year(2025, "1", "5", "100", "50"), // 20 / 10
+            year(2026, "1", "5", "120", "60"), // 24 / 12
+        ];
+        let p = quick_screen(&years, Some(d("110")), Some(d("5"))).price;
+        assert!(p.five_year_record);
+        assert_eq!(p.pe_years, 5);
+        assert_eq!(p.high_year, Some(2022));
+        assert_eq!(p.high_years, 5);
+        // 2024 loses its low price: its high P/E must not enter the high total alone.
+        years[2].low_price = None;
+        let p = quick_screen(&years, Some(d("110")), Some(d("5"))).price;
+        assert_eq!(p.pe_years, 4);
+        assert_eq!(p.pe_high_total, Some(d("89")));
+        assert_eq!(p.pe_low_total, Some(d("47")));
+        assert_eq!(p.pe_high_avg, Some(d("22.25")));
+        assert_eq!(p.pe_low_avg, Some(d("11.75")));
+        // A non-positive EPS everywhere: no P/E row → every P/E figure absent, count 0.
+        for y in &mut years {
+            y.eps = Some(d("-1"));
+        }
+        let p = quick_screen(&years, Some(d("110")), None).price;
+        assert_eq!(p.pe_years, 0);
+        assert_eq!(
+            (p.pe_high_total, p.pe_high_avg, p.pe_avg_of_avgs),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn an_overflowing_pe_total_is_absent_never_the_last_value() {
+        let big = Decimal::MAX.to_string();
+        let years = vec![
+            year(2025, "1", "1", &big, "1"),
+            year(2026, "1", "1", &big, "1"),
+        ];
+        let p = quick_screen(&years, None, None).price;
+        assert_eq!(p.pe_years, 2);
+        assert_eq!(p.pe_high_total, None);
+        assert_eq!(p.pe_high_avg, None);
+        assert_eq!(p.pe_avg_of_avgs, None);
+        assert_eq!(p.pe_low_total, Some(d("2")));
+    }
+
+    #[test]
+    fn a_short_record_claims_no_five_years_and_no_high_counts_as_absent() {
+        let years = vec![
+            year(2024, "1", "2", "50", "30"),
+            year(2025, "1", "4", "80", "40"),
+            year(2026, "1", "4", "100", "60"),
+        ];
+        let p = quick_screen(&years, Some(d("90")), Some(d("4"))).price;
+        assert!(!p.five_year_record);
+        assert_eq!(p.high_year, Some(2024));
+        assert_eq!((p.years_sold_as_high, p.high_years), (Some(1), 3));
+        // Five rows that are not consecutive are not the form's five years either.
+        let gap: Vec<CanonicalYear> = [2019, 2022, 2023, 2024, 2026]
+            .into_iter()
+            .map(|y| year(y, "1", "1", "10", "5"))
+            .collect();
+        assert!(!quick_screen(&gap, None, None).price.five_year_record);
+        // Rows without a high: « sold as high in 0 of … » would be a lie — absent.
+        let mut no_high = years.clone();
+        for y in &mut no_high {
+            y.high_price = None;
+        }
+        let p = quick_screen(&no_high, Some(d("90")), None).price;
+        assert_eq!(p.years_sold_as_high, None);
+        assert_eq!(p.high_years, 0);
+        assert_eq!(p.high_year, None);
+        // No price rows at all: absent, never 0.
+        assert_eq!(
+            quick_screen(&[], Some(d("90")), None)
+                .price
+                .years_sold_as_high,
+            None
+        );
     }
 }

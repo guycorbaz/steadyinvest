@@ -889,6 +889,11 @@ impl Doc {
         self.y = MARGIN;
     }
 
+    /// The zero-based index of the page in progress (the finished pages before it).
+    pub(crate) fn page_index(&self) -> usize {
+        self.pages.len()
+    }
+
     /// Issue #104: reserve `need` points as ONE block so a heading + its table/chart never split
     /// across a page break (the §4 zone bar was orphaning). A no-op when the block already fits.
     pub(crate) fn keep_together(&mut self, need: f32) {

@@ -132,11 +132,11 @@ Guy's (2026-09-25).
 - [x] [Review][Patch] Quota stop only when the chain's FINAL error is a quota one [app/src/fetch.rs:402]
 - [x] [Review][Patch] `plan()` swallows read failures (empty list « 0 valeur(s) »; a studied ticker fetched again, spending quota) [app/src/wiring/screening.rs:127-133]
 - [x] [Review][Patch] The #109 price-only-year filter applies to the fetch path only; an empty-after-filter series passes the « no data » refusal — the empty-after-filter case fixed (PR A); the study path keeps its saved years (the apply path already drops the price-only row, so a saved study does not carry it) [app/src/wiring/quick_screen.rs:139-168,207, app/src/wiring/screening.rs:110]
-- [ ] [Review][Patch] Checklist arithmetic: `sum` overflow replaces the total by the last value; P/E totals / averages partial and over different subsets; `increase_pct` sign inverted on a negative base; « cinq ans » claimed over fewer rows, « 0 » when none [core/src/checklist.rs:152-157,190-243]
-- [ ] [Review][Patch] Conclusions: « atteint » decided on the raw rate while the rounded one is shown; « objectif non renseigné » when the RATE is absent; conclusion 4 says « PER actuel indisponible » when the 5-year average is missing, and the PDF drops it [app/src/viewmodel/quick_screen.rs:133-137, app/ui/screens/quick_screen.slint:296-313, report/src/quick_screen.rs:444-457]
-- [ ] [Review][Patch] Without a price the three §3 facts vanish instead of reading « — » (spec §6); the PDF's higher / lower word is parsed back from the formatted string [app/ui/screens/quick_screen.slint:263-271, report/src/quick_screen.rs:~400-425]
+- [x] [Review][Patch] Checklist arithmetic: `sum` overflow replaces the total by the last value; P/E totals / averages partial and over different subsets; `increase_pct` sign inverted on a negative base; « cinq ans » claimed over fewer rows, « 0 » when none [core/src/checklist.rs:152-157,190-243]
+- [x] [Review][Patch] Conclusions: « atteint » decided on the raw rate while the rounded one is shown; « objectif non renseigné » when the RATE is absent; conclusion 4 says « PER actuel indisponible » when the 5-year average is missing, and the PDF drops it [app/src/viewmodel/quick_screen.rs:133-137, app/ui/screens/quick_screen.slint:296-313, report/src/quick_screen.rs:444-457]
+- [x] [Review][Patch] Without a price the three §3 facts vanish instead of reading « — » (spec §6); the PDF's higher / lower word is parsed back from the formatted string [app/ui/screens/quick_screen.slint:263-271, report/src/quick_screen.rs:~400-425]
 - [x] [Review][Patch] « Fermer le criblage » clears an unrelated watchlist notice (F4) [app/src/wiring/screening.rs:274]
-- [ ] [Review][Patch] Tests: n = 3 ladder, the two-page PDF, 27 % → 5,0 % through `quick_screen` (spec §6) [core/src/checklist.rs, report/src/quick_screen.rs]
+- [x] [Review][Patch] Tests: n = 3 ladder, the two-page PDF, 27 % → 5,0 % through `quick_screen` (spec §6) [core/src/checklist.rs, report/src/quick_screen.rs]
 - [x] [Review][Defer] Neutral §2 / §3 facts in a StatusBand with the « ◦ » glyph [app/ui/screens/quick_screen.slint] — deferred, cosmetic
 
 ### Story 7.5 — decision and PDF findings (G1, 2026-09-25)
@@ -157,3 +157,7 @@ Guy's (2026-09-25).
 Fixed in PR A (G1, branch `fix/g1-a-quick-screen-async`): the items checked above, plus decisions 1
 (trigger sell: Enter records only a typed number) and 2 (six-year ladder). The n = 3 ladder test
 landed with decision 2; the two other test items and the dossier-switch item are in later PRs.
+Fixed in PR D (G1, branch `fix/g1-d-quick-screen-figures`): the checklist arithmetic, the
+conclusions, the §3 facts without a price and the tests (27 % → 5 % at the form's whole-percent
+precision; 27,6 % → « 5,0 % » at display precision). The PDF breaks before §3 while on page 1,
+for the form's two pages (spec §5, §7).
