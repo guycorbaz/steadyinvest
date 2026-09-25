@@ -17,7 +17,7 @@ import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen } from "../s
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
-import { EditableCell } from "../components/editable_cell.slint";
+import { EditableCell, CellFit } from "../components/editable_cell.slint";
 import { JudgmentField } from "../components/judgment_field.slint";
 import { ZoneBar } from "../components/zone_bar.slint";
 import { VerdictBar } from "../components/verdict_badge.slint";
@@ -33,51 +33,76 @@ global FormConst {
 
 // ── Grid primitives (visible 1 px cell borders, the high-fidelity SSG look) ──
 
-// A data cell: right-aligned tabular figures on a bordered cell.
+// Grid-column rule (G1 J, #237) — honoured by EVERY grid cell below and by `EditableCell`: a
+// column's width NEVER follows its content. Each cell declares a zero basis (`min-width` /
+// `preferred-width: 0px`), so equal-stretch cells split a row identically whether they read « — »
+// or « 69,1 », and the header + every data row share one column geometry (the on-screen §3 shift of
+// the « — » rows 2017–2021 against the figure rows 2022+). Fixed columns keep their explicit width.
+
+// A data cell: right-aligned tabular figures on a bordered cell. Shown WHOLE: a figure wider than
+// the cell shrinks its font (`CellFit`) instead of being clipped (absence honesty).
 component GridCell inherits Rectangle {
     in property <string> value;
     in property <bool> emphasise: false;
+    min-width: 0px;
+    preferred-width: 0px;
     min-height: Tokens.row-height;
     horizontal-stretch: 1;
     background: transparent;
     border-width: Tokens.border;
     border-color: Tokens.grid-line;
-    HorizontalLayout {
-        padding-left: Tokens.space-8;
-        padding-right: Tokens.space-8;
-        Text {
-            text: root.value;
-            color: root.emphasise ? Tokens.text-high : Tokens.text-mid;
-            font-family: Tokens.font-numeric;
-            font-size: Tokens.font-body;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-            horizontal-stretch: 1;
-        }
+    measure := Text {
+        visible: false;
+        text: root.value;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-body;
+    }
+    Text {
+        x: Tokens.space-8;
+        width: max(0px, parent.width - Tokens.space-8 * 2);
+        height: parent.height;
+        text: root.value;
+        color: root.emphasise ? Tokens.text-high : Tokens.text-mid;
+        font-family: Tokens.font-numeric;
+        font-size: CellFit.font(self.width, measure.preferred-width);
+        vertical-alignment: center;
+        horizontal-alignment: right;
     }
 }
 
-// A left-aligned label cell (row labels, year cells) on the same grid.
+// A left-aligned label cell (row labels, year cells) on the same grid. A label may elide (its full
+// wording lives in the source); a FIGURE never does — figures go in `GridCell` / `EditableCell`.
+// A column TITLE sets `fit: true`: it is shown whole, shrinking its font by the `CellFit` rule
+// instead of eliding (G1 J remainder: « Moy. 5… » / « Tenda… » in the §2 header).
 component GridLabelCell inherits Rectangle {
     in property <string> label;
     in property <bool> numeric: false;
+    in property <bool> fit: false;
+    min-width: 0px;
+    preferred-width: 0px;
     min-height: Tokens.row-height;
     horizontal-stretch: 1;
     background: Tokens.surface-alt;
     border-width: Tokens.border;
     border-color: Tokens.grid-line;
-    HorizontalLayout {
-        padding-left: Tokens.space-8;
-        padding-right: Tokens.space-8;
-        Text {
-            text: root.label;
-            color: Tokens.text-mid;
-            font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-            overflow: elide;
-        }
+    measure := Text {
+        visible: false;
+        text: root.label;
+        font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
+        font-size: Tokens.font-caption;
+    }
+    // Placed explicitly (no inner layout), like `GridCell`: a width-driven font inside a layout
+    // would feed the row's layout back into its own width (a binding loop).
+    Text {
+        x: Tokens.space-8;
+        width: max(0px, parent.width - Tokens.space-8 * 2);
+        height: parent.height;
+        text: root.label;
+        color: Tokens.text-mid;
+        font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
+        font-size: root.fit ? CellFit.scaled(Tokens.font-caption, self.width, measure.preferred-width) : Tokens.font-caption;
+        vertical-alignment: center;
+        overflow: elide;
     }
 }
 
@@ -85,6 +110,8 @@ component GridLabelCell inherits Rectangle {
 component PeHeaderCell inherits Rectangle {
     in property <string> letter;
     in property <string> caption;
+    min-width: 0px;
+    preferred-width: 0px;
     min-height: Tokens.row-height + Tokens.space-12;
     horizontal-stretch: 1;
     background: Tokens.surface-alt;
@@ -282,10 +309,13 @@ export component StudyScreen inherits Rectangle {
     // Fixed grid-column widths (the alignment fix). Pinning the label / stat / year-label columns to
     // a constant width makes every independently-laid-out row share the same column boundaries, so the
     // year cells align regardless of how long a given row's label is. The remaining width is split
-    // equally among the (stretchy) year columns.
-    property <length> col-label: 240px; // §2 "Indicateur" row-label column
-    property <length> col-stat: 72px;   // §2 "Moy. 5 ans" / "Tendance" columns
-    property <length> col-year: 64px;   // §3 "Année" row-label column
+    // equally among the (stretchy) year columns — equally for real only because every grid cell
+    // declares a zero basis (the grid-column rule, G1 J). G1 J widths: the stat columns fit
+    // « ↑ hausse » / « 47,6 % » at body size, the year label fits « Année »; the row-label column
+    // gives back the difference (its labels already elide) so the year columns keep their room.
+    property <length> col-label: 216px; // §2 "Indicateur" row-label column
+    property <length> col-stat: 96px;   // §2 "Moy. 5 ans" / "Tendance" columns
+    property <length> col-year: 76px;   // §3 "Année" row-label column
 
     background: Tokens.bg;
 
@@ -319,6 +349,26 @@ export component StudyScreen inherits Rectangle {
             open-traceability => { Studies.open-traceability("verdict"); }
         }
         Rectangle { height: Tokens.border; background: Tokens.separator; }
+
+        // ── G1 J — the open study's notice slot. Pinned OUTSIDE the scroll, just under the verdict
+        //    bar, so a notice raised deep in the form (the soft-lock on a §3 cell, a drag refusal)
+        //    is seen where the user is, not at the top of a scrolled-away page. An OUTCOME of a
+        //    gesture → an inline notice (the UX pass: caption ink, no colour, no band); refusals
+        //    the user must acknowledge go to the refusal dialog instead, never here. The F4
+        //    notice-slot rule is enforced where it is written (Rust `wiring::study_notice`). ──
+        if Studies.study-notice != "": VerticalLayout {
+            padding-left: Tokens.space-24;
+            padding-right: Tokens.space-24;
+            padding-top: Tokens.space-8;
+            padding-bottom: Tokens.space-8;
+            Text {
+                text: Studies.study-notice;
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                wrap: word-wrap;
+            }
+        }
+        if Studies.study-notice != "": Rectangle { height: Tokens.border; background: Tokens.separator; }
 
         Flickable {
         vertical-stretch: 1;
@@ -867,9 +917,9 @@ export component StudyScreen inherits Rectangle {
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("Indicateur"); width: root.col-label; }
-                    for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; }
-                    GridLabelCell { label: @tr("Moy. 5 ans"); width: root.col-stat; }
-                    GridLabelCell { label: @tr("Tendance"); width: root.col-stat; }
+                    for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; fit: true; }
+                    GridLabelCell { label: @tr("Moy. 5 ans"); width: root.col-stat; fit: true; }
+                    GridLabelCell { label: @tr("Tendance"); width: root.col-stat; fit: true; }
                 }
                 // Editable raw-input rows (sales · pre-tax profit · book value), paired with their
                 // label by index — the row order is fixed by `viewmodel/form.rs`.

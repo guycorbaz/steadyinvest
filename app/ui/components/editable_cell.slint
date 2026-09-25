@@ -17,8 +17,34 @@ import { Tokens } from "../tokens.slint";
 import { Studies, GridCellState, Warnings } from "../state.slint";
 import { TrustMarker } from "trust_markers.slint";
 
+// Shrink-to-fit for a grid figure (G1 J, #237). A figure is shown WHOLE — a clipped « 215 93… »
+// is neither the value nor an honest absence (absence honesty). `natural` is the figure's width
+// measured at the body size; when it exceeds the cell's value `room` the font scales down linearly
+// so the figure fits (2 px of slack absorbs glyph hinting). No readable-size floor on purpose: a
+// floor would bring the clipping back. Shared by `EditableCell` and the study screen's `GridCell`.
+export global CellFit {
+    pure public function font(room: length, natural: length) -> length {
+        return CellFit.scaled(Tokens.font-body, room, natural);
+    }
+    // The same rule from any base size (`natural` measured at `base`) — the §2 header titles use it
+    // at caption size so « Moy. 5 ans » / « Tendance » show whole rather than elide (G1 J remainder).
+    pure public function scaled(base: length, room: length, natural: length) -> length {
+        if (natural <= room) {
+            return base;
+        }
+        return max(1px, base * (max(0px, room - 2px) / natural));
+    }
+}
+
 export component EditableCell inherits Rectangle {
     in property <GridCellState> state;
+
+    // Grid-column rule (G1 J, #237): a column's width NEVER follows its content. Every grid cell
+    // (this one and the study screen's `GridCell` / `GridLabelCell` / `PeHeaderCell`) declares the
+    // same zero basis, so a row of equal-stretch cells splits its width identically whether a cell
+    // reads « — » or « 69,1 » — the header and every data row share one column geometry.
+    min-width: 0px;
+    preferred-width: 0px;
 
     // Soft-lock (Story 2.5): a validated (`✓`) cell is edit-protected — its value cannot be changed
     // by a stray keystroke; only the deliberate clear-✓ gesture releases it. Drives the read-only
@@ -74,7 +100,7 @@ export component EditableCell inherits Rectangle {
         y: (parent.height - self.height) / 2;
     }
     // Quiet not-available-accepted marker — a calm "n/a", deliberately distinct from the gap.
-    Text {
+    na := Text {
         visible: root.state.coverage == "not-available";
         text: @tr("n/a");
         color: Tokens.text-low;
@@ -84,7 +110,7 @@ export component EditableCell inherits Rectangle {
     }
     // Stale murmur — a hollow dot beside a present-but-stale value (the value itself dims via the
     // root opacity below). No stale cell exists in 2.4 except via test fixtures (Epic 3 sets stale).
-    Text {
+    stale := Text {
         visible: root.state.coverage == "present" && root.state.stale;
         text: Tokens.stale-dot;
         color: Tokens.text-low;
@@ -97,7 +123,9 @@ export component EditableCell inherits Rectangle {
     // distinct from the review marker AND the coverage glyph, no collision). Neutral ink, never a hue;
     // a static glyph (no animation → reduced-motion-safe by construction, AC5). Its human-readable
     // fact is revealed on focus via `Studies.active-warning` (the source-on-demand mirror).
-    Text {
+    // G1 J: its horizontal span is RESERVED out of the value room (`lead` below), so the glyph is
+    // never drawn over a wide figure (the on-screen 2020 « 14,726750 » overlap).
+    warn := Text {
         visible: root.state.warning;
         text: Tokens.warn-glyph;
         color: Tokens.gap-ink;
@@ -105,6 +133,27 @@ export component EditableCell inherits Rectangle {
         x: Tokens.font-body + Tokens.space-8 + Tokens.space-4;
         y: 0;
     }
+
+    // Marker-space rule (G1 J, #237): the value never shares pixels with a marker. `lead` is the
+    // right edge of the rightmost LEADING marker actually shown (trust box ?/✓, stale dot, warning
+    // △) plus a gap; `trail` reserves the trailing lock affordance / « n/a ». The value's TextInput
+    // lives strictly between them and shrinks its font (`CellFit`) rather than overflow that room.
+    property <length> marker-box: Tokens.font-body + Tokens.space-8; // = TrustMarker's fixed width
+    property <length> lead: max(
+        max(Tokens.space-8, root.state.review != "none" ? root.marker-box + Tokens.space-4 : 0px),
+        max(stale.visible ? stale.x + stale.width + Tokens.space-4 : 0px,
+            warn.visible ? warn.x + warn.width + Tokens.space-4 : 0px));
+    property <length> trail: max(
+        max(Tokens.space-8, root.locked ? root.marker-box + Tokens.space-4 : 0px),
+        na.visible ? na.width + Tokens.space-8 * 2 : 0px);
+    // The shown/typed text measured at the body size — drives the shrink-to-fit font.
+    measure := Text {
+        visible: false;
+        text: input.text;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-body;
+    }
+
     TouchArea {
         mouse-cursor: text;
         clicked => {
@@ -117,15 +166,17 @@ export component EditableCell inherits Rectangle {
         color: Tokens.text-high;
         selection-background-color: Tokens.focus;
         font-family: Tokens.font-numeric;
-        font-size: Tokens.font-body;
+        // Shrink-to-fit (G1 J): a figure wider than its room is shown whole, at a smaller size.
+        font-size: CellFit.font(self.width, measure.preferred-width);
         horizontal-alignment: right;
         vertical-alignment: center;
         single-line: true;
         // A validated cell is soft-locked: the value is read-only until the sign-off is cleared.
         read-only: root.locked;
-        width: parent.width - Tokens.space-8 * 2;
+        // Strictly between the leading and trailing markers (the marker-space rule above).
+        width: max(0px, parent.width - root.lead - root.trail);
         height: 100%;
-        x: Tokens.space-8;
+        x: root.lead;
         // Dim a stale value to ~60% (the murmur); a present-current value is full strength.
         opacity: (root.state.coverage == "present" && root.state.stale) ? Tokens.stale-opacity : 1.0;
 

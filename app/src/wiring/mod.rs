@@ -22,6 +22,7 @@ pub(crate) mod replacement;
 pub(crate) mod review;
 pub(crate) mod screening;
 pub(crate) mod studies;
+pub(crate) mod study_notice;
 pub(crate) mod watchlist;
 
 use std::cell::RefCell;

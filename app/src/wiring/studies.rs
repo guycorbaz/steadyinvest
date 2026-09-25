@@ -16,6 +16,7 @@ use crate::config::StudyViewState;
 use crate::regime::Regime;
 use crate::state::JournalState;
 use crate::wiring::push::{push_form, push_view_state};
+use crate::wiring::study_notice;
 use crate::wiring::watchlist::refresh_watchlist;
 use crate::wiring::{Session, persist};
 use crate::{FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, Verify};
@@ -584,6 +585,10 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             // and cached baseline must never survive into a different study.
             *compare_study.borrow_mut() = None;
             studies.set_scenario_compare(ScenarioCompareState::default());
+            // G1 J: the study slot starts empty — nothing said of the previous study (a fetch
+            // result, a refusal) may read as this one's. Before the render, so a normalize failure
+            // of THIS study still shows.
+            study_notice::reset(&ui);
             let format = config.borrow().number_format;
             push_form(&ui, &journal_state.borrow(), &study, format);
             // A freshly-opened form has no active entry cell (the cursor appears on first focus).
@@ -827,6 +832,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                     // the default (entry regime, all sections open) and an empty undo stack, so it never
                     // inherits the previously-open study's folds/regime or shows enabled undo/redo.
                     journal_state.borrow_mut().reset_undo();
+                    study_notice::reset(&ui); // G1 J: the demo inherits no study's notice
                     push_form(&ui, &journal_state.borrow(), &study, format);
                     push_view_state(&ui, &StudyViewState::default());
                     studies.set_notice(SharedString::new());

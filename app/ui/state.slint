@@ -536,7 +536,12 @@ export global Studies {
     // The current list (deterministic created_at,id order from persistence). Empty = none yet.
     in-out property <[StudyRow]> rows;
     // A neutral, fact-stating banner (errors / read-only / startup notices). Empty = hidden.
+    // The study LIST's slot only — shown on the list, never on an open study (G1 J).
     in-out property <string> notice;
+    // G1 J: the OPEN study's notice slot, shown pinned on the study screen (a fetch result, the
+    // soft-lock notice, an edit/undo/drag failure…). Written only through Rust's `study_notice`
+    // (the F4 slot rule lives there); emptied whenever a study or the demo opens. Empty = hidden.
+    in-out property <string> study-notice;
     // True when the open journal is read-only (newer-schema file) — creation is refused.
     in-out property <bool> read-only;
 

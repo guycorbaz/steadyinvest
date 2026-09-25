@@ -16,6 +16,7 @@ use crate::wiring::Session;
 use crate::wiring::holdings::{HoldingFreshness, mark_holding_stale, refresh_holdings};
 use crate::wiring::push::{display_timestamp, push_form};
 use crate::wiring::studies::refresh_studies;
+use crate::wiring::study_notice::{self, Source};
 use crate::{Fx, Holdings, MainWindow, Prefs, Studies};
 use crate::{fetch, keychain, state};
 
@@ -212,12 +213,26 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     studies.set_fetching(false);
                     // Re-render the open study (the stale murmur + degraded verdict show here) and
                     // refresh the dashboard — shared by the success, empty-payload, and failure arms.
+                    // Keyed by IDENTITY (the discriminator rule): is the fetched study the one on
+                    // screen? The user may have closed it, or opened another, while it ran.
+                    let still_open = current_study
+                        .borrow()
+                        .as_deref()
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                        == Some(outcome.study_id);
+                    // G1 J: the result goes to the OPEN study's slot when it is that study (the list's
+                    // slot was invisible there); otherwise to the list's slot, as before — never onto
+                    // another study's screen. `failed` picks the F4 treatment on the study slot.
+                    let say = |failed: bool, text: &str| {
+                        if !still_open {
+                            studies.set_notice(text.into());
+                        } else if failed {
+                            study_notice::fail(&ui, Source::Fetch, text);
+                        } else {
+                            study_notice::outcome(&ui, Source::Fetch, text);
+                        }
+                    };
                     let render_open = || {
-                        let still_open = current_study
-                            .borrow()
-                            .as_deref()
-                            .and_then(|s| Uuid::parse_str(s).ok())
-                            == Some(outcome.study_id);
                         if still_open
                             && let Some(study) = journal_state.borrow().get_study(outcome.study_id)
                         {
@@ -232,7 +247,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         // provider data stale (never apply an empty refresh as if nothing changed).
                         Ok(fetched) if fetched.canonical.years.is_empty() => {
                             tracing::warn!(study_id = %outcome.study_id, "study fetch returned no usable years (no data)");
-                            studies.set_notice(state::MSG_PROVIDER_NO_DATA.into());
+                            say(true, state::MSG_PROVIDER_NO_DATA);
                             let _ = journal_state
                                 .borrow_mut()
                                 .mark_provider_stale(outcome.study_id);
@@ -255,10 +270,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                             state::provider_fallback_notice(effective)
                                         );
                                     }
-                                    studies.set_notice(notice.into());
+                                    say(false, &notice);
                                     render_open();
                                 }
-                                Err(message) => studies.set_notice(message.into()),
+                                Err(message) => say(true, &message),
                             }
                         }
                         // Story 3.5 (FR23/FR24/NFR-R1): name the cause, RETAIN last-known values, and
@@ -285,7 +300,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                 notice.push(' ');
                                 notice.push_str(&state::fallback_no_key_notice(fallback));
                             }
-                            studies.set_notice(notice.into());
+                            say(true, &notice);
                             let _ = journal_state
                                 .borrow_mut()
                                 .mark_provider_stale(outcome.study_id);
@@ -591,7 +606,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 return;
             }
             studies.set_fetching(true);
-            studies.set_notice(state::MSG_PROVIDER_FETCHING.into());
+            study_notice::fail(&ui, Source::Fetch, state::MSG_PROVIDER_FETCHING);
             let primary = config.borrow().preferred_provider;
             tracing::info!(ticker = %ticker, provider = primary.wire(), "study fetch requested");
             if fetch_tx
@@ -606,10 +621,11 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 // The worker thread is gone (should never happen) — don't latch the in-progress
                 // state, which would disable the button for the rest of the session (review P1).
                 studies.set_fetching(false);
-                studies.set_notice(
-                    state::MSG_PROVIDER_FAILED
-                        .replace("{cause}", "le service de récupération est indisponible")
-                        .into(),
+                study_notice::fail(
+                    &ui,
+                    Source::Fetch,
+                    &state::MSG_PROVIDER_FAILED
+                        .replace("{cause}", "le service de récupération est indisponible"),
                 );
             }
         });

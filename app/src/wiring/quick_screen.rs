@@ -19,6 +19,7 @@ use crate::viewmodel::quick_screen::{QuickScreenHeader, meets_key, quick_screen_
 use crate::wiring::Session;
 use crate::wiring::fetch::resolve_chain;
 use crate::wiring::studies::refresh_studies;
+use crate::wiring::study_notice::{self, Source};
 use crate::{MainWindow, QuickPriceRow, QuickScreen, Studies};
 
 /// The examination of the moment (session only). `Clone`: a criblage row keeps its own and hands
@@ -534,14 +535,20 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
             refresh_studies(&ui, &journal_state.borrow());
             ui.global::<Studies>().set_screen_open(false);
             // Either way an outcome on the study's notice slot — not a refusal dialog: the study
-            // WAS created (a « refusé » title would misstate it).
-            let notice = match applied {
-                Ok(_) => state::MSG_QUICK_SCREEN_STUDY_CREATED.to_string(),
-                Err(message) => state::MSG_QUICK_SCREEN_STUDY_EMPTY.replace("{cause}", &message),
-            };
-            ui.global::<Studies>().set_notice(notice.into());
+            // WAS created (a « refusé » title would misstate it). G1 J: the OPEN study's slot,
+            // written AFTER the open (which empties it) so it lands on the study it names.
             ui.global::<Studies>()
                 .invoke_open_study(id.to_string().into());
+            match applied {
+                Ok(_) => {
+                    study_notice::outcome(&ui, Source::Fetch, state::MSG_QUICK_SCREEN_STUDY_CREATED)
+                }
+                Err(message) => study_notice::fail(
+                    &ui,
+                    Source::Fetch,
+                    &state::MSG_QUICK_SCREEN_STUDY_EMPTY.replace("{cause}", &message),
+                ),
+            }
         });
     }
     {
