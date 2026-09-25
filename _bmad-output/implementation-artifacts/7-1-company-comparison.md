@@ -67,3 +67,22 @@ never a walk through five studies with a notepad.
   opens NVDA.US and its « Retour » lands on the table; the table's « Retour » lands on the list.
 - The demo PDF: two landscape pages, clipped headers, row 27 words listed under « Autres ».
 - Gates: fmt clean, clippy `-D warnings` clean, `cargo test --workspace` green.
+
+### Review Findings — G1 catch-up review (2026-09-25, #237)
+
+3-layer adversarial review of PR #227, checked against main 73a7b19. Decisions are Guy's
+(2026-09-25).
+
+- [x] [Review][Decision] Columns keyed by ticker, not by study; « Ouvrir l'étude » runs its own ticker lookup — **the pickers list studies (id carried end to end), « TICKER · CUR » when ambiguous** [app/src/wiring/comparison.rs:45,89-92, app/src/state/watchlist.rs:39-46]
+- [x] [Review][Decision] PDF runs to two landscape pages (spec §4: one) and its header omits the decision date (spec §3) — **two pages ratified; the decision date is added to the column header** [report/src/comparison.rs:206]
+- [ ] [Review][Patch] A picked ticker stays in the other lists (spec §2); duplicate picks enable « Comparer » and give a one-column table [app/ui/screens/dashboard.slint:428-439, app/src/wiring/comparison.rs:27-29]
+- [ ] [Review][Patch] Picks, table and notice survive a dossier switch / restore; the export notice is never cleared [app/src/wiring/journal.rs:130-145,446-449, app/src/wiring/comparison.rs:195]
+- [ ] [Review][Patch] A missing study (`Ok(None)`) is shown « indisponible » like a read failure; the picker hides a read failure behind an empty list [app/src/wiring/comparison.rs:45-54, app/src/wiring/studies.rs:70-78]
+- [ ] [Review][Patch] Row 27 prints « 0 » quality signals when nothing could be evaluated [app/src/viewmodel/comparison.rs:129-131]
+- [ ] [Review][Patch] Rows 9 / 11 / 15: min / max over the known years only, shown as the 5-year figure [app/src/viewmodel/comparison.rs:92-105]
+- [ ] [Review][Patch] Row 29 labels the creation date as the data date; row 30 derives « B » from BRK.B [app/src/viewmodel/comparison.rs:30-36,173-174]
+- [ ] [Review][Patch] Unavailable column header dangles: « · » on screen, « ROG.SW () » in the PDF [app/ui/screens/comparison.slint:123, report/src/comparison.rs:206]
+- [ ] [Review][Patch] Row 20 zone wording differs: screen follows `Labels.zone-*`, PDF prints « zone basse / médiane / haute » (AC4) [app/ui/screens/comparison.slint:43-46, report/src/comparison.rs]
+- [ ] [Review][Patch] PDF: the second header row overwrites the repeated grid header — a continuation page loses tickers and currencies; header rows can be orphaned at a page foot [report/src/pdf.rs:1040-1049, report/src/comparison.rs:223-226]
+- [ ] [Review][Patch] The nav rail closes the comparison without `Comparison.on_close` [app/ui/app.slint:131-132]
+- [ ] [Review][Patch] Tests: the derived rows 8 / 9 / 11 / 15 and parity with the study screen (spec §5, AC1) [app/src/viewmodel/comparison.rs]

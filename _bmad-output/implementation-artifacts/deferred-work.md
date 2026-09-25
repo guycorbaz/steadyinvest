@@ -64,3 +64,13 @@ _Throwaway spike (GO). These apply to the **Epic 2 production grid** (Stories 2.
 
 - **Un-checkpointed external backup can silently drop -wal data** — `inspect_backup` (immutable=1) + `restore_journal_file` (main-file-only) ignore a backup's sibling `-wal`. A hand-rolled raw copy of a live journal without its `-wal` loses WAL-resident commits silently. App-made backups checkpoint first (safe). Deferred → **GitHub #67**. [persistence/src/restore.rs]
 - **Backups land in the default data dir, not beside a user-selected journal** — `create_backup` writes to `ProjectDirs.data_dir()/backups`, ignoring `self.path`. Moot today (the journal IS at the default path); becomes relevant once **Story 5.5** adds user-selectable journal location — backups should then follow the journal. [app/src/state.rs create_backup]
+
+## Deferred from: G1 catch-up review of Epic 7 (2026-09-25, #237)
+
+- **PDF exports write in place** — every export (`studies.rs`, `comparison.rs`, `review.rs`, `quick_screen.rs`) calls `std::fs::write` on the picked path: no temp + rename (a failed write truncates an existing file) and no self-alias guard (picking the open dossier's file would overwrite the live journal). Pre-existing since 5.6. [app/src/wiring/*.rs]
+- **Hard-coded French in Rust outside the message inventory** — e.g. « le service de récupération est indisponible », the rfd dialog titles. Pre-existing debt, reproduced in 7.x. [app/src/wiring/quick_screen.rs:301,425, fetch.rs:624,728]
+- **Magic screen indices** — `set_current_screen(n)` / `== n` across the wiring; Settings moved 3 → 4 in 7.2. A named constant table would stop the next reorder from misrouting. [app/src/wiring/*.rs, app/ui/app.slint]
+- **Focus through a 30 ms timer** — the Slint 1.17 workaround for `focus()` in `init` of a conditional element. Revisit on a Slint upgrade. [app/ui/components/action_button.slint]
+- **Same-day ledger order by entry time** — dates are day-granular; a back-dated buy entered after a same-day sale replays after it and is refused as an oversell. [persistence/src/transactions.rs:464,516]
+- **Label overlap on 30+ year studies** — year labels and the six guide labels in the study PDF chart. [report/src/pdf.rs:1281-1287,1370-1377]
+- **Cosmetic state rendering** — some states still plain text (candidates panel, watchlist « Aucune étude liée », consolidation rows); Études success notices and neutral quick-screen facts in a StatusBand. [portfolio.slint:201, watchlist.slint:123, dashboard.slint:264, quick_screen.slint]
