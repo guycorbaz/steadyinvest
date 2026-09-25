@@ -219,6 +219,8 @@ impl JournalState {
     /// deterministic order). Empty when no journal / no portfolio / on a read failure (a display
     /// surface). Their ledger stays readable via [`Self::holding_ledger`] and a re-buy through
     /// [`Self::record_buy_for`] re-opens the position.
+    /// Test-only since the G1 final review: the section reads [`Self::try_sold_holdings`].
+    #[cfg(test)]
     pub fn sold_holdings(&self) -> Vec<HoldingItem> {
         self.try_sold_holdings().unwrap_or_default()
     }

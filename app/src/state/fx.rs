@@ -26,6 +26,8 @@ use uuid::Uuid;
 impl JournalState {
     /// The stored rates, deterministic order (pair, most-recent date first) — the Réglages panel
     /// read. `[]` without a journal or on a read failure (a display surface).
+    /// Test-only since the G1 final review: the panel reads [`Self::try_list_fx_rates`].
+    #[cfg(test)]
     pub fn list_fx_rates(&self) -> Vec<FxRateItem> {
         self.try_list_fx_rates().unwrap_or_default()
     }
