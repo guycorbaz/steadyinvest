@@ -237,7 +237,9 @@ fn main() -> Result<(), slint::PlatformError> {
             config.borrow().number_format,
         );
         if let Some(notice) = &startup_notice {
-            ui.global::<Studies>().set_notice(notice.clone().into());
+            // Through the list slot's F4 owner (G1 P): a standing state — a later gesture's
+            // outcome may replace it (G1 P review M4).
+            wiring::list_notice::standing(&ui, wiring::list_notice::Source::Startup, notice);
         }
         // Story 5.5: record the startup journal in the recent list (so it appears + its last-seen
         // pointer is set) and render the location panel.

@@ -326,6 +326,12 @@ fn a_case_only_ticker_edit_keeps_the_trailing_stop() {
     assert_eq!(h.security_ticker, "NESN", "the respelling is stored");
     assert_eq!(h.trailing_stop_pct.as_deref(), Some("15"));
     assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+    // G1 P (G3 L5): surrounding spaces do not name another security either (the app trims).
+    journal
+        .update_holding(id, " NESN ", "10", "100", "CHF", None)
+        .unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
 }
 
 // ── Story 6.2 — multi-currency holdings (FR38) ──

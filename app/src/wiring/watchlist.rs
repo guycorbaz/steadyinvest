@@ -27,14 +27,14 @@ pub(crate) fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
     let rows: Vec<WatchRow> = items
         .iter()
         .map(|w| {
-            // G1 final review (L6): the link resolves by the study's OWN read — a failure (or a
-            // link that no longer resolves) is « Étude indisponible », never a dangling « Étude : »
-            // and never a silent absence of the zone fact.
-            let study = w
-                .study_id
-                .map(|sid| state.try_get_study(sid).ok().flatten());
-            let study_unavailable = matches!(study, Some(None));
-            let study = study.flatten();
+            // G1 final review (L6): the link resolves by the study's OWN read — a failure is
+            // « Étude indisponible », never a dangling « Étude : » and never a silent absence of
+            // the zone fact. G1 P (G3 L2): a link whose study no longer exists is a true ABSENCE,
+            // worded as such — never « indisponible ».
+            let study = w.study_id.map(|sid| state.try_get_study(sid));
+            let study_unavailable = matches!(study, Some(Err(_)));
+            let study_deleted = matches!(study, Some(Ok(None)));
+            let study = study.and_then(Result::ok).flatten();
             // Story 4.2: a linked study whose current price is in its §4 buy zone flags a neutral
             // alert (unlinked entries are never in a zone). Issue #48: a price BELOW the recorded
             // band is its own neutral fact — mutually exclusive with the zone by construction.
@@ -61,6 +61,7 @@ pub(crate) fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
                 in_buy_zone,
                 below_band,
                 study_unavailable,
+                study_deleted,
             }
         })
         .collect();

@@ -240,3 +240,20 @@ a legacy lot's stop is seeded from its cost basis; « Lier une étude » names a
 watchlist. Not in scope and left as found: `watch_error` still words a failed READ on the write
 rails as « L'enregistrement a échoué. »; the reinvestable-cash panel still swallows its read;
 a legacy lot's trigger-sale price still comes from its ticker-only study.
+
+Follow-ups in PR P (G1, branch `fix/g1-p-followups`, on `integ/g1-final2`):
+- [x] D5 (Guy, 2026-09-25): a lot without a declared currency is presumed in the reference currency — ONE rule (`state::stop_basis`) for the register (display, trigger, ratchet, seed), the review screen + its PDF and the trigger sale; against a study in another currency the stop is not compared, both facts stated; the trigger sale refuses that study's price by name
+- [x] G3 M1: a restore never replaces nor deletes an earlier `-prerestore` copy (refused, named; the snapshot is created new); a failed rollback says the dossier WAS replaced and names the kept snapshot; a path without an open handle is refused (the checkpoint is never skipped)
+- [x] G3 L1–L6: the in-flight banner re-set by name; a deleted watched study worded as an absence; corrupt drafts / missing positions named; no default portfolio and no duplicate watch on a failed read; the SQL ticker compare trims; tests for a NULL-kind legacy sale and a dividend at full tie
+- [x] K residues: a write rail's failed READ says « Le dossier n'a pas pu être lu » (`read_error`); the reinvestable dividends say « indisponible » on a failed read
+- [x] The quick examination's list notice and the startup state go through `list_notice` (F4). The create-study and demo clears of `Studies.notice` stay outside; `progress` / `clear` keep their `dead_code` marker (still no writer).
+
+G3 review of PR P (same branch, `fix/g1-p-followups`):
+- [x] H1 D5 on the LINK: one resolution, `JournalState::try_lot_study` — a lot links its ticker's newest study in its EFFECTIVE currency (a legacy lot's: the reference); a same-ticker study in another currency is only a hint. Register, review, seed, ratchet (only by the lot's own link), trigger sale and price refresh all go through it
+- [x] H2 a legacy lot whose only study is in USD links none — no USD price on its row, never labelled CHF; its stop names the USD study
+- [x] M1 the holdings slot: a success never wipes a failure (mid-batch or not); only an empty slot, the banner or a register outcome is replaced
+- [x] M2 a leftover `-prerestore` is named before the confirm with the way out (« déplacez ou renommez ce fichier »); a failed removal is logged
+- [x] M3 (lead's decision) a reference-currency change names the legacy lots whose stop was set in the former one — never converted; redefining the stop recomputes it. (No UI path declares a legacy lot's currency — decision 4 keeps it NULL — so the notice names the stop's redefinition instead.)
+- [x] M4 the startup notice is a standing state a gesture's outcome may replace
+- [x] L-a/L-b the snapshot is removed only when this restore created it; it carries the dossier's permissions
+- [x] L-c a legacy lot's cost-basis seed is stated (MSG_STOP_SEEDED_FROM_COST); L-d the sale refusal names the ledger form; L-e `any_holding` → MSG_HOLDING_NOT_FOUND; L-f a leftover `-prerestore` is named at the next start; L-g the listed tests; L-h tickers compare trimmed and case-blind on the Rust side

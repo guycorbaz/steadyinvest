@@ -284,8 +284,29 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     return;
                 }
                 let ui = ui_weak.unwrap();
+                let former = config.borrow().reference_currency_or_default();
                 config.borrow_mut().reference_currency = value.to_string();
                 persist(path.as_ref(), &config.borrow());
+                // G1 P review (M3, the lead's conservative decision): a legacy lot's stop was set
+                // in the FORMER reference currency — it is not converted; the lots are named.
+                let notice = if former != value.as_str() {
+                    match journal_state.borrow().legacy_tickers_with_stop() {
+                        Ok(tickers) if !tickers.is_empty() => {
+                            crate::state::legacy_stops_reference_changed_message(&tickers, &former)
+                        }
+                        Ok(_) => String::new(),
+                        Err(error) => {
+                            tracing::warn!("legacy stops after a reference change: {error}");
+                            String::new()
+                        }
+                    }
+                } else {
+                    ui.global::<Prefs>()
+                        .get_reference_currency_notice()
+                        .to_string()
+                };
+                ui.global::<Prefs>()
+                    .set_reference_currency_notice(notice.into());
                 ui.global::<Prefs>().set_reference_currency(value.clone());
                 ui.global::<Holdings>().set_reference_currency(value);
                 // Re-render the register: since Story 6.2 the per-row currency label and the

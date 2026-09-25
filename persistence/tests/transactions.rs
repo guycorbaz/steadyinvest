@@ -211,6 +211,58 @@ fn list_transactions_orders_a_full_tie_as_the_replay_does_buys_before_sells() {
 }
 
 #[test]
+fn a_legacy_null_kind_sale_and_a_dividend_list_in_replay_order_on_a_full_tie() {
+    // G1 P (G3 L6): a NULL kind is a legacy 4.7 SALE (it ranks with the sells), a dividend ranks
+    // with the buys — so on a full tie: buy, dividend (by id), then the legacy sale, whatever
+    // the ids.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    let now = ts("2026-07-01T12:00:00Z");
+    let day = "2026-07-01T00:00:00Z";
+    journal
+        .record_partial_sell(hid, None, &entry(0x1, day, "3", "110", "0"), "7", &now)
+        .unwrap();
+    journal
+        .record_buy(
+            hid,
+            None,
+            &entry(0x2, day, "5", "100", "0"),
+            "12",
+            "100",
+            &now,
+        )
+        .unwrap();
+    journal
+        .record_dividend(hid, &entry(0x3, day, "12", "1", "0"), &now)
+        .unwrap();
+    // Make the sale a pre-6.3 row: its kind NULL.
+    drop(journal);
+    let conn = rusqlite::Connection::open(dir.path().join("journal.db")).unwrap();
+    conn.execute(
+        "UPDATE transactions SET kind = NULL WHERE id = ?1",
+        [Uuid::from_u128(0x1).to_string()],
+    )
+    .unwrap();
+    drop(conn);
+    let journal = Journal::open(dir.path().join("journal.db")).unwrap();
+    let rows: Vec<(u128, Option<String>)> = journal
+        .list_transactions(hid)
+        .unwrap()
+        .into_iter()
+        .map(|t| (t.id.as_u128(), t.kind))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (0x2, Some("buy".to_string())),
+            (0x3, Some("dividend".to_string())),
+            (0x1, None),
+        ]
+    );
+}
+
+#[test]
 fn record_buy_inserts_the_row_and_lands_the_aggregate_atomically() {
     let dir = TempDir::new().unwrap();
     let mut journal = fresh(&dir);

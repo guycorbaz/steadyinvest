@@ -484,7 +484,11 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                     // up against the fresh price (a falling price writes nothing).
                                     let _ = journal_state
                                         .borrow_mut()
-                                        .ratchet_trailing_stops_for_study(outcome.study_id, price);
+                                        .ratchet_trailing_stops_for_study(
+                                            outcome.study_id,
+                                            price,
+                                            &config.borrow().reference_currency_or_default(),
+                                        );
                                     let now = display_timestamp(&journal_state.borrow().now());
                                     holding_freshness.borrow_mut().insert(
                                         key,

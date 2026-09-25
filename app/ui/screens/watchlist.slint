@@ -136,6 +136,7 @@ export component WatchlistScreen inherits Rectangle {
                             // G1 final review (L6): an unreadable link is « indisponible ».
                             text: !row.linked ? @tr("Aucune étude liée")
                                 : row.study-unavailable ? @tr("Étude indisponible")
+                                : row.study-deleted ? @tr("L'étude liée a été supprimée")
                                 : @tr("Étude : {}", row.study-link);
                             color: Tokens.text-mid;
                             font-size: Tokens.font-caption;

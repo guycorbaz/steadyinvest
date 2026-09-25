@@ -33,6 +33,8 @@ pub const MSG_NO_DATA_DIR: &str =
     "Aucun emplacement de dossier n'est disponible ; les études ne sont pas enregistrées.";
 /// A save failed for a reason other than the read-only / identity guards (cause appended).
 pub const MSG_SAVE_FAILED: &str = "L'enregistrement a échoué.";
+/// G1 P: a write rail's preliminary READ failed — the write was never attempted.
+pub const MSG_READ_FAILED: &str = "Le dossier n'a pas pu être lu ; rien n'a été enregistré.";
 /// The system clipboard could not be read for a paste-a-column (Story 2.4).
 pub const MSG_CLIPBOARD_UNAVAILABLE: &str =
     "Le presse-papiers est indisponible ; aucune colonne n'a été collée.";
@@ -315,6 +317,31 @@ pub const MSG_DIVIDEND_INVALID_WITHHOLDING: &str = "La retenue à la source doit
 /// name, never silently falls back to the cost basis.
 pub const MSG_SELL_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix actuel de la vente est inconnu ; rien n'a été enregistré.";
 pub const MSG_STOP_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix de référence du seuil est inconnu ; rien n'a été enregistré.";
+/// D5 (Guy, 2026-09-25): a position without a declared currency is presumed in the reference
+/// currency — its linked study in another currency never prices the trigger sale. Template: `{s}`
+/// the study's currency, `{r}` the reference currency.
+pub const MSG_SELL_STUDY_OTHER_CURRENCY: &str = "La position n'a pas de devise renseignée (présumée en {r}) et son étude est en {s} : ce prix ne sert pas à la vente ; rien n'a été enregistré. La vente s'enregistre depuis ses transactions (« Vente… »), au prix obtenu.";
+/// G1 P review (M3, the lead's conservative decision): after a reference-currency change, the
+/// legacy positions (no declared currency) that carry a stop are named — their level was set in
+/// the FORMER reference currency and is never converted. Template: `{tickers}`, `{old}`.
+pub const MSG_LEGACY_STOPS_REFERENCE_CHANGED: &str = "La devise de référence a changé : le seuil suiveur des positions sans devise renseignée ({tickers}) avait été fixé en {old} et n'est pas converti. Redéfinir leur seuil (« Seuil… ») le recalcule dans la nouvelle devise de référence.";
+
+/// [`MSG_LEGACY_STOPS_REFERENCE_CHANGED`] filled.
+pub fn legacy_stops_reference_changed_message(tickers: &[String], former: &str) -> String {
+    MSG_LEGACY_STOPS_REFERENCE_CHANGED
+        .replace("{tickers}", &tickers.join(", "))
+        .replace("{old}", former)
+}
+/// G1 P review (L-c): a legacy position's stop seeded from its cost basis because its only study
+/// is in another currency — stated, never silent.
+pub const MSG_STOP_SEEDED_FROM_COST: &str = "Le seuil est calculé depuis le prix de revient : la position n'a pas de devise renseignée et aucune de ses études n'est dans la devise de référence.";
+
+/// [`MSG_SELL_STUDY_OTHER_CURRENCY`] filled.
+pub fn sell_study_other_currency_message(study_currency: &str, reference_currency: &str) -> String {
+    MSG_SELL_STUDY_OTHER_CURRENCY
+        .replace("{s}", study_currency)
+        .replace("{r}", reference_currency)
+}
 /// Raised when the transaction date is not a plausible AAAA-MM-JJ; nothing is written.
 pub const MSG_LEDGER_INVALID_DATE: &str =
     "La date doit être au format AAAA-MM-JJ ; rien n'a été enregistré.";
@@ -503,6 +530,30 @@ pub const MSG_RESTORE_UNCHECKPOINTED: &str = "La sauvegarde est accompagnée d'u
 /// (so its `.db` holds every write) and its safety snapshot (the rollback if the restored file will
 /// not open). Either failure refuses the restore by name; nothing is replaced.
 pub const MSG_RESTORE_CHECKPOINT_FAILED: &str = "Le dossier actuel n'a pas pu être consolidé (ses écritures les plus récentes restent dans son fichier -wal) ; rien n'a été restauré.";
+/// G1 P (G3 M1): a `-prerestore` file from an earlier restore sits beside the dossier — it may be
+/// the only copy of an original, so it is never replaced nor deleted. Template: `{file}`.
+pub const MSG_RESTORE_SNAPSHOT_EXISTS: &str = "Une copie de sécurité d'une restauration précédente existe déjà ({file}) ; elle n'est ni remplacée ni supprimée, et rien n'a été restauré. Une fois le dossier vérifié, déplacez ou renommez ce fichier.";
+/// G1 P review (L-f): at startup, a `-prerestore` beside the open dossier — left by a restore
+/// whose rollback failed — is named: it may be the only copy of an original. Template: `{file}`.
+pub const MSG_PRERESTORE_FOUND: &str = "Une copie de sécurité laissée par une restauration précédente se trouve à côté du dossier ({file}) : elle peut être la seule copie du dossier d'origine. Une fois le dossier vérifié, déplacez ou renommez ce fichier.";
+
+/// [`MSG_PRERESTORE_FOUND`] filled with the snapshot's path.
+pub fn prerestore_found_message(snapshot: &std::path::Path) -> String {
+    MSG_PRERESTORE_FOUND.replace("{file}", &snapshot.display().to_string())
+}
+/// G1 P (G3 M1): the restored file would not open AND the return to the original failed — the
+/// dossier WAS replaced; the original survives only in the named snapshot. Template: `{file}`.
+pub const MSG_RESTORE_ROLLBACK_FAILED: &str = "Le fichier restauré ne s'ouvre pas et le retour au dossier d'origine a échoué : le dossier a été remplacé. L'original est conservé dans {file}.";
+
+/// [`MSG_RESTORE_SNAPSHOT_EXISTS`] filled with the snapshot's path.
+pub fn restore_snapshot_exists_message(snapshot: &std::path::Path) -> String {
+    MSG_RESTORE_SNAPSHOT_EXISTS.replace("{file}", &snapshot.display().to_string())
+}
+
+/// [`MSG_RESTORE_ROLLBACK_FAILED`] filled with the snapshot's path.
+pub fn restore_rollback_failed_message(snapshot: &std::path::Path) -> String {
+    MSG_RESTORE_ROLLBACK_FAILED.replace("{file}", &snapshot.display().to_string())
+}
 pub const MSG_RESTORE_SNAPSHOT_FAILED: &str = "La copie de sécurité du dossier actuel n'a pas pu être créée à côté de lui ; rien n'a été restauré.";
 /// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
 pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (dossier {jid}, version {ver}) ? {reason}Le dossier actuel sera remplacé.";
@@ -846,6 +897,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,
+    MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,
     MSG_NUMBER_AMBIGUOUS_COMMA,
@@ -939,6 +991,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_DIVIDEND_INVALID_WITHHOLDING,
     MSG_SELL_STUDY_UNAVAILABLE,
     MSG_STOP_STUDY_UNAVAILABLE,
+    MSG_SELL_STUDY_OTHER_CURRENCY,
+    MSG_STOP_SEEDED_FROM_COST,
+    MSG_LEGACY_STOPS_REFERENCE_CHANGED,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
     MSG_LEDGER_UNKNOWN_KIND,
@@ -990,6 +1045,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_RESTORE_UNCHECKPOINTED,
     MSG_RESTORE_CHECKPOINT_FAILED,
     MSG_RESTORE_SNAPSHOT_FAILED,
+    MSG_RESTORE_SNAPSHOT_EXISTS,
+    MSG_PRERESTORE_FOUND,
+    MSG_RESTORE_ROLLBACK_FAILED,
     MSG_RESTORE_CONFIRM,
     MSG_RESTORE_REASON_STALE,
     MSG_RESTORE_REASON_FOREIGN,

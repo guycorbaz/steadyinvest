@@ -319,8 +319,13 @@ export component PortfolioScreen inherits Rectangle {
             // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — the study keeps the
             // gross (method fidelity); this is what is actually available to reinvest after the
             // withholding at source. No mixed-currency total (FX is Story 6.5). A neutral fact.
-            if Holdings.reinvestable-cash.length > 0: PanelCard {
+            // G1 P: a failed read shows the panel with its « indisponible » band.
+            if Holdings.reinvestable-cash-unavailable || Holdings.reinvestable-cash.length > 0: PanelCard {
                 title: @tr("Dividendes nets perçus (réinvestissables)");
+                if Holdings.reinvestable-cash-unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Dividendes nets indisponibles : ils n'ont pas pu être lus.");
+                }
                 for cash in Holdings.reinvestable-cash: FactLine {
                     text: @tr("{} {}", cash.amount, cash.currency);
                 }
@@ -577,8 +582,8 @@ export component PortfolioScreen inherits Rectangle {
                                 if row.has-stop && !row.stop-breached && row.stop-distance != "": CaptionLine {
                                     text: @tr("à {} {} au-dessus", row.stop-distance, row.currency);
                                 }
-                                if row.has-stop && row.stop-uncompared: CaptionLine {
-                                    text: @tr("non comparé au prix : le lot n'a pas de devise renseignée");
+                                if row.has-stop && row.stop-uncompared-study != "": CaptionLine {
+                                    text: @tr("non comparé au prix : le lot n'a pas de devise renseignée et l'étude est en {}", row.stop-uncompared-study);
                                 }
                             }
                         }

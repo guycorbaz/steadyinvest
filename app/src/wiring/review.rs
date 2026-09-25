@@ -495,15 +495,27 @@ pub(crate) fn push_review(
                     stops_text(p.stops.iter().filter(|s| s.breached), format)
                 }
                 .into(),
-                // A legacy lot's stop is never compared (its unit is unknown): named apart, with
-                // the reason on the screen (G1 final review — absence honesty).
+                // D5: a legacy lot (presumed in the reference currency) whose study is in another
+                // currency is not compared: named apart, both facts on the screen (absence honesty).
                 stop_no_currency: stops_text(
-                    p.stops
-                        .iter()
-                        .filter(|s| s.uncompared == Some(StopUncompared::NoCurrency)),
+                    p.stops.iter().filter(|s| {
+                        matches!(s.uncompared, Some(StopUncompared::NoCurrency { .. }))
+                    }),
                     format,
                 )
                 .into(),
+                // D5: the study currency the legacy lot's stop is not compared against.
+                stop_no_currency_study: {
+                    let mut currencies: Vec<String> = Vec::new();
+                    for s in &p.stops {
+                        if let Some(StopUncompared::NoCurrency { study_currency }) = &s.uncompared
+                            && !currencies.contains(study_currency)
+                        {
+                            currencies.push(study_currency.clone());
+                        }
+                    }
+                    currencies.join(" · ").into()
+                },
                 // …and a lot whose study could not be read (G3 review): its cause named too.
                 stop_unreadable: stops_text(
                     p.stops
@@ -713,6 +725,7 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
                 stop_breached: p.stop_breached,
                 stop_breached_levels: p.stop_breached_levels.to_string(),
                 stop_no_currency: p.stop_no_currency.to_string(),
+                stop_no_currency_study: p.stop_no_currency_study.to_string(),
                 stop_unreadable: p.stop_unreadable.to_string(),
                 trigger: p.trigger.to_string(),
             })

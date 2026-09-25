@@ -106,13 +106,17 @@ pub(crate) fn refresh_holdings(
     let rows: Vec<HoldingRow> = items
         .iter()
         .map(|h| {
-            // Auto-match the holding to the most-recent saved study of the same ticker AND currency
-            // (issue #81 — a cross-currency study must not lend this row its price / stop); `None` →
-            // a neutral "no linked study" row, never an error. Issue #95 tri-state: a read FAILURE
-            // marks the row « étude indisponible », never « aucune étude liée ».
-            let (study, study_unavailable) = match state
-                .try_matched_study_in_currency(&h.security_ticker, h.currency.as_deref())
-            {
+            // The lot's ONE link ([`JournalState::try_lot_study`] — D5, G1 P review H1): the
+            // newest study of its ticker in its EFFECTIVE currency (a legacy lot's: the reference
+            // currency), so a cross-currency study never lends this row its price / zone / stop
+            // (#81) — and never a price labelled in the wrong currency (H2). `None` → a neutral
+            // "no linked study" row. Issue #95 tri-state: a read FAILURE marks the row « étude
+            // indisponible », never « aucune étude liée ».
+            let (study, study_unavailable) = match state.try_lot_study(
+                &h.security_ticker,
+                h.currency.as_deref(),
+                &reference_currency,
+            ) {
                 Ok(found) => (found, false),
                 Err(_) => (None, true),
             };
@@ -156,17 +160,28 @@ pub(crate) fn refresh_holdings(
                 .trailing_stop_level
                 .as_deref()
                 .and_then(|s| rust_decimal::Decimal::from_str_exact(s).ok());
-            // G1 final review: the stop is compared only to a price KNOWN to be in the lot's
-            // currency — a legacy lot without a declared currency matches its study ticker-only,
-            // so its stop is never compared (no breach, no margin, no stop trigger); stated.
-            let current_price_dec = study.as_ref().and_then(|s| {
-                stop_comparable_price(
-                    h.currency.as_deref(),
-                    &s.native_currency,
-                    s.judgment.current_price.map(|m| m.as_decimal()),
-                )
-            });
-            let stop_uncompared = stop_level_dec.is_some() && h.currency.is_none();
+            // D5 (Guy, 2026-09-25 — [`state::stop_basis`], the rule the review screen shares): the
+            // stop is compared only to a price in its unit — the linked study is, by construction
+            // of the link; a legacy lot whose only study is in another currency links none, so
+            // its stop is not compared (no breach, no margin, no stop trigger) — both facts
+            // stated.
+            let current_price_dec = study
+                .as_ref()
+                .filter(|s| {
+                    state::stop_basis(
+                        h.currency.as_deref(),
+                        &reference_currency,
+                        &s.native_currency,
+                    ) == state::StopBasis::Comparable
+                })
+                .and_then(|s| s.judgment.current_price)
+                .map(|m| m.as_decimal());
+            let stop_uncompared_study = stop_uncompared_study(
+                h.currency.as_deref(),
+                study.is_some(),
+                &study_other_currency,
+                stop_level_dec.is_some(),
+            );
             let stop_breached = match (stop_level_dec, current_price_dec) {
                 (Some(level), Some(price)) => steadyinvest_core::risk::stop_breached(level, price),
                 _ => false,
@@ -229,7 +244,7 @@ pub(crate) fn refresh_holdings(
                 stop_level: stop_level_display.into(),
                 stop_breached,
                 stop_distance: stop_distance.into(),
-                stop_uncompared,
+                stop_uncompared_study: stop_uncompared_study.into(),
                 trigger_kind: trigger_kind.into(),
                 dismissed,
             }
@@ -329,8 +344,14 @@ pub(crate) fn refresh_holdings(
     // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — includes SOLD holdings'
     // dividends (cash received is cash); recomputed with the register so every ledger mutation and
     // portfolio switch keeps the panel truthful.
-    let cash_rows: Vec<CapitalAtRiskRow> = state
-        .portfolio_reinvestable_cash_by_currency(&reference_currency)
+    // G1 P: a failed read is « indisponible », never a vanished panel.
+    let (cash, cash_unavailable) =
+        match state.portfolio_reinvestable_cash_by_currency(&reference_currency) {
+            Ok(cash) => (cash, false),
+            Err(_) => (Vec::new(), true),
+        };
+    holdings.set_reinvestable_cash_unavailable(cash_unavailable);
+    let cash_rows: Vec<CapitalAtRiskRow> = cash
         .into_iter()
         .map(|(currency, net)| CapitalAtRiskRow {
             currency: currency.into(),
@@ -700,19 +721,21 @@ pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_i
     }
 }
 
-/// The study price a lot's trailing stop may be compared to (G1 final review — the review
-/// screen's rule): only a price KNOWN to be in the lot's currency. A legacy lot without a
-/// declared currency links ticker-only, so its study's price may be in any currency — `None`,
-/// never a cross-currency comparison.
-fn stop_comparable_price(
-    lot_currency: Option<&str>,
-    study_currency: &str,
-    price: Option<Decimal>,
-) -> Option<Decimal> {
-    lot_currency
-        .is_some_and(|c| c.trim().eq_ignore_ascii_case(study_currency.trim()))
-        .then_some(price)
-        .flatten()
+/// The study currency a lot's stop is NOT compared against (D5, G1 P review H1/H2): a legacy lot
+/// (no declared currency) that links no study while a same-ticker study exists in another
+/// currency — named on the row with the lot's missing currency; "" otherwise (compared, or
+/// nothing to name).
+fn stop_uncompared_study(
+    declared_currency: Option<&str>,
+    linked: bool,
+    other_currency: &str,
+    has_stop: bool,
+) -> String {
+    if declared_currency.is_none() && !linked && has_stop {
+        other_currency.to_string()
+    } else {
+        String::new()
+    }
 }
 
 /// What an Enter in the trigger-sale dialog shows when the quantity is not a typed number (G1 I
@@ -806,10 +829,9 @@ fn apply_holdings_result(
     let holdings = ui.global::<Holdings>();
     match result {
         Ok(()) => {
-            let current = holdings.get_notice();
-            holdings.set_notice(
-                notice_after_success(current.as_str(), holdings.get_refreshing()).into(),
-            );
+            let shown = holdings.get_notice();
+            holdings
+                .set_notice(notice_after_success(shown.as_str(), holdings.get_refreshing()).into());
         }
         Err(message) => crate::wiring::dialog::refuse(ui, &message),
     }
@@ -819,10 +841,42 @@ fn apply_holdings_result(
 /// The holdings notice slot after a successful gesture that states no outcome of its own (an
 /// edit, a portfolio switch): emptied — except while a price refresh is IN FLIGHT, whose banner
 /// owns the slot until the batch drains (the notice-slot rule F4, G1 final review L11: a portfolio
-/// switch or an edit used to erase « Rafraîchissement des prix en cours. » mid-batch).
-fn notice_after_success(current: &str, refreshing: bool) -> &str {
-    if refreshing { current } else { "" }
+/// switch or an edit used to erase « Rafraîchissement des prix en cours. » mid-batch). G1 P (G3
+/// L1): the in-flight banner is re-set by name, never whatever stale OUTCOME sat in the slot.
+/// G1 P review (M1): a FAILURE on show — a ticker's refresh failure written mid-batch, a
+/// provider's — is never wiped by an unrelated success: only the banner, an empty slot or a
+/// register outcome ([`REGISTER_OUTCOMES`]) are the slot's to replace.
+fn notice_after_success(shown: &str, refreshing: bool) -> &str {
+    if !slot_is_replaceable(shown) {
+        shown
+    } else if refreshing {
+        state::MSG_HOLDINGS_REFRESHING
+    } else {
+        ""
+    }
 }
+
+/// May an outcome take the holdings slot showing `shown`? An empty slot, the in-flight banner or
+/// another outcome — never a failure (F4).
+fn slot_is_replaceable(shown: &str) -> bool {
+    shown.is_empty()
+        || shown == state::MSG_HOLDINGS_REFRESHING
+        || REGISTER_OUTCOMES.contains(&shown)
+}
+
+/// The holdings slot's OUTCOMES — what a later success may replace (the F4 rule): every other
+/// notice on show is a failure (a refresh / provider cause) and stays until its own source
+/// speaks again.
+const REGISTER_OUTCOMES: &[&str] = &[
+    state::MSG_HOLDING_SOLD,
+    state::MSG_LEDGER_PARTIAL_SOLD,
+    state::MSG_LEDGER_BUY_RECORDED,
+    state::MSG_LEDGER_UPDATED,
+    state::MSG_LEDGER_DELETED,
+    state::MSG_DIVIDEND_RECORDED,
+    state::MSG_STOP_SEEDED_FROM_COST,
+    state::MSG_REFRESH_CANCELLED,
+];
 
 /// Wire the holdings + portfolio domain: the holding add / edit / remove / sell / trailing-stop /
 /// dismiss-trigger intents, the manual price refresh (one worker job per unique linked ticker,
@@ -1102,6 +1156,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>().on_refresh_prices(move || {
             let ui = ui_weak.unwrap();
             let holdings = ui.global::<Holdings>();
+            let reference = config.borrow().reference_currency_or_default();
             let jobs: Vec<(Uuid, String)> = {
                 let state = journal_state.borrow();
                 let mut seen = std::collections::HashSet::new();
@@ -1109,12 +1164,9 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     .list_holdings()
                     .into_iter()
                     .filter_map(|h| {
-                        // Issue #81: the price-refresh target is the study in the holding's currency.
+                        // Issue #81 + D5: the price-refresh target is the lot's ONE link.
                         state
-                            .study_id_for_ticker_in_currency(
-                                &h.security_ticker,
-                                h.currency.as_deref(),
-                            )
+                            .lot_study_id(&h.security_ticker, h.currency.as_deref(), &reference)
                             .map(|sid| (sid, h.security_ticker))
                     })
                     .filter(|(_, ticker)| seen.insert(ticker.to_uppercase()))
@@ -1198,19 +1250,27 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 let Some(id) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
                     return false;
                 };
+                let reference = config.borrow().reference_currency_or_default();
                 let result = journal_state
                     .borrow_mut()
-                    .set_holding_trailing_stop(id, &pct);
+                    .set_holding_trailing_stop(id, &pct, &reference);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
+                // G1 P review (L-c): a cost-basis seed of a legacy lot is stated, never silent.
+                let stated = result.as_ref().ok().copied().flatten();
                 apply_holdings_result(
                     &ui,
                     &journal_state.borrow(),
-                    result,
+                    result.map(|_| ()),
                     &holding_freshness.borrow(),
                     &holding_dismissed.borrow(),
                     format,
                 );
+                if let Some(notice) = stated
+                    && slot_is_replaceable(ui.global::<Holdings>().get_notice().as_str())
+                {
+                    ui.global::<Holdings>().set_notice(notice.into());
+                }
                 written
             });
     }
@@ -1626,29 +1686,59 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn a_stop_is_compared_only_to_a_price_known_in_the_lots_currency() {
-        // G1 final review: a legacy lot (no declared currency) is never compared — its study
-        // matched ticker-only; a declared lot is compared to its own-currency study only.
-        let price = Some(rust_decimal::Decimal::from(80));
-        assert_eq!(super::stop_comparable_price(None, "USD", price), None);
+    fn a_stop_is_compared_only_to_a_price_in_its_unit_d5() {
+        // D5 (Guy, 2026-09-25): a legacy lot is presumed in the reference currency.
+        use crate::state::{StopBasis, stop_basis};
+        assert_eq!(stop_basis(None, "CHF", "chf"), StopBasis::Comparable);
         assert_eq!(
-            super::stop_comparable_price(Some("chf"), "CHF", price),
-            price
+            stop_basis(None, "CHF", "USD"),
+            StopBasis::NoCurrencyOtherStudy("USD".to_string())
+        );
+        assert_eq!(stop_basis(Some("CHF"), "EUR", "CHF"), StopBasis::Comparable);
+        assert_eq!(
+            stop_basis(Some("CHF"), "CHF", "USD"),
+            StopBasis::OtherCurrency
+        );
+    }
+
+    #[test]
+    fn a_legacy_lot_linking_no_study_names_the_other_currency_on_its_stop() {
+        // D5 + G1 P review H1/H2: the row of a legacy lot whose only study is in USD links none
+        // (so no USD price is ever shown as CHF) and its stop caption names the USD study.
+        use super::stop_uncompared_study;
+        assert_eq!(stop_uncompared_study(None, false, "USD", true), "USD");
+        assert_eq!(
+            stop_uncompared_study(None, true, "", true),
+            "",
+            "linked: compared"
         );
         assert_eq!(
-            super::stop_comparable_price(Some("CHF"), "USD", price),
-            None
+            stop_uncompared_study(None, false, "USD", false),
+            "",
+            "no stop"
         );
-        assert_eq!(super::stop_comparable_price(Some("CHF"), "CHF", None), None);
+        assert_eq!(
+            stop_uncompared_study(Some("CHF"), false, "USD", true),
+            "",
+            "a declared lot's other-currency study is the band's fact, not the stop's"
+        );
     }
 
     #[test]
     fn a_success_never_erases_the_in_flight_refresh_banner() {
         // G1 final review (L11, the notice-slot rule F4).
+        // G1 P (G3 L1): the banner is re-set by name while refreshing — a stale outcome notice
+        // that sat in the slot is not kept.
         let banner = crate::state::MSG_HOLDINGS_REFRESHING;
+        let bought = crate::state::MSG_LEDGER_BUY_RECORDED;
         assert_eq!(notice_after_success(banner, true), banner);
-        assert_eq!(notice_after_success(banner, false), "");
-        assert_eq!(notice_after_success("", false), "");
+        assert_eq!(notice_after_success(bought, true), banner);
+        assert_eq!(notice_after_success("", true), banner);
+        assert_eq!(notice_after_success(bought, false), "");
+        // G1 P review (M1): a ticker's failure written mid-batch is never wiped by a success.
+        let failure = crate::state::MSG_PROVIDER_NO_DATA;
+        assert_eq!(notice_after_success(failure, true), failure);
+        assert_eq!(notice_after_success(failure, false), failure);
     }
 
     #[test]

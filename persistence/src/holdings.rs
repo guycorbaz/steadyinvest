@@ -363,14 +363,15 @@ impl Journal {
         self.check_writable()?;
         let tx = self.conn.transaction()?;
         // The `CASE … security_ticker IS NOT ?2` reads the OLD ticker (SET exprs see pre-update row),
-        // so the stop clears only when the ticker actually changes — compared case-insensitively
-        // (G1 final review): « nesn » → « NESN » names the SAME security (every link and ratchet
-        // matches tickers ignoring case), so its stop stays. `currency IS NOT ?5` in the WHERE
-        // keeps an identical-values edit a true no-op even when only the currency would change.
+        // so the stop clears only when the ticker actually changes — compared ignoring case
+        // AND surrounding spaces, like the app (G1 final review; G1 P, G3 L5): « nesn » → « NESN »
+        // names the SAME security (every link and ratchet matches that way), so its stop stays.
+        // `currency IS NOT ?5` in the WHERE keeps an identical-values edit a true no-op even when
+        // only the currency would change.
         let changed = tx.execute(
             "UPDATE holdings SET security_ticker = ?2, quantity = ?3, purchase_price = ?4, currency = ?5, sector = ?6,
-                    trailing_stop_pct = CASE WHEN UPPER(security_ticker) IS NOT UPPER(?2) THEN NULL ELSE trailing_stop_pct END,
-                    trailing_stop_level = CASE WHEN UPPER(security_ticker) IS NOT UPPER(?2) THEN NULL ELSE trailing_stop_level END
+                    trailing_stop_pct = CASE WHEN UPPER(TRIM(security_ticker)) IS NOT UPPER(TRIM(?2)) THEN NULL ELSE trailing_stop_pct END,
+                    trailing_stop_level = CASE WHEN UPPER(TRIM(security_ticker)) IS NOT UPPER(TRIM(?2)) THEN NULL ELSE trailing_stop_level END
              WHERE id = ?1
                AND (security_ticker IS NOT ?2 OR quantity IS NOT ?3 OR purchase_price IS NOT ?4 OR currency IS NOT ?5 OR sector IS NOT ?6)",
             rusqlite::params![id.to_string(), security_ticker, quantity, purchase_price, currency, sector],

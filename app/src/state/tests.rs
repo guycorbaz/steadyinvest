@@ -709,30 +709,173 @@ fn confirm_restore_is_refused_on_a_read_only_dossier() {
 }
 
 #[test]
-fn confirm_restore_is_refused_when_the_safety_snapshot_cannot_be_written() {
-    // G1 final review (L12): the snapshot is a PRECONDITION — without it a restored file that
-    // will not open could not be rolled back. Refused by name; the live dossier stays and reopens.
+fn a_restore_never_replaces_nor_deletes_an_earlier_prerestore_copy() {
+    // G1 P (G3 M1): a `-prerestore` left beside the dossier (an earlier failed rollback) may be
+    // the ONLY copy of an original — the restore is refused, the file named, and it is kept
+    // byte for byte; the live dossier is untouched and still open.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x547); // live id 0xC0FFEE
     let study = state.create_study("NESN", "CHF").unwrap();
     make_backup(&dir, "src.db", 0xBEEF, true);
-    // A directory squatting the snapshot's name makes the copy fail.
-    let squatter = dir.path().join("journal.db-prerestore");
-    std::fs::create_dir(&squatter).unwrap();
+    let earlier = dir.path().join("journal.db-prerestore");
+    // Appearing AFTER the request was parked: the apply refuses.
     state
         .request_restore(dir.path().join("src.db").to_str().unwrap())
         .unwrap();
+    std::fs::write(&earlier, b"the only copy of an earlier original").unwrap();
     assert_eq!(
         state.confirm_restore(),
-        Err(MSG_RESTORE_SNAPSHOT_FAILED.to_string())
+        Err(restore_snapshot_exists_message(&earlier))
     );
+    assert!(
+        restore_snapshot_exists_message(&earlier).contains("déplacez ou renommez"),
+        "G1 P review (M2): the way out is named"
+    );
+    // Already there: named BEFORE any confirm (G1 P review M2).
     assert_eq!(
-        state.journal_id(),
-        Some(Uuid::from_u128(0xC0FFEE)),
-        "the live dossier was not replaced, and is open again"
+        state
+            .request_restore(dir.path().join("src.db").to_str().unwrap())
+            .map(|_| ()),
+        Err(restore_snapshot_exists_message(&earlier))
     );
+    assert!(!state.has_pending_restore(), "no confirm parked");
+    assert_eq!(
+        std::fs::read(&earlier).unwrap(),
+        b"the only copy of an earlier original",
+        "never overwritten, never deleted"
+    );
+    assert_eq!(state.journal_id(), Some(Uuid::from_u128(0xC0FFEE)));
     assert!(state.get_study(study).is_some(), "nothing was lost");
-    assert!(squatter.is_dir(), "a directory not ours is left alone");
+}
+
+#[test]
+fn the_snapshot_is_never_written_over_an_existing_file_nor_removed() {
+    // G1 P review (L-a / L-g): create_new refuses an existing file, reports it did NOT create it
+    // (so it is never removed), and the file is intact.
+    let dir = TempDir::new().unwrap();
+    let live = dir.path().join("live.db");
+    let snapshot = dir.path().join("live.db-prerestore");
+    std::fs::write(&live, b"live").unwrap();
+    std::fs::write(&snapshot, b"earlier").unwrap();
+    let failure = super::restore::write_snapshot(&live, &snapshot).unwrap_err();
+    assert!(!failure.created);
+    assert_eq!(failure.error.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read(&snapshot).unwrap(), b"earlier");
+    // A fresh one is written with the dossier's permissions (L-b).
+    std::fs::remove_file(&snapshot).unwrap();
+    super::restore::write_snapshot(&live, &snapshot).unwrap();
+    assert_eq!(std::fs::read(&snapshot).unwrap(), b"live");
+    assert_eq!(
+        std::fs::metadata(&snapshot).unwrap().permissions(),
+        std::fs::metadata(&live).unwrap().permissions()
+    );
+}
+
+#[test]
+fn a_leftover_prerestore_is_named_at_startup() {
+    // G1 P review (L-f): the kept copy of a failed rollback is named at the next start.
+    let dir = TempDir::new().unwrap();
+    drop(watch_state(&dir, 0x54A));
+    let snapshot = dir.path().join("journal.db-prerestore");
+    std::fs::write(&snapshot, b"original").unwrap();
+    let (clock, idgen) = fixed(0x54B, "2026-06-14T09:00:00Z");
+    let (_state, notice) =
+        JournalState::open_or_create(Some(&dir.path().join("journal.db")), clock, idgen);
+    assert_eq!(notice, Some(prerestore_found_message(&snapshot)));
+}
+
+#[test]
+fn a_second_restore_works_once_the_first_left_no_snapshot() {
+    // G1 P (G3 M1): a successful restore removes its own snapshot, so the next one is not
+    // refused by the leftover guard.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x548);
+    make_backup(&dir, "src.db", 0xBEEF, true);
+    make_backup(&dir, "src2.db", 0xBEEF, true);
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    state.confirm_restore().unwrap();
+    assert!(!dir.path().join("journal.db-prerestore").exists());
+    state
+        .request_restore(dir.path().join("src2.db").to_str().unwrap())
+        .unwrap();
+    state.confirm_restore().unwrap();
+    assert_eq!(state.journal_id(), Some(Uuid::from_u128(0xBEEF)));
+}
+
+#[test]
+fn a_failed_rollback_says_the_dossier_was_replaced_and_keeps_the_named_snapshot() {
+    // G1 P (G3 M1): the restored file will not open AND the return to the original fails — the
+    // refusal says the dossier WAS replaced and names the snapshot, which stays on disk.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x549);
+    let live = dir.path().join("journal.db");
+    let snapshot = dir.path().join("journal.db-prerestore");
+    std::fs::copy(&live, &snapshot).unwrap();
+    state.journal = None;
+    let result = state.open_swapped(
+        &live,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "rollback failed".to_string(),
+            })
+        },
+    );
+    assert_eq!(result, Err(restore_rollback_failed_message(&snapshot)));
+    assert!(
+        result.unwrap_err().contains("a été remplacé"),
+        "the dossier WAS replaced"
+    );
+    assert!(snapshot.exists(), "the only copy of the original is kept");
+    // A rollback that succeeds removes the snapshot and says the plain failure.
+    state.journal = None;
+    let result = state.open_swapped(
+        &live,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| Ok(()),
+    );
+    assert_eq!(result, Err(MSG_RESTORE_FAILED.to_string()));
+    assert!(!snapshot.exists());
+    assert!(
+        state.journal_id().is_some(),
+        "the live dossier is open again"
+    );
+    // G1 P review (L-g): the rollback fails AND the dossier will not reopen — the refusal names
+    // the kept copy, and no path is left reading as an open dossier.
+    std::fs::write(&snapshot, b"original").unwrap();
+    let garbage = dir.path().join("not-a-journal.db");
+    std::fs::write(&garbage, b"garbage").unwrap();
+    state.journal = None;
+    let result = state.open_swapped(
+        &garbage,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "rollback failed".to_string(),
+            })
+        },
+    );
+    assert_eq!(result, Err(restore_rollback_failed_message(&snapshot)));
+    assert!(state.journal_id().is_none());
+    assert!(state.path().is_none(), "no path without an open dossier");
+    assert!(snapshot.exists());
 }
 
 #[test]
@@ -2966,7 +3109,9 @@ fn portfolio_review_aggregates_two_banks_and_reads_every_lots_stop() {
         .into_iter()
         .find(|h| h.portfolio_id == second)
         .unwrap();
-    state.set_holding_trailing_stop(lot.id, "10").unwrap();
+    state
+        .set_holding_trailing_stop(lot.id, "10", "CHF")
+        .unwrap();
     let review = review_of(&state);
     assert_eq!(
         review.counts.positions, 1,
@@ -3004,7 +3149,7 @@ fn a_study_the_engine_cannot_compute_still_reads_the_stop_counts_and_is_due() {
         .unwrap();
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let lot = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(lot, "10").unwrap(); // level 63
+    state.set_holding_trailing_stop(lot, "10", "CHF").unwrap(); // level 63
     state
         .set_judgment_field(id, "current_price", Some(und_money(60)))
         .unwrap();
@@ -3047,12 +3192,12 @@ fn lots_in_two_currencies_read_each_stop_against_their_own_study() {
     // Each lot's stop is set in its own bank (the active portfolio's register): CHF 63, USD 90.
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let lot = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(lot, "10").unwrap();
+    state.set_holding_trailing_stop(lot, "10", "CHF").unwrap();
     let second = state.add_portfolio("Swissquote").unwrap();
     state.set_active_portfolio(second);
     state.add_holding("NESN", "1", "90", "USD", "").unwrap();
     let lot = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(lot, "10").unwrap();
+    state.set_holding_trailing_stop(lot, "10", "CHF").unwrap();
     state
         .set_judgment_field(chf, "current_price", Some(und_money(60)))
         .unwrap();
@@ -3077,40 +3222,158 @@ fn lots_in_two_currencies_read_each_stop_against_their_own_study() {
 }
 
 #[test]
-fn a_legacy_lot_matches_ticker_only_and_is_never_compared_across_currencies() {
+fn a_legacy_lot_links_by_the_reference_currency_never_ticker_only() {
+    // D5 + G1 P review H1: two studies — USD the NEWEST, CHF older. A legacy (NULL-currency) lot
+    // is presumed in the reference currency (CHF): it links the CHF study, exactly as a declared
+    // CHF lot of the same ticker in another bank does — never the newest study of any currency.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x7800);
     let chf = state.create_study("NESN", "CHF").unwrap();
+    state
+        .set_judgment_field(chf, "current_price", Some(und_money(150)))
+        .unwrap();
     let usd = state.create_study("NESN", "USD").unwrap(); // the newest
     state
         .set_judgment_field(usd, "current_price", Some(und_money(10)))
         .unwrap();
-    // The register's match: a legacy (NULL-currency) lot links ticker-only — the newest study —
-    // while a declared CHF lot links the CHF study.
-    let legacy = state.lot_link("NESN", None, None);
-    let declared = state.lot_link("NESN", Some("CHF"), None);
-    assert_eq!(legacy.identity, Some(usd));
-    assert_eq!(declared.identity, Some(chf));
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let legacy = state.list_holdings()[0].id;
+    make_legacy(&mut state, legacy);
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "5", "100", "CHF", "").unwrap();
+    let declared = state.list_holdings()[0].id;
+
+    // The review's link — THE resolution the register shares.
+    let legacy_link = state.lot_link("NESN", None, "CHF", None);
+    let declared_link = state.lot_link("NESN", Some("CHF"), "CHF", None);
     assert_eq!(
-        super::review::mixed_links(&[&legacy, &declared], 0)
-            .expect("two links")
-            .currencies,
-        vec!["USD", "CHF"],
-        "the two links are stated"
+        legacy_link.identity,
+        Some(chf),
+        "never the newest USD study"
     );
-    // The legacy lot carries no currency: its stop's unit is unknown — never labelled with the
-    // reference currency, never compared with the USD study's 10 (G1 final review).
-    let stop = super::review::lot_stop(
-        Some("63"),
-        None,
-        "UBS",
-        legacy.study_currency.as_deref(),
-        legacy.price,
-        false,
-    )
-    .unwrap();
+    assert_eq!(declared_link.identity, Some(chf));
+    assert!(super::review::mixed_links(&[&legacy_link, &declared_link], 0).is_none());
+
+    // Seed: from the CHF study's 150 (20 % → 120), nothing to state.
+    state.set_active_portfolio(state.list_portfolios()[0].id);
+    assert_eq!(
+        state.set_holding_trailing_stop(legacy, "20", "CHF"),
+        Ok(None)
+    );
+    let level = |state: &JournalState, id: Uuid| {
+        state
+            .journal
+            .as_ref()
+            .unwrap()
+            .list_all_holdings()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == id)
+            .unwrap()
+            .trailing_stop_level
+    };
+    assert_eq!(level(&state, legacy).as_deref(), Some("120"));
+    // Ratchet: only by the lot's own link — the USD study's 500 moves nothing…
+    state
+        .ratchet_trailing_stops_for_study(usd, Decimal::from(500), "CHF")
+        .unwrap();
+    assert_eq!(level(&state, legacy).as_deref(), Some("120"));
+    // …the CHF study's 200 does (20 % → 160).
+    state
+        .ratchet_trailing_stops_for_study(chf, Decimal::from(200), "CHF")
+        .unwrap();
+    assert_eq!(level(&state, legacy).as_deref(), Some("160"));
+    let _ = declared;
+
+    // The review compares the legacy lot's stop with the CHF price (150 < 160: breached).
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    assert_eq!(row.stops.len(), 1);
+    assert_eq!(row.stops[0].uncompared, None);
+    assert!(row.stops[0].breached, "150 CHF is below the 160 CHF stop");
+
+    // The trigger sale is priced at the CHF study's 150, never the USD 10.
+    assert_eq!(
+        state.sell_holding(legacy, "", "", "CHF"),
+        Ok(MSG_HOLDING_SOLD)
+    );
+    let sale = state
+        .holding_ledger(legacy)
+        .into_iter()
+        .find(|t| t.kind.as_deref() == Some("sell"))
+        .unwrap();
+    assert_eq!(sale.unit_price, "150");
+}
+
+#[test]
+fn a_reference_change_names_the_legacy_lots_whose_stop_it_does_not_convert() {
+    // G1 P review (M3, the lead's conservative decision): the lots named; nothing converted.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7802);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "200", "CHF", "").unwrap();
+    let nesn = state.list_holdings()[0].id;
+    let rog = state.list_holdings()[1].id;
+    make_legacy(&mut state, nesn);
+    make_legacy(&mut state, rog);
+    state.set_holding_trailing_stop(nesn, "20", "CHF").unwrap();
+    // ROG is legacy but carries no stop: not named.
+    assert_eq!(
+        state.legacy_tickers_with_stop(),
+        Ok(vec!["NESN".to_string()])
+    );
+    let message = legacy_stops_reference_changed_message(&["NESN".to_string()], "CHF");
+    assert!(message.contains("(NESN)") && message.contains("fixé en CHF"));
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "never converted"
+    );
+}
+
+#[test]
+fn a_legacy_lot_with_only_another_currency_study_links_none_and_says_so() {
+    // D5 + G1 P review H1/H2/L-c: the only study is in USD — the legacy lot (presumed CHF) links
+    // NONE (no USD price on its row, never labelled CHF), its stop is not compared (the USD
+    // study named), its seed comes from the cost basis — stated — and the trigger sale refuses.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7801);
+    let usd = state.create_study("NESN", "USD").unwrap();
+    state
+        .set_judgment_field(usd, "current_price", Some(und_money(200)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    make_legacy(&mut state, id);
+    assert_eq!(
+        state
+            .try_lot_study("NESN", None, "CHF")
+            .map(|s| s.map(|s| s.id)),
+        Ok(None)
+    );
+    assert_eq!(
+        state.other_currency_hint("NESN", None).as_deref(),
+        Some("USD")
+    );
+    assert_eq!(
+        state.set_holding_trailing_stop(id, "20", "CHF"),
+        Ok(Some(MSG_STOP_SEEDED_FROM_COST)),
+        "the cost-basis seed is stated"
+    );
+    let review = review_of(&state);
+    let stop = &review.positions[0].stops[0];
     assert!(!stop.breached);
-    assert_eq!(stop.currency, None, "no currency the lot does not carry");
+    assert_eq!(
+        stop.uncompared,
+        Some(super::review::StopUncompared::NoCurrency {
+            study_currency: "USD".to_string()
+        })
+    );
+    assert_eq!(
+        state.sell_holding(id, "", "", "CHF"),
+        Err(sell_study_other_currency_message("USD", "CHF"))
+    );
 }
 
 #[test]
@@ -3197,7 +3460,7 @@ fn set_holding_trailing_stop_validates_seeds_from_purchase_price_and_clears() {
     // Out-of-range / non-numeric pct → refused, nothing written.
     for bad in ["0", "100", "150", "-5", "abc", "1.2.3"] {
         assert_eq!(
-            state.set_holding_trailing_stop(id, bad),
+            state.set_holding_trailing_stop(id, bad, "CHF"),
             Err(MSG_HOLDING_INVALID_STOP.to_string()),
             "pct {bad:?} is refused"
         );
@@ -3205,7 +3468,7 @@ fn set_holding_trailing_stop_validates_seeds_from_purchase_price_and_clears() {
     assert!(state.list_holdings()[0].trailing_stop_pct.is_none());
 
     // No linked study → the level seeds from the purchase price 100: 100 × (1 − 0.15) = 85.
-    state.set_holding_trailing_stop(id, "15").unwrap();
+    state.set_holding_trailing_stop(id, "15", "CHF").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert_eq!(h.trailing_stop_pct.as_deref(), Some("15"));
     assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
@@ -3213,13 +3476,13 @@ fn set_holding_trailing_stop_validates_seeds_from_purchase_price_and_clears() {
     // Review fix: an EXPLICIT re-set seeds FRESH (the user's pct wins) — a looser 50% LOWERS the
     // level to 100 × (1 − 0.50) = 50, even though 50 < the prior 85 (ratchet-up-only governs only
     // the automatic refresh path, not an explicit re-parametrisation).
-    state.set_holding_trailing_stop(id, "50").unwrap();
+    state.set_holding_trailing_stop(id, "50", "CHF").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert_eq!(h.trailing_stop_pct.as_deref(), Some("50"));
     assert_eq!(h.trailing_stop_level.as_deref(), Some("50"));
 
     // An empty pct clears the stop (both fields → None).
-    state.set_holding_trailing_stop(id, "").unwrap();
+    state.set_holding_trailing_stop(id, "", "CHF").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert!(h.trailing_stop_pct.is_none() && h.trailing_stop_level.is_none());
 }
@@ -3233,7 +3496,7 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     // Seed a 20% stop → level 80 (from purchase 100, no current_price yet).
-    state.set_holding_trailing_stop(id, "20").unwrap();
+    state.set_holding_trailing_stop(id, "20", "CHF").unwrap();
     assert_eq!(
         state.list_holdings()[0].trailing_stop_level.as_deref(),
         Some("80")
@@ -3241,7 +3504,7 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
 
     // A refresh to 150 ratchets the level up: 150 × 0.80 = 120.
     state
-        .ratchet_trailing_stops_for_study(study, Decimal::from(150))
+        .ratchet_trailing_stops_for_study(study, Decimal::from(150), "CHF")
         .unwrap();
     assert_eq!(
         state.list_holdings()[0].trailing_stop_level.as_deref(),
@@ -3250,7 +3513,7 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
 
     // A refresh to a LOWER 90 leaves the level at 120 (ratchet-up only).
     state
-        .ratchet_trailing_stops_for_study(study, Decimal::from(90))
+        .ratchet_trailing_stops_for_study(study, Decimal::from(90), "CHF")
         .unwrap();
     assert_eq!(
         state.list_holdings()[0].trailing_stop_level.as_deref(),
@@ -3259,38 +3522,90 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
     );
 }
 
-#[test]
-fn a_legacy_lot_without_a_currency_is_never_ratcheted_by_a_study_price() {
-    // G1 final review (the review screen's rule): a lot without a declared currency links its
-    // study ticker-only — the study's price may be in any currency, so it never moves (nor seeds)
-    // the lot's stop; the cost basis seeds it.
-    let dir = TempDir::new().unwrap();
-    let mut state = undo_state(&dir, 0x57, "2026-06-28T10:00:00Z");
-    let study = state.create_study("NESN", "USD").unwrap();
-    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
-    let id = state.list_holdings()[0].id;
-    // Make it a pre-6.2 legacy row: no declared currency.
+/// A holding made pre-6.2 legacy: its declared currency cleared (NULL).
+fn make_legacy(state: &mut JournalState, id: Uuid) {
+    let h = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
     state
         .journal
         .as_mut()
         .unwrap()
-        .update_holding_with_currency(id, "NESN", "10", "100", None, None)
+        .update_holding_with_currency(
+            id,
+            &h.security_ticker,
+            &h.quantity,
+            &h.purchase_price,
+            None,
+            None,
+        )
         .unwrap();
-    assert!(state.list_holdings()[0].currency.is_none());
-    state.set_holding_trailing_stop(id, "20").unwrap();
+}
+
+#[test]
+fn d5_a_legacy_lot_is_compared_and_ratcheted_against_a_reference_currency_study() {
+    // D5 (Guy, 2026-09-25): a lot without a declared currency is PRESUMED in the reference
+    // currency — a CHF study's price (reference CHF) seeds, ratchets and prices its trigger sale.
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x58, "2026-06-28T10:00:00Z");
+    let study = state.create_study("NESN", "CHF").unwrap();
+    state
+        .set_judgment_field(study, "current_price", Some(und_money(150)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    make_legacy(&mut state, id);
+    state.set_holding_trailing_stop(id, "20", "CHF").unwrap();
     assert_eq!(
         state.list_holdings()[0].trailing_stop_level.as_deref(),
-        Some("80"),
-        "seeded from the cost basis"
+        Some("120"),
+        "seeded from the CHF study's 150"
     );
     state
-        .ratchet_trailing_stops_for_study(study, Decimal::from(500))
+        .ratchet_trailing_stops_for_study(study, Decimal::from(200), "CHF")
+        .unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("160"),
+        "ratcheted by the reference-currency study"
+    );
+}
+
+#[test]
+fn d5_a_legacy_lot_is_never_compared_against_a_study_in_another_currency() {
+    // D5: the same lot linked (ticker-only) to a USD study — no seed, no ratchet, no trigger
+    // sale at the USD price: the cost basis seeds, and the sale is refused naming both facts.
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x57, "2026-06-28T10:00:00Z");
+    let study = state.create_study("NESN", "USD").unwrap();
+    state
+        .set_judgment_field(study, "current_price", Some(und_money(200)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    make_legacy(&mut state, id);
+    assert!(state.list_holdings()[0].currency.is_none());
+    state.set_holding_trailing_stop(id, "20", "CHF").unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "seeded from the cost basis, never the USD 200"
+    );
+    state
+        .ratchet_trailing_stops_for_study(study, Decimal::from(500), "CHF")
         .unwrap();
     assert_eq!(
         state.list_holdings()[0].trailing_stop_level.as_deref(),
         Some("80"),
-        "a USD study's price never ratchets a lot of unknown currency"
+        "a USD study's price never ratchets a lot presumed in CHF"
     );
+    assert_eq!(
+        state.sell_holding(id, "", "", "CHF"),
+        Err(sell_study_other_currency_message("USD", "CHF"))
+    );
+    assert!(state.holding_ledger(id).is_empty(), "nothing sold");
 }
 
 // ── Story 4.6 — simple capital-at-risk (the portfolio downside figure) ──
@@ -3305,7 +3620,9 @@ fn portfolio_capital_at_risk_sums_below_cost_stops_and_invested() {
     state.add_holding("ROG", "20", "50", "CHF", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // NESN: a 15% stop with no study → level 85 (below cost 100) → (100−85)×10 = 150.
-    state.set_holding_trailing_stop(ids[0], "15").unwrap();
+    state
+        .set_holding_trailing_stop(ids[0], "15", "CHF")
+        .unwrap();
     // ROG: no stop → contributes 0 to capital-at-risk (but to invested).
 
     // Both holdings are CHF → a single bucket; the figures match the pre-6.2 single sum.
@@ -3335,8 +3652,12 @@ fn capital_at_risk_groups_by_currency_without_a_cross_currency_total() {
     state.add_holding("AAPL", "20", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // A 15% stop on each → EUR level 85 (CaR (100−85)×10 = 150); USD level 42.5 (CaR (50−42.5)×20 = 150).
-    state.set_holding_trailing_stop(ids[0], "15").unwrap();
-    state.set_holding_trailing_stop(ids[1], "15").unwrap();
+    state
+        .set_holding_trailing_stop(ids[0], "15", "CHF")
+        .unwrap();
+    state
+        .set_holding_trailing_stop(ids[1], "15", "CHF")
+        .unwrap();
 
     let buckets = state.portfolio_capital_at_risk_by_currency("CHF");
     assert_eq!(
@@ -3451,7 +3772,9 @@ fn sell_holding_records_the_sell_and_drops_it_from_the_register() {
     state.add_holding("ROG", "20", "50", "CHF", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // NESN gets a 15% stop (no study) → level 85, below cost 100 → CaR 150 before the sell.
-    state.set_holding_trailing_stop(ids[0], "15").unwrap();
+    state
+        .set_holding_trailing_stop(ids[0], "15", "CHF")
+        .unwrap();
     assert_eq!(
         state.portfolio_capital_at_risk_by_currency("CHF")[0].1,
         Decimal::from(150)
@@ -3901,7 +4224,9 @@ fn reinvestable_cash_groups_per_currency_and_counts_sold_holdings() {
         "the USD holding is retired"
     );
 
-    let cash = state.portfolio_reinvestable_cash_by_currency("CHF");
+    let cash = state
+        .portfolio_reinvestable_cash_by_currency("CHF")
+        .unwrap();
     assert_eq!(
         cash,
         vec![
@@ -4058,7 +4383,9 @@ fn one_invalid_dividend_row_does_not_erase_its_currency_bucket() {
         )
         .unwrap();
 
-    let cash = state.portfolio_reinvestable_cash_by_currency("CHF");
+    let cash = state
+        .portfolio_reinvestable_cash_by_currency("CHF")
+        .unwrap();
     assert_eq!(
         cash,
         vec![("CHF".to_string(), Decimal::from_str_exact("19.5").unwrap())],
@@ -5759,13 +6086,19 @@ fn the_consolidation_converts_per_bank_and_globally_with_exact_rates() {
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
-    state.set_holding_trailing_stop(ids[0], "15").unwrap();
-    state.set_holding_trailing_stop(ids[1], "20").unwrap();
+    state
+        .set_holding_trailing_stop(ids[0], "15", "CHF")
+        .unwrap();
+    state
+        .set_holding_trailing_stop(ids[1], "20", "CHF")
+        .unwrap();
     // Bank 2: EUR 10@20 stop 15 → CaR 50.
     let bank2 = state.add_portfolio("PostFinance").unwrap();
     state.add_holding("ASML", "10", "20", "EUR", "").unwrap();
     let eur_id = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(eur_id, "25").unwrap();
+    state
+        .set_holding_trailing_stop(eur_id, "25", "CHF")
+        .unwrap();
     let _ = bank2;
     // Rates: USD→CHF 0.5 (CaR 40 → 20), EUR→CHF 2 (CaR 50 → 100).
     state
@@ -5809,7 +6142,9 @@ fn a_missing_pair_absents_the_bank_and_the_global_by_name() {
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
-    state.set_holding_trailing_stop(ids[1], "20").unwrap();
+    state
+        .set_holding_trailing_stop(ids[1], "20", "CHF")
+        .unwrap();
     // NO USD→CHF rate stored.
     let view = state.journal_capital_at_risk_consolidation("CHF");
     assert!(
@@ -5838,7 +6173,7 @@ fn reference_buckets_convert_at_identity_and_sold_holdings_stay_excluded() {
     let mut state = watch_state(&dir, 0x662);
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(id, "15").unwrap();
+    state.set_holding_trailing_stop(id, "15", "CHF").unwrap();
     // A sold USD holding: no rate stored for USD, but a sold position carries no risk — it must
     // neither require the pair nor block the global.
     state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
@@ -5912,7 +6247,7 @@ fn a_checked_overflow_absents_the_bank_plainly_never_a_wrong_figure() {
         "USD",
     );
     let id = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(id, "15").unwrap();
+    state.set_holding_trailing_stop(id, "15", "CHF").unwrap();
     state
         .upsert_manual_fx_rate("USD", "2", "2026-06-27", "CHF")
         .unwrap();
@@ -5943,7 +6278,7 @@ fn unstopped_exposure_counts_holdings_without_a_stop_per_currency() {
         .find(|h| h.security_ticker == "ABBN")
         .unwrap()
         .id;
-    state.set_holding_trailing_stop(abbn, "15").unwrap();
+    state.set_holding_trailing_stop(abbn, "15", "CHF").unwrap();
     // CHF: only NESN is un-stopped now (ABBN protected) → 1 position, 1000; USD: AAPL → 1, 300.
     assert_eq!(
         state.portfolio_unstopped_exposure_by_currency("CHF"),
@@ -5969,7 +6304,7 @@ fn unstopped_exposure_counts_holdings_without_a_stop_per_currency() {
             .find(|h| h.security_ticker == t)
             .unwrap()
             .id;
-        state.set_holding_trailing_stop(id, "10").unwrap();
+        state.set_holding_trailing_stop(id, "10", "CHF").unwrap();
     }
     assert!(
         state
@@ -6516,6 +6851,55 @@ fn make_table_unreadable(dir: &TempDir, table: &str) {
 }
 
 #[test]
+fn a_write_rails_failed_read_is_named_as_a_read_never_as_a_save_or_an_absence() {
+    // G1 P (G3 L3/L4, item 4): a missing position is « introuvable »; a failed READ before a
+    // write is « n'a pas pu être lu » — never « L'enregistrement a échoué », never an empty list
+    // that creates a second default portfolio or lets a duplicate through; the reinvestable-cash
+    // read says it failed.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x95A);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_watch_item("ROG", None).unwrap();
+    assert_eq!(
+        state.sell_holding(Uuid::from_u128(0xDEAD), "", "", "CHF"),
+        Err(MSG_HOLDING_NOT_FOUND.to_string())
+    );
+    assert_eq!(
+        state.record_sell_for(Uuid::from_u128(0xDEAD), "", "1", "1", "", "", "CHF"),
+        Err(MSG_HOLDING_NOT_FOUND.to_string())
+    );
+    make_table_unreadable(&dir, "watchlist_items");
+    assert_eq!(
+        state.add_watch_item("ROG", None),
+        Err(MSG_READ_FAILED.to_string()),
+        "the duplicate check sees the failed read"
+    );
+    let nesn = state.list_holdings()[0].id;
+    make_table_unreadable(&dir, "holdings");
+    assert_eq!(
+        state.update_holding_keeping_currency(nesn, "NESN", "10", "100", "x", "CHF"),
+        Err(MSG_READ_FAILED.to_string()),
+        "a failed read is no save failure"
+    );
+    make_table_unreadable(&dir, "portfolios");
+    assert_eq!(
+        state.add_holding("ROG", "1", "1", "CHF", ""),
+        Err(MSG_READ_FAILED.to_string()),
+        "never a second default portfolio on a failed read"
+    );
+    let portfolios: i64 = rusqlite::Connection::open(dir.path().join("journal.db"))
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM portfolios", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(portfolios, 1, "no default portfolio was created");
+    assert!(
+        state
+            .portfolio_reinvestable_cash_by_currency("CHF")
+            .is_err()
+    );
+}
+
+#[test]
 fn a_failed_register_read_is_an_error_never_an_empty_register() {
     // G1 final review (M5): each surface's read tells a FAILURE from a true absence, so the
     // screen can say « indisponible » instead of « aucune position / aucun taux / … ».
@@ -6578,7 +6962,7 @@ fn an_unreadable_study_refuses_the_trigger_sale_and_the_stop_never_the_cost_basi
         Err(MSG_SELL_STUDY_UNAVAILABLE.to_string())
     );
     assert_eq!(
-        state.set_holding_trailing_stop(holding, "10"),
+        state.set_holding_trailing_stop(holding, "10", "CHF"),
         Err(MSG_STOP_STUDY_UNAVAILABLE.to_string())
     );
     let h = &state.list_holdings()[0];
@@ -7332,7 +7716,7 @@ fn the_rails_read_typed_amounts_under_the_comma_format() {
     assert_eq!(h.purchase_price, "10.5");
     let id = h.id;
     // The other mark, where it cannot be a thousands point, is read too.
-    state.set_holding_trailing_stop(id, "12.5").unwrap();
+    state.set_holding_trailing_stop(id, "12.5", "CHF").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert_eq!(h.trailing_stop_pct.as_deref(), Some("12.5"));
     // A possible thousands point is ambiguous: refused BY NAME, never read as 1.234 nor 1234.
@@ -7346,7 +7730,7 @@ fn the_rails_read_typed_amounts_under_the_comma_format() {
         Err(MSG_LEDGER_INVALID_QUANTITY.to_string())
     );
     assert_eq!(
-        state.set_holding_trailing_stop(id, "12.500"),
+        state.set_holding_trailing_stop(id, "12.500", "CHF"),
         Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
     );
     state

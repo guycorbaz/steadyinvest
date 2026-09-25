@@ -63,7 +63,7 @@ pub use concentration::*;
 pub use confront::*;
 pub use export_import::ImportRequest;
 pub use holdings::StudyChoice;
-pub(crate) use holdings::effective_currency;
+pub(crate) use holdings::{StopBasis, effective_currency, stop_basis};
 pub use journal_io::*;
 pub use messages::*;
 pub use refresh::*;
@@ -71,6 +71,7 @@ pub use replacement::*;
 pub use restore::*;
 pub use review::*;
 pub use undo::*;
+pub(crate) use watchlist::same_ticker;
 
 /// Where a default journal lives when the user has none yet: the OS **data** dir (NOT the config
 /// dir, NOT beside `config.json`, NOT inside the journal) — outside any sync-watched tree (the
@@ -176,6 +177,27 @@ impl JournalState {
     /// default journal in the OS data dir. Returns the state plus an optional neutral startup notice
     /// to surface in a banner. Never panics; a failure leaves a usable (journal-less) state.
     pub fn open_or_create(
+        configured: Option<&Path>,
+        clock: Box<dyn Clock>,
+        idgen: Box<dyn IdGen>,
+    ) -> (Self, Option<String>) {
+        let (state, notice) = Self::open_or_create_inner(configured, clock, idgen);
+        // G1 P review (L-f): a `-prerestore` beside the open dossier (a restore whose rollback
+        // failed) is named at startup — it may be the only copy of an original.
+        let leftover = state
+            .path
+            .as_deref()
+            .map(|live| path_with_suffix(live, "-prerestore"))
+            .filter(|snapshot| std::fs::symlink_metadata(snapshot).is_ok())
+            .map(|snapshot| prerestore_found_message(&snapshot));
+        let notice = match (notice, leftover) {
+            (Some(first), Some(second)) => Some(format!("{first} {second}")),
+            (first, second) => first.or(second),
+        };
+        (state, notice)
+    }
+
+    fn open_or_create_inner(
         configured: Option<&Path>,
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
@@ -383,6 +405,13 @@ pub fn created_at_date(ts: &Timestamp) -> String {
 /// save-failure. The persistence error's own (English) text is LOGGED, never appended to the French
 /// refusal (G1 final review: a raw `transaction rows still reference…` under « L'enregistrement a
 /// échoué. » was no cause the user could read).
+/// A failed READ on a write rail (G1 P): named as a read failure — never « L'enregistrement a
+/// échoué. » for a write that was never attempted. The persistence error's text is logged.
+fn read_error(error: PersistError) -> String {
+    tracing::warn!("journal read failed: {error}");
+    MSG_READ_FAILED.to_string()
+}
+
 fn watch_error(error: PersistError) -> String {
     match error {
         PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),

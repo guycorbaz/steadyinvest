@@ -53,11 +53,12 @@ use crate::viewmodel::format::NumberFormat;
 use super::{
     JournalState, MSG_DIVIDEND_INVALID_GROSS, MSG_DIVIDEND_INVALID_QUANTITY,
     MSG_DIVIDEND_INVALID_WITHHOLDING, MSG_DIVIDEND_RETIRED, MSG_DIVIDEND_WITHHOLDING,
-    MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_INVALID_FEES, MSG_LEDGER_INVALID_PRICE,
-    MSG_LEDGER_INVALID_QUANTITY, MSG_LEDGER_OUT_OF_RANGE, MSG_LEDGER_OVERSELL,
-    MSG_LEDGER_PARTIAL_SOLD, MSG_LEDGER_QUANTITY_EMPTY, MSG_LEDGER_ROW_INVALID,
-    MSG_LEDGER_UNKNOWN_KIND, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
-    MSG_SELL_STUDY_UNAVAILABLE, MSG_WITHHOLDING_INVALID, effective_currency, watch_error,
+    MSG_HOLDING_NOT_FOUND, MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_INVALID_FEES,
+    MSG_LEDGER_INVALID_PRICE, MSG_LEDGER_INVALID_QUANTITY, MSG_LEDGER_OUT_OF_RANGE,
+    MSG_LEDGER_OVERSELL, MSG_LEDGER_PARTIAL_SOLD, MSG_LEDGER_QUANTITY_EMPTY,
+    MSG_LEDGER_ROW_INVALID, MSG_LEDGER_UNKNOWN_KIND, MSG_NO_JOURNAL, MSG_READ_FAILED,
+    MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, MSG_SELL_STUDY_UNAVAILABLE, MSG_WITHHOLDING_INVALID,
+    effective_currency, read_error, watch_error,
 };
 
 /// An owned ledger-row draft — the borrow-free twin of [`LedgerEntry`] (which borrows), so the
@@ -232,8 +233,9 @@ fn candidate_of_owned(
     created_at: &str,
 ) -> Result<Candidate, String> {
     // The drafts hold canonical spellings (validated input, or the stored opening aggregate): a
-    // failed parse is a corrupt stored value, like `event_of`'s — never « not a number ».
-    let dec = |s: &str| Decimal::from_str_exact(s).map_err(|_| MSG_SAVE_FAILED.to_string());
+    // failed parse is a corrupt STORED value — named as such (G1 P, G3 L3), never « not a
+    // number » nor a generic save failure.
+    let dec = |s: &str| Decimal::from_str_exact(s).map_err(|_| MSG_LEDGER_ROW_INVALID.to_string());
     Ok(Candidate {
         occurred_at: entry.occurred_at.clone(),
         created_at: created_at.to_string(),
@@ -278,6 +280,8 @@ impl JournalState {
     /// The holding's ledger rows, oldest first (Story 6.3, FR39) — read-only, `[]` without a
     /// journal or on a read failure (a DISPLAY surface, never a hard error). Write rails must use
     /// [`Self::ledger_rows_strict`] instead.
+    /// Test-only since G1 P: every surface reads [`Self::try_holding_ledger`].
+    #[cfg(test)]
     pub fn holding_ledger(&self, holding_id: Uuid) -> Vec<TransactionItem> {
         self.try_holding_ledger(holding_id).unwrap_or_default()
     }
@@ -302,7 +306,7 @@ impl JournalState {
             .as_ref()
             .ok_or(MSG_NO_JOURNAL.to_string())?
             .list_transactions(holding_id)
-            .map_err(watch_error)
+            .map_err(read_error)
     }
 
     /// Any holding by id — including a sold one (the ledger of a retired holding stays editable;
@@ -312,10 +316,10 @@ impl JournalState {
             .as_ref()
             .ok_or(MSG_NO_JOURNAL.to_string())?
             .list_all_holdings()
-            .map_err(watch_error)?
+            .map_err(read_error)?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string()) // G1 P review (L-e): named
     }
 
     /// The opening-position row to materialize, iff the holding's **current** ledger holds no buy
@@ -438,11 +442,13 @@ impl JournalState {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
         // Selling is an action on an ACTIVE position (a retired holding re-enters via a new add).
+        // G1 P (G3 L3): an absent position is named; a failed read of the register too.
         let holding = self
-            .list_holdings()
+            .try_list_holdings()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())?;
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string())?;
         let quantity_input = quantity_input.trim();
         let quantity = if quantity_input.is_empty() {
             holding.quantity.clone()
@@ -456,10 +462,27 @@ impl JournalState {
         // Issue #81: match a study in the holding's own currency — never price a CHF sale from a
         // same-ticker USD study. G1 final review (L7): the cost basis stands in only for a TRUE
         // absence (no study, no price) — a study that could not be READ refuses the sale by name,
-        // never records it silently at the cost basis.
-        let unit_price = self
-            .try_matched_study_in_currency(&holding.security_ticker, holding.currency.as_deref())
-            .map_err(|_| MSG_SELL_STUDY_UNAVAILABLE.to_string())?
+        // never records it silently at the cost basis. D5 (G1 P review H1): the lot's ONE link
+        // ([`Self::try_lot_study`]) — a legacy lot links in the reference currency; when its only
+        // study is in ANOTHER currency, that price never prices the sale (nor does the cost basis
+        // stand in silently): refused, both facts named, the way out too.
+        let study = self
+            .try_lot_study(
+                &holding.security_ticker,
+                holding.currency.as_deref(),
+                reference_currency,
+            )
+            .map_err(|_| MSG_SELL_STUDY_UNAVAILABLE.to_string())?;
+        if study.is_none()
+            && let Some(study_currency) =
+                self.other_currency_hint(&holding.security_ticker, holding.currency.as_deref())
+        {
+            return Err(super::sell_study_other_currency_message(
+                &study_currency,
+                reference_currency,
+            ));
+        }
+        let unit_price = study
             .and_then(|s| s.judgment.current_price)
             .map(|m| m.as_decimal().to_string())
             .unwrap_or_else(|| holding.purchase_price.clone());
@@ -501,11 +524,13 @@ impl JournalState {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
+        // G1 P (G3 L3): an absent position is named; a failed read of the register too.
         let holding = self
-            .list_holdings()
+            .try_list_holdings()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())?;
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string())?;
         let (qty, price, fees) = validate_ledger_amounts(
             quantity,
             unit_price,
@@ -591,9 +616,7 @@ impl JournalState {
         // v1 entry point: an ACTIVE holding (the ledger panel lives in the register; the
         // sold-positions surface is #84 — the panel READ still counts sold holdings' dividends).
         // A retired holding refuses with its own factual notice, not a fake save failure (review).
-        let holding = self
-            .any_holding(holding_id)
-            .map_err(|_| MSG_SAVE_FAILED.to_string())?;
+        let holding = self.any_holding(holding_id)?;
         if holding.sold_at.is_some() {
             return Err(MSG_DIVIDEND_RETIRED.to_string());
         }
@@ -665,21 +688,26 @@ impl JournalState {
     /// corrupt, imported, or over-withheld — is SKIPPED; it must never blank its whole currency
     /// bucket). Deterministic order; NO cross-currency total (FX is Story 6.5); a bucket whose
     /// dividends net to exactly zero still shows (a fully-withheld dividend is a recorded fact).
+    /// G1 P: a failed read (portfolios, holdings, a ledger) is `Err` — the panel says
+    /// « indisponible », never a panel that silently vanishes or a partial sum.
     pub fn portfolio_reinvestable_cash_by_currency(
         &self,
         reference_currency: &str,
-    ) -> Vec<(String, Decimal)> {
+    ) -> Result<Vec<(String, Decimal)>, String> {
         use std::collections::BTreeMap;
         let Some(journal) = self.journal.as_ref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let Some(portfolio) = self.active_portfolio() else {
-            return Vec::new();
+        let Some(portfolio) = self.try_active_portfolio()? else {
+            return Ok(Vec::new());
         };
-        let holdings = journal.list_all_holdings().unwrap_or_default();
+        let holdings = journal.list_all_holdings().map_err(|error| {
+            tracing::warn!("reinvestable cash: list_all_holdings failed: {error}");
+            error.to_string()
+        })?;
         let mut by_ccy: BTreeMap<String, Decimal> = BTreeMap::new();
         for holding in holdings.iter().filter(|h| h.portfolio_id == portfolio.id) {
-            for row in self.holding_ledger(holding.id) {
+            for row in self.try_holding_ledger(holding.id)? {
                 if row.kind.as_deref() != Some(KIND_DIVIDEND) {
                     continue;
                 }
@@ -704,7 +732,7 @@ impl JournalState {
                 *bucket = bucket.checked_add(net).unwrap_or(*bucket);
             }
         }
-        by_ccy.into_iter().collect()
+        Ok(by_ccy.into_iter().collect())
     }
 
     /// Edit a ledger row (Story 6.3, FR39): date, quantity, unit price, fees, rationale — never

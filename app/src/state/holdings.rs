@@ -17,8 +17,9 @@ use super::{
     MSG_HOLDING_INVALID_TICKER, MSG_HOLDING_LEDGER_UNREADABLE, MSG_HOLDING_NO_STUDY,
     MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_DELETED, MSG_HOLDING_STUDY_UNAVAILABLE,
     MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
-    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_ONLY_WRITE, MSG_STOP_STUDY_UNAVAILABLE,
-    holding_study_other_currency_message, portfolio_has_holdings_message, read_typed, watch_error,
+    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_FAILED, MSG_READ_ONLY_WRITE, MSG_STOP_SEEDED_FROM_COST,
+    MSG_STOP_STUDY_UNAVAILABLE, holding_study_other_currency_message,
+    portfolio_has_holdings_message, read_error, read_typed, watch_error,
 };
 
 /// One study a position can be added for (G1 review, Guy's decision 3) — the #81 link key
@@ -61,7 +62,7 @@ impl JournalState {
     }
 
     /// Fallible [`Self::active_portfolio`]: `Err` when the portfolios could not be read.
-    fn try_active_portfolio(&self) -> Result<Option<PortfolioItem>, String> {
+    pub(super) fn try_active_portfolio(&self) -> Result<Option<PortfolioItem>, String> {
         let portfolios = self.try_list_portfolios()?;
         if let Some(id) = self.active_portfolio_id
             && let Some(p) = portfolios.iter().find(|p| p.id == id)
@@ -154,7 +155,7 @@ impl JournalState {
         }
         let portfolios = {
             let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-            journal.list_portfolios().map_err(watch_error)?
+            journal.list_portfolios().map_err(read_error)?
         };
         if !portfolios.iter().any(|p| p.id == id) {
             return Err(MSG_PORTFOLIO_NOT_FOUND.to_string());
@@ -175,7 +176,7 @@ impl JournalState {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         Ok(journal
             .list_all_holdings()
-            .map_err(watch_error)?
+            .map_err(read_error)?
             .iter()
             .filter(|h| h.portfolio_id == id)
             .count())
@@ -183,8 +184,13 @@ impl JournalState {
 
     /// The active portfolio, creating the default one if the journal has none yet (the add-holding
     /// path). Mints an id/timestamp **only** when no portfolio exists (ADD15).
+    /// G1 P (G3 L4): a failed read of the portfolios is REFUSED by name — never taken for « no
+    /// portfolio yet » (which would create a second default one).
     fn active_portfolio_or_default(&mut self) -> Result<PortfolioItem, String> {
-        if let Some(p) = self.active_portfolio() {
+        if let Some(p) = self
+            .try_active_portfolio()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
+        {
             return Ok(p);
         }
         self.ensure_default_portfolio()
@@ -281,7 +287,7 @@ impl JournalState {
     /// `IdGen` id (which would shift a deterministic test sequence) and the common path is a pure read.
     fn ensure_default_portfolio(&mut self) -> Result<PortfolioItem, String> {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-        if let Some(existing) = journal.first_portfolio().map_err(watch_error)? {
+        if let Some(existing) = journal.first_portfolio().map_err(read_error)? {
             return Ok(existing);
         }
         let id = self.idgen.new_id();
@@ -400,7 +406,7 @@ impl JournalState {
             let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
             journal
                 .list_all_holdings()
-                .map_err(watch_error)?
+                .map_err(read_error)?
                 .into_iter()
                 .find(|h| h.id == id)
                 .ok_or_else(|| MSG_HOLDING_NOT_FOUND.to_string())?
@@ -543,12 +549,12 @@ impl JournalState {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         let ledger_backed = !journal
             .list_transactions(id)
-            .map_err(watch_error)?
+            .map_err(read_error)?
             .is_empty();
         if ledger_backed {
             let current = journal
                 .list_all_holdings()
-                .map_err(watch_error)?
+                .map_err(read_error)?
                 .into_iter()
                 .find(|h| h.id == id);
             if let Some(current) = current {
@@ -632,7 +638,8 @@ impl JournalState {
         &mut self,
         holding_id: Uuid,
         pct_input: &str,
-    ) -> Result<(), String> {
+        reference_currency: &str,
+    ) -> Result<Option<&'static str>, String> {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
@@ -642,6 +649,7 @@ impl JournalState {
             let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
             return journal
                 .set_trailing_stop(holding_id, None, None)
+                .map(|_| None)
                 .map_err(watch_error);
         }
         let pct = Some(self.read_typed(pct_input, MSG_HOLDING_INVALID_STOP)?)
@@ -652,19 +660,25 @@ impl JournalState {
             .into_iter()
             .find(|h| h.id == holding_id)
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
-        // Issue #81: match the study in the holding's own currency (a cross-currency study must
-        // not seed this stop level). G1 final review (L7): the cost basis seeds the level only for
-        // a TRUE absence — an unreadable study refuses by name. A legacy holding WITHOUT a declared
-        // currency links ticker-only, so no study price is known to be in its unit: its own cost
-        // basis seeds the level (the review screen's rule — never a cross-currency price).
-        let study_price = match holding.currency.as_deref() {
-            Some(currency) => self
-                .try_matched_study_in_currency(&holding.security_ticker, Some(currency))
-                .map_err(|_| MSG_STOP_STUDY_UNAVAILABLE.to_string())?
-                .and_then(|s| s.judgment.current_price)
-                .map(|m| m.as_decimal()),
-            None => None,
-        };
+        // The lot's ONE link ([`Self::try_lot_study`], D5): its study in its effective currency —
+        // a legacy lot's is the reference currency. G1 final review (L7): the cost basis seeds
+        // the level only for a TRUE absence — an unreadable study refuses by name. G1 P review
+        // (L-c): a legacy lot whose only study is in another currency is seeded from its cost
+        // basis, and that is STATED (the returned notice), never silent.
+        let study = self
+            .try_lot_study(
+                &holding.security_ticker,
+                holding.currency.as_deref(),
+                reference_currency,
+            )
+            .map_err(|_| MSG_STOP_STUDY_UNAVAILABLE.to_string())?;
+        let seeded_from_cost = study.is_none()
+            && self
+                .other_currency_hint(&holding.security_ticker, holding.currency.as_deref())
+                .is_some();
+        let study_price = study
+            .and_then(|s| s.judgment.current_price)
+            .map(|m| m.as_decimal());
         let reference_price = study_price
             .or_else(|| Decimal::from_str_exact(&holding.purchase_price).ok())
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
@@ -680,7 +694,46 @@ impl JournalState {
                 Some(&pct.normalize().to_string()),
                 Some(&level.normalize().to_string()),
             )
-            .map_err(watch_error)
+            .map_err(watch_error)?;
+        Ok(seeded_from_cost.then_some(MSG_STOP_SEEDED_FROM_COST))
+    }
+
+    /// The ACTIVE legacy lots (no declared currency) that carry a trailing stop, every portfolio —
+    /// their tickers, sorted, unique (G1 P review M3: named after a reference-currency change,
+    /// since their level was set in the former one). `Err` on a failed read.
+    pub fn legacy_tickers_with_stop(&self) -> Result<Vec<String>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let mut tickers: Vec<String> = journal
+            .list_all_holdings()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|h| {
+                h.sold_at.is_none() && h.currency.is_none() && h.trailing_stop_level.is_some()
+            })
+            .map(|h| h.security_ticker.trim().to_uppercase())
+            .collect();
+        tickers.sort();
+        tickers.dedup();
+        Ok(tickers)
+    }
+
+    /// The HINT for a legacy lot (no declared currency) that links no study (D5): the currency
+    /// of the newest same-ticker study in another currency, upper-cased — what the surfaces name
+    /// (« l'étude est en USD »). `None` for a declared lot, or when no study exists. Absence-blind
+    /// on purpose: a hint is never a claim, and a read failure is stated by the link's own read.
+    pub(crate) fn other_currency_hint(
+        &self,
+        ticker: &str,
+        declared_currency: Option<&str>,
+    ) -> Option<String> {
+        if declared_currency.is_some() {
+            return None;
+        }
+        self.study_id_for_ticker(ticker)
+            .and_then(|id| self.get_study(id))
+            .map(|s| s.native_currency.trim().to_uppercase())
     }
 
     /// Ratchet the trailing-stop level of every holding of `study_id`'s ticker against a fresh price
@@ -691,28 +744,28 @@ impl JournalState {
         &mut self,
         study_id: Uuid,
         price: Decimal,
+        reference_currency: &str,
     ) -> Result<(), String> {
         if self.read_only {
             return Ok(()); // a read-only refresh simply doesn't ratchet — never an error
         }
-        let Some((ticker, study_currency)) = self
-            .get_study(study_id)
-            .map(|s| (s.security_ticker, s.native_currency))
-        else {
+        let Some(ticker) = self.get_study(study_id).map(|s| s.security_ticker) else {
             return Ok(());
         };
         let targets: Vec<(Uuid, Decimal, Option<Decimal>)> = self
             .list_holdings()
             .into_iter()
-            // Issue #81: ratchet only holdings in the study's OWN currency — the study's price is in
-            // that currency, so a cross-currency same-ticker holding must not be ratcheted with it.
-            // G1 final review (the review screen's rule): a legacy holding that declares NO currency
-            // is not ratcheted either — the price's currency cannot be told to match its stop's.
+            // Issue #81 + D5 (G1 P review H1): ratchet only the holdings whose ONE link
+            // ([`Self::try_lot_study`] — the study in the lot's effective currency, a legacy lot's
+            // being the reference) IS this study; any other same-ticker study, whatever its
+            // currency, never moves the stop.
             .filter(|h| {
-                h.security_ticker.eq_ignore_ascii_case(&ticker)
-                    && h.currency
-                        .as_deref()
-                        .is_some_and(|c| c.eq_ignore_ascii_case(&study_currency))
+                super::same_ticker(&h.security_ticker, &ticker)
+                    && self.lot_study_id(
+                        &h.security_ticker,
+                        h.currency.as_deref(),
+                        reference_currency,
+                    ) == Some(study_id)
             })
             .filter_map(|h| {
                 let pct = h
@@ -832,6 +885,41 @@ pub(crate) fn unstopped_exposure_by_currency(
             )
         })
         .collect()
+}
+
+/// How a lot's trailing stop stands against its study's price — THE rule shared by the register
+/// (display, trigger, ratchet, seed), the trigger sale's price and the review screen + its PDF.
+/// Owner decision D5 (Guy, 2026-09-25): a legacy lot without a declared currency is PRESUMED in
+/// the reference currency (as everywhere else, [`effective_currency`]); its stop is compared,
+/// ratcheted and seeded only against a study price in that currency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopBasis {
+    /// The study's price is in the stop's unit: compared, ratcheted, a seed.
+    Comparable,
+    /// A lot WITHOUT a declared currency whose only study (the ticker-only HINT — it links
+    /// none, [`JournalState::try_lot_study`]) is in another currency than the reference: not
+    /// compared — both facts stated (no currency; the study's).
+    NoCurrencyOtherStudy(String),
+    /// A declared lot's study in another currency (the currency-aware link makes it
+    /// unreachable): not compared, nothing to state beyond the absent comparison.
+    OtherCurrency,
+}
+
+/// [`StopBasis`] of a lot (`lot_currency` as DECLARED, `None` for a legacy lot) against a study
+/// priced in `study_currency`, the reference currency standing in for the undeclared one (D5).
+pub(crate) fn stop_basis(
+    lot_currency: Option<&str>,
+    reference_currency: &str,
+    study_currency: &str,
+) -> StopBasis {
+    let unit = lot_currency.unwrap_or(reference_currency).trim();
+    if unit.eq_ignore_ascii_case(study_currency.trim()) {
+        StopBasis::Comparable
+    } else if lot_currency.is_none() {
+        StopBasis::NoCurrencyOtherStudy(study_currency.trim().to_uppercase())
+    } else {
+        StopBasis::OtherCurrency
+    }
 }
 
 /// A holding's **effective currency** (Story 6.2, FR38): its own `currency` when set, else the
