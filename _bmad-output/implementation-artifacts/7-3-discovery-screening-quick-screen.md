@@ -128,7 +128,7 @@ Guy's (2026-09-25).
 - [x] [Review][Patch] A quick-screen result is not tied to its request: Enter bypasses the `!fetching` / currency guard (double fetch, empty currency); a late result replaces a study or criblage examination [app/src/wiring/quick_screen.rs:185-220, app/ui/screens/dashboard.slint:406-416]
 - [x] [Review][Patch] « Créer l'étude »: an `apply_provider_refresh` error shows the refusal AND the success notice, and opens an empty study [app/src/wiring/quick_screen.rs:399-407]
 - [x] [Review][Patch] The reader's fields (reasons, answers, objective) carry over to the next examination and its PDF — answers reset on a new examination; the objective stays for the session (spec Q1) [app/src/wiring/quick_screen.rs:49-51,112,240-246]
-- [ ] [Review][Patch] Examination and criblage sessions survive a dossier switch / restore [app/src/wiring/journal.rs:130-145,446-449]
+- [x] [Review][Patch] Examination and criblage sessions survive a dossier switch / restore [app/src/wiring/journal.rs:130-145,446-449]
 - [x] [Review][Patch] Quota stop only when the chain's FINAL error is a quota one [app/src/fetch.rs:402]
 - [x] [Review][Patch] `plan()` swallows read failures (empty list « 0 valeur(s) »; a studied ticker fetched again, spending quota) [app/src/wiring/screening.rs:127-133]
 - [x] [Review][Patch] The #109 price-only-year filter applies to the fetch path only; an empty-after-filter series passes the « no data » refusal — the empty-after-filter case fixed (PR A); the study path keeps its saved years (the apply path already drops the price-only row, so a saved study does not carry it) [app/src/wiring/quick_screen.rs:139-168,207, app/src/wiring/screening.rs:110]
@@ -167,3 +167,6 @@ quarterly box below the chart), plus the shared engine fixes for 7.1 (every head
 never orphaned) and 7.2 (a row and its note kept together) — checked off in those records once the
 PRs are merged. Figures are never cut: a figure too wide is shrunk (floor 6 pt), printed whole.
 Still open, pre-existing (5.6): the study PDF ignores the number locale (« 2.9 % »).
+
+Fixed in PR G (G1, branch `fix/g1-g-dossier-switch`): every dossier change ends the examination
+(fetch superseded, slot emptied, screen closed) and the criblage (run stopped, card hidden).

@@ -127,6 +127,7 @@ impl JournalState {
                     journal_id: journal.id(),
                     logical_version,
                     sync_warning: matches!(mode, JournalMode::Delete),
+                    unchanged: false,
                 };
                 self.read_only = journal.is_read_only();
                 self.journal = Some(journal);
@@ -165,6 +166,7 @@ impl JournalState {
                 journal_id: self.journal_id().unwrap_or_else(Uuid::nil),
                 logical_version: self.logical_version_or_zero(),
                 sync_warning: matches!(sync_mode_for(path), JournalMode::Delete),
+                unchanged: true,
             });
         }
         let prev = self.path.clone();
@@ -204,6 +206,7 @@ impl JournalState {
                     journal_id: journal.id(),
                     logical_version,
                     sync_warning: matches!(mode, JournalMode::Delete),
+                    unchanged: false,
                 };
                 self.read_only = journal.is_read_only();
                 self.journal = Some(journal);

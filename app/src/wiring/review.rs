@@ -598,7 +598,11 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
 }
 
 pub(crate) fn wire_review(ui: &MainWindow, s: &Session) {
-    let Session { journal_state, .. } = s;
+    let Session {
+        journal_state,
+        quick_screen,
+        ..
+    } = s;
     {
         // « Exporter PDF » — render from the pushed rows, native save picker, outcome in the slot.
         let ui_weak = ui.as_weak();
@@ -636,11 +640,15 @@ pub(crate) fn wire_review(ui: &MainWindow, s: &Session) {
     {
         // « Ouvrir l'étude » — the one open rail (Études + invoke_open_study), with the arrival
         // re-render every navigation owes its destination (#94): Études re-derives its list
-        // before the study opens over it.
+        // before the study opens over it. G1 G review: a comparison or an examination left open
+        // over Études would hide the study — they close first, through their own close paths.
         let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let quick_screen = Rc::clone(quick_screen);
         ui.global::<Review>().on_open_study(move |id| {
             let ui = ui_weak.unwrap();
             if Uuid::parse_str(&id).is_ok() {
+                crate::wiring::close_studies_overlays(&ui, &journal_state.borrow(), &quick_screen);
                 ui.set_current_screen(0);
                 ui.invoke_screen_activated(0);
                 ui.global::<Studies>().invoke_open_study(id);

@@ -132,6 +132,9 @@ pub struct OpenOutcome {
     /// `true` when the journal lives in a detected sync folder and was opened in the sync-safe
     /// (`DELETE`) mode — the UI surfaces the warning + the recommended pattern (ADD8).
     pub sync_warning: bool,
+    /// `true` when the target was the journal ALREADY open (re-selecting it is a no-op): the
+    /// dossier did not change, so the session it carries must not be reset (G1 G review).
+    pub unchanged: bool,
 }
 
 impl JournalState {
@@ -266,6 +269,18 @@ impl JournalState {
     /// True when the open journal is read-only (newer-schema file).
     pub fn is_read_only(&self) -> bool {
         self.read_only
+    }
+
+    /// The up-front refusal of a rail that would WRITE the open journal (G1 G, on-screen check):
+    /// on a read-only journal, « Restaurer une sauvegarde… » and « Importer un dossier… » refuse
+    /// at once with the reason — before any file picker or confirm (the write guards behind them
+    /// stay as second guards).
+    pub fn refuse_if_read_only(&self) -> Result<(), &'static str> {
+        if self.read_only {
+            Err(MSG_READ_ONLY_WRITE)
+        } else {
+            Ok(())
+        }
     }
 
     /// The open journal's identity (UUID), or `None` when no journal is open. Used to name a

@@ -201,6 +201,13 @@ pub(crate) fn clear_comparison(ui: &MainWindow) {
     sync_picker(&c);
 }
 
+/// Close the comparison screen (the picks and the table stay: « Retour » then « Comparer »
+/// again finds them) — « Retour » and the nav rail's « Études » (G1 G: one close path). The
+/// caller re-derives the studies list.
+pub(crate) fn close_screen(ui: &MainWindow) {
+    ui.global::<Studies>().set_compare_open(false);
+}
+
 /// One picked study: its id (the key), the label shown for it, and the « · n » ordinal its label
 /// carries (`None` when it needs none).
 pub(crate) struct Pick {
@@ -385,7 +392,7 @@ pub(crate) fn wire_comparison(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Comparison>().on_close(move || {
             let ui = ui_weak.unwrap();
-            ui.global::<Studies>().set_compare_open(false);
+            close_screen(&ui);
             crate::wiring::studies::refresh_studies(&ui, &journal_state.borrow());
         });
     }
