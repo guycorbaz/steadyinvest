@@ -162,23 +162,9 @@ reviewed PR (G3) or listed under Defer.
 - [x] [Review][Patch] Studies read failure shown as « aucune étude » in the position dialog (#95) [app/src/wiring/holdings.rs:211-221,861-882]
 - [x] [Review][Patch] « Tout non classé » band compares list lengths (0 == 0 when concentration is unavailable) [app/ui/screens/portfolio.slint:385]
 - [x] [Review][Patch] Portfolio rename with an unparsable id reports success; stop / sell return false without a cause [app/src/wiring/holdings.rs:138-145]
-- [ ] [Review][Patch] A refused dossier switch clears the open dossier's location status [app/src/wiring/journal.rs:163-166]
+- [x] [Review][Patch] A refused dossier switch clears the open dossier's location status [app/src/wiring/journal.rs:163-166]
 - [x] [Review][Patch] Adoption chips (#213/#214): no year shown, may come from a very old year, est-low EPS ≤ 0 proposed; candidate (a) has no positivity guard; (a)/(d) overflow names the wrong reason [app/src/viewmodel/engine.rs:380-381,448-470, core/src/ssg/risk_reward.rs:34-38]
 - [x] [Review][Patch] Orphan confirm properties and dead code (`study-action-confirm-visible`, `import-confirm`, `restore-confirm`, `Dialog.notice`, `LabeledDropdown.changed`, `NARROW_NBSP` misnamed) [app/ui/state.slint:784,900,908]
-- [ ] [Review][Patch] Tests: #217 per-share rebasing coverage lost in `eodhd_mapping.rs`; no n=3 / fractional split test [ingestion/tests/eodhd_mapping.rs]
-- [ ] [Review][Patch] `refuse()` overwrites a parked confirm (pending study action / import / restore stay armed), routes unrelated async refusals into the open form's field error, overwrites an unread notice [app/src/wiring/dialog.rs:14-23]
-- [ ] [Review][Patch] Focus not trapped in the modal; dropdown-first forms (position, FX rate) get no initial focus → Esc dead, Enter re-fires the hidden opener [app/ui/components/modal_dialog.slint:193,291,514]
-- [ ] [Review][Patch] Dropdown: no keyboard selection, no max height / no scroll (tickers beyond the window unreachable) [app/ui/components/dropdown.slint:30-83]
-- [ ] [Review][Patch] Dividend transaction edit uses the buy/sell labels (« Frais (vide = 0) » vs the withholding default) [app/ui/screens/portfolio.slint:681, modal_dialog.slint:340-381]
-- [ ] [Review][Patch] « Renommer le portefeuille » opens empty (spec: prefilled) [app/ui/screens/portfolio.slint:135]
-- [ ] [Review][Patch] Deleting a portfolio with holdings confirms, then refuses; the refusal names no count (spec §5.1) [app/ui/screens/portfolio.slint:142, app/src/state/messages.rs:331]
-- [ ] [Review][Patch] No « Dossier en lecture seule » band in Portefeuille (buttons only greyed) [app/ui/screens/portfolio.slint]
-- [ ] [Review][Patch] Studies read failure shown as « aucune étude » in the position dialog (#95) [app/src/wiring/holdings.rs:211-221,861-882]
-- [ ] [Review][Patch] « Tout non classé » band compares list lengths (0 == 0 when concentration is unavailable) [app/ui/screens/portfolio.slint:385]
-- [ ] [Review][Patch] Portfolio rename with an unparsable id reports success; stop / sell return false without a cause [app/src/wiring/holdings.rs:138-145]
-- [x] [Review][Patch] A refused dossier switch clears the open dossier's location status [app/src/wiring/journal.rs:163-166]
-- [ ] [Review][Patch] Adoption chips (#213/#214): no year shown, may come from a very old year, est-low EPS ≤ 0 proposed; candidate (a) has no positivity guard; (a)/(d) overflow names the wrong reason [app/src/viewmodel/engine.rs:380-381,448-470, core/src/ssg/risk_reward.rs:34-38]
-- [ ] [Review][Patch] Orphan confirm properties and dead code (`study-action-confirm-visible`, `import-confirm`, `restore-confirm`, `Dialog.notice`, `LabeledDropdown.changed`, `NARROW_NBSP` misnamed) [app/ui/state.slint:784,900,908]
 - [x] [Review][Patch] Tests: #217 per-share rebasing coverage lost in `eodhd_mapping.rs`; no n=3 / fractional split test [ingestion/tests/eodhd_mapping.rs]
 - [x] [Review][Defer] Focus taken through a 30 ms timer (Slint 1.17 workaround) [app/ui/components/action_button.slint] — deferred, cross-cutting
 - [x] [Review][Defer] Same-day ledger rows ordered by entry time → a back-dated buy after a same-day sale is refused as an oversell [persistence/src/transactions.rs:464,516] — deferred, design of day-granular dates
@@ -200,3 +186,31 @@ pinned on the assumption that EODHD restates the balance-sheet share counts — 
 ONE real NVDA.US fetch with Guy present (G5).
 Fixed in PR G (G1, branch `fix/g1-g-dossier-switch`): a refused switch recomputes the open
 dossier's own status (never blanks it, never keeps a stale reclaim offer).
+
+### Review Findings — G1 final review, area 1: dialogs, portfolio, input (2026-09-25, #237)
+
+Decisions are Guy's (2026-09-25).
+
+- [x] [Review][Decision] H1 « Retirer » on a position with ledger transactions confirmed a ledger deletion, then was refused with English text under « L'enregistrement a échoué » — **refused UP FRONT, no confirm; the refusal names the cause in French (its transactions must be deleted first); typed check (`holding_has_transactions`), never string matching** [app/ui/screens/portfolio.slint, persistence/src/holdings.rs, app/src/state/mod.rs]
+- [x] [Review][Decision] M2 the ledger « Vente » promised « vide = toute la position » while the form and the rail refused an empty quantity — **promise removed; the quantity is required and its absence names itself** [app/ui/components/modal_dialog.slint, app/src/state/ledger.rs]
+- [x] [Review][Patch] M3 portfolio rate notes (and the candidates' rates) spelled a raw « 0.8 » [app/src/wiring/holdings.rs, app/src/wiring/replacement.rs]
+- [x] [Review][Patch] M4 ledger rails named « quantité et prix d'achat… aucune position » for fees, withholding, gross, overflow [app/src/state/ledger.rs]
+- [x] [Review][Patch] M5 read failures shown as empty states: holdings, sold positions, portfolios, ledger, watchlist, FX rates [app/src/wiring/{holdings,watchlist,fx}.rs]
+- [x] [Review][Patch] L6 watchlist link read failure → « aucune étude »; « Étude : » dangling [app/src/wiring/watchlist.rs]
+- [x] [Review][Patch] L7 trigger sell / trailing stop silently used the cost basis when the study read failed [app/src/state/{ledger,holdings}.rs]
+- [x] [Review][Patch] L8 a case-only ticker edit cleared the trailing stop [persistence/src/holdings.rs]
+- [x] [Review][Patch] L9 trigger-sell Enter on a non-number had no visible effect [app/src/wiring/holdings.rs]
+- [x] [Review][Patch] L10 the ledger-backed guard compared strings (« 5,0 » vs « 5 ») [app/src/state/holdings.rs]
+- [x] [Review][Patch] L11 an edit / a portfolio switch cleared the in-flight refresh banner (F4) [app/src/wiring/holdings.rs]
+- [x] [Review][Decision] L12 a restore proceeded without its safety snapshot / ignored a checkpoint failure — **refused, naming the cause** [app/src/state/restore.rs]
+- [x] [Review][Patch] L13 raw English error text appended to French refusals (`watch_error`, restore) [app/src/state/{mod,restore}.rs]
+- [x] [Review][Patch] L14 ledger display order differed from the replay order on a full tie [persistence/src/transactions.rs]
+- [x] [Review][Patch] L15 this record carried the G1 catch-up items twice, checked and unchecked — merged
+- [x] [Review][Patch] (from the review branch's G3) a legacy lot without a declared currency had its stop compared to / ratcheted by a price of unknown currency [app/src/wiring/holdings.rs, app/src/state/holdings.rs]
+
+Fixed in PR K (G1, branch `fix/g1-k-portfolio-ledger`): every item above. Beyond the letter: a
+failed rollback after a restore keeps the pre-restore snapshot on disk (it is then the only copy);
+a legacy lot's stop is seeded from its cost basis; « Lier une étude » names an unreadable
+watchlist. Not in scope and left as found: `watch_error` still words a failed READ on the write
+rails as « L'enregistrement a échoué. »; the reinvestable-cash panel still swallows its read;
+a legacy lot's trigger-sale price still comes from its ticker-only study.
