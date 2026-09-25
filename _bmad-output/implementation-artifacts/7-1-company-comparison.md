@@ -113,3 +113,8 @@ none is orphaned at a page foot (the item checked above; `report/src/pdf.rs`,
 - [x] [Review][Patch] Story record stale: the PDF header item fixed but unchecked; AC1 rows 29 / 30 wording [this file]
 
 Fixed in the G1 final-review branch `fix/g1-m-comparison-screen`.
+
+G3 review of the final-review branch: when PTP and ROE spans differ, the study screen's §2 title
+stays « Moyenne » and each average cell names its span (« Moy. a / b ans » read as « a of b »);
+the study PDF reads core's span counts. The « sur n ans » cells are tested through
+`name_average_spans` with a three-year study.

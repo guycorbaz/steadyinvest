@@ -184,3 +184,9 @@ Fixed in PR G (G1, branch `fix/g1-g-dossier-switch`): every dossier change ends 
 - [x] [Review][Patch] Nits: `MIN_LADDER_YEARS` unused with a misleading doc (removed); a French cause hard-coded in the rail (now `MSG_FETCH_WORKER_GONE`, also used by the two fetch rails) [core/src/checklist.rs:23, app/src/wiring/quick_screen.rs:443]
 
 Fixed in the G1 final-review branch `fix/g1-m-comparison-screen`.
+
+G3 review of the final-review branch: the kept « Examiner » outcome has one lifecycle (cleared by
+a new request and by any examination shown, replaced by a newer kept one, opened only over the
+list); a failure arriving over another screen is kept and named on the card, not a dialog; the
+criblage says which ladder is short or absent and why a rate reads « — »; a number-format change
+re-spells the objective.
