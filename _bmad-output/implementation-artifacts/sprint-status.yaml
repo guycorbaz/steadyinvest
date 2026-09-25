@@ -682,6 +682,9 @@ development_status:
   7-5-pdf-print-other-forms: done
   # 2026-09-24: retro held (epic-7-retro-2026-09-24.md) — G1 catch-up review + G2 Epic-8 framing block Epic 8.
   epic-7-retrospective: done
+  # 2026-09-25: G1 catch-up review (#237) of 7.0–7.3 / 7.5 — 3 layers × 5 groups; 10 decisions taken by
+  #             Guy; findings written to the 7.0–7.3 records (7.5 under 7.3), defers to deferred-work.md.
+  #             Stories stay done (epic closed at the retro); the fixes land as themed reviewed PRs under #237.
 
   # ── Epic 8: Read-only AI clerk-of-memory & MCP façade [V] (story outlines) ──
   epic-8: backlog

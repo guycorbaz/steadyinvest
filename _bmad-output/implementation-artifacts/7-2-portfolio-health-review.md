@@ -76,3 +76,28 @@ so that a portfolio review is one screen of facts instead of a walk through ever
   2,2:1 · valeur relative 124,9 % » and « Signaux (5) : … », NVDA.US « Aucune étude liée :
   l'étude NVDA.US est en USD et la position en CHF »; « Aucune étude à revoir »; the counts.
 - Gates: fmt clean, clippy `-D warnings` clean, `cargo test --all` green (see the PR).
+
+### Review Findings — G1 catch-up review (2026-09-25, #237)
+
+3-layer adversarial review of PR #225, checked against main 73a7b19. Decisions are Guy's
+(2026-09-25).
+
+- [x] [Review][Decision] The review's own « seuil − 5 » murmur, applied to concentration, sectors and currencies (an all-CHF dossier is always warned), fallback literal 50 — **apply the spec: concentration = `core::risk::concentration_flagged` (as Portefeuille), sectors at/over the threshold, currencies no murmur, fallback through the config default** [app/src/wiring/review.rs:178-182]
+- [x] [Review][Decision] PDF: « Études à revoir » does not start page 3; signals printed without their count — **page flow ratified; « Signaux (n) » added** [report/src/review.rs]
+- [ ] [Review][Patch] PDF prints stale rows or « Aucune donnée. » for a block that is « indisponible » on screen; no unavailable flags in `PortfolioReview` [app/src/wiring/review.rs:206,230,382-480, report/src/review.rs:60,310]
+- [ ] [Review][Patch] PDF loses the named absences: `global_missing`, `concentration_missing`, per-position missing pairs, the other-currency cause of « aucune étude » [app/src/wiring/review.rs:428-455, report/src/review.rs:26,357]
+- [ ] [Review][Patch] An unconsolidated bank reads « non classé (étude indisponible) » [app/src/wiring/review.rs:247-257]
+- [ ] [Review][Patch] A history read failure falls back to the creation date (false « plus de 12 mois ») [app/src/state/review.rs:246-256]
+- [ ] [Review][Patch] A normalize failure is worded as a read failure; a global total absent without a named pair shows nothing; shares blocked by a missing global pair don't name it; only the first missing pair is named [app/src/state/review.rs:234, app/src/wiring/review.rs:132-158,247-285]
+- [ ] [Review][Patch] Study line dangles: « prix actuel :  CHF · H/B  · valeur relative : » [app/ui/screens/review.slint:205-207]
+- [ ] [Review][Patch] Trailing stop and breach taken from `held[0]` only (other banks ignored) [app/src/state/review.rs:202,275-288]
+- [ ] [Review][Patch] A legacy holding with no currency is matched differently from the register [app/src/state/review.rs:203,219]
+- [ ] [Review][Patch] Threshold and size targets shown as raw config strings beside formatted shares (locale rule) [app/src/wiring/review.rs:107,130-156,425]
+- [ ] [Review][Patch] One due reason per study (« age » hides « withheld » / « low confidence ») [app/src/state/review.rs:305]
+- [ ] [Review][Patch] Other-currency study lookup is absence-blind (#95) [app/src/state/review.rs:223]
+- [ ] [Review][Patch] Share-row labels keyed by string value (a bank or sector named « small » reads « Petite »); PDF unclassified `MissingRate` rows lose « non classé » [app/ui/screens/review.slint:65-71, report/src/review.rs:270-297]
+- [ ] [Review][Patch] Export notice never cleared (survives a dossier switch) [app/src/wiring/review.rs:514]
+- [ ] [Review][Patch] « Ouvrir l'étude » skips `invoke_screen_activated` (#94) [app/src/wiring/review.rs:1158-1163]
+- [ ] [Review][Patch] PDF: a position's note line can be split from its row by a page break [report/src/pdf.rs:1166-1184, report/src/review.rs:477]
+- [ ] [Review][Patch] Zone / verdict logic duplicated from `viewmodel::engine`; dead-code silencers (`let _ = …`) [app/src/state/review.rs:135, app/src/wiring/review.rs:542, report/src/review.rs:519-520]
+- [ ] [Review][Patch] Tests: the 12-month path, a missing pair, two banks, a row with signals, parity with Portefeuille, header repeat [app/src/state/tests.rs, report/src/review.rs]
