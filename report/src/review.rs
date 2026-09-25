@@ -75,9 +75,12 @@ pub struct ReviewLine {
     pub stop_breached: bool,
     /// The breached stop(s) among `stop` (G1 review: which level, which bank).
     pub stop_breached_levels: String,
-    /// The stop(s) of a lot without a declared currency — unit unknown, never compared with the
-    /// price (G1 final review); `""` when none.
+    /// The stop(s) of a lot without a declared currency (presumed in the reference currency, D5)
+    /// whose study is in ANOTHER currency — not compared with the price; `""` when none.
     pub stop_no_currency: String,
+    /// The currency (or currencies, joined) of those lots' studies — the second fact the line
+    /// states.
+    pub stop_no_currency_study: String,
     /// The stop(s) of a lot whose study could not be read — never compared (G3 review).
     pub stop_unreadable: String,
     /// `stop` | `sell` | `""`.
@@ -223,7 +226,8 @@ const DATA_NEVER: &str = "données : pas encore rafraîchies";
 const FLAGS_LABEL: &str = "Signaux";
 const STOP_LABEL: &str = "Seuil suiveur :";
 const STOP_BREACHED: &str = "sous le seuil";
-const STOP_NO_CURRENCY: &str = "non comparé au prix : le lot n'a pas de devise renseignée";
+const STOP_NO_CURRENCY: &str =
+    "non comparé au prix : le lot n'a pas de devise renseignée et l'étude est en";
 const STOP_UNREADABLE: &str = "non comparé au prix : l'étude du lot n'a pas pu être lue";
 const TRIGGER_STOP: &str = "Le prix a atteint le seuil suiveur.";
 const TRIGGER_SELL: &str = "Le prix est dans la zone haute.";
@@ -746,8 +750,8 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             }
             if !l.stop_no_currency.is_empty() {
                 extra.push(format!(
-                    "{STOP_LABEL} {} {STOP_NO_CURRENCY}",
-                    l.stop_no_currency
+                    "{STOP_LABEL} {} {STOP_NO_CURRENCY} {}",
+                    l.stop_no_currency, l.stop_no_currency_study
                 ));
             }
             if !l.stop_unreadable.is_empty() {
@@ -1080,10 +1084,15 @@ mod tests {
     #[test]
     fn a_stop_without_a_currency_says_why_it_is_not_compared() {
         let mut r = sample();
-        r.positions[0].stop_no_currency = "63,00 (UBS)".into();
+        r.positions[0].stop_no_currency = "63,00 CHF (UBS)".into();
+        r.positions[0].stop_no_currency_study = "USD".into();
         let bytes = render_portfolio_review(&r);
-        assert!(carries(&bytes, "63,00 (UBS)"));
+        assert!(carries(&bytes, "63,00 CHF (UBS)"));
         assert!(carries(&bytes, "le lot n'a pas"), "the LOT has no currency");
+        assert!(
+            carries(&bytes, "est en USD"),
+            "D5: and the study's currency"
+        );
         // G3 review: a lot whose study could not be read — its cause, too.
         let mut r = sample();
         r.positions[0].flags = String::new();

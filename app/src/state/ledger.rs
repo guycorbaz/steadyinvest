@@ -456,10 +456,26 @@ impl JournalState {
         // Issue #81: match a study in the holding's own currency — never price a CHF sale from a
         // same-ticker USD study. G1 final review (L7): the cost basis stands in only for a TRUE
         // absence (no study, no price) — a study that could not be READ refuses the sale by name,
-        // never records it silently at the cost basis.
-        let unit_price = self
+        // never records it silently at the cost basis. D5 ([`super::stop_basis`], the stop's
+        // rule): a legacy lot without a declared currency is presumed in the reference currency —
+        // its ticker-only study in ANOTHER currency never prices the sale (nor does the cost basis
+        // stand in silently): refused, both facts named; the ledger form sells at a typed price.
+        let study = self
             .try_matched_study_in_currency(&holding.security_ticker, holding.currency.as_deref())
-            .map_err(|_| MSG_SELL_STUDY_UNAVAILABLE.to_string())?
+            .map_err(|_| MSG_SELL_STUDY_UNAVAILABLE.to_string())?;
+        if let Some(s) = &study
+            && let super::StopBasis::NoCurrencyOtherStudy(study_currency) = super::stop_basis(
+                holding.currency.as_deref(),
+                reference_currency,
+                &s.native_currency,
+            )
+        {
+            return Err(super::sell_study_other_currency_message(
+                &study_currency,
+                reference_currency,
+            ));
+        }
+        let unit_price = study
             .and_then(|s| s.judgment.current_price)
             .map(|m| m.as_decimal().to_string())
             .unwrap_or_else(|| holding.purchase_price.clone());

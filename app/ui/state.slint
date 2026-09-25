@@ -1127,7 +1127,8 @@ export struct ReviewPositionRow {
     stop: string,           // every lot's stop: level, currency (when the lot declares one), bank — joined (data)
     stop-breached: bool,
     stop-breached-levels: string, // the breached stop(s) among `stop` (which level, which bank)
-    stop-no-currency: string, // the stop(s) of a lot without a declared currency: unit unknown, never compared
+    stop-no-currency: string, // D5: the stop(s) of a lot without a declared currency whose study is in another currency: not compared
+    stop-no-currency-study: string, // …and that study's currency (or currencies, joined)
     stop-unreadable: string,  // the stop(s) of a lot whose study could not be read: never compared
     trigger: string,        // stop | sell | ""
     mixed: bool,            // the lots do not all link to the same study
@@ -1439,9 +1440,10 @@ export struct HoldingRow {
     stop-breached: bool,
     // The current price's margin above the stop level (display string; "" when breached or unknown).
     stop-distance: string,
-    // G1 final review: a legacy lot with NO declared currency has a stop that is never compared
-    // to (nor ratcheted by) a price whose currency cannot be told to match — stated, no trigger.
-    stop-uncompared: bool,
+    // D5 (Guy, 2026-09-25): a legacy lot with NO declared currency is presumed in the reference
+    // currency; linked to a study in ANOTHER currency (named here, "" otherwise) its stop is not
+    // compared (nor ratcheted) — both facts stated, no stop trigger.
+    stop-uncompared-study: string,
     // Story 4.7 (FR46/FR47): the neutral trigger this holding fires — "stop" (breached, takes
     // priority), "sell" (in its Sell zone), or "" (none). `dismissed` is true while the user has
     // hidden this trigger's action panel for the session (transient; never persisted).

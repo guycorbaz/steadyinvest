@@ -315,6 +315,17 @@ pub const MSG_DIVIDEND_INVALID_WITHHOLDING: &str = "La retenue à la source doit
 /// name, never silently falls back to the cost basis.
 pub const MSG_SELL_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix actuel de la vente est inconnu ; rien n'a été enregistré.";
 pub const MSG_STOP_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix de référence du seuil est inconnu ; rien n'a été enregistré.";
+/// D5 (Guy, 2026-09-25): a position without a declared currency is presumed in the reference
+/// currency — its linked study in another currency never prices the trigger sale. Template: `{s}`
+/// the study's currency, `{r}` the reference currency.
+pub const MSG_SELL_STUDY_OTHER_CURRENCY: &str = "La position n'a pas de devise renseignée (présumée en {r}) et l'étude liée est en {s} : son prix ne sert pas à la vente ; rien n'a été enregistré.";
+
+/// [`MSG_SELL_STUDY_OTHER_CURRENCY`] filled.
+pub fn sell_study_other_currency_message(study_currency: &str, reference_currency: &str) -> String {
+    MSG_SELL_STUDY_OTHER_CURRENCY
+        .replace("{s}", study_currency)
+        .replace("{r}", reference_currency)
+}
 /// Raised when the transaction date is not a plausible AAAA-MM-JJ; nothing is written.
 pub const MSG_LEDGER_INVALID_DATE: &str =
     "La date doit être au format AAAA-MM-JJ ; rien n'a été enregistré.";
@@ -939,6 +950,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_DIVIDEND_INVALID_WITHHOLDING,
     MSG_SELL_STUDY_UNAVAILABLE,
     MSG_STOP_STUDY_UNAVAILABLE,
+    MSG_SELL_STUDY_OTHER_CURRENCY,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
     MSG_LEDGER_UNKNOWN_KIND,

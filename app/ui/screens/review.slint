@@ -280,7 +280,7 @@ export component ReviewScreen inherits Rectangle {
                         // a lot without a declared currency, a lot whose study could not be read.
                         if row.stop-no-currency != "": StatusBand {
                             icon: "◦";
-                            text: @tr("Seuil suiveur {} non comparé au prix : le lot n'a pas de devise renseignée.", row.stop-no-currency);
+                            text: @tr("Seuil suiveur {} non comparé au prix : le lot n'a pas de devise renseignée et l'étude est en {}.", row.stop-no-currency, row.stop-no-currency-study);
                         }
                         if row.stop-unreadable != "": StatusBand {
                             icon: "⊘";

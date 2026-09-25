@@ -571,8 +571,8 @@ export component PortfolioScreen inherits Rectangle {
                                 if row.has-stop && !row.stop-breached && row.stop-distance != "": CaptionLine {
                                     text: @tr("à {} {} au-dessus", row.stop-distance, row.currency);
                                 }
-                                if row.has-stop && row.stop-uncompared: CaptionLine {
-                                    text: @tr("non comparé au prix : le lot n'a pas de devise renseignée");
+                                if row.has-stop && row.stop-uncompared-study != "": CaptionLine {
+                                    text: @tr("non comparé au prix : le lot n'a pas de devise renseignée et l'étude est en {}", row.stop-uncompared-study);
                                 }
                             }
                         }

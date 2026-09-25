@@ -86,9 +86,8 @@ pub struct ReviewStudyFacts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StopFact {
     pub level: Decimal,
-    /// The lot's DECLARED currency — the stop's unit. `None` for a legacy lot that carries no
-    /// currency: the stop's unit cannot be established, so it is never labelled with one (not
-    /// even the reference currency) and never compared with a price (G1 final review).
+    /// The stop's unit: the lot's EFFECTIVE currency — a legacy lot without a declared one is
+    /// presumed in the reference currency (D5, Guy 2026-09-25).
     pub currency: Option<String>,
     /// The bank (portfolio name) holding the lot.
     pub bank: String,
@@ -103,10 +102,11 @@ pub struct StopFact {
 }
 
 /// Why a lot's stop is not compared with a price.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopUncompared {
-    /// The lot declares no currency: the stop's unit is unknown.
-    NoCurrency,
+    /// The lot declares no currency (presumed in the reference, D5) and its study is in
+    /// ANOTHER currency — named, so the row states both facts.
+    NoCurrency { study_currency: String },
     /// The lot's study could not be read (#95).
     StudyUnreadable,
 }
@@ -297,38 +297,40 @@ fn due_reasons(
     reasons
 }
 
-/// One lot's stop against its own study: breached only when the price is known AND in the
-/// stop's currency (never a cross-currency comparison — a legacy lot may match a study in
-/// another currency ticker-only). A legacy lot with NO declared currency (`lot_currency` is
-/// `None`) has a stop of unknown unit: never labelled with a currency it does not carry, never
-/// compared (G1 final review); a lot whose study could not be read (`study_unreadable`) is not
-/// compared either — both causes are carried in [`StopFact::uncompared`] for the row to state
-/// (G3 review). `None` when the lot carries no (parsable) stop.
+/// One lot's stop against its own study — the register's rule, [`super::stop_basis`] (D5, Guy
+/// 2026-09-25): breached only when the price is known AND in the stop's unit. A legacy lot with
+/// NO declared currency (`lot_currency` is `None`) is presumed in the reference currency: compared
+/// against a reference-currency study, NOT against a study in another currency — that cause is
+/// carried with the study's currency in [`StopFact::uncompared`]; a lot whose study could not be
+/// read (`study_unreadable`) is not compared either, its cause carried too (G3 review). `None`
+/// when the lot carries no (parsable) stop.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn lot_stop(
     level: Option<&str>,
     lot_currency: Option<&str>,
+    reference_currency: &str,
     bank: &str,
     study_currency: Option<&str>,
     price: Option<Decimal>,
     study_unreadable: bool,
 ) -> Option<StopFact> {
     let level = Decimal::from_str_exact(level?).ok()?;
-    let uncompared = if lot_currency.is_none() {
-        Some(StopUncompared::NoCurrency)
-    } else if study_unreadable {
+    let basis = study_currency.map(|c| super::stop_basis(lot_currency, reference_currency, c));
+    let uncompared = if study_unreadable {
         Some(StopUncompared::StudyUnreadable)
+    } else if let Some(super::StopBasis::NoCurrencyOtherStudy(study_currency)) = &basis {
+        Some(StopUncompared::NoCurrency {
+            study_currency: study_currency.clone(),
+        })
     } else {
         None
     };
-    let same_currency = lot_currency
-        .zip(study_currency)
-        .is_some_and(|(lot, study)| study.eq_ignore_ascii_case(lot));
     let breached = uncompared.is_none()
-        && same_currency
+        && basis == Some(super::StopBasis::Comparable)
         && price.is_some_and(|p| steadyinvest_core::risk::stop_breached(level, p));
     Some(StopFact {
         level,
-        currency: lot_currency.map(str::to_uppercase),
+        currency: Some(lot_currency.unwrap_or(reference_currency).to_uppercase()),
         bank: bank.to_string(),
         breached,
         uncompared,
@@ -623,9 +625,10 @@ impl JournalState {
             let shown = row_link(&link_refs, &study_order);
             let mixed = mixed_links(&link_refs, shown);
             // Every lot's stop against its own study, and each lot's trigger keyed by its
-            // holding (the stop takes priority, as per lot in the register). A legacy lot's stop
-            // carries no currency: its unit is unknown (G1 final review); an unreadable study's
-            // lot is not compared either — both stated (G3 review).
+            // holding (the stop takes priority, as per lot in the register). A legacy lot is
+            // presumed in the reference currency (D5): against a study in another currency its
+            // stop is not compared; an unreadable study's lot is not compared either — both
+            // stated (G3 review).
             let mut stops = Vec::new();
             let mut lot_triggers = Vec::new();
             for (h, link) in held.iter().zip(&links) {
@@ -633,6 +636,7 @@ impl JournalState {
                 let stop = lot_stop(
                     h.trailing_stop_level.as_deref(),
                     declared.as_deref(),
+                    reference_currency,
                     &bank_name(h.portfolio_id),
                     link.study_currency.as_deref(),
                     link.price,
@@ -859,7 +863,7 @@ mod tests {
     fn a_lots_stop_is_read_against_its_own_study_in_its_own_currency() {
         let chf = Some("CHF");
         let stop = |study: &str, price: Option<Decimal>| {
-            lot_stop(Some("63"), chf, "UBS", Some(study), price, false).unwrap()
+            lot_stop(Some("63"), chf, "CHF", "UBS", Some(study), price, false).unwrap()
         };
         let s = stop("CHF", Some(d("60")));
         assert!(s.breached);
@@ -871,22 +875,48 @@ mod tests {
         // An unknown price breaches nothing; no stop is no fact.
         assert!(!stop("CHF", None).breached);
         assert_eq!(
-            lot_stop(None, chf, "UBS", Some("CHF"), Some(d("1")), false),
+            lot_stop(None, chf, "CHF", "UBS", Some("CHF"), Some(d("1")), false),
             None
         );
     }
 
     #[test]
     fn a_stop_that_cannot_be_compared_names_its_cause() {
-        // G1 final review: a lot without a declared currency — its stop's unit is unknown. It
-        // is neither labelled with the reference currency nor compared, even when the price
-        // would reach it in the study's own currency.
-        let s = lot_stop(Some("63"), None, "UBS", Some("CHF"), Some(d("1")), false).unwrap();
-        assert_eq!(s.currency, None);
+        // D5 (Guy, 2026-09-25): a lot without a declared currency is presumed in the reference
+        // currency — compared against a study in it…
+        let s = lot_stop(
+            Some("63"),
+            None,
+            "CHF",
+            "UBS",
+            Some("CHF"),
+            Some(d("60")),
+            false,
+        )
+        .unwrap();
+        assert_eq!(s.currency.as_deref(), Some("CHF"));
+        assert!(s.breached);
+        assert_eq!(s.uncompared, None);
+        // …never against a study in another currency: both facts named.
+        let s = lot_stop(
+            Some("63"),
+            None,
+            "CHF",
+            "UBS",
+            Some("USD"),
+            Some(d("1")),
+            false,
+        )
+        .unwrap();
         assert!(!s.breached);
-        assert_eq!(s.uncompared, Some(StopUncompared::NoCurrency));
+        assert_eq!(
+            s.uncompared,
+            Some(StopUncompared::NoCurrency {
+                study_currency: "USD".to_string()
+            })
+        );
         // G3 review: a lot whose study could not be read is not compared, and says so.
-        let s = lot_stop(Some("63"), Some("CHF"), "UBS", None, None, true).unwrap();
+        let s = lot_stop(Some("63"), Some("CHF"), "CHF", "UBS", None, None, true).unwrap();
         assert!(!s.breached);
         assert_eq!(s.uncompared, Some(StopUncompared::StudyUnreadable));
     }

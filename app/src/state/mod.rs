@@ -63,7 +63,7 @@ pub use concentration::*;
 pub use confront::*;
 pub use export_import::ImportRequest;
 pub use holdings::StudyChoice;
-pub(crate) use holdings::effective_currency;
+pub(crate) use holdings::{StopBasis, effective_currency, stop_basis};
 pub use journal_io::*;
 pub use messages::*;
 pub use refresh::*;
