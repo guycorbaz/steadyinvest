@@ -87,6 +87,13 @@ fn push(ui: &MainWindow, session: &ScreeningSession, format: NumberFormat) {
     w.set_screening_quota(session.stop.load(Ordering::Relaxed));
 }
 
+/// One row's fetch outcome: `quota` = this row latched the run's quota stop.
+pub(crate) struct RowOutcome {
+    pub(crate) result: Result<FetchedFinancials, IngestionError>,
+    pub(crate) effective: ProviderChoice,
+    pub(crate) quota: bool,
+}
+
 /// A row's fetch result (called from the fetch outcome handler): `None` = drained behind the
 /// quota stop. A stale batch is ignored, and so is a result for a row that is not waiting for one
 /// (G1 review: a studied row, or one already done, is never overwritten).
@@ -96,7 +103,7 @@ pub(crate) fn on_fetched(
     slot: &Rc<RefCell<Option<ScreeningSession>>>,
     batch: u64,
     index: usize,
-    result: Option<(Result<FetchedFinancials, IngestionError>, ProviderChoice)>,
+    outcome: Option<RowOutcome>,
 ) {
     let mut guard = slot.borrow_mut();
     let Some(session) = guard.as_mut().filter(|s| s.batch == batch) else {
@@ -109,18 +116,33 @@ pub(crate) fn on_fetched(
     else {
         return;
     };
-    row.state = match result {
-        // Skipped behind the quota stop.
-        None => RowState::NotExamined,
-        Some((Ok(fetched), _)) if !has_analysis_years(&fetched) => RowState::Unavailable,
-        Some((Ok(fetched), effective)) => {
+    row.state = match outcome {
+        // Skipped behind the quota stop — or the row that latched it (whatever the chain's final
+        // error, the cause named is the usage limit, like the rows behind it).
+        None
+        | Some(RowOutcome {
+            result: Err(_),
+            quota: true,
+            ..
+        }) => RowState::NotExamined,
+        Some(RowOutcome {
+            result: Ok(fetched),
+            ..
+        }) if !has_analysis_years(&fetched) => RowState::Unavailable,
+        Some(RowOutcome {
+            result: Ok(fetched),
+            effective,
+            ..
+        }) => {
             // A watched ticker carries no currency: the examination names none (and offers no
             // « Créer l'étude » — Études' « Examiner un titre » asks for one).
             let mut s = session_from_fetch(&row.ticker, "", fetched, effective);
             s.from_watchlist = true;
             RowState::Examined(Box::new(s))
         }
-        Some((Err(error), _)) => failed_state(&error),
+        Some(RowOutcome {
+            result: Err(error), ..
+        }) => failed_state(&error),
     };
     push(ui, session, format);
 }

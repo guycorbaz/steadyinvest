@@ -99,6 +99,29 @@ pub struct QuickScreenRequest {
     pub request: FetchRequest,
 }
 
+/// The criblage's quota trace for one row (G1 review): each chain member's FINAL answer — a
+/// same-member retry after a declared retry-after replaces that member's first answer, so a quota
+/// that cleared on the retry never counts. Pure: fed by the worker, decided here.
+#[derive(Default)]
+pub(crate) struct QuotaTrace {
+    answers: Vec<(&'static str, bool)>,
+}
+
+impl QuotaTrace {
+    /// Record one call's answer for the member tagged `tag`.
+    pub(crate) fn record(&mut self, tag: &'static str, quota: bool) {
+        match self.answers.last_mut() {
+            Some((last, answer)) if *last == tag => *answer = quota,
+            _ => self.answers.push((tag, quota)),
+        }
+    }
+
+    /// Whether some member's final answer was its usage limit.
+    pub(crate) fn any_final_quota(&self) -> bool {
+        self.answers.iter().any(|(_, quota)| *quota)
+    }
+}
+
 /// Whether an error is the provider's usage limit (the criblage's stop condition).
 pub fn is_quota(error: &IngestionError) -> bool {
     matches!(
@@ -179,11 +202,14 @@ pub enum WorkerOutcome {
         effective: ProviderChoice,
     },
     /// Story 7.3 (PR 2): one criblage row's fetch result (`effective` as for `QuickScreen`).
+    /// `quota` = this row latched the run's quota stop (a member's final answer was its limit and
+    /// no member served) — the row reads « non examiné (limite d'usage) » like those behind it.
     Screening {
         batch: u64,
         index: usize,
         result: Result<FetchedFinancials, IngestionError>,
         effective: ProviderChoice,
+        quota: bool,
     },
     /// Story 7.3 (PR 2): a criblage row the worker drained unfetched after the run's quota stop.
     ScreeningSkipped {
@@ -405,10 +431,11 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                     }
                     WorkerJob::Screening(job) => {
                         let req = &job.request;
-                        // G1 review: ANY member's quota reply counts, not only the chain's final
-                        // error — a primary out of quota whose fallback then fails otherwise
-                        // would be called again for every row still queued.
-                        let mut quota_seen = false;
+                        // G1 review: ANY member's final quota answer counts, not only the chain's
+                        // final error — a primary out of quota whose fallback then fails otherwise
+                        // would be called again for every row still queued. A quota that cleared
+                        // on the retry-after retry does not count (QuotaTrace).
+                        let mut trace = QuotaTrace::default();
                         let (result, effective, _) = run_chain(
                             &mut last_request,
                             select,
@@ -417,13 +444,17 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             |provider, key| {
                                 let attempt =
                                     runtime.block_on(fetch_canonical(provider, &req.ticker, key));
-                                quota_seen |= attempt.as_ref().err().is_some_and(is_quota);
+                                trace.record(
+                                    provider.tag(),
+                                    attempt.as_ref().err().is_some_and(is_quota),
+                                );
                                 attempt
                             },
                         );
                         // The quota stop: latch BEFORE the next queued row is picked up (a row a
                         // fallback served stands, and so does the run).
-                        if quota_seen && result.is_err() {
+                        let quota = trace.any_final_quota() && result.is_err();
+                        if quota {
                             job.stop.store(true, Ordering::Relaxed);
                         }
                         WorkerOutcome::Screening {
@@ -431,6 +462,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             index: job.index,
                             result,
                             effective: effective.unwrap_or(req.primary),
+                            quota,
                         }
                     }
                     WorkerJob::RefreshHolding(_) if worker_cancel.load(Ordering::Relaxed) => {
@@ -553,6 +585,27 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
     use steadyinvest_ingestion::{FakeProvider, ProviderError};
+
+    // ── G1 review — the criblage's quota stop keys off each member's FINAL answer ──
+
+    #[test]
+    fn a_quota_that_clears_on_the_retry_does_not_stop_the_run() {
+        // TwelveData: quota (retry-after) → retried → not found. The limit cleared: no stop.
+        let mut trace = QuotaTrace::default();
+        trace.record("twelvedata", true);
+        trace.record("twelvedata", false);
+        assert!(!trace.any_final_quota());
+        // EODHD out of quota (final), then TwelveData not found: the primary's limit stands.
+        let mut trace = QuotaTrace::default();
+        trace.record("eodhd", true);
+        trace.record("twelvedata", false);
+        assert!(trace.any_final_quota());
+        // A quota on the retry too is final.
+        let mut trace = QuotaTrace::default();
+        trace.record("eodhd", true);
+        trace.record("eodhd", true);
+        assert!(trace.any_final_quota());
+    }
 
     // ── Story 6.9 — the pure pacing/retry decisions (FR27; no sleep-based tests) ──
 

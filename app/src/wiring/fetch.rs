@@ -322,6 +322,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     index,
                     result,
                     effective,
+                    quota,
                 } => {
                     // Story 7.3 (PR 2): one criblage row — session only, nothing written.
                     let format = config.borrow().number_format;
@@ -331,7 +332,11 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         &screening,
                         batch,
                         index,
-                        Some((result, effective)),
+                        Some(crate::wiring::screening::RowOutcome {
+                            result,
+                            effective,
+                            quota,
+                        }),
                     );
                 }
                 fetch::WorkerOutcome::ScreeningSkipped { batch, index } => {

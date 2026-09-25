@@ -462,15 +462,13 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
             *slot.borrow_mut() = None;
             refresh_studies(&ui, &journal_state.borrow());
             ui.global::<Studies>().set_screen_open(false);
-            match applied {
-                Ok(_) => ui
-                    .global::<Studies>()
-                    .set_notice(state::MSG_QUICK_SCREEN_STUDY_CREATED.into()),
-                Err(message) => crate::wiring::dialog::refuse(
-                    &ui,
-                    &state::MSG_QUICK_SCREEN_STUDY_EMPTY.replace("{cause}", &message),
-                ),
-            }
+            // Either way an outcome on the study's notice slot — not a refusal dialog: the study
+            // WAS created (a « refusé » title would misstate it).
+            let notice = match applied {
+                Ok(_) => state::MSG_QUICK_SCREEN_STUDY_CREATED.to_string(),
+                Err(message) => state::MSG_QUICK_SCREEN_STUDY_EMPTY.replace("{cause}", &message),
+            };
+            ui.global::<Studies>().set_notice(notice.into());
             ui.global::<Studies>()
                 .invoke_open_study(id.to_string().into());
         });
