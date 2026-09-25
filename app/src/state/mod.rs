@@ -181,6 +181,27 @@ impl JournalState {
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
+        let (state, notice) = Self::open_or_create_inner(configured, clock, idgen);
+        // G1 P review (L-f): a `-prerestore` beside the open dossier (a restore whose rollback
+        // failed) is named at startup — it may be the only copy of an original.
+        let leftover = state
+            .path
+            .as_deref()
+            .map(|live| path_with_suffix(live, "-prerestore"))
+            .filter(|snapshot| std::fs::symlink_metadata(snapshot).is_ok())
+            .map(|snapshot| prerestore_found_message(&snapshot));
+        let notice = match (notice, leftover) {
+            (Some(first), Some(second)) => Some(format!("{first} {second}")),
+            (first, second) => first.or(second),
+        };
+        (state, notice)
+    }
+
+    fn open_or_create_inner(
+        configured: Option<&Path>,
+        clock: Box<dyn Clock>,
+        idgen: Box<dyn IdGen>,
+    ) -> (Self, Option<String>) {
         // 1) A configured journal that exists on disk → open it.
         if let Some(path) = configured
             && path.exists()

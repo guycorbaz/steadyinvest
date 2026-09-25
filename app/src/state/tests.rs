@@ -718,14 +718,27 @@ fn a_restore_never_replaces_nor_deletes_an_earlier_prerestore_copy() {
     let study = state.create_study("NESN", "CHF").unwrap();
     make_backup(&dir, "src.db", 0xBEEF, true);
     let earlier = dir.path().join("journal.db-prerestore");
-    std::fs::write(&earlier, b"the only copy of an earlier original").unwrap();
+    // Appearing AFTER the request was parked: the apply refuses.
     state
         .request_restore(dir.path().join("src.db").to_str().unwrap())
         .unwrap();
+    std::fs::write(&earlier, b"the only copy of an earlier original").unwrap();
     assert_eq!(
         state.confirm_restore(),
         Err(restore_snapshot_exists_message(&earlier))
     );
+    assert!(
+        restore_snapshot_exists_message(&earlier).contains("déplacez ou renommez"),
+        "G1 P review (M2): the way out is named"
+    );
+    // Already there: named BEFORE any confirm (G1 P review M2).
+    assert_eq!(
+        state
+            .request_restore(dir.path().join("src.db").to_str().unwrap())
+            .map(|_| ()),
+        Err(restore_snapshot_exists_message(&earlier))
+    );
+    assert!(!state.has_pending_restore(), "no confirm parked");
     assert_eq!(
         std::fs::read(&earlier).unwrap(),
         b"the only copy of an earlier original",
@@ -733,6 +746,42 @@ fn a_restore_never_replaces_nor_deletes_an_earlier_prerestore_copy() {
     );
     assert_eq!(state.journal_id(), Some(Uuid::from_u128(0xC0FFEE)));
     assert!(state.get_study(study).is_some(), "nothing was lost");
+}
+
+#[test]
+fn the_snapshot_is_never_written_over_an_existing_file_nor_removed() {
+    // G1 P review (L-a / L-g): create_new refuses an existing file, reports it did NOT create it
+    // (so it is never removed), and the file is intact.
+    let dir = TempDir::new().unwrap();
+    let live = dir.path().join("live.db");
+    let snapshot = dir.path().join("live.db-prerestore");
+    std::fs::write(&live, b"live").unwrap();
+    std::fs::write(&snapshot, b"earlier").unwrap();
+    let failure = super::restore::write_snapshot(&live, &snapshot).unwrap_err();
+    assert!(!failure.created);
+    assert_eq!(failure.error.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read(&snapshot).unwrap(), b"earlier");
+    // A fresh one is written with the dossier's permissions (L-b).
+    std::fs::remove_file(&snapshot).unwrap();
+    super::restore::write_snapshot(&live, &snapshot).unwrap();
+    assert_eq!(std::fs::read(&snapshot).unwrap(), b"live");
+    assert_eq!(
+        std::fs::metadata(&snapshot).unwrap().permissions(),
+        std::fs::metadata(&live).unwrap().permissions()
+    );
+}
+
+#[test]
+fn a_leftover_prerestore_is_named_at_startup() {
+    // G1 P review (L-f): the kept copy of a failed rollback is named at the next start.
+    let dir = TempDir::new().unwrap();
+    drop(watch_state(&dir, 0x54A));
+    let snapshot = dir.path().join("journal.db-prerestore");
+    std::fs::write(&snapshot, b"original").unwrap();
+    let (clock, idgen) = fixed(0x54B, "2026-06-14T09:00:00Z");
+    let (_state, notice) =
+        JournalState::open_or_create(Some(&dir.path().join("journal.db")), clock, idgen);
+    assert_eq!(notice, Some(prerestore_found_message(&snapshot)));
 }
 
 #[test]
@@ -803,6 +852,30 @@ fn a_failed_rollback_says_the_dossier_was_replaced_and_keeps_the_named_snapshot(
         state.journal_id().is_some(),
         "the live dossier is open again"
     );
+    // G1 P review (L-g): the rollback fails AND the dossier will not reopen — the refusal names
+    // the kept copy, and no path is left reading as an open dossier.
+    std::fs::write(&snapshot, b"original").unwrap();
+    let garbage = dir.path().join("not-a-journal.db");
+    std::fs::write(&garbage, b"garbage").unwrap();
+    state.journal = None;
+    let result = state.open_swapped(
+        &garbage,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "rollback failed".to_string(),
+            })
+        },
+    );
+    assert_eq!(result, Err(restore_rollback_failed_message(&snapshot)));
+    assert!(state.journal_id().is_none());
+    assert!(state.path().is_none(), "no path without an open dossier");
+    assert!(snapshot.exists());
 }
 
 #[test]

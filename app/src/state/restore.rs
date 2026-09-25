@@ -79,6 +79,14 @@ impl JournalState {
         // G1 G (on-screen check): a read-only dossier is never overwritten — refused before the
         // backup is even read, so no confirm is ever parked for it.
         self.refuse_if_read_only().map_err(str::to_string)?;
+        // G1 P review (M2): a leftover `-prerestore` (possibly the only copy of an original) is
+        // named BEFORE the confirm — never a confirm that the apply then refuses.
+        if let Some(live) = self.path.as_deref() {
+            let snapshot = path_with_suffix(live, "-prerestore");
+            if std::fs::symlink_metadata(&snapshot).is_ok() {
+                return Err(restore_snapshot_exists_message(&snapshot));
+            }
+        }
         let info = inspect_backup(backup_path).map_err(|error| match error {
             PersistError::CorruptJournalMeta { .. } => MSG_RESTORE_NOT_A_JOURNAL.to_string(),
             _ => MSG_RESTORE_UNREADABLE.to_string(),
@@ -218,10 +226,16 @@ impl JournalState {
             return Err(restore_snapshot_exists_message(&snapshot));
         }
         self.journal = None;
-        if let Err(error) = write_snapshot(&live, &snapshot) {
-            tracing::warn!("restore refused: the safety snapshot could not be written: {error}");
-            // A partial copy is no snapshot — and it is ours (created new just above).
-            let _ = std::fs::remove_file(&snapshot);
+        if let Err(failure) = write_snapshot(&live, &snapshot) {
+            tracing::warn!(
+                "restore refused: the safety snapshot could not be written: {}",
+                failure.error
+            );
+            // G1 P review (L-a): a partial copy is no snapshot — removed only when THIS restore
+            // created the file; one that appeared meanwhile (AlreadyExists) is not ours.
+            if failure.created {
+                remove_snapshot(&snapshot);
+            }
             self.reopen_live(&live);
             return Err(MSG_RESTORE_SNAPSHOT_FAILED.to_string());
         }
@@ -231,7 +245,7 @@ impl JournalState {
         // (G1 final review, L13).
         if let Err(error) = restore_journal_file(&live, &pending.backup_path) {
             tracing::warn!("restore swap failed: {error}");
-            let _ = std::fs::remove_file(&snapshot);
+            remove_snapshot(&snapshot);
             self.reopen_live(&live);
             return Err(MSG_RESTORE_FAILED.to_string());
         }
@@ -258,7 +272,7 @@ impl JournalState {
     ) -> Result<(), String> {
         match open(live) {
             Ok(journal) => {
-                let _ = std::fs::remove_file(snapshot);
+                remove_snapshot(snapshot);
                 self.read_only = journal.is_read_only();
                 self.journal = Some(journal);
                 self.reset_undo();
@@ -269,11 +283,16 @@ impl JournalState {
                 // the user's original journal is not lost, then reopen it.
                 tracing::warn!("the restored journal will not open: {error}");
                 if let Err(rollback_error) = rollback(live, snapshot) {
-                    tracing::warn!("rollback to the pre-restore snapshot failed: {rollback_error}");
+                    // G1 P review (L-f): the kept copy's path is logged, and named again at the
+                    // next start (a sibling `-prerestore` of the dossier is reported then).
+                    tracing::warn!(
+                        snapshot = %snapshot.display(),
+                        "rollback to the pre-restore snapshot failed: {rollback_error}"
+                    );
                     self.reopen_live(live);
                     return Err(restore_rollback_failed_message(snapshot));
                 }
-                let _ = std::fs::remove_file(snapshot);
+                remove_snapshot(snapshot);
                 self.reopen_live(live);
                 Err(MSG_RESTORE_FAILED.to_string())
             }
@@ -311,14 +330,45 @@ impl JournalState {
     }
 }
 
+/// Why the snapshot could not be written, and whether THIS call created the file (so only then
+/// may a partial copy be removed — G1 P review L-a).
+#[derive(Debug)]
+pub(super) struct SnapshotFailure {
+    pub(super) created: bool,
+    pub(super) error: std::io::Error,
+}
+
 /// Write the pre-restore snapshot as a NEW file (never over an existing one — the TOCTOU twin of
-/// the `-prerestore` existence refusal above).
-fn write_snapshot(live: &Path, snapshot: &Path) -> std::io::Result<()> {
-    let mut source = std::fs::File::open(live)?;
+/// the `-prerestore` existence refusal above), carrying the dossier's permissions (G1 P review
+/// L-b: the copy of a private dossier stays private).
+pub(super) fn write_snapshot(live: &Path, snapshot: &Path) -> Result<(), SnapshotFailure> {
+    let not_created = |error| SnapshotFailure {
+        created: false,
+        error,
+    };
+    let created = |error| SnapshotFailure {
+        created: true,
+        error,
+    };
+    let mut source = std::fs::File::open(live).map_err(not_created)?;
+    let permissions = source.metadata().map_err(not_created)?.permissions();
     let mut target = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(snapshot)?;
-    std::io::copy(&mut source, &mut target)?;
-    target.sync_all()
+        .open(snapshot)
+        .map_err(not_created)?;
+    target.set_permissions(permissions).map_err(created)?;
+    std::io::copy(&mut source, &mut target).map_err(created)?;
+    target.sync_all().map_err(created)
+}
+
+/// Remove this restore's own snapshot; a failure is logged with the path (G1 P review M2) — the
+/// file would then block the next restore, which names it.
+fn remove_snapshot(snapshot: &Path) {
+    if let Err(error) = std::fs::remove_file(snapshot) {
+        tracing::warn!(
+            snapshot = %snapshot.display(),
+            "the pre-restore snapshot could not be removed: {error}"
+        );
+    }
 }

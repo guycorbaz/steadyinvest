@@ -521,7 +521,15 @@ pub const MSG_RESTORE_UNCHECKPOINTED: &str = "La sauvegarde est accompagnée d'u
 pub const MSG_RESTORE_CHECKPOINT_FAILED: &str = "Le dossier actuel n'a pas pu être consolidé (ses écritures les plus récentes restent dans son fichier -wal) ; rien n'a été restauré.";
 /// G1 P (G3 M1): a `-prerestore` file from an earlier restore sits beside the dossier — it may be
 /// the only copy of an original, so it is never replaced nor deleted. Template: `{file}`.
-pub const MSG_RESTORE_SNAPSHOT_EXISTS: &str = "Une copie de sécurité d'une restauration précédente existe déjà ({file}) ; elle n'est ni remplacée ni supprimée, et rien n'a été restauré.";
+pub const MSG_RESTORE_SNAPSHOT_EXISTS: &str = "Une copie de sécurité d'une restauration précédente existe déjà ({file}) ; elle n'est ni remplacée ni supprimée, et rien n'a été restauré. Une fois le dossier vérifié, déplacez ou renommez ce fichier.";
+/// G1 P review (L-f): at startup, a `-prerestore` beside the open dossier — left by a restore
+/// whose rollback failed — is named: it may be the only copy of an original. Template: `{file}`.
+pub const MSG_PRERESTORE_FOUND: &str = "Une copie de sécurité laissée par une restauration précédente se trouve à côté du dossier ({file}) : elle peut être la seule copie du dossier d'origine. Une fois le dossier vérifié, déplacez ou renommez ce fichier.";
+
+/// [`MSG_PRERESTORE_FOUND`] filled with the snapshot's path.
+pub fn prerestore_found_message(snapshot: &std::path::Path) -> String {
+    MSG_PRERESTORE_FOUND.replace("{file}", &snapshot.display().to_string())
+}
 /// G1 P (G3 M1): the restored file would not open AND the return to the original failed — the
 /// dossier WAS replaced; the original survives only in the named snapshot. Template: `{file}`.
 pub const MSG_RESTORE_ROLLBACK_FAILED: &str = "Le fichier restauré ne s'ouvre pas et le retour au dossier d'origine a échoué : le dossier a été remplacé. L'original est conservé dans {file}.";
@@ -1026,6 +1034,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_RESTORE_CHECKPOINT_FAILED,
     MSG_RESTORE_SNAPSHOT_FAILED,
     MSG_RESTORE_SNAPSHOT_EXISTS,
+    MSG_PRERESTORE_FOUND,
     MSG_RESTORE_ROLLBACK_FAILED,
     MSG_RESTORE_CONFIRM,
     MSG_RESTORE_REASON_STALE,
