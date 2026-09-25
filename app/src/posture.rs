@@ -805,10 +805,11 @@ mod tests {
         // blank-symbol refusal: 139. The G1 review adds the examination's blank-currency refusal
         // and the study-created-but-empty notice (MSG_QUICK_BLANK_CURRENCY,
         // MSG_QUICK_SCREEN_STUDY_EMPTY) and the criblage's unreadable-watchlist refusal
-        // (MSG_SCREENING_LIST_UNREADABLE): 142.
+        // (MSG_SCREENING_LIST_UNREADABLE): 142. The G1 review of 7.1 (#237) adds the marker of a
+        // comparison pick whose study is gone (MSG_COMPARISON_PICK_GONE): 142 + 1 = 143.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            142,
+            143,
             "state.rs message inventory changed — register the new notice"
         );
     }

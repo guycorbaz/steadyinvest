@@ -1,13 +1,16 @@
 // Comparaison de sociétés (Story 7.1): up to five studies side by side, the comparison form's
 // thirty rows in four groups. It compares, never ranks (FR13): no « best », no colour — ink and
-// words only; an absent figure is « — », a study that could not be read is « indisponible ».
+// words only; an absent figure is « — », a study that could not be read is « indisponible », a
+// picked study that no longer exists is « introuvable ».
 
 import { Tokens } from "../tokens.slint";
-import { Comparison, ComparisonHeader, Labels } from "../state.slint";
+import { Comparison, ComparisonHeader } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
 
+// Every column gets the same width whatever its text (G1 on-screen check: a long row-27 cell took
+// the width and folded its neighbour to one word per line) — the width never follows the content.
 component Cell inherits Text {
     color: Tokens.text-high;
     font-family: Tokens.font-numeric;
@@ -15,6 +18,8 @@ component Cell inherits Text {
     vertical-alignment: center;
     horizontal-alignment: right;
     wrap: word-wrap;
+    min-width: 0px;
+    preferred-width: 0px;
 }
 
 // One row: the numbered label, then one cell per column (row-major cells, keyed rows worded).
@@ -32,7 +37,9 @@ component CmpRow inherits HorizontalLayout {
         wrap: word-wrap;
     }
     for c[i] in Comparison.columns: Cell {
-        text: c.unavailable ? @tr("indisponible")
+        text: c.missing ? @tr("introuvable")
+            : c.uncomputable ? @tr("non calculable")
+            : c.unavailable ? @tr("indisponible")
             : root.number == 20 ? root.zone-words(c.zone)
             : root.number == 28 ? root.state-words(c)
             : Comparison.cells[(root.number - 1) * Comparison.column-count + i] != ""
@@ -40,12 +47,14 @@ component CmpRow inherits HorizontalLayout {
                 : "—";
         horizontal-stretch: 1;
     }
+    // Row 20 names the band of rows 17–19 in THEIR words — the same nouns as the PDF (G1, #237),
+    // not the label-set words (`Labels.zone-*`), which the report never carries.
     pure function zone-words(key: string) -> string {
-        if (key == "buy") { return Labels.zone-buy; }
-        if (key == "neutral") { return Labels.zone-hold; }
-        if (key == "sell") { return Labels.zone-sell; }
-        if (key == "below") { return @tr("sous la bande"); }
-        if (key == "above") { return @tr("au-dessus de la bande"); }
+        if (key == "buy") { return @tr("Zone basse"); }
+        if (key == "neutral") { return @tr("Zone médiane"); }
+        if (key == "sell") { return @tr("Zone haute"); }
+        if (key == "below") { return @tr("Sous la bande"); }
+        if (key == "above") { return @tr("Au-dessus de la bande"); }
         return "—";
     }
     pure function state-words(c: ComparisonHeader) -> string {
@@ -112,6 +121,8 @@ export component ComparisonScreen inherits Rectangle {
                     for c in Comparison.columns: VerticalLayout {
                         spacing: Tokens.space-4;
                         horizontal-stretch: 1;
+                        min-width: 0px;
+                        preferred-width: 0px;
                         Text {
                             text: c.ticker;
                             color: Tokens.text-high;
@@ -119,8 +130,14 @@ export component ComparisonScreen inherits Rectangle {
                             font-weight: Tokens.weight-semibold;
                             horizontal-alignment: right;
                         }
+                        // A column with no figures names its state, never a dangling « · »; a
+                        // study that does not compute keeps its currency and date.
                         Text {
-                            text: c.name != "" ? @tr("{} · {} · {}", c.name, c.currency, c.date) : @tr("{} · {}", c.currency, c.date);
+                            text: c.missing ? @tr("étude introuvable")
+                                : c.uncomputable ? @tr("{} · {} · étude non calculable", c.currency, c.date)
+                                : c.unavailable ? @tr("étude indisponible")
+                                : c.name != "" ? @tr("{} · {} · {}", c.name, c.currency, c.date)
+                                : @tr("{} · {}", c.currency, c.date);
                             color: Tokens.text-mid;
                             font-size: Tokens.font-caption;
                             horizontal-alignment: right;

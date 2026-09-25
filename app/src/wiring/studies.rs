@@ -9,6 +9,7 @@
 use std::rc::Rc;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use steadyinvest_persistence::StudySummary;
 use uuid::Uuid;
 
 use crate::config::StudyViewState;
@@ -60,12 +61,133 @@ fn safe_stem(ticker: &str) -> String {
     }
 }
 
+/// One pickable study (G1 decision 3, #237): the `id` is the key carried end to end; the `label`
+/// is display only — « TICKER », or « TICKER · CUR » when the ticker has several studies (then
+/// « · date » and « · n » only if a currency is still shared or unreadable), unique within one
+/// list. `ordinal` is that « n » — the one disambiguator the column header (ticker, currency,
+/// date) does not already show, so the comparison carries it into the header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StudyChoice {
+    pub id: Uuid,
+    pub label: String,
+    pub ordinal: Option<usize>,
+}
+
+/// The facts a choice label is built from. `currency` is read only for an ambiguous ticker;
+/// `None` there means the study could not be read (it stays listed: it EXISTS, and compared it
+/// reads « indisponible »).
+#[derive(Debug, Clone)]
+struct ChoiceFacts {
+    id: Uuid,
+    ticker: String,
+    currency: Option<String>,
+    date: String,
+}
+
+/// PURE: label the studies (the discriminator rule: the label disambiguates, the id identifies),
+/// sorted by label. Every label is unique, so a drop-down value maps back to one study.
+fn label_choices(facts: &[ChoiceFacts]) -> Vec<StudyChoice> {
+    let count = |pred: &dyn Fn(&ChoiceFacts) -> bool| facts.iter().filter(|f| pred(f)).count();
+    let mut out: Vec<StudyChoice> = facts
+        .iter()
+        .map(|f| {
+            let label = if count(&|g| g.ticker == f.ticker) == 1 {
+                f.ticker.clone()
+            } else {
+                match &f.currency {
+                    Some(cur)
+                        if count(&|g| g.ticker == f.ticker && g.currency == f.currency) == 1 =>
+                    {
+                        format!("{} · {cur}", f.ticker)
+                    }
+                    Some(cur) => format!("{} · {cur} · {}", f.ticker, f.date),
+                    // Unreadable: no currency to name — the date (then a number) tells it apart.
+                    None => format!("{} · {}", f.ticker, f.date),
+                }
+            };
+            StudyChoice {
+                id: f.id,
+                label,
+                ordinal: None,
+            }
+        })
+        .collect();
+    // Same ticker, currency and day: number them in (date, id) order — still one label per study.
+    let mut totals: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for c in &out {
+        *totals.entry(c.label.clone()).or_insert(0) += 1;
+    }
+    let mut ordered: Vec<usize> = (0..facts.len()).collect();
+    ordered.sort_by(|&a, &b| (&facts[a].date, facts[a].id).cmp(&(&facts[b].date, facts[b].id)));
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for i in ordered {
+        if totals.get(&out[i].label).is_some_and(|&t| t > 1) {
+            let n = seen.entry(out[i].label.clone()).or_insert(0);
+            *n += 1;
+            out[i].label = format!("{} · {n}", out[i].label);
+            out[i].ordinal = Some(*n);
+        }
+    }
+    out.sort_by(|a, b| (&a.label, a.id).cmp(&(&b.label, b.id)));
+    out
+}
+
+/// PURE: the choice facts of a listing. `currency_of` reads a study's currency — asked only for
+/// an ambiguous ticker: `Ok(None)` (gone between the listing and the read) leaves the study out,
+/// it no longer exists; `Err` (unreadable) keeps it, currency-less.
+fn choice_facts(
+    summaries: &[StudySummary],
+    currency_of: impl Fn(Uuid) -> Result<Option<String>, String>,
+) -> Vec<ChoiceFacts> {
+    let mut facts: Vec<ChoiceFacts> = Vec::with_capacity(summaries.len());
+    for s in summaries {
+        let ticker = s.security_ticker.to_uppercase();
+        let ambiguous = summaries
+            .iter()
+            .filter(|o| o.security_ticker.eq_ignore_ascii_case(&ticker))
+            .count()
+            > 1;
+        let currency = if ambiguous {
+            match currency_of(s.id) {
+                Ok(Some(cur)) => Some(cur.to_uppercase()),
+                Ok(None) => continue,
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+        facts.push(ChoiceFacts {
+            id: s.id,
+            ticker,
+            currency,
+            date: s.created_at.0.chars().take(10).collect(),
+        });
+    }
+    facts
+}
+
+/// The dossier's studies as pickable choices (G1 decision 3) — for the comparison's five
+/// drop-downs, and for any other study picker. Fallible (#95): `Err` is a failure of the LISTING,
+/// which the picker states — never an empty list passed off as « aucune étude ». One unreadable
+/// study does not hide the others: it stays listed (see [`choice_facts`]).
+pub(crate) fn study_choices(state: &JournalState) -> Result<Vec<StudyChoice>, String> {
+    let summaries = state.try_list_studies()?;
+    let facts = choice_facts(&summaries, |id| {
+        state
+            .try_get_study(id)
+            .map(|s| s.map(|study| study.native_currency))
+    });
+    Ok(label_choices(&facts))
+}
+
 /// Rebuild the dashboard list from the journal and mirror the read-only flag into the `Studies`
 /// global. Called on startup and after every create.
 pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     let studies = ui.global::<Studies>();
-    // Story 7.1: the comparison picker (and the add-position dialog) offer the dossier's study
-    // tickers — pushed here too, so the list screen never shows a stale drop-down.
+    // Story 7.1 / G1 decision 3: the comparison's five pickers list STUDIES (ids), re-pushed here
+    // so the list screen never shows a stale drop-down.
+    crate::wiring::comparison::push_choices(ui, state);
+    // The add-position dialog offers the dossier's study tickers.
     {
         let mut tickers: Vec<String> = state
             .list_studies()
@@ -713,5 +835,114 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 Err(_) => crate::wiring::dialog::refuse(&ui, state::MSG_DEMO_UNAVAILABLE),
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn facts(n: u128, ticker: &str, currency: &str, date: &str) -> ChoiceFacts {
+        ChoiceFacts {
+            id: Uuid::from_u128(n),
+            ticker: ticker.into(),
+            currency: (!currency.is_empty()).then(|| currency.to_string()),
+            date: date.into(),
+        }
+    }
+
+    fn summary(n: u128, ticker: &str, date: &str) -> StudySummary {
+        StudySummary {
+            id: Uuid::from_u128(n),
+            security_ticker: ticker.into(),
+            created_at: steadyinvest_contract::Timestamp(format!("{date}T00:00:00Z")),
+            status: "active".into(),
+        }
+    }
+
+    #[test]
+    fn an_unreadable_study_stays_listed_and_a_gone_one_is_left_out() {
+        let summaries = [
+            summary(1, "nesn.sw", "2026-01-01"),
+            summary(2, "NESN.SW", "2026-02-01"),
+            summary(3, "NESN.SW", "2026-03-01"),
+            summary(4, "ROG.SW", "2026-04-01"),
+        ];
+        let listed = choice_facts(&summaries, |id| match id.as_u128() {
+            1 => Ok(Some("chf".into())),
+            2 => Err("unreadable".into()),
+            3 => Ok(None), // deleted between the listing and the read
+            _ => panic!("an unambiguous ticker is never read"),
+        });
+        let c = label_choices(&listed);
+        assert_eq!(
+            c.len(),
+            3,
+            "the gone study is left out, the unreadable one kept"
+        );
+        assert_eq!(label_of(&c, 1), "NESN.SW · CHF");
+        assert_eq!(label_of(&c, 2), "NESN.SW · 2026-02-01");
+        assert_eq!(label_of(&c, 4), "ROG.SW");
+        // Two unreadable on one day: numbered, and the number is carried for the header.
+        let c = label_choices(&[
+            facts(5, "X.SW", "", "2026-01-01"),
+            facts(6, "X.SW", "", "2026-01-01"),
+        ]);
+        assert_eq!(label_of(&c, 5), "X.SW · 2026-01-01 · 1");
+        assert_eq!(
+            c.iter()
+                .find(|x| x.id == Uuid::from_u128(6))
+                .unwrap()
+                .ordinal,
+            Some(2)
+        );
+    }
+
+    fn label_of(choices: &[StudyChoice], n: u128) -> String {
+        choices
+            .iter()
+            .find(|c| c.id == Uuid::from_u128(n))
+            .map(|c| c.label.clone())
+            .unwrap()
+    }
+
+    #[test]
+    fn a_choice_names_its_currency_only_when_the_ticker_is_ambiguous() {
+        let c = label_choices(&[
+            facts(1, "NESN.SW", "", "2026-01-01"),
+            facts(2, "AAPL.US", "USD", "2026-02-01"),
+            facts(3, "AAPL.US", "CHF", "2026-03-01"),
+        ]);
+        assert_eq!(label_of(&c, 1), "NESN.SW");
+        assert_eq!(label_of(&c, 2), "AAPL.US · USD");
+        assert_eq!(label_of(&c, 3), "AAPL.US · CHF");
+        // Sorted by label, one entry per STUDY (never deduplicated by ticker).
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert_eq!(labels, ["AAPL.US · CHF", "AAPL.US · USD", "NESN.SW"]);
+    }
+
+    #[test]
+    fn a_shared_ticker_and_currency_falls_back_to_the_date_then_a_number() {
+        let c = label_choices(&[
+            facts(1, "ROG.SW", "CHF", "2026-01-01"),
+            facts(2, "ROG.SW", "CHF", "2026-05-01"),
+            facts(4, "NOVN.SW", "CHF", "2026-06-01"),
+            facts(3, "NOVN.SW", "CHF", "2026-06-01"),
+        ]);
+        assert_eq!(label_of(&c, 1), "ROG.SW · CHF · 2026-01-01");
+        assert_eq!(label_of(&c, 2), "ROG.SW · CHF · 2026-05-01");
+        // Same day: numbered in id order — every label still names one study.
+        assert_eq!(label_of(&c, 3), "NOVN.SW · CHF · 2026-06-01 · 1");
+        assert_eq!(label_of(&c, 4), "NOVN.SW · CHF · 2026-06-01 · 2");
+        let ord = |n: u128| {
+            c.iter()
+                .find(|x| x.id == Uuid::from_u128(n))
+                .unwrap()
+                .ordinal
+        };
+        assert_eq!((ord(1), ord(3), ord(4)), (None, Some(1), Some(2)));
+        let mut labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        labels.dedup();
+        assert_eq!(labels.len(), 4, "unique labels");
     }
 }
