@@ -161,6 +161,8 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         config_path,
         holding_freshness,
         holding_dismissed,
+        quick_screen,
+        screening,
         ..
     } = s;
     // Settings intents: apply live (no restart), mirror into Prefs, persist on change.
@@ -201,6 +203,8 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
+        let quick_screen = Rc::clone(quick_screen);
+        let screening = Rc::clone(screening);
         ui.global::<Prefs>()
             .on_number_format_selected(move |value| {
                 let Some(format) = NumberFormat::parse(&value) else {
@@ -212,6 +216,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     return;
                 }
                 let ui = ui_weak.unwrap();
+                let old_format = config.borrow().number_format;
                 push_samples(&ui, format);
                 ui.global::<Prefs>()
                     .set_number_format(format.as_str().into());
@@ -246,6 +251,21 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 // Issue #107: the dashboard's potential-return column is baked in the current locale
                 // at curate time — re-render it so the "%" figures re-format with the new separator.
                 crate::wiring::studies::refresh_studies(&ui, &journal_state.borrow());
+                // G1 final review: the criblage card (running or finished), the examination and
+                // the comparison table are baked at push time too — they re-spell as well.
+                crate::wiring::screening::rerender_screening(&ui, &screening, format);
+                crate::wiring::quick_screen::rerender(
+                    &ui,
+                    &journal_state.borrow(),
+                    &quick_screen,
+                    old_format,
+                    format,
+                );
+                crate::wiring::comparison::rerender_comparison(
+                    &ui,
+                    &journal_state.borrow(),
+                    format,
+                );
             });
     }
     // ── Story 4.3 — reference currency (FR63) ── persist the chosen code and re-label the register.

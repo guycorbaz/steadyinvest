@@ -76,6 +76,7 @@ pub(crate) fn render_journal_panel(ui: &MainWindow, state: &JournalState, config
 pub(crate) struct DossierSession {
     current_study: Rc<RefCell<Option<String>>>,
     quick_screen: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
+    quick_screen_ready: Rc<crate::wiring::quick_screen::KeptSlot>,
     quick_screen_request: Rc<std::cell::Cell<u64>>,
     screening: Rc<RefCell<Option<crate::wiring::screening::ScreeningSession>>>,
     /// The dossier generation (G1 final review M1) — bumped here, read by every provider job
@@ -98,6 +99,7 @@ impl DossierSession {
         Self {
             current_study: Rc::clone(&s.current_study),
             quick_screen: Rc::clone(&s.quick_screen),
+            quick_screen_ready: Rc::clone(&s.quick_screen_ready),
             quick_screen_request: Rc::clone(&s.quick_screen_request),
             screening: Rc::clone(&s.screening),
             dossier_generation: Rc::clone(&s.dossier_generation),
@@ -159,6 +161,7 @@ fn clear_dossier_session(ui: &MainWindow, session: &DossierSession) {
     crate::wiring::quick_screen::clear_examination(
         ui,
         &session.quick_screen,
+        &session.quick_screen_ready,
         &session.quick_screen_request,
     );
     crate::wiring::screening::close_screening(ui, &session.screening);
@@ -864,6 +867,7 @@ mod tests {
             current_study: Rc::new(RefCell::new(Some("x".into()))),
             quick_screen: Rc::new(RefCell::new(None)),
             quick_screen_request: Rc::new(std::cell::Cell::new(0)),
+            quick_screen_ready: Rc::new(RefCell::new(None)),
             screening: Rc::new(RefCell::new(None)),
             dossier_generation: Rc::new(std::cell::Cell::new(7)),
             refresh_pending: Rc::new(RefCell::new(3)),

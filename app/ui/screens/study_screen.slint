@@ -945,7 +945,14 @@ export component StudyScreen inherits Rectangle {
                     spacing: 0;
                     GridLabelCell { label: @tr("Indicateur"); width: root.col-label; }
                     for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; fit: true; }
-                    GridLabelCell { label: @tr("Moy. 5 ans"); width: root.col-stat; fit: true; }
+                    // The years actually averaged, never « 5 ans » over three (G1, #237).
+                    GridLabelCell {
+                        label: Studies.mgmt-computed.avg-years == 1 ? @tr("Moy. 1 an")
+                            : Studies.mgmt-computed.avg-years > 1 ? @tr("Moy. {} ans", Studies.mgmt-computed.avg-years)
+                            : @tr("Moyenne");
+                        width: root.col-stat;
+                        fit: true;
+                    }
                     GridLabelCell { label: @tr("Tendance"); width: root.col-stat; fit: true; }
                 }
                 // Editable raw-input rows (sales · pre-tax profit · book value), paired with their

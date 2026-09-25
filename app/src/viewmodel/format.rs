@@ -56,7 +56,7 @@ impl NumberFormat {
         }
     }
 
-    fn decimal_separator(self) -> char {
+    pub(crate) fn decimal_separator(self) -> char {
         match self {
             NumberFormat::Comma => ',',
             NumberFormat::Point => '.',

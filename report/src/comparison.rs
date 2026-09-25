@@ -28,6 +28,29 @@ pub struct ComparisonColumn {
     /// `full` | `provisional` | `withheld` | `""`.
     pub state: String,
     pub low_confidence: bool,
+    /// Rows 5 / 6: how many years this column's average actually runs over (`0` = no average
+    /// shown) — the row label says that number, never « 5 ans » over three (G1, #237).
+    pub ptp_avg_years: usize,
+    pub roe_avg_years: usize,
+}
+
+/// Rows 5 / 6 (`row` = 5 or 6): the number of years every SHOWN average of the row runs over —
+/// `Some(n)` when the columns agree (the label says « moyenne n ans »); `None` when no column
+/// shows one or they differ (the label says « moyenne » and each cell names its own years).
+pub fn average_years(columns: &[ComparisonColumn], row: usize) -> Option<usize> {
+    let mut shown = columns
+        .iter()
+        .filter(|c| !c.unavailable)
+        .map(|c| {
+            if row == 5 {
+                c.ptp_avg_years
+            } else {
+                c.roe_avg_years
+            }
+        })
+        .filter(|n| *n > 0);
+    let first = shown.next()?;
+    shown.all(|n| n == first).then_some(first)
 }
 
 /// The comparison, ready to lay out.
@@ -55,8 +78,9 @@ const ROWS: [&str; 30] = [
     "Croissance estimée des ventes",
     "Croissance historique du BPA",
     "Croissance estimée du BPA",
-    "Marge avant impôt, moyenne 5 ans · tendance",
-    "Rendement des capitaux propres, moyenne 5 ans · tendance",
+    // Rows 5 / 6 are worded by `row_label` (the years actually averaged).
+    PTP_AVG,
+    ROE_AVG,
     "Part du capital détenue par la direction",
     "BPA total estimé sur 5 ans",
     "Fourchette de cours sur 5 ans",
@@ -94,6 +118,14 @@ const STATE_WITHHELD: &str = "en attente";
 const LOW_CONFIDENCE: &str = "confiance réduite";
 const EMPTY: &str = "Aucune étude sélectionnée.";
 const FLAGS_TITLE: &str = "Signaux de qualité (ligne 27)";
+// Rows 5 / 6 say the years their averages run over (G1, #237): `{n}` years, one year, or — when
+// the columns differ — no number in the label (each cell names its own).
+const PTP_AVG_N: &str = "Marge avant impôt, moyenne {n} ans · tendance";
+const PTP_AVG_ONE: &str = "Marge avant impôt, moyenne 1 an · tendance";
+const PTP_AVG: &str = "Marge avant impôt, moyenne · tendance";
+const ROE_AVG_N: &str = "Rendement des capitaux propres, moyenne {n} ans · tendance";
+const ROE_AVG_ONE: &str = "Rendement des capitaux propres, moyenne 1 an · tendance";
+const ROE_AVG: &str = "Rendement des capitaux propres, moyenne · tendance";
 
 #[cfg(test)]
 const COMPARISON_USER_FACING: &[&str] = &[
@@ -118,7 +150,27 @@ const COMPARISON_USER_FACING: &[&str] = &[
     LOW_CONFIDENCE,
     EMPTY,
     FLAGS_TITLE,
+    PTP_AVG_N,
+    PTP_AVG_ONE,
+    PTP_AVG,
+    ROE_AVG_N,
+    ROE_AVG_ONE,
+    ROE_AVG,
 ];
+
+/// The label of row `n` (1-based): the fixed inventory, but rows 5 / 6 say the years averaged.
+fn row_label(columns: &[ComparisonColumn], n: usize) -> String {
+    let (many, one, none) = match n {
+        5 => (PTP_AVG_N, PTP_AVG_ONE, PTP_AVG),
+        6 => (ROE_AVG_N, ROE_AVG_ONE, ROE_AVG),
+        _ => return ROWS[n - 1].to_string(),
+    };
+    match average_years(columns, n) {
+        Some(1) => one.to_string(),
+        Some(years) => many.replace("{n}", &years.to_string()),
+        None => none.to_string(),
+    }
+}
 
 fn zone_label(key: &str) -> &str {
     match key {
@@ -155,6 +207,27 @@ fn flag_words(c: &ComparisonColumn) -> Option<String> {
     let row = c.rows.get(26)?;
     let (_, words) = row.split_once(" : ")?;
     Some(words.trim().to_string())
+}
+
+/// A column's identity as its header states it — « TICKER (CUR) · date » (the ticker carries the
+/// « · n » of two studies of one ticker, currency and day). Two columns of one ticker are two
+/// studies: the flag list names each by this, never by the bare ticker (G1, #237).
+fn column_identity(c: &ComparisonColumn) -> String {
+    let head = header_line(c);
+    if c.date.is_empty() {
+        head
+    } else {
+        format!("{head} · {}", c.date)
+    }
+}
+
+/// The flag list under the grids: one line per column with raised flags, in column order, each
+/// named by its own column's identity.
+fn flag_list(cols: &[ComparisonColumn]) -> Vec<String> {
+    cols.iter()
+        .filter(|c| !c.unavailable && !c.missing)
+        .filter_map(|c| flag_words(c).map(|w| format!("{} : {w}", column_identity(c))))
+        .collect()
 }
 
 /// The cell of row `n` (1-based) for a column: the figure, the worded key rows, or the absence.
@@ -280,7 +353,7 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
             doc.grid_row_small(&name_refs, &edges, true, 1);
         }
         for row in range {
-            let mut cells = vec![format!("({row}) {}", ROWS[row - 1])];
+            let mut cells = vec![format!("({row}) {}", row_label(cols, row))];
             cells.extend(cols.iter().map(|c| cell(c, row)));
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
             doc.grid_row_small(&refs, &edges, false, 1);
@@ -290,16 +363,12 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     }
     // Row 27 in the grid carries the count only; the flags themselves are listed here, one
     // paragraph per study, wrapped to the page (a flag's words never spill past the margin).
-    let listed: Vec<(&str, String)> = cols
-        .iter()
-        .filter(|c| !c.unavailable && !c.missing)
-        .filter_map(|c| flag_words(c).map(|w| (c.ticker.as_str(), w)))
-        .collect();
+    let listed = flag_list(cols);
     if !listed.is_empty() {
         doc.section(FLAGS_TITLE);
         let width = doc.right() - MARGIN;
-        for (ticker, words) in listed {
-            for chunk in wrap_to_width(&format!("{ticker} : {words}"), width, SMALL) {
+        for line in listed {
+            for chunk in wrap_to_width(&line, width, SMALL) {
                 doc.small_line(&chunk);
             }
         }
@@ -434,6 +503,70 @@ mod tests {
         assert_eq!(second_header_line(&x), "2026-09-24 · non calculable");
         assert_eq!(cell(&x, 1), UNCOMPUTABLE);
         assert_ne!(UNCOMPUTABLE, UNAVAILABLE);
+    }
+
+    #[test]
+    fn two_columns_of_one_ticker_list_their_flags_apart() {
+        // Two studies of AAPL.US, in two currencies, then in one currency on two days.
+        let mut a = column("AAPL.US", false);
+        a.currency = "USD".into();
+        a.rows[26] = "1 : marge en baisse".into();
+        let mut b = column("AAPL.US", false);
+        b.rows[26] = "1 : ratio sous la cible".into();
+        let listed = flag_list(&[a.clone(), b.clone()]);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0], "AAPL.US (USD) · 2026-09-24 : marge en baisse");
+        assert_eq!(
+            listed[1],
+            "AAPL.US (CHF) · 2026-09-24 : ratio sous la cible"
+        );
+        b.currency = "USD".into();
+        b.date = "2026-09-25".into();
+        let listed = flag_list(&[a.clone(), b.clone()]);
+        assert_ne!(
+            listed[0].split(" : ").next(),
+            listed[1].split(" : ").next(),
+            "each line names its own column"
+        );
+        // Same ticker, currency and day: the header's « · n » tells them apart.
+        let (mut x, mut y) = (a.clone(), a);
+        x.ticker = "AAPL.US · 1".into();
+        y.ticker = "AAPL.US · 2".into();
+        let listed = flag_list(&[x, y]);
+        assert!(listed[0].starts_with("AAPL.US · 1 (USD)"));
+        assert!(listed[1].starts_with("AAPL.US · 2 (USD)"));
+    }
+
+    #[test]
+    fn rows_5_and_6_say_the_years_actually_averaged() {
+        let mut a = column("A", false);
+        let mut b = column("B", false);
+        (a.ptp_avg_years, a.roe_avg_years) = (5, 3);
+        (b.ptp_avg_years, b.roe_avg_years) = (5, 4);
+        let cols = [a.clone(), b.clone()];
+        assert_eq!(average_years(&cols, 5), Some(5));
+        assert_eq!(
+            row_label(&cols, 5),
+            "Marge avant impôt, moyenne 5 ans · tendance"
+        );
+        // The columns differ: no number in the label (each cell names its own years).
+        assert_eq!(average_years(&cols, 6), None);
+        assert_eq!(row_label(&cols, 6), ROE_AVG);
+        // Three years everywhere: « moyenne 3 ans », never « 5 ans ».
+        b.roe_avg_years = 3;
+        assert_eq!(
+            row_label(&[a.clone(), b.clone()], 6),
+            "Rendement des capitaux propres, moyenne 3 ans · tendance"
+        );
+        // A column with no average, or no figures, does not vote.
+        b.roe_avg_years = 0;
+        let mut u = column("U", true);
+        u.roe_avg_years = 1;
+        assert_eq!(average_years(&[a.clone(), b, u], 6), Some(3));
+        a.ptp_avg_years = 1;
+        assert_eq!(row_label(&[a], 5), PTP_AVG_ONE);
+        assert_eq!(row_label(&[], 5), PTP_AVG);
+        assert_eq!(row_label(&[], 7), ROWS[6]);
     }
 
     #[test]

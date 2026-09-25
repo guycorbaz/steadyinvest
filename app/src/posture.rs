@@ -699,8 +699,18 @@ mod tests {
         // Its G3 review: the mixed-links band's four more variants (a lot without a study, an
         // unreadable one), the other studies' signals / high zone, the unreadable lot's stop, and
         // the due count on its own line: 956 + 8 = 964, measured.
+        // G1 M (#237): rows 5 / 6 of the comparison and the study screen's §2 average column say
+        // the years actually averaged (comparison 2 → 6 labels, study 1 → 4 titles): +7 = 960,
+        // measured. The same pass, area 4 (#237): the rate « — » cause, the « different years »
+        // band and criblage word, the criblage's « fenêtre incomplète », the kept-examination band
+        // and its « Ouvrir l'examen » (the ladder's unavailable band is reworded in place): +6 =
+        // 966, measured. Its G3 review: the study screen's « Moy. a / b ans » goes (−1); the
+        // criblage names which ladder is short or absent (6 years-column words, the « fenêtre
+        // incomplète » one reworded: +5) and a rate's « — » cause (+3); the kept failure's band
+        // and its « Compris » (+2): +9 = 975, measured.
+        // integ/g1-final2: 953 + L 11 + M 22 = 986.
         assert!(
-            total >= 964,
+            total >= 986,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -822,7 +832,9 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            162,
+            163,
+            // G1 final review: the worker-gone cause moves out of three rails into a registered
+            // message (MSG_FETCH_WORKER_GONE): +1; integ/g1-final2 with N, O: 163.
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -851,7 +863,9 @@ mod tests {
         }
         assert_eq!(
             crate::viewmodel::engine::USER_FACING_LABELS.len(),
-            23,
+            // G1 M (#237): the years a comparison cell's §2 average runs over (AVG_OVER_ONE_YEAR,
+            // AVG_OVER_YEARS): 23 + 2 = 25.
+            25,
             "engine.rs label inventory changed — register the new label"
         );
     }

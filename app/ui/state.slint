@@ -59,10 +59,16 @@ export struct ScreeningRow {
     years: string,
     sales-rate: string,
     eps-rate: string,
-    eps-vs-sales: string,   // eps | sales | same | ""
+    eps-vs-sales: string,   // eps | sales | same | years | "" (years = different periods)
     pe-position: string,    // higher | similar | lower | ""
     price-vs-high: string,  // signed %, "" = unknown
     has-study: bool,
+    // Why `years` / a rate is empty (G1 final review): years-gap ∈ sales-absent | eps-absent |
+    // both-absent | sales-window | eps-window | both-window | ""; a rate gap ∈ absent | window |
+    // nonpositive | "".
+    years-gap: string,
+    sales-rate-gap: string,
+    eps-rate-gap: string,
 }
 
 // One stored exchange rate (Story 6.5, FR28): dated + source-aware, BASE → QUOTE (the reference
@@ -387,6 +393,9 @@ export struct MgmtComputed {
     avg-roe: string,
     ptp-trend: string,
     roe-trend: string,
+    // The « Moy. n ans » column title (G1, #237): the years the shown averages run over when
+    // they agree; 0 = none shown or they differ (title « Moyenne », each cell names its span).
+    avg-years: int,
 }
 
 // §3 P/E summary results.
@@ -1190,6 +1199,8 @@ export struct ComparisonHeader {
     zone: string,           // buy | neutral | sell | below | above | ""
     state: string,          // full | provisional | withheld | ""
     low-confidence: bool,
+    ptp-avg-years: int,     // rows 5 / 6: the years this column's average runs over (0 = none)
+    roe-avg-years: int,
 }
 // G1 decision 3 (#237): one pickable STUDY — the id is the key, the label display only;
 // `ordinal` = the label's « · n » (0 = none), carried into the column header.
@@ -1223,7 +1234,11 @@ export global Comparison {
     in-out property <string> pick5;
     in-out property <[string]> pick-ids;
     in-out property <int> distinct-picks;   // distinct picked studies — « Comparer » at ≥ 2
-    callback picked(int, string);  // slot (0-based), label → resolve its study id
+    // Rows 5 / 6 (G1, #237): the years every shown average of the row runs over — the label says
+    // « moyenne n ans »; 0 = none shown or the columns differ (each cell then names its years).
+    in-out property <int> ptp-avg-years;
+    in-out property <int> roe-avg-years;
+    callback picked(int, int);     // slot (0-based), option INDEX → its study id (the dropdown contract)
     callback clear-picks();
     callback compare();            // build the table from the picks and open it
     callback close();              // back to the list
@@ -1259,12 +1274,14 @@ export global QuickScreen {
     in-out property <string> sales-span;
     in-out property <bool> sales-nonpositive-base;   // line (10) absent: old average ≤ 0
     in-out property <bool> sales-unavailable;
+    in-out property <bool> sales-rate-nonpositive;   // rate absent: average (4) or (8) ≤ 0
     in-out property <[string]> eps-lines;
     in-out property <[string]> eps-years;
     in-out property <string> eps-rate;
     in-out property <string> eps-span;
     in-out property <bool> eps-nonpositive-base;
     in-out property <bool> eps-unavailable;
+    in-out property <bool> eps-rate-nonpositive;
     in-out property <string> eps-vs-sales;   // eps | sales | same | ""
     // §3
     in-out property <[QuickPriceRow]> price-rows;
@@ -1304,6 +1321,14 @@ export global QuickScreen {
     in-out property <string> pick-currency;
     callback examine(string, string);   // ticker, currency → fetch, then open
     callback examine-study();           // the open study's own years → open
+    // G1 final review: an « Examiner » outcome that arrived while the list was not on screen (or
+    // with a study / the comparison / another examination open) is KEPT, never lost nor laid
+    // over what the reader has open — a result is named with « Ouvrir l'examen », a failure with
+    // its cause and « Compris ».
+    in-out property <string> ready-ticker;
+    in-out property <string> ready-failure;   // "" = a kept result; else the kept failure's cause
+    callback open-ready();
+    callback dismiss-ready();                 // « Compris » on a kept failure
     callback close();
     callback export-pdf();
     callback create-study();

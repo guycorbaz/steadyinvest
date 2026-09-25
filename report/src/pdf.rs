@@ -227,15 +227,9 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             head.push(EM_DASH.to_string());
         }
         // G1 F — « Moy. 5 ans » only when five years were averaged: the average runs over the
-        // known ratios of the usable-years window (the §3 window), which may hold fewer.
-        let window: Vec<i32> = outputs.valuation.per_year.iter().map(|v| v.year).collect();
-        let averaged = |pick: fn(&steadyinvest_core::ssg::YearRatios) -> Option<Decimal>| {
-            m.per_year
-                .iter()
-                .filter(|r| window.contains(&r.year) && pick(r).is_some())
-                .count()
-        };
-        let (n_a, n_b) = (averaged(|r| r.ptp_pct), averaged(|r| r.roe_pct));
+        // known ratios of the usable-years window, which may hold fewer — the count is core's
+        // (`ptp_avg_years` / `roe_avg_years`, G1 final review: one count, never recounted here).
+        let (n_a, n_b) = (m.ptp_avg_years, m.roe_avg_years);
         let floor = USABLE_YEARS_FLOOR as usize;
         let five = n_a >= floor && n_b >= floor;
         head.push(if five { AVG_FIVE } else { AVG_FEWER }.to_string());

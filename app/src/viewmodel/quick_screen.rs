@@ -25,6 +25,15 @@ fn year(y: Option<i32>) -> String {
     y.map(|y| y.to_string()).unwrap_or_default()
 }
 
+/// The rate is absent because an average, (4) or (8), is zero or negative — a compound rate is
+/// not defined there (G1 final review). The examination and the criblage name it alike.
+pub fn rate_nonpositive(l: &Ladder) -> bool {
+    l.compound_rate_pct.is_none()
+        && [l.recent_avg, l.old_avg]
+            .iter()
+            .any(|a| a.is_some_and(|a| a <= Decimal::ZERO))
+}
+
 fn ladder(l: &Ladder, field: DisplayField, format: NumberFormat) -> QuickScreenLadder {
     if l.unavailable {
         return QuickScreenLadder {
@@ -55,6 +64,8 @@ fn ladder(l: &Ladder, field: DisplayField, format: NumberFormat) -> QuickScreenL
         span_years: l.span_years.to_string(),
         // Line (10) is absent on a non-positive old average: the layouts say why (G1 D review).
         nonpositive_base: l.old_avg.is_some_and(|o| o <= Decimal::ZERO),
+        // The rate's « — » names its cause when an average is ≤ 0 (G1 final review).
+        rate_nonpositive: rate_nonpositive(l),
         unavailable: false,
     }
 }
@@ -144,6 +155,7 @@ pub fn quick_screen_view(
             Some(RateComparison::EpsFaster) => "eps",
             Some(RateComparison::SalesFaster) => "sales",
             Some(RateComparison::Same) => "same",
+            Some(RateComparison::DifferentYears) => "years",
             None => "",
         }
         .into(),
@@ -223,6 +235,32 @@ pub fn meets_key(rate_pct: Option<Decimal>, objective: &str, format: NumberForma
     }
 }
 
+/// The reader's objective re-spelled from `old` into `new` on a number-format change (G1 final
+/// review): « 7,5 % » typed under the comma format reads « 7.5 % » under the point one — never
+/// turned into « non lu » by the switch. A text the old format did not read stays as typed.
+pub fn respell_objective(objective: &str, old: NumberFormat, new: NumberFormat) -> String {
+    if old == new || meets_key(Some(Decimal::ZERO), objective, old) == "unread" {
+        return objective.to_string();
+    }
+    let trimmed = objective.trim();
+    let (body, percent) = match trimmed.strip_suffix('%') {
+        Some(body) => (body.trim_end(), true),
+        None => (trimmed, false),
+    };
+    let NumberReading::Value(value) = read_number(body, old) else {
+        return objective.to_string();
+    };
+    // The value's own digits (its typed scale kept), with the new format's decimal mark only —
+    // an objective carries no grouping (`meets_key` reads a grouped one as « non lu »).
+    let mut out = value
+        .to_string()
+        .replace('.', &new.decimal_separator().to_string());
+    if percent {
+        out.push_str(" %");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +323,61 @@ mod tests {
         assert!(v.eps.nonpositive_base);
         assert_eq!(v.eps.lines[9], "");
         assert!(!v.sales.nonpositive_base);
+        // The rate's « — » names its cause too — an old OR a recent average ≤ 0 (G1 final).
+        assert!(v.eps.rate_nonpositive);
+        out.eps.old_avg = Some(d("2"));
+        out.eps.recent_avg = Some(d("0"));
+        assert!(
+            quick_screen_view(head(), &out, NumberFormat::Comma)
+                .eps
+                .rate_nonpositive
+        );
+        // A present rate, or absent averages: nothing to explain by a sign.
+        out.eps.compound_rate_pct = Some(d("3"));
+        assert!(
+            !quick_screen_view(head(), &out, NumberFormat::Comma)
+                .eps
+                .rate_nonpositive
+        );
+        assert!(!v.sales.rate_nonpositive);
+    }
+
+    #[test]
+    fn a_format_change_respells_the_objective_never_unreads_it() {
+        use NumberFormat::{Comma, Point};
+        assert_eq!(respell_objective("7,5 %", Comma, Point), "7.5 %");
+        assert_eq!(
+            meets_key(
+                Some(d("8")),
+                &respell_objective("7,5 %", Comma, Point),
+                Point
+            ),
+            "yes"
+        );
+        assert_eq!(respell_objective("7.5", Point, Comma), "7,5");
+        assert_eq!(respell_objective("12", Comma, Point), "12");
+        assert_eq!(
+            respell_objective("7,50", Comma, Point),
+            "7.50",
+            "the typed scale is kept"
+        );
+        // Unread before, unread after: left as typed; blank stays blank; same format: untouched.
+        assert_eq!(respell_objective("sept", Comma, Point), "sept");
+        assert_eq!(respell_objective("7.500", Comma, Point), "7.500");
+        assert_eq!(respell_objective("", Comma, Point), "");
+        assert_eq!(respell_objective("7,5", Comma, Comma), "7,5");
+    }
+
+    #[test]
+    fn two_ladders_over_different_years_are_said_not_compared() {
+        let out = QuickScreenOutputs {
+            eps_vs_sales: Some(RateComparison::DifferentYears),
+            ..QuickScreenOutputs::default()
+        };
+        assert_eq!(
+            quick_screen_view(head(), &out, NumberFormat::Comma).eps_vs_sales,
+            "years"
+        );
     }
 
     /// The decision is taken on the rate as shown: 6,96 % reads « 7,0 % », which meets 7.

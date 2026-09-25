@@ -14,13 +14,14 @@
 use rust_decimal::Decimal;
 
 use crate::normalize::CanonicalYear;
+use crate::rounding::{DisplayField, round_for_display};
 use crate::ssg::endpoints_cagr_pct;
 
 /// The form's exponent for its six-year window (its conversion table).
 pub const FORM_SPAN_YEARS: u32 = 5;
-/// Fewer usable years than this and a ladder is « indisponible »: two consecutive pairs that do
-/// not overlap (G1 review — three years made the middle one serve both pairs).
-pub const MIN_LADDER_YEARS: usize = 4;
+// A ladder is « indisponible » when its six-year window (ending at the most recent consecutive
+// pair) holds no second, disjoint consecutive pair — a matter of WHICH years, not of how many
+// (`ladder_pairs`; G1 final review: the old « fewer than four years » constant misstated it).
 /// « voisin » band around the five-year average P/E, in percent of it.
 pub const PE_SIMILAR_BAND_PCT: u32 = 10;
 
@@ -56,6 +57,9 @@ pub struct Ladder {
     /// `true` when the series holds no two non-overlapping consecutive pairs inside the six-year
     /// window: every line is `None`.
     pub unavailable: bool,
+    /// `true` when the series holds no figure at all (then also `unavailable`) — the absence of
+    /// the series, told apart from a short window (G1 final review).
+    pub absent: bool,
 }
 
 /// One row of the §3 price record.
@@ -84,6 +88,9 @@ pub enum RateComparison {
     EpsFaster,
     SalesFaster,
     Same,
+    /// The two ladders do not read the same years (a gap in one series): their rates are not
+    /// compared — said, never decided over two different periods.
+    DifferentYears,
 }
 
 /// The §3 price record and its facts.
@@ -153,6 +160,7 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
     let Some((recent_year, old_year)) = ladder_pairs(points) else {
         return Ladder {
             unavailable: true,
+            absent: points.is_empty(),
             ..Ladder::default()
         };
     };
@@ -206,6 +214,7 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
         compound_rate_pct,
         span_years: span,
         unavailable: false,
+        absent: false,
     }
 }
 
@@ -230,6 +239,25 @@ fn total(values: impl Iterator<Item = Decimal>) -> Option<Decimal> {
         });
     }
     acc
+}
+
+/// Where `now` stands against `avg` ± `PE_SIMILAR_BAND_PCT` %. Checked arithmetic (G1 final
+/// review): an overflow is an absent position, never a panic; a non-positive average has none.
+fn position_against(now: Decimal, avg: Decimal) -> Option<PePosition> {
+    if avg <= Decimal::ZERO {
+        return None;
+    }
+    let band = avg
+        .checked_mul(Decimal::from(PE_SIMILAR_BAND_PCT))?
+        .checked_div(Decimal::ONE_HUNDRED)?;
+    let (top, bottom) = (avg.checked_add(band)?, avg.checked_sub(band)?);
+    Some(if now > top {
+        PePosition::Higher
+    } else if now < bottom {
+        PePosition::Lower
+    } else {
+        PePosition::Similar
+    })
 }
 
 fn price_record(
@@ -288,16 +316,7 @@ fn price_record(
             .count() as u32
     });
     let pe_position = match (present_pe, pe_avg_of_avgs) {
-        (Some(now), Some(avg)) if avg > Decimal::ZERO => {
-            let band = avg * Decimal::from(PE_SIMILAR_BAND_PCT) / Decimal::ONE_HUNDRED;
-            Some(if now > avg + band {
-                PePosition::Higher
-            } else if now < avg - band {
-                PePosition::Lower
-            } else {
-                PePosition::Similar
-            })
-        }
+        (Some(now), Some(avg)) => position_against(now, avg),
         _ => None,
     };
     PriceRecord {
@@ -321,6 +340,38 @@ fn price_record(
     }
 }
 
+/// The years a ladder reads: (1), (2), (5), (6).
+fn ladder_years(l: &Ladder) -> [Option<i32>; 4] {
+    [
+        l.recent_year,
+        l.recent_prior_year,
+        l.old_year,
+        l.old_prior_year,
+    ]
+}
+
+/// « Le BPA a augmenté plus / moins vite que les ventes » — decided on the rates AS SHOWN (rounded
+/// for display: « 5,0 % » against « 5,0 % » is « même rythme », whatever the digits beyond) and
+/// only over the SAME years: two ladders over different periods are `DifferentYears`, never
+/// compared (G1 final review). `None` when either rate is absent.
+fn compare_rates(eps: &Ladder, sales: &Ladder) -> Option<RateComparison> {
+    let shown = |r: Decimal| round_for_display(r, DisplayField::Percent);
+    let (e, s) = (
+        shown(eps.compound_rate_pct?),
+        shown(sales.compound_rate_pct?),
+    );
+    if ladder_years(eps) != ladder_years(sales) {
+        return Some(RateComparison::DifferentYears);
+    }
+    Some(if e > s {
+        RateComparison::EpsFaster
+    } else if e < s {
+        RateComparison::SalesFaster
+    } else {
+        RateComparison::Same
+    })
+}
+
 /// The examination of a canonical series (ascending years). `present_eps` is the TTM figure when
 /// known; the caller falls back to the latest annual EPS.
 pub fn quick_screen(
@@ -338,12 +389,7 @@ pub fn quick_screen(
         .collect();
     let sales = ladder(&sales_points);
     let eps = ladder(&eps_points);
-    let eps_vs_sales = match (eps.compound_rate_pct, sales.compound_rate_pct) {
-        (Some(e), Some(s)) if e > s => Some(RateComparison::EpsFaster),
-        (Some(e), Some(s)) if e < s => Some(RateComparison::SalesFaster),
-        (Some(_), Some(_)) => Some(RateComparison::Same),
-        _ => None,
-    };
+    let eps_vs_sales = compare_rates(&eps, &sales);
     QuickScreenOutputs {
         sales,
         eps,
@@ -511,6 +557,59 @@ mod tests {
     }
 
     /// Six years whose two-year averages are `old` (2021–2022) and `recent` (2025–2026).
+    #[test]
+    fn eps_versus_sales_is_decided_on_the_shown_rates_over_the_same_years() {
+        let l = |rate: &str, recent: i32| Ladder {
+            recent_year: Some(recent),
+            recent_prior_year: Some(recent - 1),
+            old_year: Some(recent - 4),
+            old_prior_year: Some(recent - 5),
+            compound_rate_pct: Some(d(rate)),
+            span_years: 5,
+            ..Ladder::default()
+        };
+        // 5,04 % and 5,01 % both read « 5,0 % »: the same pace, as the reader sees it.
+        assert_eq!(
+            compare_rates(&l("5.04", 2025), &l("5.01", 2025)),
+            Some(RateComparison::Same)
+        );
+        assert_eq!(
+            compare_rates(&l("5.06", 2025), &l("5.01", 2025)),
+            Some(RateComparison::EpsFaster)
+        );
+        assert_eq!(
+            compare_rates(&l("4.9", 2025), &l("5.0", 2025)),
+            Some(RateComparison::SalesFaster)
+        );
+        // Two different periods are never compared — and said so.
+        assert_eq!(
+            compare_rates(&l("9", 2025), &l("5", 2024)),
+            Some(RateComparison::DifferentYears)
+        );
+        let mut absent = l("5", 2025);
+        absent.compound_rate_pct = None;
+        assert_eq!(compare_rates(&absent, &l("5", 2025)), None);
+    }
+
+    #[test]
+    fn an_absent_series_is_told_apart_from_a_short_window() {
+        assert!(ladder(&[]).absent && ladder(&[]).unavailable);
+        let short = ladder(&[(2024, d("1")), (2025, d("2"))]);
+        assert!(short.unavailable && !short.absent);
+    }
+
+    #[test]
+    fn the_pe_band_never_overflows_into_a_panic() {
+        assert_eq!(position_against(d("30"), d("20")), Some(PePosition::Higher));
+        assert_eq!(
+            position_against(d("21"), d("20")),
+            Some(PePosition::Similar)
+        );
+        assert_eq!(position_against(d("10"), d("20")), Some(PePosition::Lower));
+        assert_eq!(position_against(Decimal::ONE, Decimal::MAX), None);
+        assert_eq!(position_against(Decimal::ONE, Decimal::ZERO), None);
+    }
+
     fn six_years_with_averages(old: &str, recent: &str) -> Vec<CanonicalYear> {
         [
             (2021, old),

@@ -18,7 +18,7 @@ component Head inherits Text {
 // The criblage's column widths, shared by the head and the rows so they line up.
 global Cols {
     out property <length> ticker: 120px;
-    out property <length> years: 70px;
+    out property <length> years: 100px;   // room for « fenêtre du BPA incomplète » (wrapped)
     out property <length> rate: 110px;
     out property <length> versus: 120px;
     out property <length> pe: 170px;
@@ -39,6 +39,14 @@ import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
 
 export component WatchlistScreen inherits Rectangle {
+    // A criblage rate, or the word for its absence (G1 final review).
+    pure function rate-or-cause(rate: string, gap: string) -> string {
+        if (rate != "") { return rate; }
+        if (gap == "absent") { return @tr("série absente"); }
+        if (gap == "window") { return @tr("fenêtre incomplète"); }
+        if (gap == "nonpositive") { return @tr("moyenne ≤ 0"); }
+        return "—";
+    }
     Flickable {
         viewport-height: content.preferred-height;
 
@@ -240,15 +248,37 @@ export component WatchlistScreen inherits Rectangle {
                         }
                         if row.state == "done": HorizontalLayout {
                             spacing: Tokens.space-8;
-                            Cell { text: row.years; width: Cols.years; }
-                            Cell { text: row.sales-rate != "" ? row.sales-rate : "—"; width: Cols.rate; }
-                            Cell { text: row.eps-rate != "" ? row.eps-rate : "—"; width: Cols.rate; }
+                            // Which ladder, and why: an absent series or a short window.
+                            Cell {
+                                text: row.years-gap == "both-absent" ? @tr("ventes et BPA absents")
+                                    : row.years-gap == "sales-absent" ? @tr("ventes absentes")
+                                    : row.years-gap == "eps-absent" ? @tr("BPA absent")
+                                    : row.years-gap == "both-window" ? @tr("fenêtres incomplètes")
+                                    : row.years-gap == "sales-window" ? @tr("fenêtre des ventes incomplète")
+                                    : row.years-gap == "eps-window" ? @tr("fenêtre du BPA incomplète")
+                                    : row.years;
+                                width: Cols.years;
+                                wrap: word-wrap;
+                            }
+                            // A rate « — » names its cause in a word (G1 final review).
+                            Cell {
+                                text: root.rate-or-cause(row.sales-rate, row.sales-rate-gap);
+                                width: Cols.rate;
+                                wrap: word-wrap;
+                            }
+                            Cell {
+                                text: root.rate-or-cause(row.eps-rate, row.eps-rate-gap);
+                                width: Cols.rate;
+                                wrap: word-wrap;
+                            }
                             Cell {
                                 width: Cols.versus;
                                 text: row.eps-vs-sales == "eps" ? @tr("plus vite")
                                     : row.eps-vs-sales == "sales" ? @tr("moins vite")
                                     : row.eps-vs-sales == "same" ? @tr("même rythme")
+                                    : row.eps-vs-sales == "years" ? @tr("années différentes")
                                     : "—";
+                                wrap: word-wrap;
                             }
                             Cell {
                                 width: Cols.pe;

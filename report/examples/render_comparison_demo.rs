@@ -24,6 +24,8 @@ fn column(ticker: &str, name: &str, currency: &str, unavailable: bool) -> Compar
         zone: "buy".into(),
         state: "provisional".into(),
         low_confidence: ticker.starts_with('N'),
+        ptp_avg_years: 5,
+        roe_avg_years: 5,
         ..Default::default()
     }
 }

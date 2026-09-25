@@ -246,6 +246,9 @@ pub fn comparison_column(
         zone: zone_position_key(r, current).to_string(),
         state: verdict_state(frame.snapshot.verdict()).to_string(),
         low_confidence: outputs.low_confidence,
+        // The years each shown average runs over (0 when no average is shown).
+        ptp_avg_years: m.avg_ptp_pct.map_or(0, |_| m.ptp_avg_years),
+        roe_avg_years: m.avg_roe_pct.map_or(0, |_| m.roe_avg_years),
         ..ComparisonColumn::default()
     }
 }
@@ -307,6 +310,7 @@ mod tests {
         assert_eq!(u.rows.len(), 30);
     }
 
+    use crate::viewmodel::engine::with_avg_years;
     use crate::viewmodel::engine::{
         build_frame, growth_computed, mgmt_computed, pe_computed, pe_year_cells, return_computed,
         risk_computed,
@@ -498,6 +502,25 @@ mod tests {
             (None, None)
         );
         assert_eq!(window_pe_extremes(&v.per_year[1..]), (None, None));
+    }
+
+    #[test]
+    fn rows_5_and_6_carry_the_years_actually_averaged() {
+        let study = demo_study().unwrap();
+        let frame = build_frame(&study).unwrap();
+        let col = comparison_column(&study, &frame, F);
+        let m = &frame.snapshot.outputs().management;
+        assert_eq!(col.ptp_avg_years, m.ptp_avg_years);
+        assert_eq!(col.roe_avg_years, m.roe_avg_years);
+        assert!(col.ptp_avg_years > 0);
+        // A cell names its own span only when asked (the columns differ).
+        assert_eq!(
+            with_avg_years("47,6 % · ↑ hausse", 3),
+            "47,6 % sur 3 ans · ↑ hausse"
+        );
+        assert_eq!(with_avg_years("47,6 % · —", 1), "47,6 % sur 1 an · —");
+        assert_eq!(with_avg_years("", 3), "", "an absent average stays absent");
+        assert_eq!(with_avg_years("47,6 % · ↑ hausse", 0), "47,6 % · ↑ hausse");
     }
 
     #[test]
