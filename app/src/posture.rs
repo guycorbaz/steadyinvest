@@ -680,9 +680,14 @@ mod tests {
         // « Examen rapide » (the picker card, the two ladders' labels, the price record, the
         // reader's fields, the four conclusions) and measures 850. Story 7.3 PR 2 adds the watchlist
         // criblage (the button, the card, its column heads, the row states and fact words, the
-        // quota band, the « Retour à la liste de suivi » label) and measures 892. Floor strict.
+        // quota band, the « Retour à la liste de suivi » label) and measures 892. The G1 review's
+        // quick-screen figures fix (D) words the §3 facts over a short / partial record (the
+        // counted variants, the « — » lines that replace the vanishing ones, the partial-P/E note)
+        // and names what conclusions 1, 2 and 4 miss (rate absent, objective unread, the record's
+        // average): +17 templates, the « — » fallbacks now through `or-dash`, measures 906. Floor
+        // strict.
         assert!(
-            total >= 892,
+            total >= 906,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

@@ -98,13 +98,21 @@ fn push(ui: &MainWindow, session: &QuickScreenSession, today: &str, format: Numb
     q.set_pe_high_avg(view.pe_high_avg.into());
     q.set_pe_low_avg(view.pe_low_avg.into());
     q.set_pe_avg_of_avgs(view.pe_avg_of_avgs.into());
+    q.set_pe_basis(view.pe_basis.into());
+    q.set_pe_years(view.pe_years.into());
+    q.set_record_years(view.record_years.into());
     q.set_present_price(view.present_price.into());
     q.set_present_eps(view.present_eps.into());
     q.set_present_pe(view.present_pe.into());
     q.set_high_five_years_ago(view.high_five_years_ago.into());
+    q.set_high_basis(view.high_basis.into());
+    q.set_high_year(view.high_year.into());
     q.set_price_vs_high_pct(view.price_vs_high_pct.into());
     q.set_years_sold_as_high(view.years_sold_as_high.into());
     q.set_pe_position(view.pe_position.into());
+    q.set_sold_basis(view.sold_basis.into());
+    q.set_sold_of(view.sold_of.into());
+    q.set_pe_absent(view.pe_absent.into());
     let objective = q.get_objective().to_string();
     q.set_sales_meets(
         meets_key(session.outputs.sales.compound_rate_pct, &objective, format).into(),

@@ -1206,20 +1206,29 @@ export global QuickScreen {
     in-out property <string> pe-high-avg;
     in-out property <string> pe-low-avg;
     in-out property <string> pe-avg-of-avgs;
+    // The §3 bases (G1 review): « cinq ans » only over the form's full five-year record.
+    in-out property <string> pe-basis;            // five | all | partial | "" (no P/E row)
+    in-out property <string> pe-years;            // rows the P/E totals / averages cover
+    in-out property <string> record-years;        // rows of the record
     in-out property <string> present-price;
     in-out property <string> present-eps;
     in-out property <string> present-pe;
     in-out property <string> high-five-years-ago;
     in-out property <string> price-vs-high-pct;   // signed, "" = unknown
+    in-out property <string> high-basis;          // five | year | "" (no high)
+    in-out property <string> high-year;
     in-out property <string> years-sold-as-high;
+    in-out property <string> sold-basis;          // five | count | "" (absent)
+    in-out property <string> sold-of;             // rows with a known high
     in-out property <string> pe-position;         // higher | similar | lower | ""
+    in-out property <string> pe-absent;           // pe | average | both | "" (why no position)
     // The reader's fields (session only, echoed as typed).
     in-out property <string> reasons;
     in-out property <string> factors-continue;    // yes | less | no | ""
     in-out property <string> pe-notes;
     in-out property <string> objective;
     in-out property <string> eps-will-meet;       // yes | no | ""
-    // §4, derived in Rust from the objective (keys: yes | no | "").
+    // §4, derived in Rust from the objective (keys: yes | no | no-rate | unread | "" = blank).
     in-out property <string> sales-meets;
     in-out property <string> eps-meets;
     // The picker on Études.
