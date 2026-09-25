@@ -3556,15 +3556,70 @@ fn a_bad_date_or_amount_on_a_buy_is_refused_neutrally() {
         state.record_buy_for(id, "02/07/2026", "1", "1", "", "", "CHF"),
         Err(MSG_LEDGER_INVALID_DATE.to_string())
     );
+    // G1 final review (M4): each refusal names ITS field — never the register's « quantité et
+    // prix d'achat… aucune position ».
     assert_eq!(
         state.record_buy_for(id, "", "0", "1", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string())
     );
     assert_eq!(
         state.record_buy_for(id, "", "1", "-1", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+        Err(MSG_LEDGER_INVALID_PRICE.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "1", "1", "-2", "", "CHF"),
+        Err(MSG_LEDGER_INVALID_FEES.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "1", "1", "frais", "", "CHF"),
+        Err(MSG_LEDGER_INVALID_FEES.to_string())
+    );
+    // G1 final review (M2, Guy's decision): the ledger sale's quantity is REQUIRED — an empty one
+    // names itself, never sells the whole position.
+    assert_eq!(
+        state.record_sell_for(id, "", "  ", "100", "", "", "CHF"),
+        Err(MSG_LEDGER_QUANTITY_EMPTY.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "", "1", "", "", "CHF"),
+        Err(MSG_LEDGER_QUANTITY_EMPTY.to_string())
     );
     assert!(state.holding_ledger(id).is_empty(), "nothing materialized");
+    assert_eq!(state.list_holdings()[0].quantity, "10", "nothing was sold");
+}
+
+#[test]
+fn a_dividends_refusals_name_the_dividend_field_at_fault() {
+    // G1 final review (M4): gross, withholding and shares are named as such — on the record rail
+    // AND on the ledger's edit of a dividend row.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x637);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    assert_eq!(
+        state.record_dividend_for(id, "", "10", "-3", "", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_GROSS.to_string())
+    );
+    assert_eq!(
+        state.record_dividend_for(id, "", "10", "3", "-1", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_WITHHOLDING.to_string())
+    );
+    assert_eq!(
+        state.record_dividend_for(id, "", "0", "3", "", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_QUANTITY.to_string())
+    );
+    state
+        .record_dividend_for(id, "2026-07-01", "10", "3", "1", "", "CHF", "35")
+        .unwrap();
+    let row = state.holding_ledger(id)[0].id;
+    assert_eq!(
+        state.update_transaction_for(id, row, "2026-07-01", "10", "3", "-1", "", "CHF"),
+        Err(MSG_DIVIDEND_INVALID_WITHHOLDING.to_string())
+    );
+    assert_eq!(
+        state.update_transaction_for(id, row, "2026-07-01", "10", "x", "1", "", "CHF"),
+        Err(MSG_DIVIDEND_INVALID_GROSS.to_string())
+    );
 }
 
 // ── Story 6.4 — dividends: gross study, net reinvestable (FR41) ──
@@ -6243,6 +6298,29 @@ fn try_get_study_distinguishes_a_read_failure_from_a_true_absence() {
 }
 
 #[test]
+fn an_unreadable_study_refuses_the_trigger_sale_and_the_stop_never_the_cost_basis() {
+    // G1 final review (L7): the cost basis stands in only for a TRUE absence — a linked study
+    // that cannot be read refuses the trigger sale and the stop by name; nothing is written.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x958);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let holding = state.list_holdings()[0].id;
+    let study = state.create_study("NESN", "CHF").unwrap();
+    make_study_unreadable(&mut state, study);
+    assert_eq!(
+        state.sell_holding(holding, "", "", "CHF"),
+        Err(MSG_SELL_STUDY_UNAVAILABLE.to_string())
+    );
+    assert_eq!(
+        state.set_holding_trailing_stop(holding, "10"),
+        Err(MSG_STOP_STUDY_UNAVAILABLE.to_string())
+    );
+    let h = &state.list_holdings()[0];
+    assert!(state.holding_ledger(holding).is_empty(), "no sale recorded");
+    assert!(h.trailing_stop_pct.is_none(), "no stop seeded");
+}
+
+#[test]
 fn an_unreadable_study_is_unclassified_as_unavailable_never_no_study() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x952);
@@ -6397,7 +6475,7 @@ fn a_rebuy_is_still_guarded_read_only_and_validated() {
     state.read_only = false;
     assert_eq!(
         state.record_buy_for(id, "", "0", "120", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string()),
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string()),
         "the ledger validations apply to a re-buy unchanged"
     );
     assert!(
@@ -6999,7 +7077,7 @@ fn the_rails_read_typed_amounts_under_the_comma_format() {
     // A text that is no number keeps the rail's own refusal.
     assert_eq!(
         state.record_buy_for(id, "2026-07-01", "deux", "10", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string())
     );
     assert_eq!(
         state.set_holding_trailing_stop(id, "12.500"),

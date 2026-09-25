@@ -279,6 +279,33 @@ pub const MSG_LEDGER_DELETED: &str = "La transaction a été supprimée.";
 /// the history — the ledger never goes negative; nothing is written.
 pub const MSG_LEDGER_OVERSELL: &str =
     "La quantité dépasse la quantité détenue à cette date ; rien n'a été enregistré.";
+/// The ledger's amount refusals (G1 final review, M2/M4): each names the ONE field at fault —
+/// never « La quantité et le prix d'achat… aucune position » for fees, a withholding or a
+/// dividend's gross. The quantity of a buy or a sale is REQUIRED (Guy's decision: no
+/// « vide = toute la position » in the ledger form); its absence names itself.
+pub const MSG_LEDGER_QUANTITY_EMPTY: &str =
+    "La quantité est vide ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_QUANTITY: &str =
+    "La quantité doit être un nombre strictement positif ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_PRICE: &str =
+    "Le prix unitaire doit être un nombre positif ou nul ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_FEES: &str =
+    "Les frais doivent être un nombre positif ou nul ; aucune transaction n'a été enregistrée.";
+/// The replay (or a dividend's gross) left `Decimal`'s range — named as such, never as a typo.
+pub const MSG_LEDGER_OUT_OF_RANGE: &str =
+    "Les montants dépassent la plage prise en charge ; aucune transaction n'a été enregistrée.";
+/// A STORED row (imported, legacy) carries a nonpositive quantity or a negative amount — the
+/// history cannot be replayed; the cause is the recorded row, not what the user just typed.
+pub const MSG_LEDGER_ROW_INVALID: &str = "Une transaction déjà enregistrée dans ce registre porte une quantité ou un montant invalide ; rien n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_QUANTITY: &str = "Le nombre d'actions concernées doit être un nombre strictement positif ; aucun dividende n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_GROSS: &str =
+    "Le brut par action doit être un nombre positif ou nul ; aucun dividende n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_WITHHOLDING: &str = "La retenue à la source doit être un montant positif ou nul ; aucun dividende n'a été enregistré.";
+/// G1 final review (L7): the trigger sale and the trailing stop take the linked study's price —
+/// the cost basis stands in only for a TRUE absence; a study that could not be READ refuses by
+/// name, never silently falls back to the cost basis.
+pub const MSG_SELL_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix actuel de la vente est inconnu ; rien n'a été enregistré.";
+pub const MSG_STOP_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix de référence du seuil est inconnu ; rien n'a été enregistré.";
 /// Raised when the transaction date is not a plausible AAAA-MM-JJ; nothing is written.
 pub const MSG_LEDGER_INVALID_DATE: &str =
     "La date doit être au format AAAA-MM-JJ ; rien n'a été enregistré.";
@@ -863,6 +890,17 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_LEDGER_UPDATED,
     MSG_LEDGER_DELETED,
     MSG_LEDGER_OVERSELL,
+    MSG_LEDGER_QUANTITY_EMPTY,
+    MSG_LEDGER_INVALID_QUANTITY,
+    MSG_LEDGER_INVALID_PRICE,
+    MSG_LEDGER_INVALID_FEES,
+    MSG_LEDGER_OUT_OF_RANGE,
+    MSG_LEDGER_ROW_INVALID,
+    MSG_DIVIDEND_INVALID_QUANTITY,
+    MSG_DIVIDEND_INVALID_GROSS,
+    MSG_DIVIDEND_INVALID_WITHHOLDING,
+    MSG_SELL_STUDY_UNAVAILABLE,
+    MSG_STOP_STUDY_UNAVAILABLE,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
     MSG_LEDGER_UNKNOWN_KIND,

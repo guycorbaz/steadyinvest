@@ -17,8 +17,8 @@ use super::{
     MSG_HOLDING_INVALID_TICKER, MSG_HOLDING_LEDGER_UNREADABLE, MSG_HOLDING_NO_STUDY,
     MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_DELETED, MSG_HOLDING_STUDY_UNAVAILABLE,
     MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
-    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_ONLY_WRITE, holding_study_other_currency_message,
-    portfolio_has_holdings_message, read_typed, watch_error,
+    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_ONLY_WRITE, MSG_STOP_STUDY_UNAVAILABLE,
+    holding_study_other_currency_message, portfolio_has_holdings_message, read_typed, watch_error,
 };
 
 /// One study a position can be added for (G1 review, Guy's decision 3) — the #81 link key
@@ -611,9 +611,10 @@ impl JournalState {
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
         let reference_price = self
             // Issue #81: match the study in the holding's own currency (a cross-currency study must
-            // not seed this stop level).
-            .study_id_for_ticker_in_currency(&holding.security_ticker, holding.currency.as_deref())
-            .and_then(|sid| self.get_study(sid))
+            // not seed this stop level). G1 final review (L7): the cost basis seeds the level only
+            // for a TRUE absence — an unreadable study refuses by name.
+            .try_matched_study_in_currency(&holding.security_ticker, holding.currency.as_deref())
+            .map_err(|_| MSG_STOP_STUDY_UNAVAILABLE.to_string())?
             .and_then(|s| s.judgment.current_price)
             .map(|m| m.as_decimal())
             .or_else(|| Decimal::from_str_exact(&holding.purchase_price).ok())

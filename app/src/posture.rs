@@ -816,12 +816,17 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            160,
+            171,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured.
             // G1 final review (K): « Retirer » refused up front by cause
             // (MSG_HOLDING_HAS_TRANSACTIONS, MSG_HOLDING_LEDGER_UNREADABLE): 158 + 2 = 160, measured.
+            // Each ledger amount refusal names its field (MSG_LEDGER_QUANTITY_EMPTY / _INVALID_
+            // QUANTITY / _PRICE / _FEES / _OUT_OF_RANGE / _ROW_INVALID, MSG_DIVIDEND_INVALID_
+            // QUANTITY / _GROSS / _WITHHOLDING) and an unreadable linked study refuses the trigger
+            // sale and the stop (MSG_SELL_STUDY_UNAVAILABLE, MSG_STOP_STUDY_UNAVAILABLE):
+            // 160 + 11 = 171, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }
