@@ -19,7 +19,9 @@ use crate::wiring::push::{push_form, push_view_state};
 use crate::wiring::study_notice;
 use crate::wiring::watchlist::refresh_watchlist;
 use crate::wiring::{Session, persist};
-use crate::{FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, Verify};
+use crate::{
+    FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, TraceState, Verify,
+};
 use crate::{regime, state, viewmodel};
 
 /// Write a study's export envelope to a file (Story 5.2, FR59) and return its path. The file lands in
@@ -271,6 +273,21 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     studies.set_study_count(summaries.len() as i32);
     studies.set_rows(ModelRc::new(VecModel::from(rows)));
     studies.set_read_only(state.is_read_only());
+}
+
+/// G1 final review M3: what belongs to the study on screen and must never show over another study
+/// or the demo — the traceability panel, the scenario comparison (its overlay and cached
+/// baseline) and the §1 chart's drag/hover flags (a stuck flag disables the form's scroll).
+fn reset_study_overlays(
+    ui: &MainWindow,
+    compare_study: &Rc<std::cell::RefCell<Option<steadyinvest_contract::Study>>>,
+) {
+    let studies = ui.global::<Studies>();
+    *compare_study.borrow_mut() = None;
+    studies.set_scenario_compare(ScenarioCompareState::default());
+    studies.set_trace(TraceState::default());
+    studies.set_judgment_dragging(false);
+    studies.set_judgment_hover(false);
 }
 
 /// Wire the studies domain: create / open (with per-study view-state restore) / fold / regime,
@@ -561,17 +578,22 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
     }
 
     // G1 J review — the ONE close path of an open study (in-form « Retour », the nav rail, the
-    // Portefeuille « go to studies »): forget the open study's id, so a late fetch result is routed
-    // to the list and no edit rail can write a study that is no longer shown.
+    // Portefeuille « go to studies », and — G1 final review L9 — a dossier change and the archive /
+    // delete of the open study): forget the open study's id, so a late fetch result is routed
+    // to the list and no edit rail can write a study that is no longer shown. G1 final review
+    // M3/L9: what belonged to the study on screen goes with it (the traceability panel, the
+    // scenario comparison, the §1 drag/hover flags), and so does the demo flag.
     {
         let ui_weak = ui.as_weak();
         let current_study = Rc::clone(current_study);
+        let compare_study = Rc::clone(compare_study);
         ui.global::<Studies>().on_close_study(move || {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
             *current_study.borrow_mut() = None;
             studies.set_study_open(false);
             studies.set_demo_active(false);
+            reset_study_overlays(&ui, &compare_study);
         });
     }
 
@@ -597,9 +619,9 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             // push_form so the mirrored can-undo/can-redo flags read empty.
             journal_state.borrow_mut().reset_undo();
             // Also discard any scenario-compare state from a previous study (review P3) — its overlay
-            // and cached baseline must never survive into a different study.
-            *compare_study.borrow_mut() = None;
-            studies.set_scenario_compare(ScenarioCompareState::default());
+            // and cached baseline must never survive into a different study; nor its traceability
+            // panel (G1 final review M3).
+            reset_study_overlays(&ui, &compare_study);
             // G1 J: the study slot starts empty — nothing said of the previous study (a fetch
             // result, a refusal) may read as this one's. Before the render, so a normalize failure
             // of THIS study still shows.
@@ -785,8 +807,8 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                     let is_open =
                         current_study.borrow().as_deref() == Some(id.to_string().as_str());
                     if is_open {
-                        *current_study.borrow_mut() = None;
-                        studies.set_study_open(false);
+                        // G1 final review L9: through the ONE close path.
+                        studies.invoke_close_study();
                     }
                     refresh_studies(&ui, &journal_state.borrow());
                     // A delete clears any watchlist soft link to this study (Story 4.1) — re-render
@@ -838,6 +860,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let journal_state = Rc::clone(journal_state);
         let current_study = Rc::clone(current_study);
+        let compare_study = Rc::clone(compare_study);
         ui.global::<Studies>().on_load_demo(move || {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
@@ -849,6 +872,8 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                     // inherits the previously-open study's folds/regime or shows enabled undo/redo.
                     journal_state.borrow_mut().reset_undo();
                     study_notice::reset(&ui); // G1 J: the demo inherits no study's notice
+                    // G1 final review M3: …nor a study's traceability panel or scenario comparison.
+                    reset_study_overlays(&ui, &compare_study);
                     // G1 J review: `current_study` is None HERE, by construction — not merely
                     // "stays" None: a study opened earlier would otherwise receive the demo's
                     // edit rails and a late fetch result would render over the demo.
