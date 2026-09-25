@@ -8,10 +8,11 @@
 //! section; a missing FX pair is named on the figure it blocks.
 
 use rust_decimal::Decimal;
-use steadyinvest_core::ssg::{QualityFlagKey, UpsideDownside, Zone};
-use steadyinvest_core::verdict::Verdict;
+use steadyinvest_core::ssg::{QualityFlagKey, UpsideDownside};
 use steadyinvest_persistence::FxRateItem;
 use uuid::Uuid;
+
+use crate::viewmodel::engine;
 
 use super::fx::JournalConsolidation;
 use super::{
@@ -30,6 +31,10 @@ pub enum ReviewStudy {
     None { other_currency: Option<String> },
     /// The study read FAILED (#95) — « indisponible », never « aucune étude ».
     Unavailable,
+    /// The study was READ, but its data does not normalize (a structural input error — the
+    /// engine suspends its computation, `MSG_NORMALIZE_FAILED`): a different fact from a failed
+    /// read (G1 review), and the study can still be opened to repair it.
+    NotComputable(Uuid),
     /// A linked study and its snapshot facts.
     Linked(ReviewStudyFacts),
 }
@@ -50,9 +55,10 @@ pub struct ReviewStudyFacts {
     pub relative_value_pct: Option<Decimal>,
     pub quality_flags: Vec<QualityFlagKey>,
     /// The `YYYY-MM-DD` of the last effective save (the latest FR51 snapshot, else the study's
-    /// creation) — the annual-review clock.
-    pub last_saved: String,
-    /// `last_saved` is older than [`REVIEW_CADENCE_MONTHS`].
+    /// creation) — the annual-review clock. `None` when the FR51 history read FAILED: the date
+    /// is unknown, never replaced by the creation date (G1 review — a false « plus de 12 mois »).
+    pub last_saved: Option<String>,
+    /// `last_saved` is known and older than [`REVIEW_CADENCE_MONTHS`].
     pub due_for_review: bool,
 }
 
@@ -71,21 +77,26 @@ pub struct ReviewPosition {
     pub share_pct: Option<Decimal>,
     pub missing_pairs: Vec<String>,
     pub study: ReviewStudy,
-    /// The trailing stop as a level in the position's currency, when set (the first bank's).
-    pub stop_level: Option<Decimal>,
+    /// The trailing-stop levels of EVERY held lot of the ticker that carries one (distinct, in
+    /// lot order), in the position's currency — empty when no lot has a stop (G1 review: a stop
+    /// on another bank's lot was ignored).
+    pub stop_levels: Vec<Decimal>,
+    /// Any lot's stop is reached by the study's present price (`core::risk::stop_breached`).
     pub stop_breached: bool,
     /// `"stop"` | `"sell"` | `""` — the neutral trigger (core::risk), as the register shows it.
     pub trigger: &'static str,
 }
 
-/// A study due for its review, with the reason: `"age"` (older than the cadence), `"withheld"`
-/// (a load-bearing input missing) or `"low_confidence"`.
+/// A study due for its review, with EVERY reason that applies (G1 review — the first reason hid
+/// the others), in the fixed order `"age"` (older than the cadence), `"withheld"` (a
+/// load-bearing input missing), `"low_confidence"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DueStudy {
     pub ticker: String,
     pub study_id: Uuid,
-    pub last_saved: String,
-    pub reason: &'static str,
+    /// `None` when the history read failed (the date is unknown — see [`ReviewStudyFacts`]).
+    pub last_saved: Option<String>,
+    pub reasons: Vec<&'static str>,
 }
 
 /// Counts only — a number is a fact; no judgement is derived from them.
@@ -130,24 +141,61 @@ fn review_threshold(today: &str) -> Option<String> {
     Some(format!("{:04}{rest}", year - years_back))
 }
 
-/// The present price's position against the §4 band: the zone inside it, the honest « below »
-/// / « above » outside it (the register's 2026-07-12 rule), `""` without a band or a price.
-fn zone_position(
-    r: &steadyinvest_core::ssg::RiskRewardOutputs,
+/// The last effective save's day: the latest FR51 snapshot, else the study's creation — or
+/// `None` when the history read FAILED (an unknown date, never the creation date passed off as
+/// the last save: that would state a false « plus de 12 mois »).
+fn last_saved_day<E>(history: Result<Vec<String>, E>, created_at: &str) -> Option<String> {
+    let latest = history.ok()?.into_iter().max();
+    Some(
+        latest
+            .as_deref()
+            .unwrap_or(created_at)
+            .chars()
+            .take(10)
+            .collect(),
+    )
+}
+
+/// Every reason a linked study is due for its review, in the fixed order age · withheld · low
+/// confidence — all of them, never only the first (G1 review).
+fn due_reasons(due_for_review: bool, verdict: &str, low_confidence: bool) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+    if due_for_review {
+        reasons.push("age");
+    }
+    if verdict == "withheld" {
+        reasons.push("withheld");
+    }
+    if low_confidence {
+        reasons.push("low_confidence");
+    }
+    reasons
+}
+
+/// The trailing stop across EVERY held lot of a ticker (every bank): the distinct levels, in lot
+/// order, and whether any of them is breached by the present price. An unknown price breaches
+/// nothing (the register's rule); an unparsable stored level is skipped (unreachable through the
+/// validated write path).
+fn stops_across_lots<'a>(
+    levels: impl IntoIterator<Item = Option<&'a str>>,
     price: Option<Decimal>,
-) -> &'static str {
-    if let Some(zone) = r.present_price_zone {
-        return match zone {
-            Zone::Buy => "buy",
-            Zone::Neutral => "neutral",
-            Zone::Sell => "sell",
-        };
+) -> (Vec<Decimal>, bool) {
+    let mut distinct: Vec<Decimal> = Vec::new();
+    for level in levels
+        .into_iter()
+        .flatten()
+        .filter_map(|s| Decimal::from_str_exact(s).ok())
+    {
+        if !distinct.contains(&level) {
+            distinct.push(level);
+        }
     }
-    match (r.zones.as_ref(), price) {
-        (Some(b), Some(p)) if p < b.forecast_low => "below",
-        (Some(b), Some(p)) if p > b.forecast_high => "above",
-        _ => "",
-    }
+    let breached = price.is_some_and(|p| {
+        distinct
+            .iter()
+            .any(|level| steadyinvest_core::risk::stop_breached(*level, p))
+    });
+    (distinct, breached)
 }
 
 impl JournalState {
@@ -200,6 +248,9 @@ impl JournalState {
                 .filter(|h| h.security_ticker.to_uppercase() == ticker)
                 .collect();
             let first = held[0];
+            // The displayed currency is the effective one (the 6.2 coalescing); the study MATCH
+            // below uses the lot's DECLARED currency exactly as the register does — a legacy
+            // `None` row matches ticker-only there (G1 review: the two surfaces disagreed).
             let currency = super::effective_currency(first, reference_currency);
             let mut banks: Vec<String> = portfolios
                 .iter()
@@ -215,71 +266,74 @@ impl JournalState {
                 None => (None, None, Vec::new()),
             };
             // The study in the position's currency (#81 / #218); a read failure is its own state.
-            let (study, current_price, in_sell_zone) =
-                match self.try_matched_study_in_currency(&ticker, Some(&currency)) {
-                    Err(_) => (ReviewStudy::Unavailable, None, false),
-                    Ok(None) => {
-                        let other = self
-                            .study_id_for_ticker(&ticker)
-                            .and_then(|id| self.get_study(id))
-                            .map(|s| s.native_currency.to_uppercase());
-                        (
+            let (study, current_price, in_sell_zone) = match self
+                .try_matched_study_in_currency(&ticker, first.currency.as_deref())
+            {
+                Err(_) => (ReviewStudy::Unavailable, None, false),
+                Ok(None) => {
+                    // The other-currency cause, read FALLIBLY (#95): a failed lookup is
+                    // « indisponible », never a cause-less « aucune étude » that may be false.
+                    let other = self
+                        .try_study_id_for_ticker(&ticker)
+                        .and_then(|id| match id {
+                            Some(id) => self.try_get_study(id),
+                            None => Ok(None),
+                        });
+                    match other {
+                        Err(_) => (ReviewStudy::Unavailable, None, false),
+                        Ok(other) => (
                             ReviewStudy::None {
-                                other_currency: other,
+                                other_currency: other.map(|s| s.native_currency.to_uppercase()),
                             },
                             None,
                             false,
-                        )
+                        ),
                     }
-                    Ok(Some(s)) => match self.snapshot_for(s.id) {
-                        Err(_) => (ReviewStudy::Unavailable, None, false),
-                        Ok(snapshot) => {
-                            let outputs = snapshot.outputs();
-                            let price = s.judgment.current_price.map(|m| m.as_decimal());
-                            let zone = zone_position(&outputs.risk_reward, price);
-                            let verdict = match snapshot.verdict() {
-                                Verdict::Full(_) => "full",
-                                Verdict::Provisional(_) => "provisional",
-                                Verdict::Withheld(_) => "withheld",
-                            };
-                            // The annual-review clock: the latest FR51 snapshot, else creation.
-                            let last_saved: String = self
-                                .try_list_study_history(s.id)
-                                .ok()
-                                .and_then(|h| h.into_iter().map(|e| e.created_at.0).max())
-                                .unwrap_or_else(|| s.created_at.0.clone())
-                                .chars()
-                                .take(10)
-                                .collect();
-                            let due_for_review = threshold
-                                .as_deref()
-                                .is_some_and(|t| last_saved.as_str() < t);
-                            let facts = ReviewStudyFacts {
-                                study_id: s.id,
-                                company_name: s.company_name.clone(),
-                                verdict,
-                                low_confidence: outputs.low_confidence,
-                                zone,
-                                current_price: price,
-                                upside_downside: outputs.risk_reward.upside_downside,
-                                relative_value_pct: outputs.valuation.relative_value_pct,
-                                quality_flags: outputs.quality_flags.clone(),
-                                last_saved,
-                                due_for_review,
-                            };
-                            (ReviewStudy::Linked(facts), price, zone == "sell")
-                        }
-                    },
-                };
-            // The trailing stop (the first bank's row) and the neutral trigger (core::risk).
-            let stop_level = first
-                .trailing_stop_level
-                .as_deref()
-                .and_then(|s| Decimal::from_str_exact(s).ok());
-            let stop_breached = match (stop_level, current_price) {
-                (Some(level), Some(price)) => steadyinvest_core::risk::stop_breached(level, price),
-                _ => false,
+                }
+                // The study is already read: its snapshot is built directly (THE engine call), so
+                // a normalize failure is its own state — never worded as a read failure.
+                Ok(Some(s)) => match engine::build_snapshot(&s) {
+                    Err(_) => (ReviewStudy::NotComputable(s.id), None, false),
+                    Ok(snapshot) => {
+                        let outputs = snapshot.outputs();
+                        let price = s.judgment.current_price.map(|m| m.as_decimal());
+                        // The zone / verdict keys of every other surface (viewmodel::engine).
+                        let zone = engine::zone_position_key(&outputs.risk_reward, price);
+                        let verdict = engine::verdict_state(snapshot.verdict());
+                        // The annual-review clock: the latest FR51 snapshot, else creation —
+                        // unknown when the history read failed.
+                        let last_saved = last_saved_day(
+                            self.try_list_study_history(s.id)
+                                .map(|h| h.into_iter().map(|e| e.created_at.0).collect::<Vec<_>>()),
+                            &s.created_at.0,
+                        );
+                        let due_for_review = match (threshold.as_deref(), last_saved.as_deref()) {
+                            (Some(t), Some(saved)) => saved < t,
+                            _ => false,
+                        };
+                        let facts = ReviewStudyFacts {
+                            study_id: s.id,
+                            company_name: s.company_name.clone(),
+                            verdict,
+                            low_confidence: outputs.low_confidence,
+                            zone,
+                            current_price: price,
+                            upside_downside: outputs.risk_reward.upside_downside,
+                            relative_value_pct: outputs.valuation.relative_value_pct,
+                            quality_flags: outputs.quality_flags.clone(),
+                            last_saved,
+                            due_for_review,
+                        };
+                        (ReviewStudy::Linked(facts), price, zone == "sell")
+                    }
+                },
             };
+            // The trailing stop across EVERY held lot (every bank — never the first lot alone)
+            // and the neutral trigger (core::risk).
+            let (stop_levels, stop_breached) = stops_across_lots(
+                held.iter().map(|h| h.trailing_stop_level.as_deref()),
+                current_price,
+            );
             let trigger = match steadyinvest_core::risk::trigger_state(stop_breached, in_sell_zone)
             {
                 Some(steadyinvest_core::risk::TriggerKind::Stop) => "stop",
@@ -301,21 +355,13 @@ impl JournalState {
                 if f.zone == "sell" || f.zone == "above" {
                     counts.high_zone += 1;
                 }
-                let reason = if f.due_for_review {
-                    Some("age")
-                } else if f.verdict == "withheld" {
-                    Some("withheld")
-                } else if f.low_confidence {
-                    Some("low_confidence")
-                } else {
-                    None
-                };
-                if let Some(reason) = reason {
+                let reasons = due_reasons(f.due_for_review, f.verdict, f.low_confidence);
+                if !reasons.is_empty() {
                     due.push(DueStudy {
                         ticker: ticker.clone(),
                         study_id: f.study_id,
                         last_saved: f.last_saved.clone(),
-                        reason,
+                        reasons,
                     });
                 }
             }
@@ -330,7 +376,7 @@ impl JournalState {
                 share_pct,
                 missing_pairs,
                 study,
-                stop_level,
+                stop_levels,
                 stop_breached,
                 trigger,
             });
@@ -392,5 +438,55 @@ mod tests {
         // same day is not.
         assert!("2025-09-23" < "2025-09-24");
         assert!(("2025-09-24" >= "2025-09-24"));
+    }
+
+    #[test]
+    fn a_failed_history_read_leaves_the_last_save_unknown() {
+        // The latest snapshot wins; an empty history falls back to the creation; a FAILED read
+        // is unknown — never the creation date passed off as the last save.
+        let created = "2024-03-01T10:00:00Z";
+        assert_eq!(
+            last_saved_day::<()>(
+                Ok(vec![
+                    "2025-01-02T00:00:00Z".into(),
+                    "2026-02-03T00:00:00Z".into()
+                ]),
+                created
+            )
+            .as_deref(),
+            Some("2026-02-03")
+        );
+        assert_eq!(
+            last_saved_day::<()>(Ok(Vec::new()), created).as_deref(),
+            Some("2024-03-01")
+        );
+        assert_eq!(last_saved_day(Err("disk"), created), None);
+    }
+
+    #[test]
+    fn every_due_reason_is_kept_in_order() {
+        assert_eq!(
+            due_reasons(true, "withheld", true),
+            vec!["age", "withheld", "low_confidence"]
+        );
+        assert_eq!(
+            due_reasons(false, "provisional", true),
+            vec!["low_confidence"]
+        );
+        assert!(due_reasons(false, "full", false).is_empty());
+    }
+
+    #[test]
+    fn the_stop_is_read_on_every_lot() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        // The first lot has no stop; the second one's is breached.
+        let (levels, breached) = stops_across_lots([None, Some("63"), Some("63")], Some(d("60")));
+        assert_eq!(levels, vec![d("63")], "distinct levels");
+        assert!(breached);
+        let (levels, breached) = stops_across_lots([Some("50"), Some("63")], Some(d("70")));
+        assert_eq!(levels, vec![d("50"), d("63")]);
+        assert!(!breached);
+        // An unknown price breaches nothing.
+        assert!(!stops_across_lots([Some("63")], None).1);
     }
 }

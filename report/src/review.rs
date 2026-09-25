@@ -4,20 +4,24 @@
 //! page 1 = the header + the four répartition blocks + the concentration; page 2+ = the positions
 //! table (header repeated across breaks), the studies due for review, the counts.
 
-use pdf_writer::Content;
-
-use crate::pdf::{Doc, EM_DASH, MARGIN, PAGE_W, SMALL};
+use crate::pdf::{Doc, EM_DASH, MARGIN, PAGE_W};
 
 /// One line of a share block: a label (data — a sector, a currency, a bank, a ticker, or a size
-/// key `small` | `medium` | `large`), an amount, a share, a target, and a note (a missing pair or a
-/// reason key) — all pre-formatted by the app, `""` when absent.
+/// key `small` | `medium` | `large`; which one is known from the FIELD the line sits in, never
+/// from its value — a bank named « small » stays « small »), an amount, a share, a target, the
+/// missing pair(s) blocking the figure, and a reason key (an unclassified security) — all
+/// pre-formatted by the app, `""` when absent. The screen's row, field for field.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShareLine {
     pub label: String,
     pub amount: String,
     pub share: String,
     pub target: String,
-    pub note: String,
+    /// The pair(s) blocking the figure (« EUR → CHF · USD → CHF »), `""` when none.
+    pub missing: String,
+    /// `""` | `no_study` | `study_unavailable` | `no_sales` | `missing_rate` | `unconvertible`
+    /// — an unclassified size row (« non classé »); `missing_rate` names its pair in `missing`.
+    pub reason: String,
     pub flagged: bool,
 }
 
@@ -29,8 +33,14 @@ pub struct ReviewLine {
     pub banks: String,
     pub invested: String,
     pub share: String,
-    /// `full` | `provisional` | `withheld` | `none` | `unavailable`.
+    /// The position's currency (the other-currency cause names it).
+    pub currency: String,
+    /// The pair(s) blocking the invested figure, `""` when none.
+    pub missing: String,
+    /// `full` | `provisional` | `withheld` | `none` | `unavailable` | `not_computable`.
     pub study: String,
+    /// `study == none`: a same-ticker study in ANOTHER currency (the cause), `""` when none.
+    pub other_currency: String,
     pub low_confidence: bool,
     /// `buy` | `neutral` | `sell` | `below` | `above` | `""`.
     pub zone: String,
@@ -38,6 +48,8 @@ pub struct ReviewLine {
     pub relative: String,
     /// The flags already worded by the app (its inventory), joined; `""` when none.
     pub flags: String,
+    /// How many flags `flags` carries (« Signaux (n) », as on the screen).
+    pub flag_count: usize,
     /// `stale` | `fresh` | `""`, and the as-of date.
     pub data_state: String,
     pub as_of: String,
@@ -47,12 +59,15 @@ pub struct ReviewLine {
     pub trigger: String,
 }
 
-/// A study due for review: `age` | `withheld` | `low_confidence`.
+/// A study due for review, with every reason that applies: `age` · `withheld` ·
+/// `low_confidence`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DueLine {
     pub ticker: String,
     pub date: String,
-    pub reason: String,
+    /// The last-save date is unknown (the history read failed) — stated, never a dash.
+    pub date_unknown: bool,
+    pub reasons: Vec<String>,
 }
 
 /// The review, ready to lay out — figures formatted by the app, labels owned here.
@@ -68,11 +83,25 @@ pub struct PortfolioReview {
     pub rates: Vec<String>,
     pub size_lines: Vec<ShareLine>,
     pub unclassified: Vec<ShareLine>,
+    /// The 6.7 read failed: the size block AND the concentration block are « indisponible »
+    /// (their lines are then empty — never stale rows, never « Aucune donnée. »).
+    pub diversification_unavailable: bool,
     pub sector_lines: Vec<ShareLine>,
+    pub sectors_unavailable: bool,
     pub currency_lines: Vec<ShareLine>,
+    pub currencies_unavailable: bool,
     pub bank_lines: Vec<ShareLine>,
     pub global_invested: String,
+    /// The pair(s) that absent the global total, `""` when none.
+    pub global_missing: String,
+    /// The global total is absent for a reason that is NOT a nameable pair (a failed bank read,
+    /// an overflow) — a plain « indisponible ».
+    pub global_unavailable: bool,
     pub concentration: Vec<ShareLine>,
+    /// The pair(s) that absent the concentration shares' denominator, `""` when none.
+    pub concentration_missing: String,
+    /// The shares' denominator is absent (or not positive) without a nameable pair.
+    pub concentration_global_absent: bool,
     pub concentration_threshold: String,
     pub positions: Vec<ReviewLine>,
     pub due: Vec<DueLine>,
@@ -110,6 +139,19 @@ const SECTOR_UNLABELED: &str = "non renseigné";
 const GLOBAL_TOTAL: &str = "Total global";
 const THRESHOLD_NOTE: &str = "seuil de concentration :";
 const MURMUR: &str = "seuil approché ou atteint";
+const MURMUR_REACHED: &str = "seuil atteint ou dépassé";
+const UNAVAILABLE: &str = "indisponible";
+const SIZE_UNAVAILABLE: &str = "Répartition par taille indisponible.";
+const SECTORS_UNAVAILABLE: &str = "Exposition par secteur indisponible.";
+const CURRENCIES_UNAVAILABLE: &str = "Exposition par devise indisponible.";
+const CONCENTRATION_UNAVAILABLE: &str = "Concentration indisponible.";
+const GLOBAL_MISSING: &str = "Total global indisponible : taux manquant";
+const GLOBAL_UNAVAILABLE: &str = "Total global indisponible.";
+const SHARES_MISSING: &str = "Parts indisponibles : taux manquant";
+const SHARES_UNAVAILABLE: &str = "Parts indisponibles.";
+const AMOUNT_MISSING: &str = "montant indisponible : taux manquant";
+const OTHER_CURRENCY_STUDY: &str = "aucune étude liée : étude en";
+const OTHER_CURRENCY_POSITION: &str = "position en";
 const REASON_NO_STUDY: &str = "non classé : aucune étude";
 const REASON_STUDY_UNAVAILABLE: &str = "non classé : étude indisponible";
 const REASON_NO_SALES: &str = "non classé : chiffre d'affaires indisponible";
@@ -130,6 +172,7 @@ const STUDY_PROVISIONAL: &str = "provisoire";
 const STUDY_WITHHELD: &str = "en attente";
 const STUDY_NONE: &str = "aucune étude";
 const STUDY_UNAVAILABLE: &str = "indisponible";
+const STUDY_NOT_COMPUTABLE: &str = "non calculable";
 const LOW_CONFIDENCE: &str = "confiance réduite";
 const ZONE_BUY: &str = "basse";
 const ZONE_NEUTRAL: &str = "médiane";
@@ -138,7 +181,7 @@ const ZONE_BELOW: &str = "sous la bande";
 const ZONE_ABOVE: &str = "au-dessus de la bande";
 const DATA_STALE: &str = "périmé";
 const DATA_FRESH: &str = "à jour le";
-const FLAGS_LABEL: &str = "Signaux :";
+const FLAGS_LABEL: &str = "Signaux";
 const STOP_LABEL: &str = "Seuil suiveur :";
 const STOP_BREACHED: &str = "sous le seuil";
 const TRIGGER_STOP: &str = "Le prix a atteint le seuil suiveur.";
@@ -150,6 +193,7 @@ const DUE_AGE: &str = "plus de 12 mois";
 const DUE_WITHHELD: &str = "une donnée requise manque";
 const DUE_LOW_CONFIDENCE: &str = "confiance réduite";
 const DUE_NONE: &str = "Aucune étude à revoir.";
+const DUE_DATE_UNKNOWN: &str = "inconnue (historique indisponible)";
 const K_POSITIONS: &str = "positions";
 const K_LINKED: &str = "avec une étude";
 const K_FULL: &str = "critères validés";
@@ -191,6 +235,19 @@ const REVIEW_USER_FACING: &[&str] = &[
     GLOBAL_TOTAL,
     THRESHOLD_NOTE,
     MURMUR,
+    MURMUR_REACHED,
+    UNAVAILABLE,
+    SIZE_UNAVAILABLE,
+    SECTORS_UNAVAILABLE,
+    CURRENCIES_UNAVAILABLE,
+    CONCENTRATION_UNAVAILABLE,
+    GLOBAL_MISSING,
+    GLOBAL_UNAVAILABLE,
+    SHARES_MISSING,
+    SHARES_UNAVAILABLE,
+    AMOUNT_MISSING,
+    OTHER_CURRENCY_STUDY,
+    OTHER_CURRENCY_POSITION,
     REASON_NO_STUDY,
     REASON_STUDY_UNAVAILABLE,
     REASON_NO_SALES,
@@ -211,6 +268,7 @@ const REVIEW_USER_FACING: &[&str] = &[
     STUDY_WITHHELD,
     STUDY_NONE,
     STUDY_UNAVAILABLE,
+    STUDY_NOT_COMPUTABLE,
     LOW_CONFIDENCE,
     ZONE_BUY,
     ZONE_NEUTRAL,
@@ -231,6 +289,7 @@ const REVIEW_USER_FACING: &[&str] = &[
     DUE_WITHHELD,
     DUE_LOW_CONFIDENCE,
     DUE_NONE,
+    DUE_DATE_UNKNOWN,
     K_POSITIONS,
     K_LINKED,
     K_FULL,
@@ -267,45 +326,84 @@ const COLS_POSITIONS: [f32; 9] = [
     PAGE_W - MARGIN,
 ];
 
-fn size_label(key: &str) -> &str {
+/// A size line's label: the class key worded. Applied to the size FIELD only (keyed by the
+/// block, never by the value — a bank or a sector named « small » is data).
+fn size_label(key: &str) -> String {
     match key {
         "small" => SIZE_SMALL,
         "medium" => SIZE_MEDIUM,
         "large" => SIZE_LARGE,
-        "" => SECTOR_UNLABELED,
         other => other,
     }
+    .to_string()
 }
 
-fn reason_label(key: &str) -> String {
-    match key.split_once(':') {
-        Some(("missing_rate", pair)) => format!("{REASON_MISSING_RATE} {pair}"),
-        _ => match key {
-            "no_study" => REASON_NO_STUDY.to_string(),
-            "study_unavailable" => REASON_STUDY_UNAVAILABLE.to_string(),
-            "no_sales" => REASON_NO_SALES.to_string(),
-            "unconvertible" => REASON_UNCONVERTIBLE.to_string(),
-            other => other.to_string(),
-        },
+/// A sector line's label: `""` is the « non renseigné » bucket (the sector field only).
+fn sector_label(key: &str) -> String {
+    if key.is_empty() {
+        SECTOR_UNLABELED.to_string()
+    } else {
+        key.to_string()
     }
 }
 
-/// A share block's note: a missing pair (`missing_rate:EUR → CHF`), a murmur, or plain data.
-fn note_label(line: &ShareLine) -> String {
+/// The lines of one block with their labels worded by the block's own rule.
+fn labelled(lines: &[ShareLine], label: fn(&str) -> String) -> Vec<ShareLine> {
+    lines
+        .iter()
+        .map(|l| ShareLine {
+            label: label(&l.label),
+            ..l.clone()
+        })
+        .collect()
+}
+
+/// An unclassified row's « non classé » reason — the missing-rate reason names its pair.
+fn reason_label(line: &ShareLine) -> String {
+    match line.reason.as_str() {
+        "no_study" => REASON_NO_STUDY.to_string(),
+        "study_unavailable" => REASON_STUDY_UNAVAILABLE.to_string(),
+        "no_sales" => REASON_NO_SALES.to_string(),
+        "missing_rate" => format!("{REASON_MISSING_RATE} {}", line.missing),
+        "unconvertible" => REASON_UNCONVERTIBLE.to_string(),
+        _ => UNAVAILABLE.to_string(),
+    }
+}
+
+/// A share block's note, as the screen states it: an unclassified reason, else the missing
+/// pair(s) blocking the figure, else a plain « indisponible » when no figure could be stated at
+/// all (never a row of dashes that explains nothing); then the block's threshold murmur.
+fn note_label(line: &ShareLine, murmur: &str) -> String {
     let mut parts = Vec::new();
-    if let Some(("missing_rate", pair)) = line.note.split_once(':') {
-        parts.push(format!("{MISSING_RATE} {pair}"));
-    } else if !line.note.is_empty() {
-        parts.push(reason_label(&line.note));
+    if !line.reason.is_empty() {
+        parts.push(reason_label(line));
+    } else if !line.missing.is_empty() {
+        parts.push(format!("{MISSING_RATE} {}", line.missing));
+    } else if line.amount.is_empty() && line.share.is_empty() {
+        parts.push(UNAVAILABLE.to_string());
     }
     if line.flagged {
-        parts.push(MURMUR.to_string());
+        parts.push(murmur.to_string());
     }
     parts.join(" · ")
 }
 
-fn share_block(doc: &mut Doc, title: &str, lines: &[ShareLine], with_target: bool) {
+/// One share block: its « indisponible » statement when the read failed (never stale rows, never
+/// « Aucune donnée. »), else its grid; `murmur` is the block's threshold wording.
+fn share_block(
+    doc: &mut Doc,
+    title: &str,
+    unavailable: Option<&str>,
+    lines: &[ShareLine],
+    with_target: bool,
+    murmur: &str,
+) {
     doc.section(title);
+    if let Some(statement) = unavailable {
+        doc.line(statement);
+        doc.gap(4.0);
+        return;
+    }
     if lines.is_empty() {
         doc.line(EMPTY_BLOCK);
         doc.gap(4.0);
@@ -320,9 +418,9 @@ fn share_block(doc: &mut Doc, title: &str, lines: &[ShareLine], with_target: boo
         1..4,
     );
     for l in lines {
-        let note = note_label(l);
+        let note = note_label(l, murmur);
         let cells = [
-            size_label(&l.label).to_string(),
+            l.label.clone(),
             or_dash(&l.amount),
             or_dash(&l.share),
             if with_target {
@@ -354,6 +452,7 @@ fn study_label(l: &ReviewLine) -> &'static str {
         "provisional" => STUDY_PROVISIONAL,
         "withheld" => STUDY_WITHHELD,
         "unavailable" => STUDY_UNAVAILABLE,
+        "not_computable" => STUDY_NOT_COMPUTABLE,
         _ => STUDY_NONE,
     }
 }
@@ -398,12 +497,36 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
     }
     doc.gap(4.0);
 
-    // Répartition blocks.
-    let mut size_lines = review.size_lines.clone();
+    // Répartition blocks — each label worded by its OWN block's rule (sizes, sectors), never by
+    // the label's value; an unavailable block states itself, as on the screen.
+    let unavailable = |flag: bool, statement: &'static str| flag.then_some(statement);
+    let mut size_lines = labelled(&review.size_lines, size_label);
     size_lines.extend(review.unclassified.iter().cloned());
-    share_block(&mut doc, S_SIZE, &size_lines, true);
-    share_block(&mut doc, S_SECTOR, &review.sector_lines, false);
-    share_block(&mut doc, S_CURRENCY, &review.currency_lines, false);
+    share_block(
+        &mut doc,
+        S_SIZE,
+        unavailable(review.diversification_unavailable, SIZE_UNAVAILABLE),
+        &size_lines,
+        true,
+        MURMUR,
+    );
+    // Sectors murmur AT or OVER the threshold (no « approché » band); currencies never murmur.
+    share_block(
+        &mut doc,
+        S_SECTOR,
+        unavailable(review.sectors_unavailable, SECTORS_UNAVAILABLE),
+        &labelled(&review.sector_lines, sector_label),
+        false,
+        MURMUR_REACHED,
+    );
+    share_block(
+        &mut doc,
+        S_CURRENCY,
+        unavailable(review.currencies_unavailable, CURRENCIES_UNAVAILABLE),
+        &review.currency_lines,
+        false,
+        MURMUR,
+    );
     let mut bank_lines = review.bank_lines.clone();
     if !review.global_invested.is_empty() {
         bank_lines.push(ShareLine {
@@ -412,8 +535,34 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             ..ShareLine::default()
         });
     }
-    share_block(&mut doc, S_BANK, &bank_lines, false);
-    share_block(&mut doc, S_CONCENTRATION, &review.concentration, false);
+    share_block(&mut doc, S_BANK, None, &bank_lines, false, MURMUR);
+    // The global total's named absence (the screen's band): its pair(s), else plain.
+    if !review.global_missing.is_empty() {
+        doc.small_line(&format!("{GLOBAL_MISSING} {}", review.global_missing));
+    } else if review.global_unavailable {
+        doc.small_line(GLOBAL_UNAVAILABLE);
+    }
+    share_block(
+        &mut doc,
+        S_CONCENTRATION,
+        unavailable(
+            review.diversification_unavailable,
+            CONCENTRATION_UNAVAILABLE,
+        ),
+        &review.concentration,
+        false,
+        MURMUR,
+    );
+    if !review.diversification_unavailable {
+        if !review.concentration_missing.is_empty() {
+            doc.small_line(&format!(
+                "{SHARES_MISSING} {}",
+                review.concentration_missing
+            ));
+        } else if review.concentration_global_absent {
+            doc.small_line(SHARES_UNAVAILABLE);
+        }
+    }
     if !review.concentration_threshold.is_empty() {
         doc.small_line(&format!(
             "{THRESHOLD_NOTE} {}",
@@ -449,16 +598,27 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             ];
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
             doc.grid_row_num(&refs, &COLS_POSITIONS, false, 2);
-            // A second, small-print line under the row: the flags, the data state, the stop.
+            // A second, small-print line under the row: the named absences (the pair blocking
+            // the invested figure, the other-currency cause of « aucune étude »), the flags with
+            // their count, the data state, the stop — the screen's facts, none dropped.
             let mut extra: Vec<String> = Vec::new();
             if !l.name.is_empty() {
                 extra.push(l.name.clone());
+            }
+            if !l.missing.is_empty() {
+                extra.push(format!("{AMOUNT_MISSING} {}", l.missing));
+            }
+            if l.study == "none" && !l.other_currency.is_empty() {
+                extra.push(format!(
+                    "{OTHER_CURRENCY_STUDY} {}, {OTHER_CURRENCY_POSITION} {}",
+                    l.other_currency, l.currency
+                ));
             }
             if l.low_confidence {
                 extra.push(LOW_CONFIDENCE.to_string());
             }
             if !l.flags.is_empty() {
-                extra.push(format!("{FLAGS_LABEL} {}", l.flags));
+                extra.push(format!("{FLAGS_LABEL} ({}) : {}", l.flag_count, l.flags));
             }
             extra.push(format!("{P_DATA} : {}", data_label(l)));
             if !l.stop.is_empty() {
@@ -488,13 +648,24 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
         doc.grid_begin(review.due.len());
         doc.grid_row_num(&[D_TICKER, D_DATE, D_REASON], &cols, true, 9);
         for d in &review.due {
-            let reason = match d.reason.as_str() {
-                "age" => DUE_AGE,
-                "withheld" => DUE_WITHHELD,
-                "low_confidence" => DUE_LOW_CONFIDENCE,
-                _ => EM_DASH,
+            // Every reason that applies, in the app's fixed order.
+            let reasons = d
+                .reasons
+                .iter()
+                .map(|r| match r.as_str() {
+                    "age" => DUE_AGE,
+                    "withheld" => DUE_WITHHELD,
+                    "low_confidence" => DUE_LOW_CONFIDENCE,
+                    _ => EM_DASH,
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let date = if d.date_unknown {
+                DUE_DATE_UNKNOWN.to_string()
+            } else {
+                or_dash(&d.date)
             };
-            doc.grid_row_num(&[&d.ticker, &or_dash(&d.date), reason], &cols, false, 9);
+            doc.grid_row_num(&[&d.ticker, &date, &or_dash(&reasons)], &cols, false, 9);
         }
         doc.grid_end(&cols);
     }
@@ -516,8 +687,6 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
         };
         doc.line(&format!("{value}   {label}"));
     }
-    let _ = SMALL; // the small-print size is reachable through Doc; kept for symmetry with pdf.rs
-    let _: Option<&Content> = None;
     doc.finish()
 }
 
@@ -543,7 +712,8 @@ mod tests {
             }],
             unclassified: vec![ShareLine {
                 label: "NVDA.US".into(),
-                note: "missing_rate:USD → CHF".into(),
+                missing: "USD → CHF".into(),
+                reason: "missing_rate".into(),
                 ..Default::default()
             }],
             sector_lines: vec![ShareLine {
@@ -580,7 +750,8 @@ mod tests {
                 zone: "buy".into(),
                 ud: "5,3:1".into(),
                 relative: "114 %".into(),
-                flags: "PER haut jugé au-dessus de 25".into(),
+                flags: "PER haut jugé au-dessus de 25 · ROE en baisse".into(),
+                flag_count: 2,
                 data_state: "fresh".into(),
                 as_of: "2026-09-23".into(),
                 stop: "180 USD".into(),
@@ -589,10 +760,161 @@ mod tests {
             due: vec![DueLine {
                 ticker: "SCHN.SW".into(),
                 date: "2025-06-01".into(),
-                reason: "age".into(),
+                reasons: vec!["age".into(), "withheld".into()],
+                ..Default::default()
             }],
             counts: vec![("positions".into(), "3".into()), ("due".into(), "1".into())],
+            ..Default::default()
         }
+    }
+
+    /// Whether `needle` (ASCII; a line may wrap at a space, so keep needles short) appears in the
+    /// rendered content streams — as a literal string, or hex-encoded (the WinAnsi writer emits a
+    /// string carrying any non-ASCII glyph as `<…>` hex).
+    fn carries(bytes: &[u8], needle: &str) -> bool {
+        let hex: String = needle.bytes().map(|b| format!("{b:02X}")).collect();
+        [needle.as_bytes(), hex.as_bytes()]
+            .iter()
+            .any(|n| bytes.windows(n.len()).any(|w| w == *n))
+    }
+
+    #[test]
+    fn an_unavailable_block_states_itself_never_stale_rows_nor_aucune_donnee() {
+        let mut r = sample();
+        r.sectors_unavailable = true;
+        r.sector_lines = vec![ShareLine {
+            label: "StaleSector".into(),
+            share: "40 %".into(),
+            ..Default::default()
+        }];
+        r.currencies_unavailable = true;
+        r.currency_lines = Vec::new();
+        let bytes = render_portfolio_review(&r);
+        assert!(
+            !carries(&bytes, "StaleSector"),
+            "an unavailable block prints no row"
+        );
+        assert!(carries(&bytes, "Exposition par secteur indisponible."));
+        assert!(carries(&bytes, "Exposition par devise indisponible."));
+        assert!(
+            !carries(&bytes, "Aucune donn"),
+            "an unavailable block is never « Aucune donnée. »"
+        );
+    }
+
+    #[test]
+    fn the_named_absences_of_the_screen_reach_the_pdf() {
+        let mut r = sample();
+        r.global_invested = String::new();
+        r.global_missing = "EUR -> CHF".into();
+        r.concentration_missing = "GBP -> CHF".into();
+        r.positions[0].invested = String::new();
+        r.positions[0].missing = "JPY -> CHF · SEK -> CHF".into();
+        r.positions.push(ReviewLine {
+            ticker: "ROG.SW".into(),
+            currency: "CHF".into(),
+            study: "none".into(),
+            other_currency: "USD".into(),
+            ..Default::default()
+        });
+        let bytes = render_portfolio_review(&r);
+        assert!(carries(
+            &bytes,
+            "Total global indisponible : taux manquant EUR -> CHF"
+        ));
+        assert!(carries(
+            &bytes,
+            "Parts indisponibles : taux manquant GBP -> CHF"
+        ));
+        assert!(carries(&bytes, "JPY"), "every missing pair is named");
+        assert!(carries(&bytes, "SEK"), "every missing pair is named");
+        assert!(carries(&bytes, "position en"), "the other-currency cause");
+        // A global total absent for an un-nameable reason still states itself.
+        let mut r = sample();
+        r.global_invested = String::new();
+        r.global_unavailable = true;
+        assert!(carries(
+            &render_portfolio_review(&r),
+            "Total global indisponible."
+        ));
+    }
+
+    #[test]
+    fn labels_follow_the_block_not_the_value_and_reasons_keep_non_classe() {
+        // A bank named « small » is data; only the size block words its class keys.
+        let bank = ShareLine {
+            label: "small".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            labelled(std::slice::from_ref(&bank), size_label)[0].label,
+            "Petite"
+        );
+        let mut r = sample();
+        r.bank_lines = vec![ShareLine {
+            label: "small".into(),
+            amount: "1 CHF".into(),
+            ..Default::default()
+        }];
+        let bytes = render_portfolio_review(&r);
+        assert!(
+            bytes.windows(7).any(|w| w == b"(small)"),
+            "the bank's own name"
+        );
+        // An unclassified MissingRate row keeps « non classé » AND names its pair.
+        let row = ShareLine {
+            label: "NVDA.US".into(),
+            missing: "USD → CHF".into(),
+            reason: "missing_rate".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            note_label(&row, MURMUR),
+            "non classé : taux manquant USD → CHF"
+        );
+        // A row with no figure and no pair is plainly « indisponible », never a row of dashes.
+        assert_eq!(note_label(&bank, MURMUR), "indisponible");
+        // The sector block's murmur is its own (at or over).
+        let flagged = ShareLine {
+            share: "60 %".into(),
+            flagged: true,
+            ..Default::default()
+        };
+        assert_eq!(note_label(&flagged, MURMUR_REACHED), MURMUR_REACHED);
+    }
+
+    #[test]
+    fn signals_carry_their_count_and_every_due_reason_is_printed() {
+        let bytes = render_portfolio_review(&sample());
+        assert!(carries(&bytes, "Signaux (2)"));
+        assert!(carries(&bytes, "plus de 12 mois"), "the age reason");
+        assert!(carries(&bytes, "une donn"), "the withheld reason beside it");
+        let mut r = sample();
+        r.due[0].date = String::new();
+        r.due[0].date_unknown = true;
+        assert!(carries(
+            &render_portfolio_review(&r),
+            "(historique indisponible)"
+        ));
+    }
+
+    #[test]
+    fn the_positions_header_repeats_across_a_page_break() {
+        let mut r = sample();
+        let row = r.positions[0].clone();
+        r.positions = (0..80)
+            .map(|i| ReviewLine {
+                ticker: format!("T{i:03}"),
+                ..row.clone()
+            })
+            .collect();
+        let bytes = render_portfolio_review(&r);
+        // « Val. rel. » is a positions-only header cell: one per page the table touches.
+        let count = bytes
+            .windows(b"Val. rel.".len())
+            .filter(|w| *w == b"Val. rel.")
+            .count();
+        assert!(count >= 2, "the header must repeat, saw {count}");
     }
 
     #[test]

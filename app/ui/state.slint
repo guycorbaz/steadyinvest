@@ -1060,8 +1060,8 @@ export struct ReviewShareRow {
     amount: string,
     share: string,
     target: string,
-    missing: string,   // the missing pair blocking the figure ("EUR → CHF"), "" when none
-    reason: string,    // "" | no_study | study_unavailable | no_sales | unconvertible (an unclassified size row)
+    missing: string,   // the missing pair(s) blocking the figure ("EUR → CHF · USD → CHF"), "" when none
+    reason: string,    // "" | no_study | study_unavailable | no_sales | missing_rate | unconvertible (an unclassified size row)
     flagged: bool,
 }
 export struct ReviewPositionRow {
@@ -1073,11 +1073,12 @@ export struct ReviewPositionRow {
     invested: string,
     share: string,
     missing: string,        // the missing pair(s) blocking the invested figure
-    study: string,          // full | provisional | withheld | none | unavailable
+    study: string,          // full | provisional | withheld | none | unavailable | not_computable
+    linked: bool,           // study is full | provisional | withheld (the engine computed it)
     other-currency: string, // a same-ticker study in ANOTHER currency (study == none)
     low-confidence: bool,
     zone: string,           // buy | neutral | sell | below | above | ""
-    price: string,
+    price: string,          // the present price WITH its currency ("123,45 USD"), "" when unknown
     ud: string,
     relative: string,
     flags: string,          // the flags worded by Rust (inventory), joined; "" = none
@@ -1088,13 +1089,18 @@ export struct ReviewPositionRow {
     stop-breached: bool,
     trigger: string,        // stop | sell | ""
     last-saved: string,
+    last-saved-unknown: bool, // the FR51 history read failed — the date is unknown, never the creation date
     due: bool,
 }
 export struct ReviewDueRow {
     ticker: string,
     study-id: string,
     date: string,
-    reason: string,         // age | withheld | low_confidence
+    date-unknown: bool,     // the history read failed (the date is unknown)
+    // Every reason that applies (G1 review — one reason hid the others).
+    age: bool,
+    withheld: bool,
+    low-confidence: bool,
 }
 export global Review {
     in-out property <bool> unavailable;
@@ -1112,9 +1118,11 @@ export global Review {
     in-out property <[ReviewShareRow]> bank-rows;
     in-out property <string> global-invested;
     in-out property <string> global-missing;
+    in-out property <bool> global-unavailable;          // global absent without a nameable pair
     in-out property <[ReviewShareRow]> concentration-rows;
     in-out property <string> concentration-missing;
-    in-out property <bool> concentration-unavailable;
+    in-out property <bool> concentration-unavailable;   // the 6.7 read failed — size AND concentration
+    in-out property <bool> concentration-global-absent; // shares' denominator absent, no nameable pair
     in-out property <string> threshold;
     in-out property <[ReviewPositionRow]> positions;
     in-out property <[ReviewDueRow]> due;

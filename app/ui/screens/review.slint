@@ -27,6 +27,10 @@ component CaptionLine inherits Text {
 component ShareBlock inherits VerticalLayout {
     in property <[ReviewShareRow]> rows;
     in property <bool> with-target;
+    // Which block this is (size | sector | currency | bank | ticker): the label rule and the murmur
+    // wording follow the BLOCK, never the label's value (the discriminator rule — a bank or a
+    // sector named « small » is data, not the size class).
+    in property <string> kind;
     spacing: Tokens.space-4;
     if rows.length == 0: CaptionLine { text: @tr("Aucune donnée."); }
     for r in rows: VerticalLayout {
@@ -57,16 +61,20 @@ component ShareBlock inherits VerticalLayout {
                 : r.reason == "missing_rate" ? @tr("{} — non classé (taux manquant {})", r.label, r.missing)
                 : @tr("{} — non classé (conversion impossible)", r.label);
         }
+        // Decision 6 (G1 review): concentration murmurs from the core band (as Portefeuille); a
+        // sector only AT or OVER the threshold; a currency never (Rust never flags it).
         if r.reason == "" && r.flagged: StatusBand {
             icon: "⚠";
-            text: @tr("{} — seuil {} % approché ou atteint", root.label-of(r.label), Review.threshold);
+            text: root.kind == "sector"
+                ? @tr("{} — seuil {} % atteint ou dépassé", root.label-of(r.label), Review.threshold)
+                : @tr("{} — seuil {} % approché ou atteint", root.label-of(r.label), Review.threshold);
         }
     }
     pure function label-of(key: string) -> string {
-        if (key == "small") { return @tr("Petite"); }
-        if (key == "medium") { return @tr("Moyenne"); }
-        if (key == "large") { return @tr("Grande"); }
-        if (key == "") { return @tr("non renseigné"); }
+        if (root.kind == "size" && key == "small") { return @tr("Petite"); }
+        if (root.kind == "size" && key == "medium") { return @tr("Moyenne"); }
+        if (root.kind == "size" && key == "large") { return @tr("Grande"); }
+        if (root.kind == "sector" && key == "") { return @tr("non renseigné"); }
         return key;
     }
 }
@@ -79,6 +87,10 @@ export component ReviewScreen inherits Rectangle {
         if (row.study == "unavailable") { return @tr("étude indisponible"); }
         return @tr("aucune étude");
     }
+    // An absent figure reads as the em-dash, never a dangling empty slot.
+    pure function or-dash(value: string) -> string {
+        return value != "" ? value : "—";
+    }
     pure function zone-words(key: string) -> string {
         if (key == "buy") { return Labels.zone-buy; }
         if (key == "neutral") { return Labels.zone-hold; }
@@ -87,10 +99,13 @@ export component ReviewScreen inherits Rectangle {
         if (key == "above") { return @tr("au-dessus de la bande de prévision"); }
         return "—";
     }
-    pure function reason-words(key: string) -> string {
-        if (key == "age") { return @tr("dernière sauvegarde de plus de 12 mois"); }
-        if (key == "withheld") { return @tr("une donnée requise manque"); }
-        return @tr("confiance réduite");
+    // Every reason that applies, in the fixed order age · withheld · low confidence.
+    pure function due-words(d: ReviewDueRow) -> string {
+        return (d.age ? @tr("dernière sauvegarde de plus de 12 mois") : "")
+            + (d.age && (d.withheld || d.low-confidence) ? " · " : "")
+            + (d.withheld ? @tr("une donnée requise manque") : "")
+            + (d.withheld && d.low-confidence ? " · " : "")
+            + (d.low-confidence ? @tr("confiance réduite") : "");
     }
 
     Flickable {
@@ -139,31 +154,35 @@ export component ReviewScreen inherits Rectangle {
 
             if !Review.unavailable: PanelCard {
                 title: @tr("Répartition par taille (chiffre d'affaires)");
-                ShareBlock { rows: Review.size-rows; with-target: true; }
-                ShareBlock { rows: Review.unclassified-rows; with-target: false; }
+                // The size mix is the 6.7 read: its failure is this block's « indisponible ».
+                if Review.concentration-unavailable: StatusBand { icon: "⊘"; text: @tr("Répartition par taille indisponible."); }
+                if !Review.concentration-unavailable: ShareBlock { rows: Review.size-rows; with-target: true; kind: "size"; }
+                if !Review.concentration-unavailable && Review.unclassified-rows.length > 0: ShareBlock { rows: Review.unclassified-rows; with-target: false; kind: "ticker"; }
             }
             if !Review.unavailable: PanelCard {
                 title: @tr("Répartition par secteur");
                 if Review.sectors-unavailable: StatusBand { icon: "⊘"; text: @tr("Exposition par secteur indisponible."); }
-                if !Review.sectors-unavailable: ShareBlock { rows: Review.sector-rows; with-target: false; }
+                if !Review.sectors-unavailable: ShareBlock { rows: Review.sector-rows; with-target: false; kind: "sector"; }
             }
             if !Review.unavailable: PanelCard {
                 title: @tr("Répartition par devise");
                 if Review.currencies-unavailable: StatusBand { icon: "⊘"; text: @tr("Exposition par devise indisponible."); }
-                if !Review.currencies-unavailable: ShareBlock { rows: Review.currency-rows; with-target: false; }
+                if !Review.currencies-unavailable: ShareBlock { rows: Review.currency-rows; with-target: false; kind: "currency"; }
             }
             if !Review.unavailable: PanelCard {
                 title: @tr("Répartition par banque");
                 if Review.global-missing != "": StatusBand { icon: "◦"; text: @tr("Total global indisponible : taux manquant {}", Review.global-missing); }
-                ShareBlock { rows: Review.bank-rows; with-target: false; }
+                if Review.global-unavailable: StatusBand { icon: "⊘"; text: @tr("Total global indisponible."); }
+                ShareBlock { rows: Review.bank-rows; with-target: false; kind: "bank"; }
                 if Review.global-invested != "": FactLine { text: @tr("Total global : {}", Review.global-invested); }
             }
             if !Review.unavailable: PanelCard {
                 title: @tr("Concentration par titre");
                 subtitle: @tr("Part de chaque titre dans le capital total investi ; seuil de concentration : {} %.", Review.threshold);
                 if Review.concentration-unavailable: StatusBand { icon: "⊘"; text: @tr("Concentration indisponible"); }
-                if Review.concentration-missing != "": StatusBand { icon: "◦"; text: @tr("Parts indisponibles : taux manquant {}", Review.concentration-missing); }
-                ShareBlock { rows: Review.concentration-rows; with-target: false; }
+                if !Review.concentration-unavailable && Review.concentration-missing != "": StatusBand { icon: "◦"; text: @tr("Parts indisponibles : taux manquant {}", Review.concentration-missing); }
+                if !Review.concentration-unavailable && Review.concentration-global-absent: StatusBand { icon: "◦"; text: @tr("Parts indisponibles."); }
+                if !Review.concentration-unavailable: ShareBlock { rows: Review.concentration-rows; with-target: false; kind: "ticker"; }
             }
 
             if !Review.unavailable: PanelCard {
@@ -201,10 +220,11 @@ export component ReviewScreen inherits Rectangle {
                                 clicked => { Review.open-study(row.study-id); }
                             }
                         }
-                        // The study line: its state, the zone, U/D, relative value.
-                        if row.study == "full" || row.study == "provisional" || row.study == "withheld": FactLine {
-                            text: @tr("Étude : {} · zone : {} · prix actuel : {} {} · H/B {} · valeur relative : {}",
-                                root.study-words(row), root.zone-words(row.zone), row.price, row.currency, row.ud, row.relative);
+                        // The study line: its state, the zone, U/D, relative value — an absent
+                        // figure reads « — », never a dangling empty slot.
+                        if row.linked: FactLine {
+                            text: @tr("Étude : {} · zone : {} · prix actuel : {} · H/B : {} · valeur relative : {}",
+                                root.study-words(row), root.zone-words(row.zone), root.or-dash(row.price), root.or-dash(row.ud), root.or-dash(row.relative));
                         }
                         if row.study == "none" && row.other-currency != "": StatusBand {
                             icon: "◦";
@@ -218,6 +238,11 @@ export component ReviewScreen inherits Rectangle {
                             icon: "⊘";
                             text: @tr("Étude indisponible : sa lecture a échoué.");
                         }
+                        // Read fine, but its data does not normalize — not a read failure.
+                        if row.study == "not_computable": StatusBand {
+                            icon: "⊘";
+                            text: @tr("Étude non calculable : ses données ne peuvent pas être préparées.");
+                        }
                         if row.flags != "": StatusBand {
                             icon: "⚠";
                             text: @tr("Signaux ({}) : {}", row.flag-count, row.flags);
@@ -225,7 +250,7 @@ export component ReviewScreen inherits Rectangle {
                         HorizontalLayout {
                             spacing: Tokens.space-12;
                             alignment: start;
-                            if row.study-id != "": CaptionLine {
+                            if row.linked: CaptionLine {
                                 text: row.stale ? @tr("◦ données périmées") : (row.as-of != "" ? @tr("données à jour le {}", row.as-of) : @tr("données : pas encore rafraîchies"));
                             }
                             if row.stop != "": CaptionLine {
@@ -233,7 +258,9 @@ export component ReviewScreen inherits Rectangle {
                             }
                             if row.trigger == "stop": CaptionLine { text: @tr("◆ Le prix a atteint votre stop."); }
                             if row.trigger == "sell": CaptionLine { text: @tr("◆ Le prix est dans la zone de vente."); }
-                            if row.study-id != "": CaptionLine { text: @tr("dernière sauvegarde : {}", row.last-saved); }
+                            if row.linked: CaptionLine {
+                                text: row.last-saved-unknown ? @tr("dernière sauvegarde : inconnue (historique indisponible)") : @tr("dernière sauvegarde : {}", row.last-saved);
+                            }
                         }
                     }
                 }
@@ -245,7 +272,13 @@ export component ReviewScreen inherits Rectangle {
                 if Review.due.length == 0: CaptionLine { text: @tr("Aucune étude à revoir."); }
                 for d in Review.due: HorizontalLayout {
                     spacing: Tokens.space-12;
-                    FactLine { text: @tr("{} — {} (dernière sauvegarde : {})", d.ticker, root.reason-words(d.reason), d.date); vertical-alignment: center; horizontal-stretch: 1; }
+                    FactLine {
+                        text: d.date-unknown
+                            ? @tr("{} — {} (dernière sauvegarde : inconnue, historique indisponible)", d.ticker, root.due-words(d))
+                            : @tr("{} — {} (dernière sauvegarde : {})", d.ticker, root.due-words(d), d.date);
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
                     ActionButton {
                         label: @tr("Ouvrir l'étude");
                         enabled: true;

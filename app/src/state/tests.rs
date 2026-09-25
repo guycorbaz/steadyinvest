@@ -2386,14 +2386,20 @@ fn portfolio_review_composes_positions_studies_and_counts() {
         _ => unreachable!(),
     };
     assert_eq!(linked.verdict, "withheld");
-    assert_eq!(linked.last_saved, review.today, "created today");
+    assert_eq!(
+        linked.last_saved.as_deref(),
+        Some(review.today.as_str()),
+        "created today"
+    );
     assert!(
         !linked.due_for_review,
         "created today is not older than the cadence"
     );
     assert_eq!(review.counts.withheld, 1);
     assert_eq!(review.due.len(), 1);
-    assert_eq!(review.due[0].reason, "withheld");
+    // Every reason: an empty study is « en attente » AND of reduced confidence (the first
+    // reason used to hide the second).
+    assert_eq!(review.due[0].reasons, vec!["withheld", "low_confidence"]);
     // The other-currency cause: a USD study for ROG does not link a CHF position, but is named.
     state.create_study("ROG", "USD").unwrap();
     let review = state
@@ -2410,6 +2416,151 @@ fn portfolio_review_composes_positions_studies_and_counts() {
             other_currency: Some("USD".into())
         }
     );
+}
+
+/// A journal state at a caller-chosen clock with a SEQUENTIAL id source (the review tests reopen
+/// the same file a year later — the 12-month path).
+fn review_state_at(dir: &TempDir, seed: u128, ts: &str) -> JournalState {
+    let path = dir.path().join("journal.db");
+    if !path.exists() {
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xC0FFEE),
+                &Timestamp("2024-01-01T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+    }
+    let clock: Box<dyn Clock> = Box::new(FixedClock(Timestamp(ts.to_string())));
+    let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
+    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    state
+}
+
+fn review_of(state: &JournalState) -> PortfolioReviewFacts {
+    state
+        .portfolio_review(
+            "CHF",
+            Decimal::from(1_000_000_000),
+            Decimal::from(10_000_000_000u64),
+        )
+        .expect("a readable dossier reviews")
+}
+
+#[test]
+fn portfolio_review_lists_a_study_older_than_twelve_months_with_every_reason() {
+    let dir = TempDir::new().unwrap();
+    {
+        let mut then = review_state_at(&dir, 0x7200, "2025-01-10T09:00:00Z");
+        then.create_study("NESN", "CHF").unwrap();
+        then.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    }
+    // Reopened a year and a half later: the last effective save (the creation — no FR51
+    // snapshot yet) is older than the cadence.
+    let now = review_state_at(&dir, 0x7300, "2026-06-27T15:00:00Z");
+    let review = review_of(&now);
+    let ReviewStudy::Linked(f) = &review.positions[0].study else {
+        panic!("the CHF study links the CHF position");
+    };
+    assert_eq!(f.last_saved.as_deref(), Some("2025-01-10"));
+    assert!(f.due_for_review);
+    assert_eq!(review.due.len(), 1);
+    // Every reason, not only the first: older than 12 months AND « en attente » AND of reduced
+    // confidence (an empty study).
+    assert_eq!(
+        review.due[0].reasons,
+        vec!["age", "withheld", "low_confidence"]
+    );
+    assert_eq!(review.due[0].last_saved.as_deref(), Some("2025-01-10"));
+    // A study created yesterday is not listed for its age.
+    let dir2 = TempDir::new().unwrap();
+    {
+        let mut then = review_state_at(&dir2, 0x7200, "2026-06-26T09:00:00Z");
+        then.create_study("NESN", "CHF").unwrap();
+        then.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    }
+    let review = review_of(&review_state_at(&dir2, 0x7300, "2026-06-27T15:00:00Z"));
+    assert_eq!(
+        review.due[0].reasons,
+        vec!["withheld", "low_confidence"],
+        "saved yesterday: no age reason"
+    );
+}
+
+#[test]
+fn portfolio_review_names_a_missing_pair_on_the_figures_it_blocks() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7400);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "5", "200", "USD", "").unwrap();
+    let review = review_of(&state);
+    let aapl = review
+        .positions
+        .iter()
+        .find(|p| p.ticker == "AAPL")
+        .unwrap();
+    assert_eq!(aapl.invested, None, "absent, never a partial figure");
+    assert_eq!(aapl.missing_pairs, vec!["USD → CHF".to_string()]);
+    let nesn = review
+        .positions
+        .iter()
+        .find(|p| p.ticker == "NESN")
+        .unwrap();
+    assert_eq!(nesn.invested, Some(Decimal::from(1000)), "the others stay");
+    assert_eq!(
+        nesn.share_pct, None,
+        "a share against an absent total is absent"
+    );
+    assert!(review.consolidation.global.is_none());
+    assert_eq!(
+        review.consolidation.missing_pairs,
+        vec!["USD → CHF".to_string()]
+    );
+    assert_eq!(
+        review.diversification.missing_pairs,
+        vec!["USD → CHF".to_string()]
+    );
+}
+
+#[test]
+fn portfolio_review_aggregates_two_banks_and_reads_every_lots_stop() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7500);
+    let study = state.create_study("NESN", "CHF").unwrap();
+    state
+        .set_judgment_field(study, "current_price", Some(und_money(70)))
+        .unwrap();
+    // Bank one: a lot WITHOUT a stop.
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    // Bank two: a lot with a 10 % stop, seeded from the present price 70 → level 63.
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "5", "80", "CHF", "").unwrap();
+    let lot = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.portfolio_id == second)
+        .unwrap();
+    state.set_holding_trailing_stop(lot.id, "10").unwrap();
+    let review = review_of(&state);
+    assert_eq!(
+        review.counts.positions, 1,
+        "one row per ticker, across banks"
+    );
+    let row = &review.positions[0];
+    assert_eq!(row.banks.len(), 2);
+    assert!(row.banks.contains(&"Swissquote".to_string()));
+    assert_eq!(row.stop_levels, vec![Decimal::from(63)]);
+    assert!(!row.stop_breached, "70 is above 63");
+    // The price falls through the second bank's stop: the breach is read on THAT lot.
+    state
+        .set_judgment_field(study, "current_price", Some(und_money(60)))
+        .unwrap();
+    let review = review_of(&state);
+    assert!(review.positions[0].stop_breached);
+    assert_eq!(review.positions[0].trigger, "stop");
+    assert_eq!(review.counts.stop_breached, 1);
 }
 
 // ── Story 4.5 — trailing stop per holding (validate, seed, ratchet) ──

@@ -680,9 +680,13 @@ mod tests {
         // « Examen rapide » (the picker card, the two ladders' labels, the price record, the
         // reader's fields, the four conclusions) and measures 850. Story 7.3 PR 2 adds the watchlist
         // criblage (the button, the card, its column heads, the row states and fact words, the
-        // quota band, the « Retour à la liste de suivi » label) and measures 892. Floor strict.
+        // quota band, the « Retour à la liste de suivi » label) and measures 892. The G1 review of
+        // 7.2 adds the sector murmur « atteint ou dépassé » (Decision 6), the size block's and the
+        // global total's plain « indisponible », « Parts indisponibles. », the « non calculable »
+        // study band and the two unknown-last-save variants (position caption, due line): +7 =
+        // 899. Floor strict.
         assert!(
-            total >= 892,
+            total >= 899,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
