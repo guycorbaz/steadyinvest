@@ -643,8 +643,8 @@ pub(crate) fn wire_review(ui: &MainWindow, s: &Session) {
         // before the study opens over it. G1 G review: a comparison or an examination left open
         // over Études would hide the study — they close first, through their own close paths.
         let ui_weak = ui.as_weak();
-        let journal_state = Rc::clone(journal_state);
-        let quick_screen = Rc::clone(quick_screen);
+        let journal_state = std::rc::Rc::clone(journal_state);
+        let quick_screen = std::rc::Rc::clone(quick_screen);
         ui.global::<Review>().on_open_study(move |id| {
             let ui = ui_weak.unwrap();
             if Uuid::parse_str(&id).is_ok() {

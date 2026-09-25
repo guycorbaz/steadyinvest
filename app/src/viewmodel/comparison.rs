@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(col.rows[12], dash_free(pe.avg_pe.to_string()));
         assert_eq!(col.rows[13], dash_free(pe.avg_low_pe.to_string()));
         assert_eq!(col.rows[15], dash_free(pe.current_pe.to_string()));
-        let risk = risk_computed(o, F);
+        let risk = risk_computed(o, &study.judgment, F);
         assert_eq!(col.rows[20], dash_free(risk.ud_ratio.to_string()));
         let ret = return_computed(o, F);
         assert_eq!(col.rows[21], dash_free(ret.present_yield.to_string()));

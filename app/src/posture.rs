@@ -690,8 +690,9 @@ mod tests {
         // Floor strict.
         // The G1 on-screen check adds the stop caption without a repeated level list (every level
         // breached): +1 = 903.
+        // integ/g1-a-to-h (G1 fix PRs A–H combined): 892 + B 11 + C 9 + D 26 + E 15 = 953, measured.
         assert!(
-            total >= 903,
+            total >= 953,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -809,7 +810,8 @@ mod tests {
         // comparison pick whose study is gone (MSG_COMPARISON_PICK_GONE): 142 + 1 = 143.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            143,
+            153,
+            // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }

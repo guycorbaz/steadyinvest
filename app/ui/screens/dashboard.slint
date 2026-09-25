@@ -432,11 +432,11 @@ export component DashboardScreen inherits Rectangle {
                 }
                 HorizontalLayout {
                     spacing: Tokens.space-8;
-                    Dropdown { options: Comparison.options1; value <=> Comparison.pick1; placeholder: @tr("étude 1"); horizontal-stretch: 1; changed(label) => { Comparison.picked(0, label); } }
-                    Dropdown { options: Comparison.options2; value <=> Comparison.pick2; placeholder: @tr("étude 2"); horizontal-stretch: 1; changed(label) => { Comparison.picked(1, label); } }
-                    Dropdown { options: Comparison.options3; value <=> Comparison.pick3; placeholder: @tr("étude 3"); horizontal-stretch: 1; changed(label) => { Comparison.picked(2, label); } }
-                    Dropdown { options: Comparison.options4; value <=> Comparison.pick4; placeholder: @tr("étude 4"); horizontal-stretch: 1; changed(label) => { Comparison.picked(3, label); } }
-                    Dropdown { options: Comparison.options5; value <=> Comparison.pick5; placeholder: @tr("étude 5"); horizontal-stretch: 1; changed(label) => { Comparison.picked(4, label); } }
+                    Dropdown { options: Comparison.options1; value <=> Comparison.pick1; placeholder: @tr("étude 1"); horizontal-stretch: 1; picked(i) => { Comparison.picked(0, Comparison.options1[i]); } }
+                    Dropdown { options: Comparison.options2; value <=> Comparison.pick2; placeholder: @tr("étude 2"); horizontal-stretch: 1; picked(i) => { Comparison.picked(1, Comparison.options2[i]); } }
+                    Dropdown { options: Comparison.options3; value <=> Comparison.pick3; placeholder: @tr("étude 3"); horizontal-stretch: 1; picked(i) => { Comparison.picked(2, Comparison.options3[i]); } }
+                    Dropdown { options: Comparison.options4; value <=> Comparison.pick4; placeholder: @tr("étude 4"); horizontal-stretch: 1; picked(i) => { Comparison.picked(3, Comparison.options4[i]); } }
+                    Dropdown { options: Comparison.options5; value <=> Comparison.pick5; placeholder: @tr("étude 5"); horizontal-stretch: 1; picked(i) => { Comparison.picked(4, Comparison.options5[i]); } }
                 }
                 HorizontalLayout {
                     alignment: start;
