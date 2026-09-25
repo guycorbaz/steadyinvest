@@ -568,7 +568,8 @@ export component ModalDialog inherits Rectangle {
                     // matched study's present price. A destructive verb never fires on a plain
                     // Enter (G1 review, decision 1): Enter records only a typed number — blank or
                     // spaces never reach the whole-position rail; that sale takes a click on the
-                    // verb.
+                    // verb. « A typed number » is read by the rails' own rule, under the user's
+                    // number format (G1 I).
                     if Dialog.form-id == "sell-trigger": VerticalLayout {
                         spacing: Tokens.space-12;
                         trig-qty := LabeledField {
@@ -577,13 +578,13 @@ export component ModalDialog inherits Rectangle {
                             text <=> Dialog.draft-quantity;
                             autofocus: true;
                             focus-request: root.first-request;
-                            accepted => { if (Dialog.draft-quantity.is-float()) { root.submit(); } }
+                            accepted => { if (Holdings.reads-as-number(Dialog.draft-quantity)) { root.submit(); } }
                         }
                         LabeledField {
                             label: @tr("Raison (facultative)");
                             placeholder: @tr("Ce qui motive l'opération");
                             text <=> Dialog.draft-rationale;
-                            accepted => { if (Dialog.draft-quantity.is-float()) { root.submit(); } }
+                            accepted => { if (Holdings.reads-as-number(Dialog.draft-quantity)) { root.submit(); } }
                         }
                     }
 

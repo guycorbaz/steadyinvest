@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::provider::ProviderChoice;
 use crate::state::JournalState;
-use crate::viewmodel::format::{NumberFormat, format_scaled};
+use crate::viewmodel::format::{NumberFormat, format_amount, format_scaled};
 use crate::wiring::{Session, persist};
 use crate::{
     BankCarRow, CapitalAtRiskRow, ConcentrationLine, HoldingRow, Holdings, LedgerRow, MainWindow,
@@ -188,8 +188,10 @@ pub(crate) fn refresh_holdings(
             HoldingRow {
                 id: id_text.into(),
                 ticker: h.security_ticker.clone().into(),
-                quantity: h.quantity.clone().into(),
-                purchase_price: h.purchase_price.clone().into(),
+                // The exact stored values in the user's number format (G1 I): shown, and the edit
+                // dialog's prefill — read back by the same rule, digit for digit.
+                quantity: format_amount(&h.quantity, format).into(),
+                purchase_price: format_amount(&h.purchase_price, format).into(),
                 purchase_price_text: Decimal::from_str_exact(&h.purchase_price)
                     .map(|d| format_scaled(d, DisplayField::Price, format))
                     .unwrap_or_else(|_| h.purchase_price.clone())
@@ -210,7 +212,8 @@ pub(crate) fn refresh_holdings(
                 stale: f.stale,
                 as_of: f.as_of.unwrap_or_default().into(),
                 has_stop: h.trailing_stop_pct.is_some(),
-                stop_pct: h.trailing_stop_pct.clone().unwrap_or_default().into(),
+                stop_pct: format_amount(h.trailing_stop_pct.as_deref().unwrap_or_default(), format)
+                    .into(),
                 stop_level: stop_level_display.into(),
                 stop_breached,
                 stop_distance: stop_distance.into(),
@@ -621,10 +624,13 @@ pub(crate) fn refresh_holdings(
 }
 
 /// Push one holding's transaction ledger (Story 6.3, FR39) into the `Holdings` global and mark it
-/// as the opened one. Rows are the exact canonical TEXT spellings (no display rounding — the
-/// ledger IS the record); the date shows the event day (`occurred_at`'s date part); a `NULL`
-/// legacy `kind` renders as a sell (the only pre-6.3 writer).
+/// as the opened one. Rows are the exact stored values (no display rounding — the ledger IS the
+/// record) spelled in the user's number format (G1 I: « Retenue : 10,5 », « net 19,5 » under the
+/// comma format — never a point beside the register's commas); the same spellings prefill
+/// « Modifier » and read back by the same rule. The date shows the event day (`occurred_at`'s
+/// date part); a `NULL` legacy `kind` renders as a sell (the only pre-6.3 writer).
 pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uuid) {
+    let format = state.number_format();
     let rows: Vec<LedgerRow> = state
         .holding_ledger(holding_id)
         .iter()
@@ -634,9 +640,9 @@ pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uui
             // cell would round-trip through "Modifier" as an empty — i.e. today's — date).
             date: t.occurred_at.0.get(..10).unwrap_or(&t.occurred_at.0).into(),
             kind: t.kind.clone().unwrap_or_else(|| "sell".to_string()).into(),
-            quantity: t.quantity.clone().into(),
-            unit_price: t.unit_price.clone().into(),
-            fees: t.fees.clone().into(),
+            quantity: format_amount(&t.quantity, format).into(),
+            unit_price: format_amount(&t.unit_price, format).into(),
+            fees: format_amount(&t.fees, format).into(),
             currency: t.currency.clone().into(),
             rationale: t.rationale.clone().unwrap_or_default().into(),
             // Story 6.4 (FR41): a dividend row also shows its NET (gross − retenue); "" elsewhere
@@ -649,7 +655,8 @@ pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uui
                     let net = q.checked_mul(p)?.checked_sub(f)?;
                     // Cash received is never negative — an invalid (imported/legacy) row shows
                     // no net rather than a nonsense figure (2026-07-02 review).
-                    (!net.is_sign_negative()).then(|| net.normalize().to_string())
+                    (!net.is_sign_negative())
+                        .then(|| format_amount(&net.normalize().to_string(), format))
                 })()
                 .unwrap_or_default()
                 .into()
@@ -991,6 +998,14 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 let ui = ui_weak.unwrap();
                 push_position_choices(&ui, &journal_state.borrow(), &current_ticker);
             });
+    }
+    // G1 I: the sell-by-trigger dialog's Enter guard — a typed number under the user's format.
+    {
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Holdings>().on_reads_as_number(move |text| {
+            let format = journal_state.borrow().number_format();
+            crate::viewmodel::format::parse_decimal(&text, format).is_some()
+        });
     }
     // ── Story 4.4 (FR40) — manual price refresh for every linked holding, off the UI thread. One
     // job per UNIQUE linked ticker (reusing the Epic-3 worker); holdings with no matching study are

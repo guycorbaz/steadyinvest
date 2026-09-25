@@ -482,7 +482,9 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
                 return;
             };
-            let Ok(bytes) = steadyinvest_report::render_study_pdf(&study) else {
+            // G1 I: the PDF's figures in the user's number format, as on the screen.
+            let numbers = journal_state.borrow().number_format().report_style();
+            let Ok(bytes) = steadyinvest_report::render_study_pdf(&study, numbers) else {
                 // The study does not compute as entered — a neutral refusal, no panic, no leak.
                 crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
                 return;

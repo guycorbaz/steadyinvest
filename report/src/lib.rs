@@ -15,6 +15,6 @@ pub mod quick_screen;
 pub mod review;
 
 pub use comparison::{Comparison, ComparisonColumn, render_comparison};
-pub use pdf::{ReportError, render_study_pdf};
+pub use pdf::{NumberStyle, ReportError, render_study_pdf};
 pub use quick_screen::{QuickScreen, QuickScreenLadder, QuickScreenPriceRow, render_quick_screen};
 pub use review::{DueLine, PortfolioReview, ReviewLine, ShareLine, render_portfolio_review};

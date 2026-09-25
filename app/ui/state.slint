@@ -1309,7 +1309,8 @@ export struct CapitalAtRiskRow {
 
 // Story 6.3 (FR39): one row of the opened holding's transaction ledger. `kind` is the raw
 // discriminator ("buy"/"sell" — the display noun is chosen in the view); decimals are the exact
-// canonical TEXT spellings; `date` is the event date (AAAA-MM-JJ).
+// stored values, digit for digit, in the user's number format (G1 I — shown and the « Modifier »
+// prefill); `date` is the event date (AAAA-MM-JJ).
 export struct LedgerRow {
     id: string,
     date: string,
@@ -1500,6 +1501,9 @@ export global Holdings {
     callback add-portfolio(string) -> bool;             // name → created?
     callback rename-portfolio(string, string) -> bool;  // id, name → renamed?
     callback delete-portfolio(string);          // id
+    // G1 I: whether a typed text reads as a number under the user's number format (the one rule
+    // the rails read it by — « 10,5 » under the comma format, where Slint's `is-float` says no).
+    pure callback reads-as-number(string) -> bool;
     // Guy, 2026-09-24: every study's ticker, unique, sorted (the comparison pickers' list).
     in-out property <[string]> study-tickers;
     // G1 review (Guy's decision 3): the position dialog's choices are STUDIES — one per (ticker,

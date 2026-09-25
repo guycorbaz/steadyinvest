@@ -29,11 +29,13 @@
 
 use std::path::{Path, PathBuf};
 
+use rust_decimal::Decimal;
 use steadyinvest_contract::{ForecastLowOption, Judgment, Timestamp};
 use steadyinvest_persistence::{Error as PersistError, Journal, clear_lock, lock_is_stale};
 use uuid::Uuid;
 
 use crate::clock::{Clock, IdGen};
+use crate::viewmodel::format::NumberFormat;
 
 mod cells;
 mod concentration;
@@ -121,6 +123,10 @@ pub struct JournalState {
     /// (deterministic). `main.rs` loads it from / persists it to `AppConfig.active_portfolio_id`; it
     /// is in-memory here (validated against the live portfolio list by [`Self::active_portfolio`]).
     active_portfolio_id: Option<Uuid>,
+    /// The user's number format (G1 I, #237), pushed by the wiring from app-config at startup and
+    /// on every Réglages change: the rails read every user-typed amount through
+    /// [`crate::viewmodel::format::parse_decimal`] under it (« 10,5 » under the comma format).
+    number_format: NumberFormat,
 }
 
 /// The result of opening/creating/switching a journal (Story 5.5) — the identity + version the caller
@@ -171,6 +177,7 @@ impl JournalState {
                             pending_restore: None,
                             pending_import: None,
                             active_portfolio_id: None,
+                            number_format: NumberFormat::default(),
                         },
                         read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                     );
@@ -207,6 +214,7 @@ impl JournalState {
                     pending_restore: None,
                     pending_import: None,
                     active_portfolio_id: None,
+                    number_format: NumberFormat::default(),
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
             );
@@ -237,6 +245,7 @@ impl JournalState {
                         pending_restore: None,
                         pending_import: None,
                         active_portfolio_id: None,
+                        number_format: NumberFormat::default(),
                     },
                     read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                 )
@@ -254,6 +263,7 @@ impl JournalState {
                         pending_restore: None,
                         pending_import: None,
                         active_portfolio_id: None,
+                        number_format: NumberFormat::default(),
                     },
                     Some(format!("{MSG_SAVE_FAILED} {error}")),
                 )
@@ -264,6 +274,23 @@ impl JournalState {
     /// The resolved on-disk path of the open journal, for persisting into app-config.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
+    }
+
+    /// Set the user's number format the rails read typed amounts under (G1 I).
+    pub fn set_number_format(&mut self, format: NumberFormat) {
+        self.number_format = format;
+    }
+
+    /// The user's number format (G1 I): the rails' reading of typed amounts, and the spelling of
+    /// the figures the wiring bakes from this state.
+    pub fn number_format(&self) -> NumberFormat {
+        self.number_format
+    }
+
+    /// Read a user-typed amount under the user's number format (G1 I) — `None` when blank, not a
+    /// number, or ambiguous; never a guess.
+    pub(crate) fn read_amount(&self, input: &str) -> Option<Decimal> {
+        crate::viewmodel::format::parse_decimal(input, self.number_format)
     }
 
     /// True when the open journal is read-only (newer-schema file).

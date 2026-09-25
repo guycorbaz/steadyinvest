@@ -11,15 +11,17 @@ use crate::wiring::Session;
 use crate::{Fx, FxRateRow, MainWindow};
 use crate::{fetch, state};
 
-/// Push the stored rates into the `Fx` global (pair "EUR → CHF", exact rate spelling, day, source).
+/// Push the stored rates into the `Fx` global (pair "EUR → CHF", the exact rate in the user's
+/// number format — G1 I —, day, source).
 pub(crate) fn push_fx_rates(ui: &MainWindow, state: &JournalState) {
+    let format = state.number_format();
     let rows: Vec<FxRateRow> = state
         .list_fx_rates()
         .iter()
         .map(|r| FxRateRow {
             id: r.id.to_string().into(),
             pair: format!("{} → {}", r.base_currency, r.quote_currency).into(),
-            rate: r.rate.clone().into(),
+            rate: crate::viewmodel::format::format_amount(&r.rate, format).into(),
             date: r.rate_date.clone().into(),
             source: r.source.clone().into(),
             quote: r.quote_currency.clone().into(),

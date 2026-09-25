@@ -9,7 +9,7 @@ use steadyinvest_core::checklist::{
 use steadyinvest_core::rounding::{DisplayField, round_for_display};
 use steadyinvest_report::{QuickScreen, QuickScreenLadder, QuickScreenPriceRow};
 
-use crate::viewmodel::format::{NumberFormat, format_scaled, parse_amount};
+use crate::viewmodel::format::{NumberFormat, format_scaled, parse_decimal};
 
 fn f(v: Option<Decimal>, field: DisplayField, format: NumberFormat) -> String {
     v.map(|d| format_scaled(d, field, format))
@@ -203,13 +203,9 @@ pub fn meets_key(rate_pct: Option<Decimal>, objective: &str, format: NumberForma
     if cleaned.is_empty() {
         return String::new();
     }
-    // A growth objective carries no grouping: under the Point preset « 7,5 » would otherwise lose
-    // its comma to the thousands rule and read 75 — unread, never a silently different target
-    // (G1 D review). Inner spaces are grouping too.
-    if cleaned.contains(format.thousands_separator()) || cleaned.contains(char::is_whitespace) {
-        return "unread".into();
-    }
-    let Some(target) = parse_amount(cleaned, format).map(|m| m.as_decimal()) else {
+    // The one reading rule of user numbers (G1 I): under the Point preset « 7,5 » cannot group, so
+    // it reads 7.5; a badly grouped « 7 5 » is unread — never a silently different target (G1 D).
+    let Some(target) = parse_decimal(cleaned, format) else {
         return "unread".into();
     };
     match rate_pct.map(|r| round_for_display(r, DisplayField::Percent)) {
@@ -245,10 +241,9 @@ mod tests {
 
     #[test]
     fn a_grouped_objective_is_unread_never_a_different_number() {
-        assert_eq!(
-            meets_key(Some(d("8")), "7,5", NumberFormat::Point),
-            "unread"
-        );
+        // A comma that cannot group reads as the decimal mark (G1 I) — 7.5, not 75.
+        assert_eq!(meets_key(Some(d("8")), "7,5", NumberFormat::Point), "yes");
+        assert_eq!(meets_key(Some(d("7")), "7,5", NumberFormat::Point), "no");
         assert_eq!(meets_key(Some(d("8")), "7.5", NumberFormat::Point), "yes");
         assert_eq!(
             meets_key(Some(d("8")), "7 5", NumberFormat::Comma),

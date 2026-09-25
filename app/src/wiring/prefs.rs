@@ -11,7 +11,7 @@ use slint::ComponentHandle;
 use crate::labels::LabelSet;
 use crate::provider::ProviderChoice;
 use crate::theme::Theme;
-use crate::viewmodel::format::{NumberFormat, format_amount};
+use crate::viewmodel::format::{NumberFormat, canonical_input, format_amount};
 use crate::wiring::fetch::mirror_provider_prefs;
 use crate::wiring::holdings::refresh_holdings;
 use crate::wiring::{Session, persist};
@@ -46,21 +46,31 @@ pub(crate) fn mirror_fallback_prefs(ui: &MainWindow, cfg: &crate::config::AppCon
     prefs.set_fx_fallback(wire(FieldKind::Fx).into());
 }
 
-/// Mirror the Story 6.7 risk settings (concentration threshold + diversify-by-size table) from
-/// the validated config accessors into BOTH globals: `Prefs` (the Réglages fields) and `Holdings`
-/// (the canonical strings `refresh_holdings` bakes at render time — the reference-currency
-/// pattern). Always effective values (defaults when unset/damaged).
+/// Mirror the Réglages number settings — the Story 4.5 default trailing stop, the Story 6.4
+/// withholding rate, the Story 6.7 concentration threshold + diversify-by-size table — from the
+/// validated config accessors. `Prefs` (the Réglages fields, the dialogs' prefills and labels)
+/// carries them in the user's number format (G1 I: « 12,5 » under the comma format — read back by
+/// the same [`crate::viewmodel::format::parse_decimal`] rule); `Holdings` keeps the canonical
+/// strings `refresh_holdings` bakes at render time (the reference-currency pattern). Always
+/// effective values (defaults when unset/damaged).
 pub(crate) fn mirror_risk_settings(ui: &MainWindow, cfg: &crate::config::AppConfig) {
+    let format = cfg.number_format;
+    let shown =
+        |canonical: &str| -> slint::SharedString { format_amount(canonical, format).into() };
     let threshold = cfg.concentration_threshold_pct_or_default();
     let (small_max, medium_max) = cfg.size_bounds_or_default();
     let (target_small, target_medium, target_large) = cfg.size_targets_or_default();
     let prefs = ui.global::<Prefs>();
-    prefs.set_concentration_threshold_pct(threshold.clone().into());
-    prefs.set_size_small_max(small_max.clone().into());
-    prefs.set_size_medium_max(medium_max.clone().into());
-    prefs.set_size_target_small_pct(target_small.clone().into());
-    prefs.set_size_target_medium_pct(target_medium.clone().into());
-    prefs.set_size_target_large_pct(target_large.clone().into());
+    prefs.set_default_trailing_stop_pct(shown(
+        &cfg.default_trailing_stop_pct_or_none().unwrap_or_default(),
+    ));
+    prefs.set_withholding_rate_pct(shown(&cfg.withholding_rate_pct_or_default()));
+    prefs.set_concentration_threshold_pct(shown(&threshold));
+    prefs.set_size_small_max(shown(&small_max));
+    prefs.set_size_medium_max(shown(&medium_max));
+    prefs.set_size_target_small_pct(shown(&target_small));
+    prefs.set_size_target_medium_pct(shown(&target_medium));
+    prefs.set_size_target_large_pct(shown(&target_large));
     let holdings = ui.global::<Holdings>();
     holdings.set_concentration_threshold_pct(threshold.into());
     holdings.set_size_small_max(small_max.into());
@@ -117,6 +127,8 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let path = config_path.clone();
         let journal_state = Rc::clone(journal_state);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Prefs>()
             .on_number_format_selected(move |value| {
                 let Some(format) = NumberFormat::parse(&value) else {
@@ -128,6 +140,23 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     .set_number_format(format.as_str().into());
                 config.borrow_mut().number_format = format;
                 persist(path.as_ref(), &config.borrow());
+                // G1 I: the rails read typed amounts under the new format, and every figure baked
+                // in the old one — the Réglages fields, the register, the open ledger — re-renders.
+                journal_state.borrow_mut().set_number_format(format);
+                mirror_risk_settings(&ui, &config.borrow());
+                refresh_holdings(
+                    &ui,
+                    &journal_state.borrow(),
+                    &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
+                    format,
+                );
+                if let Ok(open) =
+                    uuid::Uuid::parse_str(&ui.global::<Holdings>().get_ledger_holding_id())
+                {
+                    crate::wiring::holdings::sync_ledger_panel(&ui, &journal_state.borrow(), open);
+                }
+                crate::wiring::fx::push_fx_rates(&ui, &journal_state.borrow());
                 // Story 6.8 (2026-07-03 review): an OPEN candidates panel re-renders in the new
                 // locale (its strings are baked at push time).
                 crate::wiring::replacement::sync_candidates(&ui, &journal_state.borrow());
@@ -181,23 +210,21 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 // Empty clears the default; a malformed percent is REFUSED with a named notice (issue
                 // #88). G1 review (spec AC1): the refusal returns `false` so the panel KEEPS the
                 // typed text, and it touches no other card's status slot.
+                // G1 I: read under the user's number format, stored canonical.
+                let format = config.borrow().number_format;
                 let stored = if value.is_empty() {
                     None
-                } else if config::is_valid_trailing_stop_pct(value) {
-                    Some(value.to_string())
+                } else if let Some(pct) = canonical_input(value, format)
+                    .filter(|pct| config::is_valid_trailing_stop_pct(pct))
+                {
+                    Some(pct)
                 } else {
                     crate::wiring::dialog::refuse(&ui, crate::state::MSG_TRAILING_STOP_INVALID);
                     return false;
                 };
                 config.borrow_mut().default_trailing_stop_pct = stored;
                 persist(path.as_ref(), &config.borrow());
-                ui.global::<Prefs>().set_default_trailing_stop_pct(
-                    config
-                        .borrow()
-                        .default_trailing_stop_pct_or_none()
-                        .unwrap_or_default()
-                        .into(),
-                );
+                mirror_risk_settings(&ui, &config.borrow());
                 true
             });
     }
@@ -212,19 +239,20 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 let value = value.trim();
                 // Empty resets to the default; a malformed/out-of-range percent is REFUSED with a
                 // named notice (issue #88); the refusal keeps the typed text (G1 review, AC1).
+                let format = config.borrow().number_format;
                 let stored = if value.is_empty() {
                     None
-                } else if config::is_valid_withholding_rate_pct(value) {
-                    Some(value.to_string())
+                } else if let Some(rate) = canonical_input(value, format)
+                    .filter(|rate| config::is_valid_withholding_rate_pct(rate))
+                {
+                    Some(rate)
                 } else {
                     crate::wiring::dialog::refuse(&ui, crate::state::MSG_WITHHOLDING_INVALID);
                     return false;
                 };
                 config.borrow_mut().withholding_rate_pct = stored;
                 persist(path.as_ref(), &config.borrow());
-                ui.global::<Prefs>().set_withholding_rate_pct(
-                    config.borrow().withholding_rate_pct_or_default().into(),
-                );
+                mirror_risk_settings(&ui, &config.borrow());
                 true
             });
     }
@@ -242,10 +270,13 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
             .on_concentration_threshold_pct_changed(move |value| {
                 let ui = ui_weak.unwrap();
                 let value = value.trim();
+                let format = config.borrow().number_format;
                 let stored = if value.is_empty() {
                     None
-                } else if config::is_valid_trailing_stop_pct(value) {
-                    Some(value.to_string())
+                } else if let Some(pct) = canonical_input(value, format)
+                    .filter(|pct| config::is_valid_trailing_stop_pct(pct))
+                {
+                    Some(pct)
                 } else {
                     // The refusal keeps the typed text (G1 review, AC1).
                     crate::wiring::dialog::refuse(&ui, crate::state::MSG_CONCENTRATION_INVALID);
@@ -285,12 +316,16 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 };
                 // "" → None (that field's pinned default); a non-empty field must validate. Issue #96:
                 // on a bad value, record the FIRST offending field's label so the notice names it.
+                // G1 I: each field reads under the user's number format, stored canonical.
+                let format = config.borrow().number_format;
                 let bound = |v: &str, label: &'static str, bad: &mut Option<&'static str>| {
                     let v = v.trim();
                     if v.is_empty() {
                         None
-                    } else if config::is_valid_size_bound(v) {
-                        Some(v.to_string())
+                    } else if let Some(b) =
+                        canonical_input(v, format).filter(|b| config::is_valid_size_bound(b))
+                    {
+                        Some(b)
                     } else {
                         if bad.is_none() {
                             *bad = Some(label);
@@ -302,8 +337,10 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     let v = v.trim();
                     if v.is_empty() {
                         None
-                    } else if config::is_valid_size_target_pct(v) {
-                        Some(v.to_string())
+                    } else if let Some(t) =
+                        canonical_input(v, format).filter(|t| config::is_valid_size_target_pct(t))
+                    {
+                        Some(t)
                     } else {
                         if bad.is_none() {
                             *bad = Some(label);

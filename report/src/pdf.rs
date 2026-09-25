@@ -111,7 +111,13 @@ const SERIES_GRAY: f32 = 0.0; // series strokes (black; told apart by weight + d
 /// four low-price candidates and the one retained, the zoning, the upside/downside ratio, the price
 /// target), §5 (present yield, average yield, the total return); then the synthesis; then an annexe
 /// with every historical figure the form plots but does not tabulate.
-pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
+///
+/// G1 I — every figure is spelled in the reader's number format (`numbers`: « 128,9 » and
+/// « 1 234,5 » under [`NumberStyle::Comma`], « 128.9 » and « 1,234.5 » under
+/// [`NumberStyle::Point`]), as the app shows it; the comparison / review / quick-screen reports
+/// receive their strings already spelled by the app.
+pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, ReportError> {
+    let nf = numbers;
     let frame = crate::form::build_frame(study).map_err(ReportError::Normalize)?;
     let outputs = frame.snapshot.outputs();
     let judgment = &study.judgment;
@@ -152,7 +158,7 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         EM_DASH,
         EM_DASH,
         EM_DASH,
-        fmt_dec(latest_bvps, DisplayField::PerShare),
+        nf.fmt_dec(latest_bvps, DisplayField::PerShare),
     ));
     doc.gap(4.0);
 
@@ -163,21 +169,21 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     doc.two_columns(
         &format!(
             "(1) Croissance historique des ventes : {}",
-            pct(outputs.growth.sales_cagr_pct)
+            nf.pct(outputs.growth.sales_cagr_pct)
         ),
         &format!(
             "(3) Croissance historique du BPA : {}",
-            pct(outputs.growth.eps_cagr_pct)
+            nf.pct(outputs.growth.eps_cagr_pct)
         ),
     );
     doc.two_columns(
         &format!(
             "(2) Croissance estimée des ventes : {}",
-            pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal()))
+            nf.pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal()))
         ),
         &format!(
             "(4) Croissance estimée du BPA : {}",
-            pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal()))
+            nf.pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal()))
         ),
     );
     doc.new_page();
@@ -231,20 +237,20 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         doc.grid_begin(2);
         doc.grid_row_small(&head_refs, &edges, true, 1);
         let mut ptp: Vec<String> = vec!["A · % marge avant impôt".to_string()];
-        ptp.extend(rows.iter().map(|r| pct_bare(r.ptp_pct)));
+        ptp.extend(rows.iter().map(|r| nf.pct_bare(r.ptp_pct)));
         if rows.is_empty() {
             ptp.push(EM_DASH.to_string());
         }
-        ptp.push(pct_bare(m.avg_ptp_pct));
+        ptp.push(nf.pct_bare(m.avg_ptp_pct));
         ptp.push(trend(m.ptp_trend).to_string());
         let refs: Vec<&str> = ptp.iter().map(String::as_str).collect();
         doc.grid_row_small(&refs, &edges, false, 1);
         let mut roe: Vec<String> = vec!["B · % rendement des c. propres".to_string()];
-        roe.extend(rows.iter().map(|r| pct_bare(r.roe_pct)));
+        roe.extend(rows.iter().map(|r| nf.pct_bare(r.roe_pct)));
         if rows.is_empty() {
             roe.push(EM_DASH.to_string());
         }
-        roe.push(pct_bare(m.avg_roe_pct));
+        roe.push(nf.pct_bare(m.avg_roe_pct));
         roe.push(trend(m.roe_trend).to_string());
         let refs: Vec<&str> = roe.iter().map(String::as_str).collect();
         doc.grid_row_small(&refs, &edges, false, 1);
@@ -290,14 +296,14 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             };
             let cells = [
                 row.year.to_string(),
-                money(hp),
-                money(lp),
-                fmt_dec(ep, DisplayField::PerShare),
-                num(row.high_pe),
-                num(row.low_pe),
-                fmt_dec(dv, DisplayField::PerShare),
-                pct(row.payout_pct),
-                pct(row.high_yield_pct),
+                nf.money(hp),
+                nf.money(lp),
+                nf.fmt_dec(ep, DisplayField::PerShare),
+                nf.num(row.high_pe),
+                nf.num(row.low_pe),
+                nf.fmt_dec(dv, DisplayField::PerShare),
+                nf.pct(row.payout_pct),
+                nf.pct(row.high_yield_pct),
             ];
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
             doc.grid_row_num(&refs, &COLS9, false, 1);
@@ -341,11 +347,11 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             String::new(),
             String::new(),
             String::new(),
-            num(total_of(&totals[0])),
-            num(total_of(&totals[1])),
+            nf.num(total_of(&totals[0])),
+            nf.num(total_of(&totals[1])),
             String::new(),
-            pct(total_of(&totals[2])),
-            pct(total_of(&totals[3])),
+            nf.pct(total_of(&totals[2])),
+            nf.pct(total_of(&totals[3])),
         ];
         let refs: Vec<&str> = total.iter().map(String::as_str).collect();
         doc.grid_row_num(&refs, &COLS9, false, 1);
@@ -354,11 +360,11 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             String::new(),
             String::new(),
             String::new(),
-            num(v.avg_high_pe),
-            num(v.avg_low_pe),
+            nf.num(v.avg_high_pe),
+            nf.num(v.avg_low_pe),
             String::new(),
-            pct(v.avg_payout_pct),
-            pct(v.avg_high_yield_pct),
+            nf.pct(v.avg_payout_pct),
+            nf.pct(v.avg_high_yield_pct),
         ];
         let refs: Vec<&str> = avg.iter().map(String::as_str).collect();
         doc.grid_row_num(&refs, &COLS9, false, 1);
@@ -385,13 +391,13 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         }
         doc.line(&format!(
             "8 · C/B moyen (D et E) : {}   ·   9 · C/B actuel : {}   ·   valeur relative : {}",
-            num(v.avg_pe),
-            num(v.current_pe),
-            pct(v.relative_value_pct),
+            nf.num(v.avg_pe),
+            nf.num(v.current_pe),
+            nf.pct(v.relative_value_pct),
         ));
         doc.line(&format!(
             "Cours actuel : {}   ·   plus haut de l'année en cours : {}   ·   plus bas de l'année en cours : {}",
-            money(current_price),
+            nf.money(current_price),
             EM_DASH,
             EM_DASH,
         ));
@@ -409,38 +415,38 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         let est_low = outputs.growth.estimated_low_eps;
         b.line(&format!(
             "A · Prix haut à 5 ans : PER haut moyen {} × BPA estimé haut {} = {}",
-            num(judgment.judged_avg_high_pe.map(|m| m.as_decimal())),
-            fmt_dec(est_high, DisplayField::PerShare),
-            money(r.forecast_high),
+            nf.num(judgment.judged_avg_high_pe.map(|m| m.as_decimal())),
+            nf.fmt_dec(est_high, DisplayField::PerShare),
+            nf.money(r.forecast_high),
         ));
         b.line("B · Prix bas à 5 ans, les quatre candidats :");
         b.indent_line(&format!(
             "(a) PER bas moyen {} × BPA estimé bas {} = {}",
-            num(judgment.judged_avg_low_pe.map(|m| m.as_decimal())),
-            fmt_dec(est_low, DisplayField::PerShare),
-            money(c.avg_low_pe_times_eps),
+            nf.num(judgment.judged_avg_low_pe.map(|m| m.as_decimal())),
+            nf.fmt_dec(est_low, DisplayField::PerShare),
+            nf.money(c.avg_low_pe_times_eps),
         ));
         b.indent_line(&format!(
             "(b) Prix bas moyen des 5 dernières années = {}",
-            money(c.avg_low_price_last_5y),
+            nf.money(c.avg_low_price_last_5y),
         ));
         b.indent_line(&format!(
             "(c) Plus bas sévère récent = {}",
-            money(c.recent_severe_low),
+            nf.money(c.recent_severe_low),
         ));
         b.indent_line(&format!(
             "(d) Prix soutenu par le dividende : dividende {} ÷ rendement haut moyen {} = {}",
-            fmt_dec(
+            nf.fmt_dec(
                 judgment.present_full_year_dividend.map(|m| m.as_decimal()),
                 DisplayField::PerShare
             ),
-            pct(outputs.valuation.avg_high_yield_pct),
-            money(c.dividend_supported),
+            nf.pct(outputs.valuation.avg_high_yield_pct),
+            nf.money(c.dividend_supported),
         ));
         b.indent_line(&format!(
             "Prix bas retenu ({}) = {}",
             option_label(judgment.forecast_low_option),
-            money(r.forecast_low),
+            nf.money(r.forecast_low),
         ));
         match &r.zones {
             Some(z) => {
@@ -448,26 +454,26 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
                 let third = z.buy_top - z.forecast_low;
                 b.line(&format!(
                     "C · Zonage : étendue {} − {} = {}   ·   un tiers = {}",
-                    money(Some(z.forecast_high)),
-                    money(Some(z.forecast_low)),
-                    money(Some(range)),
-                    money(Some(third)),
+                    nf.money(Some(z.forecast_high)),
+                    nf.money(Some(z.forecast_low)),
+                    nf.money(Some(range)),
+                    nf.money(Some(third)),
                 ));
                 b.indent_line(&format!(
                     "{} : {} à {}   ·   {} : {} à {}   ·   {} : {} à {}",
                     ZONE_LOW,
-                    money(Some(z.forecast_low)),
-                    money(Some(z.buy_top)),
+                    nf.money(Some(z.forecast_low)),
+                    nf.money(Some(z.buy_top)),
                     ZONE_MID,
-                    money(Some(z.buy_top)),
-                    money(Some(z.neutral_top)),
+                    nf.money(Some(z.buy_top)),
+                    nf.money(Some(z.neutral_top)),
                     ZONE_HIGH,
-                    money(Some(z.neutral_top)),
-                    money(Some(z.forecast_high)),
+                    nf.money(Some(z.neutral_top)),
+                    nf.money(Some(z.forecast_high)),
                 ));
                 b.indent_line(&format!(
                     "Le cours actuel {} se situe : {}",
-                    money(current_price),
+                    nf.money(current_price),
                     zone_label(r.present_price_zone),
                 ));
             }
@@ -475,17 +481,17 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         }
         b.line(&format!(
             "D · Ratio hausse / baisse : (prix haut {} − cours {}) ÷ (cours {} − prix bas {}) = {}",
-            money(r.forecast_high),
-            money(current_price),
-            money(current_price),
-            money(r.forecast_low),
-            upside(&r.upside_downside),
+            nf.money(r.forecast_high),
+            nf.money(current_price),
+            nf.money(current_price),
+            nf.money(r.forecast_low),
+            upside(&r.upside_downside, nf),
         ));
         b.line(&format!(
             "E · Objectif de cours : (prix haut {} ÷ cours {} × 100) − 100 = {} d'appréciation",
-            money(r.forecast_high),
-            money(current_price),
-            pct(outputs.returns.projected_appreciation_pct),
+            nf.money(r.forecast_high),
+            nf.money(current_price),
+            nf.pct(outputs.returns.projected_appreciation_pct),
         ));
         let bar_h = if r.zones.is_some() {
             ZONEBAR_H_RESERVE
@@ -497,7 +503,7 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         doc.block(&b);
         doc.gap(4.0);
         // Issue #105 — the zone bar (low/median/high thirds + the current-price marker).
-        doc.zone_bar(r.zones.as_ref(), current_price);
+        doc.zone_bar(r.zones.as_ref(), current_price, nf);
     }
     doc.gap(6.0);
 
@@ -507,35 +513,35 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         let mut b = Block::default();
         b.line(&format!(
             "A · Rendement présent : dividende {} ÷ cours {} × 100 = {}",
-            fmt_dec(
+            nf.fmt_dec(
                 judgment.present_full_year_dividend.map(|m| m.as_decimal()),
                 DisplayField::PerShare
             ),
-            money(current_price),
-            pct(ret.present_yield_pct),
+            nf.money(current_price),
+            nf.pct(ret.present_yield_pct),
         ));
         b.line(&format!(
             "B · Rendement moyen sur 5 ans : BPA moyen projeté {} × % distribution moyen {} = dividende moyen {}",
-            fmt_dec(ret.avg_annual_eps, DisplayField::PerShare),
-            pct(outputs.valuation.avg_payout_pct),
-            fmt_dec(ret.avg_annual_dividend, DisplayField::PerShare),
+            nf.fmt_dec(ret.avg_annual_eps, DisplayField::PerShare),
+            nf.pct(outputs.valuation.avg_payout_pct),
+            nf.fmt_dec(ret.avg_annual_dividend, DisplayField::PerShare),
         ));
         b.indent_line(&format!(
             "dividende moyen {} ÷ cours {} × 100 = {}",
-            fmt_dec(ret.avg_annual_dividend, DisplayField::PerShare),
-            money(current_price),
-            pct(ret.avg_yield_pct),
+            nf.fmt_dec(ret.avg_annual_dividend, DisplayField::PerShare),
+            nf.money(current_price),
+            nf.pct(ret.avg_yield_pct),
         ));
         b.line(&format!(
             "C · Rendement annuel total estimé : appréciation sur 5 ans {}, soit {} annualisée",
-            pct(ret.projected_appreciation_pct),
-            pct(ret.projected_annualized_appreciation_pct),
+            nf.pct(ret.projected_appreciation_pct),
+            nf.pct(ret.projected_annualized_appreciation_pct),
         ));
         b.indent_line(&format!(
             "appréciation annualisée {} + rendement moyen {} = {}",
-            pct(ret.projected_annualized_appreciation_pct),
-            pct(ret.avg_yield_pct),
-            total_return(ret),
+            nf.pct(ret.projected_annualized_appreciation_pct),
+            nf.pct(ret.avg_yield_pct),
+            total_return(ret, nf),
         ));
         b.small_line(
             "Les taux annualisés sont composés (et non simples) : (haut ÷ cours)^(1/5) − 1.",
@@ -578,19 +584,19 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     for y in &study.years {
         let cells = [
             y.year.to_string(),
-            cell(y.sales.value, DisplayField::LargeMonetary),
-            cell(
+            nf.cell(y.sales.value, DisplayField::LargeMonetary),
+            nf.cell(
                 y.pre_tax_profit.as_ref().and_then(|c| c.value),
                 DisplayField::LargeMonetary,
             ),
-            cell(y.eps.value, DisplayField::PerShare),
-            cell(y.high_price.value, DisplayField::Price),
-            cell(y.low_price.value, DisplayField::Price),
-            cell(
+            nf.cell(y.eps.value, DisplayField::PerShare),
+            nf.cell(y.high_price.value, DisplayField::Price),
+            nf.cell(y.low_price.value, DisplayField::Price),
+            nf.cell(
                 y.dividend_per_share.as_ref().and_then(|c| c.value),
                 DisplayField::PerShare,
             ),
-            cell(
+            nf.cell(
                 y.book_value_per_share.as_ref().and_then(|c| c.value),
                 DisplayField::PerShare,
             ),
@@ -605,31 +611,86 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
 
 // ── neutral formatting helpers (None → em-dash, never 0; exact-decimal display rounding) ──
 
-fn cell(v: Option<steadyinvest_contract::Money>, field: DisplayField) -> String {
-    fmt_dec(v.map(|m| m.as_decimal()), field)
+/// The reader's number format for the study PDF (G1 I, #237) — the report crate's own mirror of
+/// the app's setting, so `report` stays independent of `app`: `Comma` → `1 234,56` (no-break
+/// space grouping, decimal comma), `Point` → `1,234.56` (comma grouping, decimal point). Pure
+/// spelling over the rounded decimal — no arithmetic, the scale and the rounding come from
+/// `core::rounding` as before.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NumberStyle {
+    #[default]
+    Comma,
+    Point,
 }
 
-pub(crate) fn money(v: Option<Decimal>) -> String {
-    fmt_dec(v, DisplayField::Price)
-}
+/// The no-break space the app emits for the comma format's grouping (WinAnsi 0xA0).
+const GROUP_NBSP: char = '\u{00A0}';
 
-pub(crate) fn num(v: Option<Decimal>) -> String {
-    fmt_dec(v, DisplayField::PeRatio)
-}
-
-pub(crate) fn pct(v: Option<Decimal>) -> String {
-    match v {
-        None => EM_DASH.to_string(),
-        Some(d) => format!(
-            "{} %",
-            round_for_display(d, DisplayField::Percent).normalize()
-        ),
+impl NumberStyle {
+    /// A decimal's canonical digits, grouped and marked for the format (a leading `-` kept).
+    pub fn spell(self, d: Decimal) -> String {
+        let canonical = d.to_string();
+        let (negative, unsigned) = match canonical.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, canonical.as_str()),
+        };
+        let (integer, fraction) = match unsigned.split_once('.') {
+            Some((i, f)) => (i, Some(f)),
+            None => (unsigned, None),
+        };
+        let (group, mark) = match self {
+            NumberStyle::Comma => (GROUP_NBSP, ','),
+            NumberStyle::Point => (',', '.'),
+        };
+        let mut out = String::with_capacity(canonical.len() + integer.len() / 3 + 1);
+        if negative {
+            out.push('-');
+        }
+        let len = integer.chars().count();
+        for (i, digit) in integer.chars().enumerate() {
+            if i != 0 && (len - i) % 3 == 0 {
+                out.push(group);
+            }
+            out.push(digit);
+        }
+        if let Some(fraction) = fraction {
+            out.push(mark);
+            out.push_str(fraction);
+        }
+        out
     }
-}
 
-/// A percentage without its unit — for a table whose header already says « % » (the §2 columns).
-fn pct_bare(v: Option<Decimal>) -> String {
-    fmt_dec(v, DisplayField::Percent)
+    pub(crate) fn fmt_dec(self, v: Option<Decimal>, field: DisplayField) -> String {
+        match v {
+            None => EM_DASH.to_string(),
+            Some(d) => self.spell(round_for_display(d, field).normalize()),
+        }
+    }
+
+    fn cell(self, v: Option<steadyinvest_contract::Money>, field: DisplayField) -> String {
+        self.fmt_dec(v.map(|m| m.as_decimal()), field)
+    }
+
+    pub(crate) fn money(self, v: Option<Decimal>) -> String {
+        self.fmt_dec(v, DisplayField::Price)
+    }
+
+    pub(crate) fn num(self, v: Option<Decimal>) -> String {
+        self.fmt_dec(v, DisplayField::PeRatio)
+    }
+
+    pub(crate) fn pct(self, v: Option<Decimal>) -> String {
+        match v {
+            None => EM_DASH.to_string(),
+            Some(_) => format!("{} %", self.fmt_dec(v, DisplayField::Percent)),
+        }
+    }
+
+    /// A percentage without its unit — for a table whose header already says « % » (the §2
+    /// columns).
+    fn pct_bare(self, v: Option<Decimal>) -> String {
+        self.fmt_dec(v, DisplayField::Percent)
+    }
 }
 
 /// A §3 column's « Total » (G1 F): the sum over EVERY year of the window, or the reason it cannot
@@ -756,21 +817,14 @@ fn data_source(study: &Study) -> String {
 /// dividend history is missing (`ReturnOutputs::appreciation_only_potential`), the annualised
 /// appreciation alone with the honest « (hors div.) » marker — mirrors `app`'s
 /// `fmt_total_return`.
-fn total_return(r: &steadyinvest_core::ssg::ReturnOutputs) -> String {
+fn total_return(r: &steadyinvest_core::ssg::ReturnOutputs, nf: NumberStyle) -> String {
     match (
         r.projected_total_annualized_return_pct,
         r.appreciation_only_potential(),
     ) {
-        (Some(total), _) => pct(Some(total)),
-        (None, Some(appreciation)) => format!("{} (hors div.)", pct(Some(appreciation))),
-        (None, None) => pct(None),
-    }
-}
-
-pub(crate) fn fmt_dec(v: Option<Decimal>, field: DisplayField) -> String {
-    match v {
-        None => EM_DASH.to_string(),
-        Some(d) => round_for_display(d, field).normalize().to_string(),
+        (Some(total), _) => nf.pct(Some(total)),
+        (None, Some(appreciation)) => format!("{} (hors div.)", nf.pct(Some(appreciation))),
+        (None, None) => nf.pct(None),
     }
 }
 
@@ -792,14 +846,9 @@ fn zone_label(z: Option<Zone>) -> &'static str {
     }
 }
 
-fn upside(u: &UpsideDownside) -> String {
+fn upside(u: &UpsideDownside, nf: NumberStyle) -> String {
     match u {
-        UpsideDownside::Ratio(d) => {
-            format!(
-                "{} : 1",
-                round_for_display(*d, DisplayField::Ratio).normalize()
-            )
-        }
+        UpsideDownside::Ratio(d) => format!("{} : 1", nf.fmt_dec(Some(*d), DisplayField::Ratio)),
         UpsideDownside::Undefined => "— (dénominateur non positif)".to_string(),
         UpsideDownside::Unknown => EM_DASH.to_string(),
     }
@@ -1780,7 +1829,12 @@ impl Doc {
     /// the three thirds (low / median / high), greyscale-shaded (light → dark) with a label in each,
     /// and a marker at the current price. Greyscale-safe: the bands read by shade + label + position,
     /// never hue. Nothing is drawn when the forecast is incomplete (the §4 text already says so).
-    fn zone_bar(&mut self, zones: Option<&ZoneBounds>, current_price: Option<Decimal>) {
+    fn zone_bar(
+        &mut self,
+        zones: Option<&ZoneBounds>,
+        current_price: Option<Decimal>,
+        nf: NumberStyle,
+    ) {
         let Some(z) = zones else {
             return;
         };
@@ -1825,10 +1879,16 @@ impl Doc {
 
         // Boundary prices under the bar.
         let by = top + ZONEBAR_H + 9.0;
-        text(&mut self.cur, x0, by, 7.0, &money(Some(z.forecast_low)));
-        text_centered(&mut self.cur, fx(buy), by, 7.0, &money(Some(z.buy_top)));
-        text_centered(&mut self.cur, fx(neu), by, 7.0, &money(Some(z.neutral_top)));
-        let hi_lbl = money(Some(z.forecast_high));
+        text(&mut self.cur, x0, by, 7.0, &nf.money(Some(z.forecast_low)));
+        text_centered(&mut self.cur, fx(buy), by, 7.0, &nf.money(Some(z.buy_top)));
+        text_centered(
+            &mut self.cur,
+            fx(neu),
+            by,
+            7.0,
+            &nf.money(Some(z.neutral_top)),
+        );
+        let hi_lbl = nf.money(Some(z.forecast_high));
         text_right(&mut self.cur, x1, by, 7.0, &hi_lbl);
 
         // Current-price marker: a vertical line through the bar + a caption above.
@@ -1846,7 +1906,7 @@ impl Doc {
                 mx,
                 top - 6.0,
                 7.0,
-                &format!("{CURRENT_PRICE} {}", money(current_price)),
+                &format!("{CURRENT_PRICE} {}", nf.money(current_price)),
             );
         }
         self.y = by + 4.0;
@@ -2453,7 +2513,8 @@ mod tests {
 
     #[test]
     fn renders_a_nonempty_well_formed_pdf() {
-        let bytes = render_study_pdf(&demo_study()).expect("a normalizing study renders");
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point)
+            .expect("a normalizing study renders");
         assert!(
             bytes.starts_with(b"%PDF-"),
             "a PDF starts with the %PDF- header"
@@ -2516,8 +2577,8 @@ mod tests {
     fn output_is_deterministic_same_study_same_bytes() {
         // No timestamp / file-id / randomness — a fixture renders byte-identically (testable, and
         // friendly to content-hash dedup).
-        let a = render_study_pdf(&demo_study()).unwrap();
-        let b = render_study_pdf(&demo_study()).unwrap();
+        let a = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let b = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         assert_eq!(a, b, "the same study must render identical bytes");
     }
 
@@ -2528,7 +2589,8 @@ mod tests {
         // `ReportError::Normalize` path — exercised by `core`'s own normalize tests.)
         let mut s = demo_study();
         s.years.clear();
-        let bytes = render_study_pdf(&s).expect("a degenerate study still renders");
+        let bytes =
+            render_study_pdf(&s, NumberStyle::Point).expect("a degenerate study still renders");
         assert!(bytes.starts_with(b"%PDF-"));
         assert!(
             bytes.windows(5).any(|w| w == b"%%EOF"),
@@ -2539,16 +2601,54 @@ mod tests {
     #[test]
     fn unknown_figures_format_as_the_em_dash_never_zero() {
         // The project's most-repeated rail, at the formatter level (the PDF hex-encodes the glyph).
-        assert_eq!(money(None), EM_DASH);
-        assert_eq!(num(None), EM_DASH);
-        assert_eq!(pct(None), EM_DASH);
-        assert_eq!(super::cell(None, DisplayField::LargeMonetary), EM_DASH);
+        let nf = NumberStyle::Comma;
+        assert_eq!(nf.money(None), EM_DASH);
+        assert_eq!(nf.num(None), EM_DASH);
+        assert_eq!(nf.pct(None), EM_DASH);
+        assert_eq!(nf.cell(None, DisplayField::LargeMonetary), EM_DASH);
         assert_eq!(trend(None), EM_DASH);
         // A present value formats as its rounded decimal (no spurious zero-padding).
         assert_eq!(
-            money(Some(rust_decimal::Decimal::from_str_exact("80").unwrap())),
+            nf.money(Some(rust_decimal::Decimal::from_str_exact("80").unwrap())),
             "80"
         );
+    }
+
+    // ── G1 I (#237): the study PDF speaks the reader's number format ──
+
+    #[test]
+    fn a_number_is_spelled_in_the_readers_format() {
+        let d = |s: &str| rust_decimal::Decimal::from_str_exact(s).unwrap();
+        assert_eq!(NumberStyle::Comma.spell(d("128.9")), "128,9");
+        assert_eq!(NumberStyle::Point.spell(d("128.9")), "128.9");
+        assert_eq!(
+            NumberStyle::Comma.spell(d("-1234567.5")),
+            "-1\u{00A0}234\u{00A0}567,5"
+        );
+        assert_eq!(NumberStyle::Point.spell(d("-1234567.5")), "-1,234,567.5");
+        assert_eq!(NumberStyle::Point.spell(d("123456")), "123,456");
+        assert_eq!(NumberStyle::Comma.spell(d("999")), "999");
+        assert_eq!(NumberStyle::Comma.pct(Some(d("15.84"))), "15,8 %");
+        assert_eq!(NumberStyle::Point.pct(Some(d("15.84"))), "15.8 %");
+        assert_eq!(
+            upside(&UpsideDownside::Ratio(d("2.71")), NumberStyle::Comma),
+            "2,7 : 1"
+        );
+        assert_eq!(NumberStyle::default(), NumberStyle::Comma);
+    }
+
+    #[test]
+    fn the_study_pdf_follows_the_number_format_and_stays_deterministic() {
+        let mut s = demo_study();
+        s.judgment.current_price = Some(money_of("77.94"));
+        let comma = render_study_pdf(&s, NumberStyle::Comma).unwrap();
+        let point = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        assert!(contains(&comma, "Cours actuel : 77,94"));
+        assert!(!contains(&comma, "77.94"));
+        assert!(contains(&point, "Cours actuel : 77.94"));
+        assert!(!contains(&point, "77,94"));
+        assert_ne!(comma, point);
+        assert_eq!(comma, render_study_pdf(&s, NumberStyle::Comma).unwrap());
     }
 
     /// A token-wise neutrality check mirroring the app posture gate: split on non-alphanumerics and
@@ -2586,7 +2686,7 @@ mod tests {
             UpsideDownside::Undefined,
             UpsideDownside::Unknown,
         ] {
-            assert_neutral(&upside(&u));
+            assert_neutral(&upside(&u, NumberStyle::Comma));
         }
     }
 
@@ -2610,7 +2710,7 @@ mod tests {
         // never hit the `4+2i / 5+2i` ref allocation across pages).
         let mut s = demo_study();
         s.years = (1970..=2025).map(|y| year(y, "5")).collect(); // 56 years → overflows one A4 page
-        let bytes = render_study_pdf(&s).expect("a long study renders");
+        let bytes = render_study_pdf(&s, NumberStyle::Point).expect("a long study renders");
         assert!(bytes.starts_with(b"%PDF-") && bytes.windows(5).any(|w| w == b"%%EOF"));
         // The page tree's /Count must exceed 1 and the xref must stay well-formed.
         let count_pos = bytes
@@ -2631,7 +2731,7 @@ mod tests {
         // header on each continuation page (fidelity — a headerless continuation is confusing).
         let mut s = demo_study();
         s.years = (1900..=2025).map(|y| year(y, "5")).collect(); // 126 years → §1 spans several pages
-        let bytes = render_study_pdf(&s).expect("a long study renders");
+        let bytes = render_study_pdf(&s, NumberStyle::Point).expect("a long study renders");
         // "Cours haut" is a §1-only header cell (WinAnsi = ASCII, so a contiguous byte run). One
         // occurrence per page the table touches → ≥ 2 proves the header was replayed.
         let header = b"Cours haut";
@@ -2696,7 +2796,7 @@ mod tests {
         let mut s = demo_study();
         let name = "W".repeat(48);
         s.company_name = Some(name.clone());
-        let bytes = render_study_pdf(&s).unwrap();
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
         let room = (PAGE_W - 2.0 * MARGIN) / 3.0 - 2.0 * CELL_PAD;
         let fitted = fit(&name, room, FONT);
         assert!(fitted.ends_with('…') && text_width(&fitted, FONT) <= room);
@@ -2706,7 +2806,7 @@ mod tests {
         );
         assert!(!contains(&bytes, &name), "never the whole over-wide name");
         // A name that fits is written whole, no spurious ellipsis.
-        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         assert!(contains(&bytes, "NESN"));
     }
 
@@ -2742,11 +2842,17 @@ mod tests {
         // A label without a digit may still end in « … ».
         let (lines, _) = cell_layout("Supercalifragilistique", 40.0, FONT);
         assert!(lines[0].ends_with('…'));
-        // End to end: the study annexe prints the 14-digit figure whole.
+        // End to end: the study annexe prints the 14-digit figure whole, grouped in the reader's
+        // format (G1 I) — the no-break space never breaks the figure.
         let mut s = demo_study();
         s.years[0].sales = cell("31234567890123");
-        let bytes = render_study_pdf(&s).unwrap();
-        assert!(contains(&bytes, "31234567890123"));
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        assert!(contains(&bytes, "31,234,567,890,123"));
+        let bytes = render_study_pdf(&s, NumberStyle::Comma).unwrap();
+        assert!(contains(
+            &bytes,
+            "31\u{00A0}234\u{00A0}567\u{00A0}890\u{00A0}123"
+        ));
     }
 
     #[test]
@@ -2860,11 +2966,11 @@ mod tests {
         // never the undefined-ratio reason, which does not apply.
         let mut s = demo_study();
         s.years[4].dividend_per_share = None;
-        let bytes = render_study_pdf(&s).unwrap();
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
         assert!(contains(&bytes, TOTAL_UNKNOWN_YEAR));
         assert!(!contains(&bytes, TOTAL_UNDEFINED));
         assert!(!contains(&bytes, "160 %"), "no partial G total (4 × 40 %)");
-        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         assert!(
             !contains(&bytes, TOTAL_UNKNOWN_YEAR),
             "no note when all is known"
@@ -2881,7 +2987,7 @@ mod tests {
         // are undefined — not « missing ». The note names that cause, not a missing figure.
         let mut s = demo_study();
         s.years[2].eps = cell("-1");
-        let bytes = render_study_pdf(&s).unwrap();
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
         assert!(contains(&bytes, TOTAL_UNDEFINED));
         assert!(
             !contains(&bytes, TOTAL_UNKNOWN_YEAR),
@@ -2913,7 +3019,7 @@ mod tests {
         let mut s = demo_study();
         s.years[3].eps = cell("-1");
         s.years[4].eps = cell("-2");
-        let bytes = render_study_pdf(&s).unwrap();
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
         assert!(contains(&bytes, &format!("{GUIDES_FROM} 2023")));
         assert!(contains(
             &bytes,
@@ -2923,12 +3029,12 @@ mod tests {
 
     #[test]
     fn the_section_2_average_says_how_many_years_it_covers() {
-        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         assert!(contains(&bytes, AVG_FIVE));
         assert!(!contains(&bytes, AVG_FEWER_NOTE));
         let mut s = demo_study();
         s.years.truncate(3);
-        let bytes = render_study_pdf(&s).unwrap();
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
         assert!(
             !contains(&bytes, AVG_FIVE),
             "never « Moy. 5 ans » over three years"
@@ -2991,7 +3097,7 @@ mod tests {
     fn section_4_states_the_four_low_price_candidates() {
         // demo: judged low P/E 10 × est. low EPS 4 = 40; the five lows are 50; no severe low
         // entered; dividend 2 ÷ average high yield 4 % (2 ÷ 50) = 50.
-        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         for line in [
             "(a) PER bas moyen 10 × BPA estimé bas 4 = 40",
             "(b) Prix bas moyen des 5 dernières années = 50",
@@ -3017,7 +3123,7 @@ mod tests {
 
     #[test]
     fn the_study_is_the_forms_two_pages_then_the_annexe() {
-        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         let pages = page_streams(&bytes);
         assert_eq!(pages.len(), 3, "page 1, page 2, annexe");
         assert!(contains(
@@ -3078,7 +3184,7 @@ mod tests {
     fn the_quarterly_box_is_drawn_below_the_plot() {
         // Owner decision 7: the box leaves the plot — no opaque white fill is painted on page 1
         // (the zone bar's greys are on page 2; `1 g` is the white fill the box used to paint).
-        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         let pages = page_streams(&bytes);
         assert!(
             !contains(&pages[0], "\n1 g\n"),
@@ -3151,7 +3257,7 @@ mod tests {
         // The 200-char ticker must be truncated before it is written into the content stream.
         let mut s = demo_study();
         s.security_ticker = "Z".repeat(200);
-        let bytes = render_study_pdf(&s).expect("the study still renders");
+        let bytes = render_study_pdf(&s, NumberStyle::Point).expect("the study still renders");
         assert!(
             !bytes.windows(200).any(|w| w.iter().all(|b| *b == b'Z')),
             "the over-long ticker must be truncated, never written to the page in full"
@@ -3162,7 +3268,7 @@ mod tests {
     fn carries_no_naic_wordmark() {
         // The faithful layout must NOT embed NAIC marks/verbatim prose (open-source constraint). The
         // text is WinAnsi-encoded in the content streams; assert the wordmarks never appear.
-        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         for mark in [
             b"NAIC".as_slice(),
             b"Stock Selection Guide".as_slice(),

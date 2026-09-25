@@ -76,7 +76,9 @@ fn main() {
         year(2024, "391035000000", "6.08", "260.10", "164.08"),
         year(2025, "416161000000", "7.47", "288.62", "169.21"),
     ];
-    let bytes = steadyinvest_report::render_study_pdf(&s).expect("renders");
+    let bytes =
+        steadyinvest_report::render_study_pdf(&s, steadyinvest_report::NumberStyle::default())
+            .expect("renders");
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "/tmp/study.pdf".into());

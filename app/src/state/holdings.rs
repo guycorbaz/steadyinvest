@@ -9,6 +9,8 @@ use rust_decimal::Decimal;
 use steadyinvest_persistence::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
 use uuid::Uuid;
 
+use crate::viewmodel::format::{NumberFormat, parse_decimal};
+
 use super::{
     JournalState, MSG_HOLDING_AMOUNT_OUT_OF_RANGE, MSG_HOLDING_INVALID_CURRENCY,
     MSG_HOLDING_INVALID_NUMBER, MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER,
@@ -432,7 +434,8 @@ impl JournalState {
         if !crate::config::is_supported_currency(currency) {
             return Err(MSG_HOLDING_INVALID_CURRENCY.to_string());
         }
-        let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
+        let (quantity, purchase_price) =
+            validate_holding_amounts(quantity, purchase_price, self.number_format())?;
         // Issue #98 (FR48): the sector is free text — trimmed; empty = NULL (« non renseigné »,
         // an honest absence the provider may later fill — PR 2).
         let sector = sector.trim();
@@ -501,7 +504,8 @@ impl JournalState {
         if currency.is_some_and(|c| !crate::config::is_supported_currency(c)) {
             return Err(MSG_HOLDING_INVALID_CURRENCY.to_string());
         }
-        let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
+        let (quantity, purchase_price) =
+            validate_holding_amounts(quantity, purchase_price, self.number_format())?;
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         let ledger_backed = !journal
             .list_transactions(id)
@@ -569,8 +573,8 @@ impl JournalState {
                 .set_trailing_stop(holding_id, None, None)
                 .map_err(watch_error);
         }
-        let pct = Decimal::from_str_exact(pct_input)
-            .ok()
+        let pct = self
+            .read_amount(pct_input)
             .filter(|p| p.is_sign_positive() && !p.is_zero() && *p < Decimal::ONE_HUNDRED)
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
         let holding = self
@@ -773,8 +777,9 @@ fn max_holding_magnitude() -> Decimal {
     Decimal::from(1_000_000_000_000_i64) // 1e12
 }
 
-/// Validate a holding's quantity and purchase price (Story 4.3, FR36 + NFR-C1). Both must parse as
-/// **exact** decimals (`Decimal::from_str_exact` — errors instead of silently rounding); quantity
+/// Validate a holding's quantity and purchase price (Story 4.3, FR36 + NFR-C1). Both must read as
+/// **exact** decimals under the user's number format ([`parse_decimal`] — « 10,5 » under the comma
+/// format; errors instead of silently rounding or guessing, G1 I); quantity
 /// must be strictly positive, price non-negative, and both within [`max_holding_magnitude`] (issue
 /// #60). On success returns their **canonical** decimal spellings to store as TEXT; a non-number is
 /// the neutral [`MSG_HOLDING_INVALID_NUMBER`], an out-of-range magnitude
@@ -782,13 +787,12 @@ fn max_holding_magnitude() -> Decimal {
 fn validate_holding_amounts(
     quantity: &str,
     purchase_price: &str,
+    format: NumberFormat,
 ) -> Result<(String, String), String> {
-    let qty = Decimal::from_str_exact(quantity.trim())
-        .ok()
+    let qty = parse_decimal(quantity, format)
         .filter(|q| q.is_sign_positive() && !q.is_zero())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
-    let price = Decimal::from_str_exact(purchase_price.trim())
-        .ok()
+    let price = parse_decimal(purchase_price, format)
         .filter(|p| !p.is_sign_negative())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
     let max = max_holding_magnitude();

@@ -47,6 +47,8 @@ use steadyinvest_persistence::{
 };
 use uuid::Uuid;
 
+use crate::viewmodel::format::{NumberFormat, parse_decimal};
+
 use super::{
     JournalState, MSG_DIVIDEND_RETIRED, MSG_DIVIDEND_WITHHOLDING, MSG_HOLDING_INVALID_NUMBER,
     MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_OVERSELL, MSG_LEDGER_PARTIAL_SOLD,
@@ -126,25 +128,23 @@ pub(super) fn normalize_event_date(input: &str, now_rfc3339: &str) -> Result<Str
 }
 
 /// Validate the ledger amounts (Story 6.3 twin of `validate_holding_amounts`): quantity strictly
-/// positive, unit price and fees non-negative; empty fees default to `"0"`. Returns the canonical
-/// decimal spellings.
+/// positive, unit price and fees non-negative; empty fees default to `"0"`. Each is read under the
+/// user's number format ([`parse_decimal`], G1 I). Returns the canonical decimal spellings.
 fn validate_ledger_amounts(
     quantity: &str,
     unit_price: &str,
     fees: &str,
+    format: NumberFormat,
 ) -> Result<(String, String, String), String> {
-    let qty = Decimal::from_str_exact(quantity.trim())
-        .ok()
+    let qty = parse_decimal(quantity, format)
         .filter(|q| q.is_sign_positive() && !q.is_zero())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
-    let price = Decimal::from_str_exact(unit_price.trim())
-        .ok()
+    let price = parse_decimal(unit_price, format)
         .filter(|p| !p.is_sign_negative())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
     let fees = fees.trim();
     let fees = if fees.is_empty() { "0" } else { fees };
-    let fees = Decimal::from_str_exact(fees)
-        .ok()
+    let fees = parse_decimal(fees, format)
         .filter(|f| !f.is_sign_negative())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
     Ok((qty.to_string(), price.to_string(), fees.to_string()))
@@ -322,7 +322,8 @@ impl JournalState {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
         let holding = self.any_holding(holding_id)?;
-        let (qty, price, fees) = validate_ledger_amounts(quantity, unit_price, fees)?;
+        let (qty, price, fees) =
+            validate_ledger_amounts(quantity, unit_price, fees, self.number_format())?;
         let now = self.clock.now();
         let occurred_at = normalize_event_date(date_input, &now.0)?;
         let rows = self.ledger_rows_strict(holding_id)?;
@@ -391,8 +392,7 @@ impl JournalState {
         let quantity = if quantity_input.is_empty() {
             holding.quantity.clone()
         } else {
-            Decimal::from_str_exact(quantity_input)
-                .ok()
+            self.read_amount(quantity_input)
                 .filter(|q| q.is_sign_positive() && !q.is_zero())
                 .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
                 .to_string()
@@ -449,7 +449,8 @@ impl JournalState {
             .into_iter()
             .find(|h| h.id == holding_id)
             .ok_or(MSG_SAVE_FAILED.to_string())?;
-        let (qty, price, fees) = validate_ledger_amounts(quantity, unit_price, fees)?;
+        let (qty, price, fees) =
+            validate_ledger_amounts(quantity, unit_price, fees, self.number_format())?;
         let now = self.clock.now();
         let occurred_at = normalize_event_date(date_input, &now.0)?;
         let rows = self.ledger_rows_strict(holding_id)?;
@@ -536,18 +537,17 @@ impl JournalState {
         }
         // An EMPTY quantity defaults to the whole current position (AC4's prefill, done at the
         // rail — the record-date position may differ, so an explicit value overrides).
+        // The stored quantity is canonical; a typed one reads under the user's format (G1 I).
         let quantity = quantity.trim();
-        let quantity = if quantity.is_empty() {
-            holding.quantity.as_str()
+        let qty = if quantity.is_empty() {
+            Decimal::from_str_exact(&holding.quantity).ok()
         } else {
-            quantity
-        };
-        let qty = Decimal::from_str_exact(quantity)
-            .ok()
-            .filter(|q| q.is_sign_positive() && !q.is_zero())
-            .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
-        let gross_per_share = Decimal::from_str_exact(per_share_gross.trim())
-            .ok()
+            self.read_amount(quantity)
+        }
+        .filter(|q| q.is_sign_positive() && !q.is_zero())
+        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+        let gross_per_share = self
+            .read_amount(per_share_gross)
             .filter(|p| !p.is_sign_negative())
             .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
         let gross = qty
@@ -567,8 +567,7 @@ impl JournalState {
                 .map(|w| w.round_dp(2))
                 .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
         } else {
-            Decimal::from_str_exact(withholding_input)
-                .ok()
+            self.read_amount(withholding_input)
                 .filter(|w| !w.is_sign_negative())
                 .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
         };
@@ -665,7 +664,8 @@ impl JournalState {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
         let holding = self.any_holding(holding_id)?;
-        let (qty, price, fees) = validate_ledger_amounts(quantity, unit_price, fees)?;
+        let (qty, price, fees) =
+            validate_ledger_amounts(quantity, unit_price, fees, self.number_format())?;
         let now = self.clock.now();
         let normalized = normalize_event_date(date_input, &now.0)?;
         let rows = self.ledger_rows_strict(holding_id)?;

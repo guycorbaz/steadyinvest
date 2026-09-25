@@ -6942,3 +6942,99 @@ fn an_unreadable_study_stays_pickable_and_compares_as_unavailable() {
         "the header states the absence itself"
     );
 }
+
+// ── G1 I (#237) — every typed amount reads under the user's number format ──
+
+#[test]
+fn the_rails_read_typed_amounts_under_the_comma_format() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x1901);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Comma);
+    // The on-screen finding: « 10,5 » as a purchase price was refused as not a number.
+    state
+        .add_holding("NESN", "1\u{202F}000", "10,5", "CHF", "")
+        .expect("« 10,5 » reads as 10.5 under the comma format");
+    let h = state.list_holdings().into_iter().next().unwrap();
+    assert_eq!(h.quantity, "1000");
+    assert_eq!(h.purchase_price, "10.5");
+    let id = h.id;
+    // The other mark, where it cannot be a thousands point, is read too.
+    state.set_holding_trailing_stop(id, "12.5").unwrap();
+    let h = state.list_holdings().into_iter().next().unwrap();
+    assert_eq!(h.trailing_stop_pct.as_deref(), Some("12.5"));
+    // A foreign thousands point is ambiguous: refused, never read as 1.234 nor 1234.
+    assert_eq!(
+        state.record_buy_for(id, "2026-07-01", "1.234", "10", "", "", "CHF"),
+        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+    );
+    state
+        .record_buy_for(id, "2026-07-01", "2", "11,25", "1,5", "", "CHF")
+        .expect("the buy records");
+    state
+        .record_dividend_for(id, "2026-07-02", "10", "3", "10,5", "", "CHF", "35")
+        .expect("the withholding « 10,5 » records");
+    let rows = state.holding_ledger(id);
+    let buy = rows.iter().find(|r| r.unit_price == "11.25").unwrap();
+    assert_eq!(buy.fees, "1.5");
+    let dividend = rows
+        .iter()
+        .find(|r| r.kind.as_deref() == Some("dividend"))
+        .unwrap();
+    assert_eq!(dividend.fees, "10.5");
+    // The whole-position default of the dividend is the STORED quantity (canonical), whatever
+    // the format — a stored 1002 is never re-read as a typed text.
+    state
+        .record_dividend_for(id, "2026-07-03", "", "1", "0", "", "CHF", "35")
+        .unwrap();
+    assert!(
+        state
+            .holding_ledger(id)
+            .iter()
+            .any(|r| r.kind.as_deref() == Some("dividend") && r.quantity == "1002")
+    );
+    // A manual FX rate in the user's spelling.
+    state
+        .upsert_manual_fx_rate("EUR", "0,9345", "2026-06-26", "CHF")
+        .unwrap();
+    assert_eq!(state.list_fx_rates()[0].rate, "0.9345");
+}
+
+#[test]
+fn the_rails_read_typed_amounts_under_the_point_format() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x1902);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Point);
+    // Under the point format the comma groups: « 1,234 » is 1234, never 1.234.
+    state
+        .add_holding("NESN", "1,234", "10.5", "CHF", "")
+        .unwrap();
+    let h = state.list_holdings().into_iter().next().unwrap();
+    assert_eq!(h.quantity, "1234");
+    assert_eq!(h.purchase_price, "10.5");
+    // A comma that cannot group is the decimal mark.
+    state.sell_holding(h.id, "0,5", "", "CHF").unwrap();
+    let h = state.list_holdings().into_iter().next().unwrap();
+    assert_eq!(h.quantity, "1233.5");
+}
+
+#[test]
+fn a_provider_fx_rate_is_never_read_as_typed_text() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x1903);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Comma);
+    // 1.085 typed under the comma format is ambiguous; FETCHED, it is a Decimal and records.
+    assert_eq!(
+        state.upsert_manual_fx_rate("USD", "1.085", "2026-06-26", "CHF"),
+        Err(MSG_FX_INVALID_RATE.to_string())
+    );
+    state
+        .apply_fx_fetch(
+            "USD",
+            "CHF",
+            Decimal::new(1085, 3),
+            Some("2026-06-26"),
+            "eodhd",
+        )
+        .unwrap();
+    assert_eq!(state.list_fx_rates()[0].rate, "1.085");
+}
