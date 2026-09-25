@@ -198,7 +198,8 @@ pub(crate) fn wire_replacement(ui: &MainWindow, s: &Session) {
         let quick_screen = std::rc::Rc::clone(quick_screen);
         ui.global::<Holdings>().on_go_to_studies(move || {
             let ui = ui_weak.unwrap();
-            ui.global::<Studies>().set_study_open(false);
+            // G1 J review: through the ONE close path (Rust forgets the open study's id).
+            ui.global::<Studies>().invoke_close_study();
             crate::wiring::close_studies_overlays(&ui, &journal_state.borrow(), &quick_screen);
             ui.set_current_screen(0);
         });

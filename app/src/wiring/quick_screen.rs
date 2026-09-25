@@ -510,6 +510,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         let slot = Rc::clone(slot);
+        let current_study = Rc::clone(current_study);
         ui.global::<QuickScreen>().on_create_study(move || {
             let ui = ui_weak.unwrap();
             let (ticker, currency, fetched) = {
@@ -539,15 +540,25 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
             // written AFTER the open (which empties it) so it lands on the study it names.
             ui.global::<Studies>()
                 .invoke_open_study(id.to_string().into());
+            // G1 J review: only when the open really happened (this study, by id, on screen) —
+            // otherwise the list's slot, where the new study's row is.
+            let opened = ui.global::<Studies>().get_study_open()
+                && current_study.borrow().as_deref() == Some(id.to_string().as_str());
             match applied {
+                Ok(_) if !opened => ui
+                    .global::<Studies>()
+                    .set_notice(state::MSG_QUICK_SCREEN_STUDY_CREATED.into()),
                 Ok(_) => {
                     study_notice::outcome(&ui, Source::Fetch, state::MSG_QUICK_SCREEN_STUDY_CREATED)
                 }
-                Err(message) => study_notice::fail(
-                    &ui,
-                    Source::Fetch,
-                    &state::MSG_QUICK_SCREEN_STUDY_EMPTY.replace("{cause}", &message),
-                ),
+                Err(message) => {
+                    let notice = state::MSG_QUICK_SCREEN_STUDY_EMPTY.replace("{cause}", &message);
+                    if opened {
+                        study_notice::fail(&ui, Source::Fetch, &notice);
+                    } else {
+                        ui.global::<Studies>().set_notice(notice.into());
+                    }
+                }
             }
         });
     }

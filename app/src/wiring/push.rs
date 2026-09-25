@@ -155,7 +155,9 @@ pub(crate) fn push_form(
             studies.set_section4_warning_key(SharedString::new());
             // G1 J: on the OPEN study's slot (the list's slot was invisible here), sourced Render so
             // the next render that computes takes it down again (a state that no longer holds).
-            study_notice::fail(ui, Source::Render, state::MSG_NORMALIZE_FAILED);
+            // G1 J review: written as a STANDING state — never over a fetch failure or an edit
+            // refusal already on show (F4); that failure keeps the slot.
+            study_notice::standing(ui, Source::Render, state::MSG_NORMALIZE_FAILED);
         }
     }
 

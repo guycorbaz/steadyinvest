@@ -215,11 +215,15 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     // refresh the dashboard — shared by the success, empty-payload, and failure arms.
                     // Keyed by IDENTITY (the discriminator rule): is the fetched study the one on
                     // screen? The user may have closed it, or opened another, while it ran.
-                    let still_open = current_study
-                        .borrow()
-                        .as_deref()
-                        .and_then(|s| Uuid::parse_str(s).ok())
-                        == Some(outcome.study_id);
+                    // G1 J review: the id alone is not enough — the study must still be SHOWN (not
+                    // closed back to the list, not replaced by the read-only demo).
+                    let still_open = studies.get_study_open()
+                        && !studies.get_demo_active()
+                        && current_study
+                            .borrow()
+                            .as_deref()
+                            .and_then(|s| Uuid::parse_str(s).ok())
+                            == Some(outcome.study_id);
                     // G1 J: the result goes to the OPEN study's slot when it is that study (the list's
                     // slot was invisible there); otherwise to the list's slot, as before — never onto
                     // another study's screen. `failed` picks the F4 treatment on the study slot.
@@ -270,8 +274,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                             state::provider_fallback_notice(effective)
                                         );
                                     }
-                                    say(false, &notice);
+                                    // Render FIRST: a computing render takes down a stale normalize
+                                    // failure, so the outcome then finds the slot free (F4).
                                     render_open();
+                                    say(false, &notice);
                                 }
                                 Err(message) => say(true, &message),
                             }
@@ -606,7 +612,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 return;
             }
             studies.set_fetching(true);
-            study_notice::fail(&ui, Source::Fetch, state::MSG_PROVIDER_FETCHING);
+            study_notice::progress(&ui, Source::Fetch, state::MSG_PROVIDER_FETCHING);
             let primary = config.borrow().preferred_provider;
             tracing::info!(ticker = %ticker, provider = primary.wire(), "study fetch requested");
             if fetch_tx

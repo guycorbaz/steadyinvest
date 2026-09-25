@@ -74,6 +74,12 @@ export global Tokens {
     out property <length> font-h3: 23px;
     out property <length> font-body: 22px;
     out property <length> font-caption: 19px;
+    // G1 J review — the smallest size a grid figure/title may shrink to (shrink-to-fit floor): below
+    // it a figure is not shrunk further but marked as overflowing (« ⋯ ») and shown whole on
+    // focus/hover. And the narrowest a data column of the study grids may get: past it the form
+    // scrolls sideways instead of squeezing the columns.
+    out property <length> font-floor: 13px;
+    out property <length> grid-col-min: 80px;
     out property <int> weight-regular: 400;
     out property <int> weight-medium: 500;
     out property <int> weight-semibold: 600;
