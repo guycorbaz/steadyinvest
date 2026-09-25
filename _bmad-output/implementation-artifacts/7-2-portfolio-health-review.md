@@ -108,3 +108,18 @@ guard on both sides; sectors at/over the threshold; currencies never) and 9d («
 Also: stops and study links read per lot as the register does; « non calculable » studies counted
 and listed as due (« données non calculables »); an unknown last-save date listed as due
 (« ancienneté inconnue »). The PDF note-row page break is in the PDF PR.
+
+### Review Findings — G1 final review, area 2 (2026-09-25, #237, on integ/g1-final e686141)
+
+- [x] [Review][Patch] M1 — A legacy lot (no declared currency): its stop was labelled in the reference currency, and the study price in the position's currency — **the stop carries no currency and is never compared; the row (and the PDF) say why (« non comparé au prix : la position n'a pas de devise renseignée »); the price is labelled with the STUDY's currency**. The register (`wiring/holdings.rs`) computes its own comparison (not shared) and still compares unconditionally — left to the portfolio branch [app/src/state/review.rs, app/src/wiring/review.rs]
+- [x] [Review][Patch] M2 — The row's study was `links[0]` (lot position); counts / due read the first lot's study only — **chosen by identity (the newest linked study — the ticker's own; a failed read before « aucune étude »); flag / zone counts and the due list read every lot's study (« NESN (USD) » when the lots link to different studies); the verdict partition follows the row's study** [app/src/state/review.rs]
+- [x] [Review][Patch] M3 — The review was not re-pushed when a price / FX / study fetch landed while shown; the PDF exported the pushed rows as they were — **re-pushed on every async arrival while on display; the export re-pushes first** [app/src/wiring/fetch.rs, app/src/wiring/review.rs]
+- [x] [Review][Patch] L4 — Amounts at 0 dp (`LargeMonetary`) where Portefeuille shows `Price` (2 dp) — **`Price`, as Portefeuille; the PDF columns widened for « 12 345 678,00 CHF »** [app/src/wiring/review.rs, report/src/review.rs]
+- [x] [Review][Patch] L5 — An empty dossier read three « indisponible » size classes — **one statement « Aucune position classée : le dossier ne contient aucune position. », screen and PDF**
+- [x] [Review][Patch] L6 — PDF share / target columns without « % » (the test data carried it) — **the layout writes the unit; the sample hands the bare figure, as the app does**
+- [x] [Review][Patch] L7 — FX footnote rate as the stored « 0.8 » — **through the user's number format** (Portefeuille's footnote is the same and is left to the portfolio branch)
+- [x] [Review][Patch] L8 — A dismissed trigger was still shown — **per-lot triggers keyed by holding id; the register's dismissed set honoured**
+- [x] [Review][Patch] L9 — A global total absent for pairs AND a non-pair cause named only the pairs — **both named**
+- [x] [Review][Patch] L10 — Trigger words differed screen / PDF; the due subtitle named three of five reasons — **« Le prix a atteint le seuil suiveur. » / « Le prix est dans la zone haute. » on both; the subtitle lists all five**
+
+Fixed on branch `fix/g1-l-review`.
