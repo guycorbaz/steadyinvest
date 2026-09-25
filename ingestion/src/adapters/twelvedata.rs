@@ -237,6 +237,19 @@ fn venue_mic(suffix: &str) -> Option<&'static str> {
     })
 }
 
+/// PURE: the listing venue of a stored canonical ticker (`NESN.SW` → `SW`, `BRK.B.US` → `US`) —
+/// only a KNOWN venue: `.US` or a suffix of the pinned [`venue_mic`] table. A share-class suffix
+/// (`BRK.B`) or an unmapped one is `None`, never passed off as an exchange (G1, #237: the
+/// comparison's row 30).
+pub fn known_venue(ticker: &str) -> Option<String> {
+    let (base, suffix) = ticker.rsplit_once('.')?;
+    if base.is_empty() {
+        return None;
+    }
+    (suffix.eq_ignore_ascii_case("US") || venue_mic(suffix).is_some())
+        .then(|| suffix.to_ascii_uppercase())
+}
+
 /// PURE: the Twelve Data equity **query fragment** for a stored canonical ticker (issue #70). The
 /// stored ticker follows EODHD's `TICKER.EXCHANGE` convention; Twelve Data expects the bare symbol
 /// plus, for a non-US listing, an explicit venue:
@@ -414,6 +427,17 @@ mod tests {
         assert_eq!(venue_mic("sw"), Some("XSWX"));
         assert_eq!(venue_mic("XX"), None);
         assert_eq!(venue_mic("US"), None); // `.US` is handled upstream (bare symbol, no MIC)
+    }
+
+    #[test]
+    fn a_known_venue_is_never_a_share_class() {
+        assert_eq!(known_venue("NESN.SW").as_deref(), Some("SW"));
+        assert_eq!(known_venue("aapl.us").as_deref(), Some("US"));
+        assert_eq!(known_venue("BRK.B.US").as_deref(), Some("US"));
+        assert_eq!(known_venue("BRK.B"), None); // a share class, not an exchange
+        assert_eq!(known_venue("NESN.XX"), None); // unmapped: absent, never a guess
+        assert_eq!(known_venue("NESN"), None);
+        assert_eq!(known_venue(".SW"), None);
     }
 
     #[test]

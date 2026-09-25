@@ -1141,11 +1141,17 @@ export struct ComparisonHeader {
     study-id: string,
     name: string,
     currency: string,
-    date: string,
-    unavailable: bool,
+    date: string,           // the decision date (the study's creation), YYYY-MM-DD
+    unavailable: bool,      // the study could not be read — « indisponible »
+    missing: bool,          // the picked study no longer exists — « introuvable »
     zone: string,           // buy | neutral | sell | below | above | ""
     state: string,          // full | provisional | withheld | ""
     low-confidence: bool,
+}
+// G1 decision 3 (#237): one pickable STUDY — the id is the key, the label display only.
+export struct StudyChoice {
+    id: string,
+    label: string,
 }
 export global Comparison {
     in-out property <[ComparisonHeader]> columns;
@@ -1154,12 +1160,26 @@ export global Comparison {
     in-out property <bool> currency-mix;
     in-out property <string> date;
     in-out property <string> notice;
-    // The five picks (study tickers), from the Études list's drop-downs.
+    // The dossier's studies (pushed from `refresh_studies`); `choices-unavailable` = the listing
+    // failed (#95: stated, never an empty list).
+    in-out property <[StudyChoice]> choices;
+    in-out property <bool> choices-unavailable;
+    // Each drop-down's list: every study but those picked in the OTHER four (spec §2).
+    in-out property <[string]> options1;
+    in-out property <[string]> options2;
+    in-out property <[string]> options3;
+    in-out property <[string]> options4;
+    in-out property <[string]> options5;
+    // The five picks: the shown labels, and the study ids they stand for (five slots, "" = none).
     in-out property <string> pick1;
     in-out property <string> pick2;
     in-out property <string> pick3;
     in-out property <string> pick4;
     in-out property <string> pick5;
+    in-out property <[string]> pick-ids;
+    in-out property <int> distinct-picks;   // distinct picked studies — « Comparer » at ≥ 2
+    callback picked(int, string);  // slot (0-based), label → resolve its study id
+    callback clear-picks();
     callback compare();            // build the table from the picks and open it
     callback close();              // back to the list
     callback export-pdf();

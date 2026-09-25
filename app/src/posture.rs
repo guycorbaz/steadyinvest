@@ -680,9 +680,13 @@ mod tests {
         // « Examen rapide » (the picker card, the two ladders' labels, the price record, the
         // reader's fields, the four conclusions) and measures 850. Story 7.3 PR 2 adds the watchlist
         // criblage (the button, the card, its column heads, the row states and fact words, the
-        // quota band, the « Retour à la liste de suivi » label) and measures 892. Floor strict.
+        // quota band, the « Retour à la liste de suivi » label) and measures 892. The G1 fix of
+        // 7.1 (#237) adds the picker's « liste des études indisponible » band, row 20's three
+        // band nouns (worded as rows 17–19, no longer via `Labels`), the « introuvable » cell and
+        // the two stated column headers (« étude introuvable » / « étude indisponible »): +7 =
+        // 899. Floor strict.
         assert!(
-            total >= 892,
+            total >= 899,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

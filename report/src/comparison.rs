@@ -12,9 +12,13 @@ pub struct ComparisonColumn {
     pub ticker: String,
     pub name: String,
     pub currency: String,
+    /// The decision date (the study's creation), `YYYY-MM-DD`.
     pub date: String,
     /// The study could not be read — every row reads « indisponible ».
     pub unavailable: bool,
+    /// The picked study no longer exists — every row reads « introuvable » (an absence, not a
+    /// read failure: misattribution is a lie). Comes with `unavailable` (no figures either).
+    pub missing: bool,
     pub rows: Vec<String>,
     /// `buy` | `neutral` | `sell` | `below` | `above` | `""`.
     pub zone: String,
@@ -37,6 +41,7 @@ const TITLE: &str = "Comparaison de sociétés";
 const DATE: &str = "Date";
 const CURRENCY_MIX: &str = "Les études comparées ne sont pas toutes dans la même monnaie : les cours restent dans la monnaie de chaque étude, sans conversion.";
 const UNAVAILABLE: &str = "indisponible";
+const MISSING: &str = "introuvable";
 const G_GROWTH: &str = "Croissance (section 1)";
 const G_MANAGEMENT: &str = "Gestion (section 2)";
 const G_PRICE: &str = "Cours (sections 3 à 5)";
@@ -73,9 +78,10 @@ const ROWS: [&str; 30] = [
     "Date des données",
     "Place de cotation",
 ];
-const ZONE_BUY: &str = "zone basse";
-const ZONE_NEUTRAL: &str = "zone médiane";
-const ZONE_SELL: &str = "zone haute";
+// Row 20 names the band of rows 17–19 in their own words — the screen says the same (G1, #237).
+const ZONE_BUY: &str = ROWS[16];
+const ZONE_NEUTRAL: &str = ROWS[17];
+const ZONE_SELL: &str = ROWS[18];
 const ZONE_BELOW: &str = "sous la bande";
 const ZONE_ABOVE: &str = "au-dessus de la bande";
 const STATE_FULL: &str = "critères validés";
@@ -91,6 +97,7 @@ const COMPARISON_USER_FACING: &[&str] = &[
     DATE,
     CURRENCY_MIX,
     UNAVAILABLE,
+    MISSING,
     G_GROWTH,
     G_MANAGEMENT,
     G_PRICE,
@@ -133,8 +140,9 @@ fn state_label(c: &ComparisonColumn) -> String {
     }
 }
 
-/// Row 27 arrives as « N : flag · flag » (or « 0 »): the count before the colon is the cell;
-/// the words after it are listed under the grids.
+/// Row 27 arrives as « N : flag · flag », « 0 » (every rule evaluated, none raised) or `""` (not
+/// assessable — the em-dash): the count before the colon is the cell; the words after it are
+/// listed under the grids.
 fn flag_count(row: &str) -> &str {
     row.split_once(" : ").map(|(n, _)| n).unwrap_or(row).trim()
 }
@@ -146,6 +154,9 @@ fn flag_words(c: &ComparisonColumn) -> Option<String> {
 
 /// The cell of row `n` (1-based) for a column: the figure, the worded key rows, or the absence.
 fn cell(c: &ComparisonColumn, n: usize) -> String {
+    if c.missing {
+        return MISSING.to_string();
+    }
     if c.unavailable {
         return UNAVAILABLE.to_string();
     }
@@ -174,6 +185,32 @@ fn strip_arrows(s: &str) -> String {
     s.replace("↑ ", "").replace("↓ ", "").replace("→ ", "")
 }
 
+/// The first header line: « TICKER (CUR) », or the bare ticker when there is no currency to name.
+fn header_line(c: &ComparisonColumn) -> String {
+    if c.currency.is_empty() {
+        c.ticker.clone()
+    } else {
+        format!("{} ({})", c.ticker, c.currency)
+    }
+}
+
+/// The second header line: « date · name », either alone when the other is absent; a column
+/// with no study behind it names its state.
+fn second_header_line(c: &ComparisonColumn) -> String {
+    if c.missing {
+        return MISSING.to_string();
+    }
+    if c.unavailable {
+        return UNAVAILABLE.to_string();
+    }
+    match (c.date.is_empty(), c.name.is_empty()) {
+        (false, false) => format!("{} · {}", c.date, c.name),
+        (false, true) => c.date.clone(),
+        (true, false) => c.name.clone(),
+        (true, true) => String::new(),
+    }
+}
+
 /// Render the comparison (FR53): A4 landscape, deterministic, greyscale, neutral labels.
 pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     let mut doc = Doc::landscape();
@@ -196,22 +233,24 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     for i in 1..=n {
         edges.push(MARGIN + label_w + col_w * i as f32);
     }
-    // Two header rows: « TICKER (CUR) » then the company name, cut to its column at the real
+    // Two header rows: « TICKER (CUR) » then « decision date · company name » (G1 decision 9b:
+    // the date as on screen, first so an ellipsis never eats it), cut to its column at the real
     // Helvetica widths (an over-long name ends with an ellipsis, never spills into the
-    // neighbour's column; the grid wraps any other over-long cell inside its own).
+    // neighbour's column; the grid wraps any other over-long cell inside its own). A column
+    // with no study behind it names its state instead — never a dangling « () ».
     let name_w = col_w - 10.0;
     let header: Vec<String> = std::iter::once(String::new())
-        .chain(
-            cols.iter()
-                .map(|c| format!("{} ({})", c.ticker, c.currency)),
-        )
+        .chain(cols.iter().map(header_line))
         .collect();
     let header_refs: Vec<&str> = header.iter().map(String::as_str).collect();
     let names: Vec<String> = std::iter::once(String::new())
-        .chain(cols.iter().map(|c| fit(&c.name, name_w, SMALL)))
+        .chain(
+            cols.iter()
+                .map(|c| fit(&second_header_line(c), name_w, SMALL)),
+        )
         .collect();
     let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    let any_name = cols.iter().any(|c| !c.name.is_empty());
+    let any_name = names.iter().any(|n| !n.is_empty());
     let groups: [(&str, std::ops::RangeInclusive<usize>); 4] = [
         (G_GROWTH, 1..=4),
         (G_MANAGEMENT, 5..=7),
@@ -238,7 +277,7 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     // paragraph per study, wrapped to the page (a flag's words never spill past the margin).
     let listed: Vec<(&str, String)> = cols
         .iter()
-        .filter(|c| !c.unavailable)
+        .filter(|c| !c.unavailable && !c.missing)
         .filter_map(|c| flag_words(c).map(|w| (c.ticker.as_str(), w)))
         .collect();
     if !listed.is_empty() {
@@ -264,6 +303,7 @@ mod tests {
             currency: "CHF".into(),
             date: "2026-09-24".into(),
             unavailable,
+            missing: false,
             rows: (1..=30).map(|i| format!("v{i}")).collect(),
             zone: "buy".into(),
             state: "provisional".into(),
@@ -321,9 +361,57 @@ mod tests {
         c.rows[26] = "0".into();
         assert_eq!(cell(&c, 27), "0");
         assert_eq!(flag_words(&c), None);
+        // Not assessable: the em-dash, never « 0 ».
+        c.rows[26] = String::new();
+        assert_eq!(cell(&c, 27), EM_DASH);
         let mut t = column("T", false);
         t.rows[4] = "47,6 % · ↑ hausse".into();
         assert_eq!(cell(&t, 5), "47,6 % · hausse");
+    }
+
+    #[test]
+    fn row_20_uses_the_band_rows_own_nouns() {
+        // The screen words row 20 with the same nouns (comparison.slint `zone-words`).
+        let mut c = column("X", false);
+        for (key, row) in [("buy", 17), ("neutral", 18), ("sell", 19)] {
+            c.zone = key.into();
+            assert_eq!(cell(&c, 20), ROWS[row - 1]);
+        }
+        c.zone = String::new();
+        assert_eq!(cell(&c, 20), EM_DASH);
+    }
+
+    #[test]
+    fn a_missing_study_is_not_worded_as_a_read_failure() {
+        let mut m = column("NESN.SW", false);
+        m.missing = true;
+        assert_eq!(cell(&m, 1), MISSING);
+        assert_eq!(cell(&m, 28), MISSING);
+        assert_ne!(MISSING, UNAVAILABLE);
+    }
+
+    #[test]
+    fn the_headers_carry_the_decision_date_and_never_dangle() {
+        let c = column("NESN.SW", false);
+        assert_eq!(header_line(&c), "NESN.SW (CHF)");
+        assert_eq!(second_header_line(&c), "2026-09-24 · Société");
+        let mut nameless = column("NESN.SW", false);
+        nameless.name = String::new();
+        assert_eq!(second_header_line(&nameless), "2026-09-24");
+        // An unavailable column carries no currency / date / name: no « () », no « · ».
+        let u = ComparisonColumn {
+            ticker: "ROG.SW".into(),
+            unavailable: true,
+            rows: vec![String::new(); 30],
+            ..ComparisonColumn::default()
+        };
+        assert_eq!(header_line(&u), "ROG.SW");
+        assert_eq!(second_header_line(&u), UNAVAILABLE);
+        let m = ComparisonColumn {
+            missing: true,
+            ..u.clone()
+        };
+        assert_eq!(second_header_line(&m), MISSING);
     }
 
     #[test]
