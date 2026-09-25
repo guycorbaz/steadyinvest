@@ -507,13 +507,18 @@ impl Journal {
         Ok(out)
     }
 
-    /// Every transaction recorded against a holding, oldest first (deterministic: `occurred_at` then
-    /// `id`). Story 4.7 uses it to read back recorded sells (tests / a later ledger view).
+    /// Every transaction recorded against a holding, oldest first — in the app's REPLAY order
+    /// (Story 6.3: `occurred_at`, `created_at`, then buys and dividends before sells, then `id`;
+    /// a `NULL` kind is a legacy 4.7 sell). G1 final review (L14): the ledger panel shows the rows
+    /// in this order, so on a full date/insertion tie it must list them as the position is
+    /// derived — never a sale above the buy it was replayed after.
     pub fn list_transactions(&self, holding_id: Uuid) -> Result<Vec<TransactionItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, holding_id, occurred_at, quantity, unit_price, fees, currency,
                     kind, rationale, created_at
-             FROM transactions WHERE holding_id = ?1 ORDER BY occurred_at, created_at, id",
+             FROM transactions WHERE holding_id = ?1
+             ORDER BY occurred_at, created_at,
+                      CASE WHEN kind IS NULL OR kind = 'sell' THEN 1 ELSE 0 END, id",
         )?;
         let rows = stmt.query_map(rusqlite::params![holding_id.to_string()], |r| {
             Ok((

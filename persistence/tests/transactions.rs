@@ -176,6 +176,41 @@ fn holding_row(journal: &Journal, hid: Uuid) -> steadyinvest_persistence::Holdin
 }
 
 #[test]
+fn list_transactions_orders_a_full_tie_as_the_replay_does_buys_before_sells() {
+    // G1 final review (L14): same event day, same insertion stamp — the sale's id sorts FIRST,
+    // yet the app replays the buy first; the listing (the ledger panel's order) must agree.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    let now = ts("2026-07-01T12:00:00Z");
+    let day = "2026-07-01T00:00:00Z";
+    journal
+        .record_buy(
+            hid,
+            None,
+            &entry(0x2, day, "5", "100", "0"),
+            "15",
+            "100",
+            &now,
+        )
+        .unwrap();
+    journal
+        .record_partial_sell(hid, None, &entry(0x1, day, "3", "110", "0"), "12", &now)
+        .unwrap();
+    let kinds: Vec<Option<String>> = journal
+        .list_transactions(hid)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        [Some("buy".to_string()), Some("sell".to_string())],
+        "buy first on a full tie, whatever the ids"
+    );
+}
+
+#[test]
 fn record_buy_inserts_the_row_and_lands_the_aggregate_atomically() {
     let dir = TempDir::new().unwrap();
     let mut journal = fresh(&dir);
