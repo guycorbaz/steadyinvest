@@ -828,7 +828,11 @@ fn apply_holdings_result(
 ) {
     let holdings = ui.global::<Holdings>();
     match result {
-        Ok(()) => holdings.set_notice(notice_after_success(holdings.get_refreshing()).into()),
+        Ok(()) => {
+            let shown = holdings.get_notice();
+            holdings
+                .set_notice(notice_after_success(shown.as_str(), holdings.get_refreshing()).into());
+        }
         Err(message) => crate::wiring::dialog::refuse(ui, &message),
     }
     refresh_holdings(ui, state, freshness, dismissed, format);
@@ -838,15 +842,41 @@ fn apply_holdings_result(
 /// edit, a portfolio switch): emptied — except while a price refresh is IN FLIGHT, whose banner
 /// owns the slot until the batch drains (the notice-slot rule F4, G1 final review L11: a portfolio
 /// switch or an edit used to erase « Rafraîchissement des prix en cours. » mid-batch). G1 P (G3
-/// L1): the in-flight banner is the ONLY thing kept — re-set by name, never whatever stale
-/// notice happened to sit in the slot.
-fn notice_after_success(refreshing: bool) -> &'static str {
-    if refreshing {
+/// L1): the in-flight banner is re-set by name, never whatever stale OUTCOME sat in the slot.
+/// G1 P review (M1): a FAILURE on show — a ticker's refresh failure written mid-batch, a
+/// provider's — is never wiped by an unrelated success: only the banner, an empty slot or a
+/// register outcome ([`REGISTER_OUTCOMES`]) are the slot's to replace.
+fn notice_after_success<'a>(shown: &'a str, refreshing: bool) -> &'a str {
+    if !slot_is_replaceable(shown) {
+        shown
+    } else if refreshing {
         state::MSG_HOLDINGS_REFRESHING
     } else {
         ""
     }
 }
+
+/// May an outcome take the holdings slot showing `shown`? An empty slot, the in-flight banner or
+/// another outcome — never a failure (F4).
+fn slot_is_replaceable(shown: &str) -> bool {
+    shown.is_empty()
+        || shown == state::MSG_HOLDINGS_REFRESHING
+        || REGISTER_OUTCOMES.contains(&shown)
+}
+
+/// The holdings slot's OUTCOMES — what a later success may replace (the F4 rule): every other
+/// notice on show is a failure (a refresh / provider cause) and stays until its own source
+/// speaks again.
+const REGISTER_OUTCOMES: &[&str] = &[
+    state::MSG_HOLDING_SOLD,
+    state::MSG_LEDGER_PARTIAL_SOLD,
+    state::MSG_LEDGER_BUY_RECORDED,
+    state::MSG_LEDGER_UPDATED,
+    state::MSG_LEDGER_DELETED,
+    state::MSG_DIVIDEND_RECORDED,
+    state::MSG_STOP_SEEDED_FROM_COST,
+    state::MSG_REFRESH_CANCELLED,
+];
 
 /// Wire the holdings + portfolio domain: the holding add / edit / remove / sell / trailing-stop /
 /// dismiss-trigger intents, the manual price refresh (one worker job per unique linked ticker,
@@ -1236,7 +1266,9 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     &holding_dismissed.borrow(),
                     format,
                 );
-                if let Some(notice) = stated {
+                if let Some(notice) = stated
+                    && slot_is_replaceable(ui.global::<Holdings>().get_notice().as_str())
+                {
                     ui.global::<Holdings>().set_notice(notice.into());
                 }
                 written
@@ -1697,11 +1729,16 @@ mod tests {
         // G1 final review (L11, the notice-slot rule F4).
         // G1 P (G3 L1): the banner is re-set by name while refreshing — a stale outcome notice
         // that sat in the slot is not kept.
-        assert_eq!(
-            notice_after_success(true),
-            crate::state::MSG_HOLDINGS_REFRESHING
-        );
-        assert_eq!(notice_after_success(false), "");
+        let banner = crate::state::MSG_HOLDINGS_REFRESHING;
+        let bought = crate::state::MSG_LEDGER_BUY_RECORDED;
+        assert_eq!(notice_after_success(banner, true), banner);
+        assert_eq!(notice_after_success(bought, true), banner);
+        assert_eq!(notice_after_success("", true), banner);
+        assert_eq!(notice_after_success(bought, false), "");
+        // G1 P review (M1): a ticker's failure written mid-batch is never wiped by a success.
+        let failure = crate::state::MSG_PROVIDER_NO_DATA;
+        assert_eq!(notice_after_success(failure, true), failure);
+        assert_eq!(notice_after_success(failure, false), failure);
     }
 
     #[test]
