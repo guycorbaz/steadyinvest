@@ -36,7 +36,9 @@ export component ActionButton inherits Rectangle {
     height: Tokens.row-height + Tokens.space-4;
     forward-focus: fs;
     horizontal-stretch: 0;
-    min-width: Tokens.space-48 * 2;
+    // Never narrower than its own label (on-screen check, 2026-09-25: a crowded row clipped
+    // « Transactions » to « Transactior »): the label plus its padding, with the old floor.
+    min-width: max(Tokens.space-48 * 2, label-text.preferred-width + 2 * Tokens.space-16);
     border-radius: Tokens.radius;
     opacity: root.enabled ? 1.0 : 0.5;
     background: touch.pressed ? Tokens.surface : Tokens.surface-alt;
@@ -75,7 +77,7 @@ export component ActionButton inherits Rectangle {
         padding-left: Tokens.space-16;
         padding-right: Tokens.space-16;
 
-        Text {
+        label-text := Text {
             text: root.label;
             color: Tokens.text-high;
             font-size: Tokens.font-body;

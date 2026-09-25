@@ -483,28 +483,41 @@ export component PortfolioScreen inherits Rectangle {
                         padding: Tokens.space-12;
                         spacing: Tokens.space-8;
 
-                        // The facts line + the row actions.
+                        // The facts line (on-screen check, 2026-09-25: at 1600 px a row showing a
+                        // sector broke « Quantité » mid-word and clipped its buttons). The short
+                        // facts never wrap and never shrink below their text; the sector, the study
+                        // facts and the stop facts wrap by whole words above a floor; the row
+                        // ACTIONS have their own line below, so nothing squeezes them.
                         HorizontalLayout {
-                            spacing: Tokens.space-12;
+                            spacing: Tokens.space-16;
                             Text {
                                 text: row.ticker;
                                 color: Tokens.text-high;
                                 font-size: Tokens.font-body;
                                 font-weight: Tokens.weight-semibold;
                                 vertical-alignment: center;
+                                min-width: self.preferred-width;
                             }
                             CaptionLine {
                                 text: @tr("Quantité : {}", row.quantity);
                                 vertical-alignment: center;
+                                wrap: no-wrap;
+                                min-width: self.preferred-width;
                             }
                             CaptionLine {
                                 text: @tr("Prix d'achat : {} {}", row.purchase-price-text, row.currency);
                                 vertical-alignment: center;
+                                wrap: no-wrap;
+                                min-width: self.preferred-width;
                             }
                             // Issue #98 (FR48): the sector fact, when known (a caption — neutral ink).
+                            // Wraps by words; the floor keeps a long sector name from being cut
+                            // inside a word.
                             if row.sector != "": CaptionLine {
                                 text: @tr("Secteur : {}", row.sector);
                                 vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                min-width: 160px;
                             }
                             // ── Story 4.4 (FR40): the matched study's zone + present price + freshness.
                             // The zone marker is NEUTRAL ink + a glyph — never a buy/hold/sell hue. ──
@@ -513,7 +526,7 @@ export component PortfolioScreen inherits Rectangle {
                                 horizontal-stretch: 1;
                                 // A floor: without it the open ledger's wider toggle squeezed this
                                 // column to one glyph per line (walk finding, 2026-09-24).
-                                min-width: 170px;
+                                min-width: 190px;
                                 if row.linked: CaptionLine {
                                     text: row.zone == "buy" ? @tr("◆ {}", Labels.zone-buy)
                                         : row.zone == "neutral" ? @tr("◆ {}", Labels.zone-hold)
@@ -538,6 +551,7 @@ export component PortfolioScreen inherits Rectangle {
                             VerticalLayout {
                                 alignment: center;
                                 horizontal-stretch: 1;
+                                min-width: row.has-stop ? 160px : 0px;
                                 if row.has-stop: CaptionLine {
                                     text: @tr("Stop {}% : {} {}", row.stop-pct, row.stop-level, row.currency);
                                 }
@@ -548,6 +562,13 @@ export component PortfolioScreen inherits Rectangle {
                                     text: @tr("à {} {} au-dessus", row.stop-distance, row.currency);
                                 }
                             }
+                        }
+
+                        // The row actions — their own line, right-aligned, each button at least
+                        // as wide as its label.
+                        HorizontalLayout {
+                            alignment: end;
+                            spacing: Tokens.space-8;
                             ActionButton {
                                 label: row.has-stop ? @tr("Seuil…") : @tr("Définir un seuil…");
                                 enabled: !Holdings.read-only;
