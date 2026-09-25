@@ -793,10 +793,13 @@ mod tests {
         // comparison's export outcome (MSG_COMPARISON_EXPORTED): 132 + 1 = 133. The walk of
         // 2026-09-24 adds the watchlist duplicate refusal (MSG_WATCH_DUPLICATE): 134. Story 7.3
         // adds the examination's export / study-created outcomes, its two source words and its
-        // blank-symbol refusal: 139.
+        // blank-symbol refusal: 139. The G1 review adds the examination's blank-currency refusal
+        // and the study-created-but-empty notice (MSG_QUICK_BLANK_CURRENCY,
+        // MSG_QUICK_SCREEN_STUDY_EMPTY) and the criblage's unreadable-watchlist refusal
+        // (MSG_SCREENING_LIST_UNREADABLE): 142.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            139,
+            142,
             "state.rs message inventory changed — register the new notice"
         );
     }

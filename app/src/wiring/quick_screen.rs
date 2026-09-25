@@ -3,6 +3,7 @@
 //! the reader's objective re-words the two rate conclusions; « Exporter PDF » through the native
 //! picker; « Créer l'étude » writes the study from the SAME fetched financials (no second fetch).
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -178,7 +179,10 @@ pub(crate) fn session_from_study(
     })
 }
 
-/// Push `session` to the screen, keep it as the examination of the moment, open the screen.
+/// Push `session` to the screen, keep it as the examination of the moment, open the screen. A
+/// new examination starts with blank reader's answers (G1 review: the reasons and answers typed for
+/// one company never carry over to the next one's screen or PDF); the objective stays — it is the
+/// reader's bar for the session (spec Q1).
 pub(crate) fn show(
     ui: &MainWindow,
     state: &JournalState,
@@ -186,30 +190,66 @@ pub(crate) fn show(
     slot: &Rc<std::cell::RefCell<Option<QuickScreenSession>>>,
     session: QuickScreenSession,
 ) {
+    let q = ui.global::<QuickScreen>();
+    q.set_reasons(SharedString::new());
+    q.set_factors_continue(SharedString::new());
+    q.set_pe_notes(SharedString::new());
+    q.set_eps_will_meet(SharedString::new());
     push(ui, &session, &today(state), format);
     *slot.borrow_mut() = Some(session);
     ui.global::<Studies>().set_screen_open(true);
 }
 
-/// The worker's examination result (called from the fetch outcome handler).
+/// Supersede any examination fetch in flight: its result will be dropped (another examination
+/// is now the one of the moment).
+pub(crate) fn supersede_request(ui: &MainWindow, request: &Cell<u64>) {
+    request.set(request.get() + 1);
+    ui.global::<QuickScreen>().set_fetching(false);
+}
+
+/// A worker examination result, with the identity and the currency of its request.
+pub(crate) struct FetchedExamination {
+    pub(crate) request_id: u64,
+    pub(crate) ticker: String,
+    pub(crate) currency: String,
+    pub(crate) result: Result<FetchedFinancials, steadyinvest_ingestion::IngestionError>,
+    pub(crate) effective: ProviderChoice,
+}
+
+/// Whether fetched financials hold an analysis year — a year WITH sales (issue #109: a price-only
+/// row is the fiscal year in progress, which [`session_from_fetch`] drops).
+pub(crate) fn has_analysis_years(fetched: &FetchedFinancials) -> bool {
+    fetched.canonical.years.iter().any(|y| y.sales.is_some())
+}
+
+/// The worker's examination result (called from the fetch outcome handler). Only the LATEST
+/// request is shown — a superseded one is dropped (G1 review: keyed by request identity, never by
+/// « whatever arrives last »), and its currency is the one picked when it was asked.
 pub(crate) fn on_fetched(
     ui: &MainWindow,
     state: &JournalState,
     format: NumberFormat,
     slot: &Rc<std::cell::RefCell<Option<QuickScreenSession>>>,
-    ticker: String,
-    result: Result<FetchedFinancials, steadyinvest_ingestion::IngestionError>,
-    effective: ProviderChoice,
+    request: &Cell<u64>,
+    outcome: FetchedExamination,
 ) {
+    if outcome.request_id != request.get() {
+        tracing::info!(ticker = %outcome.ticker, "superseded quick screen result dropped");
+        return;
+    }
     let q = ui.global::<QuickScreen>();
     q.set_fetching(false);
-    match result {
-        Ok(fetched) if fetched.canonical.years.is_empty() => {
+    match outcome.result {
+        Ok(fetched) if !has_analysis_years(&fetched) => {
             crate::wiring::dialog::refuse(ui, state::MSG_PROVIDER_NO_DATA);
         }
         Ok(fetched) => {
-            let currency = q.get_pick_currency().trim().to_uppercase();
-            let session = session_from_fetch(&ticker, &currency, fetched, effective);
+            let session = session_from_fetch(
+                &outcome.ticker,
+                &outcome.currency,
+                fetched,
+                outcome.effective,
+            );
             show(ui, state, format, slot, session);
         }
         Err(error) => {
@@ -253,19 +293,30 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         config,
         current_study,
         quick_screen: slot,
+        quick_screen_request: request,
         fetch_tx,
         ..
     } = s;
     {
-        // « Examiner » on Études: the fundamentals fetch through the configured chain.
+        // « Examiner » on Études: the fundamentals fetch through the configured chain. The Rust
+        // side holds the button's guards too — Enter in the symbol field reaches here directly.
         let ui_weak = ui.as_weak();
         let config = Rc::clone(config);
+        let request = Rc::clone(request);
         let fetch_tx = fetch_tx.clone();
         ui.global::<QuickScreen>().on_examine(move |ticker, currency| {
             let ui = ui_weak.unwrap();
+            if ui.global::<QuickScreen>().get_fetching() {
+                return; // one examination fetch at a time (each costs provider quota)
+            }
             let ticker = ticker.trim().to_uppercase();
             if ticker.is_empty() {
                 crate::wiring::dialog::refuse(&ui, state::MSG_QUICK_BLANK_TICKER);
+                return;
+            }
+            let currency = currency.trim().to_uppercase();
+            if currency.is_empty() {
+                crate::wiring::dialog::refuse(&ui, state::MSG_QUICK_BLANK_CURRENCY);
                 return;
             }
             if config.borrow().preferred_provider == ProviderChoice::None {
@@ -281,17 +332,25 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
                 return;
             }
             let q = ui.global::<QuickScreen>();
-            q.set_pick_currency(currency.trim().to_uppercase().into());
+            q.set_pick_currency(currency.as_str().into());
             q.set_fetching(true);
+            let request_id = request.get() + 1;
+            request.set(request_id);
             let primary = config.borrow().preferred_provider;
             tracing::info!(ticker = %ticker, provider = primary.wire(), "quick screen requested");
             if fetch_tx
-                .send(crate::fetch::WorkerJob::QuickScreen(crate::fetch::FetchRequest {
-                    study_id: uuid::Uuid::nil(),
-                    ticker,
-                    chain,
-                    primary,
-                }))
+                .send(crate::fetch::WorkerJob::QuickScreen(
+                    crate::fetch::QuickScreenRequest {
+                        request_id,
+                        currency,
+                        request: crate::fetch::FetchRequest {
+                            study_id: uuid::Uuid::nil(),
+                            ticker,
+                            chain,
+                            primary,
+                        },
+                    },
+                ))
                 .is_err()
             {
                 q.set_fetching(false);
@@ -310,6 +369,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let current_study = Rc::clone(current_study);
         let slot = Rc::clone(slot);
+        let request = Rc::clone(request);
         ui.global::<QuickScreen>().on_examine_study(move || {
             let ui = ui_weak.unwrap();
             let Some(study) = current_study
@@ -328,6 +388,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
                 }
             };
             let format = config.borrow().number_format;
+            supersede_request(&ui, &request);
             show(&ui, &journal_state.borrow(), format, &slot, session);
         });
     }
@@ -396,13 +457,20 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
             let applied = journal_state
                 .borrow_mut()
                 .apply_provider_refresh(id, &fetched);
-            if let Err(message) = applied {
-                crate::wiring::dialog::refuse(&ui, &message);
-            }
+            // The study exists either way: the examination is spent, the study opens — with the
+            // success notice only when its data really was written (G1 review).
+            *slot.borrow_mut() = None;
             refresh_studies(&ui, &journal_state.borrow());
             ui.global::<Studies>().set_screen_open(false);
-            ui.global::<Studies>()
-                .set_notice(state::MSG_QUICK_SCREEN_STUDY_CREATED.into());
+            match applied {
+                Ok(_) => ui
+                    .global::<Studies>()
+                    .set_notice(state::MSG_QUICK_SCREEN_STUDY_CREATED.into()),
+                Err(message) => crate::wiring::dialog::refuse(
+                    &ui,
+                    &state::MSG_QUICK_SCREEN_STUDY_EMPTY.replace("{cause}", &message),
+                ),
+            }
             ui.global::<Studies>()
                 .invoke_open_study(id.to_string().into());
         });

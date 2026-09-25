@@ -425,7 +425,10 @@ export component ModalDialog inherits Rectangle {
                     }
 
                     // The trigger-panel sell (Story 4.7 flow): quantity + rationale, at the
-                    // matched study's present price.
+                    // matched study's present price. A destructive verb never fires on a plain
+                    // Enter (G1 review, decision 1): Enter records only a typed number — blank or
+                    // spaces never reach the whole-position rail; that sale takes a click on the
+                    // verb.
                     if Dialog.form-id == "sell-trigger": VerticalLayout {
                         spacing: Tokens.space-12;
                         trig-qty := LabeledField {
@@ -433,13 +436,13 @@ export component ModalDialog inherits Rectangle {
                             placeholder: @tr("Nombre d'actions");
                             text <=> Dialog.draft-quantity;
                             autofocus: true;
-                            accepted => { root.submit(); }
+                            accepted => { if (Dialog.draft-quantity.is-float()) { root.submit(); } }
                         }
                         LabeledField {
                             label: @tr("Raison (facultative)");
                             placeholder: @tr("Ce qui motive l'opération");
                             text <=> Dialog.draft-rationale;
-                            accepted => { root.submit(); }
+                            accepted => { if (Dialog.draft-quantity.is-float()) { root.submit(); } }
                         }
                     }
 

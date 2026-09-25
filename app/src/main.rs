@@ -282,6 +282,7 @@ fn main() -> Result<(), slint::PlatformError> {
         drag_moved: Rc::clone(&drag_moved),
         compare_study: Rc::clone(&compare_study),
         quick_screen: Rc::clone(&quick_screen),
+        quick_screen_request: Rc::new(std::cell::Cell::new(0)),
         screening: Rc::new(RefCell::new(None)),
         holding_freshness: Rc::clone(&holding_freshness),
         holding_dismissed: Rc::clone(&holding_dismissed),

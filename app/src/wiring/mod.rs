@@ -58,6 +58,10 @@ pub(crate) struct Session {
     /// the objective changes, to export) and, after a fetch, the financials « Créer l'étude »
     /// reuses. Session-only, never persisted.
     pub(crate) quick_screen: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
+    /// Story 7.3 (G1 review): the identity of the latest examination request — a fetch result
+    /// whose id is not this one was superseded (another « Examiner », or an examination opened
+    /// from a study / the criblage) and is dropped.
+    pub(crate) quick_screen_request: Rc<std::cell::Cell<u64>>,
     /// Story 7.3 (PR 2): the watchlist's criblage run of the moment (rows + batch + quota latch).
     /// Session-only, never persisted.
     pub(crate) screening: Rc<RefCell<Option<crate::wiring::screening::ScreeningSession>>>,

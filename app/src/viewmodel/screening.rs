@@ -44,7 +44,8 @@ fn ladder_years(l: &Ladder) -> Option<u32> {
     Some(((recent - oldest + 1).max(0) as u32).min(FORM_YEARS))
 }
 
-/// The years the examination rests on (the shorter of the two ladders); `None` = fewer than three.
+/// The years the examination rests on (the shorter of the two ladders); `None` = a ladder is
+/// unavailable (fewer than two non-overlapping consecutive pairs).
 pub fn years_used(out: &QuickScreenOutputs) -> Option<u32> {
     match (ladder_years(&out.sales), ladder_years(&out.eps)) {
         (Some(s), Some(e)) => Some(s.min(e)),
@@ -58,7 +59,7 @@ pub struct ScreeningRowView {
     pub ticker: String,
     /// pending | done | unavailable | quota
     pub state: String,
-    /// « 6 / 6 », « 4 / 6 », « < 3 / 6 »; "" before the examination.
+    /// « 6 / 6 », « 4 / 6 », « < 4 / 6 »; "" before the examination.
     pub years: String,
     pub sales_rate: String,
     pub eps_rate: String,
@@ -113,7 +114,7 @@ pub fn screening_row_view(
         state: "done".into(),
         years: match years_used(out) {
             Some(n) => format!("{n} / {FORM_YEARS}"),
-            None => format!("< 3 / {FORM_YEARS}"),
+            None => format!("< 4 / {FORM_YEARS}"),
         },
         sales_rate: pct(out.sales.compound_rate_pct, format),
         eps_rate: pct(out.eps.compound_rate_pct, format),
@@ -231,7 +232,7 @@ mod tests {
         let mut out = QuickScreenOutputs::default();
         out.sales.unavailable = true;
         let v = screening_row_view("x", false, &RowState::Examined(&out), NumberFormat::Comma);
-        assert_eq!(v.years, "< 3 / 6");
+        assert_eq!(v.years, "< 4 / 6");
         assert_eq!(v.sales_rate, "");
     }
 }

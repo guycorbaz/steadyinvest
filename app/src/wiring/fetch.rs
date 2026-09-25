@@ -183,6 +183,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         fetch_cancel,
         fetch_tx,
         quick_screen,
+        quick_screen_request,
         screening,
         ..
     } = s;
@@ -192,6 +193,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         let config = Rc::clone(config);
         let quick_screen = Rc::clone(quick_screen);
+        let quick_screen_request = Rc::clone(quick_screen_request);
         let screening = Rc::clone(screening);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
@@ -292,48 +294,50 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     }
                 }
                 fetch::WorkerOutcome::QuickScreen {
+                    request_id,
                     ticker,
+                    currency,
                     result,
-                    fell_back_to,
+                    effective,
                 } => {
                     // Story 7.3: the examination's fetch — session only, nothing written.
                     let format = config.borrow().number_format;
-                    // The member that served (Story 6.9): the fallback when one ran, else the primary.
-                    let effective = fell_back_to.unwrap_or(config.borrow().preferred_provider);
                     crate::wiring::quick_screen::on_fetched(
                         &ui,
                         &journal_state.borrow(),
                         format,
                         &quick_screen,
-                        ticker,
-                        result,
-                        effective,
+                        &quick_screen_request,
+                        crate::wiring::quick_screen::FetchedExamination {
+                            request_id,
+                            ticker,
+                            currency,
+                            result,
+                            effective,
+                        },
                     );
                 }
                 fetch::WorkerOutcome::Screening {
                     batch,
                     index,
                     result,
-                    fell_back_to,
+                    effective,
                 } => {
                     // Story 7.3 (PR 2): one criblage row — session only, nothing written.
                     let format = config.borrow().number_format;
-                    let effective = fell_back_to.unwrap_or(config.borrow().preferred_provider);
                     crate::wiring::screening::on_fetched(
                         &ui,
                         format,
                         &screening,
                         batch,
                         index,
-                        Some(result),
-                        effective,
+                        Some((result, effective)),
                     );
                 }
                 fetch::WorkerOutcome::ScreeningSkipped { batch, index } => {
                     let format = config.borrow().number_format;
-                    let effective = config.borrow().preferred_provider;
                     crate::wiring::screening::on_fetched(
-                        &ui, format, &screening, batch, index, None, effective,
+                        &ui, format, &screening, batch, index, None,
                     );
                 }
                 fetch::WorkerOutcome::HoldingFetch(outcome) => {

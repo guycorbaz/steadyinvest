@@ -132,6 +132,15 @@ pub const MSG_QUICK_SOURCE_STUDY: &str = "depuis l'étude";
 pub const MSG_QUICK_SOURCE_PROVIDER: &str = "fournisseur : {provider}";
 /// Story 7.3: the picked symbol is blank (no fetch).
 pub const MSG_QUICK_BLANK_TICKER: &str = "Le symbole est vide ; aucun examen n'a été lancé.";
+/// Story 7.3 (G1 review): « Examiner » needs the currency the study would be created in.
+pub const MSG_QUICK_BLANK_CURRENCY: &str = "La devise est vide ; aucun examen n'a été lancé.";
+/// Story 7.3 (G1 review): the study was created but the fetched financials were not written into
+/// it — `{cause}` names why (never the success notice over a failed write).
+pub const MSG_QUICK_SCREEN_STUDY_EMPTY: &str =
+    "L'étude a été créée, mais les données récupérées n'y ont pas été écrites : {cause}";
+/// Story 7.3 (G1 review): the watchlist could not be read — never shown as « 0 valeur(s) ».
+pub const MSG_SCREENING_LIST_UNREADABLE: &str =
+    "La liste de suivi est illisible ; aucun criblage n'a été lancé.";
 pub const MSG_FLAG_PTP_TREND_DECLINING: &str = "marge avant impôt en baisse";
 pub const MSG_FLAG_ROE_TREND_DECLINING: &str = "rendement des capitaux propres en baisse";
 pub const MSG_FLAG_ROE_LOW: &str = "rendement des capitaux propres sous 10 %";
@@ -650,6 +659,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_QUICK_SOURCE_STUDY,
     MSG_QUICK_SOURCE_PROVIDER,
     MSG_QUICK_BLANK_TICKER,
+    MSG_QUICK_BLANK_CURRENCY,
+    MSG_QUICK_SCREEN_STUDY_EMPTY,
+    MSG_SCREENING_LIST_UNREADABLE,
     MSG_FLAG_PTP_TREND_DECLINING,
     MSG_FLAG_ROE_TREND_DECLINING,
     MSG_FLAG_ROE_LOW,

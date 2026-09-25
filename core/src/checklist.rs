@@ -4,9 +4,11 @@
 //! PURE: `Decimal` in, `Option<Decimal>` out — an absent figure is `None`, never 0; the roots go
 //! through [`crate::ssg::growth::endpoints_cagr_pct`] (the same exact-root helper as §1).
 //!
+//! A ladder reads a six-year window: (1)–(2) the recent year and the one before, (5)–(6) the
+//! fifth and sixth years back counting the recent one as the first (`recent − 4`, `recent − 5`).
 //! The form's conversion table (« 27 % increase ↔ 5 % compounded », « 271 % ↔ 30 % ») is
-//! `(1 + r)^5 = 1 + increase` — five years between the two two-year averages, even though the
-//! averages' midpoints sit four years apart. Fidelity to the form wins (NFR-U3); the span is
+//! `(1 + r)^5 = 1 + increase` — five years for the six-year window, even though the averages'
+//! midpoints sit four years apart. Fidelity to the form wins (NFR-U3, spec Q2); the span is
 //! reported so the screen can state it.
 
 use rust_decimal::Decimal;
@@ -14,10 +16,11 @@ use rust_decimal::Decimal;
 use crate::normalize::CanonicalYear;
 use crate::ssg::endpoints_cagr_pct;
 
-/// The form's span between the recent and the old two-year averages (its conversion table).
+/// The form's exponent for its six-year window (its conversion table).
 pub const FORM_SPAN_YEARS: u32 = 5;
-/// Fewer usable years than this and a ladder is « indisponible » (spec §6).
-pub const MIN_LADDER_YEARS: usize = 3;
+/// Fewer usable years than this and a ladder is « indisponible »: two consecutive pairs that do
+/// not overlap (G1 review — three years made the middle one serve both pairs).
+pub const MIN_LADDER_YEARS: usize = 4;
 /// « voisin » band around the five-year average P/E, in percent of it.
 pub const PE_SIMILAR_BAND_PCT: u32 = 10;
 
@@ -33,7 +36,7 @@ pub struct Ladder {
     /// (3) (1) + (2); (4) ÷ 2.
     pub recent_total: Option<Decimal>,
     pub recent_avg: Option<Decimal>,
-    /// (5) the figure `span` years before (1), and its year.
+    /// (5) the figure of the `span`-th year counting (1) as the first, and its year.
     pub old: Option<Decimal>,
     pub old_year: Option<i32>,
     /// (6) the year before (5), and its year.
@@ -47,9 +50,11 @@ pub struct Ladder {
     pub increase_pct: Option<Decimal>,
     /// The compound annual rate over `span_years`, in percent.
     pub compound_rate_pct: Option<Decimal>,
-    /// The years between (1) and (5): the form's five when the series allows, else the real span.
+    /// The exponent: the window's length minus one — the form's five for its six years, fewer when
+    /// the series only allows a shorter window.
     pub span_years: u32,
-    /// `true` when the series had fewer than [`MIN_LADDER_YEARS`] figures: every line is `None`.
+    /// `true` when the series holds no two non-overlapping consecutive pairs inside the six-year
+    /// window: every line is `None`.
     pub unavailable: bool,
 }
 
@@ -117,30 +122,40 @@ fn two() -> Decimal {
     Decimal::from(2)
 }
 
+/// The two pairs of a ladder, by YEAR (never by position in the series — a gap must not pair
+/// two years that are not consecutive): the most recent consecutive pair `(r, r − 1)`, and the
+/// old pair `(o, o − 1)` — the form's `o = r − 4` when present, else the oldest consecutive pair
+/// still inside the six-year window and disjoint from the recent pair (`r − 4 < o ≤ r − 2`).
+/// `None` when either pair is missing. Returns `(r, o)`.
+fn ladder_pairs(points: &[(i32, Decimal)]) -> Option<(i32, i32)> {
+    let has = |y: i32| points.iter().any(|(py, _)| *py == y);
+    let recent = points.iter().rev().map(|(y, _)| *y).find(|y| has(y - 1))?;
+    let window = FORM_SPAN_YEARS as i32 - 1; // r − 4: the form's (5)
+    (recent - window..=recent - 2)
+        .find(|o| has(*o) && has(o - 1))
+        .map(|o| (recent, o))
+}
+
 /// Build one ladder from `(year, figure)` pairs (ascending, figures present).
 fn ladder(points: &[(i32, Decimal)]) -> Ladder {
-    if points.len() < MIN_LADDER_YEARS {
+    let Some((recent_year, old_year)) = ladder_pairs(points) else {
         return Ladder {
             unavailable: true,
             ..Ladder::default()
         };
-    }
-    let n = points.len();
-    let (recent_year, recent) = points[n - 1];
-    let (recent_prior_year, recent_prior) = points[n - 2];
-    // The form's old pair: `span` and `span + 1` years before the recent year; when the series
-    // lacks them, the oldest consecutive pair it has, and the real span.
-    let by_year = |y: i32| points.iter().find(|(py, _)| *py == y).map(|(_, v)| *v);
-    let form_old = recent_year - FORM_SPAN_YEARS as i32;
-    let (old_year, old, old_prior_year, old_prior, span) =
-        match (by_year(form_old), by_year(form_old - 1)) {
-            (Some(o), Some(op)) => (form_old, o, form_old - 1, op, FORM_SPAN_YEARS),
-            _ => {
-                let (oy, o) = points[1];
-                let (opy, op) = points[0];
-                (oy, o, opy, op, (recent_year - oy).max(1) as u32)
-            }
-        };
+    };
+    let at = |y: i32| {
+        points
+            .iter()
+            .find(|(py, _)| *py == y)
+            .map(|(_, v)| *v)
+            .expect("ladder_pairs checked the year")
+    };
+    let (recent_prior_year, old_prior_year) = (recent_year - 1, old_year - 1);
+    let (recent, recent_prior) = (at(recent_year), at(recent_prior_year));
+    let (old, old_prior) = (at(old_year), at(old_prior_year));
+    // The window runs from (6) to (1): its length minus one is the exponent — the form's five.
+    let span = (recent_year - old_prior_year) as u32;
     let recent_total = recent.checked_add(recent_prior);
     let recent_avg = recent_total.and_then(|t| t.checked_div(two()));
     let old_total = old.checked_add(old_prior);
@@ -342,12 +357,12 @@ mod tests {
 
     #[test]
     fn a_six_year_ladder_follows_the_form() {
-        // Sales 100, 110, …, 200 over 2020–2026 (seven years): recent pair 2026/2025, old pair
-        // 2021/2020 (five and six years before 2026), span 5.
-        let years: Vec<CanonicalYear> = (0..7)
+        // Sales 100, 110, …, 150 over 2021–2026 (six years, spec §7 AC1): recent pair 2026/2025,
+        // old pair 2022/2021 (the fifth and sixth years, counting 2026 as the first), span 5.
+        let years: Vec<CanonicalYear> = (0..6)
             .map(|i| {
                 let s = 100 + 10 * i;
-                year(2020 + i, &s.to_string(), "1", "10", "5")
+                year(2021 + i, &s.to_string(), "1", "10", "5")
             })
             .collect();
         let out = quick_screen(&years, Some(d("12")), Some(d("1")));
@@ -356,14 +371,14 @@ mod tests {
             (l.recent_year, l.recent_prior_year),
             (Some(2026), Some(2025))
         );
-        assert_eq!((l.old_year, l.old_prior_year), (Some(2021), Some(2020)));
-        assert_eq!(l.recent_avg, Some(d("155")));
+        assert_eq!((l.old_year, l.old_prior_year), (Some(2022), Some(2021)));
+        assert_eq!(l.recent_avg, Some(d("145")));
         assert_eq!(l.old_avg, Some(d("105")));
-        assert_eq!(l.increase, Some(d("50")));
-        assert_eq!(l.increase_pct.map(|p| p.round_dp(2)), Some(d("47.62")));
+        assert_eq!(l.increase, Some(d("40")));
+        assert_eq!(l.increase_pct.map(|p| p.round_dp(2)), Some(d("38.10")));
         assert_eq!(l.span_years, 5);
-        // (155/105)^(1/5) − 1 = 8.1 %
-        assert_eq!(l.compound_rate_pct.map(|p| p.round_dp(1)), Some(d("8.1")));
+        // (145/105)^(1/5) − 1 = 6.7 %
+        assert_eq!(l.compound_rate_pct.map(|p| p.round_dp(1)), Some(d("6.7")));
         // EPS flat → 0 % → sales grew faster.
         assert_eq!(
             out.eps.compound_rate_pct.map(|p| p.round_dp(1)),
@@ -380,10 +395,42 @@ mod tests {
         let l = quick_screen(&years, None, None).sales;
         assert!(!l.unavailable);
         assert_eq!((l.old_year, l.old_prior_year), (Some(2024), Some(2023)));
-        assert_eq!(l.span_years, 2, "2026 − 2024");
+        assert_eq!(l.span_years, 3, "a four-year window: 2026 − 2023");
+        // Three years: the middle one would serve both pairs (G1 review) — unavailable.
+        let three: Vec<CanonicalYear> = years[1..].to_vec();
+        assert!(quick_screen(&three, None, None).sales.unavailable);
+        assert_eq!(
+            quick_screen(&three, None, None).sales.compound_rate_pct,
+            None
+        );
         let two: Vec<CanonicalYear> = years[..2].to_vec();
         assert!(quick_screen(&two, None, None).sales.unavailable);
-        assert_eq!(quick_screen(&two, None, None).sales.compound_rate_pct, None);
+    }
+
+    #[test]
+    fn the_pairs_are_keyed_by_year_inside_the_six_year_window() {
+        // Twelve years with 2021 missing: the form's old pair (2022/2021) is broken, so the
+        // oldest consecutive pair inside the window is taken (2023/2022, span 4) — never a pair
+        // from before the window, never two years across the gap.
+        let years: Vec<CanonicalYear> = (2015..=2026)
+            .filter(|y| *y != 2021)
+            .map(|y| year(y, "100", "1", "10", "5"))
+            .collect();
+        let l = quick_screen(&years, None, None).sales;
+        assert_eq!((l.old_year, l.old_prior_year), (Some(2023), Some(2022)));
+        assert_eq!(l.span_years, 4);
+        // The latest year without its predecessor: the recent pair is the latest CONSECUTIVE one.
+        let years: Vec<CanonicalYear> = [2019, 2020, 2021, 2022, 2023, 2024, 2026]
+            .into_iter()
+            .map(|y| year(y, "100", "1", "10", "5"))
+            .collect();
+        let l = quick_screen(&years, None, None).sales;
+        assert_eq!(
+            (l.recent_year, l.recent_prior_year),
+            (Some(2024), Some(2023))
+        );
+        assert_eq!((l.old_year, l.old_prior_year), (Some(2020), Some(2019)));
+        assert_eq!(l.span_years, 5);
     }
 
     #[test]

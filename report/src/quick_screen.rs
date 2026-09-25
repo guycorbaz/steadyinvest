@@ -92,7 +92,8 @@ const E_OLD_PRIOR: &str = "(6) BPA il y a {} ans";
 const RATE_SALES: &str = "Taux annuel composé de croissance des ventes";
 const RATE_EPS: &str = "Taux annuel composé de croissance du BPA";
 const SPAN_NOTE: &str = "Base : deux moyennes de deux ans, à {} ans d'écart (formulaire : 5).";
-const UNAVAILABLE: &str = "indisponible (moins de trois années exploitables)";
+const UNAVAILABLE: &str =
+    "indisponible (les années exploitables ne forment pas deux paires consécutives)";
 const EPS_FASTER: &str = "Le BPA a augmenté plus vite que les ventes sur la période.";
 const SALES_FASTER: &str = "Le BPA a augmenté moins vite que les ventes sur la période.";
 const SAME_PACE: &str = "Le BPA et les ventes ont augmenté au même rythme sur la période.";

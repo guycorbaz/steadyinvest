@@ -90,7 +90,16 @@ pub struct ScreeningRequest {
     pub stop: Arc<AtomicBool>,
 }
 
-/// Whether a chain's final error is the provider's usage limit (the criblage's stop condition).
+/// An « Examen rapide » fetch (Story 7.3): `request_id` identifies the request (only the latest
+/// one issued is shown — a superseded result is dropped), `currency` is the one picked WHEN the
+/// request was made (G1 review: never re-read from the picker when the result arrives).
+pub struct QuickScreenRequest {
+    pub request_id: u64,
+    pub currency: String,
+    pub request: FetchRequest,
+}
+
+/// Whether an error is the provider's usage limit (the criblage's stop condition).
 pub fn is_quota(error: &IngestionError) -> bool {
     matches!(
         error,
@@ -104,7 +113,7 @@ pub enum WorkerJob {
     /// Story 7.3: an « Examen rapide » of a ticker with no study — the same fundamentals fetch
     /// as [`WorkerJob::Fetch`] (`study_id` unused), routed to the examination screen and kept in
     /// the session only; nothing is written unless « Créer l'étude » follows.
-    QuickScreen(FetchRequest),
+    QuickScreen(QuickScreenRequest),
     /// Story 7.3 (PR 2): one row of the watchlist « criblage » — the same fundamentals fetch as
     /// [`WorkerJob::QuickScreen`], tagged with its batch + row. The batch's `stop` flag is raised BY
     /// THE WORKER on the first quota reply, so every row still queued behind it drains unfetched
@@ -159,18 +168,22 @@ pub struct FxRateOutcome {
 /// What the worker produces, marshalled back to the UI thread.
 pub enum WorkerOutcome {
     Fetch(FetchOutcome),
-    /// Story 7.3: the examination's fetch result — the ticker rides back (there is no study).
+    /// Story 7.3: the examination's fetch result — its request identity, ticker and currency ride
+    /// back (there is no study). `effective` is the member that served (the primary captured at
+    /// enqueue when none did), never the preference read when the result lands.
     QuickScreen {
+        request_id: u64,
         ticker: String,
+        currency: String,
         result: Result<FetchedFinancials, IngestionError>,
-        fell_back_to: Option<ProviderChoice>,
+        effective: ProviderChoice,
     },
-    /// Story 7.3 (PR 2): one criblage row's fetch result.
+    /// Story 7.3 (PR 2): one criblage row's fetch result (`effective` as for `QuickScreen`).
     Screening {
         batch: u64,
         index: usize,
         result: Result<FetchedFinancials, IngestionError>,
-        fell_back_to: Option<ProviderChoice>,
+        effective: ProviderChoice,
     },
     /// Story 7.3 (PR 2): a criblage row the worker drained unfetched after the run's quota stop.
     ScreeningSkipped {
@@ -365,8 +378,9 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             fell_back_to,
                         })
                     }
-                    WorkerJob::QuickScreen(req) => {
-                        let (result, _, fell_back_to) = run_chain(
+                    WorkerJob::QuickScreen(job) => {
+                        let req = job.request;
+                        let (result, effective, _) = run_chain(
                             &mut last_request,
                             select,
                             &req.chain,
@@ -376,9 +390,11 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             },
                         );
                         WorkerOutcome::QuickScreen {
+                            request_id: job.request_id,
                             ticker: req.ticker,
+                            currency: job.currency,
                             result,
-                            fell_back_to,
+                            effective: effective.unwrap_or(req.primary),
                         }
                     }
                     WorkerJob::Screening(job) if job.stop.load(Ordering::Relaxed) => {
@@ -389,24 +405,32 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                     }
                     WorkerJob::Screening(job) => {
                         let req = &job.request;
-                        let (result, _, fell_back_to) = run_chain(
+                        // G1 review: ANY member's quota reply counts, not only the chain's final
+                        // error — a primary out of quota whose fallback then fails otherwise
+                        // would be called again for every row still queued.
+                        let mut quota_seen = false;
+                        let (result, effective, _) = run_chain(
                             &mut last_request,
                             select,
                             &req.chain,
                             req.primary,
                             |provider, key| {
-                                runtime.block_on(fetch_canonical(provider, &req.ticker, key))
+                                let attempt =
+                                    runtime.block_on(fetch_canonical(provider, &req.ticker, key));
+                                quota_seen |= attempt.as_ref().err().is_some_and(is_quota);
+                                attempt
                             },
                         );
-                        // The quota stop: latch BEFORE the next queued row is picked up.
-                        if result.as_ref().err().is_some_and(is_quota) {
+                        // The quota stop: latch BEFORE the next queued row is picked up (a row a
+                        // fallback served stands, and so does the run).
+                        if quota_seen && result.is_err() {
                             job.stop.store(true, Ordering::Relaxed);
                         }
                         WorkerOutcome::Screening {
                             batch: job.batch,
                             index: job.index,
                             result,
-                            fell_back_to,
+                            effective: effective.unwrap_or(req.primary),
                         }
                     }
                     WorkerJob::RefreshHolding(_) if worker_cancel.load(Ordering::Relaxed) => {

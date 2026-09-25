@@ -14,14 +14,20 @@ use super::{
 impl JournalState {
     // ── Watchlist (Story 4.1, FR34) ──
 
-    /// Every watched security, ordered by position. Empty when no journal is open.
+    /// Every watched security, ordered by position. Empty when no journal is open. Absence-blind —
+    /// a consumer that STATES absence must use [`Self::try_list_watch_items`] (issue #95).
     pub fn list_watch_items(&self) -> Vec<WatchItem> {
+        self.try_list_watch_items().unwrap_or_default()
+    }
+
+    /// Fallible [`Self::list_watch_items`] (issue #95): `Err` is a read failure, never an empty list.
+    pub fn try_list_watch_items(&self) -> Result<Vec<WatchItem>, String> {
         let Some(journal) = self.journal.as_ref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        journal.list_watch_items().unwrap_or_else(|error| {
+        journal.list_watch_items().map_err(|error| {
             tracing::warn!("list_watch_items failed: {error}");
-            Vec::new()
+            error.to_string()
         })
     }
 
