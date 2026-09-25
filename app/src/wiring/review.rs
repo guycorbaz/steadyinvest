@@ -3,15 +3,19 @@
 //! save picker (the 5.6 rail). Formatting happens HERE (the one float→string boundary of the app);
 //! the state read carries engine values, the report carries its own labels.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+use std::rc::Rc;
+
 use rust_decimal::Decimal;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use steadyinvest_core::rounding::DisplayField;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
-use crate::state::{self, JournalState, PortfolioReviewFacts, ReviewStudy};
+use crate::state::{self, JournalState, PortfolioReviewFacts, ReviewStudy, StopUncompared};
 use crate::viewmodel::engine::fmt_ud;
-use crate::viewmodel::format::{NumberFormat, format_scaled};
+use crate::viewmodel::format::{NumberFormat, format_amount, format_scaled};
 use crate::wiring::Session;
 use crate::wiring::holdings::{HoldingFreshnessMap, concentration_murmur};
 use crate::{MainWindow, Review, ReviewDueRow, ReviewPositionRow, ReviewShareRow, Studies};
@@ -22,11 +26,16 @@ fn pct(v: Option<Decimal>, format: NumberFormat) -> SharedString {
         .into()
 }
 
+/// An invested amount in the reference currency. G1 final review: the SAME precision as the
+/// Portefeuille screen for the same figure (its consolidation and concentration amounts are
+/// `DisplayField::Price`: rounded to at most two decimals, trailing zeros not padded — « 1 234,5 »
+/// stays « 1 234,5 », as there) — a total read on one screen and checked on the other must
+/// agree digit for digit; the checklist's locale rule (§4) asks for one spelling per figure.
 fn amount(v: Option<Decimal>, currency: &str, format: NumberFormat) -> SharedString {
     v.map(|d| {
         format!(
             "{} {currency}",
-            format_scaled(d, DisplayField::LargeMonetary, format)
+            format_scaled(d, DisplayField::Price, format)
         )
     })
     .unwrap_or_default()
@@ -84,37 +93,133 @@ fn union_pairs<'a>(pairs: impl IntoIterator<Item = &'a String>) -> Vec<String> {
 }
 
 /// Stops as data: « 63,00 CHF (UBS) · 50,00 CHF (Swissquote) » — level through the locale path,
-/// the stop's own currency, the bank holding the lot (no prose).
+/// the stop's own currency, the bank holding the lot (no prose). A legacy lot's stop has no
+/// currency to state (G1 final review): « 63,00 (UBS) », never a borrowed one.
 fn stops_text<'a>(
     stops: impl Iterator<Item = &'a state::StopFact>,
     format: NumberFormat,
 ) -> String {
     stops
         .map(|s| {
-            format!(
-                "{} {} ({})",
-                format_scaled(s.level, DisplayField::Price, format),
-                s.currency,
-                s.bank
-            )
+            let level = format_scaled(s.level, DisplayField::Price, format);
+            match &s.currency {
+                Some(currency) => format!("{level} {currency} ({})", s.bank),
+                None => format!("{level} ({})", s.bank),
+            }
         })
         .collect::<Vec<_>>()
         .join(" · ")
 }
 
-fn rates_note(rates: &[steadyinvest_persistence::FxRateItem]) -> SharedString {
+/// The FR28 footnote: pair, rate, then "(date, source)" — pure data, the rate spelled in the
+/// user's number format (G1 final review: never the stored « 0.8 » beside « 1 234,50 »).
+fn rates_note(
+    rates: &[steadyinvest_persistence::FxRateItem],
+    format: NumberFormat,
+) -> SharedString {
     rates
         .iter()
         .map(|r| {
             format!(
                 "{} → {} {} ({}, {})",
-                r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
+                r.base_currency,
+                r.quote_currency,
+                format_amount(&r.rate, format),
+                r.rate_date,
+                r.source
             )
         })
         .collect::<Vec<_>>()
         .join(" · ")
         .into()
 }
+
+/// The global total's named absence (G1 final review — every cause, never only the pairs):
+/// the pair(s) that absent it, and whether ANOTHER cause absents it too (a bank that could not
+/// consolidate for a non-pair reason, or — no pair at all to blame — a failed read / overflow).
+fn global_absence(
+    global_absent: bool,
+    missing_pairs: &[String],
+    any_bank_unavailable: bool,
+) -> (String, bool) {
+    if !global_absent {
+        return (String::new(), false);
+    }
+    (
+        missing_pairs.join(" · "),
+        any_bank_unavailable || missing_pairs.is_empty(),
+    )
+}
+
+/// The coalescing latch of the async re-push (G3 review: a 40-ticker price batch re-composed
+/// the whole review 40 times). The first request of a burst schedules ONE re-push; the ones
+/// that land before it fires ride along. Pure — the timer is the caller's.
+#[derive(Default)]
+pub(crate) struct RepushLatch {
+    pending: std::cell::Cell<bool>,
+}
+
+impl RepushLatch {
+    /// A re-push is wanted: `true` when the caller must schedule it (none is pending yet).
+    pub(crate) fn request(&self) -> bool {
+        !self.pending.replace(true)
+    }
+
+    /// The scheduled re-push runs: the latch opens for the next burst.
+    pub(crate) fn fire(&self) {
+        self.pending.set(false);
+    }
+}
+
+thread_local! {
+    /// The UI thread's one latch (the review is one surface).
+    static REPUSH: RepushLatch = RepushLatch::default();
+}
+
+/// Re-push the review when it is the screen on display — the re-render every async mutation
+/// owes a shown surface (checklist §7): a price, FX or study result landing while « Revue » is
+/// open (G1 final review). Coalesced (G3 review): a burst of results re-pushes ONCE, on the
+/// next event-loop turn (a zero-delay single-shot timer). Off-screen, the arrival re-render
+/// covers it.
+pub(crate) fn request_review_refresh(
+    ui: &MainWindow,
+    journal_state: &Rc<RefCell<JournalState>>,
+    freshness: &Rc<RefCell<HoldingFreshnessMap>>,
+    dismissed: &Rc<RefCell<HashSet<String>>>,
+    config: &Rc<RefCell<AppConfig>>,
+) {
+    if ui.get_current_screen() != REVIEW_SCREEN || !REPUSH.with(RepushLatch::request) {
+        return;
+    }
+    let ui_weak = ui.as_weak();
+    let journal_state = Rc::clone(journal_state);
+    let freshness = Rc::clone(freshness);
+    let dismissed = Rc::clone(dismissed);
+    let config = Rc::clone(config);
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        REPUSH.with(RepushLatch::fire);
+        let Some(ui) = ui_weak.upgrade() else { return };
+        // Still on display? (the user may have left in the meantime — the arrival re-renders.)
+        if ui.get_current_screen() == REVIEW_SCREEN {
+            push_review(
+                &ui,
+                &journal_state.borrow(),
+                &freshness.borrow(),
+                &dismissed.borrow(),
+                &config.borrow(),
+            );
+        }
+    });
+}
+
+/// Empty the export-outcome slot — on arrival and at the start of an export (the F4 slot is
+/// free again for the next outcome; a stale « exportée » never survives a navigation).
+pub(crate) fn clear_notice(ui: &MainWindow) {
+    ui.global::<Review>().set_notice(SharedString::new());
+}
+
+/// The « Revue » screen's index (`MainWindow.current-screen`).
+const REVIEW_SCREEN: i32 = 3;
 
 /// Compose the review facts from the state + the config's size table (the same parse the
 /// Portefeuille block uses), or `None` (« indisponible ») on a read failure.
@@ -140,18 +245,19 @@ fn rows_model(rows: Vec<ReviewShareRow>) -> ModelRc<ReviewShareRow> {
 }
 
 /// Push the review into the `Review` global. Freshness comes from the session map (transient,
-/// keyed by uppercased ticker — the register's rule).
+/// keyed by uppercased ticker — the register's rule); `dismissed` is the register's set of
+/// dismissed triggers (holding ids), honoured here too (G1 final review).
 pub(crate) fn push_review(
     ui: &MainWindow,
     state: &JournalState,
     freshness: &HoldingFreshnessMap,
+    dismissed: &HashSet<String>,
     config: &AppConfig,
 ) {
     let review = ui.global::<Review>();
-    // The export outcome belongs to the render it reported on: every (re)push clears it — a
-    // dossier switch or a later arrival never shows a stale « exportée » (the F4 slot is empty
-    // again for the next outcome).
-    review.set_notice(SharedString::new());
+    // The export notice is NOT cleared here (G3 review): an async re-push (a price landing)
+    // must keep « Revue exportée : chemin ». It is cleared on arrival ([`clear_notice`], the
+    // screen-activated arm), at the start of an export, and on a dossier switch.
     let format = config.number_format;
     let Some(f) = facts(state, config) else {
         review.set_unavailable(true);
@@ -169,7 +275,7 @@ pub(crate) fn push_review(
     review.set_date(f.today.clone().into());
     review.set_reference_currency(reference.clone().into());
     review.set_bank_count(f.bank_count as i32);
-    review.set_rates(rates_note(&f.rates_used));
+    review.set_rates(rates_note(&f.rates_used, format));
     let threshold_raw = config.concentration_threshold_pct_or_default();
     let threshold = threshold_pct(&threshold_raw);
     review.set_threshold(config_pct(&threshold_raw, format).into());
@@ -204,8 +310,13 @@ pub(crate) fn push_review(
         )
     };
     // The 6.7 read failed: the size and concentration blocks are « indisponible » — their
-    // models are EMPTIED (never stale rows the export would print).
-    let size_rows = if d.unavailable {
+    // models are EMPTIED (never stale rows the export would print). A dossier without any
+    // position has nothing to classify: one « aucune position classée » statement, never three
+    // « indisponible » classes (G1 final review — an empty dossier is not a failed read).
+    // Keyed by the review's own positions (G3 review), not by the 6.7 read's row list.
+    let size_empty = !d.unavailable && f.positions.is_empty();
+    review.set_size_empty(size_empty);
+    let size_rows = if d.unavailable || size_empty {
         Vec::new()
     } else {
         vec![
@@ -316,13 +427,15 @@ pub(crate) fn push_review(
         .collect();
     review.set_bank_rows(rows_model(bank_rows));
     review.set_global_invested(amount(global_total, &reference, format));
-    review.set_global_missing(if c.global.is_none() {
-        c.missing_pairs.join(" · ").into()
-    } else {
-        SharedString::new()
-    });
-    // Absent without a nameable pair (a failed bank read, an overflow): stated plainly.
-    review.set_global_unavailable(c.global.is_none() && c.missing_pairs.is_empty());
+    // Every cause of an absent total: its pairs, and — alone or beside them — a non-pair cause
+    // (a failed bank read, an overflow), stated plainly.
+    let (global_missing, global_other) = global_absence(
+        c.global.is_none(),
+        &c.missing_pairs,
+        c.banks.iter().any(|b| b.unavailable),
+    );
+    review.set_global_missing(global_missing.into());
+    review.set_global_unavailable(global_other);
     review.set_concentration_unavailable(d.unavailable);
     review.set_concentration_missing(if d.global_invested.is_none() && !d.unavailable {
         d.missing_pairs.join(" · ").into()
@@ -382,10 +495,47 @@ pub(crate) fn push_review(
                     stops_text(p.stops.iter().filter(|s| s.breached), format)
                 }
                 .into(),
-                trigger: p.trigger.into(),
-                mixed_links: p.mixed_links.join(" · ").into(),
+                // A legacy lot's stop is never compared (its unit is unknown): named apart, with
+                // the reason on the screen (G1 final review — absence honesty).
+                stop_no_currency: stops_text(
+                    p.stops
+                        .iter()
+                        .filter(|s| s.uncompared == Some(StopUncompared::NoCurrency)),
+                    format,
+                )
+                .into(),
+                // …and a lot whose study could not be read (G3 review): its cause named too.
+                stop_unreadable: stops_text(
+                    p.stops
+                        .iter()
+                        .filter(|s| s.uncompared == Some(StopUncompared::StudyUnreadable)),
+                    format,
+                )
+                .into(),
+                // A trigger the register dismissed stays dismissed here (keyed by holding id).
+                trigger: state::position_trigger(&p.lot_triggers, |id| {
+                    dismissed.contains(&id.to_string())
+                })
+                .into(),
                 ..Default::default()
             };
+            // The lots link to different studies: every fact of the band — the read studies'
+            // currencies, a lot without a study, an unreadable one, and what the OTHER studies
+            // carry (signals, high zone) so the row hides nothing (G3 review).
+            if let Some(m) = &p.mixed {
+                row.mixed = true;
+                row.mixed_links = m.currencies.join(" · ").into();
+                row.mixed_no_study = m.no_study;
+                row.mixed_unreadable = m.unreadable;
+                row.other_flagged = m
+                    .other_flagged
+                    .iter()
+                    .map(|(currency, n)| format!("{currency} ({n})"))
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+                    .into();
+                row.other_high_zone = m.other_high_zone.join(" · ").into();
+            }
             match &p.study {
                 ReviewStudy::None { other_currency } => {
                     row.study = "none".into();
@@ -408,13 +558,15 @@ pub(crate) fn push_review(
                     row.name = s.company_name.clone().unwrap_or_default().into();
                     row.low_confidence = s.low_confidence;
                     row.zone = s.zone.into();
+                    // The study's price in the STUDY's currency — never the position's (a legacy
+                    // lot's effective currency is only the reference fallback — G1 final review).
                     row.price = s
                         .current_price
                         .map(|d| {
                             format!(
                                 "{} {}",
                                 format_scaled(d, DisplayField::Price, format),
-                                p.currency
+                                s.currency
                             )
                         })
                         .unwrap_or_default()
@@ -507,6 +659,7 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
             .map(str::to_string)
             .collect(),
         size_lines: shares(r.get_size_rows()),
+        size_empty: r.get_size_empty(),
         unclassified: shares(r.get_unclassified_rows()),
         diversification_unavailable: r.get_concentration_unavailable(),
         sector_lines: shares(r.get_sector_rows()),
@@ -550,10 +703,17 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
                 price: p.price.to_string(),
                 last_saved: p.last_saved.to_string(),
                 last_saved_unknown: p.last_saved_unknown,
+                mixed: p.mixed,
                 mixed_links: p.mixed_links.to_string(),
+                mixed_no_study: p.mixed_no_study,
+                mixed_unreadable: p.mixed_unreadable,
+                other_flagged: p.other_flagged.to_string(),
+                other_high_zone: p.other_high_zone.to_string(),
                 stop: p.stop.to_string(),
                 stop_breached: p.stop_breached,
                 stop_breached_levels: p.stop_breached_levels.to_string(),
+                stop_no_currency: p.stop_no_currency.to_string(),
+                stop_unreadable: p.stop_unreadable.to_string(),
                 trigger: p.trigger.to_string(),
             })
             .collect(),
@@ -601,14 +761,36 @@ pub(crate) fn wire_review(ui: &MainWindow, s: &Session) {
     let Session {
         journal_state,
         quick_screen,
+        config,
+        holding_freshness,
+        holding_dismissed,
         ..
     } = s;
     {
-        // « Exporter PDF » — render from the pushed rows, native save picker, outcome in the slot.
+        // « Exporter PDF » — re-push first, then render from the pushed rows (one formatting
+        // path): the PDF states the dossier as it is NOW, never rows an async price / FX result
+        // has since outdated (G1 final review). Native save picker, outcome in the slot.
         let ui_weak = ui.as_weak();
         let journal_state = std::rc::Rc::clone(journal_state);
+        let config = std::rc::Rc::clone(config);
+        let holding_freshness = std::rc::Rc::clone(holding_freshness);
+        let holding_dismissed = std::rc::Rc::clone(holding_dismissed);
         ui.global::<Review>().on_export_pdf(move || {
             let ui = ui_weak.unwrap();
+            // A new export: the previous outcome leaves the slot (G3 review — the re-push no
+            // longer clears it).
+            clear_notice(&ui);
+            push_review(
+                &ui,
+                &journal_state.borrow(),
+                &holding_freshness.borrow(),
+                &holding_dismissed.borrow(),
+                &config.borrow(),
+            );
+            if ui.global::<Review>().get_unavailable() {
+                // The dossier could not be read just now: the screen says so; nothing to export.
+                return;
+            }
             let value = report_value(&ui);
             let bytes = steadyinvest_report::render_portfolio_review(&value);
             let mut dialog = rfd::FileDialog::new()
@@ -745,6 +927,84 @@ mod tests {
         let a = "EUR → CHF".to_string();
         let b = "USD → CHF".to_string();
         assert_eq!(union_pairs([&b, &a, &b]), vec![a.clone(), b.clone()]);
+    }
+
+    #[test]
+    fn a_burst_of_async_results_schedules_one_re_push() {
+        let latch = RepushLatch::default();
+        assert!(latch.request(), "the first result of a burst schedules");
+        assert!(!latch.request(), "the next ones ride along");
+        assert!(!latch.request());
+        latch.fire();
+        assert!(
+            latch.request(),
+            "after the re-push, a new burst schedules again"
+        );
+    }
+
+    #[test]
+    fn the_global_totals_absence_names_every_cause() {
+        let pairs = vec!["EUR → CHF".to_string()];
+        assert_eq!(global_absence(false, &pairs, true), (String::new(), false));
+        // Pairs alone.
+        assert_eq!(
+            global_absence(true, &pairs, false),
+            ("EUR → CHF".to_string(), false)
+        );
+        // Pairs AND a bank that could not consolidate for another reason — both named.
+        assert_eq!(
+            global_absence(true, &pairs, true),
+            ("EUR → CHF".to_string(), true)
+        );
+        // No pair to blame: a plain « indisponible ».
+        assert_eq!(global_absence(true, &[], false), (String::new(), true));
+    }
+
+    #[test]
+    fn amounts_rates_and_stops_are_spelled_as_elsewhere() {
+        let comma = NumberFormat::Comma;
+        // Portefeuille's precision for an invested amount: up to two decimals (never rounded to the unit).
+        assert_eq!(
+            amount(Some(d("1234.5")), "CHF", comma).as_str(),
+            format!(
+                "{} CHF",
+                format_scaled(d("1234.5"), DisplayField::Price, comma)
+            )
+        );
+        assert!(
+            amount(Some(d("1234.56")), "CHF", comma).contains(",56"),
+            "the cents are no longer rounded away"
+        );
+        // The FX footnote's rate in the user's number format.
+        let rate = steadyinvest_persistence::FxRateItem {
+            rate: "0.8".into(),
+            ..fx_item()
+        };
+        assert!(rates_note(&[rate], comma).contains(" 0,8 ("));
+        // A legacy lot's stop is not given a currency it does not carry.
+        let stop = |currency: Option<&str>| state::StopFact {
+            level: d("63"),
+            currency: currency.map(str::to_string),
+            bank: "UBS".into(),
+            breached: false,
+            uncompared: None,
+        };
+        assert_eq!(
+            stops_text([stop(None), stop(Some("CHF"))].iter(), comma),
+            "63 (UBS) · 63 CHF (UBS)"
+        );
+    }
+
+    fn fx_item() -> steadyinvest_persistence::FxRateItem {
+        steadyinvest_persistence::FxRateItem {
+            id: Uuid::nil(),
+            base_currency: "USD".into(),
+            quote_currency: "CHF".into(),
+            rate: "1".into(),
+            rate_date: "2026-09-23".into(),
+            source: "manual".into(),
+            created_at: steadyinvest_contract::Timestamp(String::new()),
+        }
     }
 
     #[test]

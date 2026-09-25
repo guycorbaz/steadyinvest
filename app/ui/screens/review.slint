@@ -157,7 +157,9 @@ export component ReviewScreen inherits Rectangle {
                 title: @tr("Répartition par taille (chiffre d'affaires)");
                 // The size mix is the 6.7 read: its failure is this block's « indisponible ».
                 if Review.concentration-unavailable: StatusBand { icon: "⊘"; text: @tr("Répartition par taille indisponible."); }
-                if !Review.concentration-unavailable: ShareBlock { rows: Review.size-rows; with-target: true; kind: "size"; }
+                // An empty dossier: nothing to classify — one statement, never three « indisponible ».
+                if !Review.concentration-unavailable && Review.size-empty: StatusBand { icon: "◦"; text: @tr("Aucune position classée : le dossier ne contient aucune position."); }
+                if !Review.concentration-unavailable && !Review.size-empty: ShareBlock { rows: Review.size-rows; with-target: true; kind: "size"; }
                 if !Review.concentration-unavailable && Review.unclassified-rows.length > 0: ShareBlock { rows: Review.unclassified-rows; with-target: false; kind: "ticker"; }
             }
             if !Review.unavailable: PanelCard {
@@ -172,8 +174,10 @@ export component ReviewScreen inherits Rectangle {
             }
             if !Review.unavailable: PanelCard {
                 title: @tr("Répartition par banque");
-                if Review.global-missing != "": StatusBand { icon: "◦"; text: @tr("Total global indisponible : taux manquant {}", Review.global-missing); }
-                if Review.global-unavailable: StatusBand { icon: "⊘"; text: @tr("Total global indisponible."); }
+                // Every cause of an absent total: the pairs, a non-pair cause, or both (G1 final review).
+                if Review.global-missing != "" && !Review.global-unavailable: StatusBand { icon: "◦"; text: @tr("Total global indisponible : taux manquant {}", Review.global-missing); }
+                if Review.global-missing != "" && Review.global-unavailable: StatusBand { icon: "⊘"; text: @tr("Total global indisponible : taux manquant {}, et au moins une banque indisponible.", Review.global-missing); }
+                if Review.global-missing == "" && Review.global-unavailable: StatusBand { icon: "⊘"; text: @tr("Total global indisponible."); }
                 ShareBlock { rows: Review.bank-rows; with-target: false; kind: "bank"; }
                 if Review.global-invested != "": FactLine { text: @tr("Total global : {}", Review.global-invested); }
             }
@@ -246,10 +250,41 @@ export component ReviewScreen inherits Rectangle {
                         }
                         // The lots of this ticker do not all link to the same study (a legacy lot
                         // matched ticker-only, lots in two currencies): stated, the row showing
-                        // the first lot's study.
-                        if row.mixed-links != "": StatusBand {
+                        // the most recent study (chosen by identity, never by lot position).
+                        // G3 review: « aucune étude » and « indisponible » are two facts; with an
+                        // unreadable lot the row cannot claim to show the most recent study.
+                        if row.mixed && !row.mixed-unreadable: StatusBand {
                             icon: "◦";
-                            text: @tr("Les lots de ce titre sont liés à des études différentes (études en {}) ; la ligne montre celle du premier lot.", row.mixed-links);
+                            text: row.mixed-no-study
+                                ? @tr("Les lots de ce titre ne sont pas tous liés à la même étude (études en {}, et un lot sans étude) ; la ligne montre la plus récente.", row.mixed-links)
+                                : @tr("Les lots de ce titre sont liés à des études différentes (études en {}) ; la ligne montre la plus récente.", row.mixed-links);
+                        }
+                        if row.mixed && row.mixed-unreadable: StatusBand {
+                            icon: "⊘";
+                            text: row.mixed-links == ""
+                                ? @tr("Un lot de ce titre n'a aucune étude et l'étude d'un autre lot n'a pas pu être lue.")
+                                : row.mixed-no-study
+                                    ? @tr("Les lots de ce titre ne sont pas tous liés à la même étude (études en {}, et un lot sans étude) et l'étude d'un lot n'a pas pu être lue ; la ligne montre une étude lue, sans pouvoir dire si c'est la plus récente.", row.mixed-links)
+                                    : @tr("Les lots de ce titre ne sont pas tous liés à la même étude (études en {}) et l'étude d'un lot n'a pas pu être lue ; la ligne montre une étude lue, sans pouvoir dire si c'est la plus récente.", row.mixed-links);
+                        }
+                        // What the OTHER studies carry — nothing hidden behind the shown one.
+                        if row.other-flagged != "": StatusBand {
+                            icon: "⚠";
+                            text: @tr("Autre étude de ce titre avec des signaux : {}", row.other-flagged);
+                        }
+                        if row.other-high-zone != "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Autre étude de ce titre dans la zone haute ou au-dessus : {}", row.other-high-zone);
+                        }
+                        // A stop that cannot be compared with a price says why (absence honesty):
+                        // a lot without a declared currency, a lot whose study could not be read.
+                        if row.stop-no-currency != "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Seuil suiveur {} non comparé au prix : le lot n'a pas de devise renseignée.", row.stop-no-currency);
+                        }
+                        if row.stop-unreadable != "": StatusBand {
+                            icon: "⊘";
+                            text: @tr("Seuil suiveur {} non comparé au prix : l'étude du lot n'a pas pu être lue.", row.stop-unreadable);
                         }
                         if row.flags != "": StatusBand {
                             icon: "⚠";
@@ -266,8 +301,10 @@ export component ReviewScreen inherits Rectangle {
                                     : row.stop-breached-levels == "" ? @tr("seuil suiveur {} — sous le seuil", row.stop)
                                     : @tr("seuil suiveur {} — sous le seuil : {}", row.stop, row.stop-breached-levels);
                             }
-                            if row.trigger == "stop": CaptionLine { text: @tr("◆ Le prix a atteint votre stop."); }
-                            if row.trigger == "sell": CaptionLine { text: @tr("◆ Le prix est dans la zone de vente."); }
+                            // The review's own words, as in its PDF and its counts (« seuil suiveur »,
+                            // « zone haute ») — G1 final review.
+                            if row.trigger == "stop": CaptionLine { text: @tr("◆ Le prix a atteint le seuil suiveur."); }
+                            if row.trigger == "sell": CaptionLine { text: @tr("◆ Le prix est dans la zone haute."); }
                             if row.linked || row.study == "not_computable": CaptionLine {
                                 text: row.last-saved-unknown ? @tr("dernière sauvegarde : inconnue (historique indisponible)") : @tr("dernière sauvegarde : {}", row.last-saved);
                             }
@@ -278,7 +315,8 @@ export component ReviewScreen inherits Rectangle {
 
             if !Review.unavailable: PanelCard {
                 title: @tr("Études à revoir");
-                subtitle: @tr("Revue annuelle : plus de 12 mois depuis la dernière sauvegarde effective, une donnée requise manquante, ou une confiance réduite.");
+                // Every reason the list can carry (G1 final review — the subtitle named three of five).
+                subtitle: @tr("Revue annuelle : plus de 12 mois depuis la dernière sauvegarde effective, une ancienneté inconnue, une donnée requise manquante, une confiance réduite, ou des données non calculables.");
                 if Review.due.length == 0: CaptionLine { text: @tr("Aucune étude à revoir."); }
                 for d in Review.due: HorizontalLayout {
                     spacing: Tokens.space-12;
@@ -300,7 +338,10 @@ export component ReviewScreen inherits Rectangle {
             if !Review.unavailable: PanelCard {
                 title: @tr("En chiffres");
                 FactLine { text: @tr("{} positions · {} avec une étude · {} critères validés · {} provisoires · {} en attente · {} non calculables", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld, Review.count-not-computable); }
-                FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur · {} à revoir", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached, Review.count-due); }
+                // Positions, as their rows show them (G3 review); the due count counts STUDIES —
+                // on its own line, never read as positions.
+                FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached); }
+                FactLine { text: @tr("{} études à revoir", Review.count-due); }
             }
         }
     }

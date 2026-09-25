@@ -2951,7 +2951,7 @@ fn portfolio_review_aggregates_two_banks_and_reads_every_lots_stop() {
     assert_eq!(row.stops.len(), 1, "only the lot that carries a stop");
     assert_eq!(row.stops[0].level, Decimal::from(63));
     assert_eq!(row.stops[0].bank, "Swissquote");
-    assert!(row.mixed_links.is_empty(), "both lots link the same study");
+    assert!(row.mixed.is_none(), "both lots link the same study");
     assert!(!row.stop_breached, "70 is above 63");
     // The price falls through the second bank's stop: the breach is read on THAT lot.
     state
@@ -3032,10 +3032,16 @@ fn lots_in_two_currencies_read_each_stop_against_their_own_study() {
     let review = review_of(&state);
     let row = &review.positions[0];
     // Stated: the lots do not share one study.
-    assert_eq!(row.mixed_links.len(), 2);
-    assert!(row.mixed_links.contains(&"CHF".to_string()));
-    assert!(row.mixed_links.contains(&"USD".to_string()));
-    let by = |c: &str| row.stops.iter().find(|s| s.currency == c).unwrap();
+    let mixed = row.mixed.as_ref().expect("two studies");
+    assert_eq!(mixed.currencies.len(), 2);
+    assert!(mixed.currencies.contains(&"CHF".to_string()));
+    assert!(mixed.currencies.contains(&"USD".to_string()));
+    let by = |c: &str| {
+        row.stops
+            .iter()
+            .find(|s| s.currency.as_deref() == Some(c))
+            .unwrap()
+    };
     assert_eq!(by("CHF").level, Decimal::from(63));
     assert!(by("CHF").breached, "60 CHF reached the CHF stop");
     assert_eq!(by("USD").level, Decimal::from(90));
@@ -3059,21 +3065,97 @@ fn a_legacy_lot_matches_ticker_only_and_is_never_compared_across_currencies() {
     assert_eq!(legacy.identity, Some(usd));
     assert_eq!(declared.identity, Some(chf));
     assert_eq!(
-        super::review::mixed_links(&[&legacy, &declared]),
+        super::review::mixed_links(&[&legacy, &declared], 0)
+            .expect("two links")
+            .currencies,
         vec!["USD", "CHF"],
         "the two links are stated"
     );
-    // The legacy lot's stop is in its effective (reference) currency, CHF: the USD study's 10
-    // is never compared with it.
+    // The legacy lot carries no currency: its stop's unit is unknown — never labelled with the
+    // reference currency, never compared with the USD study's 10 (G1 final review).
     let stop = super::review::lot_stop(
         Some("63"),
-        "CHF",
+        None,
         "UBS",
         legacy.study_currency.as_deref(),
         legacy.price,
+        false,
     )
     .unwrap();
     assert!(!stop.breached);
+    assert_eq!(stop.currency, None, "no currency the lot does not carry");
+}
+
+#[test]
+fn a_rows_study_is_the_newest_linked_one_and_every_lots_study_is_due() {
+    // G1 final review: the CHF lot comes first, but the row shows the NEWEST linked study (the
+    // USD one) — by identity, never by lot position; the due list reads both studies.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7900);
+    let chf = state.create_study("NESN", "CHF").unwrap();
+    let usd = state.create_study("NESN", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "1", "90", "USD", "").unwrap();
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    let ReviewStudy::Linked(f) = &row.study else {
+        panic!("a linked study, got {:?}", row.study);
+    };
+    assert_eq!(f.study_id, usd, "the newest study, not the first lot's");
+    assert_eq!(f.currency, "USD", "the price's unit is the study's");
+    assert_eq!(
+        row.currency, "USD",
+        "the row states the shown study's currency"
+    );
+    // Both empty studies are « en attente » — both are listed, each named by its currency.
+    let due: Vec<(&str, Uuid)> = review
+        .due
+        .iter()
+        .map(|d| (d.ticker.as_str(), d.study_id))
+        .collect();
+    assert_eq!(due, vec![("NESN (USD)", usd), ("NESN (CHF)", chf)]);
+    assert_eq!(review.counts.due, 2);
+    assert_eq!(review.counts.linked, 1, "one position with a study");
+}
+
+#[test]
+fn three_lots_chf_usd_chf_show_the_most_recently_created_study_not_the_largest_id() {
+    // G3 review: studies created on DIFFERENT days, the newer one carrying the SMALLER id — the
+    // row follows creation recency (the listing order), never the id, never the lot order.
+    let dir = TempDir::new().unwrap();
+    let chf = {
+        let mut then = review_state_at(&dir, 0x7B00, "2026-01-10T09:00:00Z");
+        then.create_study("NESN", "CHF").unwrap()
+    };
+    let mut now = review_state_at(&dir, 0x7A00, "2026-06-10T09:00:00Z");
+    let usd = now.create_study("NESN", "USD").unwrap();
+    assert!(usd < chf, "the newer study has the smaller id");
+    now.set_judgment_field(chf, "current_price", Some(und_money(70)))
+        .unwrap();
+    now.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let second = now.add_portfolio("Swissquote").unwrap();
+    now.set_active_portfolio(second);
+    now.add_holding("NESN", "1", "90", "USD", "").unwrap();
+    let third = now.add_portfolio("PostFinance").unwrap();
+    now.set_active_portfolio(third);
+    now.add_holding("NESN", "2", "80", "CHF", "").unwrap();
+    let review = review_of(&now);
+    assert_eq!(review.positions.len(), 1, "three lots, one row");
+    let row = &review.positions[0];
+    let ReviewStudy::Linked(f) = &row.study else {
+        panic!("a linked study, got {:?}", row.study);
+    };
+    assert_eq!(f.study_id, usd, "the most recently created study");
+    let mixed = row.mixed.as_ref().expect("two studies");
+    assert_eq!(
+        mixed.currencies,
+        vec!["CHF", "USD"],
+        "each study once, lot order"
+    );
+    assert!(!mixed.no_study && !mixed.unreadable);
+    assert_eq!(row.banks.len(), 3);
 }
 
 // ── Story 4.5 — trailing stop per holding (validate, seed, ratchet) ──

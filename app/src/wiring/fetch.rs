@@ -310,6 +310,14 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                         refresh_studies(&ui, &journal_state.borrow());
+                        // A study the review reads may have changed under it (G1 final review).
+                        crate::wiring::review::request_review_refresh(
+                            &ui,
+                            &journal_state,
+                            &holding_freshness,
+                            &holding_dismissed,
+                            &config,
+                        );
                     };
                     match outcome.result {
                         // Story 3.5 / #46: a transport-success that returned ZERO usable years is
@@ -540,6 +548,15 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         &holding_dismissed.borrow(),
                         format,
                     );
+                    // The review shown while the batch runs re-derives too (checklist §7 — the
+                    // price, the stop and the freshness it states just changed; G1 final review).
+                    crate::wiring::review::request_review_refresh(
+                        &ui,
+                        &journal_state,
+                        &holding_freshness,
+                        &holding_dismissed,
+                        &config,
+                    );
                     // One job resolved — advance the batch counter, clear the latch when fully drained.
                     advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
                 }
@@ -648,6 +665,14 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         &holding_freshness.borrow(),
                         &holding_dismissed.borrow(),
                         format,
+                    );
+                    // …and the review, when it is on display (G1 final review).
+                    crate::wiring::review::request_review_refresh(
+                        &ui,
+                        &journal_state,
+                        &holding_freshness,
+                        &holding_dismissed,
+                        &config,
                     );
                 }
                 fetch::WorkerOutcome::TestKey(result) => {
