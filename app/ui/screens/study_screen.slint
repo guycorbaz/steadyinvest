@@ -72,9 +72,12 @@ component GridCell inherits Rectangle {
 
 // A left-aligned label cell (row labels, year cells) on the same grid. A label may elide (its full
 // wording lives in the source); a FIGURE never does — figures go in `GridCell` / `EditableCell`.
+// A column TITLE sets `fit: true`: it is shown whole, shrinking its font by the `CellFit` rule
+// instead of eliding (G1 J remainder: « Moy. 5… » / « Tenda… » in the §2 header).
 component GridLabelCell inherits Rectangle {
     in property <string> label;
     in property <bool> numeric: false;
+    in property <bool> fit: false;
     min-width: 0px;
     preferred-width: 0px;
     min-height: Tokens.row-height;
@@ -82,18 +85,24 @@ component GridLabelCell inherits Rectangle {
     background: Tokens.surface-alt;
     border-width: Tokens.border;
     border-color: Tokens.grid-line;
-    HorizontalLayout {
-        padding-left: Tokens.space-8;
-        padding-right: Tokens.space-8;
-        Text {
-            text: root.label;
-            color: Tokens.text-mid;
-            font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-            overflow: elide;
-        }
+    measure := Text {
+        visible: false;
+        text: root.label;
+        font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
+        font-size: Tokens.font-caption;
+    }
+    // Placed explicitly (no inner layout), like `GridCell`: a width-driven font inside a layout
+    // would feed the row's layout back into its own width (a binding loop).
+    Text {
+        x: Tokens.space-8;
+        width: max(0px, parent.width - Tokens.space-8 * 2);
+        height: parent.height;
+        text: root.label;
+        color: Tokens.text-mid;
+        font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
+        font-size: root.fit ? CellFit.scaled(Tokens.font-caption, self.width, measure.preferred-width) : Tokens.font-caption;
+        vertical-alignment: center;
+        overflow: elide;
     }
 }
 
@@ -888,9 +897,9 @@ export component StudyScreen inherits Rectangle {
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("Indicateur"); width: root.col-label; }
-                    for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; }
-                    GridLabelCell { label: @tr("Moy. 5 ans"); width: root.col-stat; }
-                    GridLabelCell { label: @tr("Tendance"); width: root.col-stat; }
+                    for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; fit: true; }
+                    GridLabelCell { label: @tr("Moy. 5 ans"); width: root.col-stat; fit: true; }
+                    GridLabelCell { label: @tr("Tendance"); width: root.col-stat; fit: true; }
                 }
                 // Editable raw-input rows (sales · pre-tax profit · book value), paired with their
                 // label by index — the row order is fixed by `viewmodel/form.rs`.

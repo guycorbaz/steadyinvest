@@ -24,10 +24,15 @@ import { TrustMarker } from "trust_markers.slint";
 // floor would bring the clipping back. Shared by `EditableCell` and the study screen's `GridCell`.
 export global CellFit {
     pure public function font(room: length, natural: length) -> length {
+        return CellFit.scaled(Tokens.font-body, room, natural);
+    }
+    // The same rule from any base size (`natural` measured at `base`) — the §2 header titles use it
+    // at caption size so « Moy. 5 ans » / « Tendance » show whole rather than elide (G1 J remainder).
+    pure public function scaled(base: length, room: length, natural: length) -> length {
         if (natural <= room) {
-            return Tokens.font-body;
+            return base;
         }
-        return max(1px, Tokens.font-body * (max(0px, room - 2px) / natural));
+        return max(1px, base * (max(0px, room - 2px) / natural));
     }
 }
 
