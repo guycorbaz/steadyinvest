@@ -240,3 +240,10 @@ a legacy lot's stop is seeded from its cost basis; « Lier une étude » names a
 watchlist. Not in scope and left as found: `watch_error` still words a failed READ on the write
 rails as « L'enregistrement a échoué. »; the reinvestable-cash panel still swallows its read;
 a legacy lot's trigger-sale price still comes from its ticker-only study.
+
+Follow-ups in PR P (G1, branch `fix/g1-p-followups`, on `integ/g1-final2`):
+- [x] D5 (Guy, 2026-09-25): a lot without a declared currency is presumed in the reference currency — ONE rule (`state::stop_basis`) for the register (display, trigger, ratchet, seed), the review screen + its PDF and the trigger sale; against a study in another currency the stop is not compared, both facts stated; the trigger sale refuses that study's price by name
+- [x] G3 M1: a restore never replaces nor deletes an earlier `-prerestore` copy (refused, named; the snapshot is created new); a failed rollback says the dossier WAS replaced and names the kept snapshot; a path without an open handle is refused (the checkpoint is never skipped)
+- [x] G3 L1–L6: the in-flight banner re-set by name; a deleted watched study worded as an absence; corrupt drafts / missing positions named; no default portfolio and no duplicate watch on a failed read; the SQL ticker compare trims; tests for a NULL-kind legacy sale and a dividend at full tie
+- [x] K residues: a write rail's failed READ says « Le dossier n'a pas pu être lu » (`read_error`); the reinvestable dividends say « indisponible » on a failed read
+- [x] The quick examination's list notice and the startup state go through `list_notice` (F4). The create-study and demo clears of `Studies.notice` stay outside; `progress` / `clear` keep their `dead_code` marker (still no writer).
