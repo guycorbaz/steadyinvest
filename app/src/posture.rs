@@ -715,8 +715,10 @@ mod tests {
         // The legacy lot's uncompared stop is stated (« non comparé au prix : le lot n'a pas de
         // devise renseignée »): 962 + 1 = 963, measured.
         // integ/g1-final2: 953 + L 11 + M 22 + K 10 = 996, measured.
+        // G1 P: a watched study that was deleted is worded as an absence, and the reinvestable
+        // dividends say « indisponible » on a failed read: 996 + 2 = 998, measured.
         assert!(
-            total >= 996,
+            total >= 998,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -838,7 +840,7 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            183,
+            184,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -862,7 +864,8 @@ mod tests {
             // G1 P (D5): a currency-less lot's trigger sale is refused against a study in another
             // currency (MSG_SELL_STUDY_OTHER_CURRENCY): 180 + 1 = 181, measured. A restore
             // never replaces an earlier `-prerestore` and a failed rollback says the dossier was
-            // replaced (MSG_RESTORE_SNAPSHOT_EXISTS, MSG_RESTORE_ROLLBACK_FAILED): 181 + 2 = 183.
+            // replaced (MSG_RESTORE_SNAPSHOT_EXISTS, MSG_RESTORE_ROLLBACK_FAILED): 181 + 2 = 183. A write
+            // rail's failed READ is named as a read (MSG_READ_FAILED): 183 + 1 = 184, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }

@@ -17,8 +17,9 @@ use super::{
     MSG_HOLDING_INVALID_TICKER, MSG_HOLDING_LEDGER_UNREADABLE, MSG_HOLDING_NO_STUDY,
     MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_DELETED, MSG_HOLDING_STUDY_UNAVAILABLE,
     MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
-    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_ONLY_WRITE, MSG_STOP_STUDY_UNAVAILABLE,
-    holding_study_other_currency_message, portfolio_has_holdings_message, read_typed, watch_error,
+    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_FAILED, MSG_READ_ONLY_WRITE, MSG_STOP_STUDY_UNAVAILABLE,
+    holding_study_other_currency_message, portfolio_has_holdings_message, read_error, read_typed,
+    watch_error,
 };
 
 /// One study a position can be added for (G1 review, Guy's decision 3) — the #81 link key
@@ -61,7 +62,7 @@ impl JournalState {
     }
 
     /// Fallible [`Self::active_portfolio`]: `Err` when the portfolios could not be read.
-    fn try_active_portfolio(&self) -> Result<Option<PortfolioItem>, String> {
+    pub(super) fn try_active_portfolio(&self) -> Result<Option<PortfolioItem>, String> {
         let portfolios = self.try_list_portfolios()?;
         if let Some(id) = self.active_portfolio_id
             && let Some(p) = portfolios.iter().find(|p| p.id == id)
@@ -154,7 +155,7 @@ impl JournalState {
         }
         let portfolios = {
             let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-            journal.list_portfolios().map_err(watch_error)?
+            journal.list_portfolios().map_err(read_error)?
         };
         if !portfolios.iter().any(|p| p.id == id) {
             return Err(MSG_PORTFOLIO_NOT_FOUND.to_string());
@@ -175,7 +176,7 @@ impl JournalState {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         Ok(journal
             .list_all_holdings()
-            .map_err(watch_error)?
+            .map_err(read_error)?
             .iter()
             .filter(|h| h.portfolio_id == id)
             .count())
@@ -183,8 +184,13 @@ impl JournalState {
 
     /// The active portfolio, creating the default one if the journal has none yet (the add-holding
     /// path). Mints an id/timestamp **only** when no portfolio exists (ADD15).
+    /// G1 P (G3 L4): a failed read of the portfolios is REFUSED by name — never taken for « no
+    /// portfolio yet » (which would create a second default one).
     fn active_portfolio_or_default(&mut self) -> Result<PortfolioItem, String> {
-        if let Some(p) = self.active_portfolio() {
+        if let Some(p) = self
+            .try_active_portfolio()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
+        {
             return Ok(p);
         }
         self.ensure_default_portfolio()
@@ -281,7 +287,7 @@ impl JournalState {
     /// `IdGen` id (which would shift a deterministic test sequence) and the common path is a pure read.
     fn ensure_default_portfolio(&mut self) -> Result<PortfolioItem, String> {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-        if let Some(existing) = journal.first_portfolio().map_err(watch_error)? {
+        if let Some(existing) = journal.first_portfolio().map_err(read_error)? {
             return Ok(existing);
         }
         let id = self.idgen.new_id();
@@ -400,7 +406,7 @@ impl JournalState {
             let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
             journal
                 .list_all_holdings()
-                .map_err(watch_error)?
+                .map_err(read_error)?
                 .into_iter()
                 .find(|h| h.id == id)
                 .ok_or_else(|| MSG_HOLDING_NOT_FOUND.to_string())?
@@ -543,12 +549,12 @@ impl JournalState {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         let ledger_backed = !journal
             .list_transactions(id)
-            .map_err(watch_error)?
+            .map_err(read_error)?
             .is_empty();
         if ledger_backed {
             let current = journal
                 .list_all_holdings()
-                .map_err(watch_error)?
+                .map_err(read_error)?
                 .into_iter()
                 .find(|h| h.id == id);
             if let Some(current) = current {

@@ -340,8 +340,14 @@ pub(crate) fn refresh_holdings(
     // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — includes SOLD holdings'
     // dividends (cash received is cash); recomputed with the register so every ledger mutation and
     // portfolio switch keeps the panel truthful.
-    let cash_rows: Vec<CapitalAtRiskRow> = state
-        .portfolio_reinvestable_cash_by_currency(&reference_currency)
+    // G1 P: a failed read is « indisponible », never a vanished panel.
+    let (cash, cash_unavailable) =
+        match state.portfolio_reinvestable_cash_by_currency(&reference_currency) {
+            Ok(cash) => (cash, false),
+            Err(_) => (Vec::new(), true),
+        };
+    holdings.set_reinvestable_cash_unavailable(cash_unavailable);
+    let cash_rows: Vec<CapitalAtRiskRow> = cash
         .into_iter()
         .map(|(currency, net)| CapitalAtRiskRow {
             currency: currency.into(),
@@ -801,12 +807,7 @@ fn apply_holdings_result(
 ) {
     let holdings = ui.global::<Holdings>();
     match result {
-        Ok(()) => {
-            let current = holdings.get_notice();
-            holdings.set_notice(
-                notice_after_success(current.as_str(), holdings.get_refreshing()).into(),
-            );
-        }
+        Ok(()) => holdings.set_notice(notice_after_success(holdings.get_refreshing()).into()),
         Err(message) => crate::wiring::dialog::refuse(ui, &message),
     }
     refresh_holdings(ui, state, freshness, dismissed, format);
@@ -815,9 +816,15 @@ fn apply_holdings_result(
 /// The holdings notice slot after a successful gesture that states no outcome of its own (an
 /// edit, a portfolio switch): emptied — except while a price refresh is IN FLIGHT, whose banner
 /// owns the slot until the batch drains (the notice-slot rule F4, G1 final review L11: a portfolio
-/// switch or an edit used to erase « Rafraîchissement des prix en cours. » mid-batch).
-fn notice_after_success(current: &str, refreshing: bool) -> &str {
-    if refreshing { current } else { "" }
+/// switch or an edit used to erase « Rafraîchissement des prix en cours. » mid-batch). G1 P (G3
+/// L1): the in-flight banner is the ONLY thing kept — re-set by name, never whatever stale
+/// notice happened to sit in the slot.
+fn notice_after_success(refreshing: bool) -> &'static str {
+    if refreshing {
+        state::MSG_HOLDINGS_REFRESHING
+    } else {
+        ""
+    }
 }
 
 /// Wire the holdings + portfolio domain: the holding add / edit / remove / sell / trailing-stop /
@@ -1641,10 +1648,13 @@ mod tests {
     #[test]
     fn a_success_never_erases_the_in_flight_refresh_banner() {
         // G1 final review (L11, the notice-slot rule F4).
-        let banner = crate::state::MSG_HOLDINGS_REFRESHING;
-        assert_eq!(notice_after_success(banner, true), banner);
-        assert_eq!(notice_after_success(banner, false), "");
-        assert_eq!(notice_after_success("", false), "");
+        // G1 P (G3 L1): the banner is re-set by name while refreshing — a stale outcome notice
+        // that sat in the slot is not kept.
+        assert_eq!(
+            notice_after_success(true),
+            crate::state::MSG_HOLDINGS_REFRESHING
+        );
+        assert_eq!(notice_after_success(false), "");
     }
 
     #[test]

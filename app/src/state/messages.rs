@@ -33,6 +33,8 @@ pub const MSG_NO_DATA_DIR: &str =
     "Aucun emplacement de dossier n'est disponible ; les études ne sont pas enregistrées.";
 /// A save failed for a reason other than the read-only / identity guards (cause appended).
 pub const MSG_SAVE_FAILED: &str = "L'enregistrement a échoué.";
+/// G1 P: a write rail's preliminary READ failed — the write was never attempted.
+pub const MSG_READ_FAILED: &str = "Le dossier n'a pas pu être lu ; rien n'a été enregistré.";
 /// The system clipboard could not be read for a paste-a-column (Story 2.4).
 pub const MSG_CLIPBOARD_UNAVAILABLE: &str =
     "Le presse-papiers est indisponible ; aucune colonne n'a été collée.";
@@ -873,6 +875,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,
+    MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,
     MSG_NUMBER_AMBIGUOUS_COMMA,

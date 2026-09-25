@@ -7,8 +7,8 @@ use steadyinvest_persistence::WatchItem;
 use uuid::Uuid;
 
 use super::{
-    JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_WATCH_DUPLICATE,
-    watch_error,
+    JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_FAILED, MSG_READ_ONLY_WRITE,
+    MSG_WATCH_DUPLICATE, watch_error,
 };
 
 impl JournalState {
@@ -121,8 +121,11 @@ impl JournalState {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
+        // G1 P (G3 L4): the duplicate check SEES a failed read — refused by name, never taken for
+        // an empty list (which would let a duplicate through).
         if self
-            .list_watch_items()
+            .try_list_watch_items()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
             .iter()
             .any(|w| w.security_ticker.eq_ignore_ascii_case(ticker))
         {

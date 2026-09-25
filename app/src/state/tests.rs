@@ -4044,7 +4044,9 @@ fn reinvestable_cash_groups_per_currency_and_counts_sold_holdings() {
         "the USD holding is retired"
     );
 
-    let cash = state.portfolio_reinvestable_cash_by_currency("CHF");
+    let cash = state
+        .portfolio_reinvestable_cash_by_currency("CHF")
+        .unwrap();
     assert_eq!(
         cash,
         vec![
@@ -4201,7 +4203,9 @@ fn one_invalid_dividend_row_does_not_erase_its_currency_bucket() {
         )
         .unwrap();
 
-    let cash = state.portfolio_reinvestable_cash_by_currency("CHF");
+    let cash = state
+        .portfolio_reinvestable_cash_by_currency("CHF")
+        .unwrap();
     assert_eq!(
         cash,
         vec![("CHF".to_string(), Decimal::from_str_exact("19.5").unwrap())],
@@ -6664,6 +6668,50 @@ fn make_table_unreadable(dir: &TempDir, table: &str) {
         [],
     )
     .unwrap();
+}
+
+#[test]
+fn a_write_rails_failed_read_is_named_as_a_read_never_as_a_save_or_an_absence() {
+    // G1 P (G3 L3/L4, item 4): a missing position is « introuvable »; a failed READ before a
+    // write is « n'a pas pu être lu » — never « L'enregistrement a échoué », never an empty list
+    // that creates a second default portfolio or lets a duplicate through; the reinvestable-cash
+    // read says it failed.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x95A);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_watch_item("ROG", None).unwrap();
+    assert_eq!(
+        state.sell_holding(Uuid::from_u128(0xDEAD), "", "", "CHF"),
+        Err(MSG_HOLDING_NOT_FOUND.to_string())
+    );
+    assert_eq!(
+        state.record_sell_for(Uuid::from_u128(0xDEAD), "", "1", "1", "", "", "CHF"),
+        Err(MSG_HOLDING_NOT_FOUND.to_string())
+    );
+    make_table_unreadable(&dir, "watchlist_items");
+    assert_eq!(
+        state.add_watch_item("ROG", None),
+        Err(MSG_READ_FAILED.to_string()),
+        "the duplicate check sees the failed read"
+    );
+    let nesn = state.list_holdings()[0].id;
+    make_table_unreadable(&dir, "holdings");
+    assert_eq!(
+        state.update_holding_keeping_currency(nesn, "NESN", "10", "100", "x", "CHF"),
+        Err(MSG_READ_FAILED.to_string()),
+        "a failed read is no save failure"
+    );
+    make_table_unreadable(&dir, "portfolios");
+    assert_eq!(
+        state.add_holding("ROG", "1", "1", "CHF", ""),
+        Err(MSG_READ_FAILED.to_string()),
+        "never a second default portfolio on a failed read"
+    );
+    assert!(
+        state
+            .portfolio_reinvestable_cash_by_currency("CHF")
+            .is_err()
+    );
 }
 
 #[test]

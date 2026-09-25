@@ -51,6 +51,8 @@ export struct WatchRow {
     // G1 final review (L6): the linked study could not be READ (or no longer resolves) —
     // « Étude indisponible », never a dangling « Étude : » nor « aucune étude ».
     study-unavailable: bool,
+    // G1 P (G3 L2): the linked study no longer exists — a true absence, worded as such.
+    study-deleted: bool,
 }
 
 // Story 7.3 (PR 2): one row of the watchlist « criblage » — the examination's facts as already-
@@ -1529,6 +1531,8 @@ export global Holdings {
     callback record-dividend(string, string, string, string, string, string) -> bool;
     // Story 6.4 (FR41): the NET reinvestable dividend cash per currency (pct unused — "").
     in-out property <[CapitalAtRiskRow]> reinvestable-cash;
+    // G1 P: the dividends could not be READ — « indisponible », never a vanished panel.
+    in-out property <bool> reinvestable-cash-unavailable;
     // ── Story 6.6 (FR44): the consolidation hierarchy — per bank + global, in the reference
     //    currency, FX only here. Empty banks list = nothing to consolidate (single bank, no
     //    foreign bucket) → the block hides. `consolidation-global` is "" when a pair is missing

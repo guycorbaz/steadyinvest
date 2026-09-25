@@ -383,6 +383,13 @@ pub fn created_at_date(ts: &Timestamp) -> String {
 /// save-failure. The persistence error's own (English) text is LOGGED, never appended to the French
 /// refusal (G1 final review: a raw `transaction rows still reference…` under « L'enregistrement a
 /// échoué. » was no cause the user could read).
+/// A failed READ on a write rail (G1 P): named as a read failure — never « L'enregistrement a
+/// échoué. » for a write that was never attempted. The persistence error's text is logged.
+fn read_error(error: PersistError) -> String {
+    tracing::warn!("journal read failed: {error}");
+    MSG_READ_FAILED.to_string()
+}
+
 fn watch_error(error: PersistError) -> String {
     match error {
         PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),

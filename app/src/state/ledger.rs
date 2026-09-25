@@ -53,11 +53,12 @@ use crate::viewmodel::format::NumberFormat;
 use super::{
     JournalState, MSG_DIVIDEND_INVALID_GROSS, MSG_DIVIDEND_INVALID_QUANTITY,
     MSG_DIVIDEND_INVALID_WITHHOLDING, MSG_DIVIDEND_RETIRED, MSG_DIVIDEND_WITHHOLDING,
-    MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_INVALID_FEES, MSG_LEDGER_INVALID_PRICE,
-    MSG_LEDGER_INVALID_QUANTITY, MSG_LEDGER_OUT_OF_RANGE, MSG_LEDGER_OVERSELL,
-    MSG_LEDGER_PARTIAL_SOLD, MSG_LEDGER_QUANTITY_EMPTY, MSG_LEDGER_ROW_INVALID,
-    MSG_LEDGER_UNKNOWN_KIND, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
-    MSG_SELL_STUDY_UNAVAILABLE, MSG_WITHHOLDING_INVALID, effective_currency, watch_error,
+    MSG_HOLDING_NOT_FOUND, MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_INVALID_FEES,
+    MSG_LEDGER_INVALID_PRICE, MSG_LEDGER_INVALID_QUANTITY, MSG_LEDGER_OUT_OF_RANGE,
+    MSG_LEDGER_OVERSELL, MSG_LEDGER_PARTIAL_SOLD, MSG_LEDGER_QUANTITY_EMPTY,
+    MSG_LEDGER_ROW_INVALID, MSG_LEDGER_UNKNOWN_KIND, MSG_NO_JOURNAL, MSG_READ_FAILED,
+    MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, MSG_SELL_STUDY_UNAVAILABLE, MSG_WITHHOLDING_INVALID,
+    effective_currency, read_error, watch_error,
 };
 
 /// An owned ledger-row draft — the borrow-free twin of [`LedgerEntry`] (which borrows), so the
@@ -232,8 +233,9 @@ fn candidate_of_owned(
     created_at: &str,
 ) -> Result<Candidate, String> {
     // The drafts hold canonical spellings (validated input, or the stored opening aggregate): a
-    // failed parse is a corrupt stored value, like `event_of`'s — never « not a number ».
-    let dec = |s: &str| Decimal::from_str_exact(s).map_err(|_| MSG_SAVE_FAILED.to_string());
+    // failed parse is a corrupt STORED value — named as such (G1 P, G3 L3), never « not a
+    // number » nor a generic save failure.
+    let dec = |s: &str| Decimal::from_str_exact(s).map_err(|_| MSG_LEDGER_ROW_INVALID.to_string());
     Ok(Candidate {
         occurred_at: entry.occurred_at.clone(),
         created_at: created_at.to_string(),
@@ -302,7 +304,7 @@ impl JournalState {
             .as_ref()
             .ok_or(MSG_NO_JOURNAL.to_string())?
             .list_transactions(holding_id)
-            .map_err(watch_error)
+            .map_err(read_error)
     }
 
     /// Any holding by id — including a sold one (the ledger of a retired holding stays editable;
@@ -312,7 +314,7 @@ impl JournalState {
             .as_ref()
             .ok_or(MSG_NO_JOURNAL.to_string())?
             .list_all_holdings()
-            .map_err(watch_error)?
+            .map_err(read_error)?
             .into_iter()
             .find(|h| h.id == holding_id)
             .ok_or(MSG_SAVE_FAILED.to_string())
@@ -438,11 +440,13 @@ impl JournalState {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
         // Selling is an action on an ACTIVE position (a retired holding re-enters via a new add).
+        // G1 P (G3 L3): an absent position is named; a failed read of the register too.
         let holding = self
-            .list_holdings()
+            .try_list_holdings()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())?;
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string())?;
         let quantity_input = quantity_input.trim();
         let quantity = if quantity_input.is_empty() {
             holding.quantity.clone()
@@ -517,11 +521,13 @@ impl JournalState {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
+        // G1 P (G3 L3): an absent position is named; a failed read of the register too.
         let holding = self
-            .list_holdings()
+            .try_list_holdings()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())?;
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string())?;
         let (qty, price, fees) = validate_ledger_amounts(
             quantity,
             unit_price,
@@ -681,21 +687,26 @@ impl JournalState {
     /// corrupt, imported, or over-withheld — is SKIPPED; it must never blank its whole currency
     /// bucket). Deterministic order; NO cross-currency total (FX is Story 6.5); a bucket whose
     /// dividends net to exactly zero still shows (a fully-withheld dividend is a recorded fact).
+    /// G1 P: a failed read (portfolios, holdings, a ledger) is `Err` — the panel says
+    /// « indisponible », never a panel that silently vanishes or a partial sum.
     pub fn portfolio_reinvestable_cash_by_currency(
         &self,
         reference_currency: &str,
-    ) -> Vec<(String, Decimal)> {
+    ) -> Result<Vec<(String, Decimal)>, String> {
         use std::collections::BTreeMap;
         let Some(journal) = self.journal.as_ref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let Some(portfolio) = self.active_portfolio() else {
-            return Vec::new();
+        let Some(portfolio) = self.try_active_portfolio()? else {
+            return Ok(Vec::new());
         };
-        let holdings = journal.list_all_holdings().unwrap_or_default();
+        let holdings = journal.list_all_holdings().map_err(|error| {
+            tracing::warn!("reinvestable cash: list_all_holdings failed: {error}");
+            error.to_string()
+        })?;
         let mut by_ccy: BTreeMap<String, Decimal> = BTreeMap::new();
         for holding in holdings.iter().filter(|h| h.portfolio_id == portfolio.id) {
-            for row in self.holding_ledger(holding.id) {
+            for row in self.try_holding_ledger(holding.id)? {
                 if row.kind.as_deref() != Some(KIND_DIVIDEND) {
                     continue;
                 }
@@ -720,7 +731,7 @@ impl JournalState {
                 *bucket = bucket.checked_add(net).unwrap_or(*bucket);
             }
         }
-        by_ccy.into_iter().collect()
+        Ok(by_ccy.into_iter().collect())
     }
 
     /// Edit a ledger row (Story 6.3, FR39): date, quantity, unit price, fees, rationale — never
