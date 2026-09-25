@@ -71,6 +71,7 @@ pub use replacement::*;
 pub use restore::*;
 pub use review::*;
 pub use undo::*;
+pub(crate) use watchlist::same_ticker;
 
 /// Where a default journal lives when the user has none yet: the OS **data** dir (NOT the config
 /// dir, NOT beside `config.json`, NOT inside the journal) — outside any sync-watched tree (the

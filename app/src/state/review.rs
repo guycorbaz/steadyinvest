@@ -453,13 +453,15 @@ impl JournalState {
         (last_saved, due)
     }
 
-    /// One lot's link, matched EXACTLY as the register matches it (#81 / #218 — the lot's
-    /// DECLARED currency; a legacy `None` lot matches ticker-only); a read failure is its own
-    /// state, a normalize failure too.
+    /// One lot's link, matched EXACTLY as the register matches it — THE resolution,
+    /// [`Self::try_lot_study`] (#81 / #218 / D5, G1 P review H1: the lot's EFFECTIVE currency, a
+    /// legacy `None` lot's being the reference; ticker-only only as the « other currency » hint);
+    /// a read failure is its own state, a normalize failure too.
     pub(super) fn lot_link(
         &self,
         ticker: &str,
         currency: Option<&str>,
+        reference_currency: &str,
         threshold: Option<&str>,
     ) -> LotLink {
         let unlinked = |study| LotLink {
@@ -469,7 +471,7 @@ impl JournalState {
             in_sell_zone: false,
             identity: None,
         };
-        let s = match self.try_matched_study_in_currency(ticker, currency) {
+        let s = match self.try_lot_study(ticker, currency, reference_currency) {
             Err(_) => return unlinked(ReviewStudy::Unavailable),
             Ok(None) => {
                 // The other-currency cause, read FALLIBLY (#95): a failed lookup is
@@ -615,7 +617,12 @@ impl JournalState {
                 let link = link_cache
                     .entry((ticker.clone(), declared.clone()))
                     .or_insert_with(|| {
-                        self.lot_link(&ticker, declared.as_deref(), threshold.as_deref())
+                        self.lot_link(
+                            &ticker,
+                            declared.as_deref(),
+                            reference_currency,
+                            threshold.as_deref(),
+                        )
                     })
                     .clone();
                 links.push(link);
@@ -633,12 +640,18 @@ impl JournalState {
             let mut lot_triggers = Vec::new();
             for (h, link) in held.iter().zip(&links) {
                 let declared = h.currency.as_deref().map(str::to_uppercase);
+                // D5 (G1 P review H1): a legacy lot that links no study is not compared against
+                // its same-ticker study in another currency — that hint's currency is named.
+                let hint = match (&link.study, declared.as_deref()) {
+                    (ReviewStudy::None { other_currency }, None) => other_currency.clone(),
+                    _ => None,
+                };
                 let stop = lot_stop(
                     h.trailing_stop_level.as_deref(),
                     declared.as_deref(),
                     reference_currency,
                     &bank_name(h.portfolio_id),
-                    link.study_currency.as_deref(),
+                    link.study_currency.as_deref().or(hint.as_deref()),
                     link.price,
                     matches!(link.study, ReviewStudy::Unavailable),
                 );

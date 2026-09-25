@@ -106,13 +106,17 @@ pub(crate) fn refresh_holdings(
     let rows: Vec<HoldingRow> = items
         .iter()
         .map(|h| {
-            // Auto-match the holding to the most-recent saved study of the same ticker AND currency
-            // (issue #81 — a cross-currency study must not lend this row its price / stop); `None` →
-            // a neutral "no linked study" row, never an error. Issue #95 tri-state: a read FAILURE
-            // marks the row « étude indisponible », never « aucune étude liée ».
-            let (study, study_unavailable) = match state
-                .try_matched_study_in_currency(&h.security_ticker, h.currency.as_deref())
-            {
+            // The lot's ONE link ([`JournalState::try_lot_study`] — D5, G1 P review H1): the
+            // newest study of its ticker in its EFFECTIVE currency (a legacy lot's: the reference
+            // currency), so a cross-currency study never lends this row its price / zone / stop
+            // (#81) — and never a price labelled in the wrong currency (H2). `None` → a neutral
+            // "no linked study" row. Issue #95 tri-state: a read FAILURE marks the row « étude
+            // indisponible », never « aucune étude liée ».
+            let (study, study_unavailable) = match state.try_lot_study(
+                &h.security_ticker,
+                h.currency.as_deref(),
+                &reference_currency,
+            ) {
                 Ok(found) => (found, false),
                 Err(_) => (None, true),
             };
@@ -157,27 +161,27 @@ pub(crate) fn refresh_holdings(
                 .as_deref()
                 .and_then(|s| rust_decimal::Decimal::from_str_exact(s).ok());
             // D5 (Guy, 2026-09-25 — [`state::stop_basis`], the rule the review screen shares): the
-            // stop is compared only to a price in its unit; a legacy lot without a declared
-            // currency is presumed in the reference currency, so a study in another currency is
-            // not compared (no breach, no margin, no stop trigger) — both facts stated.
-            let basis = study.as_ref().map(|s| {
-                state::stop_basis(
-                    h.currency.as_deref(),
-                    &reference_currency,
-                    &s.native_currency,
-                )
-            });
+            // stop is compared only to a price in its unit — the linked study is, by construction
+            // of the link; a legacy lot whose only study is in another currency links none, so
+            // its stop is not compared (no breach, no margin, no stop trigger) — both facts
+            // stated.
             let current_price_dec = study
                 .as_ref()
-                .filter(|_| basis == Some(state::StopBasis::Comparable))
+                .filter(|s| {
+                    state::stop_basis(
+                        h.currency.as_deref(),
+                        &reference_currency,
+                        &s.native_currency,
+                    ) == state::StopBasis::Comparable
+                })
                 .and_then(|s| s.judgment.current_price)
                 .map(|m| m.as_decimal());
-            let stop_uncompared_study = match (&basis, stop_level_dec) {
-                (Some(state::StopBasis::NoCurrencyOtherStudy(currency)), Some(_)) => {
-                    currency.clone()
-                }
-                _ => String::new(),
-            };
+            let stop_uncompared_study = stop_uncompared_study(
+                h.currency.as_deref(),
+                study.is_some(),
+                &study_other_currency,
+                stop_level_dec.is_some(),
+            );
             let stop_breached = match (stop_level_dec, current_price_dec) {
                 (Some(level), Some(price)) => steadyinvest_core::risk::stop_breached(level, price),
                 _ => false,
@@ -717,6 +721,23 @@ pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_i
     }
 }
 
+/// The study currency a lot's stop is NOT compared against (D5, G1 P review H1/H2): a legacy lot
+/// (no declared currency) that links no study while a same-ticker study exists in another
+/// currency — named on the row with the lot's missing currency; "" otherwise (compared, or
+/// nothing to name).
+fn stop_uncompared_study(
+    declared_currency: Option<&str>,
+    linked: bool,
+    other_currency: &str,
+    has_stop: bool,
+) -> String {
+    if declared_currency.is_none() && !linked && has_stop {
+        other_currency.to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// What an Enter in the trigger-sale dialog shows when the quantity is not a typed number (G1 I
 /// review; G1 final review L9 — a text that is no number used to do NOTHING visible): an ambiguous
 /// number's named refusal, a non-number's quantity refusal, and "" only for a blank field (Guy's
@@ -1105,6 +1126,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>().on_refresh_prices(move || {
             let ui = ui_weak.unwrap();
             let holdings = ui.global::<Holdings>();
+            let reference = config.borrow().reference_currency_or_default();
             let jobs: Vec<(Uuid, String)> = {
                 let state = journal_state.borrow();
                 let mut seen = std::collections::HashSet::new();
@@ -1112,12 +1134,9 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     .list_holdings()
                     .into_iter()
                     .filter_map(|h| {
-                        // Issue #81: the price-refresh target is the study in the holding's currency.
+                        // Issue #81 + D5: the price-refresh target is the lot's ONE link.
                         state
-                            .study_id_for_ticker_in_currency(
-                                &h.security_ticker,
-                                h.currency.as_deref(),
-                            )
+                            .lot_study_id(&h.security_ticker, h.currency.as_deref(), &reference)
                             .map(|sid| (sid, h.security_ticker))
                     })
                     .filter(|(_, ticker)| seen.insert(ticker.to_uppercase()))
@@ -1207,14 +1226,19 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                     .set_holding_trailing_stop(id, &pct, &reference);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
+                // G1 P review (L-c): a cost-basis seed of a legacy lot is stated, never silent.
+                let stated = result.as_ref().ok().copied().flatten();
                 apply_holdings_result(
                     &ui,
                     &journal_state.borrow(),
-                    result,
+                    result.map(|_| ()),
                     &holding_freshness.borrow(),
                     &holding_dismissed.borrow(),
                     format,
                 );
+                if let Some(notice) = stated {
+                    ui.global::<Holdings>().set_notice(notice.into());
+                }
                 written
             });
     }
@@ -1642,6 +1666,29 @@ mod tests {
         assert_eq!(
             stop_basis(Some("CHF"), "CHF", "USD"),
             StopBasis::OtherCurrency
+        );
+    }
+
+    #[test]
+    fn a_legacy_lot_linking_no_study_names_the_other_currency_on_its_stop() {
+        // D5 + G1 P review H1/H2: the row of a legacy lot whose only study is in USD links none
+        // (so no USD price is ever shown as CHF) and its stop caption names the USD study.
+        use super::stop_uncompared_study;
+        assert_eq!(stop_uncompared_study(None, false, "USD", true), "USD");
+        assert_eq!(
+            stop_uncompared_study(None, true, "", true),
+            "",
+            "linked: compared"
+        );
+        assert_eq!(
+            stop_uncompared_study(None, false, "USD", false),
+            "",
+            "no stop"
+        );
+        assert_eq!(
+            stop_uncompared_study(Some("CHF"), false, "USD", true),
+            "",
+            "a declared lot's other-currency study is the band's fact, not the stop's"
         );
     }
 

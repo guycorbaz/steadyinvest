@@ -320,7 +320,10 @@ pub const MSG_STOP_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être l
 /// D5 (Guy, 2026-09-25): a position without a declared currency is presumed in the reference
 /// currency — its linked study in another currency never prices the trigger sale. Template: `{s}`
 /// the study's currency, `{r}` the reference currency.
-pub const MSG_SELL_STUDY_OTHER_CURRENCY: &str = "La position n'a pas de devise renseignée (présumée en {r}) et l'étude liée est en {s} : son prix ne sert pas à la vente ; rien n'a été enregistré.";
+pub const MSG_SELL_STUDY_OTHER_CURRENCY: &str = "La position n'a pas de devise renseignée (présumée en {r}) et son étude est en {s} : ce prix ne sert pas à la vente ; rien n'a été enregistré. La vente s'enregistre depuis ses transactions (« Vente… »), au prix obtenu.";
+/// G1 P review (L-c): a legacy position's stop seeded from its cost basis because its only study
+/// is in another currency — stated, never silent.
+pub const MSG_STOP_SEEDED_FROM_COST: &str = "Le seuil est calculé depuis le prix de revient : la position n'a pas de devise renseignée et aucune de ses études n'est dans la devise de référence.";
 
 /// [`MSG_SELL_STUDY_OTHER_CURRENCY`] filled.
 pub fn sell_study_other_currency_message(study_currency: &str, reference_currency: &str) -> String {
@@ -970,6 +973,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SELL_STUDY_UNAVAILABLE,
     MSG_STOP_STUDY_UNAVAILABLE,
     MSG_SELL_STUDY_OTHER_CURRENCY,
+    MSG_STOP_SEEDED_FROM_COST,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
     MSG_LEDGER_UNKNOWN_KIND,

@@ -319,7 +319,7 @@ impl JournalState {
             .map_err(read_error)?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string()) // G1 P review (L-e): named
     }
 
     /// The opening-position row to materialize, iff the holding's **current** ledger holds no buy
@@ -462,19 +462,20 @@ impl JournalState {
         // Issue #81: match a study in the holding's own currency — never price a CHF sale from a
         // same-ticker USD study. G1 final review (L7): the cost basis stands in only for a TRUE
         // absence (no study, no price) — a study that could not be READ refuses the sale by name,
-        // never records it silently at the cost basis. D5 ([`super::stop_basis`], the stop's
-        // rule): a legacy lot without a declared currency is presumed in the reference currency —
-        // its ticker-only study in ANOTHER currency never prices the sale (nor does the cost basis
-        // stand in silently): refused, both facts named; the ledger form sells at a typed price.
+        // never records it silently at the cost basis. D5 (G1 P review H1): the lot's ONE link
+        // ([`Self::try_lot_study`]) — a legacy lot links in the reference currency; when its only
+        // study is in ANOTHER currency, that price never prices the sale (nor does the cost basis
+        // stand in silently): refused, both facts named, the way out too.
         let study = self
-            .try_matched_study_in_currency(&holding.security_ticker, holding.currency.as_deref())
-            .map_err(|_| MSG_SELL_STUDY_UNAVAILABLE.to_string())?;
-        if let Some(s) = &study
-            && let super::StopBasis::NoCurrencyOtherStudy(study_currency) = super::stop_basis(
+            .try_lot_study(
+                &holding.security_ticker,
                 holding.currency.as_deref(),
                 reference_currency,
-                &s.native_currency,
             )
+            .map_err(|_| MSG_SELL_STUDY_UNAVAILABLE.to_string())?;
+        if study.is_none()
+            && let Some(study_currency) =
+                self.other_currency_hint(&holding.security_ticker, holding.currency.as_deref())
         {
             return Err(super::sell_study_other_currency_message(
                 &study_currency,
@@ -615,9 +616,7 @@ impl JournalState {
         // v1 entry point: an ACTIVE holding (the ledger panel lives in the register; the
         // sold-positions surface is #84 — the panel READ still counts sold holdings' dividends).
         // A retired holding refuses with its own factual notice, not a fake save failure (review).
-        let holding = self
-            .any_holding(holding_id)
-            .map_err(|_| MSG_SAVE_FAILED.to_string())?;
+        let holding = self.any_holding(holding_id)?;
         if holding.sold_at.is_some() {
             return Err(MSG_DIVIDEND_RETIRED.to_string());
         }

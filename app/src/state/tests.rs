@@ -3149,50 +3149,131 @@ fn lots_in_two_currencies_read_each_stop_against_their_own_study() {
 }
 
 #[test]
-fn a_legacy_lot_matches_ticker_only_and_is_never_compared_across_currencies() {
+fn a_legacy_lot_links_by_the_reference_currency_never_ticker_only() {
+    // D5 + G1 P review H1: two studies — USD the NEWEST, CHF older. A legacy (NULL-currency) lot
+    // is presumed in the reference currency (CHF): it links the CHF study, exactly as a declared
+    // CHF lot of the same ticker in another bank does — never the newest study of any currency.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x7800);
     let chf = state.create_study("NESN", "CHF").unwrap();
+    state
+        .set_judgment_field(chf, "current_price", Some(und_money(150)))
+        .unwrap();
     let usd = state.create_study("NESN", "USD").unwrap(); // the newest
     state
         .set_judgment_field(usd, "current_price", Some(und_money(10)))
         .unwrap();
-    // The register's match: a legacy (NULL-currency) lot links ticker-only — the newest study —
-    // while a declared CHF lot links the CHF study.
-    let legacy = state.lot_link("NESN", None, None);
-    let declared = state.lot_link("NESN", Some("CHF"), None);
-    assert_eq!(legacy.identity, Some(usd));
-    assert_eq!(declared.identity, Some(chf));
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let legacy = state.list_holdings()[0].id;
+    make_legacy(&mut state, legacy);
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "5", "100", "CHF", "").unwrap();
+    let declared = state.list_holdings()[0].id;
+
+    // The review's link — THE resolution the register shares.
+    let legacy_link = state.lot_link("NESN", None, "CHF", None);
+    let declared_link = state.lot_link("NESN", Some("CHF"), "CHF", None);
     assert_eq!(
-        super::review::mixed_links(&[&legacy, &declared], 0)
-            .expect("two links")
-            .currencies,
-        vec!["USD", "CHF"],
-        "the two links are stated"
+        legacy_link.identity,
+        Some(chf),
+        "never the newest USD study"
     );
-    // D5 (Guy, 2026-09-25): the legacy lot is presumed in the reference currency (CHF) — never
-    // compared with the USD study's 10, and that cause names the study's currency.
-    let stop = super::review::lot_stop(
-        Some("63"),
-        None,
-        "CHF",
-        "UBS",
-        legacy.study_currency.as_deref(),
-        legacy.price,
-        false,
-    )
-    .unwrap();
+    assert_eq!(declared_link.identity, Some(chf));
+    assert!(super::review::mixed_links(&[&legacy_link, &declared_link], 0).is_none());
+
+    // Seed: from the CHF study's 150 (20 % → 120), nothing to state.
+    state.set_active_portfolio(state.list_portfolios()[0].id);
+    assert_eq!(
+        state.set_holding_trailing_stop(legacy, "20", "CHF"),
+        Ok(None)
+    );
+    let level = |state: &JournalState, id: Uuid| {
+        state
+            .journal
+            .as_ref()
+            .unwrap()
+            .list_all_holdings()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == id)
+            .unwrap()
+            .trailing_stop_level
+    };
+    assert_eq!(level(&state, legacy).as_deref(), Some("120"));
+    // Ratchet: only by the lot's own link — the USD study's 500 moves nothing…
+    state
+        .ratchet_trailing_stops_for_study(usd, Decimal::from(500), "CHF")
+        .unwrap();
+    assert_eq!(level(&state, legacy).as_deref(), Some("120"));
+    // …the CHF study's 200 does (20 % → 160).
+    state
+        .ratchet_trailing_stops_for_study(chf, Decimal::from(200), "CHF")
+        .unwrap();
+    assert_eq!(level(&state, legacy).as_deref(), Some("160"));
+    let _ = declared;
+
+    // The review compares the legacy lot's stop with the CHF price (150 < 160: breached).
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    assert_eq!(row.stops.len(), 1);
+    assert_eq!(row.stops[0].uncompared, None);
+    assert!(row.stops[0].breached, "150 CHF is below the 160 CHF stop");
+
+    // The trigger sale is priced at the CHF study's 150, never the USD 10.
+    assert_eq!(
+        state.sell_holding(legacy, "", "", "CHF"),
+        Ok(MSG_HOLDING_SOLD)
+    );
+    let sale = state
+        .holding_ledger(legacy)
+        .into_iter()
+        .find(|t| t.kind.as_deref() == Some("sell"))
+        .unwrap();
+    assert_eq!(sale.unit_price, "150");
+}
+
+#[test]
+fn a_legacy_lot_with_only_another_currency_study_links_none_and_says_so() {
+    // D5 + G1 P review H1/H2/L-c: the only study is in USD — the legacy lot (presumed CHF) links
+    // NONE (no USD price on its row, never labelled CHF), its stop is not compared (the USD
+    // study named), its seed comes from the cost basis — stated — and the trigger sale refuses.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7801);
+    let usd = state.create_study("NESN", "USD").unwrap();
+    state
+        .set_judgment_field(usd, "current_price", Some(und_money(200)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    make_legacy(&mut state, id);
+    assert_eq!(
+        state
+            .try_lot_study("NESN", None, "CHF")
+            .map(|s| s.map(|s| s.id)),
+        Ok(None)
+    );
+    assert_eq!(
+        state.other_currency_hint("NESN", None).as_deref(),
+        Some("USD")
+    );
+    assert_eq!(
+        state.set_holding_trailing_stop(id, "20", "CHF"),
+        Ok(Some(MSG_STOP_SEEDED_FROM_COST)),
+        "the cost-basis seed is stated"
+    );
+    let review = review_of(&state);
+    let stop = &review.positions[0].stops[0];
     assert!(!stop.breached);
-    assert_eq!(
-        stop.currency.as_deref(),
-        Some("CHF"),
-        "presumed in the reference"
-    );
     assert_eq!(
         stop.uncompared,
         Some(super::review::StopUncompared::NoCurrency {
             study_currency: "USD".to_string()
         })
+    );
+    assert_eq!(
+        state.sell_holding(id, "", "", "CHF"),
+        Err(sell_study_other_currency_message("USD", "CHF"))
     );
 }
 
