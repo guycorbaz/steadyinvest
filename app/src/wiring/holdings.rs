@@ -668,6 +668,19 @@ pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_i
     }
 }
 
+/// What an Enter in the trigger-sale dialog shows when the quantity is not a typed number (G1 I
+/// review; G1 final review L9 — a text that is no number used to do NOTHING visible): an ambiguous
+/// number's named refusal, a non-number's quantity refusal, and "" only for a blank field (Guy's
+/// decision 1: the whole-position sale takes a click on the verb, never a plain Enter).
+fn trigger_enter_refusal(text: &str, format: NumberFormat) -> &'static str {
+    use crate::viewmodel::format::NumberReading;
+    match crate::viewmodel::format::read_number(text, format) {
+        NumberReading::Ambiguous => state::ambiguous_number_message(format),
+        NumberReading::NotANumber => state::MSG_LEDGER_INVALID_QUANTITY,
+        NumberReading::Blank | NumberReading::Value(_) => "",
+    }
+}
+
 /// Parse a row / form id, or raise `message` as a named refusal (G1 review: an unreadable id used
 /// to return `false` silently — the form then stayed open with no cause shown).
 fn parse_or_refuse(ui: &MainWindow, id: &str, message: &str) -> Option<Uuid> {
@@ -1009,12 +1022,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>()
             .on_ambiguous_number_refusal(move |text| {
                 let format = journal_state.borrow().number_format();
-                match crate::viewmodel::format::read_number(&text, format) {
-                    crate::viewmodel::format::NumberReading::Ambiguous => {
-                        state::ambiguous_number_message(format).into()
-                    }
-                    _ => SharedString::new(),
-                }
+                trigger_enter_refusal(&text, format).into()
             });
     }
     // ── Story 4.4 (FR40) — manual price refresh for every linked holding, off the UI thread. One
@@ -1543,9 +1551,25 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
 
 #[cfg(test)]
 mod tests {
-    use super::{edit_ticker_options, study_choice_label};
+    use super::{edit_ticker_options, study_choice_label, trigger_enter_refusal};
     use crate::state::StudyChoice;
+    use crate::viewmodel::format::NumberFormat;
     use uuid::Uuid;
+
+    #[test]
+    fn an_enter_on_a_non_number_in_the_trigger_sale_names_its_refusal() {
+        // G1 final review (L9): a text that is no number shows the quantity refusal — never an
+        // Enter with no visible effect; a blank one still waits for the verb (decision 1).
+        assert_eq!(
+            trigger_enter_refusal("deux", NumberFormat::Comma),
+            crate::state::MSG_LEDGER_INVALID_QUANTITY
+        );
+        assert_eq!(
+            trigger_enter_refusal("1.234", NumberFormat::Comma),
+            crate::state::MSG_NUMBER_AMBIGUOUS_COMMA
+        );
+        assert_eq!(trigger_enter_refusal("  ", NumberFormat::Comma), "");
+    }
 
     fn choice(ticker: &str, currency: &str, ambiguous: bool) -> StudyChoice {
         StudyChoice {

@@ -1527,7 +1527,8 @@ export global Holdings {
     // the rails read it by — « 10,5 » under the comma format, where Slint's `is-float` says no).
     pure callback reads-as-number(string) -> bool;
     // G1 I review: the named refusal of an AMBIGUOUS typed number (« 1.085 » under the comma
-    // format), "" otherwise — so the dialog's Enter shows it instead of silently doing nothing.
+    // format), and (G1 final review) a text that is no number's quantity refusal; "" only for a
+    // blank field — so the dialog's Enter shows it instead of silently doing nothing.
     pure callback ambiguous-number-refusal(string) -> string;
     // Guy, 2026-09-24: every study's ticker, unique, sorted (the comparison pickers' list).
     in-out property <[string]> study-tickers;
