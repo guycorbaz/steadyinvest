@@ -484,6 +484,7 @@ pub(crate) fn wire_review(ui: &MainWindow, s: &Session) {
         journal_state,
         config,
         holding_freshness,
+        quick_screen,
         ..
     } = s;
     {
@@ -522,10 +523,15 @@ pub(crate) fn wire_review(ui: &MainWindow, s: &Session) {
     }
     {
         // « Ouvrir l'étude » — the one open rail (Études + invoke_open_study).
+        // G1 G review: a comparison or an examination left open over Études would hide the study
+        // — they close first, through their own close paths.
         let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let quick_screen = Rc::clone(quick_screen);
         ui.global::<Review>().on_open_study(move |id| {
             let ui = ui_weak.unwrap();
             if Uuid::parse_str(&id).is_ok() {
+                crate::wiring::close_studies_overlays(&ui, &journal_state.borrow(), &quick_screen);
                 ui.set_current_screen(0);
                 ui.global::<Studies>().invoke_open_study(id);
             }

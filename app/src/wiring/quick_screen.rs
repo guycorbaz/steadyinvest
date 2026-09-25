@@ -212,8 +212,8 @@ pub(crate) fn supersede_request(ui: &MainWindow, request: &Cell<u64>) {
 pub(crate) enum CloseVia {
     /// « Retour » on the screen: back where the examination was opened.
     Back,
-    /// « Études » on the nav rail: the reader chose the destination (the studies list), and the
-    /// nav's own arrival re-derives the list.
+    /// « Études » on the nav rail — or a programmatic route to Études (`close_studies_overlays`):
+    /// the reader chose the destination, and that route re-derives what it shows.
     NavRail,
 }
 

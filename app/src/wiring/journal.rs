@@ -70,22 +70,29 @@ pub(crate) fn render_journal_panel(ui: &MainWindow, state: &JournalState, config
 }
 
 /// The session state that belongs to the OPEN dossier — what a dossier change must end (G1 G,
-/// checklist §7 « clears on journal switch »). Cloned handles out of [`Session`].
+/// checklist §7 « clears on journal switch »). Cloned handles out of [`Session`], plus the
+/// location status computed when the open dossier was opened (see [`status_after_refusal`]).
 #[derive(Clone)]
 pub(crate) struct DossierSession {
     current_study: Rc<RefCell<Option<String>>>,
     quick_screen: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
     quick_screen_request: Rc<std::cell::Cell<u64>>,
     screening: Rc<RefCell<Option<crate::wiring::screening::ScreeningSession>>>,
+    /// `(path, status)` of the last SUCCESSFUL open/create/switch — the open dossier's own status
+    /// line, which a later refusal restores (never a string read back from the screen).
+    opened_status: Rc<RefCell<Option<(PathBuf, String)>>>,
 }
 
 impl DossierSession {
-    pub(crate) fn of(s: &Session) -> Self {
+    /// Built ONCE, in [`wire_journal`], and cloned into each rail (the `opened_status` cell is
+    /// created here and shared by those clones).
+    fn of(s: &Session) -> Self {
         Self {
             current_study: Rc::clone(&s.current_study),
             quick_screen: Rc::clone(&s.quick_screen),
             quick_screen_request: Rc::clone(&s.quick_screen_request),
             screening: Rc::clone(&s.screening),
+            opened_status: Rc::new(RefCell::new(None)),
         }
     }
 }
@@ -96,17 +103,30 @@ impl DossierSession {
 /// `refresh_studies`).
 /// - the open study editor closes (a stale form must never save an old study id into the new
 ///   dossier);
+/// - the Études, Liste de suivi and Portefeuille notices go (an outcome of the previous dossier —
+///   « L'étude a été créée… », a startup notice — never reads as the new one's; the new dossier
+///   re-derives its own states);
 /// - the replacement candidates panel empties;
+/// - the FX panel: the in-flight flag and the sticky notice reset (rates are dossier data);
 /// - the comparison: picks (ids + labels), table and notice empty, the screen closes;
 /// - the examen rapide: a fetch in flight is superseded, the session empties, the screen closes,
 ///   its notice goes;
 /// - the criblage: the run stops (its queued rows drain, its late results are dropped), the slot
 ///   empties, the card hides — the batch counter keeps counting (it outlives any run);
 /// - the Revue: its export notice goes (it named a file of the previous dossier's review).
-pub(crate) fn clear_dossier_session(ui: &MainWindow, session: &DossierSession) {
+fn clear_dossier_session(ui: &MainWindow, session: &DossierSession) {
     *session.current_study.borrow_mut() = None;
     ui.global::<Studies>().set_study_open(false);
+    ui.global::<Studies>()
+        .set_notice(slint::SharedString::new());
+    ui.global::<crate::Watchlist>()
+        .set_notice(slint::SharedString::new());
+    ui.global::<crate::Holdings>()
+        .set_notice(slint::SharedString::new());
     crate::wiring::replacement::clear_candidates(ui);
+    ui.global::<crate::Fx>().set_refreshing(false);
+    ui.global::<crate::Fx>()
+        .set_notice(slint::SharedString::new());
     crate::wiring::comparison::clear_comparison(ui);
     crate::wiring::comparison::close_screen(ui);
     crate::wiring::quick_screen::clear_examination(
@@ -174,23 +194,24 @@ fn finish_journal_switch(
             } else {
                 state::MSG_JOURNAL_OPENED.to_string()
             };
-            prefs.set_journal_location_status(status.into());
+            prefs.set_journal_location_status(status.as_str().into());
             prefs.set_journal_reclaim_path("".into());
+            *dossier.opened_status.borrow_mut() = Some((opened_path, status));
 
             // The whole journal changed — end the previous dossier's session (study editor,
-            // comparison, examination, criblage, notices) and re-render every surface.
-            clear_dossier_session(ui, dossier);
+            // comparison, examination, criblage, FX flag, notices) and re-render every surface.
+            // Re-selecting the dossier already open changed nothing (G1 G review): its session
+            // — an examination, a criblage, a comparison — stays.
+            if !outcome.unchanged {
+                clear_dossier_session(ui, dossier);
+            }
             let st = journal_state.borrow();
             let format = config.borrow().number_format;
             retain_held_freshness(holding_freshness, &st);
             refresh_studies(ui, &st);
             refresh_watchlist(ui, &st);
-            // Story 6.5 review: the FX panel follows the journal (rates are journal data); the
-            // in-flight flag and sticky notice reset with it.
+            // Story 6.5 review: the FX panel follows the journal (rates are journal data).
             crate::wiring::fx::push_fx_rates(ui, &st);
-            ui.global::<crate::Fx>().set_refreshing(false);
-            ui.global::<crate::Fx>()
-                .set_notice(slint::SharedString::new());
             refresh_holdings(
                 ui,
                 &st,
@@ -209,13 +230,18 @@ fn finish_journal_switch(
                 prefs.set_journal_location_status(state::MSG_JOURNAL_LOCK_RECLAIMABLE.into());
                 prefs.set_journal_reclaim_path(attempted.display().to_string().into());
             } else {
-                // An open/create that did not happen is a refusal (acknowledged). The open
-                // dossier is unchanged, so its status line (stale, sync) stays as it was (G1 G):
-                // only a reclaim offer — which was about an earlier attempt, not the open
-                // dossier — goes, status line and path together.
-                if !status_survives_refusal(&prefs.get_journal_location_status()) {
-                    prefs.set_journal_location_status("".into());
-                }
+                // An open/create that did not happen is a refusal (acknowledged). The status
+                // line is the OPEN dossier's own (G1 G), recomputed from the journal actually
+                // open — never the string on screen, which may be a reclaim offer about an
+                // earlier attempt.
+                let st = journal_state.borrow();
+                let open = st.path();
+                let status = status_after_refusal(
+                    open,
+                    open.is_some_and(state::is_sync_folder),
+                    dossier.opened_status.borrow().as_ref(),
+                );
+                prefs.set_journal_location_status(status.into());
                 prefs.set_journal_reclaim_path("".into());
                 crate::wiring::dialog::refuse(ui, &notice);
             }
@@ -223,11 +249,28 @@ fn finish_journal_switch(
     }
 }
 
-/// PURE: whether the location status line stays after a refused open/create/switch (G1 G). The
-/// open dossier did not change, so its STATES (stale, sync folder, opened/created) stand; only a
-/// reclaimable-lock offer goes — it described an earlier attempt, and its path is cleared with it.
-fn status_survives_refusal(status: &str) -> bool {
-    status != state::MSG_JOURNAL_LOCK_RECLAIMABLE
+/// PURE: the location status line after a refused open/create/switch (G1 G), from the journal
+/// actually open (`open`, and whether it sits in a sync folder) and the `(path, status)` recorded
+/// when a dossier was last opened:
+/// - no journal open (the previous one could not be reacquired) → nothing to state;
+/// - the open journal is the one recorded → its own status (stale, sync folder, opened/created);
+/// - otherwise (the startup dossier: no switch recorded it) → the sync-folder warning when it
+///   applies, else nothing.
+///
+/// A reclaimable-lock offer is never kept: it described an earlier attempt, not the open dossier.
+fn status_after_refusal(
+    open: Option<&std::path::Path>,
+    in_sync_folder: bool,
+    recorded: Option<&(PathBuf, String)>,
+) -> String {
+    let Some(open) = open else {
+        return String::new();
+    };
+    match recorded {
+        Some((path, status)) if path == open => status.clone(),
+        _ if in_sync_folder => state::MSG_SYNC_FOLDER_WARNING.to_string(),
+        _ => String::new(),
+    }
 }
 
 /// Record the **currently-open** journal's `(journal_id, logical_version)` into app-config before
@@ -522,9 +565,10 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             retain_held_freshness(&holding_freshness, &state);
             refresh_studies(&ui, &state);
             refresh_watchlist(&ui, &state);
-            // Story 6.5 review: imported/restored fx_rates must show without a restart.
+            // Story 6.5 review: imported/restored fx_rates must show without a restart. (The
+            // candidates panel is emptied by `clear_dossier_session` on success; a failed restore
+            // left the dossier — and its panel — as they were.)
             crate::wiring::fx::push_fx_rates(&ui, &state);
-            crate::wiring::replacement::clear_candidates(&ui);
             refresh_holdings(
                 &ui,
                 &state,
@@ -686,15 +730,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_refused_switch_keeps_the_open_dossiers_status_but_drops_a_reclaim_offer() {
-        // The open dossier's states stand: a refusal changed nothing about it.
-        assert!(status_survives_refusal(state::MSG_SYNC_FOLDER_WARNING));
-        assert!(status_survives_refusal(state::MSG_JOURNAL_OPENED));
-        assert!(status_survives_refusal(&state::journal_stale_message(7, 5)));
-        assert!(status_survives_refusal(""));
-        // A reclaim offer was about an earlier attempt: it goes with its path.
-        assert!(!status_survives_refusal(
-            state::MSG_JOURNAL_LOCK_RECLAIMABLE
-        ));
+    fn a_refused_switch_states_the_open_dossiers_own_status() {
+        let a = PathBuf::from("/d/a.db");
+        let b = PathBuf::from("/d/b.db");
+        let stale = state::journal_stale_message(7, 5);
+        let recorded = (a.clone(), stale.clone());
+        // The open dossier is the one recorded: its own status stands (stale here) — whatever
+        // the screen showed (a reclaim offer about an earlier attempt included).
+        assert_eq!(
+            status_after_refusal(Some(&a), false, Some(&recorded)),
+            stale
+        );
+        // Another journal is open than the one recorded (the startup dossier): recomputed.
+        assert_eq!(
+            status_after_refusal(Some(&b), true, Some(&recorded)),
+            state::MSG_SYNC_FOLDER_WARNING
+        );
+        assert_eq!(status_after_refusal(Some(&b), false, None), "");
+        // No journal could be reacquired: nothing to state about an open dossier.
+        assert_eq!(status_after_refusal(None, true, Some(&recorded)), "");
+        // Never the reclaim offer.
+        for (open, sync) in [(Some(a.as_path()), false), (Some(b.as_path()), true)] {
+            assert_ne!(
+                status_after_refusal(open, sync, Some(&recorded)),
+                state::MSG_JOURNAL_LOCK_RECLAIMABLE
+            );
+        }
     }
 }

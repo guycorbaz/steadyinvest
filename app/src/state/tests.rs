@@ -733,10 +733,15 @@ fn open_and_create_journal_switch_between_journals() {
         !outcome.sync_warning,
         "a plain temp dir is not a sync folder"
     );
+    assert!(!outcome.unchanged, "a created journal is a dossier change");
 
     // Open journal A back → its study is there (a clean switch round-trip).
     let path_a = dir.path().join("journal.db");
-    state.open_journal(&path_a).unwrap();
+    let back = state.open_journal(&path_a).unwrap();
+    assert!(
+        !back.unchanged,
+        "opening another journal is a dossier change"
+    );
     assert!(
         state.get_study(id_in_a).is_some(),
         "switched back to journal A"
@@ -940,6 +945,11 @@ fn reopening_the_currently_open_journal_is_a_no_op() {
     let path = dir.path().join("journal.db");
     let outcome = state.open_journal(&path).unwrap();
     assert_eq!(outcome.journal_id, Uuid::from_u128(0xC0FFEE));
+    // G1 G review: the outcome says so — the wiring keeps the dossier's session.
+    assert!(
+        outcome.unchanged,
+        "re-selecting the open journal is unchanged"
+    );
     assert!(
         state.get_study(id).is_some(),
         "the journal stayed open, study intact"

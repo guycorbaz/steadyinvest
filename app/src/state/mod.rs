@@ -131,6 +131,9 @@ pub struct OpenOutcome {
     /// `true` when the journal lives in a detected sync folder and was opened in the sync-safe
     /// (`DELETE`) mode — the UI surfaces the warning + the recommended pattern (ADD8).
     pub sync_warning: bool,
+    /// `true` when the target was the journal ALREADY open (re-selecting it is a no-op): the
+    /// dossier did not change, so the session it carries must not be reset (G1 G review).
+    pub unchanged: bool,
 }
 
 impl JournalState {

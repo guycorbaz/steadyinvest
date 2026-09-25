@@ -87,6 +87,28 @@ pub(crate) fn persist(path: Option<&PathBuf>, config: &AppConfig) {
     }
 }
 
+/// Close the screens that sit over Études — the comparison and the examen rapide — through their
+/// own close paths, the reader having chosen another destination (G1 G): the nav rail's
+/// « Études », and every programmatic route to Études that is not the criblage's « Ouvrir
+/// l'examen » (Revue's « Ouvrir l'étude », the candidates panel's « Ouvrir l'étude » and « Aller
+/// aux études »). Without it, an examination left open hides the study just opened.
+pub(crate) fn close_studies_overlays(
+    ui: &crate::MainWindow,
+    state: &JournalState,
+    quick_screen: &Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
+) {
+    use slint::ComponentHandle;
+    crate::wiring::comparison::close_screen(ui);
+    if ui.global::<crate::Studies>().get_screen_open() {
+        crate::wiring::quick_screen::close_screen(
+            ui,
+            state,
+            quick_screen,
+            crate::wiring::quick_screen::CloseVia::NavRail,
+        );
+    }
+}
+
 /// Issue #94 (epic-6 retro F4): the study-derived surfaces — watchlist zones (4.2), holdings
 /// zones/prices (4.4), the size mix and « non classé » lines (6.7), the candidates panel (6.8) —
 /// are baked at render time from studies, but study MUTATIONS happen on the Études screen and
@@ -119,15 +141,7 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
             // startup-only — finishing an analysis and coming back showed stale rows).
             0 => {
                 let state = journal_state.borrow();
-                crate::wiring::comparison::close_screen(&ui);
-                if ui.global::<crate::Studies>().get_screen_open() {
-                    crate::wiring::quick_screen::close_screen(
-                        &ui,
-                        &state,
-                        &quick_screen,
-                        crate::wiring::quick_screen::CloseVia::NavRail,
-                    );
-                }
+                close_studies_overlays(&ui, &state, &quick_screen);
                 crate::wiring::studies::refresh_studies(&ui, &state);
             }
             // Liste de suivi: the per-item buy-zone flags re-derive from the CURRENT studies.
