@@ -448,8 +448,8 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 or_dash(&l.relative),
             ];
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
-            doc.grid_row_num(&refs, &COLS_POSITIONS, false, 2);
-            // A second, small-print line under the row: the flags, the data state, the stop.
+            // A second, small-print line under the row: the flags, the data state, the stop —
+            // laid out with its row as one block (G1 D: never split from it by a page break).
             let mut extra: Vec<String> = Vec::new();
             if !l.name.is_empty() {
                 extra.push(l.name.clone());
@@ -474,7 +474,13 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 "sell" => extra.push(TRIGGER_SELL.to_string()),
                 _ => {}
             }
-            doc.grid_note_row(&extra.join("   ·   "), COLS_POSITIONS[1], &COLS_POSITIONS);
+            doc.grid_row_num_with_note(
+                &refs,
+                &COLS_POSITIONS,
+                2,
+                &extra.join("   ·   "),
+                COLS_POSITIONS[1],
+            );
         }
         doc.grid_end(&COLS_POSITIONS);
     }
