@@ -67,6 +67,9 @@ pub struct ReviewLine {
     pub stop_breached: bool,
     /// The breached stop(s) among `stop` (G1 review: which level, which bank).
     pub stop_breached_levels: String,
+    /// The stop(s) of a lot without a declared currency — unit unknown, never compared with the
+    /// price (G1 final review); `""` when none.
+    pub stop_no_currency: String,
     /// `stop` | `sell` | `""`.
     pub trigger: String,
 }
@@ -94,6 +97,9 @@ pub struct PortfolioReview {
     /// The FR28 footnote entries (data: pair, rate, date, source).
     pub rates: Vec<String>,
     pub size_lines: Vec<ShareLine>,
+    /// The dossier holds no position: nothing to classify — one statement, never three
+    /// « indisponible » classes (G1 final review).
+    pub size_empty: bool,
     pub unclassified: Vec<ShareLine>,
     /// The 6.7 read failed: the size block AND the concentration block are « indisponible »
     /// (their lines are then empty — never stale rows, never « Aucune donnée. »).
@@ -107,7 +113,7 @@ pub struct PortfolioReview {
     /// The pair(s) that absent the global total, `""` when none.
     pub global_missing: String,
     /// The global total is absent for a reason that is NOT a nameable pair (a failed bank read,
-    /// an overflow) — a plain « indisponible ».
+    /// an overflow) — a plain « indisponible », alone or beside `global_missing`.
     pub global_unavailable: bool,
     pub concentration: Vec<ShareLine>,
     /// The pair(s) that absent the concentration shares' denominator, `""` when none.
@@ -159,6 +165,8 @@ const CURRENCIES_UNAVAILABLE: &str = "Exposition par devise indisponible.";
 const CONCENTRATION_UNAVAILABLE: &str = "Concentration indisponible.";
 const GLOBAL_MISSING: &str = "Total global indisponible : taux manquant";
 const GLOBAL_UNAVAILABLE: &str = "Total global indisponible.";
+const GLOBAL_ALSO_UNAVAILABLE: &str = "et au moins une banque indisponible";
+const SIZE_EMPTY: &str = "Aucune position classée : le dossier ne contient aucune position.";
 const SHARES_MISSING: &str = "Parts indisponibles : taux manquant";
 const SHARES_UNAVAILABLE: &str = "Parts indisponibles.";
 const AMOUNT_MISSING: &str = "montant indisponible : taux manquant";
@@ -200,6 +208,7 @@ const DATA_NEVER: &str = "données : pas encore rafraîchies";
 const FLAGS_LABEL: &str = "Signaux";
 const STOP_LABEL: &str = "Seuil suiveur :";
 const STOP_BREACHED: &str = "sous le seuil";
+const STOP_NO_CURRENCY: &str = "non comparé au prix : la position n'a pas de devise renseignée";
 const TRIGGER_STOP: &str = "Le prix a atteint le seuil suiveur.";
 const TRIGGER_SELL: &str = "Le prix est dans la zone haute.";
 const D_TICKER: &str = "Titre";
@@ -262,6 +271,8 @@ const REVIEW_USER_FACING: &[&str] = &[
     CONCENTRATION_UNAVAILABLE,
     GLOBAL_MISSING,
     GLOBAL_UNAVAILABLE,
+    GLOBAL_ALSO_UNAVAILABLE,
+    SIZE_EMPTY,
     SHARES_MISSING,
     SHARES_UNAVAILABLE,
     AMOUNT_MISSING,
@@ -302,6 +313,7 @@ const REVIEW_USER_FACING: &[&str] = &[
     FLAGS_LABEL,
     STOP_LABEL,
     STOP_BREACHED,
+    STOP_NO_CURRENCY,
     TRIGGER_STOP,
     TRIGGER_SELL,
     D_TICKER,
@@ -329,9 +341,10 @@ const REVIEW_USER_FACING: &[&str] = &[
 
 // The share blocks: label · amount · share · target, then the note — prose, left-aligned and
 // given the room (a note wraps inside its column, never across the rules).
+// G1 final review: the amount column holds « 12 345 678,00 CHF » (two decimals, as on Portefeuille).
 const COLS_SHARE: [f32; 6] = [
     MARGIN,
-    MARGIN + 150.0,
+    MARGIN + 144.0,
     MARGIN + 235.0,
     MARGIN + 285.0,
     MARGIN + 335.0,
@@ -341,16 +354,18 @@ const COLS_SHARE: [f32; 6] = [
 // The positions table: a symbol column wide enough for « NESN.SW », the banks (they wrap), then
 // the figures — each column sized to its longest word at the grid font plus the cell padding
 // (on-screen check 2: « au-dessus de la bande » needs ≈ 101 pt; the relative value and H/B had
-// room to give). Guarded by `every_positions_word_fits_its_column`.
+// room to give; G1 final review: the invested amount now carries two decimals, as on
+// Portefeuille — « 12 345 678,00 CHF » needs ≈ 89 pt, taken from the symbol and relative-value
+// columns). Guarded by `every_positions_word_fits_its_column`.
 const COLS_POSITIONS: [f32; 9] = [
     MARGIN,
-    MARGIN + 62.0,
-    MARGIN + 122.0,
-    MARGIN + 200.0,
-    MARGIN + 244.0,
-    MARGIN + 316.0,
-    MARGIN + 418.0,
-    MARGIN + 460.0,
+    MARGIN + 56.0,
+    MARGIN + 116.0,
+    MARGIN + 205.0,
+    MARGIN + 249.0,
+    MARGIN + 321.0,
+    MARGIN + 423.0,
+    MARGIN + 465.0,
     PAGE_W - MARGIN,
 ];
 
@@ -450,9 +465,9 @@ fn share_block(
         let cells = [
             l.label.clone(),
             or_dash(&l.amount),
-            or_dash(&l.share),
+            pct_or_dash(&l.share),
             if with_target {
-                or_dash(&l.target)
+                pct_or_dash(&l.target)
             } else {
                 String::new()
             },
@@ -470,6 +485,17 @@ fn or_dash(s: &str) -> String {
         EM_DASH.to_string()
     } else {
         s.to_string()
+    }
+}
+
+/// A share or a target: the app hands the bare locale-formatted figure (« 34,1 », as the screen's
+/// `{} %` template receives it) — the unit is this layout's to write (G1 final review: the PDF
+/// printed « 34,1 » under « Part »). An absent figure stays the dash.
+fn pct_or_dash(s: &str) -> String {
+    if s.is_empty() {
+        EM_DASH.to_string()
+    } else {
+        format!("{s} %")
     }
 }
 
@@ -535,14 +561,10 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
     let unavailable = |flag: bool, statement: &'static str| flag.then_some(statement);
     let mut size_lines = labelled(&review.size_lines, size_label);
     size_lines.extend(review.unclassified.iter().cloned());
-    share_block(
-        &mut doc,
-        S_SIZE,
-        unavailable(review.diversification_unavailable, SIZE_UNAVAILABLE),
-        &size_lines,
-        true,
-        MURMUR,
-    );
+    // A failed read first; else an empty dossier states itself once (never « Aucune donnée. »).
+    let size_statement = unavailable(review.diversification_unavailable, SIZE_UNAVAILABLE)
+        .or(unavailable(review.size_empty, SIZE_EMPTY));
+    share_block(&mut doc, S_SIZE, size_statement, &size_lines, true, MURMUR);
     // Sectors murmur AT or OVER the threshold (no « approché » band); currencies never murmur.
     share_block(
         &mut doc,
@@ -569,8 +591,14 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
         });
     }
     share_block(&mut doc, S_BANK, None, &bank_lines, false, MURMUR);
-    // The global total's named absence (the screen's band): its pair(s), else plain.
-    if !review.global_missing.is_empty() {
+    // The global total's named absence (the screen's band): its pair(s), a non-pair cause, or
+    // both — every cause (G1 final review).
+    if !review.global_missing.is_empty() && review.global_unavailable {
+        doc.small_line(&format!(
+            "{GLOBAL_MISSING} {}, {GLOBAL_ALSO_UNAVAILABLE}.",
+            review.global_missing
+        ));
+    } else if !review.global_missing.is_empty() {
         doc.small_line(&format!("{GLOBAL_MISSING} {}", review.global_missing));
     } else if review.global_unavailable {
         doc.small_line(GLOBAL_UNAVAILABLE);
@@ -629,7 +657,7 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 } else {
                     l.invested.clone()
                 },
-                or_dash(&l.share),
+                pct_or_dash(&l.share),
                 study_label(l).to_string(),
                 zone_label(&l.zone).to_string(),
                 or_dash(&l.ud),
@@ -675,6 +703,12 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                     (true, false) => format!(" ({STOP_BREACHED} : {})", l.stop_breached_levels),
                 };
                 extra.push(format!("{STOP_LABEL} {}{breached}", l.stop));
+            }
+            if !l.stop_no_currency.is_empty() {
+                extra.push(format!(
+                    "{STOP_LABEL} {} {STOP_NO_CURRENCY}",
+                    l.stop_no_currency
+                ));
             }
             if l.last_saved_unknown {
                 extra.push(format!("{LAST_SAVED_LABEL} {DUE_DATE_UNKNOWN}"));
@@ -767,8 +801,8 @@ mod tests {
             size_lines: vec![ShareLine {
                 label: "large".into(),
                 amount: "".into(),
-                share: "34,1 %".into(),
-                target: "25 %".into(),
+                share: "34,1".into(),
+                target: "25".into(),
                 ..Default::default()
             }],
             unclassified: vec![ShareLine {
@@ -779,25 +813,25 @@ mod tests {
             }],
             sector_lines: vec![ShareLine {
                 label: "".into(),
-                share: "100 %".into(),
+                share: "100".into(),
                 ..Default::default()
             }],
             currency_lines: vec![ShareLine {
                 label: "CHF".into(),
-                share: "100 %".into(),
+                share: "100".into(),
                 ..Default::default()
             }],
             bank_lines: vec![ShareLine {
                 label: "UBS".into(),
                 amount: "3 000 CHF".into(),
-                share: "60 %".into(),
+                share: "60".into(),
                 ..Default::default()
             }],
             global_invested: "5 000 CHF".into(),
             concentration: vec![ShareLine {
                 label: "NVDA.US".into(),
                 amount: "3 880 CHF".into(),
-                share: "65,9 %".into(),
+                share: "65,9".into(),
                 flagged: true,
                 ..Default::default()
             }],
@@ -806,7 +840,7 @@ mod tests {
                 ticker: "NVDA.US".into(),
                 banks: "UBS, Swissquote".into(),
                 invested: "3 880 CHF".into(),
-                share: "65,9 %".into(),
+                share: "65,9".into(),
                 study: "provisional".into(),
                 zone: "buy".into(),
                 ud: "5,3:1".into(),
@@ -845,7 +879,7 @@ mod tests {
         r.sectors_unavailable = true;
         r.sector_lines = vec![ShareLine {
             label: "StaleSector".into(),
-            share: "40 %".into(),
+            share: "40".into(),
             ..Default::default()
         }];
         r.currencies_unavailable = true;
@@ -937,7 +971,7 @@ mod tests {
         assert_eq!(note_label(&bank, MURMUR), "indisponible");
         // The sector block's murmur is its own (at or over).
         let flagged = ShareLine {
-            share: "60 %".into(),
+            share: "60".into(),
             flagged: true,
             ..Default::default()
         };
@@ -957,6 +991,53 @@ mod tests {
             &render_portfolio_review(&r),
             "(historique indisponible)"
         ));
+    }
+
+    #[test]
+    fn shares_and_targets_carry_their_unit() {
+        // G1 final review: the app hands the bare figure (« 34,1 ») — the sample used to hand
+        // « 34,1 % » and masked a PDF that printed no unit at all.
+        let bytes = render_portfolio_review(&sample());
+        assert!(carries(&bytes, "34,1 %"), "a size share");
+        assert!(carries(&bytes, "25 %"), "a size target");
+        assert!(carries(&bytes, "60 %"), "a bank share");
+        assert!(
+            carries(&bytes, "65,9 %"),
+            "a concentration / position share"
+        );
+        assert!(!carries(&bytes, "% %"), "never a doubled unit");
+        assert_eq!(pct_or_dash(""), EM_DASH, "an absent share stays the dash");
+    }
+
+    #[test]
+    fn an_empty_dossier_states_itself_once_in_the_size_block() {
+        let r = PortfolioReview {
+            size_empty: true,
+            ..PortfolioReview::default()
+        };
+        let bytes = render_portfolio_review(&r);
+        assert!(carries(&bytes, "le dossier ne contient aucune position"));
+        assert!(!carries(&bytes, "Petite"), "no class rows");
+    }
+
+    #[test]
+    fn every_cause_of_an_absent_global_total_is_named() {
+        let mut r = sample();
+        r.global_invested = String::new();
+        r.global_missing = "EUR -> CHF".into();
+        r.global_unavailable = true;
+        let bytes = render_portfolio_review(&r);
+        assert!(carries(&bytes, "taux manquant EUR -> CHF"));
+        assert!(carries(&bytes, "au moins une banque indisponible"));
+    }
+
+    #[test]
+    fn a_stop_without_a_currency_says_why_it_is_not_compared() {
+        let mut r = sample();
+        r.positions[0].stop_no_currency = "63,00 (UBS)".into();
+        let bytes = render_portfolio_review(&r);
+        assert!(carries(&bytes, "63,00 (UBS)"));
+        assert!(carries(&bytes, "pas de devise"));
     }
 
     #[test]
@@ -1024,7 +1105,14 @@ mod tests {
         }
         // The other columns keep room for their usual figures.
         fits(0, "NESN.SW");
-        fits(2, "12 345 678 CHF");
+        fits(1, "Swissquote");
+        let share_room = COLS_SHARE[2] - COLS_SHARE[1];
+        let need = text_width("12 345 678,00 CHF", FONT) + 2.0 * PAD;
+        assert!(
+            need <= share_room,
+            "a share block amount needs {need} pt, has {share_room}"
+        );
+        fits(2, "12 345 678,00 CHF");
         fits(2, UNAVAILABLE);
         fits(3, "100,0 %");
         fits(6, "123,4:1");
@@ -1044,6 +1132,8 @@ mod tests {
         p.stop_breached = true;
         p.stop_breached_levels = "BREACHEDLVL".into();
         p.invested = String::new();
+        // No flags: the needles below must not straddle a wrap of the small-print line.
+        p.flags = String::new();
         r.due = vec![DueLine {
             ticker: "ROG.SW".into(),
             date_unknown: true,

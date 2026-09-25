@@ -1099,16 +1099,17 @@ export struct ReviewPositionRow {
     other-currency: string, // a same-ticker study in ANOTHER currency (study == none)
     low-confidence: bool,
     zone: string,           // buy | neutral | sell | below | above | ""
-    price: string,          // the present price WITH its currency ("123,45 USD"), "" when unknown
+    price: string,          // the present price WITH the study's currency ("123,45 USD"), "" when unknown
     ud: string,
     relative: string,
     flags: string,          // the flags worded by Rust (inventory), joined; "" = none
     flag-count: int,
     stale: bool,
     as-of: string,
-    stop: string,           // every lot's stop: level, currency, bank — joined (data)
+    stop: string,           // every lot's stop: level, currency (when the lot declares one), bank — joined (data)
     stop-breached: bool,
     stop-breached-levels: string, // the breached stop(s) among `stop` (which level, which bank)
+    stop-no-currency: string, // the stop(s) of a lot without a declared currency: unit unknown, never compared
     trigger: string,        // stop | sell | ""
     mixed-links: string,    // the lots link to different studies: their currencies, joined; "" when one study
     last-saved: string,
@@ -1135,6 +1136,7 @@ export global Review {
     in-out property <int> bank-count;
     in-out property <string> rates;
     in-out property <[ReviewShareRow]> size-rows;
+    in-out property <bool> size-empty;                  // no position at all: nothing to classify (never a failed read)
     in-out property <[ReviewShareRow]> unclassified-rows;
     in-out property <bool> sectors-unavailable;
     in-out property <[ReviewShareRow]> sector-rows;
@@ -1143,7 +1145,7 @@ export global Review {
     in-out property <[ReviewShareRow]> bank-rows;
     in-out property <string> global-invested;
     in-out property <string> global-missing;
-    in-out property <bool> global-unavailable;          // global absent without a nameable pair
+    in-out property <bool> global-unavailable;          // a non-pair cause absents the global (alone, or beside global-missing)
     in-out property <[ReviewShareRow]> concentration-rows;
     in-out property <string> concentration-missing;
     in-out property <bool> concentration-unavailable;   // the 6.7 read failed — size AND concentration

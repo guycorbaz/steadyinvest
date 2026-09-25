@@ -693,8 +693,11 @@ mod tests {
         // integ/g1-a-to-h (G1 fix PRs A–H combined): 892 + B 11 + C 9 + D 26 + E 15 = 953, measured.
         // G1 I (locale numbers + its review) adds no @tr literal (its refusals are MSG_*; the new
         // Slint lines are callbacks and handlers): 953 + 0 = 953, measured.
+        // G1 final review of the « Revue » (area 2): the empty dossier's size statement, the
+        // global total's both-causes band and the not-compared legacy stop: 953 + 3 = 956,
+        // measured (the reworded trigger / mixed-links / due-subtitle lines replace, not add).
         assert!(
-            total >= 953,
+            total >= 956,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

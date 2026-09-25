@@ -3005,7 +3005,12 @@ fn lots_in_two_currencies_read_each_stop_against_their_own_study() {
     assert_eq!(row.mixed_links.len(), 2);
     assert!(row.mixed_links.contains(&"CHF".to_string()));
     assert!(row.mixed_links.contains(&"USD".to_string()));
-    let by = |c: &str| row.stops.iter().find(|s| s.currency == c).unwrap();
+    let by = |c: &str| {
+        row.stops
+            .iter()
+            .find(|s| s.currency.as_deref() == Some(c))
+            .unwrap()
+    };
     assert_eq!(by("CHF").level, Decimal::from(63));
     assert!(by("CHF").breached, "60 CHF reached the CHF stop");
     assert_eq!(by("USD").level, Decimal::from(90));
@@ -3033,17 +3038,52 @@ fn a_legacy_lot_matches_ticker_only_and_is_never_compared_across_currencies() {
         vec!["USD", "CHF"],
         "the two links are stated"
     );
-    // The legacy lot's stop is in its effective (reference) currency, CHF: the USD study's 10
-    // is never compared with it.
+    // The legacy lot carries no currency: its stop's unit is unknown — never labelled with the
+    // reference currency, never compared with the USD study's 10 (G1 final review).
     let stop = super::review::lot_stop(
         Some("63"),
-        "CHF",
+        None,
         "UBS",
         legacy.study_currency.as_deref(),
         legacy.price,
     )
     .unwrap();
     assert!(!stop.breached);
+    assert_eq!(stop.currency, None, "no currency the lot does not carry");
+}
+
+#[test]
+fn a_rows_study_is_the_newest_linked_one_and_every_lots_study_is_due() {
+    // G1 final review: the CHF lot comes first, but the row shows the NEWEST linked study (the
+    // USD one) — by identity, never by lot position; the due list reads both studies.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7900);
+    let chf = state.create_study("NESN", "CHF").unwrap();
+    let usd = state.create_study("NESN", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "1", "90", "USD", "").unwrap();
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    let ReviewStudy::Linked(f) = &row.study else {
+        panic!("a linked study, got {:?}", row.study);
+    };
+    assert_eq!(f.study_id, usd, "the newest study, not the first lot's");
+    assert_eq!(f.currency, "USD", "the price's unit is the study's");
+    assert_eq!(
+        row.currency, "USD",
+        "the position currency follows the shown study's lot"
+    );
+    // Both empty studies are « en attente » — both are listed, each named by its currency.
+    let due: Vec<(&str, Uuid)> = review
+        .due
+        .iter()
+        .map(|d| (d.ticker.as_str(), d.study_id))
+        .collect();
+    assert_eq!(due, vec![("NESN (USD)", usd), ("NESN (CHF)", chf)]);
+    assert_eq!(review.counts.due, 2);
+    assert_eq!(review.counts.linked, 1, "one position with a study");
 }
 
 // ── Story 4.5 — trailing stop per holding (validate, seed, ratchet) ──

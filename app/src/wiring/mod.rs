@@ -164,6 +164,7 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
                 &ui,
                 &journal_state.borrow(),
                 &holding_freshness.borrow(),
+                &holding_dismissed.borrow(),
                 &config.borrow(),
             ),
             _ => {}
