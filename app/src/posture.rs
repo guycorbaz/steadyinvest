@@ -708,9 +708,15 @@ mod tests {
         // criblage names which ladder is short or absent (6 years-column words, the « fenêtre
         // incomplète » one reworded: +5) and a rate's « — » cause (+3); the kept failure's band
         // and its « Compris » (+2): +9 = 975, measured.
-        // integ/g1-final2: 953 + L 11 + M 22 = 986.
+        // G1 final review (K): every read failure of the portfolio, watchlist and FX surfaces is
+        // « indisponible » (portfolios, positions, ledger ×2, sold positions title + band, FX
+        // rates, watchlist, a watched study): 953 + 9 = 962, measured. (The ledger sale's
+        // « Quantité vendue » replaces its « (vide = toute la position) » occurrence: ±0.)
+        // The legacy lot's uncompared stop is stated (« non comparé au prix : le lot n'a pas de
+        // devise renseignée »): 962 + 1 = 963, measured.
+        // integ/g1-final2: 953 + L 11 + M 22 + K 10 = 996, measured.
         assert!(
-            total >= 986,
+            total >= 996,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -832,9 +838,7 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            163,
-            // G1 final review: the worker-gone cause moves out of three rails into a registered
-            // message (MSG_FETCH_WORKER_GONE): +1; integ/g1-final2 with N, O: 163.
+            180,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -842,7 +846,19 @@ mod tests {
             // 158 + 2 = 160, measured. Its G3 review refuses a completed « .pdf » name that is taken
             // (MSG_EXPORT_NAME_TAKEN): 160 + 1 = 161, measured. The G1 final review (L10) states
             // that no dossier is open after a refused switch that lost the previous one
-            // (MSG_NO_JOURNAL_OPEN): 161 + 1 = 162.
+            // (MSG_NO_JOURNAL_OPEN): 161 + 1 = 162. The worker-gone cause moves out of three rails
+            // into a registered message (MSG_FETCH_WORKER_GONE): 162 + 1 = 163.
+            // G1 final review (K), counted from 158 on its own branch: « Retirer » refused up front
+            // by cause (MSG_HOLDING_HAS_TRANSACTIONS, MSG_HOLDING_LEDGER_UNREADABLE): +2.
+            // Each ledger amount refusal names its field (MSG_LEDGER_QUANTITY_EMPTY / _INVALID_
+            // QUANTITY / _PRICE / _FEES / _OUT_OF_RANGE / _ROW_INVALID, MSG_DIVIDEND_INVALID_
+            // QUANTITY / _GROSS / _WITHHOLDING) and an unreadable linked study refuses the trigger
+            // sale and the stop (MSG_SELL_STUDY_UNAVAILABLE, MSG_STOP_STUDY_UNAVAILABLE):
+            // +11. A restore whose checkpoint or safety snapshot of the
+            // current dossier fails is refused by name (MSG_RESTORE_CHECKPOINT_FAILED,
+            // MSG_RESTORE_SNAPSHOT_FAILED): +2. « Lier une étude » names an
+            // unreadable study list or watchlist (MSG_WATCH_STUDY_UNAVAILABLE,
+            // MSG_WATCH_LINK_LIST_UNREADABLE): +2. integ/g1-final2: 163 + K 17 = 180, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }

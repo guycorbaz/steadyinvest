@@ -114,9 +114,12 @@ export component ModalDialog inherits Rectangle {
         // G1 decision 4: the edit keeps the currency; a new symbol is checked by Rust (a named
         // refusal when its study is in another currency).
         if (Dialog.form-id == "holding-edit") { return Dialog.draft-ticker != ""; }
-        if (Dialog.form-id == "buy" || Dialog.form-id == "sell" || Dialog.form-id == "txn-edit") {
+        if (Dialog.form-id == "buy" || Dialog.form-id == "txn-edit") {
             return Dialog.draft-quantity != "" && Dialog.draft-price != "";
         }
+        // G1 final review (M2): the ledger sale's quantity is required, and its absence NAMES
+        // itself (Rust's refusal) — never a silently greyed verb read as « empty = everything ».
+        if (Dialog.form-id == "sell") { return Dialog.draft-price != ""; }
         if (Dialog.form-id == "dividend") { return Dialog.draft-price != ""; }
         if (Dialog.form-id == "stop") { return Dialog.draft-price != ""; }
         if (Dialog.form-id == "portfolio-add" || Dialog.form-id == "portfolio-rename") {
@@ -482,8 +485,9 @@ export component ModalDialog inherits Rectangle {
                                 accepted => { root.submit(); }
                             }
                             LabeledField {
-                                label: Dialog.form-id == "sell"
-                                    ? @tr("Quantité vendue (vide = toute la position)") : @tr("Quantité");
+                                // G1 final review (Guy's decision M2): the ledger sale's quantity is
+                                // required — no « vide = toute la position » promise here.
+                                label: Dialog.form-id == "sell" ? @tr("Quantité vendue") : @tr("Quantité");
                                 placeholder: @tr("Nombre d'actions");
                                 text <=> Dialog.draft-quantity;
                                 accepted => { root.submit(); }

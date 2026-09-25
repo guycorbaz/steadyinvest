@@ -709,6 +709,33 @@ fn confirm_restore_is_refused_on_a_read_only_dossier() {
 }
 
 #[test]
+fn confirm_restore_is_refused_when_the_safety_snapshot_cannot_be_written() {
+    // G1 final review (L12): the snapshot is a PRECONDITION — without it a restored file that
+    // will not open could not be rolled back. Refused by name; the live dossier stays and reopens.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x547); // live id 0xC0FFEE
+    let study = state.create_study("NESN", "CHF").unwrap();
+    make_backup(&dir, "src.db", 0xBEEF, true);
+    // A directory squatting the snapshot's name makes the copy fail.
+    let squatter = dir.path().join("journal.db-prerestore");
+    std::fs::create_dir(&squatter).unwrap();
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    assert_eq!(
+        state.confirm_restore(),
+        Err(MSG_RESTORE_SNAPSHOT_FAILED.to_string())
+    );
+    assert_eq!(
+        state.journal_id(),
+        Some(Uuid::from_u128(0xC0FFEE)),
+        "the live dossier was not replaced, and is open again"
+    );
+    assert!(state.get_study(study).is_some(), "nothing was lost");
+    assert!(squatter.is_dir(), "a directory not ours is left alone");
+}
+
+#[test]
 fn restoring_the_journal_onto_itself_is_a_safe_no_op() {
     // Review CRITICAL: fs::copy(live, live) truncates to 0 bytes — the same-path guard must make a
     // self-restore a no-op that loses nothing.
@@ -3232,6 +3259,40 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
     );
 }
 
+#[test]
+fn a_legacy_lot_without_a_currency_is_never_ratcheted_by_a_study_price() {
+    // G1 final review (the review screen's rule): a lot without a declared currency links its
+    // study ticker-only — the study's price may be in any currency, so it never moves (nor seeds)
+    // the lot's stop; the cost basis seeds it.
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x57, "2026-06-28T10:00:00Z");
+    let study = state.create_study("NESN", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    // Make it a pre-6.2 legacy row: no declared currency.
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .update_holding_with_currency(id, "NESN", "10", "100", None, None)
+        .unwrap();
+    assert!(state.list_holdings()[0].currency.is_none());
+    state.set_holding_trailing_stop(id, "20").unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "seeded from the cost basis"
+    );
+    state
+        .ratchet_trailing_stops_for_study(study, Decimal::from(500))
+        .unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "a USD study's price never ratchets a lot of unknown currency"
+    );
+}
+
 // ── Story 4.6 — simple capital-at-risk (the portfolio downside figure) ──
 
 #[test]
@@ -3668,15 +3729,70 @@ fn a_bad_date_or_amount_on_a_buy_is_refused_neutrally() {
         state.record_buy_for(id, "02/07/2026", "1", "1", "", "", "CHF"),
         Err(MSG_LEDGER_INVALID_DATE.to_string())
     );
+    // G1 final review (M4): each refusal names ITS field — never the register's « quantité et
+    // prix d'achat… aucune position ».
     assert_eq!(
         state.record_buy_for(id, "", "0", "1", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string())
     );
     assert_eq!(
         state.record_buy_for(id, "", "1", "-1", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+        Err(MSG_LEDGER_INVALID_PRICE.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "1", "1", "-2", "", "CHF"),
+        Err(MSG_LEDGER_INVALID_FEES.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "1", "1", "frais", "", "CHF"),
+        Err(MSG_LEDGER_INVALID_FEES.to_string())
+    );
+    // G1 final review (M2, Guy's decision): the ledger sale's quantity is REQUIRED — an empty one
+    // names itself, never sells the whole position.
+    assert_eq!(
+        state.record_sell_for(id, "", "  ", "100", "", "", "CHF"),
+        Err(MSG_LEDGER_QUANTITY_EMPTY.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "", "1", "", "", "CHF"),
+        Err(MSG_LEDGER_QUANTITY_EMPTY.to_string())
     );
     assert!(state.holding_ledger(id).is_empty(), "nothing materialized");
+    assert_eq!(state.list_holdings()[0].quantity, "10", "nothing was sold");
+}
+
+#[test]
+fn a_dividends_refusals_name_the_dividend_field_at_fault() {
+    // G1 final review (M4): gross, withholding and shares are named as such — on the record rail
+    // AND on the ledger's edit of a dividend row.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x637);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    assert_eq!(
+        state.record_dividend_for(id, "", "10", "-3", "", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_GROSS.to_string())
+    );
+    assert_eq!(
+        state.record_dividend_for(id, "", "10", "3", "-1", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_WITHHOLDING.to_string())
+    );
+    assert_eq!(
+        state.record_dividend_for(id, "", "0", "3", "", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_QUANTITY.to_string())
+    );
+    state
+        .record_dividend_for(id, "2026-07-01", "10", "3", "1", "", "CHF", "35")
+        .unwrap();
+    let row = state.holding_ledger(id)[0].id;
+    assert_eq!(
+        state.update_transaction_for(id, row, "2026-07-01", "10", "3", "-1", "", "CHF"),
+        Err(MSG_DIVIDEND_INVALID_WITHHOLDING.to_string())
+    );
+    assert_eq!(
+        state.update_transaction_for(id, row, "2026-07-01", "10", "x", "1", "", "CHF"),
+        Err(MSG_DIVIDEND_INVALID_GROSS.to_string())
+    );
 }
 
 // ── Story 6.4 — dividends: gross study, net reinvestable (FR41) ──
@@ -4023,6 +4139,37 @@ fn a_ledger_backed_holding_refuses_direct_quantity_price_currency_edits() {
 }
 
 #[test]
+fn a_ledger_backed_guard_compares_numbers_not_spellings() {
+    // G1 final review (L10): « 20,0 » typed over the stored « 20 » is the SAME quantity — the
+    // sector edit applies, and the ledger's own spelling of the aggregate stays stored.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x63D);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Comma);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "2026-07-01", "10", "110", "0", "", "CHF")
+        .expect("the buy records");
+    let stored = state.list_holdings()[0].clone();
+    assert_eq!(stored.quantity, "20");
+    state
+        .update_holding_keeping_currency(id, "NESN", "20,0", "105,00", "Santé", "CHF")
+        .expect("same numbers, another spelling: not a ledger change");
+    let after = state.list_holdings()[0].clone();
+    assert_eq!(after.sector.as_deref(), Some("Santé"));
+    assert_eq!(
+        after.quantity, stored.quantity,
+        "the ledger's spelling stays"
+    );
+    assert_eq!(after.purchase_price, stored.purchase_price);
+    assert_eq!(
+        state.update_holding_keeping_currency(id, "NESN", "20,5", "105", "", "CHF"),
+        Err(MSG_LEDGER_BACKED.to_string()),
+        "a different number is still refused"
+    );
+}
+
+#[test]
 fn a_ledger_form_sell_records_the_explicit_price_and_fees() {
     // Review decision (FR39 to the letter): the ledger-form sell carries the user's own price,
     // date and fees — unlike the trigger sell (study price, fees 0).
@@ -4230,6 +4377,35 @@ fn edit_and_delete_holding_round_trip_and_survive_reopen() {
     assert_eq!(rows[0].security_ticker, "NESN.SW");
     assert_eq!(rows[0].quantity, "12");
     assert_eq!(rows[0].purchase_price, "96.00");
+}
+
+#[test]
+fn retirer_refuses_up_front_a_position_with_transactions_naming_the_cause() {
+    // G1 final review (Guy's decision): « Retirer » never confirms a removal the write refuses —
+    // a position with ledger transactions is refused BEFORE the confirm, in French, by cause; the
+    // write path's own refusal is the same French sentence (typed, never the English error text).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x433);
+    state.add_holding("NESN", "10", "95.40", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "248.10", "CHF", "").unwrap();
+    let nesn = state.list_holdings()[0].id;
+    let rog = state.list_holdings()[1].id;
+    state
+        .record_buy_for(nesn, "2026-07-01", "3", "100", "0", "", "CHF")
+        .unwrap();
+    assert_eq!(
+        state.holding_remove_guard(nesn),
+        Err(MSG_HOLDING_HAS_TRANSACTIONS.to_string())
+    );
+    assert_eq!(
+        state.delete_holding(nesn),
+        Err(MSG_HOLDING_HAS_TRANSACTIONS.to_string()),
+        "the write's second guard names the same cause"
+    );
+    // A position without transactions reaches the confirm, and is removed.
+    assert_eq!(state.holding_remove_guard(rog), Ok(()));
+    state.delete_holding(rog).unwrap();
+    assert_eq!(state.list_holdings().len(), 1);
 }
 
 #[test]
@@ -6325,6 +6501,91 @@ fn try_get_study_distinguishes_a_read_failure_from_a_true_absence() {
     );
 }
 
+/// Make every row of `table` unreadable behind the journal's back (G1 final review, M5): an id
+/// that is no UUID fails the typed read — the vehicle of a real IO/corruption failure.
+fn make_table_unreadable(dir: &TempDir, table: &str) {
+    let conn = rusqlite::Connection::open(dir.path().join("journal.db")).unwrap();
+    // The referencing rows keep their old ids — the point is an unreadable table, not a
+    // consistent one.
+    conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+    conn.execute(
+        &format!("UPDATE {table} SET id = 'not-a-uuid-' || rowid"),
+        [],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_failed_register_read_is_an_error_never_an_empty_register() {
+    // G1 final review (M5): each surface's read tells a FAILURE from a true absence, so the
+    // screen can say « indisponible » instead of « aucune position / aucun taux / … ».
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x959);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "2026-07-01", "1", "100", "0", "", "CHF")
+        .unwrap();
+    state.add_watch_item("ROG", None).unwrap();
+    state
+        .upsert_manual_fx_rate("EUR", "0,95", "", "CHF")
+        .unwrap();
+    // A true state first: everything reads.
+    assert_eq!(state.try_list_holdings().map(|h| h.len()), Ok(1));
+    assert_eq!(state.try_sold_holdings().map(|h| h.len()), Ok(0));
+    assert_eq!(state.try_holding_ledger(id).map(|t| t.len()), Ok(2));
+    assert_eq!(state.try_list_watch_items().map(|w| w.len()), Ok(1));
+    assert_eq!(state.try_list_fx_rates().map(|r| r.len()), Ok(1));
+
+    make_table_unreadable(&dir, "transactions");
+    assert!(
+        state.try_holding_ledger(id).is_err(),
+        "never « aucune transaction »"
+    );
+    make_table_unreadable(&dir, "watchlist_items");
+    assert!(
+        state.try_list_watch_items().is_err(),
+        "never « aucune valeur suivie »"
+    );
+    make_table_unreadable(&dir, "fx_rates");
+    assert!(state.try_list_fx_rates().is_err(), "never « aucun taux »");
+    make_table_unreadable(&dir, "holdings");
+    assert!(
+        state.try_list_holdings().is_err(),
+        "never « aucune position »"
+    );
+    assert!(state.try_sold_holdings().is_err());
+    make_table_unreadable(&dir, "portfolios");
+    assert!(state.try_list_portfolios().is_err());
+    assert!(
+        state.try_list_holdings().is_err(),
+        "an unreadable portfolio list is no « no portfolio yet »"
+    );
+}
+
+#[test]
+fn an_unreadable_study_refuses_the_trigger_sale_and_the_stop_never_the_cost_basis() {
+    // G1 final review (L7): the cost basis stands in only for a TRUE absence — a linked study
+    // that cannot be read refuses the trigger sale and the stop by name; nothing is written.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x958);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let holding = state.list_holdings()[0].id;
+    let study = state.create_study("NESN", "CHF").unwrap();
+    make_study_unreadable(&mut state, study);
+    assert_eq!(
+        state.sell_holding(holding, "", "", "CHF"),
+        Err(MSG_SELL_STUDY_UNAVAILABLE.to_string())
+    );
+    assert_eq!(
+        state.set_holding_trailing_stop(holding, "10"),
+        Err(MSG_STOP_STUDY_UNAVAILABLE.to_string())
+    );
+    let h = &state.list_holdings()[0];
+    assert!(state.holding_ledger(holding).is_empty(), "no sale recorded");
+    assert!(h.trailing_stop_pct.is_none(), "no stop seeded");
+}
+
 #[test]
 fn an_unreadable_study_is_unclassified_as_unavailable_never_no_study() {
     let dir = TempDir::new().unwrap();
@@ -6480,7 +6741,7 @@ fn a_rebuy_is_still_guarded_read_only_and_validated() {
     state.read_only = false;
     assert_eq!(
         state.record_buy_for(id, "", "0", "120", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string()),
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string()),
         "the ledger validations apply to a re-buy unchanged"
     );
     assert!(
@@ -7082,7 +7343,7 @@ fn the_rails_read_typed_amounts_under_the_comma_format() {
     // A text that is no number keeps the rail's own refusal.
     assert_eq!(
         state.record_buy_for(id, "2026-07-01", "deux", "10", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string())
     );
     assert_eq!(
         state.set_holding_trailing_stop(id, "12.500"),

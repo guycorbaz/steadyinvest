@@ -94,7 +94,12 @@ pub(crate) fn refresh_holdings(
 ) {
     use steadyinvest_core::rounding::DisplayField;
     let holdings = ui.global::<Holdings>();
-    let items = state.list_holdings();
+    // G1 final review (M5): a failed read is « indisponible » (a band), never the empty state.
+    let (items, holdings_unavailable) = match state.try_list_holdings() {
+        Ok(items) => (items, false),
+        Err(_) => (Vec::new(), true),
+    };
+    holdings.set_holdings_unavailable(holdings_unavailable);
     // Story 6.2 (FR38): the global reference currency is the fallback for a pre-6.2 holding whose own
     // currency is NULL (None) — the app coalesces None → reference at this read boundary.
     let reference_currency = holdings.get_reference_currency().to_string();
@@ -151,10 +156,17 @@ pub(crate) fn refresh_holdings(
                 .trailing_stop_level
                 .as_deref()
                 .and_then(|s| rust_decimal::Decimal::from_str_exact(s).ok());
-            let current_price_dec = study
-                .as_ref()
-                .and_then(|s| s.judgment.current_price)
-                .map(|m| m.as_decimal());
+            // G1 final review: the stop is compared only to a price KNOWN to be in the lot's
+            // currency — a legacy lot without a declared currency matches its study ticker-only,
+            // so its stop is never compared (no breach, no margin, no stop trigger); stated.
+            let current_price_dec = study.as_ref().and_then(|s| {
+                stop_comparable_price(
+                    h.currency.as_deref(),
+                    &s.native_currency,
+                    s.judgment.current_price.map(|m| m.as_decimal()),
+                )
+            });
+            let stop_uncompared = stop_level_dec.is_some() && h.currency.is_none();
             let stop_breached = match (stop_level_dec, current_price_dec) {
                 (Some(level), Some(price)) => steadyinvest_core::risk::stop_breached(level, price),
                 _ => false,
@@ -217,6 +229,7 @@ pub(crate) fn refresh_holdings(
                 stop_level: stop_level_display.into(),
                 stop_breached,
                 stop_distance: stop_distance.into(),
+                stop_uncompared,
                 trigger_kind: trigger_kind.into(),
                 dismissed,
             }
@@ -241,8 +254,12 @@ pub(crate) fn refresh_holdings(
     // ── Issue #84: the « Positions vendues » section — retired holdings, most recently sold
     // first. Read-only facts (ticker, sold day, currency); the ledger opens through the same
     // `ledger-holding-id` mechanism as the register, and the re-buy rides the record-buy rail. ──
-    let sold_rows: Vec<SoldRow> = state
-        .sold_holdings()
+    let (sold, sold_unavailable) = match state.try_sold_holdings() {
+        Ok(sold) => (sold, false),
+        Err(_) => (Vec::new(), true),
+    };
+    holdings.set_sold_unavailable(sold_unavailable);
+    let sold_rows: Vec<SoldRow> = sold
         .iter()
         .map(|h| SoldRow {
             id: h.id.to_string().into(),
@@ -393,20 +410,7 @@ pub(crate) fn refresh_holdings(
     });
     // The FR28 footnote: every rate actually used, with its day and source.
     holdings.set_consolidation_rates(if show {
-        consolidation
-            .rates_used
-            .iter()
-            .map(|r| {
-                // No prose baked into Rust (posture — the @tr scan cannot see it): the entry is
-                // pure data — pair, rate, then "(date, source)".
-                format!(
-                    "{} → {} {} ({}, {})",
-                    r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" · ")
-            .into()
+        crate::wiring::fx::rate_notes(&consolidation.rates_used, format).into()
     } else {
         SharedString::new()
     });
@@ -582,25 +586,19 @@ pub(crate) fn refresh_holdings(
     );
     // The FR28 footnote — pure data entries, no prose baked into Rust (posture).
     holdings.set_concentration_rates(if show_div {
-        div.rates_used
-            .iter()
-            .map(|r| {
-                format!(
-                    "{} → {} {} ({}, {})",
-                    r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" · ")
-            .into()
+        crate::wiring::fx::rate_notes(&div.rates_used, format).into()
     } else {
         SharedString::new()
     });
 
     // Story 6.1 (FR37): the portfolio selector + the active id (the register above is the active
     // portfolio's holdings). Pushed here so every holdings re-render keeps the selector in sync.
-    let portfolios: Vec<PortfolioRow> = state
-        .list_portfolios()
+    let (portfolios, portfolios_unavailable) = match state.try_list_portfolios() {
+        Ok(portfolios) => (portfolios, false),
+        Err(_) => (Vec::new(), true),
+    };
+    holdings.set_portfolios_unavailable(portfolios_unavailable);
+    let portfolios: Vec<PortfolioRow> = portfolios
         .iter()
         .map(|p| PortfolioRow {
             id: p.id.to_string().into(),
@@ -631,8 +629,13 @@ pub(crate) fn refresh_holdings(
 /// date part); a `NULL` legacy `kind` renders as a sell (the only pre-6.3 writer).
 pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uuid) {
     let format = state.number_format();
-    let rows: Vec<LedgerRow> = state
-        .holding_ledger(holding_id)
+    // G1 final review (M5): a failed read is « indisponible », never « aucune transaction ».
+    let (ledger, unavailable) = match state.try_holding_ledger(holding_id) {
+        Ok(rows) => (rows, false),
+        Err(_) => (Vec::new(), true),
+    };
+    ui.global::<Holdings>().set_ledger_unavailable(unavailable);
+    let rows: Vec<LedgerRow> = ledger
         .iter()
         .map(|t| LedgerRow {
             id: t.id.to_string().into(),
@@ -680,14 +683,48 @@ pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_i
     if open_for.as_str() != holding_id.to_string() {
         return;
     }
-    if state.list_holdings().iter().any(|h| h.id == holding_id)
-        || state.sold_holdings().iter().any(|h| h.id == holding_id)
+    // A failed register read proves nothing about the holding: keep the panel (its own read then
+    // states whether the ledger is readable) rather than close it as if the holding were gone.
+    let still_there = |rows: Result<Vec<steadyinvest_persistence::HoldingItem>, String>| match rows
     {
+        Ok(rows) => rows.iter().any(|h| h.id == holding_id),
+        Err(_) => true,
+    };
+    if still_there(state.try_list_holdings()) || still_there(state.try_sold_holdings()) {
         push_ledger(ui, state, holding_id);
     } else {
         let holdings = ui.global::<Holdings>();
         holdings.set_ledger_rows(ModelRc::new(VecModel::from(Vec::<LedgerRow>::new())));
         holdings.set_ledger_holding_id(SharedString::new());
+        holdings.set_ledger_unavailable(false);
+    }
+}
+
+/// The study price a lot's trailing stop may be compared to (G1 final review — the review
+/// screen's rule): only a price KNOWN to be in the lot's currency. A legacy lot without a
+/// declared currency links ticker-only, so its study's price may be in any currency — `None`,
+/// never a cross-currency comparison.
+fn stop_comparable_price(
+    lot_currency: Option<&str>,
+    study_currency: &str,
+    price: Option<Decimal>,
+) -> Option<Decimal> {
+    lot_currency
+        .is_some_and(|c| c.trim().eq_ignore_ascii_case(study_currency.trim()))
+        .then_some(price)
+        .flatten()
+}
+
+/// What an Enter in the trigger-sale dialog shows when the quantity is not a typed number (G1 I
+/// review; G1 final review L9 — a text that is no number used to do NOTHING visible): an ambiguous
+/// number's named refusal, a non-number's quantity refusal, and "" only for a blank field (Guy's
+/// decision 1: the whole-position sale takes a click on the verb, never a plain Enter).
+fn trigger_enter_refusal(text: &str, format: NumberFormat) -> &'static str {
+    use crate::viewmodel::format::NumberReading;
+    match crate::viewmodel::format::read_number(text, format) {
+        NumberReading::Ambiguous => state::ambiguous_number_message(format),
+        NumberReading::NotANumber => state::MSG_LEDGER_INVALID_QUANTITY,
+        NumberReading::Blank | NumberReading::Value(_) => "",
     }
 }
 
@@ -768,10 +805,23 @@ fn apply_holdings_result(
 ) {
     let holdings = ui.global::<Holdings>();
     match result {
-        Ok(()) => holdings.set_notice(SharedString::new()),
+        Ok(()) => {
+            let current = holdings.get_notice();
+            holdings.set_notice(
+                notice_after_success(current.as_str(), holdings.get_refreshing()).into(),
+            );
+        }
         Err(message) => crate::wiring::dialog::refuse(ui, &message),
     }
     refresh_holdings(ui, state, freshness, dismissed, format);
+}
+
+/// The holdings notice slot after a successful gesture that states no outcome of its own (an
+/// edit, a portfolio switch): emptied — except while a price refresh is IN FLIGHT, whose banner
+/// owns the slot until the batch drains (the notice-slot rule F4, G1 final review L11: a portfolio
+/// switch or an edit used to erase « Rafraîchissement des prix en cours. » mid-batch).
+fn notice_after_success(current: &str, refreshing: bool) -> &str {
+    if refreshing { current } else { "" }
 }
 
 /// Wire the holdings + portfolio domain: the holding add / edit / remove / sell / trailing-stop /
@@ -988,6 +1038,26 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             );
         });
     }
+    // G1 final review (Guy's decision): the « Retirer » guard BEFORE the confirm — a position with
+    // transactions is a refusal naming the cause, never a confirm the write then refuses.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Holdings>()
+            .on_request_remove_holding(move |id| {
+                let ui = ui_weak.unwrap();
+                let Some(id) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
+                    return false;
+                };
+                match journal_state.borrow().holding_remove_guard(id) {
+                    Ok(()) => true,
+                    Err(message) => {
+                        crate::wiring::dialog::refuse(&ui, &message);
+                        false
+                    }
+                }
+            });
+    }
     // ── G1 review (Guy's decision 3, #95, staleness): the position dialog's choices, read FRESH
     //    when it opens — one per study (ticker, currency), the id carried; a read failure is
     //    « indisponible », never an empty-looking « aucune étude ». ──
@@ -1013,12 +1083,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>()
             .on_ambiguous_number_refusal(move |text| {
                 let format = journal_state.borrow().number_format();
-                match crate::viewmodel::format::read_number(&text, format) {
-                    crate::viewmodel::format::NumberReading::Ambiguous => {
-                        state::ambiguous_number_message(format).into()
-                    }
-                    _ => SharedString::new(),
-                }
+                trigger_enter_refusal(&text, format).into()
             });
     }
     // ── Story 4.4 (FR40) — manual price refresh for every linked holding, off the UI thread. One
@@ -1268,6 +1333,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             let holdings = ui.global::<Holdings>();
             holdings.set_ledger_rows(ModelRc::new(VecModel::from(Vec::<LedgerRow>::new())));
             holdings.set_ledger_holding_id(SharedString::new());
+            holdings.set_ledger_unavailable(false);
         });
     }
     {
@@ -1552,9 +1618,53 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
 
 #[cfg(test)]
 mod tests {
-    use super::{edit_ticker_options, study_choice_label};
+    use super::{
+        edit_ticker_options, notice_after_success, study_choice_label, trigger_enter_refusal,
+    };
     use crate::state::StudyChoice;
+    use crate::viewmodel::format::NumberFormat;
     use uuid::Uuid;
+
+    #[test]
+    fn a_stop_is_compared_only_to_a_price_known_in_the_lots_currency() {
+        // G1 final review: a legacy lot (no declared currency) is never compared — its study
+        // matched ticker-only; a declared lot is compared to its own-currency study only.
+        let price = Some(rust_decimal::Decimal::from(80));
+        assert_eq!(super::stop_comparable_price(None, "USD", price), None);
+        assert_eq!(
+            super::stop_comparable_price(Some("chf"), "CHF", price),
+            price
+        );
+        assert_eq!(
+            super::stop_comparable_price(Some("CHF"), "USD", price),
+            None
+        );
+        assert_eq!(super::stop_comparable_price(Some("CHF"), "CHF", None), None);
+    }
+
+    #[test]
+    fn a_success_never_erases_the_in_flight_refresh_banner() {
+        // G1 final review (L11, the notice-slot rule F4).
+        let banner = crate::state::MSG_HOLDINGS_REFRESHING;
+        assert_eq!(notice_after_success(banner, true), banner);
+        assert_eq!(notice_after_success(banner, false), "");
+        assert_eq!(notice_after_success("", false), "");
+    }
+
+    #[test]
+    fn an_enter_on_a_non_number_in_the_trigger_sale_names_its_refusal() {
+        // G1 final review (L9): a text that is no number shows the quantity refusal — never an
+        // Enter with no visible effect; a blank one still waits for the verb (decision 1).
+        assert_eq!(
+            trigger_enter_refusal("deux", NumberFormat::Comma),
+            crate::state::MSG_LEDGER_INVALID_QUANTITY
+        );
+        assert_eq!(
+            trigger_enter_refusal("1.234", NumberFormat::Comma),
+            crate::state::MSG_NUMBER_AMBIGUOUS_COMMA
+        );
+        assert_eq!(trigger_enter_refusal("  ", NumberFormat::Comma), "");
+    }
 
     fn choice(ticker: &str, currency: &str, ambiguous: bool) -> StudyChoice {
         StudyChoice {

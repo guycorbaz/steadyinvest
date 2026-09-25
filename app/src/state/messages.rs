@@ -123,6 +123,12 @@ pub const MSG_REFRESH_UNMATCHED_YEARS: &str =
 /// but no saved study matches the watched ticker.
 pub const MSG_WATCH_NO_STUDY: &str =
     "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études.";
+/// G1 final review (L6): « Lier une étude » when the studies (or the list itself) could not be
+/// READ — named, never « aucune étude pour ce symbole ».
+pub const MSG_WATCH_STUDY_UNAVAILABLE: &str =
+    "Les études du dossier ne peuvent pas être lues ; aucun lien n'a été enregistré.";
+pub const MSG_WATCH_LINK_LIST_UNREADABLE: &str =
+    "La liste de suivi n'a pas pu être lue ; aucun lien n'a été enregistré.";
 /// Walk finding (2026-09-24): the same symbol twice on the watchlist is a slip, not a wish.
 pub const MSG_WATCH_DUPLICATE: &str = "Ce symbole est déjà dans la liste de suivi.";
 
@@ -146,6 +152,12 @@ pub const MSG_HOLDING_STUDY_OTHER_CURRENCY: &str = "L'étude de {t} est en {s} e
 /// refusal that names itself instead of a form that silently stays open.
 pub const MSG_HOLDING_NOT_FOUND: &str =
     "La position visée est introuvable ; rien n'a été enregistré.";
+/// G1 final review (Guy's decision): « Retirer » on a position with ledger transactions is
+/// refused UP FRONT, naming the cause — never a confirm promising a removal the write refuses.
+pub const MSG_HOLDING_HAS_TRANSACTIONS: &str = "Cette position a des transactions enregistrées : elle ne peut être retirée qu'une fois ses transactions supprimées ; elle n'a pas été retirée.";
+/// The same guard when the transactions could not be read — the cause named, never a guess.
+pub const MSG_HOLDING_LEDGER_UNREADABLE: &str =
+    "Les transactions de cette position n'ont pas pu être lues ; elle n'a pas été retirée.";
 /// G1 review: same, for a ledger row.
 pub const MSG_TRANSACTION_NOT_FOUND: &str =
     "La transaction visée est introuvable ; rien n'a été enregistré.";
@@ -276,6 +288,33 @@ pub const MSG_LEDGER_DELETED: &str = "La transaction a été supprimée.";
 /// the history — the ledger never goes negative; nothing is written.
 pub const MSG_LEDGER_OVERSELL: &str =
     "La quantité dépasse la quantité détenue à cette date ; rien n'a été enregistré.";
+/// The ledger's amount refusals (G1 final review, M2/M4): each names the ONE field at fault —
+/// never « La quantité et le prix d'achat… aucune position » for fees, a withholding or a
+/// dividend's gross. The quantity of a buy or a sale is REQUIRED (Guy's decision: no
+/// « vide = toute la position » in the ledger form); its absence names itself.
+pub const MSG_LEDGER_QUANTITY_EMPTY: &str =
+    "La quantité est vide ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_QUANTITY: &str =
+    "La quantité doit être un nombre strictement positif ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_PRICE: &str =
+    "Le prix unitaire doit être un nombre positif ou nul ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_FEES: &str =
+    "Les frais doivent être un nombre positif ou nul ; aucune transaction n'a été enregistrée.";
+/// The replay (or a dividend's gross) left `Decimal`'s range — named as such, never as a typo.
+pub const MSG_LEDGER_OUT_OF_RANGE: &str =
+    "Les montants dépassent la plage prise en charge ; aucune transaction n'a été enregistrée.";
+/// A STORED row (imported, legacy) carries a nonpositive quantity or a negative amount — the
+/// history cannot be replayed; the cause is the recorded row, not what the user just typed.
+pub const MSG_LEDGER_ROW_INVALID: &str = "Une transaction déjà enregistrée dans ce registre porte une quantité ou un montant invalide ; rien n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_QUANTITY: &str = "Le nombre d'actions concernées doit être un nombre strictement positif ; aucun dividende n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_GROSS: &str =
+    "Le brut par action doit être un nombre positif ou nul ; aucun dividende n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_WITHHOLDING: &str = "La retenue à la source doit être un montant positif ou nul ; aucun dividende n'a été enregistré.";
+/// G1 final review (L7): the trigger sale and the trailing stop take the linked study's price —
+/// the cost basis stands in only for a TRUE absence; a study that could not be READ refuses by
+/// name, never silently falls back to the cost basis.
+pub const MSG_SELL_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix actuel de la vente est inconnu ; rien n'a été enregistré.";
+pub const MSG_STOP_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix de référence du seuil est inconnu ; rien n'a été enregistré.";
 /// Raised when the transaction date is not a plausible AAAA-MM-JJ; nothing is written.
 pub const MSG_LEDGER_INVALID_DATE: &str =
     "La date doit être au format AAAA-MM-JJ ; rien n'a été enregistré.";
@@ -460,6 +499,11 @@ pub const MSG_RESTORE_UNREADABLE: &str =
 /// Issue #67: a non-empty sibling `-wal` = a raw copy of a live journal — its most recent
 /// writes are NOT in the `.db` file, so restoring it would silently drop them.
 pub const MSG_RESTORE_UNCHECKPOINTED: &str = "La sauvegarde est accompagnée d'un fichier -wal non vidé : ses écritures les plus récentes n'y figurent pas. Recréez la sauvegarde depuis l'application ; rien n'a été restauré.";
+/// G1 final review (L12): the restore's two preconditions on the CURRENT dossier — its checkpoint
+/// (so its `.db` holds every write) and its safety snapshot (the rollback if the restored file will
+/// not open). Either failure refuses the restore by name; nothing is replaced.
+pub const MSG_RESTORE_CHECKPOINT_FAILED: &str = "Le dossier actuel n'a pas pu être consolidé (ses écritures les plus récentes restent dans son fichier -wal) ; rien n'a été restauré.";
+pub const MSG_RESTORE_SNAPSHOT_FAILED: &str = "La copie de sécurité du dossier actuel n'a pas pu être créée à côté de lui ; rien n'a été restauré.";
 /// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
 pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (dossier {jid}, version {ver}) ? {reason}Le dossier actuel sera remplacé.";
 pub const MSG_RESTORE_REASON_STALE: &str =
@@ -838,11 +882,15 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_UNMATCHED_YEARS,
     MSG_WATCH_NO_STUDY,
     MSG_WATCH_DUPLICATE,
+    MSG_WATCH_STUDY_UNAVAILABLE,
+    MSG_WATCH_LINK_LIST_UNREADABLE,
     MSG_HOLDING_NO_STUDY,
     MSG_HOLDING_STUDY_UNAVAILABLE,
     MSG_HOLDING_STUDY_DELETED,
     MSG_HOLDING_STUDY_OTHER_CURRENCY,
     MSG_HOLDING_NOT_FOUND,
+    MSG_HOLDING_HAS_TRANSACTIONS,
+    MSG_HOLDING_LEDGER_UNREADABLE,
     MSG_TRANSACTION_NOT_FOUND,
     MSG_PORTFOLIO_NOT_FOUND,
     MSG_REVIEW_EXPORTED,
@@ -880,6 +928,17 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_LEDGER_UPDATED,
     MSG_LEDGER_DELETED,
     MSG_LEDGER_OVERSELL,
+    MSG_LEDGER_QUANTITY_EMPTY,
+    MSG_LEDGER_INVALID_QUANTITY,
+    MSG_LEDGER_INVALID_PRICE,
+    MSG_LEDGER_INVALID_FEES,
+    MSG_LEDGER_OUT_OF_RANGE,
+    MSG_LEDGER_ROW_INVALID,
+    MSG_DIVIDEND_INVALID_QUANTITY,
+    MSG_DIVIDEND_INVALID_GROSS,
+    MSG_DIVIDEND_INVALID_WITHHOLDING,
+    MSG_SELL_STUDY_UNAVAILABLE,
+    MSG_STOP_STUDY_UNAVAILABLE,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
     MSG_LEDGER_UNKNOWN_KIND,
@@ -929,6 +988,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_RESTORE_NOT_A_JOURNAL,
     MSG_RESTORE_UNREADABLE,
     MSG_RESTORE_UNCHECKPOINTED,
+    MSG_RESTORE_CHECKPOINT_FAILED,
+    MSG_RESTORE_SNAPSHOT_FAILED,
     MSG_RESTORE_CONFIRM,
     MSG_RESTORE_REASON_STALE,
     MSG_RESTORE_REASON_FOREIGN,

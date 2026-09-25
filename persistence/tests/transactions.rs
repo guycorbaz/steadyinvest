@@ -106,6 +106,39 @@ fn a_blank_rationale_persists_as_null() {
     );
 }
 
+#[test]
+fn holding_has_transactions_is_the_typed_twin_of_the_delete_guard() {
+    // G1 final review: the app refuses « Retirer » up front from this read — it must say exactly
+    // what the delete guard will say.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    assert!(!journal.holding_has_transactions(hid).unwrap());
+    journal
+        .record_sell(
+            Uuid::from_u128(0x9203),
+            hid,
+            "10",
+            "85",
+            "0",
+            "CHF",
+            None,
+            &ts("2026-06-29T11:00:00Z"),
+        )
+        .expect("the sell records");
+    assert!(journal.holding_has_transactions(hid).unwrap());
+    assert!(matches!(
+        journal.delete_holding(hid),
+        Err(steadyinvest_persistence::Error::HoldingHasTransactions)
+    ));
+    assert!(
+        !journal
+            .holding_has_transactions(Uuid::from_u128(0xDEAD))
+            .unwrap(),
+        "an absent holding has no transactions"
+    );
+}
+
 // ── Story 6.3 — the FR39 ledger writers (buys, partial sells, edit/delete). Persistence performs
 // no arithmetic: the aggregates below are the caller-computed values a real app derives via
 // `core::risk::ledger`; the tests only assert they land atomically with the ledger row. ──
@@ -140,6 +173,41 @@ fn holding_row(journal: &Journal, hid: Uuid) -> steadyinvest_persistence::Holdin
         .into_iter()
         .find(|h| h.id == hid)
         .expect("the holding row exists")
+}
+
+#[test]
+fn list_transactions_orders_a_full_tie_as_the_replay_does_buys_before_sells() {
+    // G1 final review (L14): same event day, same insertion stamp — the sale's id sorts FIRST,
+    // yet the app replays the buy first; the listing (the ledger panel's order) must agree.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    let now = ts("2026-07-01T12:00:00Z");
+    let day = "2026-07-01T00:00:00Z";
+    journal
+        .record_buy(
+            hid,
+            None,
+            &entry(0x2, day, "5", "100", "0"),
+            "15",
+            "100",
+            &now,
+        )
+        .unwrap();
+    journal
+        .record_partial_sell(hid, None, &entry(0x1, day, "3", "110", "0"), "12", &now)
+        .unwrap();
+    let kinds: Vec<Option<String>> = journal
+        .list_transactions(hid)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        [Some("buy".to_string()), Some("sell".to_string())],
+        "buy first on a full tie, whatever the ids"
+    );
 }
 
 #[test]

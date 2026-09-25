@@ -13,9 +13,10 @@ use steadyinvest_persistence::{
 use uuid::Uuid;
 
 use super::{
-    JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY,
-    MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL, MSG_RESTORE_UNCHECKPOINTED,
-    MSG_RESTORE_UNREADABLE, MSG_SAVE_FAILED, path_with_suffix, same_file_path, sync_mode_for,
+    JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_RESTORE_CHECKPOINT_FAILED,
+    MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY, MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL,
+    MSG_RESTORE_SNAPSHOT_FAILED, MSG_RESTORE_UNCHECKPOINTED, MSG_RESTORE_UNREADABLE,
+    path_with_suffix, same_file_path, sync_mode_for,
 };
 
 /// How a candidate backup compares to the current journal (Story 5.4, AC2).
@@ -107,9 +108,14 @@ impl JournalState {
                 None => RestoreVerdict::Ok,
                 Some(journal) if journal.id() != info.journal_id => RestoreVerdict::ForeignJournal,
                 Some(journal) => {
-                    let current = journal
-                        .logical_version()
-                        .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+                    // The live dossier's version could not be read: no comparison can be stated —
+                    // refused, the English cause logged (G1 final review, L13).
+                    let current = journal.logical_version().map_err(|error| {
+                        tracing::warn!(
+                            "restore: the live journal's version is unreadable: {error}"
+                        );
+                        MSG_RESTORE_FAILED.to_string()
+                    })?;
                     if info.logical_version < current {
                         RestoreVerdict::StaleOlder {
                             backup: info.logical_version,
@@ -190,18 +196,37 @@ impl JournalState {
 
         // Checkpoint the live journal so its `.db` is self-contained, then drop the handle (one
         // connection per Journal — swapping over an open file is unsafe) and snapshot it for rollback.
-        if let Some(journal) = self.journal.as_ref() {
-            let _ = journal.checkpoint();
+        // G1 final review (L12): both are PRECONDITIONS, never best effort — an un-checkpointed
+        // `.db` would make the snapshot miss the dossier's latest writes, and without a snapshot a
+        // restored file that will not open could not be rolled back. Either failure refuses the
+        // restore by name, before anything is touched (the handle stays open on a checkpoint
+        // failure; the live journal is reopened on a snapshot failure).
+        if let Some(journal) = self.journal.as_ref()
+            && let Err(error) = journal.checkpoint()
+        {
+            tracing::warn!("restore refused: the live journal could not be checkpointed: {error}");
+            return Err(MSG_RESTORE_CHECKPOINT_FAILED.to_string());
         }
         self.journal = None;
         let snapshot = path_with_suffix(&live, "-prerestore");
-        let have_snapshot = std::fs::copy(&live, &snapshot).is_ok();
+        if let Err(error) = std::fs::copy(&live, &snapshot) {
+            tracing::warn!("restore refused: the safety snapshot could not be written: {error}");
+            // A partial copy is no snapshot; a directory squatting the name is not ours to remove.
+            if snapshot.is_file() {
+                let _ = std::fs::remove_file(&snapshot);
+            }
+            self.reopen_live(&live);
+            return Err(MSG_RESTORE_SNAPSHOT_FAILED.to_string());
+        }
 
-        // Atomic swap — a failure leaves the live file untouched, so the original survives.
+        // Atomic swap — a failure leaves the live file untouched, so the original survives. The
+        // persistence error's (English) text is logged, never appended to the French refusal
+        // (G1 final review, L13).
         if let Err(error) = restore_journal_file(&live, &pending.backup_path) {
+            tracing::warn!("restore swap failed: {error}");
             let _ = std::fs::remove_file(&snapshot);
             self.reopen_live(&live);
-            return Err(format!("{MSG_RESTORE_FAILED} {error}"));
+            return Err(MSG_RESTORE_FAILED.to_string());
         }
 
         match Journal::open_with_mode(&live, sync_mode_for(&live)) {
@@ -215,12 +240,15 @@ impl JournalState {
             Err(error) => {
                 // The swap succeeded but the restored file will not open — roll the snapshot back so
                 // the user's original journal is not lost, then reopen it.
-                if have_snapshot {
-                    let _ = restore_journal_file(&live, &snapshot);
+                tracing::warn!("the restored journal will not open: {error}");
+                if let Err(rollback) = restore_journal_file(&live, &snapshot) {
+                    // Keep the snapshot on disk: it is then the only copy of the original.
+                    tracing::warn!("rollback to the pre-restore snapshot failed: {rollback}");
+                } else {
+                    let _ = std::fs::remove_file(&snapshot);
                 }
-                let _ = std::fs::remove_file(&snapshot);
                 self.reopen_live(&live);
-                Err(format!("{MSG_RESTORE_FAILED} {error}"))
+                Err(MSG_RESTORE_FAILED.to_string())
             }
         }
     }

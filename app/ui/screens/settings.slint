@@ -710,7 +710,13 @@ export component SettingsScreen inherits Rectangle {
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;
                     }
-                    if Fx.rates.length == 0: Text {
+                    // G1 final review (M5): a failed read is « indisponible », never « aucun taux ».
+                    if Fx.rates-unavailable: Text {
+                        text: @tr("Taux de change indisponibles : les taux enregistrés n'ont pas pu être lus.");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                    }
+                    if !Fx.rates-unavailable && Fx.rates.length == 0: Text {
                         text: @tr("Aucun taux enregistré pour le moment.");
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;

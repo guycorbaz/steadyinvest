@@ -26,11 +26,22 @@ use uuid::Uuid;
 impl JournalState {
     /// The stored rates, deterministic order (pair, most-recent date first) — the Réglages panel
     /// read. `[]` without a journal or on a read failure (a display surface).
+    /// Test-only since the G1 final review: the panel reads [`Self::try_list_fx_rates`].
+    #[cfg(test)]
     pub fn list_fx_rates(&self) -> Vec<FxRateItem> {
-        self.journal
-            .as_ref()
-            .and_then(|j| j.list_fx_rates().ok())
-            .unwrap_or_default()
+        self.try_list_fx_rates().unwrap_or_default()
+    }
+
+    /// Fallible [`Self::list_fx_rates`] for the Réglages panel (G1 final review, M5): `Err` on a
+    /// read failure — « indisponible », never the empty-looking « aucun taux ».
+    pub fn try_list_fx_rates(&self) -> Result<Vec<FxRateItem>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        journal.list_fx_rates().map_err(|error| {
+            tracing::warn!("list_fx_rates failed: {error}");
+            error.to_string()
+        })
     }
 
     /// The FOREIGN currencies in use (Story 6.5, AC3): the effective currencies of the ACTIVE

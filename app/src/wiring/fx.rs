@@ -15,8 +15,13 @@ use crate::{fetch, state};
 /// number format — G1 I —, day, source).
 pub(crate) fn push_fx_rates(ui: &MainWindow, state: &JournalState) {
     let format = state.number_format();
-    let rows: Vec<FxRateRow> = state
-        .list_fx_rates()
+    // G1 final review (M5): a failed read is « indisponible », never an empty list.
+    let (rates, unavailable) = match state.try_list_fx_rates() {
+        Ok(rates) => (rates, false),
+        Err(_) => (Vec::new(), true),
+    };
+    ui.global::<Fx>().set_rates_unavailable(unavailable);
+    let rows: Vec<FxRateRow> = rates
         .iter()
         .map(|r| FxRateRow {
             id: r.id.to_string().into(),
@@ -29,6 +34,30 @@ pub(crate) fn push_fx_rates(ui: &MainWindow, state: &JournalState) {
         .collect();
     ui.global::<Fx>()
         .set_rates(ModelRc::new(VecModel::from(rows)));
+}
+
+/// The FR28 footnote of a converted surface: every rate used, as pure data entries — pair, the
+/// exact rate in the user's number format (G1 final review: never a raw « 0.8 » beside the
+/// surface's « 0,8 »), then "(date, source)" — joined by « · ». No prose baked into Rust (posture:
+/// the @tr scan cannot see it); the surrounding sentence lives in Slint.
+pub(crate) fn rate_notes(
+    rates: &[steadyinvest_persistence::FxRateItem],
+    format: crate::viewmodel::format::NumberFormat,
+) -> String {
+    rates
+        .iter()
+        .map(|r| {
+            format!(
+                "{} → {} {} ({}, {})",
+                r.base_currency,
+                r.quote_currency,
+                crate::viewmodel::format::format_amount(&r.rate, format),
+                r.rate_date,
+                r.source
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// Wire the FX domain: the provider refresh + the manual-entry form.
@@ -184,5 +213,38 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rate_notes;
+    use crate::viewmodel::format::NumberFormat;
+
+    #[test]
+    fn rate_notes_spell_the_rate_in_the_users_number_format() {
+        let eur = steadyinvest_persistence::FxRateItem {
+            id: uuid::Uuid::nil(),
+            base_currency: "EUR".to_string(),
+            quote_currency: "CHF".to_string(),
+            rate: "0.8".to_string(),
+            rate_date: "2026-09-01".to_string(),
+            source: "manuel".to_string(),
+            created_at: steadyinvest_contract::Timestamp("2026-09-01T00:00:00Z".to_string()),
+        };
+        let usd = steadyinvest_persistence::FxRateItem {
+            base_currency: "USD".to_string(),
+            rate: "0.91".to_string(),
+            ..eur.clone()
+        };
+        assert_eq!(
+            rate_notes(&[eur.clone(), usd], NumberFormat::Comma),
+            "EUR → CHF 0,8 (2026-09-01, manuel) · USD → CHF 0,91 (2026-09-01, manuel)"
+        );
+        assert_eq!(
+            rate_notes(std::slice::from_ref(&eur), NumberFormat::Point),
+            "EUR → CHF 0.8 (2026-09-01, manuel)"
+        );
+        assert_eq!(rate_notes(&[], NumberFormat::Comma), "");
     }
 }

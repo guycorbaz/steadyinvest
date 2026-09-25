@@ -58,18 +58,7 @@ fn push_candidates(ui: &MainWindow, state: &JournalState) {
     holdings.set_candidates_rates(
         state
             .journal_currency_exposure(&reference)
-            .map(|e| {
-                e.rates_used
-                    .iter()
-                    .map(|r| {
-                        format!(
-                            "{} → {} {} ({}, {})",
-                            r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-            })
+            .map(|e| crate::wiring::fx::rate_notes(&e.rates_used, format))
             .unwrap_or_default()
             .into(),
     );

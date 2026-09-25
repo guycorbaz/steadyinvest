@@ -48,6 +48,9 @@ export struct WatchRow {
     // Issue #48 (FR35): the price sits BELOW the recorded forecast band — a distinct neutral
     // fact (« sous la bande de prévision »), mutually exclusive with `in-buy-zone`.
     below-band: bool,
+    // G1 final review (L6): the linked study could not be READ (or no longer resolves) —
+    // « Étude indisponible », never a dangling « Étude : » nor « aucune étude ».
+    study-unavailable: bool,
 }
 
 // Story 7.3 (PR 2): one row of the watchlist « criblage » — the examination's facts as already-
@@ -164,6 +167,9 @@ export struct CandidateRow {
 // refresh, user-initiated only; manual entry). NO conversion happens here (consolidation = 6.6).
 export global Fx {
     in-out property <[FxRateRow]> rates;
+    // G1 final review (M5): the stored rates could not be READ — « indisponible », never the
+    // empty-looking « aucun taux ».
+    in-out property <bool> rates-unavailable;
     in-out property <bool> refreshing;
     // Issue #100: the "done / total" progress of the paced batch ("" when idle); shown beside the
     // button so a multi-minute refresh counts up instead of showing a frozen banner.
@@ -972,6 +978,9 @@ export global Prefs {
 export global Watchlist {
     in-out property <[WatchRow]> rows;
     in-out property <int> count;
+    // G1 final review (M5): the watchlist could not be READ — « indisponible », never the empty
+    // state « Aucune valeur suivie ».
+    in-out property <bool> unavailable;
     // How many watched securities are currently in their buy zone (Story 4.2) — the summary alert.
     in-out property <int> in-buy-zone-count;
     in-out property <bool> read-only;
@@ -1430,6 +1439,9 @@ export struct HoldingRow {
     stop-breached: bool,
     // The current price's margin above the stop level (display string; "" when breached or unknown).
     stop-distance: string,
+    // G1 final review: a legacy lot with NO declared currency has a stop that is never compared
+    // to (nor ratcheted by) a price whose currency cannot be told to match — stated, no trigger.
+    stop-uncompared: bool,
     // Story 4.7 (FR46/FR47): the neutral trigger this holding fires — "stop" (breached, takes
     // priority), "sell" (in its Sell zone), or "" (none). `dismissed` is true while the user has
     // hidden this trigger's action panel for the session (transient; never persisted).
@@ -1443,6 +1455,9 @@ export struct HoldingRow {
 export global Holdings {
     in-out property <[HoldingRow]> rows;
     in-out property <int> holding-count;
+    // G1 final review (M5): the register could not be READ (its portfolios or its positions) —
+    // « indisponible », never the empty-looking « Aucune position pour le moment ».
+    in-out property <bool> holdings-unavailable;
     in-out property <bool> read-only;
     in-out property <string> notice;
     in-out property <string> reference-currency: "CHF";
@@ -1472,6 +1487,9 @@ export global Holdings {
     // id, ticker, quantity, purchase-price, sector → written?
     callback edit-holding(string, string, string, string, string) -> bool;
     callback remove-holding(string); // id
+    // G1 final review (Guy's decision): the « Retirer » guard BEFORE the confirm — a position with
+    // ledger transactions is refused by Rust, naming the cause; true = the confirm may be asked.
+    callback request-remove-holding(string) -> bool; // id
     // Story 4.4 (FR40): user-initiated price refresh for every linked holding (off the UI thread).
     callback refresh-prices();
     callback cancel-refresh();                     // issue #100: drain the in-flight refresh batch
@@ -1488,10 +1506,14 @@ export global Holdings {
     //    row currency is pinned to the holding's (FR28) — displayed, never chosen. ──
     in-out property <[LedgerRow]> ledger-rows;
     in-out property <string> ledger-holding-id;
+    // G1 final review (M5): the opened ledger could not be READ — never « Aucune transaction ».
+    in-out property <bool> ledger-unavailable;
     // Issue #84: the active portfolio's SOLD positions (most recently sold first), pushed with
     // every register re-render. The section is collapsed by default (pure-Slint toggle in the
     // screen); a sold row's ledger reuses `open-ledger` / `ledger-rows` above.
     in-out property <[SoldRow]> sold-rows;
+    // G1 final review (M5): the sold positions could not be READ — the section says so.
+    in-out property <bool> sold-unavailable;
     // Issue #86: deleting a ledger row is irreversible → the Dialog confirm variant (the UX pass).
     callback open-ledger(string);   // holding id → push rows + show
     callback close-ledger();
@@ -1547,6 +1569,8 @@ export global Holdings {
     // ── Story 6.1 (FR37): multiple portfolios. The list + the active id; the register above shows the
     //    active portfolio's holdings. Add/rename/delete are guarded (neutral notices on refusal). ──
     in-out property <[PortfolioRow]> portfolios;
+    // G1 final review (M5): the portfolios could not be READ — a band, never a silent selector.
+    in-out property <bool> portfolios-unavailable;
     in-out property <string> active-portfolio-id;
     in-out property <string> active-portfolio-name; // G1 review: « Renommer… » opens prefilled
     callback select-portfolio(string);          // id → make active
@@ -1557,7 +1581,8 @@ export global Holdings {
     // the rails read it by — « 10,5 » under the comma format, where Slint's `is-float` says no).
     pure callback reads-as-number(string) -> bool;
     // G1 I review: the named refusal of an AMBIGUOUS typed number (« 1.085 » under the comma
-    // format), "" otherwise — so the dialog's Enter shows it instead of silently doing nothing.
+    // format), and (G1 final review) a text that is no number's quantity refusal; "" only for a
+    // blank field — so the dialog's Enter shows it instead of silently doing nothing.
     pure callback ambiguous-number-refusal(string) -> string;
     // Guy, 2026-09-24: every study's ticker, unique, sorted (the comparison pickers' list).
     in-out property <[string]> study-tickers;

@@ -363,12 +363,14 @@ impl Journal {
         self.check_writable()?;
         let tx = self.conn.transaction()?;
         // The `CASE … security_ticker IS NOT ?2` reads the OLD ticker (SET exprs see pre-update row),
-        // so the stop clears only when the ticker actually changes. `currency IS NOT ?5` in the WHERE
+        // so the stop clears only when the ticker actually changes — compared case-insensitively
+        // (G1 final review): « nesn » → « NESN » names the SAME security (every link and ratchet
+        // matches tickers ignoring case), so its stop stays. `currency IS NOT ?5` in the WHERE
         // keeps an identical-values edit a true no-op even when only the currency would change.
         let changed = tx.execute(
             "UPDATE holdings SET security_ticker = ?2, quantity = ?3, purchase_price = ?4, currency = ?5, sector = ?6,
-                    trailing_stop_pct = CASE WHEN security_ticker IS NOT ?2 THEN NULL ELSE trailing_stop_pct END,
-                    trailing_stop_level = CASE WHEN security_ticker IS NOT ?2 THEN NULL ELSE trailing_stop_level END
+                    trailing_stop_pct = CASE WHEN UPPER(security_ticker) IS NOT UPPER(?2) THEN NULL ELSE trailing_stop_pct END,
+                    trailing_stop_level = CASE WHEN UPPER(security_ticker) IS NOT UPPER(?2) THEN NULL ELSE trailing_stop_level END
              WHERE id = ?1
                AND (security_ticker IS NOT ?2 OR quantity IS NOT ?3 OR purchase_price IS NOT ?4 OR currency IS NOT ?5 OR sector IS NOT ?6)",
             rusqlite::params![id.to_string(), security_ticker, quantity, purchase_price, currency, sector],
@@ -426,6 +428,14 @@ impl Journal {
         Ok(changed)
     }
 
+    /// Whether transaction rows still reference holding `id` — the typed twin of
+    /// [`Self::delete_holding`]'s guard (G1 final review), so the app can REFUSE « Retirer » up
+    /// front, naming the cause, instead of confirming a removal the write then refuses. Same count,
+    /// same table: the two can never disagree.
+    pub fn holding_has_transactions(&self, id: Uuid) -> Result<bool> {
+        Ok(transaction_count(&self.conn, id)? > 0)
+    }
+
     /// Remove a holding (FR36). One transaction; bumps the version only on a real removal (an
     /// absent id is an idempotent no-op). Refuses (typed [`Error::CorruptPayload`]-free, neutral
     /// [`Error::HoldingHasTransactions`]) while transaction rows still reference the holding —
@@ -434,12 +444,7 @@ impl Journal {
     pub fn delete_holding(&mut self, id: Uuid) -> Result<()> {
         self.check_writable()?;
         let tx = self.conn.transaction()?;
-        let referenced: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM transactions WHERE holding_id = ?1",
-            rusqlite::params![id.to_string()],
-            |r| r.get(0),
-        )?;
-        if referenced > 0 {
+        if transaction_count(&tx, id)? > 0 {
             return Err(Error::HoldingHasTransactions);
         }
         let removed = tx.execute(
@@ -537,6 +542,16 @@ impl Journal {
             Ok(DeletePortfolioOutcome::Deleted)
         }
     }
+}
+
+/// How many transaction rows (any kind, of a live or a retired holding) reference holding `id` —
+/// the ONE count behind the delete guard and its up-front twin.
+fn transaction_count(conn: &rusqlite::Connection, id: Uuid) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM transactions WHERE holding_id = ?1",
+        rusqlite::params![id.to_string()],
+        |r| r.get(0),
+    )?)
 }
 
 /// The result of a guarded [`Journal::delete_portfolio`] — the deletion happened, or it was refused
