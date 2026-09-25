@@ -91,40 +91,15 @@ impl MarketDataProvider for EodhdProvider {
             .await
             .map_err(split_history_failure)?;
         // G1 H review: the fetch day bounds the split history (a split dated after it is refused).
-        // Read here, in the I/O shell; the mapping below stays pure and takes it as a parameter.
-        // G1 final review L11: in the LOCAL calendar — see [`fetch_day_at`].
-        let fetch_day = fetch_day_at(chrono::Local::now().fixed_offset());
-        let financials = map_eodhd(&fundamentals, &prices, &splits, fetch_day, ticker)?;
-        // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
-        // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
-        // Issue #72: the bar carries its session `date`, threaded on for the confront cache key.
-        // G1 final review M2: rebased into today's shares like every bar the yearly high/low come
-        // from — a split effective after the last bar (today's split, a lagging series) otherwise
-        // paired a pre-split price with the restated per-share figures. `map_eodhd` above already
-        // accepted this split history, so reading it again cannot fail here.
-        let split_history = map_split_history(&splits, fetch_day).map_err(split_history_failure)?;
-        let dated = latest_eod_close_rebased(&prices, &split_history);
-        let latest_price = dated.as_ref().map(|d| d.close);
-        let latest_session_date = dated.and_then(|d| d.session_date);
-        // Issue #113: the trailing-twelve-months EPS (the current-P/E denominator) — EODHD's own TTM
-        // figure `Highlights.EarningsShare` (verified = the sum of the last 4 reported quarters, and it
-        // skips the not-yet-reported current quarter). A present market fact, not an annual figure.
-        let ttm_eps = dec(fundamentals.pointer("/Highlights/EarningsShare"));
-        // Issue #98 (FR48): the company's sector — `General::Sector`, already in the fundamentals
-        // response (no extra call). Trimmed; an empty/absent field is an honest `None`.
-        let sector = fundamentals
-            .pointer("/General/Sector")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string);
-        Ok(RawFetch {
-            financials,
-            latest_price,
-            latest_session_date,
-            ttm_eps,
-            sector,
-        })
+        // Read here, in the I/O shell (G1 final review L11: the LOCAL calendar, [`fetch_day_at`]);
+        // the mapping below stays pure and takes the instant as a parameter.
+        map_fetch(
+            &fundamentals,
+            &prices,
+            &splits,
+            chrono::Local::now().fixed_offset(),
+            ticker,
+        )
     }
 
     async fn fetch_latest_price(
@@ -140,7 +115,19 @@ impl MarketDataProvider for EodhdProvider {
             self.base_url
         );
         let prices = get_json(&self.http, &eod_url, ticker).await?;
-        Ok(latest_eod_close(&prices))
+        // G1 final review (G3 #3): the holdings refresh writes the same `current_price` the study
+        // fetch writes — in TODAY's shares. The raw last close is pre-split when a split falls
+        // after the last bar (today's split, a lagging series), and would overwrite the rebased
+        // price the study fetch stored. So the split history is read here too; a failed split
+        // request is a named failure (the price is refused with its cause, never served raw).
+        let splits_url = format!(
+            "{}/splits/{ticker}?api_token={token}&fmt=json&from=1900-01-01",
+            self.base_url
+        );
+        let splits = get_json(&self.http, &splits_url, ticker)
+            .await
+            .map_err(split_history_failure)?;
+        latest_close_in_todays_shares(&prices, &splits, chrono::Local::now().fixed_offset())
     }
 
     async fn fetch_fx_rate(
@@ -156,8 +143,16 @@ impl MarketDataProvider for EodhdProvider {
         // `fetch_latest_price` path, never duplicated (NFR-S1 stays in one place). It also inherits
         // the #50 property: `/eod`-only, so it works on the free tier that 403s `/fundamentals`.
         // Issue #90 (part 3): the bar's `date` rides along too, same as the price path.
-        self.fetch_latest_price(&fx_pair_symbol(base, quote), api_key)
-            .await
+        // G1 final review: NOT through `fetch_latest_price` any more — a currency pair has no split
+        // history, and the equity path now reads one; the rate is the raw last close.
+        let token = api_key.ok_or(ProviderError::InvalidOrAbsentKey)?;
+        let symbol = fx_pair_symbol(base, quote);
+        let eod_url = format!(
+            "{}/eod/{symbol}?api_token={token}&period=d&fmt=json&order=a",
+            self.base_url
+        );
+        let prices = get_json(&self.http, &eod_url, &symbol).await?;
+        Ok(latest_eod_close(&prices))
     }
 }
 
@@ -180,25 +175,99 @@ pub fn latest_eod_close(prices: &Value) -> Option<DatedClose> {
 /// PURE: [`latest_eod_close`] brought into TODAY's shares by the splits dated after its bar (G1
 /// final review M2) — the same per-bar rule as the yearly high/low ([`rebase_price`]: 4 dp whenever
 /// a split applies, the served close untouched otherwise). Absent (`None`), never wrong: a last bar
-/// without a date while a split history exists cannot be placed against it, and a rebase that
-/// overflows is withheld. The session date rides on unchanged.
+/// whose date is not a readable `YYYY-MM-DD` while a split history exists cannot be placed against
+/// it (the bars' own rule, `year_of_date_key`), and a rebase that overflows is withheld. The
+/// session date rides on unchanged.
 fn latest_eod_close_rebased(prices: &Value, splits: &[DatedSplit]) -> Option<DatedClose> {
     let dated = latest_eod_close(prices)?;
     if splits.is_empty() {
         return Some(dated);
     }
-    let close = rebase_price(dated.close, dated.session_date.as_deref()?, splits)?;
+    let date = dated
+        .session_date
+        .as_deref()
+        .filter(|d| year_of_date_key(d).is_some())?;
+    let close = rebase_price(dated.close, date, splits)?;
     Some(DatedClose { close, ..dated })
 }
 
-/// The fetch day that bounds the split history (G1 final review L11), in the LOCAL calendar of
-/// `now`. EODHD dates both its bars and its splits by the exchange's trading calendar. The fetch
-/// day was the UTC date, which runs up to two hours BEHIND the user's calendar in Switzerland:
-/// between 00:00 and 02:00 local, a split dated today was refused as « dated after the fetch day ».
-/// The user's local date runs at or ahead of every European and American exchange's calendar for
-/// a user in Europe, so a split effective today there is never refused; one dated tomorrow still
-/// is. (An exchange east of the user — Asia — may start its day before the user's: a split dated
-/// its today is then refused, NAMED, until the user's own midnight — never applied early.)
+/// PURE: the holdings refresh's price (G3 #3) — the last close in today's shares, the split
+/// history read and bounded exactly as the study fetch reads it; an unreadable history is the
+/// named split-history failure.
+fn latest_close_in_todays_shares(
+    prices: &Value,
+    splits: &Value,
+    now: chrono::DateTime<chrono::FixedOffset>,
+) -> Result<Option<DatedClose>, ProviderError> {
+    let history = map_split_history(splits, fetch_day_at(now)).map_err(split_history_failure)?;
+    Ok(latest_eod_close_rebased(prices, &history))
+}
+
+/// PURE: the three bodies of a study fetch → [`RawFetch`], at the instant `now` (the I/O shell
+/// passes the wall clock; a test passes a fixed instant — so the fetch-day bound is tested where
+/// it is used, G3 #7).
+fn map_fetch(
+    fundamentals: &Value,
+    prices: &Value,
+    splits: &Value,
+    now: chrono::DateTime<chrono::FixedOffset>,
+    ticker: &str,
+) -> Result<RawFetch, ProviderError> {
+    let fetch_day = fetch_day_at(now);
+    let financials = map_eodhd(fundamentals, prices, splits, fetch_day, ticker)?;
+    // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
+    // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
+    // Issue #72: the bar carries its session `date`, threaded on for the confront cache key.
+    // G1 final review M2: rebased into today's shares like every bar the yearly high/low come
+    // from — a split effective after the last bar (today's split, a lagging series) otherwise
+    // paired a pre-split price with the restated per-share figures. `map_eodhd` above already
+    // accepted this split history, so reading it again cannot fail here.
+    let split_history = map_split_history(splits, fetch_day).map_err(split_history_failure)?;
+    let dated = latest_eod_close_rebased(prices, &split_history);
+    let latest_price = dated.as_ref().map(|d| d.close);
+    let latest_session_date = dated.and_then(|d| d.session_date);
+    // Issue #113: the trailing-twelve-months EPS (the current-P/E denominator) — EODHD's own TTM
+    // figure `Highlights.EarningsShare` (verified = the sum of the last 4 reported quarters, and it
+    // skips the not-yet-reported current quarter). A present market fact, not an annual figure.
+    let ttm_eps = dec(fundamentals.pointer("/Highlights/EarningsShare"));
+    // Issue #98 (FR48): the company's sector — `General::Sector`, already in the fundamentals
+    // response (no extra call). Trimmed; an empty/absent field is an honest `None`.
+    let sector = fundamentals
+        .pointer("/General/Sector")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    Ok(RawFetch {
+        financials,
+        latest_price,
+        latest_session_date,
+        ttm_eps,
+        sector,
+    })
+}
+
+/// The fetch day that bounds the split history (G1 final review L11): the calendar day of `now` in
+/// the user's LOCAL time.
+///
+/// What the bound guards: a split applied EARLY — announced, dated after the exchange's own today,
+/// it would rebase every served bar (today's included) by a split that has not happened, against
+/// per-share fundamentals not yet restated. EODHD dates splits and bars by the exchange's calendar,
+/// which no date on the user's machine knows exactly; the bound is the best proxy, and its errors
+/// fall two ways:
+/// - the user's day BEHIND the exchange's → a split effective today there is REFUSED, named, until
+///   the user's midnight (safe: a retry settles it). The UTC date put a Swiss user two hours behind
+///   the Swiss and European exchanges every night — the L11 defect; the local date removes it (the
+///   user's own exchanges share the user's calendar).
+/// - the user's day AHEAD of the exchange's → the early case: a split dated the user's today is
+///   accepted while the exchange is still on the eve (an American exchange, from the user's
+///   midnight to New York's — six hours from Switzerland). The UTC date had the same window, four to
+///   five hours long. Only a split dated that one day is concerned.
+///
+/// Why not the last bar's date + 1: weekends, holidays and a lagging series put the last bar days
+/// behind — a split effective on Monday, fetched on Monday before its bar, would be refused (the
+/// G1 H case « a past split after the last bar applies »), and the early case above is accepted
+/// all the same (last bar the eve + 1 = the split day).
 fn fetch_day_at(now: chrono::DateTime<chrono::FixedOffset>) -> NaiveDate {
     now.date_naive()
 }
@@ -720,30 +789,98 @@ mod tests {
             high,
             latest_eod_close_rebased(&bars, &history).map(|d| d.close)
         );
-        // A dateless last bar cannot be placed against a split history: absent, never wrong.
-        let dateless = json!([{ "close": "400" }]);
-        assert_eq!(
-            latest_eod_close_rebased(&dateless, &[split("2026-09-25")]),
-            None
-        );
+        // A last bar whose date is absent or unreadable cannot be placed against a split
+        // history: absent, never wrong (G3 #8: the bars' own `year_of_date_key` rule).
+        for bar in [
+            json!([{ "close": "400" }]),
+            json!([{ "date": "24/09/2026", "close": "400" }]),
+        ] {
+            assert_eq!(latest_eod_close_rebased(&bar, &[split("2026-09-25")]), None);
+        }
     }
 
-    /// G1 final review L11: the fetch day is the LOCAL calendar day — at 00:30 in Zurich (22:30
-    /// UTC the day before), a split dated today is accepted; one dated tomorrow is still refused.
+    /// G3 #8: several splits after the last bar compound (numerators and denominators apart, one
+    /// division, one 4-dp rounding); a split on or before the bar is not applied.
+    #[test]
+    fn several_splits_after_the_last_bar_compound_once() {
+        let prices = json!([{ "date": "2026-01-15", "close": "900" }]);
+        let s = |date: &str, n: &str, d: &str| DatedSplit {
+            date: date.into(),
+            numerator: Decimal::from_str_exact(n).unwrap(),
+            denominator: Decimal::from_str_exact(d).unwrap(),
+        };
+        let history = [
+            s("2025-06-01", "10", "1"), // before the bar — already in its price
+            s("2026-01-15", "5", "1"),  // ON the bar's date — already post-split
+            s("2026-03-01", "3", "2"),  // 3:2 after
+            s("2026-06-01", "4", "1"),  // 4:1 after
+        ];
+        let got = latest_eod_close_rebased(&prices, &history).expect("a close");
+        // 900 × 2 / (3 × 4) = 150.
+        assert_eq!(got.close, Decimal::from(150));
+        // A 7:1 after: 900 / 7 = 128.571428… → 128.5714 (4 dp once).
+        let seven = latest_eod_close_rebased(&prices, &[s("2026-02-01", "7", "1")]).unwrap();
+        assert_eq!(seven.close, Decimal::from_str_exact("128.5714").unwrap());
+    }
+
+    /// G3 #3: the holdings refresh's price is in today's shares like the study's; an unreadable or
+    /// future-dated split history is the named split-history failure — never the raw close.
+    #[test]
+    fn the_holdings_price_is_rebased_and_refused_without_a_readable_split_history() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-09-25T12:00:00+02:00").unwrap();
+        let prices = json!([{ "date": "2026-09-24", "close": "401.5" }]);
+        let splits = json!([{ "date": "2026-09-25", "split": "4.000000/1.000000" }]);
+        let got = latest_close_in_todays_shares(&prices, &splits, now).unwrap();
+        assert_eq!(
+            got.map(|d| d.close),
+            Some(Decimal::from_str_exact("100.375").unwrap())
+        );
+        assert_eq!(
+            latest_close_in_todays_shares(&prices, &json!([]), now)
+                .unwrap()
+                .map(|d| d.close),
+            Some(Decimal::from_str_exact("401.5").unwrap()),
+            "no split: the served close"
+        );
+        for bad in [
+            json!({ "error": "x" }),
+            json!([{ "date": "2026-09-26", "split": "2/1" }]),
+        ] {
+            let err = latest_close_in_todays_shares(&prices, &bad, now).unwrap_err();
+            assert!(matches!(err, ProviderError::SplitHistory { .. }), "{err:?}");
+        }
+    }
+
+    /// G1 final review L11, at the call site (G3 #7): the study fetch at 00:30 in Zurich (22:30
+    /// UTC the day before) accepts a split dated today and serves its present price rebased; one
+    /// dated tomorrow is still refused, named.
     #[test]
     fn a_split_dated_today_is_accepted_just_after_local_midnight() {
         let now = chrono::DateTime::parse_from_rfc3339("2026-09-26T00:30:00+02:00").unwrap();
-        let fetch_day = fetch_day_at(now);
-        assert_eq!(fetch_day, NaiveDate::from_ymd_opt(2026, 9, 26).unwrap());
+        assert_eq!(
+            fetch_day_at(now),
+            NaiveDate::from_ymd_opt(2026, 9, 26).unwrap()
+        );
         assert_ne!(
-            fetch_day,
+            fetch_day_at(now),
             now.naive_utc().date(),
             "the UTC date is still the 25th"
         );
-        let today = json!([{ "date": "2026-09-26", "split": "2/1" }]);
-        assert!(map_split_history(&today, fetch_day).is_ok());
+        let fundamentals = json!({ "General": { "CurrencyCode": "CHF" } });
+        let prices = json!([{ "date": "2026-09-25", "high": "80", "low": "70", "close": "78" }]);
+        let today = json!([{ "date": "2026-09-26", "split": "2.000000/1.000000" }]);
+        let fetched = map_fetch(&fundamentals, &prices, &today, now, "X.SW").expect("maps");
+        assert_eq!(fetched.latest_price, Some(Decimal::from(39)));
+        assert_eq!(
+            fetched.financials.years[0]
+                .high_price
+                .as_ref()
+                .map(|a| a.value),
+            Some(Decimal::from(40))
+        );
         let tomorrow = json!([{ "date": "2026-09-27", "split": "2/1" }]);
-        assert!(map_split_history(&tomorrow, fetch_day).is_err());
+        let err = map_fetch(&fundamentals, &prices, &tomorrow, now, "X.SW").expect_err("refused");
+        assert!(matches!(err, ProviderError::SplitHistory { .. }), "{err:?}");
     }
 
     /// G1 H (#237, owner decision 10): a 200 whose body is NOT the expected array — an error
