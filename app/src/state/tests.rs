@@ -3966,6 +3966,37 @@ fn a_ledger_backed_holding_refuses_direct_quantity_price_currency_edits() {
 }
 
 #[test]
+fn a_ledger_backed_guard_compares_numbers_not_spellings() {
+    // G1 final review (L10): « 20,0 » typed over the stored « 20 » is the SAME quantity — the
+    // sector edit applies, and the ledger's own spelling of the aggregate stays stored.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x63D);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Comma);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "2026-07-01", "10", "110", "0", "", "CHF")
+        .expect("the buy records");
+    let stored = state.list_holdings()[0].clone();
+    assert_eq!(stored.quantity, "20");
+    state
+        .update_holding_keeping_currency(id, "NESN", "20,0", "105,00", "Santé", "CHF")
+        .expect("same numbers, another spelling: not a ledger change");
+    let after = state.list_holdings()[0].clone();
+    assert_eq!(after.sector.as_deref(), Some("Santé"));
+    assert_eq!(
+        after.quantity, stored.quantity,
+        "the ledger's spelling stays"
+    );
+    assert_eq!(after.purchase_price, stored.purchase_price);
+    assert_eq!(
+        state.update_holding_keeping_currency(id, "NESN", "20,5", "105", "", "CHF"),
+        Err(MSG_LEDGER_BACKED.to_string()),
+        "a different number is still refused"
+    );
+}
+
+#[test]
 fn a_ledger_form_sell_records_the_explicit_price_and_fees() {
     // Review decision (FR39 to the letter): the ledger-form sell carries the user's own price,
     // date and fees — unlike the trigger sell (study price, fees 0).

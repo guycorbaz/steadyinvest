@@ -508,7 +508,7 @@ impl JournalState {
         if currency.is_some_and(|c| !crate::config::is_supported_currency(c)) {
             return Err(MSG_HOLDING_INVALID_CURRENCY.to_string());
         }
-        let (quantity, purchase_price) =
+        let (mut quantity, mut purchase_price) =
             validate_holding_amounts(quantity, purchase_price, self.number_format())?;
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         let ledger_backed = !journal
@@ -526,12 +526,25 @@ impl JournalState {
                     .currency
                     .as_deref()
                     .is_some_and(|c| Some(c) != currency);
-                if current.quantity != quantity
-                    || current.purchase_price != purchase_price
+                // G1 final review (L10): compared as NUMBERS — « 5,0 » typed over a stored « 5 »
+                // is the same quantity, never a « changed » ledger aggregate.
+                let same = |typed: &str, stored: &str| match (
+                    Decimal::from_str_exact(typed),
+                    Decimal::from_str_exact(stored),
+                ) {
+                    (Ok(a), Ok(b)) => a == b,
+                    _ => typed == stored,
+                };
+                if !same(&quantity, &current.quantity)
+                    || !same(&purchase_price, &current.purchase_price)
                     || currency_changed
                 {
                     return Err(MSG_LEDGER_BACKED.to_string());
                 }
+                // Equal values: the ledger's own spelling stays stored (no rewrite of the
+                // derived aggregate, no version bump for a respelling).
+                quantity = current.quantity;
+                purchase_price = current.purchase_price;
             }
         }
         // Issue #98 (FR48): same trim/NULL rule as the add rail — a cleared field re-opens the
