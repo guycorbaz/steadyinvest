@@ -9,6 +9,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::config::StudyViewState;
 use crate::state::JournalState;
 use crate::viewmodel::format::NumberFormat;
+use crate::wiring::study_notice::{self, Source};
 use crate::{
     GrowthComputed, JudgmentSuggestions, MainWindow, MgmtComputed, PeComputed, ReturnComputed,
     RiskComputed, Studies, VerdictState, ZoneBarState,
@@ -120,6 +121,9 @@ pub(crate) fn push_form(
                     .unwrap_or("")
                     .into(),
             );
+            // The study computes again: a normalize-failure notice from an earlier render goes
+            // (only that one — an edit's or a fetch's notice stays, F4).
+            study_notice::clear(ui, Source::Render);
         }
         Err(error) => {
             // Degraded-but-safe: the form still renders, every computed slot the em-dash; the verdict
@@ -149,7 +153,9 @@ pub(crate) fn push_form(
             studies.set_growth_chart(viewmodel::chart::unavailable());
             studies.set_pe_chart(viewmodel::chart::pe_chart_unavailable());
             studies.set_section4_warning_key(SharedString::new());
-            studies.set_notice(state::MSG_NORMALIZE_FAILED.into());
+            // G1 J: on the OPEN study's slot (the list's slot was invisible here), sourced Render so
+            // the next render that computes takes it down again (a state that no longer holds).
+            study_notice::fail(ui, Source::Render, state::MSG_NORMALIZE_FAILED);
         }
     }
 

@@ -105,7 +105,7 @@ impl DossierSession {
 ///   dossier);
 /// - the Études, Liste de suivi and Portefeuille notices go (an outcome of the previous dossier —
 ///   « L'étude a été créée… », a startup notice — never reads as the new one's; the new dossier
-///   re-derives its own states);
+///   re-derives its own states); the open study's own slot (`study-notice`, G1 J) goes with it;
 /// - the replacement candidates panel empties;
 /// - the FX panel: the in-flight flag and the sticky notice reset (rates are dossier data);
 /// - the comparison: picks (ids + labels), table and notice empty, the screen closes;
@@ -119,6 +119,7 @@ fn clear_dossier_session(ui: &MainWindow, session: &DossierSession) {
     ui.global::<Studies>().set_study_open(false);
     ui.global::<Studies>()
         .set_notice(slint::SharedString::new());
+    crate::wiring::study_notice::reset(ui);
     ui.global::<crate::Watchlist>()
         .set_notice(slint::SharedString::new());
     ui.global::<crate::Holdings>()

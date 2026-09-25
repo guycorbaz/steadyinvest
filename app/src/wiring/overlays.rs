@@ -5,11 +5,12 @@
 
 use std::rc::Rc;
 
-use slint::{ComponentHandle, SharedString};
+use slint::ComponentHandle;
 use uuid::Uuid;
 
 use crate::wiring::Session;
 use crate::wiring::push::push_form;
+use crate::wiring::study_notice::{self, Source};
 use crate::{Confront, MainWindow, ScenarioCompareState, Studies, TraceState};
 use crate::{state, viewmodel};
 
@@ -126,7 +127,6 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_set_forecast_low_option(move |key| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return;
                 };
@@ -143,12 +143,12 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
                     .set_forecast_low_option(id, option);
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -179,7 +179,7 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
                 Ok(snapshot) => {
                     studies.set_trace(viewmodel::engine::verdict_trace(&study, &snapshot, format));
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }

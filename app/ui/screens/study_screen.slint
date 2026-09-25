@@ -350,6 +350,26 @@ export component StudyScreen inherits Rectangle {
         }
         Rectangle { height: Tokens.border; background: Tokens.separator; }
 
+        // ── G1 J — the open study's notice slot. Pinned OUTSIDE the scroll, just under the verdict
+        //    bar, so a notice raised deep in the form (the soft-lock on a §3 cell, a drag refusal)
+        //    is seen where the user is, not at the top of a scrolled-away page. An OUTCOME of a
+        //    gesture → an inline notice (the UX pass: caption ink, no colour, no band); refusals
+        //    the user must acknowledge go to the refusal dialog instead, never here. The F4
+        //    notice-slot rule is enforced where it is written (Rust `wiring::study_notice`). ──
+        if Studies.study-notice != "": VerticalLayout {
+            padding-left: Tokens.space-24;
+            padding-right: Tokens.space-24;
+            padding-top: Tokens.space-8;
+            padding-bottom: Tokens.space-8;
+            Text {
+                text: Studies.study-notice;
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                wrap: word-wrap;
+            }
+        }
+        if Studies.study-notice != "": Rectangle { height: Tokens.border; background: Tokens.separator; }
+
         Flickable {
         vertical-stretch: 1;
         viewport-height: content.preferred-height;

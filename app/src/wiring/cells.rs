@@ -14,6 +14,7 @@ use steadyinvest_contract::Money;
 use crate::state::UnlockScope;
 use crate::wiring::Session;
 use crate::wiring::push::push_form;
+use crate::wiring::study_notice::{self, Source};
 use crate::{MainWindow, Studies};
 use crate::{state, viewmodel};
 
@@ -54,7 +55,6 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_commit_cell(move |year_index, field, text| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return false;
                 };
@@ -74,14 +74,14 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                         true
                     }
                     Err(message) => {
-                        studies.set_notice(message.into());
+                        study_notice::fail(&ui, Source::Edit, &message);
                         false
                     }
                 }
@@ -99,7 +99,6 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_paste_column(move |year_index, field| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return;
                 };
@@ -111,7 +110,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                     Ok(text) => text,
                     Err(error) => {
                         tracing::warn!("clipboard read failed: {error}");
-                        studies.set_notice(state::MSG_CLIPBOARD_UNAVAILABLE.into());
+                        study_notice::fail(&ui, Source::Edit, state::MSG_CLIPBOARD_UNAVAILABLE);
                         return;
                     }
                 };
@@ -134,15 +133,15 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 match result {
                     Ok(filled) => {
                         if filled < values.len() {
-                            studies.set_notice(state::MSG_PASTE_CLIPPED.into());
+                            study_notice::fail(&ui, Source::Edit, state::MSG_PASTE_CLIPPED);
                         } else {
-                            studies.set_notice(SharedString::new());
+                            study_notice::clear(&ui, Source::Edit);
                         }
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -157,7 +156,6 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_set_not_available(move |year_index, field, accepted| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return;
                 };
@@ -173,12 +171,12 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -216,7 +214,6 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_set_review(move |year_index, field, review| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return;
                 };
@@ -232,12 +229,12 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -267,7 +264,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         // The divergence is resolved — hide the reveal + resolve controls (the
                         // reveal is set only on focus, so clear it explicitly here).
                         studies.set_active_pending(SharedString::new());
@@ -275,7 +272,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -302,14 +299,14 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         // The divergence is dismissed — hide the reveal + resolve controls.
                         studies.set_active_pending(SharedString::new());
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -320,8 +317,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         ui.global::<Studies>().on_notify_soft_lock(move || {
             let ui = ui_weak.unwrap();
-            ui.global::<Studies>()
-                .set_notice(state::MSG_SOFT_LOCKED.into());
+            study_notice::fail(&ui, Source::Edit, state::MSG_SOFT_LOCKED);
         });
     }
 
@@ -381,12 +377,12 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
             let unlocked = journal_state.borrow_mut().unlock_all(id, &scope);
             match unlocked {
                 Ok(count) => {
-                    studies.set_notice(state::unlock_done_message(count).into());
+                    study_notice::outcome(&ui, Source::Edit, &state::unlock_done_message(count));
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }
