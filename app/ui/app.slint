@@ -131,6 +131,7 @@ export component MainWindow inherits Window {
                             if (index == 0) {
                                 Studies.study-open = false;
                                 Studies.judgment-dragging = false;
+                                Studies.close-study(); // G1 J review: Rust forgets the open study
                             }
                             // Issue #94: let Rust refresh the destination's study-derived facts.
                             root.screen-activated(index);

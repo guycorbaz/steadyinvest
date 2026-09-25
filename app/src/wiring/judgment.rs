@@ -444,6 +444,9 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             match undone {
                 Ok(true) => {
                     study_notice::clear(&ui, Source::Edit);
+                    // G1 J review: the fetch summary may describe what this undo reverted — it
+                    // goes (its outcome only; a fetch failure stays, F4).
+                    study_notice::clear_outcome(&ui, Source::Fetch);
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
@@ -478,6 +481,7 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             match redone {
                 Ok(true) => {
                     study_notice::clear(&ui, Source::Edit);
+                    study_notice::clear_outcome(&ui, Source::Fetch); // G1 J review, as undo
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }

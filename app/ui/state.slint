@@ -599,6 +599,11 @@ export global Studies {
     // invoked by the in-form « Retour aux études » button, which flips `study-open` in pure Slint
     // and therefore never passes through `screen-activated`.
     callback list-refresh-requested();
+    // G1 J review: the ONE close path of an open study — every « back to the list » gesture (the
+    // in-form button, the nav rail, the Portefeuille « go to studies ») calls it, so Rust forgets
+    // the open study's id (a late fetch result is then routed to the list, never to a hidden slot
+    // or onto the demo; an edit rail can never write a closed study).
+    callback close-study();
     // Story 5.2 (FR59): export one study to a portable file (id) / import a study from a file path.
     callback export-study(string);
     callback import-study(string);

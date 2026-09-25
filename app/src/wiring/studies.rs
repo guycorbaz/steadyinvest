@@ -558,6 +558,21 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         });
     }
 
+    // G1 J review — the ONE close path of an open study (in-form « Retour », the nav rail, the
+    // Portefeuille « go to studies »): forget the open study's id, so a late fetch result is routed
+    // to the list and no edit rail can write a study that is no longer shown.
+    {
+        let ui_weak = ui.as_weak();
+        let current_study = Rc::clone(current_study);
+        ui.global::<Studies>().on_close_study(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            *current_study.borrow_mut() = None;
+            studies.set_study_open(false);
+            studies.set_demo_active(false);
+        });
+    }
+
     // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and
     // the persisted per-study fold/regime view-state is restored (default = Entry + all open).
     {
@@ -820,6 +835,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let config = Rc::clone(config);
         let journal_state = Rc::clone(journal_state);
+        let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_load_demo(move || {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
@@ -831,6 +847,10 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                     // inherits the previously-open study's folds/regime or shows enabled undo/redo.
                     journal_state.borrow_mut().reset_undo();
                     study_notice::reset(&ui); // G1 J: the demo inherits no study's notice
+                    // G1 J review: `current_study` is None HERE, by construction — not merely
+                    // "stays" None: a study opened earlier would otherwise receive the demo's
+                    // edit rails and a late fetch result would render over the demo.
+                    *current_study.borrow_mut() = None;
                     push_form(&ui, &journal_state.borrow(), &study, format);
                     push_view_state(&ui, &StudyViewState::default());
                     studies.set_notice(SharedString::new());
