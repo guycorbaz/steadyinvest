@@ -684,9 +684,10 @@ mod tests {
         // 7.1 (#237) adds the picker's « liste des études indisponible » band, row 20's three
         // band nouns (worded as rows 17–19, no longer via `Labels`), the « introuvable » cell and
         // the two stated column headers (« étude introuvable » / « étude indisponible »): +7 =
-        // 899. Floor strict.
+        // 899. Its review adds the « non calculable » cell and header (a study that reads but
+        // does not compute — neither a read failure nor an absence): +2 = 901. Floor strict.
         assert!(
-            total >= 899,
+            total >= 901,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -800,10 +801,11 @@ mod tests {
         // blank-symbol refusal: 139. The G1 review adds the examination's blank-currency refusal
         // and the study-created-but-empty notice (MSG_QUICK_BLANK_CURRENCY,
         // MSG_QUICK_SCREEN_STUDY_EMPTY) and the criblage's unreadable-watchlist refusal
-        // (MSG_SCREENING_LIST_UNREADABLE): 142.
+        // (MSG_SCREENING_LIST_UNREADABLE): 142. The G1 review of 7.1 (#237) adds the marker of a
+        // comparison pick whose study is gone (MSG_COMPARISON_PICK_GONE): 142 + 1 = 143.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            142,
+            143,
             "state.rs message inventory changed — register the new notice"
         );
     }

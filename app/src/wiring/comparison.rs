@@ -13,7 +13,9 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use uuid::Uuid;
 
 use crate::state::{self, JournalState};
-use crate::viewmodel::comparison::{comparison_column, missing_column, unavailable_column};
+use crate::viewmodel::comparison::{
+    comparison_column, missing_column, unavailable_column, uncomputable_column,
+};
 use crate::viewmodel::engine::build_frame;
 use crate::wiring::Session;
 use crate::wiring::studies::study_choices;
@@ -63,6 +65,50 @@ fn choices(c: &Comparison<'_>) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The « · n » ordinal of a pushed choice (`None` when its label needs none).
+fn choice_ordinal(c: &Comparison<'_>, id: &str) -> Option<usize> {
+    c.get_choices()
+        .iter()
+        .find(|x| x.id.as_str() == id)
+        .and_then(|x| usize::try_from(x.ordinal).ok())
+        .filter(|n| *n > 0)
+}
+
+/// A gone pick's label: « LABEL (introuvable) » — never equal to a live label (a study recreated
+/// under the same ticker lists as « LABEL »). Idempotent.
+fn gone_label(label: &str) -> String {
+    let base = gone_base(label);
+    format!("{base} ({})", state::MSG_COMPARISON_PICK_GONE)
+}
+
+/// The label without the gone marker (for the column header, which states « introuvable » itself).
+fn gone_base(label: &str) -> &str {
+    label
+        .strip_suffix(&format!(" ({})", state::MSG_COMPARISON_PICK_GONE))
+        .unwrap_or(label)
+}
+
+/// PURE: the pick labels after a new listing (`listed` = `(id, label)`). An empty slot stays
+/// empty; a pick whose study is listed takes its CURRENT label (it may gain « · CUR » when a
+/// second study of its ticker appears); a pick whose study is gone keeps its id and is marked
+/// « (introuvable) » — « Comparer » then states it rather than dropping it in silence.
+fn relabel_picks(
+    listed: &[(String, String)],
+    ids: &[String; SLOTS],
+    labels: &[String; SLOTS],
+) -> [String; SLOTS] {
+    std::array::from_fn(|slot| {
+        let id = &ids[slot];
+        if id.is_empty() {
+            return labels[slot].clone();
+        }
+        match listed.iter().find(|(lid, _)| lid == id) {
+            Some((_, label)) => label.clone(),
+            None => gone_label(&labels[slot]),
+        }
+    })
+}
+
 /// PURE: one drop-down's list — every study but those picked in the OTHER slots (spec §2).
 fn slot_options(choices: &[(String, String)], ids: &[String; SLOTS], slot: usize) -> Vec<String> {
     choices
@@ -105,55 +151,92 @@ fn sync_picker(c: &Comparison<'_>) {
     c.set_distinct_picks(distinct_ids(&ids).len() as i32);
 }
 
-/// Push the dossier's studies into the picker (called from `refresh_studies`). A read failure
-/// is stated (`choices-unavailable`, #95), never an empty list. A pick whose study is still
-/// listed takes its current label (it may gain « · CUR » when a second study of its ticker
-/// appears); a pick whose study is gone keeps its id and label — « Comparer » then states it
-/// « introuvable » rather than dropping it in silence.
+/// Push the dossier's studies into the picker (called from `refresh_studies`). A failed listing
+/// is stated (`choices-unavailable`, #95), never an empty list — and marks no pick gone (a read
+/// failure is not an absence). The picks are relabelled by [`relabel_picks`].
 pub(crate) fn push_choices(ui: &MainWindow, state: &JournalState) {
     let c = ui.global::<Comparison>();
     let listed = study_choices(state);
     c.set_choices_unavailable(listed.is_err());
-    let listed = listed.unwrap_or_default();
     let rows: Vec<StudyChoice> = listed
+        .as_ref()
+        .map(|v| v.as_slice())
+        .unwrap_or_default()
         .iter()
         .map(|x| StudyChoice {
             id: x.id.to_string().into(),
             label: x.label.clone().into(),
+            ordinal: x.ordinal.map(|n| n as i32).unwrap_or(0),
         })
         .collect();
     c.set_choices(ModelRc::new(VecModel::from(rows)));
     let ids = pick_ids(&c);
-    for (slot, id) in ids.iter().enumerate() {
-        if let Some(choice) = listed.iter().find(|x| x.id.to_string() == *id) {
-            set_pick_label(&c, slot, &choice.label);
+    if let Ok(listed) = &listed {
+        let pairs: Vec<(String, String)> = listed
+            .iter()
+            .map(|x| (x.id.to_string(), x.label.clone()))
+            .collect();
+        let labels = relabel_picks(&pairs, &ids, &pick_labels(&c));
+        for (slot, label) in labels.iter().enumerate() {
+            set_pick_label(&c, slot, label);
         }
     }
     set_pick_ids(&c, &ids);
     sync_picker(&c);
 }
 
-/// Build the columns for the picked studies, by id: one frame each. A study that no longer
-/// exists is « introuvable »; a read failure or a frame that does not compute « indisponible ».
-fn columns(
+/// Empty the five picks (labels AND ids) and the table, its notice included — « Effacer », and
+/// the Rust-callable reset for a dossier switch.
+pub(crate) fn clear_comparison(ui: &MainWindow) {
+    let c = ui.global::<Comparison>();
+    for slot in 0..SLOTS {
+        set_pick_label(&c, slot, "");
+    }
+    set_pick_ids(&c, &std::array::from_fn(|_| String::new()));
+    c.set_columns(ModelRc::new(VecModel::from(Vec::<ComparisonHeader>::new())));
+    c.set_cells(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
+    c.set_column_count(0);
+    c.set_currency_mix(false);
+    c.set_notice(SharedString::new());
+    sync_picker(&c);
+}
+
+/// One picked study: its id (the key), the label shown for it, and the « · n » ordinal its label
+/// carries (`None` when it needs none).
+pub(crate) struct Pick {
+    pub id: String,
+    pub label: String,
+    pub ordinal: Option<usize>,
+}
+
+/// Build the columns for the picked studies, by id: one frame each, paired with the id « Ouvrir
+/// l'étude » opens (`None` when no study can be opened). A study that no longer exists is
+/// « introuvable »; a read failure « indisponible »; a study that reads but does not compute
+/// « non calculable » (it keeps its id: opening it shows why). The ordinal joins the header's
+/// ticker, so two studies of one ticker, currency and day never share a column header.
+pub(crate) fn comparison_columns(
     state: &JournalState,
-    picks: &[(String, String)],
+    picks: &[Pick],
     format: crate::viewmodel::format::NumberFormat,
 ) -> Vec<(Option<Uuid>, steadyinvest_report::ComparisonColumn)> {
     picks
         .iter()
-        .map(|(id, label)| {
-            let Ok(uuid) = Uuid::parse_str(id) else {
-                return (None, unavailable_column(label));
+        .map(|pick| {
+            let Ok(uuid) = Uuid::parse_str(&pick.id) else {
+                return (None, unavailable_column(&pick.label));
             };
-            match state.try_get_study(uuid) {
+            let (id, mut col) = match state.try_get_study(uuid) {
                 Ok(Some(study)) => match build_frame(&study) {
                     Ok(frame) => (Some(uuid), comparison_column(&study, &frame, format)),
-                    Err(_) => (None, unavailable_column(label)),
+                    Err(_) => (Some(uuid), uncomputable_column(&study)),
                 },
-                Ok(None) => (None, missing_column(label)),
-                Err(_) => (None, unavailable_column(label)),
+                Ok(None) => return (None, missing_column(gone_base(&pick.label))),
+                Err(_) => return (None, unavailable_column(&pick.label)),
+            };
+            if let Some(n) = pick.ordinal {
+                col.ticker = format!("{} · {n}", col.ticker);
             }
+            (id, col)
         })
         .collect()
 }
@@ -166,11 +249,15 @@ pub(crate) fn push_comparison(
 ) {
     let c = ui.global::<Comparison>();
     let labels = pick_labels(&c);
-    let picks: Vec<(String, String)> = distinct_ids(&pick_ids(&c))
+    let picks: Vec<Pick> = distinct_ids(&pick_ids(&c))
         .into_iter()
-        .map(|(slot, id)| (id, labels[slot].clone()))
+        .map(|(slot, id)| Pick {
+            ordinal: choice_ordinal(&c, &id),
+            label: labels[slot].clone(),
+            id,
+        })
         .collect();
-    let keyed = columns(state, &picks, format);
+    let keyed = comparison_columns(state, &picks, format);
     let cols: Vec<&steadyinvest_report::ComparisonColumn> = keyed.iter().map(|(_, x)| x).collect();
     // The notice slot holds only the export outcome of THIS table: a new table clears it.
     c.set_notice(SharedString::new());
@@ -193,7 +280,7 @@ pub(crate) fn push_comparison(
     }
     c.set_cells(ModelRc::new(VecModel::from(cells)));
     // « Ouvrir l'étude » opens the id the column was BUILT from — no second lookup; a column with
-    // no readable study behind it offers no button.
+    // no study to open (gone, unreadable) offers no button.
     let headers: Vec<ComparisonHeader> = keyed
         .iter()
         .map(|(id, col)| ComparisonHeader {
@@ -204,6 +291,7 @@ pub(crate) fn push_comparison(
             date: col.date.clone().into(),
             unavailable: col.unavailable,
             missing: col.missing,
+            uncomputable: col.uncomputable,
             zone: col.zone.clone().into(),
             state: col.state.clone().into(),
             low_confidence: col.low_confidence,
@@ -227,6 +315,7 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::Comparison {
             date: h.date.to_string(),
             unavailable: h.unavailable,
             missing: h.missing,
+            uncomputable: h.uncomputable,
             rows: (0..30)
                 .map(|row| {
                     cells
@@ -278,13 +367,7 @@ pub(crate) fn wire_comparison(ui: &MainWindow, s: &Session) {
     {
         let ui_weak = ui.as_weak();
         ui.global::<Comparison>().on_clear_picks(move || {
-            let ui = ui_weak.unwrap();
-            let c = ui.global::<Comparison>();
-            for slot in 0..SLOTS {
-                set_pick_label(&c, slot, "");
-            }
-            set_pick_ids(&c, &std::array::from_fn(|_| String::new()));
-            sync_picker(&c);
+            clear_comparison(&ui_weak.unwrap());
         });
     }
     {
@@ -353,6 +436,32 @@ mod tests {
 
     fn ids(v: [&str; SLOTS]) -> [String; SLOTS] {
         v.map(String::from)
+    }
+
+    #[test]
+    fn a_new_listing_relabels_live_picks_and_marks_gone_ones() {
+        // Pick « AAPL.US » (a); a second AAPL study (c) appears; pick b's study is deleted.
+        let listed: Vec<(String, String)> = [("a", "AAPL.US · USD"), ("c", "AAPL.US · CHF")]
+            .iter()
+            .map(|(i, l)| (i.to_string(), l.to_string()))
+            .collect();
+        let labels = relabel_picks(
+            &listed,
+            &ids(["a", "b", "", "", ""]),
+            &ids(["AAPL.US", "NESN.SW", "", "", ""]),
+        );
+        assert_eq!(labels[0], "AAPL.US · USD", "a live pick gains « · CUR »");
+        assert_eq!(labels[1], "NESN.SW (introuvable)", "a gone pick is marked");
+        assert_eq!(labels[2], "", "an empty slot stays empty");
+        // Idempotent: a second listing does not stack the marker.
+        let again = relabel_picks(&listed, &ids(["a", "b", "", "", ""]), &labels);
+        assert_eq!(again[1], "NESN.SW (introuvable)");
+        assert_eq!(gone_base(&again[1]), "NESN.SW");
+        // A study recreated under the gone ticker lists as « NESN.SW »: never the gone label,
+        // so picking it can never resolve to the gone id (labels map to ids one to one).
+        let recreated = [("d".to_string(), "NESN.SW".to_string())];
+        let labels = relabel_picks(&recreated, &ids(["", "b", "", "", ""]), &again);
+        assert_ne!(labels[1], recreated[0].1);
     }
 
     #[test]

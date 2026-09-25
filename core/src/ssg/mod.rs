@@ -113,6 +113,42 @@ pub fn recent_severe_low_proposal(years: &[CanonicalYear]) -> Option<Decimal> {
         .min()
 }
 
+/// Whether the input of one quality-flag rule is KNOWN — the rule was checked, raised or not.
+/// Mirrors [`quality_flags`] input for input; the match is exhaustive, so a new flag cannot be
+/// added without stating here what it reads.
+pub fn quality_flag_input_known(
+    key: QualityFlagKey,
+    outputs: &SsgOutputs,
+    judgment: &JudgmentInputs,
+) -> bool {
+    let m = &outputs.management;
+    match key {
+        QualityFlagKey::PtpTrendDeclining => m.ptp_trend.is_some(),
+        QualityFlagKey::RoeTrendDeclining => m.roe_trend.is_some(),
+        QualityFlagKey::RoeLow => m.latest_roe_pct.is_some(),
+        QualityFlagKey::EpsLagsSales => {
+            outputs.growth.eps_cagr_pct.is_some() && outputs.growth.sales_cagr_pct.is_some()
+        }
+        QualityFlagKey::ProjectedHighPeAggressive | QualityFlagKey::ProjectedHighPeImplausible => {
+            judgment.judged_avg_high_pe.is_some()
+        }
+        QualityFlagKey::UdBelowTarget | QualityFlagKey::UdExtreme => matches!(
+            outputs.risk_reward.upside_downside,
+            UpsideDownside::Ratio(_)
+        ),
+        QualityFlagKey::RelativeValueHigh => outputs.valuation.relative_value_pct.is_some(),
+    }
+}
+
+/// Every quality rule was checked (each input known): only then does an empty
+/// [`SsgOutputs::quality_flags`] mean « none raised » rather than « not assessable » (a flag is
+/// never raised on an unknown metric, so the empty list alone cannot tell them apart).
+pub fn quality_flags_assessable(outputs: &SsgOutputs, judgment: &JudgmentInputs) -> bool {
+    QualityFlagKey::ALL
+        .iter()
+        .all(|k| quality_flag_input_known(*k, outputs, judgment))
+}
+
 /// Raise the computable quality flags (FR7) with the spec's normative comparators (§2/§7),
 /// in pinned-catalog order. **A flag is never raised on an `unknown` metric** — unknown is
 /// not a comparison result (spec §9). `high_debt` is not raisable in v1 (no debt input —

@@ -124,6 +124,9 @@ pub const MSG_HOLDING_NO_STUDY: &str = "Aucune étude enregistrée pour ce symbo
 /// `QualityFlagKey`s, worded once here so the review screen and its PDF share the inventory).
 pub const MSG_REVIEW_EXPORTED: &str = "La revue a été exportée.";
 pub const MSG_COMPARISON_EXPORTED: &str = "La comparaison a été exportée.";
+/// G1 (#237): the marker of a comparison pick whose study is gone — « NESN.SW (introuvable) »,
+/// so a gone pick's label never equals a live one (a recreated study of the same ticker).
+pub const MSG_COMPARISON_PICK_GONE: &str = "introuvable";
 pub const MSG_QUICK_SCREEN_EXPORTED: &str = "L'examen rapide a été exporté.";
 /// Story 7.3: « Créer l'étude » from an examination wrote the study with the fetched data.
 pub const MSG_QUICK_SCREEN_STUDY_CREATED: &str = "L'étude a été créée avec les données récupérées.";
@@ -654,6 +657,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDING_NO_STUDY,
     MSG_REVIEW_EXPORTED,
     MSG_COMPARISON_EXPORTED,
+    MSG_COMPARISON_PICK_GONE,
     MSG_QUICK_SCREEN_EXPORTED,
     MSG_QUICK_SCREEN_STUDY_CREATED,
     MSG_QUICK_SOURCE_STUDY,

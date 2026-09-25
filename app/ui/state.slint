@@ -1144,14 +1144,17 @@ export struct ComparisonHeader {
     date: string,           // the decision date (the study's creation), YYYY-MM-DD
     unavailable: bool,      // the study could not be read — « indisponible »
     missing: bool,          // the picked study no longer exists — « introuvable »
+    uncomputable: bool,     // the study reads but does not compute — « non calculable »
     zone: string,           // buy | neutral | sell | below | above | ""
     state: string,          // full | provisional | withheld | ""
     low-confidence: bool,
 }
-// G1 decision 3 (#237): one pickable STUDY — the id is the key, the label display only.
+// G1 decision 3 (#237): one pickable STUDY — the id is the key, the label display only;
+// `ordinal` = the label's « · n » (0 = none), carried into the column header.
 export struct StudyChoice {
     id: string,
     label: string,
+    ordinal: int,
 }
 export global Comparison {
     in-out property <[ComparisonHeader]> columns;

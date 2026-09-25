@@ -6222,3 +6222,61 @@ fn a_candidates_sector_facts_ride_the_same_ticker_holding_label() {
     );
     assert_eq!(unlabeled.sector_share_pct, None);
 }
+
+// ── G1 review of 7.1 (#237) — one unreadable study never hides the comparison's picker ──
+
+#[test]
+fn an_unreadable_study_stays_pickable_and_compares_as_unavailable() {
+    use crate::wiring::comparison::{Pick, comparison_columns};
+    use crate::wiring::studies::study_choices;
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x71C);
+    let chf = state.create_study("NESN.SW", "CHF").unwrap();
+    let usd = state.create_study("NESN.SW", "USD").unwrap();
+    make_study_unreadable(&mut state, usd);
+
+    let choices = study_choices(&state).expect("the LISTING read — one bad row is not a failure");
+    assert_eq!(
+        choices.len(),
+        2,
+        "the unreadable study EXISTS: it stays listed"
+    );
+    let label = |id: Uuid| choices.iter().find(|c| c.id == id).unwrap().label.clone();
+    assert_eq!(label(chf), "NESN.SW · CHF");
+    assert_eq!(
+        label(usd),
+        "NESN.SW · 2026-06-27",
+        "currency-less: the date tells it apart"
+    );
+
+    let pick = |id: Uuid, label: String| Pick {
+        id: id.to_string(),
+        label,
+        ordinal: None,
+    };
+    let cols = comparison_columns(
+        &state,
+        &[
+            pick(chf, label(chf)),
+            pick(usd, label(usd)),
+            pick(Uuid::from_u128(0xDEAD), "ROG.SW (introuvable)".into()),
+        ],
+        crate::viewmodel::format::NumberFormat::Comma,
+    );
+    assert_eq!(cols[0].0, Some(chf));
+    assert!(!cols[0].1.unavailable);
+    assert_eq!(cols[1].0, None, "nothing to open");
+    assert!(
+        cols[1].1.unavailable && !cols[1].1.missing,
+        "« indisponible »"
+    );
+    assert_eq!(cols[1].1.ticker, "NESN.SW · 2026-06-27");
+    assert!(
+        cols[2].1.missing,
+        "a gone study is « introuvable », not a read failure"
+    );
+    assert_eq!(
+        cols[2].1.ticker, "ROG.SW",
+        "the header states the absence itself"
+    );
+}

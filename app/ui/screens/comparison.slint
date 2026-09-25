@@ -34,6 +34,7 @@ component CmpRow inherits HorizontalLayout {
     }
     for c[i] in Comparison.columns: Cell {
         text: c.missing ? @tr("introuvable")
+            : c.uncomputable ? @tr("non calculable")
             : c.unavailable ? @tr("indisponible")
             : root.number == 20 ? root.zone-words(c.zone)
             : root.number == 28 ? root.state-words(c)
@@ -123,9 +124,11 @@ export component ComparisonScreen inherits Rectangle {
                             font-weight: Tokens.weight-semibold;
                             horizontal-alignment: right;
                         }
-                        // A column with no study behind it names its state, never a dangling « · ».
+                        // A column with no figures names its state, never a dangling « · »; a
+                        // study that does not compute keeps its currency and date.
                         Text {
                             text: c.missing ? @tr("étude introuvable")
+                                : c.uncomputable ? @tr("{} · {} · étude non calculable", c.currency, c.date)
                                 : c.unavailable ? @tr("étude indisponible")
                                 : c.name != "" ? @tr("{} · {} · {}", c.name, c.currency, c.date)
                                 : @tr("{} · {}", c.currency, c.date);

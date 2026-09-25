@@ -6,9 +6,10 @@
 
 use rust_decimal::Decimal;
 use steadyinvest_contract::{Source, Study};
+use steadyinvest_core::method::USABLE_YEARS_FLOOR;
 use steadyinvest_core::normalize::CanonicalYear;
 use steadyinvest_core::rounding::DisplayField;
-use steadyinvest_core::ssg::{SsgOutputs, UpsideDownside, YearValuation};
+use steadyinvest_core::ssg::{JudgmentInputs, SsgOutputs, YearValuation, quality_flags_assessable};
 use steadyinvest_report::ComparisonColumn;
 
 use crate::state;
@@ -18,11 +19,11 @@ use crate::viewmodel::engine::{
 use crate::viewmodel::form::EMPTY_SLOT;
 use crate::viewmodel::format::{NumberFormat, format_scaled};
 
-/// The column of a study that could not be read (a read failure, or a frame that does not
-/// compute): every row « indisponible » (the report's word). `label` is the pick's label.
+/// The column of a study that could not be read (a read failure): every row « indisponible »
+/// (the report's word). `label` is the pick's label, shown as is (already upper-cased).
 pub fn unavailable_column(label: &str) -> ComparisonColumn {
     ComparisonColumn {
-        ticker: label.to_uppercase(),
+        ticker: label.to_string(),
         unavailable: true,
         rows: vec![String::new(); 30],
         ..ComparisonColumn::default()
@@ -38,10 +39,26 @@ pub fn missing_column(label: &str) -> ComparisonColumn {
     }
 }
 
+/// The column of a study that reads but whose frame does not compute (`build_frame` refused its
+/// inputs): the study's own header facts, every row « non calculable » — neither a read failure
+/// nor an absence; the study exists and can be opened to see why.
+pub fn uncomputable_column(study: &Study) -> ComparisonColumn {
+    ComparisonColumn {
+        ticker: study.security_ticker.to_uppercase(),
+        name: study.company_name.clone().unwrap_or_default(),
+        currency: study.native_currency.to_uppercase(),
+        date: study.created_at.0.chars().take(10).collect(),
+        unavailable: true,
+        uncomputable: true,
+        rows: vec![String::new(); 30],
+        ..ComparisonColumn::default()
+    }
+}
+
 /// The listing venue of a canonical ticker (`NESN.SW` → `SW`) — only a KNOWN venue, so a
 /// share-class suffix (`BRK.B`) is never passed off as an exchange; `""` otherwise (« — »).
 fn exchange_of(ticker: &str) -> String {
-    steadyinvest_ingestion::adapters::twelvedata::known_venue(ticker).unwrap_or_default()
+    steadyinvest_ingestion::ticker::known_venue(ticker).unwrap_or_default()
 }
 
 /// The latest PROVIDER timestamp among the study's filled cells (the form's « date of source
@@ -64,12 +81,22 @@ fn latest_provider_date(study: &Study) -> Option<String> {
         .map(|ts| ts.chars().take(10).collect())
 }
 
+/// Rows 9 / 11 / 15 are labelled « sur 5 ans »: a shorter window (a low-confidence study) is
+/// not five years, so its extremes are absent rather than passed off as the five-year ones.
+fn full_window(len: usize) -> bool {
+    len >= USABLE_YEARS_FLOOR as usize
+}
+
 /// Row 9: the lowest low / highest high over the §3 window's years — `(None, None)` when ANY
-/// window year lacks the price (absent, never a partial extreme passed off as the 5-year one).
+/// window year lacks the price or the window is shorter than five years (absent, never a
+/// partial extreme passed off as the 5-year one).
 fn window_price_range(
     window: &[i32],
     series: &[CanonicalYear],
 ) -> (Option<Decimal>, Option<Decimal>) {
+    if !full_window(window.len()) {
+        return (None, None);
+    }
     let year = |w: &i32| series.iter().find(|y| y.year == *w);
     let lows: Option<Vec<Decimal>> = window.iter().map(|w| year(w)?.low_price).collect();
     let highs: Option<Vec<Decimal>> = window.iter().map(|w| year(w)?.high_price).collect();
@@ -80,8 +107,11 @@ fn window_price_range(
 }
 
 /// Rows 11 / 15: the highest high P/E and the lowest low P/E over the window's years — each
-/// `None` when any window year's ratio is unknown (same rule as row 9).
+/// `None` when any window year's ratio is unknown or the window is short (same rule as row 9).
 fn window_pe_extremes(per_year: &[YearValuation]) -> (Option<Decimal>, Option<Decimal>) {
+    if !full_window(per_year.len()) {
+        return (None, None);
+    }
     let highs: Option<Vec<Decimal>> = per_year.iter().map(|y| y.high_pe).collect();
     let lows: Option<Vec<Decimal>> = per_year.iter().map(|y| y.low_pe).collect();
     (
@@ -90,29 +120,12 @@ fn window_pe_extremes(per_year: &[YearValuation]) -> (Option<Decimal>, Option<De
     )
 }
 
-/// Row 27's « 0 » is a statement that every quality rule was CHECKED: true only when each rule's
-/// input is known (mirrors `core::ssg::quality_flags` — a flag is never raised on an unknown
-/// metric, so with an unknown input an empty list means « not assessable », not « none »).
-fn quality_flags_assessable(outputs: &SsgOutputs, judged_avg_high_pe_known: bool) -> bool {
-    let m = &outputs.management;
-    m.ptp_trend.is_some()
-        && m.roe_trend.is_some()
-        && m.latest_roe_pct.is_some()
-        && outputs.growth.eps_cagr_pct.is_some()
-        && outputs.growth.sales_cagr_pct.is_some()
-        && judged_avg_high_pe_known
-        && matches!(
-            outputs.risk_reward.upside_downside,
-            UpsideDownside::Ratio(_)
-        )
-        && outputs.valuation.relative_value_pct.is_some()
-}
-
-/// Row 27: « N : flag · flag » when flags are raised; « 0 » only when every rule was checked;
-/// not assessable → `""` (« — »), never a zero standing for an absence.
-fn flags_row(outputs: &SsgOutputs, judged_avg_high_pe_known: bool) -> String {
+/// Row 27: « N : flag · flag » when flags are raised; « 0 » only when every rule was checked
+/// (`core::ssg::quality_flags_assessable`, next to the rules themselves); not assessable →
+/// `""` (« — »), never a zero standing for an absence.
+fn flags_row(outputs: &SsgOutputs, judgment: &JudgmentInputs) -> String {
     if outputs.quality_flags.is_empty() {
-        if quality_flags_assessable(outputs, judged_avg_high_pe_known) {
+        if quality_flags_assessable(outputs, judgment) {
             "0".to_string()
         } else {
             String::new()
@@ -190,7 +203,7 @@ pub fn comparison_column(
         ),
         None => (None, None, None, None),
     };
-    let flags = flags_row(outputs, j.judged_avg_high_pe.is_some());
+    let flags = flags_row(outputs, &steadyinvest_report::form::to_judgment_inputs(j));
     let empty_if_dash = |s: String| if s == EMPTY_SLOT { String::new() } else { s };
     let rows = vec![
         empty_if_dash(fmt_pct(g.sales_cagr_pct, format)), // 1
@@ -229,12 +242,11 @@ pub fn comparison_column(
         name: study.company_name.clone().unwrap_or_default(),
         currency: study.native_currency.to_uppercase(),
         date: study.created_at.0.chars().take(10).collect(),
-        unavailable: false,
-        missing: false,
         rows,
         zone: zone_position_key(r, current).to_string(),
         state: verdict_state(frame.snapshot.verdict()).to_string(),
         low_confidence: outputs.low_confidence,
+        ..ComparisonColumn::default()
     }
 }
 
@@ -272,16 +284,27 @@ mod tests {
 
     #[test]
     fn an_unavailable_column_has_thirty_empty_rows_and_the_flag() {
-        let c = unavailable_column("nesn.sw");
+        let c = unavailable_column("NESN.SW · 2026-01-01");
         assert!(c.unavailable);
-        assert!(!c.missing);
-        assert_eq!(c.ticker, "NESN.SW");
+        assert!(!c.missing && !c.uncomputable);
+        assert_eq!(
+            c.ticker, "NESN.SW · 2026-01-01",
+            "the pick's label, as shown"
+        );
         assert_eq!(c.rows.len(), 30);
         // A study gone meanwhile is its own state, not a read failure.
-        let m = missing_column("nesn.sw");
+        let m = missing_column("NESN.SW");
         assert!(m.missing);
         assert_eq!(m.ticker, "NESN.SW");
         assert_eq!(m.rows.len(), 30);
+        // A study that reads but does not compute keeps its facts, and its own state.
+        let study = demo_study().unwrap();
+        let u = uncomputable_column(&study);
+        assert!(u.uncomputable && u.unavailable && !u.missing);
+        assert_eq!(u.ticker, "DÉMO");
+        assert_eq!(u.date, "2026-01-01");
+        assert_eq!(u.currency, study.native_currency.to_uppercase());
+        assert_eq!(u.rows.len(), 30);
     }
 
     use crate::viewmodel::engine::{
@@ -425,26 +448,56 @@ mod tests {
 
     #[test]
     fn row_27_states_zero_only_when_every_rule_was_checked() {
+        use steadyinvest_core::ssg::{QualityFlagKey, quality_flag_input_known};
+        use steadyinvest_report::form::to_judgment_inputs;
         let mut study = demo_study().unwrap();
         // The worked example carries no TTM EPS → no current P/E → no relative value: one rule
         // unchecked. Give it one so every rule's input is known.
         let frame = build_frame(&study).unwrap();
-        assert!(!quality_flags_assessable(frame.snapshot.outputs(), true));
+        let judged = to_judgment_inputs(&study.judgment);
+        assert!(!quality_flags_assessable(frame.snapshot.outputs(), &judged));
         study.judgment.ttm_eps = Some(steadyinvest_contract::Money::from(Decimal::from(5)));
         let frame = build_frame(&study).unwrap();
         let mut o = frame.snapshot.outputs().clone();
-        assert!(quality_flags_assessable(&o, true), "every rule checked");
+        assert!(quality_flags_assessable(&o, &judged), "every rule checked");
+        // Every flag the engine raised had its input known (the predicate mirrors the rules).
+        for k in &o.quality_flags {
+            assert!(quality_flag_input_known(*k, &o, &judged), "{k:?}");
+        }
+        assert_eq!(
+            QualityFlagKey::ALL.len(),
+            9,
+            "a new rule: state its input in core"
+        );
         o.quality_flags.clear();
-        assert_eq!(flags_row(&o, true), "0");
+        assert_eq!(flags_row(&o, &judged), "0");
         // Nothing to judge the future high P/E against: not assessable → « — », never « 0 ».
-        assert_eq!(flags_row(&o, false), "");
+        let mut unjudged = judged.clone();
+        unjudged.judged_avg_high_pe = None;
+        assert_eq!(flags_row(&o, &unjudged), "");
         // An unknown trend input, same.
         o.management.ptp_trend = None;
-        assert_eq!(flags_row(&o, true), "");
+        assert_eq!(flags_row(&o, &judged), "");
         // A raised flag is a fact whatever else is unknown.
-        o.quality_flags
-            .push(steadyinvest_core::ssg::QualityFlagKey::RoeLow);
-        assert!(flags_row(&o, false).starts_with("1 : "));
+        o.quality_flags.push(QualityFlagKey::RoeLow);
+        assert!(flags_row(&o, &unjudged).starts_with("1 : "));
+    }
+
+    #[test]
+    fn a_window_shorter_than_five_years_is_not_the_five_year_extreme() {
+        let study = demo_study().unwrap();
+        let frame = build_frame(&study).unwrap();
+        let v = &frame.snapshot.outputs().valuation;
+        assert_eq!(v.per_year.len(), 5, "the worked example has a full window");
+        let window: Vec<i32> = v.per_year.iter().map(|y| y.year).collect();
+        let (lo, hi) = window_price_range(&window, &frame.series);
+        assert!(lo.is_some() && hi.is_some());
+        // Four years (a low-confidence study): rows 9 / 11 / 15 read « — ».
+        assert_eq!(
+            window_price_range(&window[1..], &frame.series),
+            (None, None)
+        );
+        assert_eq!(window_pe_extremes(&v.per_year[1..]), (None, None));
     }
 
     #[test]
@@ -453,6 +506,15 @@ mod tests {
         let frame = build_frame(&study).unwrap();
         let col = comparison_column(&study, &frame, F);
         assert_eq!(col.rows[28], "2026-01-01");
+        // Only a FILLED provider cell dates the data: an empty one stamped later does not.
+        let later = steadyinvest_contract::Timestamp("2027-03-01T00:00:00Z".into());
+        let mut probe = study.clone();
+        let cell = &mut probe.years[0].sales;
+        cell.provenance.timestamp = later.clone();
+        cell.value = None;
+        assert_eq!(latest_provider_date(&probe).as_deref(), Some("2026-01-01"));
+        probe.years[0].sales.value = study.years[0].sales.value;
+        assert_eq!(latest_provider_date(&probe).as_deref(), Some("2027-03-01"));
         // A study with no provider figure: « — », not the creation date passed off as data's.
         for y in &mut study.years {
             for c in [

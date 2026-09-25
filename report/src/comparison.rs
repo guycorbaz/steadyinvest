@@ -19,6 +19,9 @@ pub struct ComparisonColumn {
     /// The picked study no longer exists — every row reads « introuvable » (an absence, not a
     /// read failure: misattribution is a lie). Comes with `unavailable` (no figures either).
     pub missing: bool,
+    /// The study reads but its frame does not compute — every row reads « non calculable »; the
+    /// header keeps the study's facts. Comes with `unavailable` (no figures).
+    pub uncomputable: bool,
     pub rows: Vec<String>,
     /// `buy` | `neutral` | `sell` | `below` | `above` | `""`.
     pub zone: String,
@@ -42,6 +45,7 @@ const DATE: &str = "Date";
 const CURRENCY_MIX: &str = "Les études comparées ne sont pas toutes dans la même monnaie : les cours restent dans la monnaie de chaque étude, sans conversion.";
 const UNAVAILABLE: &str = "indisponible";
 const MISSING: &str = "introuvable";
+const UNCOMPUTABLE: &str = "non calculable";
 const G_GROWTH: &str = "Croissance (section 1)";
 const G_MANAGEMENT: &str = "Gestion (section 2)";
 const G_PRICE: &str = "Cours (sections 3 à 5)";
@@ -98,6 +102,7 @@ const COMPARISON_USER_FACING: &[&str] = &[
     CURRENCY_MIX,
     UNAVAILABLE,
     MISSING,
+    UNCOMPUTABLE,
     G_GROWTH,
     G_MANAGEMENT,
     G_PRICE,
@@ -157,6 +162,9 @@ fn cell(c: &ComparisonColumn, n: usize) -> String {
     if c.missing {
         return MISSING.to_string();
     }
+    if c.uncomputable {
+        return UNCOMPUTABLE.to_string();
+    }
     if c.unavailable {
         return UNAVAILABLE.to_string();
     }
@@ -195,10 +203,17 @@ fn header_line(c: &ComparisonColumn) -> String {
 }
 
 /// The second header line: « date · name », either alone when the other is absent; a column
-/// with no study behind it names its state.
+/// with no figures names its state (« date · non calculable » keeps the study's date).
 fn second_header_line(c: &ComparisonColumn) -> String {
     if c.missing {
         return MISSING.to_string();
+    }
+    if c.uncomputable {
+        return if c.date.is_empty() {
+            UNCOMPUTABLE.to_string()
+        } else {
+            format!("{} · {UNCOMPUTABLE}", c.date)
+        };
     }
     if c.unavailable {
         return UNAVAILABLE.to_string();
@@ -303,11 +318,11 @@ mod tests {
             currency: "CHF".into(),
             date: "2026-09-24".into(),
             unavailable,
-            missing: false,
             rows: (1..=30).map(|i| format!("v{i}")).collect(),
             zone: "buy".into(),
             state: "provisional".into(),
             low_confidence: true,
+            ..ComparisonColumn::default()
         }
     }
 
@@ -412,6 +427,13 @@ mod tests {
             ..u.clone()
         };
         assert_eq!(second_header_line(&m), MISSING);
+        // A study that reads but does not compute keeps its facts and names its own state.
+        let mut x = column("NESN.SW", true);
+        x.uncomputable = true;
+        assert_eq!(header_line(&x), "NESN.SW (CHF)");
+        assert_eq!(second_header_line(&x), "2026-09-24 · non calculable");
+        assert_eq!(cell(&x, 1), UNCOMPUTABLE);
+        assert_ne!(UNCOMPUTABLE, UNAVAILABLE);
     }
 
     #[test]

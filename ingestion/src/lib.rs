@@ -12,6 +12,7 @@ pub mod adapters;
 pub mod error;
 pub mod fetch;
 pub mod provider;
+pub mod ticker;
 
 pub use error::{IngestionError, ProviderError};
 pub use fetch::{

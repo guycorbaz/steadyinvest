@@ -20,11 +20,11 @@ fn column(ticker: &str, name: &str, currency: &str, unavailable: bool) -> Compar
         currency: currency.into(),
         date: "2026-09-24".into(),
         unavailable,
-        missing: false,
         rows,
         zone: "buy".into(),
         state: "provisional".into(),
         low_confidence: ticker.starts_with('N'),
+        ..Default::default()
     }
 }
 

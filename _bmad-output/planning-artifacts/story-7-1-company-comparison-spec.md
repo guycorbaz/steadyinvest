@@ -24,6 +24,11 @@ opens **in place of the list** (the way an open study does — `Studies.compare-
 on open and on return from a study (the #94 rule). No persistence of the selection (a
 comparison is a moment, not a record — open question Q3).
 
+*G1 review, 2026-09-25:* the drop-downs list the dossier's STUDIES, not its tickers — « TICKER »,
+or « TICKER · CUR » when a ticker has several studies; the study id is carried from the pick to
+the column and to « Ouvrir l'étude ». A picked study leaves the other lists; « Comparer » needs
+two distinct studies.
+
 ## 3. The rows (the form's numbering, neutral wording)
 
 Columns: one per study — ticker, company name, currency, decision date.
@@ -69,8 +74,11 @@ Columns: one per study — ticker, company name, currency, decision date.
     blank; this is the one addition, an honest one*
 28. État de l'étude — critères validés / provisoire / en attente, confiance réduite
 29. Date des données — the latest provider `provenance.timestamp` of the study's cells, else the
-    decision date
-30. Place de cotation — the ticker's suffix (`.SW`, `.US`) as data, else « — »
+    decision date — *G1 review, 2026-09-25: of its FILLED cells, else « — » (the decision date
+    is in the column header, never passed off as the data's date)*
+30. Place de cotation — the ticker's suffix (`.SW`, `.US`) as data, else « — » — *G1 review,
+    2026-09-25: a KNOWN venue only (`.US` or the pinned venue table), so a share class such as
+    `BRK.B` reads « — », never « B »*
 
 Percentages, P/Es and ratios compare across currencies; **prices (9, 10, 17–19) are native** —
 each column carries its currency and, when the selected studies differ in currency, a band says
