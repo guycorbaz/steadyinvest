@@ -614,6 +614,28 @@ fn request_restore_flags_an_older_same_journal_backup_as_stale() {
 }
 
 #[test]
+fn a_read_only_journal_refuses_restore_and_import_up_front() {
+    // G1 G (on-screen check): the rails refuse BEFORE any picker — the wiring asks
+    // `refuse_if_read_only` first; `request_restore` holds the same rule.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x544);
+    assert_eq!(state.refuse_if_read_only(), Ok(()));
+    make_backup(&dir, "foreign.db", 0xBEEF, true); // a backup that would otherwise park
+    state.read_only = true;
+    assert_eq!(state.refuse_if_read_only(), Err(MSG_READ_ONLY_WRITE));
+    assert_eq!(
+        state
+            .request_restore(dir.path().join("foreign.db").to_str().unwrap())
+            .map(|_| ()),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+    assert!(
+        !state.has_pending_restore(),
+        "no restore is parked on a read-only journal (no confirm can open)"
+    );
+}
+
+#[test]
 fn request_restore_refuses_a_non_journal_file_and_parks_nothing() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x542);

@@ -74,6 +74,9 @@ impl JournalState {
     /// nothing is applied here.
     pub fn request_restore(&mut self, backup_path: &str) -> Result<RestoreAssessment, String> {
         self.pending_restore = None;
+        // G1 G (on-screen check): a read-only dossier is never overwritten — refused before the
+        // backup is even read, so no confirm is ever parked for it.
+        self.refuse_if_read_only().map_err(str::to_string)?;
         let info = inspect_backup(backup_path).map_err(|error| match error {
             PersistError::CorruptJournalMeta { .. } => MSG_RESTORE_NOT_A_JOURNAL.to_string(),
             _ => MSG_RESTORE_UNREADABLE.to_string(),

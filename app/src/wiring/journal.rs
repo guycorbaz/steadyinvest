@@ -185,15 +185,12 @@ fn finish_journal_switch(
             }
             persist(config_path.as_ref(), &config.borrow());
 
-            let status = if let Some(seen) = stale_seen {
-                state::journal_stale_message(seen, outcome.logical_version)
-            } else if outcome.sync_warning {
-                state::MSG_SYNC_FOLDER_WARNING.to_string()
-            } else if created {
-                state::MSG_JOURNAL_CREATED.to_string()
-            } else {
-                state::MSG_JOURNAL_OPENED.to_string()
-            };
+            let status = opened_status(
+                journal_state.borrow().is_read_only(),
+                stale_seen.map(|seen| (seen, outcome.logical_version)),
+                outcome.sync_warning,
+                created,
+            );
             prefs.set_journal_location_status(status.as_str().into());
             prefs.set_journal_reclaim_path("".into());
             *dossier.opened_status.borrow_mut() = Some((opened_path, status));
@@ -239,6 +236,7 @@ fn finish_journal_switch(
                 let status = status_after_refusal(
                     open,
                     open.is_some_and(state::is_sync_folder),
+                    st.is_read_only(),
                     dossier.opened_status.borrow().as_ref(),
                 );
                 prefs.set_journal_location_status(status.into());
@@ -249,18 +247,59 @@ fn finish_journal_switch(
     }
 }
 
+/// PURE: the location status line of a dossier just opened/created. A read-only dossier (written by
+/// a newer schema) says so FIRST, in the startup wording (G1 G, on-screen check: it read only « Le
+/// dossier a été ouvert. »); then the stale-on-reopen flag (`(seen, here)`) or else the sync-folder
+/// warning; the plain « ouvert » / « créé » acknowledgement only when no state applies. The
+/// result is also what a later refusal restores ([`status_after_refusal`]).
+fn opened_status(
+    read_only: bool,
+    stale: Option<(u64, u64)>,
+    sync_warning: bool,
+    created: bool,
+) -> String {
+    dossier_states(read_only, stale, sync_warning).unwrap_or_else(|| {
+        if created {
+            state::MSG_JOURNAL_CREATED.to_string()
+        } else {
+            state::MSG_JOURNAL_OPENED.to_string()
+        }
+    })
+}
+
+/// PURE: the STATES of the open dossier, read-only first — `None` when none applies.
+fn dossier_states(
+    read_only: bool,
+    stale: Option<(u64, u64)>,
+    sync_warning: bool,
+) -> Option<String> {
+    let state_line = if let Some((seen, here)) = stale {
+        Some(state::journal_stale_message(seen, here))
+    } else if sync_warning {
+        Some(state::MSG_SYNC_FOLDER_WARNING.to_string())
+    } else {
+        None
+    };
+    match (read_only, state_line) {
+        (true, Some(line)) => Some(format!("{} {line}", state::MSG_STARTUP_READ_ONLY)),
+        (true, None) => Some(state::MSG_STARTUP_READ_ONLY.to_string()),
+        (false, line) => line,
+    }
+}
+
 /// PURE: the location status line after a refused open/create/switch (G1 G), from the journal
 /// actually open (`open`, and whether it sits in a sync folder) and the `(path, status)` recorded
 /// when a dossier was last opened:
 /// - no journal open (the previous one could not be reacquired) → nothing to state;
 /// - the open journal is the one recorded → its own status (stale, sync folder, opened/created);
-/// - otherwise (the startup dossier: no switch recorded it) → the sync-folder warning when it
-///   applies, else nothing.
+/// - otherwise (the startup dossier: no switch recorded it) → its states recomputed — read-only,
+///   the sync-folder warning — else nothing.
 ///
 /// A reclaimable-lock offer is never kept: it described an earlier attempt, not the open dossier.
 fn status_after_refusal(
     open: Option<&std::path::Path>,
     in_sync_folder: bool,
+    read_only: bool,
     recorded: Option<&(PathBuf, String)>,
 ) -> String {
     let Some(open) = open else {
@@ -268,8 +307,7 @@ fn status_after_refusal(
     };
     match recorded {
         Some((path, status)) if path == open => status.clone(),
-        _ if in_sync_folder => state::MSG_SYNC_FOLDER_WARNING.to_string(),
-        _ => String::new(),
+        _ => dossier_states(read_only, None, in_sync_folder).unwrap_or_default(),
     }
 }
 
@@ -455,10 +493,16 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
 
     {
         // Native `rfd` open picker → the SAME path-based `import-journal` callback (one verify-and-
-        // apply code path, headless-tested). Cancel → no notice, nothing read.
+        // apply code path, headless-tested). Cancel → no notice, nothing read. A read-only dossier
+        // refuses at once, before the picker (G1 G, on-screen check).
         let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>().on_pick_and_import_journal(move || {
             let ui = ui_weak.unwrap();
+            if let Err(reason) = journal_state.borrow().refuse_if_read_only() {
+                crate::wiring::dialog::refuse(&ui, reason);
+                return;
+            }
             let mut dialog = rfd::FileDialog::new()
                 .set_title("Importer un dossier")
                 .add_filter("Dossier exporté (JSON)", &["json"]);
@@ -520,6 +564,12 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>().on_pick_and_restore_backup(move || {
             let ui = ui_weak.unwrap();
+            // A read-only dossier refuses at once — no picker, no confirm (G1 G, on-screen
+            // check); `request_restore` and the confirm's blocked verb stay as further guards.
+            if let Err(reason) = journal_state.borrow().refuse_if_read_only() {
+                crate::wiring::dialog::refuse(&ui, reason);
+                return;
+            }
             let mut dialog = rfd::FileDialog::new()
                 .set_title("Restaurer une sauvegarde")
                 .add_filter("Sauvegarde (.db)", &["db"]);
@@ -738,23 +788,71 @@ mod tests {
         // The open dossier is the one recorded: its own status stands (stale here) — whatever
         // the screen showed (a reclaim offer about an earlier attempt included).
         assert_eq!(
-            status_after_refusal(Some(&a), false, Some(&recorded)),
+            status_after_refusal(Some(&a), false, false, Some(&recorded)),
             stale
         );
         // Another journal is open than the one recorded (the startup dossier): recomputed.
         assert_eq!(
-            status_after_refusal(Some(&b), true, Some(&recorded)),
+            status_after_refusal(Some(&b), true, false, Some(&recorded)),
             state::MSG_SYNC_FOLDER_WARNING
         );
-        assert_eq!(status_after_refusal(Some(&b), false, None), "");
+        assert_eq!(status_after_refusal(Some(&b), false, false, None), "");
+        // …and a read-only startup dossier says so.
+        assert_eq!(
+            status_after_refusal(Some(&b), false, true, None),
+            state::MSG_STARTUP_READ_ONLY
+        );
+        // A read-only dossier opened by a switch: its recorded status already says so.
+        let ro = (a.clone(), opened_status(true, None, false, false));
+        assert_eq!(
+            status_after_refusal(Some(&a), false, true, Some(&ro)),
+            state::MSG_STARTUP_READ_ONLY
+        );
         // No journal could be reacquired: nothing to state about an open dossier.
-        assert_eq!(status_after_refusal(None, true, Some(&recorded)), "");
+        assert_eq!(status_after_refusal(None, true, true, Some(&recorded)), "");
         // Never the reclaim offer.
         for (open, sync) in [(Some(a.as_path()), false), (Some(b.as_path()), true)] {
             assert_ne!(
-                status_after_refusal(open, sync, Some(&recorded)),
+                status_after_refusal(open, sync, false, Some(&recorded)),
                 state::MSG_JOURNAL_LOCK_RECLAIMABLE
             );
         }
+    }
+
+    #[test]
+    fn an_opened_read_only_dossier_says_so_first() {
+        // The on-screen check: a newer-schema dossier opened through « Ouvrir un dossier… »
+        // read only « Le dossier a été ouvert. ».
+        assert_eq!(
+            opened_status(true, None, false, false),
+            state::MSG_STARTUP_READ_ONLY
+        );
+        assert_eq!(
+            opened_status(true, None, false, true),
+            state::MSG_STARTUP_READ_ONLY
+        );
+        // With another state: read-only first, the other kept.
+        let both = opened_status(true, None, true, false);
+        assert!(both.starts_with(state::MSG_STARTUP_READ_ONLY));
+        assert!(both.ends_with(state::MSG_SYNC_FOLDER_WARNING));
+        let stale = opened_status(true, Some((9, 4)), true, false);
+        assert!(stale.ends_with(&state::journal_stale_message(9, 4)));
+        // A writable dossier: unchanged behaviour.
+        assert_eq!(
+            opened_status(false, None, false, false),
+            state::MSG_JOURNAL_OPENED
+        );
+        assert_eq!(
+            opened_status(false, None, false, true),
+            state::MSG_JOURNAL_CREATED
+        );
+        assert_eq!(
+            opened_status(false, None, true, true),
+            state::MSG_SYNC_FOLDER_WARNING
+        );
+        assert_eq!(
+            opened_status(false, Some((9, 4)), true, false),
+            state::journal_stale_message(9, 4)
+        );
     }
 }

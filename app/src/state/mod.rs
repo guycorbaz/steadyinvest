@@ -270,6 +270,18 @@ impl JournalState {
         self.read_only
     }
 
+    /// The up-front refusal of a rail that would WRITE the open journal (G1 G, on-screen check):
+    /// on a read-only journal, « Restaurer une sauvegarde… » and « Importer un dossier… » refuse
+    /// at once with the reason — before any file picker or confirm (the write guards behind them
+    /// stay as second guards).
+    pub fn refuse_if_read_only(&self) -> Result<(), &'static str> {
+        if self.read_only {
+            Err(MSG_READ_ONLY_WRITE)
+        } else {
+            Ok(())
+        }
+    }
+
     /// The open journal's identity (UUID), or `None` when no journal is open. Used to name a
     /// whole-journal export file (Story 5.3).
     pub fn journal_id(&self) -> Option<Uuid> {
