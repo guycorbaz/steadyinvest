@@ -178,7 +178,6 @@ const P_STUDY: &str = "Étude";
 const P_ZONE: &str = "Zone";
 const P_UD: &str = "H/B";
 const P_RELATIVE: &str = "Val. rel.";
-const P_DATA: &str = "Données";
 const STUDY_FULL: &str = "critères validés";
 const STUDY_PROVISIONAL: &str = "provisoire";
 const STUDY_WITHHELD: &str = "en attente";
@@ -194,8 +193,10 @@ const ZONE_NEUTRAL: &str = "médiane";
 const ZONE_SELL: &str = "haute";
 const ZONE_BELOW: &str = "sous la bande";
 const ZONE_ABOVE: &str = "au-dessus de la bande";
-const DATA_STALE: &str = "périmé";
-const DATA_FRESH: &str = "à jour le";
+// The data state, worded exactly as the screen's caption (parity — « Données : — » said less).
+const DATA_STALE: &str = "données périmées";
+const DATA_FRESH: &str = "données à jour le";
+const DATA_NEVER: &str = "données : pas encore rafraîchies";
 const FLAGS_LABEL: &str = "Signaux";
 const STOP_LABEL: &str = "Seuil suiveur :";
 const STOP_BREACHED: &str = "sous le seuil";
@@ -280,7 +281,6 @@ const REVIEW_USER_FACING: &[&str] = &[
     P_ZONE,
     P_UD,
     P_RELATIVE,
-    P_DATA,
     STUDY_FULL,
     STUDY_PROVISIONAL,
     STUDY_WITHHELD,
@@ -298,6 +298,7 @@ const REVIEW_USER_FACING: &[&str] = &[
     ZONE_ABOVE,
     DATA_STALE,
     DATA_FRESH,
+    DATA_NEVER,
     FLAGS_LABEL,
     STOP_LABEL,
     STOP_BREACHED,
@@ -337,16 +338,19 @@ const COLS_SHARE: [f32; 6] = [
     PAGE_W - MARGIN,
 ];
 
-// The positions table: a symbol column wide enough for « NESN.SW », the banks, then the figures.
+// The positions table: a symbol column wide enough for « NESN.SW », the banks (they wrap), then
+// the figures — each column sized to its longest word at the grid font plus the cell padding
+// (on-screen check 2: « au-dessus de la bande » needs ≈ 101 pt; the relative value and H/B had
+// room to give). Guarded by `every_positions_word_fits_its_column`.
 const COLS_POSITIONS: [f32; 9] = [
     MARGIN,
     MARGIN + 62.0,
-    MARGIN + 142.0,
-    MARGIN + 212.0,
-    MARGIN + 254.0,
-    MARGIN + 334.0,
-    MARGIN + 394.0,
-    MARGIN + 439.0,
+    MARGIN + 122.0,
+    MARGIN + 200.0,
+    MARGIN + 244.0,
+    MARGIN + 316.0,
+    MARGIN + 418.0,
+    MARGIN + 460.0,
     PAGE_W - MARGIN,
 ];
 
@@ -492,12 +496,17 @@ fn zone_label(key: &str) -> &str {
     }
 }
 
-fn data_label(l: &ReviewLine) -> String {
-    match l.data_state.as_str() {
+/// The data state as the screen words it — and, as on the screen, only for a study the engine
+/// computed (`None` otherwise: no refresh state to state). `""` means never refreshed.
+fn data_label(l: &ReviewLine) -> Option<String> {
+    if !matches!(l.study.as_str(), "full" | "provisional" | "withheld") {
+        return None;
+    }
+    Some(match l.data_state.as_str() {
         "stale" => DATA_STALE.to_string(),
         "fresh" if !l.as_of.is_empty() => format!("{DATA_FRESH} {}", l.as_of),
-        _ => EM_DASH.to_string(),
-    }
+        _ => DATA_NEVER.to_string(),
+    })
 }
 
 /// Render the review (FR53). Deterministic bytes; greyscale; neutral labels only.
@@ -656,7 +665,7 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             if !l.flags.is_empty() {
                 extra.push(format!("{FLAGS_LABEL} ({}) : {}", l.flag_count, l.flags));
             }
-            extra.push(format!("{P_DATA} : {}", data_label(l)));
+            extra.extend(data_label(l));
             if !l.stop.is_empty() {
                 // Which level(s) — and bank(s) — the price reached, never a blanket mark; when
                 // every level is breached the stop list already names them (no repetition).
@@ -942,6 +951,79 @@ mod tests {
             &render_portfolio_review(&r),
             "(historique indisponible)"
         ));
+    }
+
+    #[test]
+    fn the_data_state_is_worded_as_on_the_screen() {
+        let line = |study: &str, state: &str, as_of: &str| ReviewLine {
+            study: study.into(),
+            data_state: state.into(),
+            as_of: as_of.into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            data_label(&line("full", "", "")).as_deref(),
+            Some("données : pas encore rafraîchies"),
+            "never « Données : — »"
+        );
+        assert_eq!(
+            data_label(&line("provisional", "stale", "")).as_deref(),
+            Some("données périmées")
+        );
+        assert_eq!(
+            data_label(&line("withheld", "fresh", "2026-09-23")).as_deref(),
+            Some("données à jour le 2026-09-23")
+        );
+        // As on the screen, no data state without a computed study.
+        for study in ["none", "unavailable", "not_computable"] {
+            assert_eq!(data_label(&line(study, "stale", "")), None, "{study}");
+        }
+        let mut r = sample();
+        r.positions[0].data_state = String::new();
+        assert!(carries(&render_portfolio_review(&r), "pas encore rafra"));
+    }
+
+    #[test]
+    fn every_positions_word_fits_its_column() {
+        use crate::pdf::{FONT, text_width};
+        // The grid's cell padding on each side (pdf.rs `CELL_PAD`).
+        const PAD: f32 = 5.0;
+        let fits = |col: usize, word: &str| {
+            let room = COLS_POSITIONS[col + 1] - COLS_POSITIONS[col];
+            let need = text_width(word, FONT) + 2.0 * PAD;
+            assert!(
+                need <= room,
+                "« {word} » needs {need} pt, column {col} has {room}"
+            );
+        };
+        for zone in [
+            ZONE_BUY,
+            ZONE_NEUTRAL,
+            ZONE_SELL,
+            ZONE_BELOW,
+            ZONE_ABOVE,
+            P_ZONE,
+        ] {
+            fits(5, zone);
+        }
+        for study in [
+            STUDY_FULL,
+            STUDY_PROVISIONAL,
+            STUDY_WITHHELD,
+            STUDY_NONE,
+            STUDY_UNAVAILABLE,
+            STUDY_NOT_COMPUTABLE,
+        ] {
+            fits(4, study);
+        }
+        // The other columns keep room for their usual figures.
+        fits(0, "NESN.SW");
+        fits(2, "12 345 678 CHF");
+        fits(2, UNAVAILABLE);
+        fits(3, "100,0 %");
+        fits(6, "123,4:1");
+        fits(7, "114,0 %");
+        fits(7, P_RELATIVE);
     }
 
     #[test]
