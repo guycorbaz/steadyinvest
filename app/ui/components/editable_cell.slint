@@ -186,8 +186,13 @@ export component EditableCell inherits Rectangle {
     property <length> stale-end: stale.visible ? stale.x + stale.width + 2px : root.box-end;
     property <length> warn-end: warn.visible ? warn.x + warn.width : root.stale-end;
     property <length> lead: max(Tokens.space-8, root.warn-end + Tokens.space-4);
+    // G1 final review M4: the lock affordance shows — and takes its room — only while the cell
+    // has focus (the moment a value edit is attempted, and the lock is clickable then: a click on
+    // it does not take the focus away). Unfocused, the ✓ alone says « validated », and the figure
+    // keeps the room the lock would otherwise eat at `grid-col-min`.
+    property <bool> lock-shown: root.locked && input.has-focus;
     property <length> trail: max(
-        max(Tokens.space-8, root.locked ? root.marker-box + Tokens.space-4 : 0px),
+        max(Tokens.space-8, root.lock-shown ? root.marker-box + Tokens.space-4 : 0px),
         na.visible ? na.width + Tokens.space-8 * 2 : 0px);
     // The shown/typed text measured at the body size — drives the shrink-to-fit font.
     measure := Text {
@@ -343,9 +348,10 @@ export component EditableCell inherits Rectangle {
         }
     }
     // Calm lock affordance on a soft-locked cell — a glyph (NO colour spent), clickable to reach the
-    // deliberate clear-✓ → ? release by mouse. Distinct from the cycle marker so the first gesture
+    // deliberate clear-✓ → ? release by mouse. Shown while the cell has focus (G1 final review M4,
+    // see `lock-shown`); Ctrl+Backspace is the same release from the keyboard. Distinct from the cycle marker so the first gesture
     // clears and a normal edit needs the cleared (?) cell — never both in one keystroke.
-    if root.locked: TouchArea {
+    if root.lock-shown: TouchArea {
         width: Tokens.font-body + Tokens.space-8;
         height: 100%;
         x: parent.width - self.width;

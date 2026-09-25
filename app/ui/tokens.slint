@@ -78,8 +78,13 @@ export global Tokens {
     // it a figure is not shrunk further but marked as overflowing (« ⋯ ») and shown whole on
     // focus/hover. And the narrowest a data column of the study grids may get: past it the form
     // scrolls sideways instead of squeezing the columns.
+    // G1 final review M4: at 80 px a validated (✓) cell kept 12 px for its figure (the ✓ box 34 +
+    // the lock 34 reserved) — every figure read « ⋯ ». The lock now shows (and is reserved) only
+    // while the cell has focus, and the floor is 96 px: an unfocused ✓ cell keeps 54 px, a
+    // « 123 456 » / « 1 234,56 » at the floor size; six years of the §2 grid (240 + 2 × 96 +
+    // 6 × 96 = 1 008 px) still fit the 1 031 px a 1 280 px window leaves beside the rail.
     out property <length> font-floor: 13px;
-    out property <length> grid-col-min: 80px;
+    out property <length> grid-col-min: 96px;
     out property <int> weight-regular: 400;
     out property <int> weight-medium: 500;
     out property <int> weight-semibold: 600;

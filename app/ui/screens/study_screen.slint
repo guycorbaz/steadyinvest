@@ -338,7 +338,7 @@ export component StudyScreen inherits Rectangle {
     // many years or a narrow window scroll the form sideways instead of squeezing the figures.
     property <length> col-label: 240px; // §2 "Indicateur" row-label column
     property <length> col-stat: 96px;   // §2 "Moy. 5 ans" / "Tendance" columns
-    property <length> col-year: 80px;   // §3 "Année" row-label column
+    property <length> col-year: Tokens.grid-col-min; // §3 "Année" row-label column (the floor)
 
     background: Tokens.bg;
 
@@ -375,9 +375,12 @@ export component StudyScreen inherits Rectangle {
 
         // ── G1 J — the open study's notice slot. Pinned OUTSIDE the scroll, just under the verdict
         //    bar, so a notice raised deep in the form (the soft-lock on a §3 cell, a drag refusal)
-        //    is seen where the user is, not at the top of a scrolled-away page. An OUTCOME of a
-        //    gesture → an inline notice (the UX pass: caption ink, no colour, no band); refusals
-        //    the user must acknowledge go to the refusal dialog instead, never here. The F4
+        //    is seen where the user is, not at the top of a scrolled-away page. Shown inline (the
+        //    UX pass: caption ink, no colour, no band): a gesture's OUTCOME, its in-progress
+        //    banner, and the FAILURES that need no acknowledgement — a fetch failure, an edit
+        //    refused in passing (the soft-lock, an unreadable clipboard), the study's own
+        //    normalize state (G1 final review L8: this slot does carry failures).
+        //    Only a refusal the user must acknowledge goes to the refusal dialog instead. The F4
         //    notice-slot rule is enforced where it is written (Rust `wiring::study_notice`). ──
         if Studies.study-notice != "": VerticalLayout {
             padding-left: Tokens.space-24;
