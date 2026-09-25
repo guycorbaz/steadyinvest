@@ -19,6 +19,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }              # parse provider JSON responses
 sha2 = { workspace = true }                    # provider dependency digest (provenance, #21)
 thiserror = { workspace = true }
+# G1 H review: the fetch day (UTC) that bounds an EODHD split history — a split dated after it is
+# refused, never applied to today's bars. Same workspace entry as `app` (no new crate in the lock).
+chrono = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

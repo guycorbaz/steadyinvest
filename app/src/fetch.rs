@@ -124,10 +124,23 @@ impl QuotaTrace {
 
 /// Whether an error is the provider's usage limit (the criblage's stop condition).
 pub fn is_quota(error: &IngestionError) -> bool {
-    matches!(
-        error,
-        IngestionError::Provider(steadyinvest_ingestion::ProviderError::Quota { .. })
-    )
+    declared_quota(error).is_some()
+}
+
+/// PURE: `Some(retry_after_secs)` when the error is the provider's usage limit, seen through the
+/// split-history wrap (G1 H, #237): a 429 on EODHD's `/splits` request is the same account limit
+/// as on `/fundamentals` — it gets the same one bounded retry and stops the criblage the same way;
+/// only the user-facing notice names it apart (`provider_failure_notice`).
+pub(crate) fn declared_quota(error: &IngestionError) -> Option<Option<u64>> {
+    match error {
+        IngestionError::Provider(p) => match p.root_cause() {
+            steadyinvest_ingestion::ProviderError::Quota { retry_after_secs } => {
+                Some(*retry_after_secs)
+            }
+            _ => None,
+        },
+        IngestionError::Normalize(_) => None,
+    }
 }
 
 /// A job for the worker thread.
@@ -337,10 +350,9 @@ fn run_chain<'a, T>(
         let provider = select(member.provider);
         pace(last_request, provider.tag());
         let mut attempt = call(provider, member.api_key.as_ref().map(|k| k.as_str()));
-        if let Err(IngestionError::Provider(steadyinvest_ingestion::ProviderError::Quota {
-            retry_after_secs,
-        })) = &attempt
-            && let Some(wait) = quota_wait(*retry_after_secs)
+        if let Err(error) = &attempt
+            && let Some(retry_after_secs) = declared_quota(error)
+            && let Some(wait) = quota_wait(retry_after_secs)
         {
             // FR27: honor the declared retry-after (bounded) — ONE retry.
             std::thread::sleep(wait);
@@ -605,6 +617,39 @@ mod tests {
         trace.record("eodhd", true);
         trace.record("eodhd", true);
         assert!(trace.any_final_quota());
+    }
+
+    /// G1 H (#237): a 429 on EODHD's `/splits` request arrives wrapped as the split history's
+    /// failure — it is still the account's usage limit, so the chain's one bounded retry and the
+    /// criblage's quota stop see through the wrap; any other split failure is not a quota.
+    #[test]
+    fn a_split_history_quota_is_still_a_quota_for_the_retry_and_the_stop() {
+        let wrapped = |cause: ProviderError| {
+            IngestionError::Provider(ProviderError::SplitHistory {
+                cause: Box::new(cause),
+            })
+        };
+        let quota = wrapped(ProviderError::Quota {
+            retry_after_secs: Some(5),
+        });
+        assert_eq!(declared_quota(&quota), Some(Some(5)));
+        assert!(is_quota(&quota));
+        assert_eq!(
+            quota_wait(declared_quota(&quota).flatten()),
+            Some(Duration::from_secs(5)),
+            "the declared retry-after is honoured like a plain 429's"
+        );
+        let forbidden = wrapped(ProviderError::Forbidden {
+            detail: "plan".into(),
+        });
+        assert_eq!(declared_quota(&forbidden), None);
+        assert!(!is_quota(&forbidden));
+        assert_eq!(
+            declared_quota(&IngestionError::Provider(ProviderError::Quota {
+                retry_after_secs: None
+            })),
+            Some(None)
+        );
     }
 
     // ── Story 6.9 — the pure pacing/retry decisions (FR27; no sleep-based tests) ──

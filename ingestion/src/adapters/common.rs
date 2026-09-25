@@ -144,35 +144,50 @@ pub(crate) fn reduce_high_low(
 }
 
 /// A dated share split as the provider lists it: `numerator` new shares for `denominator` old
-/// ones, effective on `date` (`"YYYY-MM-DD"`). Issue #217.
+/// ones, effective on `date` (`"YYYY-MM-DD"`). Issue #217. Exact `Decimal`s, both strictly
+/// positive (the adapter refuses anything else): a 3:2 split is served `"1.500000/1.000000"` and
+/// must be applied as 1.5, never truncated to 1 nor dropped (G1 H, #237).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DatedSplit {
     pub date: String,
-    pub numerator: u32,
-    pub denominator: u32,
+    pub numerator: Decimal,
+    pub denominator: Decimal,
 }
 
-/// The factor that brings a bar dated `date` into TODAY's shares: for every split dated strictly
-/// after the bar, multiply by `denominator / numerator` (a 10:1 split divides the pre-split prices
-/// by 10). ISO dates compare lexicographically. `None` on an (astronomically unlikely) overflow —
-/// the caller then drops the bar rather than mis-scale it.
-fn split_factor(date: &str, splits: &[DatedSplit]) -> Option<Decimal> {
-    let mut factor = Decimal::ONE;
-    for split in splits {
-        if split.date.as_str() > date {
-            factor = factor
-                .checked_mul(Decimal::from(split.denominator))?
-                .checked_div(Decimal::from(split.numerator))?;
-        }
+/// A raw price `value` dated `date`, brought into TODAY's shares: for every split dated strictly
+/// after the bar, × `denominator / numerator` (a 10:1 split divides the pre-split prices by 10).
+/// ISO dates compare lexicographically; a bar ON the split date is already post-split. The
+/// numerators and denominators are compounded separately and the price divided ONCE (a 3:2 split
+/// of 150 is 100, no 0.666…7 factor compounded in).
+///
+/// ONE rounding rule (G1 H review): a rebased price is a DERIVED per-share figure, so whenever at
+/// least one split applies it is rounded to 4 dp (`round_dp`, banker's midpoint) — exactly like
+/// book value and dividend per share (#119). No split after the bar → the served value, untouched
+/// (never re-rounded). `None` on an (astronomically unlikely) overflow — the caller then withholds
+/// that whole year rather than mis-scale it.
+fn rebase_price(value: Decimal, date: &str, splits: &[DatedSplit]) -> Option<Decimal> {
+    let mut numerators = Decimal::ONE;
+    let mut denominators = Decimal::ONE;
+    let mut any = false;
+    for split in splits.iter().filter(|s| s.date.as_str() > date) {
+        numerators = numerators.checked_mul(split.numerator)?;
+        denominators = denominators.checked_mul(split.denominator)?;
+        any = true;
     }
-    Some(factor)
+    if !any {
+        return Some(value);
+    }
+    let quotient = value.checked_mul(denominators)?.checked_div(numerators)?;
+    Some(quotient.round_dp(4))
 }
 
 /// [`reduce_high_low`] with each DAILY bar first rebased into today's shares by the splits dated
 /// after it (issue #217): a provider that restates its per-share fundamentals but serves raw price
 /// bars would otherwise pair a post-split EPS with a pre-split price (NVDA: high P/E ≈ 3 400). The
 /// adjustment is per bar, not per year, so a mid-year split never mixes two share bases inside one
-/// yearly high/low. No splits → the raw reduce.
+/// yearly high/low. No splits → the raw reduce. A bar whose rebase overflows withholds its whole
+/// year (both high and low): a yearly extreme reduced from the OTHER bars would be a partial figure
+/// passed off as the year's (« absent, never wrong »).
 pub(crate) fn reduce_high_low_adjusted(
     bars: Option<&Value>,
     date_field: &str,
@@ -180,6 +195,7 @@ pub(crate) fn reduce_high_low_adjusted(
 ) -> (BTreeMap<i32, Decimal>, BTreeMap<i32, Decimal>) {
     let mut highs: BTreeMap<i32, Decimal> = BTreeMap::new();
     let mut lows: BTreeMap<i32, Decimal> = BTreeMap::new();
+    let mut withheld: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
     let Some(bars) = bars.and_then(Value::as_array) else {
         return (highs, lows);
     };
@@ -190,11 +206,17 @@ pub(crate) fn reduce_high_low_adjusted(
         let Some(year) = year_of_date_key(date) else {
             continue;
         };
-        let Some(factor) = split_factor(date, splits) else {
-            continue;
+        let mut scaled = |v: Option<Decimal>| {
+            let raw = v?;
+            let rebased = rebase_price(raw, date, splits);
+            if rebased.is_none() {
+                withheld.insert(year);
+            }
+            rebased
         };
-        let scaled = |v: Option<Decimal>| v.and_then(|d| d.checked_mul(factor));
-        if let Some(high) = scaled(dec(bar.get("high"))) {
+        let high = scaled(dec(bar.get("high")));
+        let low = scaled(dec(bar.get("low")));
+        if let Some(high) = high {
             highs
                 .entry(year)
                 .and_modify(|m| {
@@ -204,7 +226,7 @@ pub(crate) fn reduce_high_low_adjusted(
                 })
                 .or_insert(high);
         }
-        if let Some(low) = scaled(dec(bar.get("low"))) {
+        if let Some(low) = low {
             lows.entry(year)
                 .and_modify(|m| {
                     if low < *m {
@@ -213,6 +235,10 @@ pub(crate) fn reduce_high_low_adjusted(
                 })
                 .or_insert(low);
         }
+    }
+    for year in &withheld {
+        highs.remove(year);
+        lows.remove(year);
     }
     (highs, lows)
 }
@@ -281,13 +307,13 @@ mod tests {
         let splits = vec![
             DatedSplit {
                 date: "2021-07-20".into(),
-                numerator: 4,
-                denominator: 1,
+                numerator: d("4"),
+                denominator: d("1"),
             },
             DatedSplit {
                 date: "2024-06-10".into(),
-                numerator: 10,
-                denominator: 1,
+                numerator: d("10"),
+                denominator: d("1"),
             },
         ];
         let (h, l) = reduce_high_low_adjusted(Some(&bars), "date", &splits);
@@ -303,6 +329,75 @@ mod tests {
         // No splits → the raw reduce, byte-for-byte the old behaviour.
         let (h0, _) = reduce_high_low_adjusted(Some(&bars), "date", &[]);
         assert_eq!(h0[&2020], d("800"));
+    }
+
+    /// G1 H (#237): a fractional ratio (3:2, served "1.500000/1.000000") applies — the numerators
+    /// and denominators compound separately and the price divides once, so 150 → 100; whenever a
+    /// split applies the result is rounded to 4 dp (#119's per-share rule — one rule, G1 H
+    /// review), including a terminating 5-dp quotient; a bar ON the split date is already
+    /// post-split and served untouched (never re-rounded); a reverse split (1:10) multiplies.
+    #[test]
+    fn rebase_price_applies_fractional_and_reverse_ratios_with_one_rounding_rule() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let three_for_two = [DatedSplit {
+            date: "2022-06-01".into(),
+            numerator: d("1.5"),
+            denominator: d("1"),
+        }];
+        assert_eq!(
+            rebase_price(d("150"), "2022-05-31", &three_for_two),
+            Some(d("100"))
+        );
+        assert_eq!(
+            rebase_price(d("100"), "2022-05-31", &three_for_two),
+            Some(d("66.6667")),
+            "100 ÷ 1.5 does not terminate → 4 dp"
+        );
+        let forty = [DatedSplit {
+            date: "2022-06-01".into(),
+            numerator: d("40"),
+            denominator: d("1"),
+        }];
+        assert_eq!(
+            rebase_price(d("589.07"), "2020-01-15", &forty),
+            Some(d("14.7268")),
+            "589.07 ÷ 40 = 14.72675 terminates, yet is rounded to 4 dp too (one rule)"
+        );
+        assert_eq!(
+            rebase_price(d("150.123456"), "2022-06-01", &three_for_two),
+            Some(d("150.123456")),
+            "the split-date bar is already post-split — served untouched, not re-rounded"
+        );
+        let reverse = [DatedSplit {
+            date: "2022-06-01".into(),
+            numerator: d("1"),
+            denominator: d("10"),
+        }];
+        assert_eq!(
+            rebase_price(d("1.25"), "2021-01-04", &reverse),
+            Some(d("12.5"))
+        );
+    }
+
+    /// An overflowing rebase withholds the WHOLE year (high and low): an extreme reduced from the
+    /// remaining bars would be a partial figure passed off as the year's (« absent, never wrong »).
+    #[test]
+    fn an_overflowing_rebase_withholds_the_whole_year_not_just_the_bar() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let bars = json!([
+            { "date": "2020-03-01", "high": "10", "low": "9" },
+            { "date": "2020-09-01", "high": "79228162514264337593543950335", "low": "5" },
+            { "date": "2021-03-01", "high": "7", "low": "6" },
+        ]);
+        let reverse = [DatedSplit {
+            date: "2020-12-01".into(),
+            numerator: d("1"),
+            denominator: d("10"),
+        }];
+        let (h, l) = reduce_high_low_adjusted(Some(&bars), "date", &reverse);
+        assert!(!h.contains_key(&2020) && !l.contains_key(&2020));
+        assert_eq!(h[&2021], d("7"));
+        assert_eq!(l[&2021], d("6"));
     }
 
     #[test]

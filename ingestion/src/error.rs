@@ -42,6 +42,27 @@ pub enum ProviderError {
     /// The provider or this adapter does not cover the request.
     #[error("this request is not covered by the adapter: {detail}")]
     Unsupported { detail: String },
+
+    /// The share-split history the adapter needs to put the price bars at today's share scale
+    /// could not be read (G1 H, #237 — owner decision 10). A HARD failure of the whole fetch — no
+    /// price is ever served at a wrong scale — but NAMED apart from the fundamentals / prices
+    /// failures (« every refusal names itself »): `cause` is the underlying transport / status /
+    /// body failure of the split request (a 403 plan without the endpoint, a 429, an error object
+    /// in a 200 body, a malformed ratio). Read [`Self::root_cause`] for the quota semantics.
+    #[error("the provider's share-split history is unavailable: {cause}")]
+    SplitHistory { cause: Box<ProviderError> },
+}
+
+impl ProviderError {
+    /// The underlying cause, seen through a [`Self::SplitHistory`] wrap. A 429 on the split request
+    /// is still the provider's usage limit: the worker's one same-member retry and the criblage's
+    /// quota stop key off THIS, while the user-facing notice keys off the wrap (G1 H).
+    pub fn root_cause(&self) -> &ProviderError {
+        match self {
+            ProviderError::SplitHistory { cause } => cause.root_cause(),
+            other => other,
+        }
+    }
 }
 
 /// The ingestion-level result: a provider failure, or a structural normalization error.
@@ -117,6 +138,11 @@ mod tests {
             ProviderError::Unsupported {
                 detail: "example".into(),
             },
+            ProviderError::SplitHistory {
+                cause: Box::new(ProviderError::Forbidden {
+                    detail: "example".into(),
+                }),
+            },
         ];
         for e in &samples {
             assert_neutral(&e.to_string());
@@ -127,5 +153,24 @@ mod tests {
             )
             .to_string(),
         );
+    }
+
+    #[test]
+    fn root_cause_sees_through_the_split_history_wrap() {
+        let quota = ProviderError::SplitHistory {
+            cause: Box::new(ProviderError::Quota {
+                retry_after_secs: Some(5),
+            }),
+        };
+        assert!(matches!(
+            quota.root_cause(),
+            ProviderError::Quota {
+                retry_after_secs: Some(5)
+            }
+        ));
+        assert!(matches!(
+            ProviderError::InvalidOrAbsentKey.root_cause(),
+            ProviderError::InvalidOrAbsentKey
+        ));
     }
 }

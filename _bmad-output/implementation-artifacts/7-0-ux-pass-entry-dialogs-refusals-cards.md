@@ -166,6 +166,9 @@ reviewed PR (G3) or listed under Defer.
 - [x] [Review][Patch] Adoption chips (#213/#214): no year shown, may come from a very old year, est-low EPS ≤ 0 proposed; candidate (a) has no positivity guard; (a)/(d) overflow names the wrong reason [app/src/viewmodel/engine.rs:380-381,448-470, core/src/ssg/risk_reward.rs:34-38]
 - [x] [Review][Patch] Orphan confirm properties and dead code (`study-action-confirm-visible`, `import-confirm`, `restore-confirm`, `Dialog.notice`, `LabeledDropdown.changed`, `NARROW_NBSP` misnamed) [app/ui/state.slint:784,900,908]
 - [ ] [Review][Patch] Tests: #217 per-share rebasing coverage lost in `eodhd_mapping.rs`; no n=3 / fractional split test [ingestion/tests/eodhd_mapping.rs]
+- [ ] [Review][Patch] Adoption chips (#213/#214): no year shown, may come from a very old year, est-low EPS ≤ 0 proposed; candidate (a) has no positivity guard; (a)/(d) overflow names the wrong reason [app/src/viewmodel/engine.rs:380-381,448-470, core/src/ssg/risk_reward.rs:34-38]
+- [ ] [Review][Patch] Orphan confirm properties and dead code (`study-action-confirm-visible`, `import-confirm`, `restore-confirm`, `Dialog.notice`, `LabeledDropdown.changed`, `NARROW_NBSP` misnamed) [app/ui/state.slint:784,900,908]
+- [x] [Review][Patch] Tests: #217 per-share rebasing coverage lost in `eodhd_mapping.rs`; no n=3 / fractional split test [ingestion/tests/eodhd_mapping.rs]
 - [x] [Review][Defer] Focus taken through a 30 ms timer (Slint 1.17 workaround) [app/ui/components/action_button.slint] — deferred, cross-cutting
 - [x] [Review][Defer] Same-day ledger rows ordered by entry time → a back-dated buy after a same-day sale is refused as an oversell [persistence/src/transactions.rs:464,516] — deferred, design of day-granular dates
 - [x] [Review][Defer] Some states still plain text instead of bands (candidates panel, watchlist « Aucune étude liée », consolidation rows); success notices of Études in a StatusBand [portfolio.slint:201, watchlist.slint:123, dashboard.slint:264] — deferred, cosmetic
@@ -177,3 +180,10 @@ its reason; `confirm_restore` refuses), 8 (no currency prefill; optional company
 (Réglages keeps the typed text). The candidate (a) positivity guard was NOT made in core — it would
 change a method formula (METHOD_VERSION bump) — and is left to Guy. The refused-switch status is in
 the dossier-switch PR; the #217 tests in the EODHD PR.
+Fixed in PR H (G1, branch `fix/g1-h-eodhd-splits`): decision 10 — a /splits failure stays a hard
+failure but is named (403 / 429 / unreadable), an unreadable body or a malformed, duplicated or
+future-dated split is a named failure (never « no splits »), decimal ratios are exact (rounded to
+4 dp once when a split applies), the key test keeps its verdict (#42), and the #217 coverage is
+restored with a real split in the fixture. Dividend / book value per share stay « as served »,
+pinned on the assumption that EODHD restates the balance-sheet share counts — to be confirmed by
+ONE real NVDA.US fetch with Guy present (G5).
