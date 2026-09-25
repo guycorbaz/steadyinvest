@@ -123,19 +123,19 @@ Guy's (2026-09-25).
 
 - [x] [Review][Decision] The ladder's old pair is `recent−5 / recent−6` (seven years) while the spec reads six (Q2: midpoints 1,5 and 5,5); the fallback may take a non-consecutive or overlapping pair (n = 3) and leaves « il y a  ans » for spans > 5 — **six-year window (old pair n−4 / n−5), the form's exponent 5 kept (Q2); fallback = a consecutive pair disjoint from the recent one with the real span shown, else « indisponible »; labels (5) / (6) keep the form's wording** [core/src/checklist.rs:122-143, app/ui/screens/quick_screen.slint:59-66]
 - [x] [Review][Decision] Free fields differ from spec §2 / §3 (one field + three chips; one P/E notes field) — **ratified (seen on screen)**
-- [ ] [Review][Patch] « Fermer le criblage » empties the slot, so the next run is batch 1 again: late outcomes of the old run land on the new run's rows; `on_fetched` has no Pending guard [app/src/wiring/screening.rs:101-119,185-191,267]
-- [ ] [Review][Patch] The examination's currency is read from the picker when the result arrives — « Créer l'étude » can write the study in the wrong currency [app/src/wiring/quick_screen.rs:211]
-- [ ] [Review][Patch] A quick-screen result is not tied to its request: Enter bypasses the `!fetching` / currency guard (double fetch, empty currency); a late result replaces a study or criblage examination [app/src/wiring/quick_screen.rs:185-220, app/ui/screens/dashboard.slint:406-416]
-- [ ] [Review][Patch] « Créer l'étude »: an `apply_provider_refresh` error shows the refusal AND the success notice, and opens an empty study [app/src/wiring/quick_screen.rs:399-407]
-- [ ] [Review][Patch] The reader's fields (reasons, answers, objective) carry over to the next examination and its PDF [app/src/wiring/quick_screen.rs:49-51,112,240-246]
+- [x] [Review][Patch] « Fermer le criblage » empties the slot, so the next run is batch 1 again: late outcomes of the old run land on the new run's rows; `on_fetched` has no Pending guard [app/src/wiring/screening.rs:101-119,185-191,267]
+- [x] [Review][Patch] The examination's currency is read from the picker when the result arrives — « Créer l'étude » can write the study in the wrong currency [app/src/wiring/quick_screen.rs:211]
+- [x] [Review][Patch] A quick-screen result is not tied to its request: Enter bypasses the `!fetching` / currency guard (double fetch, empty currency); a late result replaces a study or criblage examination [app/src/wiring/quick_screen.rs:185-220, app/ui/screens/dashboard.slint:406-416]
+- [x] [Review][Patch] « Créer l'étude »: an `apply_provider_refresh` error shows the refusal AND the success notice, and opens an empty study [app/src/wiring/quick_screen.rs:399-407]
+- [x] [Review][Patch] The reader's fields (reasons, answers, objective) carry over to the next examination and its PDF — answers reset on a new examination; the objective stays for the session (spec Q1) [app/src/wiring/quick_screen.rs:49-51,112,240-246]
 - [ ] [Review][Patch] Examination and criblage sessions survive a dossier switch / restore [app/src/wiring/journal.rs:130-145,446-449]
-- [ ] [Review][Patch] Quota stop only when the chain's FINAL error is a quota one [app/src/fetch.rs:402]
-- [ ] [Review][Patch] `plan()` swallows read failures (empty list « 0 valeur(s) »; a studied ticker fetched again, spending quota) [app/src/wiring/screening.rs:127-133]
-- [ ] [Review][Patch] The #109 price-only-year filter applies to the fetch path only; an empty-after-filter series passes the « no data » refusal [app/src/wiring/quick_screen.rs:139-168,207, app/src/wiring/screening.rs:110]
+- [x] [Review][Patch] Quota stop only when the chain's FINAL error is a quota one [app/src/fetch.rs:402]
+- [x] [Review][Patch] `plan()` swallows read failures (empty list « 0 valeur(s) »; a studied ticker fetched again, spending quota) [app/src/wiring/screening.rs:127-133]
+- [x] [Review][Patch] The #109 price-only-year filter applies to the fetch path only; an empty-after-filter series passes the « no data » refusal — the empty-after-filter case fixed (PR A); the study path keeps its saved years (the apply path already drops the price-only row, so a saved study does not carry it) [app/src/wiring/quick_screen.rs:139-168,207, app/src/wiring/screening.rs:110]
 - [ ] [Review][Patch] Checklist arithmetic: `sum` overflow replaces the total by the last value; P/E totals / averages partial and over different subsets; `increase_pct` sign inverted on a negative base; « cinq ans » claimed over fewer rows, « 0 » when none [core/src/checklist.rs:152-157,190-243]
 - [ ] [Review][Patch] Conclusions: « atteint » decided on the raw rate while the rounded one is shown; « objectif non renseigné » when the RATE is absent; conclusion 4 says « PER actuel indisponible » when the 5-year average is missing, and the PDF drops it [app/src/viewmodel/quick_screen.rs:133-137, app/ui/screens/quick_screen.slint:296-313, report/src/quick_screen.rs:444-457]
 - [ ] [Review][Patch] Without a price the three §3 facts vanish instead of reading « — » (spec §6); the PDF's higher / lower word is parsed back from the formatted string [app/ui/screens/quick_screen.slint:263-271, report/src/quick_screen.rs:~400-425]
-- [ ] [Review][Patch] « Fermer le criblage » clears an unrelated watchlist notice (F4) [app/src/wiring/screening.rs:274]
+- [x] [Review][Patch] « Fermer le criblage » clears an unrelated watchlist notice (F4) [app/src/wiring/screening.rs:274]
 - [ ] [Review][Patch] Tests: n = 3 ladder, the two-page PDF, 27 % → 5,0 % through `quick_screen` (spec §6) [core/src/checklist.rs, report/src/quick_screen.rs]
 - [x] [Review][Defer] Neutral §2 / §3 facts in a StatusBand with the « ◦ » glyph [app/ui/screens/quick_screen.slint] — deferred, cosmetic
 
@@ -153,3 +153,7 @@ Guy's (2026-09-25).
 - [ ] [Review][Patch] Tests for #216: §3 totals / averages, §4 candidates, the header box, the two-page split, the guides [report/src/pdf.rs]
 - [x] [Review][Defer] PDF exports write in place (no temp + rename, no self-alias guard against the dossier file) — all exports, including the 5.6 study export [app/src/wiring/{studies,comparison,review,quick_screen}.rs] — deferred, pre-existing
 - [x] [Review][Defer] Year and guide labels overlap on 30+ year studies [report/src/pdf.rs:1281-1287,1370-1377] — deferred, rare
+
+Fixed in PR A (G1, branch `fix/g1-a-quick-screen-async`): the items checked above, plus decisions 1
+(trigger sell: Enter records only a typed number) and 2 (six-year ladder). The n = 3 ladder test
+landed with decision 2; the two other test items and the dossier-switch item are in later PRs.
