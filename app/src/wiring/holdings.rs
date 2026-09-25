@@ -393,20 +393,7 @@ pub(crate) fn refresh_holdings(
     });
     // The FR28 footnote: every rate actually used, with its day and source.
     holdings.set_consolidation_rates(if show {
-        consolidation
-            .rates_used
-            .iter()
-            .map(|r| {
-                // No prose baked into Rust (posture — the @tr scan cannot see it): the entry is
-                // pure data — pair, rate, then "(date, source)".
-                format!(
-                    "{} → {} {} ({}, {})",
-                    r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" · ")
-            .into()
+        crate::wiring::fx::rate_notes(&consolidation.rates_used, format).into()
     } else {
         SharedString::new()
     });
@@ -582,17 +569,7 @@ pub(crate) fn refresh_holdings(
     );
     // The FR28 footnote — pure data entries, no prose baked into Rust (posture).
     holdings.set_concentration_rates(if show_div {
-        div.rates_used
-            .iter()
-            .map(|r| {
-                format!(
-                    "{} → {} {} ({}, {})",
-                    r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" · ")
-            .into()
+        crate::wiring::fx::rate_notes(&div.rates_used, format).into()
     } else {
         SharedString::new()
     });
