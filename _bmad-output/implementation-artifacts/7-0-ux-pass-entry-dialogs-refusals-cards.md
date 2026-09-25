@@ -152,20 +152,28 @@ reviewed PR (G3) or listed under Defer.
 - [x] [Review][Decision] « Créer une étude » prefills the reference currency; no company-name field (spec §5.3) — **no prefill (« choisir », submit disabled until chosen), allow-list kept, optional « Nom de société » added** [app/ui/screens/dashboard.slint:259, modal_dialog.slint:488-506]
 - [x] [Review][Decision] Réglages re-syncs a field after a refusal (spec AC1: keep the typed text) — **fix: keep the typed text** [app/src/wiring/prefs.rs:188,201]
 - [x] [Review][Decision] #217 `/splits`: hard dependency with an unnamed error; a 200 non-array body skips rebasing silently; decimal ratios dropped; dividend / book per share no longer rebased on an unverified assumption — **failure stays hard but named; unreadable body = failure; decimal ratios accepted; one real NVDA.US fetch with Guy present (G5) settles the per-share point** [ingestion/src/adapters/eodhd.rs:83,251-267]
-- [ ] [Review][Patch] `refuse()` overwrites a parked confirm (pending study action / import / restore stay armed), routes unrelated async refusals into the open form's field error, overwrites an unread notice [app/src/wiring/dialog.rs:14-23]
-- [ ] [Review][Patch] Focus not trapped in the modal; dropdown-first forms (position, FX rate) get no initial focus → Esc dead, Enter re-fires the hidden opener [app/ui/components/modal_dialog.slint:193,291,514]
-- [ ] [Review][Patch] Dropdown: no keyboard selection, no max height / no scroll (tickers beyond the window unreachable) [app/ui/components/dropdown.slint:30-83]
-- [ ] [Review][Patch] Dividend transaction edit uses the buy/sell labels (« Frais (vide = 0) » vs the withholding default) [app/ui/screens/portfolio.slint:681, modal_dialog.slint:340-381]
-- [ ] [Review][Patch] « Renommer le portefeuille » opens empty (spec: prefilled) [app/ui/screens/portfolio.slint:135]
-- [ ] [Review][Patch] Deleting a portfolio with holdings confirms, then refuses; the refusal names no count (spec §5.1) [app/ui/screens/portfolio.slint:142, app/src/state/messages.rs:331]
-- [ ] [Review][Patch] No « Dossier en lecture seule » band in Portefeuille (buttons only greyed) [app/ui/screens/portfolio.slint]
-- [ ] [Review][Patch] Studies read failure shown as « aucune étude » in the position dialog (#95) [app/src/wiring/holdings.rs:211-221,861-882]
-- [ ] [Review][Patch] « Tout non classé » band compares list lengths (0 == 0 when concentration is unavailable) [app/ui/screens/portfolio.slint:385]
-- [ ] [Review][Patch] Portfolio rename with an unparsable id reports success; stop / sell return false without a cause [app/src/wiring/holdings.rs:138-145]
+- [x] [Review][Patch] `refuse()` overwrites a parked confirm (pending study action / import / restore stay armed), routes unrelated async refusals into the open form's field error, overwrites an unread notice [app/src/wiring/dialog.rs:14-23]
+- [x] [Review][Patch] Focus not trapped in the modal; dropdown-first forms (position, FX rate) get no initial focus → Esc dead, Enter re-fires the hidden opener [app/ui/components/modal_dialog.slint:193,291,514]
+- [x] [Review][Patch] Dropdown: no keyboard selection, no max height / no scroll (tickers beyond the window unreachable) [app/ui/components/dropdown.slint:30-83]
+- [x] [Review][Patch] Dividend transaction edit uses the buy/sell labels (« Frais (vide = 0) » vs the withholding default) [app/ui/screens/portfolio.slint:681, modal_dialog.slint:340-381]
+- [x] [Review][Patch] « Renommer le portefeuille » opens empty (spec: prefilled) [app/ui/screens/portfolio.slint:135]
+- [x] [Review][Patch] Deleting a portfolio with holdings confirms, then refuses; the refusal names no count (spec §5.1) [app/ui/screens/portfolio.slint:142, app/src/state/messages.rs:331]
+- [x] [Review][Patch] No « Dossier en lecture seule » band in Portefeuille (buttons only greyed) [app/ui/screens/portfolio.slint]
+- [x] [Review][Patch] Studies read failure shown as « aucune étude » in the position dialog (#95) [app/src/wiring/holdings.rs:211-221,861-882]
+- [x] [Review][Patch] « Tout non classé » band compares list lengths (0 == 0 when concentration is unavailable) [app/ui/screens/portfolio.slint:385]
+- [x] [Review][Patch] Portfolio rename with an unparsable id reports success; stop / sell return false without a cause [app/src/wiring/holdings.rs:138-145]
 - [ ] [Review][Patch] A refused dossier switch clears the open dossier's location status [app/src/wiring/journal.rs:163-166]
-- [ ] [Review][Patch] Adoption chips (#213/#214): no year shown, may come from a very old year, est-low EPS ≤ 0 proposed; candidate (a) has no positivity guard; (a)/(d) overflow names the wrong reason [app/src/viewmodel/engine.rs:380-381,448-470, core/src/ssg/risk_reward.rs:34-38]
-- [ ] [Review][Patch] Orphan confirm properties and dead code (`study-action-confirm-visible`, `import-confirm`, `restore-confirm`, `Dialog.notice`, `LabeledDropdown.changed`, `NARROW_NBSP` misnamed) [app/ui/state.slint:784,900,908]
+- [x] [Review][Patch] Adoption chips (#213/#214): no year shown, may come from a very old year, est-low EPS ≤ 0 proposed; candidate (a) has no positivity guard; (a)/(d) overflow names the wrong reason [app/src/viewmodel/engine.rs:380-381,448-470, core/src/ssg/risk_reward.rs:34-38]
+- [x] [Review][Patch] Orphan confirm properties and dead code (`study-action-confirm-visible`, `import-confirm`, `restore-confirm`, `Dialog.notice`, `LabeledDropdown.changed`, `NARROW_NBSP` misnamed) [app/ui/state.slint:784,900,908]
 - [ ] [Review][Patch] Tests: #217 per-share rebasing coverage lost in `eodhd_mapping.rs`; no n=3 / fractional split test [ingestion/tests/eodhd_mapping.rs]
 - [x] [Review][Defer] Focus taken through a 30 ms timer (Slint 1.17 workaround) [app/ui/components/action_button.slint] — deferred, cross-cutting
 - [x] [Review][Defer] Same-day ledger rows ordered by entry time → a back-dated buy after a same-day sale is refused as an oversell [persistence/src/transactions.rs:464,516] — deferred, design of day-granular dates
 - [x] [Review][Defer] Some states still plain text instead of bands (candidates panel, watchlist « Aucune étude liée », consolidation rows); success notices of Études in a StatusBand [portfolio.slint:201, watchlist.slint:123, dashboard.slint:264] — deferred, cosmetic
+
+Fixed in PR E (G1, branch `fix/g1-e-dialogs-holdings`): every item checked above, and decisions 3
+(the position dialog lists studies), 4 (« Modifier » never changes a holding's currency — a legacy
+NULL currency stays NULL and follows the register's ticker-only link), 5 (read-only confirm names
+its reason; `confirm_restore` refuses), 8 (no currency prefill; optional company name) and 9a
+(Réglages keeps the typed text). The candidate (a) positivity guard was NOT made in core — it would
+change a method formula (METHOD_VERSION bump) — and is left to Guy. The refused-switch status is in
+the dossier-switch PR; the #217 tests in the EODHD PR.
