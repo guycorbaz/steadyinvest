@@ -1,9 +1,9 @@
 //! EODHD adapter (https://eodhd.com) — CH/EU+US coverage. Story 3.1, first adapter.
 //!
-//! Two endpoints feed one [`RawFinancials`]:
-//! - `/fundamentals/{ticker}` → currency, per-year income-statement / balance-sheet / earnings,
-//!   declared splits;
-//! - `/eod/{ticker}` (daily OHLC) → each fiscal year's high/low, reduced from the daily bars.
+//! Three endpoints feed one [`RawFinancials`]:
+//! - `/fundamentals/{ticker}` → currency, per-year income-statement / balance-sheet / earnings;
+//! - `/eod/{ticker}` (daily OHLC) → each fiscal year's high/low, reduced from the daily bars;
+//! - `/splits/{ticker}` → the split history that rebases those raw bars (issue #217).
 //!
 //! The **pure mapping** [`map_eodhd`] (no I/O) is the CI-tested heart; the HTTP layer is thin
 //! (shared with Twelve Data via [`crate::adapters::common`]) and validated by a manual GO/NO-GO
@@ -18,7 +18,7 @@ use serde_json::Value;
 use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear};
 
 use crate::adapters::common::{
-    DatedSplit, build_client, dec, get_json, reduce_high_low_adjusted, year_of_date_key,
+    DatedSplit, build_client, cap_detail, dec, get_json, reduce_high_low_adjusted, year_of_date_key,
 };
 use crate::error::ProviderError;
 use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
@@ -80,7 +80,14 @@ impl MarketDataProvider for EodhdProvider {
         );
         let fundamentals = get_json(&self.http, &fundamentals_url, ticker).await?;
         let prices = get_json(&self.http, &eod_url, ticker).await?;
-        let splits = get_json(&self.http, &splits_url, ticker).await?;
+        // G1 H (#237, owner decision 10): a failed split request stays a HARD failure — the prices
+        // cannot be put at today's share scale without it — but it is NAMED as the split history's
+        // (a 403 plan without `/splits`, a 429, a network cut), never passed off as a fundamentals
+        // or prices failure. The three requests share this job's single pacing slot (the worker's
+        // `pace` + one quota retry, both keyed off `ProviderError::root_cause`).
+        let splits = get_json(&self.http, &splits_url, ticker)
+            .await
+            .map_err(split_history_failure)?;
         let financials = map_eodhd(&fundamentals, &prices, &splits, ticker)?;
         // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
         // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
@@ -194,8 +201,9 @@ pub fn map_eodhd(
     let earnings = obj(fundamentals.pointer("/Earnings/Annual"));
 
     // Per-year high/low reduced from the daily EOD bars (root array, `"date"`-keyed), each bar
-    // first rebased into today's shares by the splits dated after it (issue #217).
-    let split_history = map_split_history(splits);
+    // first rebased into today's shares by the splits dated after it (issue #217). An unreadable
+    // split history fails the whole mapping, named (G1 H) — never « no splits ».
+    let split_history = map_split_history(splits).map_err(split_history_failure)?;
     let (highs, lows) = reduce_high_low_adjusted(Some(prices), "date", &split_history);
 
     // Union of every fiscal year mentioned by any section, ascending.
@@ -257,64 +265,82 @@ pub fn map_eodhd(
     })
 }
 
-/// The `/splits/{ticker}` body is `[{ "date": "YYYY-MM-DD", "split": "num/den" }]` (e.g.
-/// `"4.000000/1.000000"`), ascending or not — sorted by date here. A malformed entry is dropped
-/// (never mis-applied); a non-array body yields no splits.
-fn map_split_history(body: &Value) -> Vec<DatedSplit> {
-    let mut out = Vec::new();
-    let Some(rows) = body.as_array() else {
-        return out;
-    };
-    for row in rows {
-        let (Some(date), Some(ratio)) = (
-            row.get("date").and_then(Value::as_str),
-            row.get("split").and_then(Value::as_str),
-        ) else {
-            continue;
-        };
-        if year_of_date_key(date).is_none() {
-            continue;
-        }
-        let mut parts = ratio.split('/');
-        let num = parts.next().and_then(parse_split_part);
-        let den = parts.next().and_then(parse_split_part);
-        if let (Some(numerator), Some(denominator)) = (num, den)
-            && numerator > 0
-            && denominator > 0
-        {
-            out.push(DatedSplit {
-                date: date.to_string(),
-                numerator,
-                denominator,
-            });
-        }
+/// Any failure of the split history — the request's or the body's — under its own name (G1 H).
+fn split_history_failure(cause: ProviderError) -> ProviderError {
+    ProviderError::SplitHistory {
+        cause: Box::new(cause),
     }
-    out.sort_by(|a, b| a.date.cmp(&b.date));
-    out
 }
 
-/// EODHD writes split ratios as decimals ("4.000000"); take the integer part.
-fn parse_split_part(s: &str) -> Option<u32> {
-    // #37: a real split ratio is a positive WHOLE number (e.g. "4.000000/1.000000"). Be strict so a
-    // malformed part is REJECTED (the split is dropped, never silently mis-applied) rather than
-    // floored: reject a leading sign and any non-zero fractional remainder — the old `split('.')`
-    // truncation parsed "4.9" as 4 and `u32::parse` accepted a leading "+".
+/// The `/splits/{ticker}` body is `[{ "date": "YYYY-MM-DD", "split": "num/den" }]` (e.g.
+/// `"4.000000/1.000000"`, or `"1.500000/1.000000"` for a 3:2), ascending or not — sorted by date
+/// here. An empty array is a company that never split.
+///
+/// G1 H (#237, owner decision 10): anything else is a `Parse` FAILURE, never « no splits » and
+/// never a skipped row — a body that is not an array (an error object in a 200, a changed format),
+/// a row without a `YYYY-MM-DD` date, a malformed or non-positive ratio. Skipping one row « with a
+/// stated reason » was weighed and refused: every price before that split would still be served
+/// at the wrong scale (the #217 defect itself), and the study has no channel to carry the reason
+/// beside the figures it corrupts. The detail names the row, from the body only (key-free).
+fn map_split_history(body: &Value) -> Result<Vec<DatedSplit>, ProviderError> {
+    let Some(rows) = body.as_array() else {
+        return Err(ProviderError::Parse {
+            detail: cap_detail(&format!("split history is not a list: {body}")),
+        });
+    };
+    let mut out = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        let bad = |what: &str| ProviderError::Parse {
+            detail: cap_detail(&format!("split history row {index}: {what}: {row}")),
+        };
+        let date = row
+            .get("date")
+            .and_then(Value::as_str)
+            .filter(|d| is_iso_date(d))
+            .ok_or_else(|| bad("no YYYY-MM-DD date"))?;
+        let (numerator, denominator) = row
+            .get("split")
+            .and_then(Value::as_str)
+            .and_then(parse_split_ratio)
+            .ok_or_else(|| bad("malformed ratio"))?;
+        out.push(DatedSplit {
+            date: date.to_string(),
+            numerator,
+            denominator,
+        });
+    }
+    out.sort_by(|a, b| a.date.cmp(&b.date));
+    Ok(out)
+}
+
+/// Exactly `YYYY-MM-DD` (ASCII digits and dashes) — the form the bar dates share, so the split
+/// dates compare with them lexicographically = chronologically.
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+/// `"num/den"` → two exact, strictly positive `Decimal`s (G1 H: "1.500000/1.000000" is a 3:2
+/// split, applied as 1.5 — the old whole-number parse dropped it in silence). Strict otherwise:
+/// exactly one `/`, no sign (#37), no exponent, no zero — `None` is a malformed ratio.
+fn parse_split_ratio(ratio: &str) -> Option<(Decimal, Decimal)> {
+    let (num, den) = ratio.split_once('/')?;
+    Some((parse_split_part(num)?, parse_split_part(den)?))
+}
+
+/// One side of a split ratio: plain digits with at most one decimal point, strictly positive.
+fn parse_split_part(s: &str) -> Option<Decimal> {
     let s = s.trim();
-    if s.starts_with('+') || s.starts_with('-') {
-        return None;
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        return None; // a sign, an exponent, a second '/', letters → malformed (#37)
     }
-    let mut parts = s.split('.');
-    let integer = parts.next()?;
-    if let Some(fraction) = parts.next() {
-        // A fractional remainder is allowed ONLY if it is all zeros ("4.000000"); else reject.
-        if fraction.bytes().any(|b| b != b'0') {
-            return None;
-        }
-    }
-    if parts.next().is_some() {
-        return None; // more than one '.' → malformed
-    }
-    integer.parse::<u32>().ok()
+    Decimal::from_str_exact(s)
+        .ok()
+        .filter(|d| d.is_sign_positive() && !d.is_zero())
 }
 
 /// `totalStockholderEquity / commonStockSharesOutstanding` when both are present and shares ≠ 0.
@@ -498,8 +524,7 @@ mod tests {
         ]);
         let splits = json!([
             { "date": "2024-06-10", "split": "10.000000/1.000000" },
-            { "date": "2021-07-20", "split": "4.000000/1.000000" },
-            { "date": "bad", "split": "2/1" }
+            { "date": "2021-07-20", "split": "4.000000/1.000000" }
         ]);
         let fin = map_eodhd(&fundamentals, &prices, &splits, "NVDA.US").expect("maps");
         let y2020 = fin.years.iter().find(|y| y.year == 2020).expect("2020");
@@ -526,25 +551,90 @@ mod tests {
             fin.splits.is_empty(),
             "nothing left for normalize to rebase"
         );
-        // The malformed row was dropped, the two real ones kept, sorted by date.
-        let history = map_split_history(&splits);
+        // Both rows kept, sorted by date.
+        let history = map_split_history(&splits).expect("a well-formed history");
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].date, "2021-07-20");
     }
 
+    /// G1 H (#237): an empty array is a company that never split — the bars pass through raw.
     #[test]
-    fn parse_split_part_accepts_whole_numbers_and_rejects_malformed_ratios() {
-        // Real EODHD ratio shapes parse; malformed parts are REJECTED (the split is dropped), never
-        // floored or sign-accepted (#37).
-        assert_eq!(parse_split_part("4"), Some(4));
-        assert_eq!(parse_split_part("4.000000"), Some(4));
-        assert_eq!(parse_split_part(" 7 "), Some(7));
-        assert_eq!(parse_split_part("4.9"), None, "no longer floored to 4");
-        assert_eq!(parse_split_part("+4"), None, "leading sign rejected");
-        assert_eq!(parse_split_part("-4"), None);
-        assert_eq!(parse_split_part("1.2.3"), None);
-        assert_eq!(parse_split_part("abc"), None);
-        assert_eq!(parse_split_part(""), None);
+    fn an_empty_split_history_is_no_splits() {
+        assert_eq!(
+            map_split_history(&json!([])).expect("empty is valid"),
+            vec![]
+        );
+    }
+
+    /// G1 H (#237, owner decision 10): a 200 whose body is NOT the expected array — an error
+    /// object, a bare string, `null` — is a named split-history FAILURE of the whole mapping,
+    /// never « no splits » (which would serve every pre-split price at the wrong scale).
+    #[test]
+    fn a_non_array_split_body_fails_the_mapping_named_never_no_splits() {
+        let fundamentals = json!({ "General": { "CurrencyCode": "USD" } });
+        let prices = json!([{ "date": "2020-01-15", "high": "589.07", "low": "180.68" }]);
+        for body in [
+            json!({ "error": "Only EOD data allowed for this plan" }),
+            json!("Unauthenticated"),
+            json!(null),
+        ] {
+            let err = map_eodhd(&fundamentals, &prices, &body, "NVDA.US").unwrap_err();
+            let ProviderError::SplitHistory { cause } = &err else {
+                panic!("expected a named split-history failure, got {err:?}");
+            };
+            assert!(
+                matches!(**cause, ProviderError::Parse { .. }),
+                "{body}: {cause:?}"
+            );
+        }
+    }
+
+    /// G1 H (#237): a malformed row fails the history (named), never silently dropped — a dropped
+    /// real split would leave its pre-split prices at the wrong scale. The detail names the row.
+    #[test]
+    fn a_malformed_split_row_fails_the_history_named() {
+        for row in [
+            json!({ "date": "bad", "split": "2/1" }),
+            json!({ "date": "2021-07-20" }),
+            json!({ "date": "2021-07-20", "split": "4.000000" }),
+            json!({ "date": "2021-07-20", "split": "0/1" }),
+            json!({ "date": "2021-07-20", "split": "-4/1" }),
+            json!({ "date": "2021-07-20", "split": "four/one" }),
+            json!({ "split": "2/1" }),
+        ] {
+            let body = json!([{ "date": "2024-06-10", "split": "10.000000/1.000000" }, row]);
+            let err = map_split_history(&body).unwrap_err();
+            let ProviderError::Parse { detail } = &err else {
+                panic!("expected Parse, got {err:?}");
+            };
+            assert!(detail.contains("row 1"), "{detail}");
+        }
+    }
+
+    #[test]
+    fn parse_split_ratio_reads_exact_decimals_and_rejects_malformed_ratios() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        // Real EODHD ratio shapes — including the fractional 3:2 the u32 parse used to drop (G1 H).
+        assert_eq!(
+            parse_split_ratio("4.000000/1.000000"),
+            Some((d("4"), d("1")))
+        );
+        assert_eq!(
+            parse_split_ratio("1.500000/1.000000"),
+            Some((d("1.5"), d("1")))
+        );
+        assert_eq!(parse_split_ratio(" 7 / 1 "), Some((d("7"), d("1"))));
+        assert_eq!(
+            parse_split_ratio("1.000000/10.000000"),
+            Some((d("1"), d("10"))),
+            "a reverse split"
+        );
+        // Malformed → None (#37: no sign; plus no zero, no exponent, exactly one '/').
+        for bad in [
+            "4.9", "+4/1", "-4/1", "4/0", "0/1", "1.2.3/1", "abc/1", "4/1/1", "4e1/1", "", "/",
+        ] {
+            assert_eq!(parse_split_ratio(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

@@ -1605,6 +1605,38 @@ fn provider_failure_notice_maps_each_cause() {
         steadyinvest_core::normalize::NormalizeError::DuplicateYear { year: 2020 },
     );
     assert_eq!(provider_failure_notice(&normalize), MSG_NORMALIZE_FAILED);
+    // G1 H (#237): the split history's failure is named as such, whatever its cause — the plan
+    // (403) and the usage limit (429) keep their own split wording, never the fundamentals' notice.
+    let splits = |cause: ProviderError| {
+        p(ProviderError::SplitHistory {
+            cause: Box::new(cause),
+        })
+    };
+    assert_eq!(
+        splits(ProviderError::Forbidden {
+            detail: "plan".into()
+        }),
+        MSG_SPLITS_FORBIDDEN
+    );
+    assert_eq!(
+        splits(ProviderError::Quota {
+            retry_after_secs: None
+        }),
+        MSG_SPLITS_QUOTA
+    );
+    for other in [
+        ProviderError::Parse {
+            detail: "error object".into(),
+        },
+        ProviderError::Network {
+            detail: "reset".into(),
+        },
+        ProviderError::TickerNotFound {
+            ticker: "NVDA.US".into(),
+        },
+    ] {
+        assert_eq!(splits(other), MSG_SPLITS_UNAVAILABLE);
+    }
 }
 
 #[test]

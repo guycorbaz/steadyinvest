@@ -88,6 +88,13 @@ pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause
 pub const MSG_PROVIDER_OFFLINE: &str = "La connexion au fournisseur a échoué ; les dernières données connues restent affichées (à actualiser).";
 pub const MSG_PROVIDER_QUOTA: &str = "Le fournisseur a signalé une limite d'usage ; les dernières données connues restent affichées, réessayez plus tard.";
 pub const MSG_PROVIDER_NO_DATA: &str = "Le fournisseur n'a renvoyé aucune donnée pour ce symbole ; les dernières données connues restent affichées.";
+/// G1 H (#237, owner decision 10): the share-split history could not be read, so the fetch is
+/// refused whole (no price at a wrong scale) — named apart from the fundamentals / prices
+/// failures. The plan-excludes-it (403) and usage-limit (429) causes keep their own wording; any
+/// other cause (connection, an unreadable body, a malformed ratio) reads the plain form.
+pub const MSG_SPLITS_UNAVAILABLE: &str = "Historique des divisions d'actions indisponible : les cours ne peuvent pas être ramenés au nombre d'actions actuel ; les dernières données connues restent affichées.";
+pub const MSG_SPLITS_FORBIDDEN: &str = "Historique des divisions d'actions indisponible : l'abonnement ne couvre pas ces données, le fournisseur a refusé l'accès ; les dernières données connues restent affichées.";
+pub const MSG_SPLITS_QUOTA: &str = "Historique des divisions d'actions indisponible : le fournisseur a signalé une limite d'usage ; les dernières données connues restent affichées, réessayez plus tard.";
 
 /// Manual-refresh recompute-cause copy (Story 3.3, FR29) — fact-stating, posture-gated. The cause is
 /// a classification of what the refresh changed; the message names it (price / fundamentals / both),
@@ -584,6 +591,13 @@ pub fn provider_failure_notice(error: &steadyinvest_ingestion::IngestionError) -
             // prepared — the neutral "data can't be prepared" notice (a static string, no token, and
             // never `MSG_PROVIDER_FAILED`'s `{cause}` placeholder which only the worker-gone path fills).
             ProviderError::Parse { .. } | ProviderError::Unsupported { .. } => MSG_NORMALIZE_FAILED,
+            // G1 H: the split history's failure is named as such — never the generic quota /
+            // plan / preparation notice, which would misattribute it to the fundamentals.
+            ProviderError::SplitHistory { cause } => match cause.root_cause() {
+                ProviderError::Forbidden { .. } => MSG_SPLITS_FORBIDDEN,
+                ProviderError::Quota { .. } => MSG_SPLITS_QUOTA,
+                _ => MSG_SPLITS_UNAVAILABLE,
+            },
         },
         // The fetched data reached us but did not normalize (a structural payload error).
         IngestionError::Normalize(_) => MSG_NORMALIZE_FAILED,
@@ -754,4 +768,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_KEY_AMBIGUOUS,
     MSG_KEY_TOO_LONG,
     MSG_KEYCHAIN_ERROR,
+    MSG_SPLITS_UNAVAILABLE,
+    MSG_SPLITS_FORBIDDEN,
+    MSG_SPLITS_QUOTA,
 ];

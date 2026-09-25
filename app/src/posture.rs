@@ -796,10 +796,12 @@ mod tests {
         // blank-symbol refusal: 139. The G1 review adds the examination's blank-currency refusal
         // and the study-created-but-empty notice (MSG_QUICK_BLANK_CURRENCY,
         // MSG_QUICK_SCREEN_STUDY_EMPTY) and the criblage's unreadable-watchlist refusal
-        // (MSG_SCREENING_LIST_UNREADABLE): 142.
+        // (MSG_SCREENING_LIST_UNREADABLE): 142. G1 H (#237) names the split-history failure
+        // apart from the fundamentals / prices ones (MSG_SPLITS_UNAVAILABLE, MSG_SPLITS_FORBIDDEN,
+        // MSG_SPLITS_QUOTA): 142 + 3 = 145.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            142,
+            145,
             "state.rs message inventory changed — register the new notice"
         );
     }

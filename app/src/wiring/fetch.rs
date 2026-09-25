@@ -561,6 +561,14 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         Err(steadyinvest_ingestion::IngestionError::Provider(
                             steadyinvest_ingestion::ProviderError::Network { .. },
                         )) => state::MSG_KEY_TEST_INCONCLUSIVE.to_string(),
+                        // G1 H (#237): the key reached `/splits` only after `/fundamentals` and
+                        // `/eod` answered — it is accepted; the split history's own named notice
+                        // says what is missing (e.g. a plan without `/splits`), never raw English.
+                        Err(
+                            ref error @ steadyinvest_ingestion::IngestionError::Provider(
+                                steadyinvest_ingestion::ProviderError::SplitHistory { .. },
+                            ),
+                        ) => state::provider_failure_notice(error).to_string(),
                         Err(error) => {
                             state::MSG_PROVIDER_FAILED.replace("{cause}", &error.to_string())
                         }

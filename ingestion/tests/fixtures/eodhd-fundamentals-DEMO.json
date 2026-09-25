@@ -33,6 +33,12 @@
           "commonStockSharesOutstanding": "100"
         }
       }
+    },
+    "Cash_Flow": {
+      "yearly": {
+        "2023-12-31": { "date": "2023-12-31", "dividendsPaid": "-100" },
+        "2024-12-31": { "date": "2024-12-31", "dividendsPaid": "-110" }
+      }
     }
   },
   "Earnings": {
@@ -42,8 +48,7 @@
     }
   },
   "SplitsDividends": {
-    "Splits": {
-      "2024-06-01": "2.000000/1.000000"
-    }
+    "LastSplitFactor": "2.000000/1.000000",
+    "LastSplitDate": "2024-06-01"
   }
 }
