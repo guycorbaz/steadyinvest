@@ -56,27 +56,6 @@ thread_local! {
     // The UI is single-threaded (every callback runs on the event loop) — the `dialog` precedent.
     static SHOWN: Cell<Shown> = const { Cell::new(None) };
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
-    /// The text the study fetch last wrote into the LIST's slot (`Studies.notice`) — the only
-    /// notice of that slot it may replace besides an empty slot (see [`may_take_list`]).
-    static LIST_OWN: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-/// PURE (G3 #6, the F4 rule on the list's slot): may a study-fetch result take the list's slot
-/// now showing `current`? Only when it is empty or shows the fetch's own earlier notice — the
-/// list's other writers (an export failure, a startup state, an archive outcome) do not say what
-/// kind their notice is, so none of them is ever overwritten: a sibling's failure never is.
-fn may_take_list(current: &str, own: Option<&str>) -> bool {
-    current.is_empty() || own == Some(current)
-}
-
-/// A study-fetch result for the LIST's slot (the study is not on screen) — under [`may_take_list`].
-pub(crate) fn list_fetch(ui: &MainWindow, text: &str) {
-    let studies = ui.global::<Studies>();
-    let current = studies.get_notice();
-    if LIST_OWN.with(|own| may_take_list(current.as_str(), own.borrow().as_deref())) {
-        studies.set_notice(SharedString::from(text));
-        LIST_OWN.with(|own| *own.borrow_mut() = Some(text.to_string()));
-    }
 }
 
 /// Keep a fetch result for `study`, said while it was not on screen, for its next open.
@@ -228,22 +207,6 @@ mod tests {
         assert!(may_place(
             Some((Source::Render, Kind::Failure)),
             Source::Render
-        ));
-    }
-
-    #[test]
-    fn a_fetch_result_takes_the_list_slot_only_when_empty_or_its_own() {
-        assert!(may_take_list("", None));
-        assert!(may_take_list("", Some("x")));
-        assert!(may_take_list(
-            "Données mises à jour.",
-            Some("Données mises à jour.")
-        ));
-        // Another writer's notice — an export failure, a startup state — is never overwritten.
-        assert!(!may_take_list("L'enregistrement a échoué.", None));
-        assert!(!may_take_list(
-            "L'enregistrement a échoué.",
-            Some("Données mises à jour.")
         ));
     }
 

@@ -16,9 +16,9 @@ use crate::config::StudyViewState;
 use crate::regime::Regime;
 use crate::state::JournalState;
 use crate::wiring::push::{push_form, push_view_state};
-use crate::wiring::study_notice;
 use crate::wiring::watchlist::refresh_watchlist;
 use crate::wiring::{Session, persist};
+use crate::wiring::{list_notice, study_notice};
 use crate::{
     FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, TraceState, Verify,
 };
@@ -62,6 +62,27 @@ fn safe_stem(ticker: &str) -> String {
     } else {
         stem
     }
+}
+
+/// G1 final (L12) — the PDF's path as picked, with `.pdf` appended unless its name already ends
+/// so (any case, « .pdf » alone included); `true` when the path was changed. rfd does not force
+/// the filter's extension everywhere, and a picked name such as « etude-NESN.SW » HAS an extension
+/// (« SW ») — so the test is the name's ending, and the suffix is appended, never swapped for the
+/// name's own last dot-part. A name ending in a bare dot (« etude. ») takes « pdf », never
+/// « ..pdf ».
+fn with_pdf_extension(path: std::path::PathBuf) -> (std::path::PathBuf, bool) {
+    let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+        return (path, false);
+    };
+    let lower = name.to_lowercase();
+    if lower.ends_with(".pdf") {
+        return (path, false);
+    }
+    let named = match name.strip_suffix('.') {
+        Some(stem) => format!("{stem}.pdf"),
+        None => format!("{name}.pdf"),
+    };
+    (path.with_file_name(named), true)
 }
 
 /// One pickable study (G1 decision 3, #237): the `id` is the key carried end to end; the `label`
@@ -468,19 +489,23 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_export_study(move |id| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Ok(uuid) = Uuid::parse_str(&id) else {
                 return;
             };
             let outcome = match journal_state.borrow().export_study(uuid) {
                 Ok(json) => match write_study_export(uuid, &json) {
                     Ok(path) => Ok(format!("{} {}", state::MSG_STUDY_EXPORTED, path.display())),
-                    Err(e) => Err(format!("{} {e}", state::MSG_SAVE_FAILED)),
+                    // G1 final (M4): the write failure is named in French, the OS cause logged.
+                    Err(error) => {
+                        tracing::warn!(study_id = %uuid, %error, "study export write failed");
+                        Err(state::MSG_EXPORT_WRITE_FAILED.to_string())
+                    }
                 },
                 Err(message) => Err(message),
             };
             match outcome {
-                Ok(notice) => studies.set_notice(notice.into()),
+                // F4: an export outcome never overwrites another source's notice.
+                Ok(notice) => list_notice::show(&ui, list_notice::Source::Export, &notice),
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
         });
@@ -494,22 +519,36 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_export_study_pdf(move |id| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Ok(uuid) = Uuid::parse_str(&id) else {
                 return;
             };
             // Fetch + render BEFORE opening a dialog, so a study that does not compute never prompts
-            // for a destination it can't fill.
-            let Some(study) = journal_state.borrow().get_study(uuid) else {
-                crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
-                return;
+            // for a destination it can't fill. G1 final (M3): each refusal names its own cause —
+            // a read failure (« illisible »), a vanished study (« introuvable »), a study whose data
+            // do not prepare — never « L'enregistrement a échoué », which nothing here attempted.
+            let read = journal_state.borrow().try_get_study(uuid);
+            let study = match read {
+                Ok(Some(study)) => study,
+                Ok(None) => {
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_MISSING);
+                    return;
+                }
+                Err(_) => {
+                    // The cause is logged by `try_get_study`.
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_UNREADABLE);
+                    return;
+                }
             };
             // G1 I: the PDF's figures in the user's number format, as on the screen.
             let numbers = journal_state.borrow().number_format().report_style();
-            let Ok(bytes) = steadyinvest_report::render_study_pdf(&study, numbers) else {
-                // The study does not compute as entered — a neutral refusal, no panic, no leak.
-                crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
-                return;
+            let bytes = match steadyinvest_report::render_study_pdf(&study, numbers) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    // The study does not compute as entered — a named refusal, no panic, no leak.
+                    tracing::warn!(study_id = %uuid, %error, "study PDF not rendered");
+                    crate::wiring::dialog::refuse(&ui, state::MSG_STUDY_PDF_UNRENDERABLE);
+                    return;
+                }
             };
             // Native save picker on the UI thread (modal — the established `rfd` pattern, cf. the
             // journal export/create rails). Cancel → no notice, nothing written.
@@ -524,17 +563,32 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             let Some(path) = dialog.save_file() else {
                 return;
             };
-            // rfd does not force the filter extension on every platform — ensure `.pdf`.
-            let path = if path.extension().is_some() {
-                path
-            } else {
-                path.with_extension("pdf")
-            };
-            let notice = match std::fs::write(&path, &bytes) {
-                Ok(()) => format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
-                Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
-            };
-            studies.set_notice(notice.into());
+            // rfd does not force the filter extension on every platform — ensure `.pdf` (L12).
+            let (path, renamed) = with_pdf_extension(path);
+            // The picker asked about overwriting the name it returned, not the one completed
+            // here: an existing file under the completed name is never overwritten in silence.
+            if renamed && path.exists() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                crate::wiring::dialog::refuse(&ui, &state::export_name_taken_message(&name));
+                return;
+            }
+            match std::fs::write(&path, &bytes) {
+                // F4: an export outcome never overwrites another source's notice (M4).
+                Ok(()) => list_notice::show(
+                    &ui,
+                    list_notice::Source::Export,
+                    &format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
+                ),
+                // A write failure is a refusal, like its neighbours — named in French, the OS
+                // cause logged (M4).
+                Err(error) => {
+                    tracing::warn!(study_id = %uuid, %error, "study PDF write failed");
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_WRITE_FAILED);
+                }
+            }
         });
     }
     {
@@ -553,7 +607,8 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 Err(_) => Err(state::MSG_IMPORT_MALFORMED.to_string()),
             };
             match outcome {
-                Ok(notice) => ui.global::<Studies>().set_notice(notice.into()),
+                // F4: an import outcome never overwrites another source's failure.
+                Ok(notice) => list_notice::show(&ui, list_notice::Source::Import, notice),
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
             refresh_studies(&ui, &journal_state.borrow());
@@ -811,7 +866,12 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             match result {
                 Ok(()) => {
-                    studies.set_notice(state::study_action_done_message(&action, &ticker).into());
+                    // F4: the outcome never overwrites another source's failure.
+                    list_notice::show(
+                        &ui,
+                        list_notice::Source::StudyAction,
+                        &state::study_action_done_message(&action, &ticker),
+                    );
                     // If the affected study is the one currently open, close it back to the dashboard
                     // (a hidden/removed study must not stay mounted).
                     let is_open =
@@ -903,6 +963,26 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_picked_pdf_name_always_ends_in_pdf() {
+        // G1 final (L12): « etude-NESN.SW » has an extension (« SW ») — `.pdf` is appended.
+        let p = |s: &str| {
+            let (path, renamed) = with_pdf_extension(std::path::PathBuf::from(s));
+            (path.to_string_lossy().to_string(), renamed)
+        };
+        let changed = |s: &str| (s.to_string(), true);
+        let kept = |s: &str| (s.to_string(), false);
+        assert_eq!(p("/x/etude-NESN.SW"), changed("/x/etude-NESN.SW.pdf"));
+        assert_eq!(p("/x/etude"), changed("/x/etude.pdf"));
+        assert_eq!(p("/x/notes.txt"), changed("/x/notes.txt.pdf"));
+        // A bare trailing dot takes « pdf » — never « ..pdf ».
+        assert_eq!(p("/x/etude."), changed("/x/etude.pdf"));
+        // Already a PDF name, any case — « .pdf » alone too (never « .pdf.pdf »).
+        assert_eq!(p("/x/etude.pdf"), kept("/x/etude.pdf"));
+        assert_eq!(p("/x/etude.PDF"), kept("/x/etude.PDF"));
+        assert_eq!(p("/x/.pdf"), kept("/x/.pdf"));
+    }
 
     fn facts(n: u128, ticker: &str, currency: &str, date: &str) -> ChoiceFacts {
         ChoiceFacts {

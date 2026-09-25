@@ -16,6 +16,7 @@ use crate::wiring::Session;
 use crate::wiring::holdings::{HoldingFreshness, mark_holding_stale, refresh_holdings};
 use crate::wiring::push::{display_timestamp, push_form};
 use crate::wiring::studies::refresh_studies;
+use crate::wiring::list_notice;
 use crate::wiring::study_notice::{self, Source};
 use crate::{Fx, Holdings, MainWindow, Prefs, Studies};
 use crate::{fetch, keychain, state};
@@ -282,13 +283,17 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     // (seen if the reader comes back to it) AND in the list's slot — every return to
                     // Études by the rail closes the study onto the list, so the result is seen
                     // either way, never left in a slot nobody will open. G3 #6: the list's slot is
-                    // taken under F4 (`study_notice::list_fetch`), and a result said while its study
+                    // taken under F4 (`list_notice`, the list slot's one owner), and a result said while its study
                     // was not on screen is KEPT for that study — the next open of it (the Revue's,
                     // the candidates panel's, the comparison's « Ouvrir l'étude » empty the slot)
                     // shows it again.
                     let say = |failed: bool, text: &str| {
                         if route != StudyFetchRoute::OpenShown {
-                            study_notice::list_fetch(&ui, text);
+                            if failed {
+                                list_notice::fail(&ui, list_notice::Source::Fetch, text);
+                            } else {
+                                list_notice::show(&ui, list_notice::Source::Fetch, text);
+                            }
                             study_notice::hold_for(outcome.study_id, failed, text);
                         }
                         match (still_open, failed) {

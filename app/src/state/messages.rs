@@ -404,6 +404,23 @@ pub const MSG_EXPORT_MISSING: &str = "L'étude est introuvable ; rien n'a été 
 /// parse) is present but unreadable, distinct from a truly absent id ([`MSG_EXPORT_MISSING`]).
 pub const MSG_EXPORT_UNREADABLE: &str =
     "L'étude est présente mais illisible par cette version ; rien n'a été exporté.";
+/// G1 final (M3) — the study PDF could not be laid out: its inputs do not normalize (the same
+/// cause the open study states). Named as such, never « L'enregistrement a échoué ».
+pub const MSG_STUDY_PDF_UNRENDERABLE: &str =
+    "Les données de l'étude ne peuvent pas être préparées ; aucun PDF n'a été écrit.";
+/// G1 final (M4) — an export file could not be written where it was asked (the OS cause is
+/// logged, never appended in English).
+pub const MSG_EXPORT_WRITE_FAILED: &str =
+    "Le fichier n'a pas pu être écrit à cet emplacement ; rien n'a été exporté.";
+/// G1 final review (M-b) — the PDF name was completed with « .pdf » and a file of that name
+/// already exists (the picker asked only about the name it returned). `{name}` is the file name
+/// (user data, not scanned).
+pub const MSG_EXPORT_NAME_TAKEN: &str = "Un fichier « {name} » existe déjà à cet emplacement ; choisissez un autre nom. Rien n'a été exporté.";
+
+/// [`MSG_EXPORT_NAME_TAKEN`] with the file name substituted.
+pub fn export_name_taken_message(name: &str) -> String {
+    MSG_EXPORT_NAME_TAKEN.replace("{name}", name)
+}
 pub const MSG_IMPORT_INTEGRITY: &str = "Le fichier ne correspond pas à son empreinte d'intégrité (fichier corrompu ou incomplet) ; rien n'a été importé.";
 pub const MSG_IMPORT_VERSION: &str =
     "Le fichier provient d'une version incompatible du format ; rien n'a été importé.";
@@ -891,6 +908,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_STUDY_UPDATED,
     MSG_EXPORT_MISSING,
     MSG_EXPORT_UNREADABLE,
+    MSG_STUDY_PDF_UNRENDERABLE,
+    MSG_EXPORT_WRITE_FAILED,
+    MSG_EXPORT_NAME_TAKEN,
     MSG_IMPORT_INTEGRITY,
     MSG_IMPORT_VERSION,
     MSG_IMPORT_MALFORMED,
