@@ -52,9 +52,12 @@ fn threshold_pct(raw: &str) -> Decimal {
 }
 
 /// Decision 6 (G1 review) — a sector murmurs only AT or OVER the threshold (no « approaching »
-/// band: the spec's sector rule). Currencies never murmur (no call site).
-fn sector_murmur(share: Option<Decimal>, threshold: Decimal) -> bool {
-    share.is_some_and(|s| s > Decimal::ZERO && s >= threshold)
+/// band: the spec's sector rule). Currencies never murmur (no call site). The « non renseigné »
+/// bucket never murmurs: it is an absence, not a sector (an absent fact never flags — G1
+/// on-screen check).
+fn sector_murmur(sector: Option<&str>, share: Option<Decimal>, threshold: Decimal) -> bool {
+    sector.is_some_and(|s| !s.trim().is_empty())
+        && share.is_some_and(|s| s > Decimal::ZERO && s >= threshold)
 }
 
 /// The pair(s) a row names when its share could not be stated: its OWN pair(s) when it has any,
@@ -247,7 +250,7 @@ pub(crate) fn push_review(
                         r.share_pct,
                         String::new(),
                         blocking_pairs(r.share_pct.is_some(), own, &global),
-                        sector_murmur(r.share_pct, threshold),
+                        sector_murmur(r.sector.as_deref(), r.share_pct, threshold),
                     )
                 })
                 .collect();
@@ -371,8 +374,14 @@ pub(crate) fn push_review(
                 // the breached ones listed apart — which level, which bank (G1 review).
                 stop: stops_text(p.stops.iter(), format).into(),
                 stop_breached: p.stop_breached,
-                stop_breached_levels: stops_text(p.stops.iter().filter(|s| s.breached), format)
-                    .into(),
+                // Named apart only when SOME levels are breached — when every level is, the stop
+                // line already lists them (no « 80 CHF (UBS) — sous le seuil : 80 CHF (UBS) »).
+                stop_breached_levels: if p.stops.iter().all(|s| s.breached) {
+                    String::new()
+                } else {
+                    stops_text(p.stops.iter().filter(|s| s.breached), format)
+                }
+                .into(),
                 trigger: p.trigger.into(),
                 mixed_links: p.mixed_links.join(" · ").into(),
                 ..Default::default()
@@ -684,10 +693,17 @@ mod tests {
     #[test]
     fn a_sector_murmurs_only_at_or_over_the_threshold() {
         let t = d("50");
-        assert!(!sector_murmur(Some(d("45")), t), "no approaching band");
-        assert!(sector_murmur(Some(d("50")), t));
-        assert!(sector_murmur(Some(d("100")), t));
-        assert!(!sector_murmur(None, t));
+        let tech = Some("Technology");
+        assert!(
+            !sector_murmur(tech, Some(d("45")), t),
+            "no approaching band"
+        );
+        assert!(sector_murmur(tech, Some(d("50")), t));
+        assert!(sector_murmur(tech, Some(d("100")), t));
+        assert!(!sector_murmur(tech, None, t));
+        // « non renseigné » is an absence, never a murmur.
+        assert!(!sector_murmur(None, Some(d("60")), t));
+        assert!(!sector_murmur(Some("  "), Some(d("60")), t));
     }
 
     #[test]

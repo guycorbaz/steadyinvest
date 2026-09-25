@@ -658,11 +658,12 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             }
             extra.push(format!("{P_DATA} : {}", data_label(l)));
             if !l.stop.is_empty() {
-                // Which level(s) — and bank(s) — the price reached, never a blanket mark.
-                let breached = if l.stop_breached {
-                    format!(" ({STOP_BREACHED} : {})", l.stop_breached_levels)
-                } else {
-                    String::new()
+                // Which level(s) — and bank(s) — the price reached, never a blanket mark; when
+                // every level is breached the stop list already names them (no repetition).
+                let breached = match (l.stop_breached, l.stop_breached_levels.is_empty()) {
+                    (false, _) => String::new(),
+                    (true, true) => format!(" ({STOP_BREACHED})"),
+                    (true, false) => format!(" ({STOP_BREACHED} : {})", l.stop_breached_levels),
                 };
                 extra.push(format!("{STOP_LABEL} {}{breached}", l.stop));
             }

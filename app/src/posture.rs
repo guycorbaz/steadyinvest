@@ -688,8 +688,10 @@ mod tests {
         // « données non calculables » and the mixed-links band (lots linked to different
         // studies); the stop captions and the counts line are reworded in place: +3 = 902.
         // Floor strict.
+        // The G1 on-screen check adds the stop caption without a repeated level list (every level
+        // breached): +1 = 903.
         assert!(
-            total >= 902,
+            total >= 903,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
