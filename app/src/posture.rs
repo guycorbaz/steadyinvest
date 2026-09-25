@@ -840,7 +840,7 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            186,
+            187,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -868,7 +868,9 @@ mod tests {
             // rail's failed READ is named as a read (MSG_READ_FAILED): 183 + 1 = 184, measured.
             // G1 P review (L-c): a legacy lot's cost-basis seed is stated
             // (MSG_STOP_SEEDED_FROM_COST): 184 + 1 = 185, measured. A leftover
-            // -prerestore is named at startup (MSG_PRERESTORE_FOUND): 185 + 1 = 186, measured.
+            // -prerestore is named at startup (MSG_PRERESTORE_FOUND): 185 + 1 = 186, measured. A reference
+            // change names the legacy stops it does not convert
+            // (MSG_LEGACY_STOPS_REFERENCE_CHANGED): 186 + 1 = 187, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }

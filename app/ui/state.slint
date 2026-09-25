@@ -901,6 +901,9 @@ export global Prefs {
     // Story 6.4 (FR41): the default dividend withholding rate in percent (mirrors
     // AppConfig.withholding_rate_pct_or_default — always a value, 35 = CH impôt anticipé).
     in-out property <string> withholding-rate-pct;
+    // G1 P review (M3): after a reference-currency change, the legacy lots (no declared currency)
+    // whose stop was set in the former reference currency — named, never converted ("" = none).
+    in-out property <string> reference-currency-notice;
     // ── Story 6.7 (FR45) — concentration threshold + the diversify-by-size table, mirrored from
     //    the validated AppConfig accessors (always effective values, defaults when unset). The
     //    commits are validated in Rust; a refusal names itself in a modal notice and

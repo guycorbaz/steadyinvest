@@ -487,6 +487,13 @@ export component SettingsScreen inherits Rectangle {
                         activated => { Prefs.reference-currency-selected(c); }
                     }
                 }
+                // G1 P review (M3): the legacy stops set in the former reference currency, named.
+                if Prefs.reference-currency-notice != "": Text {
+                    text: Prefs.reference-currency-notice;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
             }
 
             // Story 4.5 (FR42/FR63) — the default trailing-stop percentage the per-holding set-stop

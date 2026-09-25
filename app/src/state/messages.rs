@@ -321,6 +321,17 @@ pub const MSG_STOP_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être l
 /// currency — its linked study in another currency never prices the trigger sale. Template: `{s}`
 /// the study's currency, `{r}` the reference currency.
 pub const MSG_SELL_STUDY_OTHER_CURRENCY: &str = "La position n'a pas de devise renseignée (présumée en {r}) et son étude est en {s} : ce prix ne sert pas à la vente ; rien n'a été enregistré. La vente s'enregistre depuis ses transactions (« Vente… »), au prix obtenu.";
+/// G1 P review (M3, the lead's conservative decision): after a reference-currency change, the
+/// legacy positions (no declared currency) that carry a stop are named — their level was set in
+/// the FORMER reference currency and is never converted. Template: `{tickers}`, `{old}`.
+pub const MSG_LEGACY_STOPS_REFERENCE_CHANGED: &str = "La devise de référence a changé : le seuil suiveur des positions sans devise renseignée ({tickers}) avait été fixé en {old} et n'est pas converti. Redéfinir leur seuil (« Seuil… ») le recalcule dans la nouvelle devise de référence.";
+
+/// [`MSG_LEGACY_STOPS_REFERENCE_CHANGED`] filled.
+pub fn legacy_stops_reference_changed_message(tickers: &[String], former: &str) -> String {
+    MSG_LEGACY_STOPS_REFERENCE_CHANGED
+        .replace("{tickers}", &tickers.join(", "))
+        .replace("{old}", former)
+}
 /// G1 P review (L-c): a legacy position's stop seeded from its cost basis because its only study
 /// is in another currency — stated, never silent.
 pub const MSG_STOP_SEEDED_FROM_COST: &str = "Le seuil est calculé depuis le prix de revient : la position n'a pas de devise renseignée et aucune de ses études n'est dans la devise de référence.";
@@ -982,6 +993,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_STOP_STUDY_UNAVAILABLE,
     MSG_SELL_STUDY_OTHER_CURRENCY,
     MSG_STOP_SEEDED_FROM_COST,
+    MSG_LEGACY_STOPS_REFERENCE_CHANGED,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
     MSG_LEDGER_UNKNOWN_KIND,

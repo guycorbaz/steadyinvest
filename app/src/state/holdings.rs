@@ -698,6 +698,27 @@ impl JournalState {
         Ok(seeded_from_cost.then_some(MSG_STOP_SEEDED_FROM_COST))
     }
 
+    /// The ACTIVE legacy lots (no declared currency) that carry a trailing stop, every portfolio —
+    /// their tickers, sorted, unique (G1 P review M3: named after a reference-currency change,
+    /// since their level was set in the former one). `Err` on a failed read.
+    pub fn legacy_tickers_with_stop(&self) -> Result<Vec<String>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let mut tickers: Vec<String> = journal
+            .list_all_holdings()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|h| {
+                h.sold_at.is_none() && h.currency.is_none() && h.trailing_stop_level.is_some()
+            })
+            .map(|h| h.security_ticker.trim().to_uppercase())
+            .collect();
+        tickers.sort();
+        tickers.dedup();
+        Ok(tickers)
+    }
+
     /// The HINT for a legacy lot (no declared currency) that links no study (D5): the currency
     /// of the newest same-ticker study in another currency, upper-cased — what the surfaces name
     /// (« l'étude est en USD »). `None` for a declared lot, or when no study exists. Absence-blind

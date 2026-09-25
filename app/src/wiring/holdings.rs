@@ -846,7 +846,7 @@ fn apply_holdings_result(
 /// G1 P review (M1): a FAILURE on show — a ticker's refresh failure written mid-batch, a
 /// provider's — is never wiped by an unrelated success: only the banner, an empty slot or a
 /// register outcome ([`REGISTER_OUTCOMES`]) are the slot's to replace.
-fn notice_after_success<'a>(shown: &'a str, refreshing: bool) -> &'a str {
+fn notice_after_success(shown: &str, refreshing: bool) -> &str {
     if !slot_is_replaceable(shown) {
         shown
     } else if refreshing {

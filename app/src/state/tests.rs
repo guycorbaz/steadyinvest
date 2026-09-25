@@ -3307,6 +3307,32 @@ fn a_legacy_lot_links_by_the_reference_currency_never_ticker_only() {
 }
 
 #[test]
+fn a_reference_change_names_the_legacy_lots_whose_stop_it_does_not_convert() {
+    // G1 P review (M3, the lead's conservative decision): the lots named; nothing converted.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7802);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "200", "CHF", "").unwrap();
+    let nesn = state.list_holdings()[0].id;
+    let rog = state.list_holdings()[1].id;
+    make_legacy(&mut state, nesn);
+    make_legacy(&mut state, rog);
+    state.set_holding_trailing_stop(nesn, "20", "CHF").unwrap();
+    // ROG is legacy but carries no stop: not named.
+    assert_eq!(
+        state.legacy_tickers_with_stop(),
+        Ok(vec!["NESN".to_string()])
+    );
+    let message = legacy_stops_reference_changed_message(&["NESN".to_string()], "CHF");
+    assert!(message.contains("(NESN)") && message.contains("fixé en CHF"));
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "never converted"
+    );
+}
+
+#[test]
 fn a_legacy_lot_with_only_another_currency_study_links_none_and_says_so() {
     // D5 + G1 P review H1/H2/L-c: the only study is in USD — the legacy lot (presumed CHF) links
     // NONE (no USD price on its row, never labelled CHF), its stop is not compared (the USD
@@ -6861,6 +6887,11 @@ fn a_write_rails_failed_read_is_named_as_a_read_never_as_a_save_or_an_absence() 
         Err(MSG_READ_FAILED.to_string()),
         "never a second default portfolio on a failed read"
     );
+    let portfolios: i64 = rusqlite::Connection::open(dir.path().join("journal.db"))
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM portfolios", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(portfolios, 1, "no default portfolio was created");
     assert!(
         state
             .portfolio_reinvestable_cash_by_currency("CHF")
