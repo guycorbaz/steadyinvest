@@ -758,10 +758,23 @@ fn apply_holdings_result(
 ) {
     let holdings = ui.global::<Holdings>();
     match result {
-        Ok(()) => holdings.set_notice(SharedString::new()),
+        Ok(()) => {
+            let current = holdings.get_notice();
+            holdings.set_notice(
+                notice_after_success(current.as_str(), holdings.get_refreshing()).into(),
+            );
+        }
         Err(message) => crate::wiring::dialog::refuse(ui, &message),
     }
     refresh_holdings(ui, state, freshness, dismissed, format);
+}
+
+/// The holdings notice slot after a successful gesture that states no outcome of its own (an
+/// edit, a portfolio switch): emptied — except while a price refresh is IN FLIGHT, whose banner
+/// owns the slot until the batch drains (the notice-slot rule F4, G1 final review L11: a portfolio
+/// switch or an edit used to erase « Rafraîchissement des prix en cours. » mid-batch).
+fn notice_after_success(current: &str, refreshing: bool) -> &str {
+    if refreshing { current } else { "" }
 }
 
 /// Wire the holdings + portfolio domain: the holding add / edit / remove / sell / trailing-stop /
@@ -1551,10 +1564,21 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
 
 #[cfg(test)]
 mod tests {
-    use super::{edit_ticker_options, study_choice_label, trigger_enter_refusal};
+    use super::{
+        edit_ticker_options, notice_after_success, study_choice_label, trigger_enter_refusal,
+    };
     use crate::state::StudyChoice;
     use crate::viewmodel::format::NumberFormat;
     use uuid::Uuid;
+
+    #[test]
+    fn a_success_never_erases_the_in_flight_refresh_banner() {
+        // G1 final review (L11, the notice-slot rule F4).
+        let banner = crate::state::MSG_HOLDINGS_REFRESHING;
+        assert_eq!(notice_after_success(banner, true), banner);
+        assert_eq!(notice_after_success(banner, false), "");
+        assert_eq!(notice_after_success("", false), "");
+    }
 
     #[test]
     fn an_enter_on_a_non_number_in_the_trigger_sale_names_its_refusal() {
