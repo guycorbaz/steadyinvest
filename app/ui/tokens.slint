@@ -78,8 +78,23 @@ export global Tokens {
     // it a figure is not shrunk further but marked as overflowing (« ⋯ ») and shown whole on
     // focus/hover. And the narrowest a data column of the study grids may get: past it the form
     // scrolls sideways instead of squeezing the columns.
+    // G1 final review M4 (G3 rework) — the cell's MARKER COLUMNS: every grid-cell marker glyph sits in
+    // one of two narrow columns, each split in a top and a bottom half — leading: the ?/✓ review
+    // mark (top) and the lock (bottom); trailing: the △ warning (top) and the ◦ stale dot (bottom).
+    // A column is `mark-col` wide, inset `mark-inset` from the cell edge and from the value, glyphs
+    // at `mark-font` (= the figure floor). The arithmetic, IBM Plex Sans advances (digit 0.6 em,
+    // comma 0.272 em, the emitted NBSP 0.236 em): « 1 234,56 » is 90.4 px at the 22 px body size,
+    // 53.4 px at the 13 px floor, so it needs a room of 55.4 px (`CellFit.fits`' 2 px slack).
+    //   one column  = 1 + 12 + 1 = 14 px;  bare trail = 8 px (`space-8`), bare lead = 8 px;
+    //   plain cell at 80 px:           80 − 8 − 8   = 64 px  → whole;
+    //   ✓ (+ lock) at 80 px:           80 − 14 − 8  = 58 px  → whole;
+    //   ✓ + △ or ✓ + ◦ (or both):      88 − 14 − 14 = 60 px  → whole at 88 px (52 px at 80: « ⋯ »).
+    // Hence `grid-col-min` 88 px (was 80): +8 px a year column, never the lead's 34 + 34 px.
     out property <length> font-floor: 13px;
-    out property <length> grid-col-min: 80px;
+    out property <length> grid-col-min: 88px;
+    out property <length> mark-col: 12px;
+    out property <length> mark-inset: 1px;
+    out property <length> mark-font: 13px;
     out property <int> weight-regular: 400;
     out property <int> weight-medium: 500;
     out property <int> weight-semibold: 600;

@@ -284,6 +284,7 @@ fn main() -> Result<(), slint::PlatformError> {
         refresh_pending: Rc::clone(&refresh_pending),
         refresh_total: Rc::clone(&refresh_total),
         fetch_cancel,
+        dossier_generation: Rc::new(std::cell::Cell::new(0)),
     };
     wiring::dialog::wire_dialog(&ui);
     wiring::fetch::wire_fetch(&ui, &session);

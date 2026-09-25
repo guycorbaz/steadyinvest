@@ -200,3 +200,29 @@ pinned on the assumption that EODHD restates the balance-sheet share counts — 
 ONE real NVDA.US fetch with Guy present (G5).
 Fixed in PR G (G1, branch `fix/g1-g-dossier-switch`): a refused switch recomputes the open
 dossier's own status (never blanks it, never keeps a stale reclaim offer).
+
+### Review Findings — G1 final review, area 6: study screen, dossier switch, EODHD (2026-09-25, #237)
+
+Checked against `integ/g1-final` e686141; every item verified in the code before the fix.
+
+- [x] [Review][Patch] M1 — A study fetch in flight across a dossier change applies to the new dossier (a restore keeps the ids: late provider data written into the restored dossier) — **each fetch stamped with a dossier generation that every dossier change moves on; a stale result is dropped unwritten and unsaid** [app/src/wiring/fetch.rs, app/src/wiring/journal.rs, app/src/fetch.rs]
+- [x] [Review][Patch] M2 — The present price is not rebased when a split falls after the last bar [ingestion/src/adapters/eodhd.rs]
+- [x] [Review][Patch] M3 — The trace panel and the scenario comparison survive a close and show over another study / the demo [app/src/wiring/studies.rs]
+- [x] [Review][Patch] M4 — Validated ✓ cells show « ⋯ » at `grid-col-min` 80 (✓ box 34 + lock 34) — **G3 rework: two 12 px marker columns (?/✓ over the lock; △ over ◦), the lock always shown, constant geometry; `grid-col-min` 88 px (« 1 234,56 » whole with ✓ at 80, with ✓ + △/◦ at 88)** — the lead verifies on screen at 1 280 px [app/ui/components/editable_cell.slint, app/ui/tokens.slint]
+- [x] [Review][Patch] M5 — A fetch result lands in a hidden study's slot when the reader is on another screen — **said in the study's slot AND the list's** [app/src/wiring/fetch.rs]
+- [x] [Review][Patch] L8 — The study notice slot's comment contradicts the code (failures do land there) [app/ui/screens/study_screen.slint]
+- [x] [Review][Patch] L9 — Close paths not all through `close-study`; judgment-hover not reset; `demo-active` survives a switch [app/src/wiring/studies.rs, app/src/wiring/journal.rs]
+- [x] [Review][Patch] L10 — A failed switch that loses the previous dossier: the status still reads as an open dossier — **the path goes with the journal; the status says no dossier is open (MSG_NO_JOURNAL_OPEN)** [app/src/state/journal_io.rs, app/src/wiring/journal.rs]
+- [x] [Review][Patch] L11 — A split dated today is refused around midnight (UTC vs local) — **the fetch day is the local calendar day** [ingestion/src/adapters/eodhd.rs]
+- [x] [Review][Defer] L6 (tips hidden / clipped), L7 (« n/a » vs lock overlap), L12 (no horizontal-scroll affordance) — deferred to the layout debt G6
+
+- [x] [Review][Patch] G3 #1 — The reclaim branch of a refused switch that lost the dossier kept its session [app/src/wiring/journal.rs]
+- [x] [Review][Patch] G3 #2 — The holdings price refresh and the FX refresh were not stamped (a restore keeps the ids) — **stamped; stale results dropped silently; the batch resets on a dossier change** [app/src/fetch.rs, app/src/wiring/{fetch,holdings,fx,journal}.rs]
+- [x] [Review][Patch] G3 #3 — `fetch_latest_price` served an unrebased close — **reads `/splits`; an unreadable history is a named failure** [ingestion/src/adapters/eodhd.rs]
+- [x] [Review][Patch] G3 #6 — Other open rails emptied a pending fetch result; the list slot ignored F4 [app/src/wiring/study_notice.rs]
+- [x] [Review][Patch] G3 #7/#8 — The fetch-day doc misnamed the early case; a present price with an unreadable bar date [ingestion/src/adapters/eodhd.rs]
+- [x] [Review][Patch] G3 #9/#10/#11 — « Historique » survived a close; a failed restore that lost the dossier; `fetching` across a dossier change + tests [app/src/wiring/{studies,journal}.rs, app/src/state/restore.rs]
+
+Fixed in PR O (G1 final, branch `fix/g1-o-study-dossier`): every item checked above except the
+deferred ones. To watch: the holdings price refresh now makes two EODHD requests per ticker
+(`/eod` + `/splits`) — a plan without `/splits` refuses the refresh, named.

@@ -788,6 +788,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         refresh_pending,
         refresh_total,
         fetch_cancel,
+        dossier_generation,
         ..
     } = s;
     // ── Holdings intents (Story 4.3, FR36) ── add / edit / remove a holding, each validated +
@@ -1032,6 +1033,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let refresh_pending = Rc::clone(refresh_pending);
         let refresh_total = Rc::clone(refresh_total);
         let fetch_cancel = std::sync::Arc::clone(fetch_cancel);
+        let dossier_generation = Rc::clone(dossier_generation);
         ui.global::<Holdings>().on_refresh_prices(move || {
             let ui = ui_weak.unwrap();
             let holdings = ui.global::<Holdings>();
@@ -1081,12 +1083,16 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             let mut enqueued = 0usize;
             for (study_id, ticker) in jobs {
                 if fetch_tx
-                    .send(fetch::WorkerJob::RefreshHolding(fetch::FetchRequest {
-                        study_id,
-                        ticker,
-                        chain: chain.clone(),
-                        primary,
-                    }))
+                    .send(fetch::WorkerJob::RefreshHolding {
+                        request: fetch::FetchRequest {
+                            study_id,
+                            ticker,
+                            chain: chain.clone(),
+                            primary,
+                        },
+                        // G1 final review (G3 #2): the dossier this price belongs to.
+                        generation: dossier_generation.get(),
+                    })
                     .is_ok()
                 {
                     enqueued += 1;

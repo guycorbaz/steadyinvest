@@ -103,6 +103,37 @@ pub(crate) fn configured_fallback_missing_key(
     (fallback.requires_key() && !keychain::has_key(fallback).unwrap_or(false)).then_some(fallback)
 }
 
+/// Where a study fetch result goes (G1 final review M1/M5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StudyFetchRoute {
+    /// Asked in a dossier no longer open: dropped — nothing written, nothing said.
+    Stale,
+    /// The fetched study is not the one open (closed, another opened, the demo): applied by id,
+    /// said in the list's slot.
+    List,
+    /// The fetched study is open and on screen: applied, rendered, said in its own slot.
+    OpenShown,
+    /// The fetched study is open but hidden (another destination, the examination over it):
+    /// applied, rendered, said in its own slot AND in the list's.
+    OpenHidden,
+}
+
+/// PURE: route a study fetch result from the generation it was stamped with vs the open
+/// dossier's, whether its study is the open one, and whether the study screen is on screen.
+fn route_study_fetch(
+    stamped: u64,
+    current: u64,
+    is_open_study: bool,
+    on_screen: bool,
+) -> StudyFetchRoute {
+    match (stamped == current, is_open_study, on_screen) {
+        (false, _, _) => StudyFetchRoute::Stale,
+        (true, false, _) => StudyFetchRoute::List,
+        (true, true, true) => StudyFetchRoute::OpenShown,
+        (true, true, false) => StudyFetchRoute::OpenHidden,
+    }
+}
+
 /// Mirror the provider choice + keychain status into `Prefs` (Story 3.2). The key VALUE never
 /// crosses — only the boolean "configured" status (NFR-S1). A store failure shows as "not
 /// configured" plus a neutral notice (AC6).
@@ -186,6 +217,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         quick_screen,
         quick_screen_request,
         screening,
+        dossier_generation,
         ..
     } = s;
     {
@@ -193,6 +225,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         let current_study = Rc::clone(current_study);
         let config = Rc::clone(config);
+        let dossier_generation = Rc::clone(dossier_generation);
         let quick_screen = Rc::clone(quick_screen);
         let quick_screen_request = Rc::clone(quick_screen_request);
         let screening = Rc::clone(screening);
@@ -217,23 +250,51 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     // screen? The user may have closed it, or opened another, while it ran.
                     // G1 J review: the id alone is not enough — the study must still be SHOWN (not
                     // closed back to the list, not replaced by the read-only demo).
-                    let still_open = studies.get_study_open()
+                    let is_open_study = studies.get_study_open()
                         && !studies.get_demo_active()
                         && current_study
                             .borrow()
                             .as_deref()
                             .and_then(|s| Uuid::parse_str(s).ok())
                             == Some(outcome.study_id);
+                    // G1 final review M5: open is not on screen — the reader may be on another
+                    // destination, or the examination may sit over the study.
+                    let on_screen = ui.get_current_screen() == 0 && !studies.get_screen_open();
+                    let route = route_study_fetch(
+                        outcome.generation,
+                        dossier_generation.get(),
+                        is_open_study,
+                        on_screen,
+                    );
+                    // G1 final review M1: asked in a dossier no longer open (another dossier, or
+                    // the same study ids of a restored backup) — nothing is written, nothing is
+                    // said: any notice would read as the open dossier's, whose slots the change
+                    // emptied on purpose.
+                    if route == StudyFetchRoute::Stale {
+                        tracing::info!(study_id = %outcome.study_id, "study fetch result dropped: the dossier changed while it ran");
+                        return;
+                    }
+                    let still_open = route != StudyFetchRoute::List;
                     // G1 J: the result goes to the OPEN study's slot when it is that study (the list's
                     // slot was invisible there); otherwise to the list's slot, as before — never onto
                     // another study's screen. `failed` picks the F4 treatment on the study slot.
+                    // G1 final review M5: a study open but HIDDEN gets its result in its own slot
+                    // (seen if the reader comes back to it) AND in the list's slot — every return to
+                    // Études by the rail closes the study onto the list, so the result is seen
+                    // either way, never left in a slot nobody will open. G3 #6: the list's slot is
+                    // taken under F4 (`study_notice::list_fetch`), and a result said while its study
+                    // was not on screen is KEPT for that study — the next open of it (the Revue's,
+                    // the candidates panel's, the comparison's « Ouvrir l'étude » empty the slot)
+                    // shows it again.
                     let say = |failed: bool, text: &str| {
-                        if !still_open {
-                            studies.set_notice(text.into());
-                        } else if failed {
-                            study_notice::fail(&ui, Source::Fetch, text);
-                        } else {
-                            study_notice::outcome(&ui, Source::Fetch, text);
+                        if route != StudyFetchRoute::OpenShown {
+                            study_notice::list_fetch(&ui, text);
+                            study_notice::hold_for(outcome.study_id, failed, text);
+                        }
+                        match (still_open, failed) {
+                            (false, _) => {}
+                            (true, true) => study_notice::fail(&ui, Source::Fetch, text),
+                            (true, false) => study_notice::outcome(&ui, Source::Fetch, text),
                         }
                     };
                     let render_open = || {
@@ -367,6 +428,13 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     );
                 }
                 fetch::WorkerOutcome::HoldingFetch(outcome) => {
+                    // G1 final review (G3 #2): a price asked in a dossier no longer open (a restore
+                    // keeps the study ids) is dropped whole — no price written, no « périmé » mark,
+                    // no notice, and no batch counter moved: the dossier change reset the batch.
+                    if outcome.generation != dossier_generation.get() {
+                        tracing::info!(ticker = %outcome.ticker, "price refresh result dropped: the dossier changed while it ran");
+                        return;
+                    }
                     // Story 4.4 (FR40): a holdings price-refresh result → the holdings surface (NOT
                     // the study screen). Success fills `current_price` (the §4 zone recomputes) +
                     // stamps a fresh `as_of`; a failure / no-data flags the ticker `périmé`, keeping
@@ -470,21 +538,44 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     // One job resolved — advance the batch counter, clear the latch when fully drained.
                     advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
                 }
-                fetch::WorkerOutcome::HoldingSkipped => {
+                fetch::WorkerOutcome::HoldingSkipped { generation } => {
                     // Issue #100: a cancelled per-ticker job the worker drained without fetching — it
-                    // only advances the batch counter (no price applied, no re-render needed).
+                    // only advances the batch counter (no price applied, no re-render needed). G3
+                    // #2: a job of a previous dossier's batch never moves this dossier's counter.
+                    if generation != dossier_generation.get() {
+                        return;
+                    }
                     advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
                 }
-                fetch::WorkerOutcome::FxProgress { done, total } => {
-                    // Issue #100: mid-batch FX progress — count up instead of a frozen banner.
+                fetch::WorkerOutcome::FxProgress {
+                    done,
+                    total,
+                    generation,
+                } => {
+                    // Issue #100: mid-batch FX progress — count up instead of a frozen banner. G3
+                    // #2: never a previous dossier's batch's count.
+                    if generation != dossier_generation.get() {
+                        return;
+                    }
                     ui.global::<Fx>()
                         .set_refresh_progress(format!("{done} / {total}").into());
                 }
                 fetch::WorkerOutcome::FxRates {
                     journal_id,
+                    generation,
                     results,
                     fell_back_to,
                 } => {
+                    // G1 final review (G3 #2): rates asked in a dossier no longer open are dropped
+                    // silently — a restore keeps the journal id, so the id check below cannot tell;
+                    // the FX panel's flag and notice were reset by the dossier change (a refresh of
+                    // the new dossier may be running: its flag is not this batch's to clear).
+                    if generation != dossier_generation.get() {
+                        tracing::info!(
+                            "fx refresh result dropped: the dossier changed while it ran"
+                        );
+                        return;
+                    }
                     // Story 6.5 (FR28) + review: the outcome only applies to the journal that
                     // ASKED (an in-flight journal switch must not write phantom rates into the
                     // new one). Story 6.9 (FR26): each pair's stamped source is its EFFECTIVE
@@ -577,6 +668,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         let current_study = Rc::clone(current_study);
         let config = Rc::clone(config);
+        let dossier_generation = Rc::clone(dossier_generation);
         let fetch_tx = fetch_tx.clone();
         ui.global::<Studies>().on_fetch_provider(move || {
             let ui = ui_weak.unwrap();
@@ -616,12 +708,16 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             let primary = config.borrow().preferred_provider;
             tracing::info!(ticker = %ticker, provider = primary.wire(), "study fetch requested");
             if fetch_tx
-                .send(fetch::WorkerJob::Fetch(fetch::FetchRequest {
-                    study_id,
-                    ticker,
-                    chain,
-                    primary,
-                }))
+                .send(fetch::WorkerJob::Fetch {
+                    request: fetch::FetchRequest {
+                        study_id,
+                        ticker,
+                        chain,
+                        primary,
+                    },
+                    // G1 final review M1: the dossier this fetch belongs to.
+                    generation: dossier_generation.get(),
+                })
                 .is_err()
             {
                 // The worker thread is gone (should never happen) — don't latch the in-progress
@@ -749,7 +845,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_key_precedence;
+    use super::{StudyFetchRoute, resolve_key_precedence, route_study_fetch};
     use crate::keychain::KeychainError;
     use zeroize::Zeroizing;
 
@@ -788,5 +884,31 @@ mod tests {
             )),
             None
         );
+    }
+
+    #[test]
+    fn a_fetch_asked_in_another_dossier_is_dropped_whatever_the_screen() {
+        // G1 final review M1: open another dossier, create one, restore a backup — the generation
+        // moved on, so the result is stale even when the restored dossier shows the SAME study id
+        // open and on screen.
+        for (open, shown) in [(true, true), (true, false), (false, true), (false, false)] {
+            assert_eq!(route_study_fetch(3, 4, open, shown), StudyFetchRoute::Stale);
+        }
+    }
+
+    #[test]
+    fn a_result_for_a_hidden_open_study_is_said_where_the_reader_returns() {
+        // G1 final review M5: same dossier — the open study on screen gets its own slot; open but
+        // hidden gets both slots; not the open study → the list's slot.
+        assert_eq!(
+            route_study_fetch(4, 4, true, true),
+            StudyFetchRoute::OpenShown
+        );
+        assert_eq!(
+            route_study_fetch(4, 4, true, false),
+            StudyFetchRoute::OpenHidden
+        );
+        assert_eq!(route_study_fetch(4, 4, false, true), StudyFetchRoute::List);
+        assert_eq!(route_study_fetch(4, 4, false, false), StudyFetchRoute::List);
     }
 }

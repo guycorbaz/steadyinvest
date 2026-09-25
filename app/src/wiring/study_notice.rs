@@ -13,9 +13,10 @@
 //! when it is empty, holds the in-progress banner or another outcome, or holds its own source's
 //! notice — never a sibling's failure. A success CLEARS only its own source's notice.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use slint::{ComponentHandle, SharedString};
+use uuid::Uuid;
 
 use crate::{MainWindow, Studies};
 
@@ -42,9 +43,74 @@ enum Kind {
 
 type Shown = Option<(Source, Kind)>;
 
+/// A fetch result said while its study was NOT on screen (G1 final review M5, G3 #6): kept for
+/// that study, so the next open of THAT study shows it in its slot (every open rail empties the
+/// slot first — « Ouvrir l'étude » from the Revue, the candidates panel, the comparison).
+struct Pending {
+    study: Uuid,
+    kind: Kind,
+    text: String,
+}
+
 thread_local! {
     // The UI is single-threaded (every callback runs on the event loop) — the `dialog` precedent.
     static SHOWN: Cell<Shown> = const { Cell::new(None) };
+    static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
+    /// The text the study fetch last wrote into the LIST's slot (`Studies.notice`) — the only
+    /// notice of that slot it may replace besides an empty slot (see [`may_take_list`]).
+    static LIST_OWN: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// PURE (G3 #6, the F4 rule on the list's slot): may a study-fetch result take the list's slot
+/// now showing `current`? Only when it is empty or shows the fetch's own earlier notice — the
+/// list's other writers (an export failure, a startup state, an archive outcome) do not say what
+/// kind their notice is, so none of them is ever overwritten: a sibling's failure never is.
+fn may_take_list(current: &str, own: Option<&str>) -> bool {
+    current.is_empty() || own == Some(current)
+}
+
+/// A study-fetch result for the LIST's slot (the study is not on screen) — under [`may_take_list`].
+pub(crate) fn list_fetch(ui: &MainWindow, text: &str) {
+    let studies = ui.global::<Studies>();
+    let current = studies.get_notice();
+    if LIST_OWN.with(|own| may_take_list(current.as_str(), own.borrow().as_deref())) {
+        studies.set_notice(SharedString::from(text));
+        LIST_OWN.with(|own| *own.borrow_mut() = Some(text.to_string()));
+    }
+}
+
+/// Keep a fetch result for `study`, said while it was not on screen, for its next open.
+pub(crate) fn hold_for(study: Uuid, failed: bool, text: &str) {
+    let kind = if failed { Kind::Failure } else { Kind::Outcome };
+    PENDING.with(|p| {
+        *p.borrow_mut() = Some(Pending {
+            study,
+            kind,
+            text: text.to_string(),
+        })
+    });
+}
+
+/// A study opens (after [`reset`]): the result kept for THIS study takes its slot; a result kept
+/// for another study is dropped (it would read as stale later). Either way nothing stays kept.
+pub(crate) fn take_pending(ui: &MainWindow, study: Uuid) {
+    if let Some((kind, text)) = claim(PENDING.with(|p| p.borrow_mut().take()), study) {
+        write(ui, Some((Source::Fetch, kind)), &text);
+    }
+}
+
+/// PURE: what a kept result gives the study `opening` — its kind and text when it is that
+/// study's, nothing otherwise.
+fn claim(pending: Option<Pending>, opening: Uuid) -> Option<(Kind, String)> {
+    pending
+        .filter(|p| p.study == opening)
+        .map(|p| (p.kind, p.text))
+}
+
+/// The open study closes, or the dossier changes: nothing kept any more (the list's slot carries
+/// the result from here).
+pub(crate) fn drop_pending() {
+    PENDING.with(|p| *p.borrow_mut() = None);
 }
 
 /// May a notice from `source` that must not cover a sibling's failure (an outcome, the render
@@ -163,6 +229,53 @@ mod tests {
             Some((Source::Render, Kind::Failure)),
             Source::Render
         ));
+    }
+
+    #[test]
+    fn a_fetch_result_takes_the_list_slot_only_when_empty_or_its_own() {
+        assert!(may_take_list("", None));
+        assert!(may_take_list("", Some("x")));
+        assert!(may_take_list(
+            "Données mises à jour.",
+            Some("Données mises à jour.")
+        ));
+        // Another writer's notice — an export failure, a startup state — is never overwritten.
+        assert!(!may_take_list("L'enregistrement a échoué.", None));
+        assert!(!may_take_list(
+            "L'enregistrement a échoué.",
+            Some("Données mises à jour.")
+        ));
+    }
+
+    #[test]
+    fn a_kept_result_goes_only_to_its_own_study() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let kept = |kind| {
+            Some(Pending {
+                study: a,
+                kind,
+                text: "t".into(),
+            })
+        };
+        assert_eq!(
+            claim(kept(Kind::Failure), a),
+            Some((Kind::Failure, "t".into()))
+        );
+        assert_eq!(
+            claim(kept(Kind::Outcome), a),
+            Some((Kind::Outcome, "t".into()))
+        );
+        assert_eq!(
+            claim(kept(Kind::Outcome), b),
+            None,
+            "another study's result"
+        );
+        assert_eq!(claim(None, a), None);
+        // Kept, then dropped by a close / a dossier change.
+        hold_for(a, false, "ok");
+        drop_pending();
+        assert!(PENDING.with(|p| p.borrow().is_none()));
     }
 
     #[test]

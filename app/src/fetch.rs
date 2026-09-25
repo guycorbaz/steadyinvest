@@ -79,6 +79,9 @@ pub struct FxRatesRequest {
     /// The CONFIGURED primary at enqueue (see [`FetchRequest::primary`]).
     pub primary: ProviderChoice,
     pub journal_id: Option<Uuid>,
+    /// The dossier generation at enqueue (G1 final review, G3 #2): a restore keeps the journal id,
+    /// so only the generation tells the restored dossier from the one that asked.
+    pub generation: u64,
 }
 
 /// One criblage row's fetch (Story 7.3, PR 2): `batch` identifies the run (a stale outcome of an
@@ -145,7 +148,13 @@ pub(crate) fn declared_quota(error: &IngestionError) -> Option<Option<u64>> {
 
 /// A job for the worker thread.
 pub enum WorkerJob {
-    Fetch(FetchRequest),
+    /// A study fetch (Story 3.1), stamped with the dossier GENERATION it was asked in (G1 final
+    /// review M1): the result rides it back, and a result whose dossier has since changed (another
+    /// dossier opened or created, a backup restored — same study ids included) is dropped unwritten.
+    Fetch {
+        request: FetchRequest,
+        generation: u64,
+    },
     /// Story 7.3: an « Examen rapide » of a ticker with no study — the same fundamentals fetch
     /// as [`WorkerJob::Fetch`] (`study_id` unused), routed to the examination screen and kept in
     /// the session only; nothing is written unless « Créer l'étude » follows.
@@ -158,7 +167,11 @@ pub enum WorkerJob {
     Screening(ScreeningRequest),
     /// A holdings PRICE refresh (Story 4.4 / issue #50): a price-only `/eod` fetch (no
     /// `/fundamentals`), routed to the holdings surface, not the open study screen.
-    RefreshHolding(FetchRequest),
+    /// G1 final review (G3 #2): stamped with the dossier generation, like [`WorkerJob::Fetch`].
+    RefreshHolding {
+        request: FetchRequest,
+        generation: u64,
+    },
     /// An FX-rates refresh (Story 6.5): the latest BASE→QUOTE rate per pair.
     FetchFxRates(FxRatesRequest),
     TestKey(TestKeyRequest),
@@ -170,6 +183,8 @@ pub enum WorkerJob {
 /// chain failed (the error names itself).
 pub struct FetchOutcome {
     pub study_id: Uuid,
+    /// The dossier generation stamped at enqueue (see [`WorkerJob::Fetch`]).
+    pub generation: u64,
     pub result: Result<FetchedFinancials, IngestionError>,
     pub fell_back_to: Option<ProviderChoice>,
 }
@@ -179,6 +194,8 @@ pub struct FetchOutcome {
 /// map; `None` price means the provider exposed no current close.
 pub struct HoldingPriceOutcome {
     pub study_id: Uuid,
+    /// The dossier generation stamped at enqueue (G3 #2).
+    pub generation: u64,
     pub ticker: String,
     /// Issue #72: the latest close rides with its trading-session date ([`DatedClose`]) so the
     /// confront cache is keyed by the real session, not the refresh day. `None` = no quote.
@@ -236,6 +253,7 @@ pub enum WorkerOutcome {
     /// source (Story 6.9). `fell_back_to` names the fallback when ANY pair used one.
     FxRates {
         journal_id: Option<Uuid>,
+        generation: u64,
         results: Vec<FxRateOutcome>,
         fell_back_to: Option<ProviderChoice>,
     },
@@ -247,10 +265,13 @@ pub enum WorkerOutcome {
     FxProgress {
         done: usize,
         total: usize,
+        generation: u64,
     },
     /// Issue #100: a per-ticker holdings job the worker SKIPPED because the batch was cancelled — it
     /// still decrements the pending latch so the "refreshing" state clears, but applies no price.
-    HoldingSkipped,
+    HoldingSkipped {
+        generation: u64,
+    },
 }
 
 /// The UI-thread handler that applies a [`WorkerOutcome`] to the app state + UI.
@@ -400,7 +421,10 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                 std::collections::HashMap::new();
             while let Ok(job) = rx.recv() {
                 let outcome = match job {
-                    WorkerJob::Fetch(req) => {
+                    WorkerJob::Fetch {
+                        request: req,
+                        generation,
+                    } => {
                         let (result, _, fell_back_to) = run_chain(
                             &mut last_request,
                             select,
@@ -412,6 +436,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                         );
                         WorkerOutcome::Fetch(FetchOutcome {
                             study_id: req.study_id,
+                            generation,
                             result,
                             fell_back_to,
                         })
@@ -477,12 +502,17 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             quota,
                         }
                     }
-                    WorkerJob::RefreshHolding(_) if worker_cancel.load(Ordering::Relaxed) => {
+                    WorkerJob::RefreshHolding { generation, .. }
+                        if worker_cancel.load(Ordering::Relaxed) =>
+                    {
                         // Issue #100: the batch was cancelled — drain this queued per-ticker job without
                         // fetching. The skip still decrements the pending latch so "refreshing" clears.
-                        WorkerOutcome::HoldingSkipped
+                        WorkerOutcome::HoldingSkipped { generation }
                     }
-                    WorkerJob::RefreshHolding(req) => {
+                    WorkerJob::RefreshHolding {
+                        request: req,
+                        generation,
+                    } => {
                         // Issue #50: a PRICE-ONLY fetch (no fundamentals) so the holdings refresh works
                         // on a free tier; routed to the holdings surface. Twelve Data uses `/price`.
                         // 2026-07-03 review: an `Ok(None)` (the provider has no quote) ADVANCES the
@@ -508,6 +538,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                         );
                         WorkerOutcome::HoldingFetch(HoldingPriceOutcome {
                             study_id: req.study_id,
+                            generation,
                             ticker: req.ticker,
                             result,
                             fell_back_to,
@@ -518,6 +549,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                         // one pair fails over per pair), all paced through the shared map. Each
                         // pair keeps its own result — one failed pair never hides the others.
                         let total = req.pairs.len();
+                        let generation = req.generation;
                         let mut results = Vec::with_capacity(total);
                         let mut fell_back_to: Option<ProviderChoice> = None;
                         for (i, (base, quote)) in req.pairs.into_iter().enumerate() {
@@ -559,11 +591,16 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             // Issue #100: per-pair progress so the panel counts up instead of freezing.
                             let done = i + 1;
                             let _ = slint::invoke_from_event_loop(move || {
-                                dispatch_outcome(WorkerOutcome::FxProgress { done, total })
+                                dispatch_outcome(WorkerOutcome::FxProgress {
+                                    done,
+                                    total,
+                                    generation,
+                                })
                             });
                         }
                         WorkerOutcome::FxRates {
                             journal_id: req.journal_id,
+                            generation,
                             results,
                             fell_back_to,
                         }

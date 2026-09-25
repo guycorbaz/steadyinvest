@@ -40,6 +40,7 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
         fetch_cancel,
         holding_freshness,
         holding_dismissed,
+        dossier_generation,
         ..
     } = s;
     // ── « Actualiser les taux » — one job, one pair per foreign currency in use (AC3). ──
@@ -49,6 +50,7 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let fetch_tx = fetch_tx.clone();
         let fetch_cancel = std::sync::Arc::clone(fetch_cancel);
+        let dossier_generation = Rc::clone(dossier_generation);
         ui.global::<Fx>().on_refresh_rates(move || {
             let ui = ui_weak.unwrap();
             let fx = ui.global::<Fx>();
@@ -88,6 +90,8 @@ pub(crate) fn wire_fx(ui: &MainWindow, s: &Session) {
                 // Captured at enqueue time (review): the outcome applies only to THIS journal,
                 // whatever changes mid-flight.
                 journal_id: journal_state.borrow().journal_id(),
+                // G1 final review (G3 #2): a restore keeps the journal id — the generation does not.
+                generation: dossier_generation.get(),
             };
             // Issue #100: fresh batch — clear any prior cancel BEFORE the worker can pick the job up.
             fetch_cancel.store(false, std::sync::atomic::Ordering::Relaxed);

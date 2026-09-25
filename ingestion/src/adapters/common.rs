@@ -165,7 +165,7 @@ pub(crate) struct DatedSplit {
 /// book value and dividend per share (#119). No split after the bar → the served value, untouched
 /// (never re-rounded). `None` on an (astronomically unlikely) overflow — the caller then withholds
 /// that whole year rather than mis-scale it.
-fn rebase_price(value: Decimal, date: &str, splits: &[DatedSplit]) -> Option<Decimal> {
+pub(crate) fn rebase_price(value: Decimal, date: &str, splits: &[DatedSplit]) -> Option<Decimal> {
     let mut numerators = Decimal::ONE;
     let mut denominators = Decimal::ONE;
     let mut any = false;

@@ -829,6 +829,36 @@ fn open_journal_failure_leaves_the_previous_journal_open() {
 }
 
 #[test]
+fn a_refused_switch_that_cannot_reopen_the_previous_journal_leaves_none_open() {
+    // G1 final review L10: the previous journal vanished while open (unlinked), then a switch is
+    // refused — it cannot be reopened either. No journal is open, and no path says otherwise.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x553);
+    std::fs::remove_file(dir.path().join("journal.db")).unwrap();
+    let sub = dir.path().join("locked");
+    std::fs::create_dir_all(&sub).unwrap();
+    let locked = sub.join("j.db");
+    drop(
+        Journal::create(
+            &locked,
+            Uuid::from_u128(0xBEEF),
+            &Timestamp("2026-06-20T00:00:00Z".to_string()),
+        )
+        .unwrap(),
+    );
+    let mut lock = locked.as_os_str().to_os_string();
+    lock.push("-lock");
+    std::fs::write(&lock, "1").unwrap();
+
+    assert_eq!(
+        state.open_journal(&locked),
+        Err(MSG_JOURNAL_LOCKED.to_string())
+    );
+    assert_eq!(state.journal_id(), None, "no journal is open");
+    assert_eq!(state.path(), None, "and no stale path reads as one");
+}
+
+#[test]
 fn journal_stale_message_surfaces_both_versions() {
     let msg = journal_stale_message(57, 41);
     assert!(msg.contains("57"));
