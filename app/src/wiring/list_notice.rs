@@ -9,11 +9,12 @@
 //! in-progress banner or another outcome, or holds its own source's notice — never a sibling's
 //! failure. A success CLEARS only its own source's notice.
 //!
-//! Some writers of this slot do not go through here yet (the startup notice, an examination
-//! result). A notice on show that this module did not write has no known kind, so it is
-//! treated as a failure: an outcome never covers it. That check compares the slot with the text
-//! this module wrote last — it only tells « written here » from « written elsewhere », never a
-//! kind from a wording.
+//! Every writer of this slot goes through here (G1 P: the examination's « study created » and the
+//! startup state moved in). Two clears stay outside — creating a study and opening the demo
+//! empty the slot outright. A notice on show that this module did not write has no known kind,
+//! so it is treated as a failure: an outcome never covers it. That check compares the slot with
+//! the text this module wrote last — it only tells « written here » from « written elsewhere »,
+//! never a kind from a wording.
 
 use std::cell::RefCell;
 
@@ -32,6 +33,11 @@ pub(crate) enum Source {
     StudyAction,
     /// A provider fetch whose study is not on screen.
     Fetch,
+    /// The quick examination's « Créer l'étude » when the new study is not the one on screen.
+    QuickScreen,
+    /// The startup state (read-only dossier, unreadable configured file) — a standing fact,
+    /// written as a failure so no outcome covers it.
+    Startup,
 }
 
 /// What the notice on show is.
@@ -144,7 +150,16 @@ mod tests {
         assert!(!may_place("échec", Some(&failed), Source::Export));
         assert!(!may_place("échec", Some(&failed), Source::StudyAction));
         assert!(may_place("échec", Some(&failed), Source::Fetch));
-        // A notice written elsewhere (the startup state) is kept, whatever our last write was.
+        // G1 P: the startup state, now written here as a failure, is never covered by an
+        // examination's outcome (nor any sibling's).
+        let startup = w(Source::Startup, Kind::Failure, "lecture seule");
+        assert!(!may_place(
+            "lecture seule",
+            Some(&startup),
+            Source::QuickScreen
+        ));
+        assert!(!may_place("lecture seule", Some(&startup), Source::Export));
+        // A notice written elsewhere is kept, whatever our last write was.
         assert!(!may_place("dossier en lecture seule", None, Source::Export));
         assert!(!may_place(
             "dossier en lecture seule",

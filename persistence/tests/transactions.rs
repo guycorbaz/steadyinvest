@@ -245,7 +245,7 @@ fn a_legacy_null_kind_sale_and_a_dividend_list_in_replay_order_on_a_full_tie() {
     )
     .unwrap();
     drop(conn);
-    let journal = Journal::open(&dir.path().join("journal.db")).unwrap();
+    let journal = Journal::open(dir.path().join("journal.db")).unwrap();
     let rows: Vec<(u128, Option<String>)> = journal
         .list_transactions(hid)
         .unwrap()

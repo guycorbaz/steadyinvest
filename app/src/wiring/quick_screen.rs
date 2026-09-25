@@ -20,6 +20,7 @@ use crate::viewmodel::quick_screen::{
 };
 use crate::wiring::Session;
 use crate::wiring::fetch::resolve_chain;
+use crate::wiring::list_notice;
 use crate::wiring::studies::refresh_studies;
 use crate::wiring::study_notice::{self, Source};
 use crate::{MainWindow, QuickPriceRow, QuickScreen, Studies};
@@ -739,9 +740,12 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
             let opened = ui.global::<Studies>().get_study_open()
                 && current_study.borrow().as_deref() == Some(id.to_string().as_str());
             match applied {
-                Ok(_) if !opened => ui
-                    .global::<Studies>()
-                    .set_notice(state::MSG_QUICK_SCREEN_STUDY_CREATED.into()),
+                // The list's slot through its F4 owner (G1 P): never over a sibling's failure.
+                Ok(_) if !opened => list_notice::show(
+                    &ui,
+                    list_notice::Source::QuickScreen,
+                    state::MSG_QUICK_SCREEN_STUDY_CREATED,
+                ),
                 Ok(_) => {
                     study_notice::outcome(&ui, Source::Fetch, state::MSG_QUICK_SCREEN_STUDY_CREATED)
                 }
@@ -750,7 +754,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
                     if opened {
                         study_notice::fail(&ui, Source::Fetch, &notice);
                     } else {
-                        ui.global::<Studies>().set_notice(notice.into());
+                        list_notice::fail(&ui, list_notice::Source::QuickScreen, &notice);
                     }
                 }
             }

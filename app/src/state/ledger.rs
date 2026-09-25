@@ -280,6 +280,8 @@ impl JournalState {
     /// The holding's ledger rows, oldest first (Story 6.3, FR39) — read-only, `[]` without a
     /// journal or on a read failure (a DISPLAY surface, never a hard error). Write rails must use
     /// [`Self::ledger_rows_strict`] instead.
+    /// Test-only since G1 P: every surface reads [`Self::try_holding_ledger`].
+    #[cfg(test)]
     pub fn holding_ledger(&self, holding_id: Uuid) -> Vec<TransactionItem> {
         self.try_holding_ledger(holding_id).unwrap_or_default()
     }
