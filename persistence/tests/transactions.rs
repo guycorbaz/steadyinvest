@@ -106,6 +106,39 @@ fn a_blank_rationale_persists_as_null() {
     );
 }
 
+#[test]
+fn holding_has_transactions_is_the_typed_twin_of_the_delete_guard() {
+    // G1 final review: the app refuses « Retirer » up front from this read — it must say exactly
+    // what the delete guard will say.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    assert!(!journal.holding_has_transactions(hid).unwrap());
+    journal
+        .record_sell(
+            Uuid::from_u128(0x9203),
+            hid,
+            "10",
+            "85",
+            "0",
+            "CHF",
+            None,
+            &ts("2026-06-29T11:00:00Z"),
+        )
+        .expect("the sell records");
+    assert!(journal.holding_has_transactions(hid).unwrap());
+    assert!(matches!(
+        journal.delete_holding(hid),
+        Err(steadyinvest_persistence::Error::HoldingHasTransactions)
+    ));
+    assert!(
+        !journal
+            .holding_has_transactions(Uuid::from_u128(0xDEAD))
+            .unwrap(),
+        "an absent holding has no transactions"
+    );
+}
+
 // ── Story 6.3 — the FR39 ledger writers (buys, partial sells, edit/delete). Persistence performs
 // no arithmetic: the aggregates below are the caller-computed values a real app derives via
 // `core::risk::ledger`; the tests only assert they land atomically with the ledger row. ──
