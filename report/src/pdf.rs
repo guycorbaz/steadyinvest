@@ -164,7 +164,7 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
 
     // ── §1 — the full-page semi-log plot + the four growth lines ──
     doc.section("1. Analyse visuelle des ventes, bénéfices et cours");
-    doc.growth_chart(&frame);
+    doc.growth_chart(&frame, nf);
     doc.gap(2.0);
     doc.two_columns(
         &format!(
@@ -1601,7 +1601,7 @@ impl Doc {
     /// each is drawn at the slope it is labelled with; the plot's height is measured after any page
     /// break; a year with only one of its high / low prices still shows that price as a tick; and
     /// the form's quarterly box sits BELOW the plot (owner decision 7), never over plotted data.
-    fn growth_chart(&mut self, frame: &crate::form::StudyFrame) {
+    fn growth_chart(&mut self, frame: &crate::form::StudyFrame, nf: NumberStyle) {
         use steadyinvest_core::normalize::YearUsability;
         let series = &frame.series;
         let outputs = frame.snapshot.outputs();
@@ -1712,7 +1712,7 @@ impl Doc {
         stroke_rect(&mut self.cur, x0, top, plot_w, chart_h, 0.6);
         // Gridlines + labels on the EPS scale (nice 1/2/5×10^k).
         if let Some((lmin, lmax)) = eps_b {
-            for (v, lbl) in nice_ticks(lmin, lmax) {
+            for (v, lbl) in nice_ticks(lmin, lmax, nf) {
                 let gy = py(v, lmin, lmax);
                 polyline(&mut self.cur, &[(x0, gy), (x1, gy)], 0.3, GRID_GRAY, &[]);
                 text(&mut self.cur, MARGIN, gy + 2.5, 7.0, &lbl);
@@ -2366,14 +2366,14 @@ fn chart_scale_note(
 }
 
 /// Nice `1 / 2 / 5 × 10^k` tick values (+ their compact labels) inside a log scale `[10^lmin, 10^lmax]`.
-fn nice_ticks(lmin: f64, lmax: f64) -> Vec<(f64, String)> {
+fn nice_ticks(lmin: f64, lmax: f64, nf: NumberStyle) -> Vec<(f64, String)> {
     let (min, max) = (10f64.powf(lmin), 10f64.powf(lmax));
     let mut out = Vec::new();
     for k in (min.log10().floor() as i32)..=(max.log10().ceil() as i32) {
         for m in [1.0, 2.0, 5.0] {
             let v = m * 10f64.powi(k);
             if v >= min && v <= max {
-                out.push((v, compact_num(v)));
+                out.push((v, compact_num(v, k, nf)));
             }
         }
     }
@@ -2381,7 +2381,15 @@ fn nice_ticks(lmin: f64, lmax: f64) -> Vec<(f64, String)> {
 }
 
 /// A compact axis label: plain up to 999, then `k / M / Md` (French short scale) — data, not prose.
-fn compact_num(v: f64) -> String {
+/// A tick below 1 (`m × 10^k`, `k < 0`) keeps its `-k` decimals, spelled in the reader's number
+/// format (G1 I review: « 0,1 », never « 0 »).
+fn compact_num(v: f64, k: i32, nf: NumberStyle) -> String {
+    if k < 0 {
+        let places = k.unsigned_abs() as usize;
+        return Decimal::from_str_exact(&format!("{v:.places$}"))
+            .map(|d| nf.spell(d))
+            .unwrap_or_else(|_| format!("{v}"));
+    }
     if v >= 1e9 {
         format!("{} Md", (v / 1e9).round() as i64)
     } else if v >= 1e6 {
@@ -2635,6 +2643,25 @@ mod tests {
             "2,7 : 1"
         );
         assert_eq!(NumberStyle::default(), NumberStyle::Comma);
+    }
+
+    #[test]
+    fn an_axis_tick_below_one_keeps_its_decimals_in_the_readers_format() {
+        let labels = |nf| {
+            nice_ticks(-2.0, 0.5, nf)
+                .into_iter()
+                .map(|(_, l)| l)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            labels(NumberStyle::Comma),
+            ["0,01", "0,02", "0,05", "0,1", "0,2", "0,5", "1", "2"]
+        );
+        assert_eq!(
+            labels(NumberStyle::Point),
+            ["0.01", "0.02", "0.05", "0.1", "0.2", "0.5", "1", "2"]
+        );
+        assert_eq!(compact_num(5000.0, 3, NumberStyle::Comma), "5 k");
     }
 
     #[test]
@@ -3097,16 +3124,31 @@ mod tests {
     fn section_4_states_the_four_low_price_candidates() {
         // demo: judged low P/E 10 × est. low EPS 4 = 40; the five lows are 50; no severe low
         // entered; dividend 2 ÷ average high yield 4 % (2 ÷ 50) = 50.
-        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
-        for line in [
-            "(a) PER bas moyen 10 × BPA estimé bas 4 = 40",
-            "(b) Prix bas moyen des 5 dernières années = 50",
-            "(c) Plus bas sévère récent = —",
-            "(d) Prix soutenu par le dividende : dividende 2 ÷ rendement haut moyen 4 % = 50",
-            "Prix bas retenu (PER bas × BPA bas) = 40",
-        ] {
-            assert!(contains(&bytes, line), "missing: {line}");
+        for nf in [NumberStyle::Point, NumberStyle::Comma] {
+            let bytes = render_study_pdf(&demo_study(), nf).unwrap();
+            for line in [
+                "(a) PER bas moyen 10 × BPA estimé bas 4 = 40",
+                "(b) Prix bas moyen des 5 dernières années = 50",
+                "(c) Plus bas sévère récent = —",
+                "(d) Prix soutenu par le dividende : dividende 2 ÷ rendement haut moyen 4 % = 50",
+                "Prix bas retenu (PER bas × BPA bas) = 40",
+            ] {
+                assert!(contains(&bytes, line), "missing under {nf:?}: {line}");
+            }
         }
+        // A fractional candidate is spelled per format (G1 I review).
+        let mut s = demo_study();
+        s.judgment.judged_avg_low_pe = Some(money_of("10.5"));
+        let comma = render_study_pdf(&s, NumberStyle::Comma).unwrap();
+        let point = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        assert!(contains(
+            &comma,
+            "(a) PER bas moyen 10,5 × BPA estimé bas 4 = 42"
+        ));
+        assert!(contains(
+            &point,
+            "(a) PER bas moyen 10.5 × BPA estimé bas 4 = 42"
+        ));
     }
 
     #[test]
@@ -3170,7 +3212,7 @@ mod tests {
         let frame = crate::form::build_frame(&demo_study()).unwrap();
         let mut doc = Doc::new();
         doc.y = PAGE_H - BOTTOM - 120.0;
-        doc.growth_chart(&frame);
+        doc.growth_chart(&frame, NumberStyle::Comma);
         assert_eq!(doc.page_index(), 1, "the plot moved to a new page");
         // What is left under it is the caller's gap + the four growth lines.
         assert!(

@@ -25,7 +25,7 @@ pub const ALL_FIELDS: [&str; 7] = [
     FIELD_BOOK,
 ];
 
-use crate::viewmodel::format::{NumberFormat, parse_amount};
+use crate::viewmodel::format::{NumberFormat, NumberReading, read_number};
 
 /// How many most-recent complete fiscal years a freshly-created study materializes for entry, and
 /// the cap a provider fetch imports (issue #109). The canonical SSG history window: the §1 Visual
@@ -218,19 +218,20 @@ pub fn next_cell(year: usize, field: &str, dir: &str, year_count: usize) -> (usi
     (y, group[c].to_string())
 }
 
-/// Parse a pasted clipboard column into one optional exact value per line, **locale-aware** (the
+/// Read a pasted clipboard column, one [`NumberReading`] per line, **locale-aware** (the
 /// production, locale-closing evolution of the Spike-A `parse_pasted_column`). Normalises CRLF/CR to
-/// LF, drops a trailing newline (spreadsheet copies end with one), and parses each line via
-/// [`parse_amount`] under the active preset. A blank or non-numeric line yields `None` — **never
-/// coerced to `0`**.
-pub fn parse_pasted_column(text: &str, format: NumberFormat) -> Vec<Option<Money>> {
+/// LF, drops a trailing newline (spreadsheet copies end with one), and reads each line by
+/// [`read_number`] under the active preset. A blank line is [`NumberReading::Blank`] (a gap —
+/// **never `0`**); a non-number or an ambiguous one keeps its reading so the caller refuses it by
+/// name and leaves its cell as it was (G1 I review) — never an empty hole.
+pub fn parse_pasted_column(text: &str, format: NumberFormat) -> Vec<NumberReading> {
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     let body = normalized.trim_end_matches('\n');
     if body.is_empty() {
         return Vec::new();
     }
     body.split('\n')
-        .map(|line| parse_amount(line, format))
+        .map(|line| read_number(line, format))
         .collect()
 }
 
@@ -447,15 +448,22 @@ mod tests {
 
     #[test]
     fn pasted_column_is_locale_aware_keeps_gaps_and_never_zero() {
-        // CH/EU clipboard: narrow-NBSP groups + decimal commas, a trailing newline, a blank + garbage.
-        let pasted = "1\u{202F}234,5\r\n13\n\nfoo\n14,25\n";
+        // CH/EU clipboard: narrow-NBSP groups + decimal commas, a trailing newline, a blank + garbage
+        // + an ambiguous point.
+        let pasted = "1\u{202F}234,5\r\n13\n\nfoo\n14,25\n1.085\n";
         let got = parse_pasted_column(pasted, NumberFormat::Comma);
-        assert_eq!(got.len(), 5, "trailing newline must not add a 6th cell");
-        assert_eq!(got[0], Some(money("1234.5")));
-        assert_eq!(got[1], Some(money("13")));
-        assert_eq!(got[2], None, "blank line → gap, never 0");
-        assert_eq!(got[3], None, "non-numeric → gap, never 0");
-        assert_eq!(got[4], Some(money("14.25")));
+        let value = |s: &str| NumberReading::Value(money(s).as_decimal());
+        assert_eq!(got.len(), 6, "trailing newline must not add a 7th cell");
+        assert_eq!(got[0], value("1234.5"));
+        assert_eq!(got[1], value("13"));
+        assert_eq!(got[2], NumberReading::Blank, "blank line → gap, never 0");
+        assert_eq!(
+            got[3],
+            NumberReading::NotANumber,
+            "non-numeric → refused, never 0"
+        );
+        assert_eq!(got[4], value("14.25"));
+        assert_eq!(got[5], NumberReading::Ambiguous);
         // An empty clipboard yields no cells (not one empty cell).
         assert!(parse_pasted_column("", NumberFormat::Point).is_empty());
     }

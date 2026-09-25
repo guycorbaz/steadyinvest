@@ -68,7 +68,7 @@ impl JournalState {
     ) -> Result<(), String> {
         // The typed rate reads under the user's number format (G1 I); a provider rate below is
         // already a `Decimal` and never goes through the typed-input reading.
-        let rate = self.read_amount(rate_input);
+        let rate = self.read_typed(rate_input, MSG_FX_INVALID_RATE);
         self.upsert_fx_rate_from(base, rate, date_input, reference_currency, "manuel")
     }
 
@@ -85,7 +85,7 @@ impl JournalState {
         session_date: Option<&str>,
         source: &str,
     ) -> Result<(), String> {
-        self.upsert_fx_rate_from(base, Some(rate), session_date.unwrap_or(""), quote, source)
+        self.upsert_fx_rate_from(base, Ok(rate), session_date.unwrap_or(""), quote, source)
     }
 
     /// The shared validated upsert: normalize the inputs, mint id/stamp (ADD15), one persistence
@@ -93,7 +93,7 @@ impl JournalState {
     fn upsert_fx_rate_from(
         &mut self,
         base: &str,
-        rate: Option<Decimal>,
+        rate: Result<Decimal, String>,
         date_input: &str,
         quote: &str,
         source: &str,
@@ -109,7 +109,7 @@ impl JournalState {
         if !crate::config::is_supported_currency(&base) {
             return Err(MSG_FX_INVALID_CURRENCY.to_string());
         }
-        let rate = rate
+        let rate = Some(rate?)
             .filter(|r| r.is_sign_positive() && !r.is_zero())
             .ok_or(MSG_FX_INVALID_RATE.to_string())?;
         let now = self.clock.now();

@@ -47,7 +47,8 @@ use steadyinvest_persistence::{
 };
 use uuid::Uuid;
 
-use crate::viewmodel::format::{NumberFormat, parse_decimal};
+use super::read_typed;
+use crate::viewmodel::format::NumberFormat;
 
 use super::{
     JournalState, MSG_DIVIDEND_RETIRED, MSG_DIVIDEND_WITHHOLDING, MSG_HOLDING_INVALID_NUMBER,
@@ -136,15 +137,15 @@ fn validate_ledger_amounts(
     fees: &str,
     format: NumberFormat,
 ) -> Result<(String, String, String), String> {
-    let qty = parse_decimal(quantity, format)
+    let qty = Some(read_typed(quantity, format, MSG_HOLDING_INVALID_NUMBER)?)
         .filter(|q| q.is_sign_positive() && !q.is_zero())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
-    let price = parse_decimal(unit_price, format)
+    let price = Some(read_typed(unit_price, format, MSG_HOLDING_INVALID_NUMBER)?)
         .filter(|p| !p.is_sign_negative())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
     let fees = fees.trim();
     let fees = if fees.is_empty() { "0" } else { fees };
-    let fees = parse_decimal(fees, format)
+    let fees = Some(read_typed(fees, format, MSG_HOLDING_INVALID_NUMBER)?)
         .filter(|f| !f.is_sign_negative())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
     Ok((qty.to_string(), price.to_string(), fees.to_string()))
@@ -392,7 +393,7 @@ impl JournalState {
         let quantity = if quantity_input.is_empty() {
             holding.quantity.clone()
         } else {
-            self.read_amount(quantity_input)
+            Some(self.read_typed(quantity_input, MSG_HOLDING_INVALID_NUMBER)?)
                 .filter(|q| q.is_sign_positive() && !q.is_zero())
                 .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
                 .to_string()
@@ -542,12 +543,11 @@ impl JournalState {
         let qty = if quantity.is_empty() {
             Decimal::from_str_exact(&holding.quantity).ok()
         } else {
-            self.read_amount(quantity)
+            Some(self.read_typed(quantity, MSG_HOLDING_INVALID_NUMBER)?)
         }
         .filter(|q| q.is_sign_positive() && !q.is_zero())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
-        let gross_per_share = self
-            .read_amount(per_share_gross)
+        let gross_per_share = Some(self.read_typed(per_share_gross, MSG_HOLDING_INVALID_NUMBER)?)
             .filter(|p| !p.is_sign_negative())
             .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
         let gross = qty
@@ -567,7 +567,7 @@ impl JournalState {
                 .map(|w| w.round_dp(2))
                 .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
         } else {
-            self.read_amount(withholding_input)
+            Some(self.read_typed(withholding_input, MSG_HOLDING_INVALID_NUMBER)?)
                 .filter(|w| !w.is_sign_negative())
                 .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
         };

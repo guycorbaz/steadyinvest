@@ -1007,6 +1007,19 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             crate::viewmodel::format::parse_decimal(&text, format).is_some()
         });
     }
+    {
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Holdings>()
+            .on_ambiguous_number_refusal(move |text| {
+                let format = journal_state.borrow().number_format();
+                match crate::viewmodel::format::read_number(&text, format) {
+                    crate::viewmodel::format::NumberReading::Ambiguous => {
+                        state::ambiguous_number_message(format).into()
+                    }
+                    _ => SharedString::new(),
+                }
+            });
+    }
     // ── Story 4.4 (FR40) — manual price refresh for every linked holding, off the UI thread. One
     // job per UNIQUE linked ticker (reusing the Epic-3 worker); holdings with no matching study are
     // skipped. Only ever user-initiated (FR65 — no background polling). Outcomes route to the

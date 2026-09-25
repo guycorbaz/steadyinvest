@@ -702,6 +702,36 @@ pub fn size_field_invalid_message(field: &str) -> String {
     MSG_SIZE_FIELD_INVALID.replace("{field}", field)
 }
 
+/// A typed number that is a number in some spelling, but not unambiguously in the user's comma
+/// format (G1 I review: « 1.085 » could be 1,085 or 1085) — refused, named, with the expected
+/// spelling; never guessed.
+pub const MSG_NUMBER_AMBIGUOUS_COMMA: &str = "Nombre ambigu : écrivez-le 1\u{00A0}234,5 ou 1234,5 (format des nombres choisi dans les Réglages) ; rien n'a été enregistré.";
+/// The point-format twin of [`MSG_NUMBER_AMBIGUOUS_COMMA`] (« 10,5 » : the comma is this
+/// format's grouping character, never its decimal mark).
+pub const MSG_NUMBER_AMBIGUOUS_POINT: &str = "Nombre ambigu : écrivez-le 1,234.5 ou 1234.5 (format des nombres choisi dans les Réglages) ; rien n'a été enregistré.";
+/// A study cell or judgment field typed with a text that is no number (G1 I review): refused, the
+/// value left as it was — never turned into an empty « à remplir » hole.
+pub const MSG_VALUE_NOT_A_NUMBER: &str =
+    "Ce texte ne se lit pas comme un nombre ; la valeur est inchangée.";
+/// A pasted column whose some lines are no number or an ambiguous one (G1 I review): those lines
+/// are named (their years) and their cells left as they were; the others are pasted.
+pub const MSG_PASTE_LINES_KEPT: &str =
+    "Lignes non collées, nombre ambigu ou illisible : {years} ; ces cellules sont inchangées.";
+
+/// The ambiguous-number refusal for the user's number format (G1 I review).
+pub fn ambiguous_number_message(format: crate::viewmodel::format::NumberFormat) -> &'static str {
+    match format {
+        crate::viewmodel::format::NumberFormat::Comma => MSG_NUMBER_AMBIGUOUS_COMMA,
+        crate::viewmodel::format::NumberFormat::Point => MSG_NUMBER_AMBIGUOUS_POINT,
+    }
+}
+
+/// The pasted-lines refusal naming the years whose cells were left as they were.
+pub fn paste_lines_kept_message(years: &[i32]) -> String {
+    let years: Vec<String> = years.iter().map(i32::to_string).collect();
+    MSG_PASTE_LINES_KEPT.replace("{years}", &years.join(", "))
+}
+
 /// Every static user-facing message above — exposed so the crate-local posture gate (FR13) scans
 /// them for banned verbs alongside the `@tr()` literals. Test-only (the gate's sole consumer);
 /// the individual `MSG_*` consts are the runtime surfaces. Keep in sync with the consts.
@@ -717,6 +747,10 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SAVE_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,
+    MSG_NUMBER_AMBIGUOUS_COMMA,
+    MSG_NUMBER_AMBIGUOUS_POINT,
+    MSG_VALUE_NOT_A_NUMBER,
+    MSG_PASTE_LINES_KEPT,
     MSG_SOFT_LOCKED,
     MSG_YEARS_MAX,
     MSG_UNLOCK_CONFIRM,

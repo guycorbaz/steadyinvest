@@ -123,84 +123,154 @@ pub fn format_scaled(value: Decimal, field: DisplayField, format: NumberFormat) 
     format_amount(&round_for_display(value, field).to_string(), format)
 }
 
-/// Parse a **user-entered** number under the user's number format into an exact [`Decimal`], or
-/// `None` when it is blank, not a number, or **ambiguous** — never `0`, never a guess. The ONE
-/// reading rule of every numeric field the user types into (study cells, positions, ledger, FX,
-/// Réglages — G1 I, #237):
+/// What a user-typed number reads as under the user's number format (G1 I review): a value, a
+/// blank field, a text that is no number, or an **ambiguous** one — a number in some spelling, but
+/// not unambiguously in the user's (« 1.085 » under the comma format could be 1,085 or 1085). The
+/// callers tell them apart: blank may mean « clear » or « default », a non-number and an ambiguous
+/// number are refused each with its own named reason — never a guess, never 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumberReading {
+    Value(Decimal),
+    Blank,
+    NotANumber,
+    Ambiguous,
+}
+
+impl NumberReading {
+    /// The value, when there is one.
+    pub fn value(self) -> Option<Decimal> {
+        match self {
+            NumberReading::Value(d) => Some(d),
+            _ => None,
+        }
+    }
+}
+
+/// One way of spelling a number: its decimal mark, and whether the comma or the point may group.
+/// The space family and the Swiss apostrophes group in every spelling.
+#[derive(Clone, Copy)]
+struct Spelling {
+    decimal: char,
+    comma_groups: bool,
+    point_groups: bool,
+}
+
+/// The comma format's own spelling: « 1 234,5 », « 1'234,5 ».
+const COMMA_OWN: Spelling = Spelling {
+    decimal: ',',
+    comma_groups: false,
+    point_groups: false,
+};
+/// The point format's own spelling: « 1,234.5 », « 1 234.5 », « 1'234.5 ».
+const POINT_OWN: Spelling = Spelling {
+    decimal: '.',
+    comma_groups: true,
+    point_groups: false,
+};
+/// A decimal point without any comma — the one foreign spelling the comma format also reads,
+/// when it is unambiguous (« 10.5 », « 0.925 »).
+const POINT_DECIMAL_ONLY: Spelling = Spelling {
+    decimal: '.',
+    comma_groups: false,
+    point_groups: false,
+};
+/// The continental spelling where the point groups (« 1.234,5 », « 1.085 » = 1085): never read,
+/// only recognised — a text it reads is ambiguous for the comma format.
+const POINT_GROUPS: Spelling = Spelling {
+    decimal: ',',
+    comma_groups: false,
+    point_groups: true,
+};
+
+fn is_space(c: char) -> bool {
+    matches!(c, ' ' | NBSP | TYPOGRAPHIC_NARROW_NBSP)
+}
+
+fn is_apostrophe(c: char) -> bool {
+    matches!(c, '\'' | '\u{2019}')
+}
+
+/// Read a user-typed number under the user's number format — the ONE reading rule of every
+/// numeric field the user types into (study cells and judgment, positions, ledger, FX, Réglages,
+/// the quick screen's objective — G1 I, #237):
 ///
-/// - Surrounding whitespace is trimmed; one leading sign, ASCII `-` or the display minus `\u{2212}`.
-/// - The format's own decimal mark (`,` under [`NumberFormat::Comma`], `.` under
-///   [`NumberFormat::Point`]) is the decimal mark; at most one.
-/// - Grouping lives in the integer part only, and must be well-formed — a first group of 1–3 digits
-///   then groups of exactly 3, one kind of separator throughout. The space family (ASCII space, the
-///   no-break space the app emits, the typographic narrow one) groups under both formats; under
-///   `Point` the comma groups too. « 7 5 » is refused, never read as 75.
-/// - The OTHER decimal mark is read as the decimal mark when it cannot be a grouping:
-///   - under `Point`, a comma that forms a well-formed grouping IS grouping (« 1,234 » = 1234, the
-///     format says so); a single comma that cannot group (« 10,5 », « 1,2345 ») is the decimal mark;
-///   - under `Comma`, the point is foreign to the format: a single point is the decimal mark
-///     (« 10.5 », « 0.925 »), EXCEPT when it could be a foreign thousands point — 1 to 3 digits not
-///     starting with 0, then exactly 3 digits (« 1.234 », « 12.500 »): that is ambiguous and refused.
-///     Two points (« 1.234.567 ») or a point beside the comma (« 1.234,5 ») are refused.
-/// - Both sides of a decimal mark carry digits (« ,5 » and « 5, » are refused).
+/// - Surrounding whitespace is trimmed (nothing left → [`NumberReading::Blank`]); one leading
+///   sign, ASCII `-` or the display minus `\u{2212}`.
+/// - Each format reads its OWN marks: `Comma` → decimal « , », grouping by the space family;
+///   `Point` → decimal « . », grouping by « , » and the space family. Both also group with the
+///   Swiss apostrophe (U+0027, U+2019).
+/// - A grouping is well formed or it is none: a first group of 1–3 digits NOT starting with 0,
+///   then groups of exactly 3, one separator kind — « 7 5 » and « 0 925 » are not numbers (never
+///   75, never 925). Grouping lives in the integer part only; a decimal mark has digits on both
+///   sides (« ,5 », « 5, » are not numbers).
+/// - Under `Comma`, a single « . » is ALSO read as the decimal mark when it is unambiguous: not
+///   when it could be a thousands point (1–3 digits not starting with 0, then exactly 3 digits:
+///   « 1.085 », « 12.500 »). « 0.925 », « 10.5 », « 1234.567 » read.
+/// - Under `Point`, a « , » is NEVER a decimal mark — it is the user's own grouping character.
+/// - A text that is no number in the user's spelling but IS one in another (« 10,5 » or « 0,925 »
+///   under `Point`; « 1.085 », « 1.234,5 », « 1,234.5 » under `Comma`) is
+///   [`NumberReading::Ambiguous`]; anything else (letters, exponents, « % », stray marks) is
+///   [`NumberReading::NotANumber`].
 ///
 /// Pure string→`Decimal` — **no arithmetic** (Cardinal Rule); `Decimal::from_str_exact` enforces
-/// exactness (no float, no silent rounding, no scientific notation).
-pub fn parse_decimal(input: &str, format: NumberFormat) -> Option<Decimal> {
+/// exactness (no float, no silent rounding).
+pub fn read_number(input: &str, format: NumberFormat) -> NumberReading {
     let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return NumberReading::Blank;
+    }
     let (negative, body) = match trimmed.strip_prefix(['-', MINUS_SIGN]) {
         Some(rest) => (true, rest),
         None => (false, trimmed),
     };
-    let is_space = |c: char| matches!(c, ' ' | NBSP | TYPOGRAPHIC_NARROW_NBSP);
     if body.is_empty()
         || !body
             .chars()
-            .all(|c| c.is_ascii_digit() || c == ',' || c == '.' || is_space(c))
+            .all(|c| c.is_ascii_digit() || c == ',' || c == '.' || is_space(c) || is_apostrophe(c))
     {
-        return None;
+        return NumberReading::NotANumber;
     }
-    let decimal = format.decimal_separator();
-    let other = match format {
-        NumberFormat::Comma => '.',
-        NumberFormat::Point => ',',
-    };
-    let split_at = |mark: char| body.split_once(mark).map(|(i, f)| (i, Some(f)));
-    let (integer, fraction) = match (body.matches(decimal).count(), format) {
-        (0, NumberFormat::Point) => {
-            if grouped_digits(body, format).is_some() {
-                (body, None)
-            } else if body.matches(other).count() == 1 {
-                split_at(other)?
-            } else {
-                return None;
-            }
-        }
-        (0, NumberFormat::Comma) => match body.matches(other).count() {
-            0 => (body, None),
-            1 => {
-                let (int, frac) = body.split_once(other)?;
-                let could_group = (1..=3).contains(&int.len())
-                    && int.bytes().all(|b| b.is_ascii_digit())
-                    && !int.starts_with('0')
-                    && frac.len() == 3
-                    && frac.bytes().all(|b| b.is_ascii_digit());
-                if could_group {
-                    return None;
+    let reads = |spelling: Spelling| spelled(body, spelling);
+    let canonical = match format {
+        NumberFormat::Comma => match reads(COMMA_OWN) {
+            Some(c) => Some(c),
+            None => match reads(POINT_DECIMAL_ONLY) {
+                // The point could be a thousands point: ambiguous, never guessed.
+                Some(_) if reads(POINT_GROUPS).is_some() => return NumberReading::Ambiguous,
+                Some(c) => Some(c),
+                None if reads(POINT_OWN).is_some() || reads(POINT_GROUPS).is_some() => {
+                    return NumberReading::Ambiguous;
                 }
-                (int, Some(frac))
-            }
-            _ => return None,
+                None => None,
+            },
         },
-        (1, NumberFormat::Comma) if body.contains(other) => return None,
-        (1, _) => split_at(decimal)?,
-        _ => return None,
+        NumberFormat::Point => match reads(POINT_OWN) {
+            Some(c) => Some(c),
+            None if reads(COMMA_OWN).is_some() || reads(POINT_GROUPS).is_some() => {
+                return NumberReading::Ambiguous;
+            }
+            None => None,
+        },
     };
-    let mut canonical = String::with_capacity(body.len() + 1);
-    if negative {
-        canonical.push('-');
-    }
-    canonical.push_str(&grouped_digits(integer, format)?);
+    let Some(canonical) = canonical else {
+        return NumberReading::NotANumber;
+    };
+    let signed = if negative {
+        format!("-{canonical}")
+    } else {
+        canonical
+    };
+    Decimal::from_str_exact(&signed).map_or(NumberReading::NotANumber, NumberReading::Value)
+}
+
+/// The canonical unsigned spelling (`digits[.digits]`) of `body` read in `spelling`, or `None`
+/// when it is not a well-formed number there.
+fn spelled(body: &str, spelling: Spelling) -> Option<String> {
+    let (integer, fraction) = match body.split_once(spelling.decimal) {
+        Some((i, f)) => (i, Some(f)),
+        None => (body, None),
+    };
+    let mut canonical = grouped_digits(integer, spelling)?;
     if let Some(fraction) = fraction {
         if fraction.is_empty() || !fraction.bytes().all(|b| b.is_ascii_digit()) {
             return None;
@@ -208,39 +278,47 @@ pub fn parse_decimal(input: &str, format: NumberFormat) -> Option<Decimal> {
         canonical.push('.');
         canonical.push_str(fraction);
     }
-    Decimal::from_str_exact(&canonical).ok()
+    Some(canonical)
 }
 
+/// A character class: one grouping separator kind.
+type CharClass = fn(char) -> bool;
+
 /// The digits of a user-typed INTEGER part, its grouping removed — or `None` when it is empty,
-/// carries a non-digit, or groups badly (first group 1–3 digits, then exactly 3; one separator
-/// kind). The space family groups under both formats; the comma under `Point` only.
-fn grouped_digits(integer: &str, format: NumberFormat) -> Option<String> {
-    let is_space = |c: char| matches!(c, ' ' | NBSP | TYPOGRAPHIC_NARROW_NBSP);
-    let has_space = integer.chars().any(is_space);
-    let has_comma = format == NumberFormat::Point && integer.contains(',');
-    if has_space && has_comma {
-        return None;
+/// carries a non-digit, or groups badly (a first group of 1–3 digits not starting with 0, then
+/// exactly 3; one separator kind).
+fn grouped_digits(integer: &str, spelling: Spelling) -> Option<String> {
+    let kinds: [(bool, CharClass); 4] = [
+        (true, is_space),
+        (true, is_apostrophe),
+        (spelling.comma_groups, |c| c == ','),
+        (spelling.point_groups, |c| c == '.'),
+    ];
+    let mut separator: Option<CharClass> = None;
+    for (allowed, kind) in kinds {
+        if allowed && integer.chars().any(kind) {
+            if separator.is_some() {
+                return None; // two separator kinds
+            }
+            separator = Some(kind);
+        }
     }
-    let groups: Vec<&str> = if has_space {
-        integer.split(is_space).collect()
-    } else if has_comma {
-        integer.split(',').collect()
-    } else {
-        vec![integer]
+    let groups: Vec<&str> = match separator {
+        Some(kind) => integer.split(kind).collect(),
+        None => vec![integer],
     };
     let digits = |g: &str| !g.is_empty() && g.bytes().all(|b| b.is_ascii_digit());
     let (first, rest) = groups.split_first()?;
     let well_formed = digits(first)
-        && (rest.is_empty() || first.len() <= 3)
+        && (rest.is_empty() || (first.len() <= 3 && !first.starts_with('0')))
         && rest.iter().all(|g| g.len() == 3 && digits(g));
     well_formed.then(|| groups.concat())
 }
 
-/// The [`parse_decimal`] reading as the canonical decimal spelling the journal stores (trailing
-/// zeros dropped), or `None` under the same refusals. For the Rust-side rails that validate a
-/// canonical string (Réglages).
-pub fn canonical_input(input: &str, format: NumberFormat) -> Option<String> {
-    parse_decimal(input, format).map(|d| d.normalize().to_string())
+/// The value of a user-typed number, or `None` when it is blank, not a number, or ambiguous
+/// ([`read_number`]'s rule).
+pub fn parse_decimal(input: &str, format: NumberFormat) -> Option<Decimal> {
+    read_number(input, format).value()
 }
 
 /// Parse a **user-entered** amount under the active locale preset into an exact [`Money`], or
@@ -420,65 +498,112 @@ mod tests {
         Decimal::from_str_exact(s).unwrap()
     }
 
+    fn value(s: &str) -> NumberReading {
+        NumberReading::Value(dec(s))
+    }
+
     #[test]
     fn comma_format_reads_its_own_spelling_and_an_unambiguous_point() {
         let f = NumberFormat::Comma;
-        assert_eq!(parse_decimal("10,5", f), Some(dec("10.5")));
-        assert_eq!(parse_decimal(" 1 234,5 ", f), Some(dec("1234.5")));
-        assert_eq!(parse_decimal("1\u{00A0}234,5", f), Some(dec("1234.5")));
-        assert_eq!(
-            parse_decimal("1\u{202F}234\u{202F}567", f),
-            Some(dec("1234567"))
-        );
-        assert_eq!(parse_decimal("1,234", f), Some(dec("1.234")));
-        // The other mark, where it cannot be a thousands point.
-        assert_eq!(parse_decimal("10.5", f), Some(dec("10.5")));
-        assert_eq!(parse_decimal("0.925", f), Some(dec("0.925")));
-        assert_eq!(parse_decimal("1.2345", f), Some(dec("1.2345")));
-        assert_eq!(parse_decimal("1234.567", f), Some(dec("1234.567")));
-        assert_eq!(parse_decimal("1 234.5", f), Some(dec("1234.5")));
-        assert_eq!(parse_decimal("\u{2212}12,5", f), Some(dec("-12.5")));
+        for (input, expected) in [
+            ("10,5", "10.5"),
+            (" 1 234,5 ", "1234.5"),
+            ("1\u{00A0}234,5", "1234.5"),
+            ("1\u{202F}234\u{202F}567", "1234567"),
+            ("1'234,5", "1234.5"),
+            ("1\u{2019}234\u{2019}567,25", "1234567.25"),
+            ("1,234", "1.234"),
+            ("0,925", "0.925"),
+            ("12,500", "12.5"),
+            ("007", "7"),
+            // The other mark, where it cannot be a thousands point.
+            ("10.5", "10.5"),
+            ("0.925", "0.925"),
+            ("1.2345", "1.2345"),
+            ("1234.567", "1234.567"),
+            ("1 234.5", "1234.5"),
+            ("\u{2212}12,5", "-12.5"),
+        ] {
+            assert_eq!(read_number(input, f), value(expected), "{input:?}");
+        }
     }
 
     #[test]
-    fn point_format_reads_its_own_spelling_and_an_unambiguous_comma() {
+    fn point_format_reads_its_own_spelling_and_never_a_decimal_comma() {
         let f = NumberFormat::Point;
-        assert_eq!(parse_decimal("10.5", f), Some(dec("10.5")));
-        assert_eq!(parse_decimal("1,234.5", f), Some(dec("1234.5")));
-        assert_eq!(parse_decimal("1,234,567", f), Some(dec("1234567")));
-        assert_eq!(parse_decimal("1 234.5", f), Some(dec("1234.5")));
-        // A comma that groups well IS grouping under this format — never 1.234.
-        assert_eq!(parse_decimal("1,234", f), Some(dec("1234")));
-        // A comma that cannot group is the decimal mark.
-        assert_eq!(parse_decimal("10,5", f), Some(dec("10.5")));
-        assert_eq!(parse_decimal("1,2345", f), Some(dec("1.2345")));
-        assert_eq!(parse_decimal("1 234,5", f), Some(dec("1234.5")));
-        assert_eq!(parse_decimal("-0,5", f), Some(dec("-0.5")));
+        for (input, expected) in [
+            ("10.5", "10.5"),
+            ("1,234.5", "1234.5"),
+            ("1,234,567", "1234567"),
+            ("1 234.5", "1234.5"),
+            ("1'234.5", "1234.5"),
+            // The comma is the user's own grouping: « 1,234 » is 1234, never 1.234.
+            ("1,234", "1234"),
+            ("0.925", "0.925"),
+            ("-0.5", "-0.5"),
+        ] {
+            assert_eq!(read_number(input, f), value(expected), "{input:?}");
+        }
     }
 
     #[test]
-    fn ambiguous_or_malformed_input_is_refused_never_guessed() {
+    fn a_number_in_another_spelling_is_ambiguous_never_guessed() {
         for (input, format) in [
-            // A foreign thousands point under the comma format.
-            ("1.234", NumberFormat::Comma),
+            // A possible thousands point under the comma format.
+            ("1.085", NumberFormat::Comma),
             ("12.500", NumberFormat::Comma),
             ("1.234.567", NumberFormat::Comma),
             ("1.234,5", NumberFormat::Comma),
-            // Two decimal marks, badly formed groups.
+            ("1,234.5", NumberFormat::Comma),
+            // A comma is never a decimal mark under the point format.
+            ("10,5", NumberFormat::Point),
+            ("0,925", NumberFormat::Point),
+            ("1,2345", NumberFormat::Point),
+            ("1 234,5", NumberFormat::Point),
+            ("1.234,5", NumberFormat::Point),
+        ] {
+            assert_eq!(
+                read_number(input, format),
+                NumberReading::Ambiguous,
+                "{input:?} under {format:?}"
+            );
+            assert_eq!(parse_decimal(input, format), None);
+        }
+    }
+
+    #[test]
+    fn a_leading_zero_group_is_never_a_grouping() {
+        // The review's HIGH: « 0,925 » under Point and « 0 925 » were read 925 (× 1000).
+        assert_eq!(
+            read_number("0,925", NumberFormat::Point),
+            NumberReading::Ambiguous
+        );
+        for format in [NumberFormat::Comma, NumberFormat::Point] {
+            assert_eq!(read_number("0 925", format), NumberReading::NotANumber);
+            assert_eq!(read_number("0'925", format), NumberReading::NotANumber);
+            assert_eq!(read_number("01 234", format), NumberReading::NotANumber);
+        }
+    }
+
+    #[test]
+    fn blank_and_non_numbers_are_told_apart_never_zero() {
+        for format in [NumberFormat::Comma, NumberFormat::Point] {
+            assert_eq!(read_number("", format), NumberReading::Blank);
+            assert_eq!(read_number("  ", format), NumberReading::Blank);
+        }
+        for (input, format) in [
             ("1,2,3", NumberFormat::Comma),
             ("1.2.3", NumberFormat::Point),
             ("12,34,567", NumberFormat::Point),
             ("1,234 567", NumberFormat::Point),
+            ("1'234 567", NumberFormat::Comma),
             ("7 5", NumberFormat::Comma),
             ("1234 567", NumberFormat::Comma),
             ("1 234,5,6", NumberFormat::Comma),
             ("1,234.5,6", NumberFormat::Point),
-            // Bare marks, blank, signs, letters, exponents.
             (",5", NumberFormat::Comma),
             ("5,", NumberFormat::Comma),
             (".5", NumberFormat::Point),
-            ("", NumberFormat::Point),
-            ("  ", NumberFormat::Comma),
             ("-", NumberFormat::Comma),
             ("--2", NumberFormat::Point),
             ("12 %", NumberFormat::Comma),
@@ -486,24 +611,11 @@ mod tests {
             ("dix", NumberFormat::Comma),
         ] {
             assert_eq!(
-                parse_decimal(input, format),
-                None,
+                read_number(input, format),
+                NumberReading::NotANumber,
                 "{input:?} under {format:?}"
             );
         }
-    }
-
-    #[test]
-    fn canonical_input_stores_the_reading_without_trailing_zeros() {
-        assert_eq!(
-            canonical_input("12,50", NumberFormat::Comma).as_deref(),
-            Some("12.5")
-        );
-        assert_eq!(
-            canonical_input("1,000", NumberFormat::Point).as_deref(),
-            Some("1000")
-        );
-        assert_eq!(canonical_input("1.000", NumberFormat::Comma), None);
     }
 
     #[test]

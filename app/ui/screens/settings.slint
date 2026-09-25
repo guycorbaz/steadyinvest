@@ -494,6 +494,9 @@ export component SettingsScreen inherits Rectangle {
             stop-panel := PanelCard {
                 title: @tr("Seuil suiveur par défaut");
                 property <string> draft: Prefs.default-trailing-stop-pct;
+                // G1 I review: re-sync on every re-mirror (a number-format change re-spells it).
+                property <int> epoch: Prefs.number-settings-epoch;
+                changed epoch => { stop-panel.draft = Prefs.default-trailing-stop-pct; }
 
                 HorizontalLayout {
                     alignment: start;
@@ -533,6 +536,8 @@ export component SettingsScreen inherits Rectangle {
             withholding-panel := PanelCard {
                 title: @tr("Retenue à la source par défaut (dividendes)");
                 property <string> draft: Prefs.withholding-rate-pct;
+                property <int> epoch: Prefs.number-settings-epoch;
+                changed epoch => { withholding-panel.draft = Prefs.withholding-rate-pct; }
 
                 HorizontalLayout {
                     alignment: start;
@@ -569,6 +574,15 @@ export component SettingsScreen inherits Rectangle {
                 property <string> draft-target-small: Prefs.size-target-small-pct;
                 property <string> draft-target-medium: Prefs.size-target-medium-pct;
                 property <string> draft-target-large: Prefs.size-target-large-pct;
+                property <int> epoch: Prefs.number-settings-epoch;
+                changed epoch => {
+                    size-panel.draft-threshold = Prefs.concentration-threshold-pct;
+                    size-panel.draft-small-max = Prefs.size-small-max;
+                    size-panel.draft-medium-max = Prefs.size-medium-max;
+                    size-panel.draft-target-small = Prefs.size-target-small-pct;
+                    size-panel.draft-target-medium = Prefs.size-target-medium-pct;
+                    size-panel.draft-target-large = Prefs.size-target-large-pct;
+                }
 
                 HorizontalLayout {
                     alignment: start;

@@ -9,7 +9,7 @@ use rust_decimal::Decimal;
 use steadyinvest_persistence::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
 use uuid::Uuid;
 
-use crate::viewmodel::format::{NumberFormat, parse_decimal};
+use crate::viewmodel::format::NumberFormat;
 
 use super::{
     JournalState, MSG_HOLDING_AMOUNT_OUT_OF_RANGE, MSG_HOLDING_INVALID_CURRENCY,
@@ -17,7 +17,7 @@ use super::{
     MSG_HOLDING_NO_STUDY, MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_DELETED,
     MSG_HOLDING_STUDY_UNAVAILABLE, MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME,
     MSG_PORTFOLIO_LAST, MSG_PORTFOLIO_NOT_FOUND, MSG_READ_ONLY_WRITE,
-    holding_study_other_currency_message, portfolio_has_holdings_message, watch_error,
+    holding_study_other_currency_message, portfolio_has_holdings_message, read_typed, watch_error,
 };
 
 /// One study a position can be added for (G1 review, Guy's decision 3) — the #81 link key
@@ -412,10 +412,13 @@ impl JournalState {
     }
 
     /// Add a holding (FR36): a security symbol, a quantity, a purchase price and the `currency` it is
-    /// denominated in (Story 6.2, FR38). Validates the symbol (non-empty), the two decimals (exact,
-    /// quantity > 0, price ≥ 0) and the currency (a supported allow-list member) **in the app layer**
-    /// — persistence stores faithfully, native, never converted (FR28). Id/timestamp from the injected
-    /// sources. Guarded (read-only / no-journal / save-failure → a neutral notice).
+    /// denominated in (Story 6.2, FR38). Validates the symbol (non-empty), the two decimals and the
+    /// currency (a supported allow-list member) **in the app layer**. The quantity and the price
+    /// are the user's TYPED text, read under the user's number format
+    /// ([`crate::viewmodel::format::read_number`], G1 I: « 10,5 » under the comma format) — exact,
+    /// quantity > 0, price ≥ 0; an ambiguous number is refused by name — and stored canonical;
+    /// persistence stores faithfully, native, never converted (FR28). Id/timestamp from the
+    /// injected sources. Guarded (read-only / no-journal / save-failure → a neutral notice).
     pub fn add_holding(
         &mut self,
         ticker: &str,
@@ -573,8 +576,7 @@ impl JournalState {
                 .set_trailing_stop(holding_id, None, None)
                 .map_err(watch_error);
         }
-        let pct = self
-            .read_amount(pct_input)
+        let pct = Some(self.read_typed(pct_input, MSG_HOLDING_INVALID_STOP)?)
             .filter(|p| p.is_sign_positive() && !p.is_zero() && *p < Decimal::ONE_HUNDRED)
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
         let holding = self
@@ -789,12 +791,16 @@ fn validate_holding_amounts(
     purchase_price: &str,
     format: NumberFormat,
 ) -> Result<(String, String), String> {
-    let qty = parse_decimal(quantity, format)
+    let qty = Some(read_typed(quantity, format, MSG_HOLDING_INVALID_NUMBER)?)
         .filter(|q| q.is_sign_positive() && !q.is_zero())
         .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
-    let price = parse_decimal(purchase_price, format)
-        .filter(|p| !p.is_sign_negative())
-        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+    let price = Some(read_typed(
+        purchase_price,
+        format,
+        MSG_HOLDING_INVALID_NUMBER,
+    )?)
+    .filter(|p| !p.is_sign_negative())
+    .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
     let max = max_holding_magnitude();
     if qty > max || price > max {
         return Err(MSG_HOLDING_AMOUNT_OUT_OF_RANGE.to_string());

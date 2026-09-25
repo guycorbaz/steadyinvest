@@ -35,7 +35,8 @@ use steadyinvest_persistence::{Error as PersistError, Journal, clear_lock, lock_
 use uuid::Uuid;
 
 use crate::clock::{Clock, IdGen};
-use crate::viewmodel::format::NumberFormat;
+use crate::viewmodel::format::{NumberFormat, NumberReading};
+use steadyinvest_contract::Money;
 
 mod cells;
 mod concentration;
@@ -141,6 +142,33 @@ pub struct OpenOutcome {
     /// `true` when the target was the journal ALREADY open (re-selecting it is a no-op): the
     /// dossier did not change, so the session it carries must not be reset (G1 G review).
     pub unchanged: bool,
+}
+
+/// A user-typed amount under the user's number format (G1 I review): its value, or the named
+/// refusal — `not_a_number` (the rail's own message) for a blank field or a text that is no number,
+/// the format's ambiguous-number message for a number in another spelling. Never a guess.
+pub(crate) fn read_typed(
+    input: &str,
+    format: NumberFormat,
+    not_a_number: &str,
+) -> Result<Decimal, String> {
+    match crate::viewmodel::format::read_number(input, format) {
+        NumberReading::Value(d) => Ok(d),
+        NumberReading::Ambiguous => Err(ambiguous_number_message(format).to_string()),
+        NumberReading::Blank | NumberReading::NotANumber => Err(not_a_number.to_string()),
+    }
+}
+
+/// A user-typed study entry (cell, judgment field) under the user's number format (G1 I review):
+/// blank → `None` (the field is cleared — an explicit gap); a number → its value; a text that is no
+/// number, or an ambiguous one, is REFUSED with its reason — never turned into an empty hole.
+pub fn typed_entry(input: &str, format: NumberFormat) -> Result<Option<Money>, String> {
+    match crate::viewmodel::format::read_number(input, format) {
+        NumberReading::Blank => Ok(None),
+        NumberReading::Value(d) => Ok(Some(Money::from(d))),
+        NumberReading::Ambiguous => Err(ambiguous_number_message(format).to_string()),
+        NumberReading::NotANumber => Err(MSG_VALUE_NOT_A_NUMBER.to_string()),
+    }
 }
 
 impl JournalState {
@@ -287,10 +315,9 @@ impl JournalState {
         self.number_format
     }
 
-    /// Read a user-typed amount under the user's number format (G1 I) — `None` when blank, not a
-    /// number, or ambiguous; never a guess.
-    pub(crate) fn read_amount(&self, input: &str) -> Option<Decimal> {
-        crate::viewmodel::format::parse_decimal(input, self.number_format)
+    /// Read a user-typed amount under the user's number format (G1 I) — see [`read_typed`].
+    pub(crate) fn read_typed(&self, input: &str, not_a_number: &str) -> Result<Decimal, String> {
+        read_typed(input, self.number_format, not_a_number)
     }
 
     /// True when the open journal is read-only (newer-schema file).

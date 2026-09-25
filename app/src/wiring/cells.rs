@@ -12,6 +12,7 @@ use uuid::Uuid;
 use steadyinvest_contract::Money;
 
 use crate::state::UnlockScope;
+use crate::viewmodel::format::NumberReading;
 use crate::wiring::Session;
 use crate::wiring::push::push_form;
 use crate::{MainWindow, Studies};
@@ -64,8 +65,17 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 let format = config.borrow().number_format;
                 // Issue #117: Sales / pre-tax profit are typed in millions — scale back to the stored
                 // absolute value before persisting (a no-op for every other field).
-                let value = viewmodel::format::parse_amount(&text, format)
-                    .map(|m| viewmodel::entry::entered_to_stored(m, field.as_str()));
+                // G1 I review: a blank clears the cell; a non-number or an ambiguous number is
+                // REFUSED with its reason and the cell left as it was — never an empty hole.
+                let value = match state::typed_entry(&text, format) {
+                    Ok(value) => {
+                        value.map(|m| viewmodel::entry::entered_to_stored(m, field.as_str()))
+                    }
+                    Err(message) => {
+                        studies.set_notice(message.into());
+                        return false;
+                    }
+                };
                 let result = journal_state.borrow_mut().edit_cell(
                     id,
                     year_index.max(0) as usize,
@@ -115,15 +125,24 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                         return;
                     }
                 };
-                let values = viewmodel::entry::parse_pasted_column(&text, format);
-                if values.is_empty() {
+                let readings = viewmodel::entry::parse_pasted_column(&text, format);
+                if readings.is_empty() {
                     return;
                 }
                 // Issue #117: a column pasted into Sales / pre-tax profit is in millions — scale each
-                // value back to the stored absolute (a no-op for every other field).
-                let values: Vec<Option<Money>> = values
+                // value back to the stored absolute (a no-op for every other field). G1 I review: a
+                // line that is no number, or an ambiguous one, keeps its cell as it was.
+                let values: Vec<state::PastedLine> = readings
                     .into_iter()
-                    .map(|v| v.map(|m| viewmodel::entry::entered_to_stored(m, field.as_str())))
+                    .map(|reading| match reading {
+                        NumberReading::Value(d) => state::PastedLine::Set(Some(
+                            viewmodel::entry::entered_to_stored(Money::from(d), field.as_str()),
+                        )),
+                        NumberReading::Blank => state::PastedLine::Set(None),
+                        NumberReading::NotANumber | NumberReading::Ambiguous => {
+                            state::PastedLine::Keep
+                        }
+                    })
                     .collect();
                 let result = journal_state.borrow_mut().paste_column(
                     id,
@@ -132,8 +151,12 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                     &values,
                 );
                 match result {
-                    Ok(filled) => {
-                        if filled < values.len() {
+                    Ok(outcome) => {
+                        if !outcome.kept_years.is_empty() {
+                            studies.set_notice(
+                                state::paste_lines_kept_message(&outcome.kept_years).into(),
+                            );
+                        } else if outcome.filled < values.len() {
                             studies.set_notice(state::MSG_PASTE_CLIPPED.into());
                         } else {
                             studies.set_notice(SharedString::new());

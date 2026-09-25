@@ -691,6 +691,8 @@ mod tests {
         // The G1 on-screen check adds the stop caption without a repeated level list (every level
         // breached): +1 = 903.
         // integ/g1-a-to-h (G1 fix PRs A–H combined): 892 + B 11 + C 9 + D 26 + E 15 = 953, measured.
+        // G1 I (locale numbers + its review) adds no @tr literal (its refusals are MSG_*; the new
+        // Slint lines are callbacks and handlers): 953 + 0 = 953, measured.
         assert!(
             total >= 953,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
@@ -807,11 +809,15 @@ mod tests {
         // and the study-created-but-empty notice (MSG_QUICK_BLANK_CURRENCY,
         // MSG_QUICK_SCREEN_STUDY_EMPTY) and the criblage's unreadable-watchlist refusal
         // (MSG_SCREENING_LIST_UNREADABLE): 142. The G1 review of 7.1 (#237) adds the marker of a
-        // comparison pick whose study is gone (MSG_COMPARISON_PICK_GONE): 142 + 1 = 143.
+        // comparison pick whose study is gone (MSG_COMPARISON_PICK_GONE): 142 + 1 = 143. The G1 I
+        // review names the ambiguous typed number (MSG_NUMBER_AMBIGUOUS_COMMA / _POINT, the
+        // expected spelling per format), the study entry that is no number
+        // (MSG_VALUE_NOT_A_NUMBER — refused, the value kept) and the pasted lines kept by year
+        // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            153,
-            // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured.
+            157,
+            // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }

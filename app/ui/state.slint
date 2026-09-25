@@ -862,6 +862,10 @@ export global Prefs {
     // Mirrored from AppConfig.default_trailing_stop_pct ("" when none); the per-holding set-stop
     // control pre-fills it.
     in-out property <string> default-trailing-stop-pct;
+    // G1 I review: bumped by Rust on a number-format change — the Réglages panels re-assign their
+    // drafts on it (re-spelled in the new format), since the two-way `text <=> draft` severs the
+    // declarative binding to these properties. A save re-syncs its own card only (G1 review, AC1).
+    in-out property <int> number-settings-epoch;
     // Story 6.4 (FR41): the default dividend withholding rate in percent (mirrors
     // AppConfig.withholding_rate_pct_or_default — always a value, 35 = CH impôt anticipé).
     in-out property <string> withholding-rate-pct;
@@ -1504,6 +1508,9 @@ export global Holdings {
     // G1 I: whether a typed text reads as a number under the user's number format (the one rule
     // the rails read it by — « 10,5 » under the comma format, where Slint's `is-float` says no).
     pure callback reads-as-number(string) -> bool;
+    // G1 I review: the named refusal of an AMBIGUOUS typed number (« 1.085 » under the comma
+    // format), "" otherwise — so the dialog's Enter shows it instead of silently doing nothing.
+    pure callback ambiguous-number-refusal(string) -> string;
     // Guy, 2026-09-24: every study's ticker, unique, sorted (the comparison pickers' list).
     in-out property <[string]> study-tickers;
     // G1 review (Guy's decision 3): the position dialog's choices are STUDIES — one per (ticker,

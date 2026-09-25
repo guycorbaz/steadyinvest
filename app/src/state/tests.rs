@@ -6962,10 +6962,19 @@ fn the_rails_read_typed_amounts_under_the_comma_format() {
     state.set_holding_trailing_stop(id, "12.5").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert_eq!(h.trailing_stop_pct.as_deref(), Some("12.5"));
-    // A foreign thousands point is ambiguous: refused, never read as 1.234 nor 1234.
+    // A possible thousands point is ambiguous: refused BY NAME, never read as 1.234 nor 1234.
     assert_eq!(
         state.record_buy_for(id, "2026-07-01", "1.234", "10", "", "", "CHF"),
+        Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+    );
+    // A text that is no number keeps the rail's own refusal.
+    assert_eq!(
+        state.record_buy_for(id, "2026-07-01", "deux", "10", "", "", "CHF"),
         Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+    );
+    assert_eq!(
+        state.set_holding_trailing_stop(id, "12.500"),
+        Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
     );
     state
         .record_buy_for(id, "2026-07-01", "2", "11,25", "1,5", "", "CHF")
@@ -7011,8 +7020,18 @@ fn the_rails_read_typed_amounts_under_the_point_format() {
     let h = state.list_holdings().into_iter().next().unwrap();
     assert_eq!(h.quantity, "1234");
     assert_eq!(h.purchase_price, "10.5");
-    // A comma that cannot group is the decimal mark.
-    state.sell_holding(h.id, "0,5", "", "CHF").unwrap();
+    // A comma is never a decimal mark under the point format: « 0,5 » is ambiguous, refused by
+    // name, nothing sold; « 0.5 » sells.
+    assert_eq!(
+        state.sell_holding(h.id, "0,5", "", "CHF"),
+        Err(MSG_NUMBER_AMBIGUOUS_POINT.to_string())
+    );
+    assert_eq!(
+        state.add_holding("NOVN", "10", "0,925", "CHF", ""),
+        Err(MSG_NUMBER_AMBIGUOUS_POINT.to_string()),
+        "« 0,925 » is never read 925"
+    );
+    state.sell_holding(h.id, "0.5", "", "CHF").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert_eq!(h.quantity, "1233.5");
 }
@@ -7025,6 +7044,10 @@ fn a_provider_fx_rate_is_never_read_as_typed_text() {
     // 1.085 typed under the comma format is ambiguous; FETCHED, it is a Decimal and records.
     assert_eq!(
         state.upsert_manual_fx_rate("USD", "1.085", "2026-06-26", "CHF"),
+        Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+    );
+    assert_eq!(
+        state.upsert_manual_fx_rate("USD", "un", "2026-06-26", "CHF"),
         Err(MSG_FX_INVALID_RATE.to_string())
     );
     state
@@ -7037,4 +7060,78 @@ fn a_provider_fx_rate_is_never_read_as_typed_text() {
         )
         .unwrap();
     assert_eq!(state.list_fx_rates()[0].rate, "1.085");
+}
+
+#[test]
+fn a_refused_pasted_line_keeps_its_cell_and_names_its_year() {
+    // G1 I review: a non-number or an ambiguous line is never turned into an empty hole.
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x1904, "2026-06-27T10:00:00Z");
+    let id = state.create_study("NESN", "CHF").unwrap();
+    state
+        .edit_cell(id, 0, entry::FIELD_HIGH, Some(und_money(100)))
+        .unwrap();
+    state
+        .edit_cell(id, 1, entry::FIELD_HIGH, Some(und_money(110)))
+        .unwrap();
+    let years: Vec<i32> = state
+        .get_study(id)
+        .unwrap()
+        .years
+        .iter()
+        .map(|y| y.year)
+        .collect();
+    let outcome = state
+        .paste_column(
+            id,
+            0,
+            entry::FIELD_HIGH,
+            &[PastedLine::Keep, PastedLine::Set(Some(und_money(120)))],
+        )
+        .unwrap();
+    assert_eq!(
+        outcome,
+        PasteOutcome {
+            filled: 2,
+            kept_years: vec![years[0]],
+        }
+    );
+    let study = state.get_study(id).unwrap();
+    let high = |i: usize| {
+        entry::get_cell(&study.years[i], entry::FIELD_HIGH)
+            .and_then(|c| c.value)
+            .map(|m| m.as_decimal())
+    };
+    assert_eq!(
+        high(0),
+        Some(Decimal::new(100, 0)),
+        "the kept cell is unchanged"
+    );
+    assert_eq!(high(1), Some(Decimal::new(120, 0)));
+    assert_eq!(
+        paste_lines_kept_message(&[2019, 2021]),
+        "Lignes non collées, nombre ambigu ou illisible : 2019, 2021 ; ces cellules sont inchangées."
+    );
+}
+
+#[test]
+fn a_typed_study_entry_is_blank_a_value_or_a_named_refusal() {
+    use crate::viewmodel::format::NumberFormat;
+    assert_eq!(typed_entry("  ", NumberFormat::Comma), Ok(None));
+    assert_eq!(
+        typed_entry("12,5", NumberFormat::Comma),
+        Ok(Some(Money::from(Decimal::new(125, 1))))
+    );
+    assert_eq!(
+        typed_entry("abc", NumberFormat::Comma),
+        Err(MSG_VALUE_NOT_A_NUMBER.to_string())
+    );
+    assert_eq!(
+        typed_entry("12,5", NumberFormat::Point),
+        Err(MSG_NUMBER_AMBIGUOUS_POINT.to_string())
+    );
+    assert_eq!(
+        typed_entry("1.085", NumberFormat::Comma),
+        Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+    );
 }

@@ -569,7 +569,7 @@ export component ModalDialog inherits Rectangle {
                     // Enter (G1 review, decision 1): Enter records only a typed number — blank or
                     // spaces never reach the whole-position rail; that sale takes a click on the
                     // verb. « A typed number » is read by the rails' own rule, under the user's
-                    // number format (G1 I).
+                    // number format (G1 I); an ambiguous one is refused by name (G1 I review).
                     if Dialog.form-id == "sell-trigger": VerticalLayout {
                         spacing: Tokens.space-12;
                         trig-qty := LabeledField {
@@ -578,13 +578,25 @@ export component ModalDialog inherits Rectangle {
                             text <=> Dialog.draft-quantity;
                             autofocus: true;
                             focus-request: root.first-request;
-                            accepted => { if (Holdings.reads-as-number(Dialog.draft-quantity)) { root.submit(); } }
+                            accepted => {
+                                if (Holdings.reads-as-number(Dialog.draft-quantity)) {
+                                    root.submit();
+                                } else {
+                                    Dialog.field-error = Holdings.ambiguous-number-refusal(Dialog.draft-quantity);
+                                }
+                            }
                         }
                         LabeledField {
                             label: @tr("Raison (facultative)");
                             placeholder: @tr("Ce qui motive l'opération");
                             text <=> Dialog.draft-rationale;
-                            accepted => { if (Holdings.reads-as-number(Dialog.draft-quantity)) { root.submit(); } }
+                            accepted => {
+                                if (Holdings.reads-as-number(Dialog.draft-quantity)) {
+                                    root.submit();
+                                } else {
+                                    Dialog.field-error = Holdings.ambiguous-number-refusal(Dialog.draft-quantity);
+                                }
+                            }
                         }
                     }
 

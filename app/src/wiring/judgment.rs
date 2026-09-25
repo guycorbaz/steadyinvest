@@ -44,7 +44,15 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 return;
             };
             let format = config.borrow().number_format;
-            let value = viewmodel::format::parse_amount(&text, format);
+            // G1 I review: blank clears the field; a non-number or an ambiguous number is refused
+            // with its reason, the saved value left as it was.
+            let value = match state::typed_entry(&text, format) {
+                Ok(value) => value,
+                Err(message) => {
+                    studies.set_notice(message.into());
+                    return;
+                }
+            };
             let result = journal_state
                 .borrow_mut()
                 .set_judgment_field(id, field.as_str(), value);

@@ -9,7 +9,7 @@ use steadyinvest_core::checklist::{
 use steadyinvest_core::rounding::{DisplayField, round_for_display};
 use steadyinvest_report::{QuickScreen, QuickScreenLadder, QuickScreenPriceRow};
 
-use crate::viewmodel::format::{NumberFormat, format_scaled, parse_decimal};
+use crate::viewmodel::format::{NumberFormat, NumberReading, format_scaled, read_number};
 
 fn f(v: Option<Decimal>, field: DisplayField, format: NumberFormat) -> String {
     v.map(|d| format_scaled(d, field, format))
@@ -203,11 +203,19 @@ pub fn meets_key(rate_pct: Option<Decimal>, objective: &str, format: NumberForma
     if cleaned.is_empty() {
         return String::new();
     }
-    // The one reading rule of user numbers (G1 I): under the Point preset « 7,5 » cannot group, so
-    // it reads 7.5; a badly grouped « 7 5 » is unread — never a silently different target (G1 D).
-    let Some(target) = parse_decimal(cleaned, format) else {
+    // The one reading rule of user numbers (G1 I review): a growth objective carries no grouping,
+    // so any grouping mark (a space, an apostrophe, the Point preset's comma) leaves it unread —
+    // « 7,5 » under Point is never 75 nor guessed 7.5 (G1 D); an ambiguous number is unread too.
+    let grouped = cleaned
+        .chars()
+        .any(|c| c.is_whitespace() || c == '\'' || c == '\u{2019}')
+        || (format == NumberFormat::Point && cleaned.contains(','));
+    let NumberReading::Value(target) = read_number(cleaned, format) else {
         return "unread".into();
     };
+    if grouped {
+        return "unread".into();
+    }
     match rate_pct.map(|r| round_for_display(r, DisplayField::Percent)) {
         Some(r) if r >= target => "yes".into(),
         Some(_) => "no".into(),
@@ -241,9 +249,25 @@ mod tests {
 
     #[test]
     fn a_grouped_objective_is_unread_never_a_different_number() {
-        // A comma that cannot group reads as the decimal mark (G1 I) — 7.5, not 75.
-        assert_eq!(meets_key(Some(d("8")), "7,5", NumberFormat::Point), "yes");
-        assert_eq!(meets_key(Some(d("7")), "7,5", NumberFormat::Point), "no");
+        // A comma under Point is grouping, never a decimal mark: unread, never 75 nor 7.5.
+        assert_eq!(
+            meets_key(Some(d("8")), "7,5", NumberFormat::Point),
+            "unread"
+        );
+        assert_eq!(
+            meets_key(Some(d("8")), "1,000", NumberFormat::Point),
+            "unread"
+        );
+        assert_eq!(
+            meets_key(Some(d("8")), "7'5", NumberFormat::Comma),
+            "unread"
+        );
+        // An ambiguous point under Comma is unread (G1 I review).
+        assert_eq!(
+            meets_key(Some(d("8")), "7.500", NumberFormat::Comma),
+            "unread"
+        );
+        assert_eq!(meets_key(Some(d("8")), "7.5", NumberFormat::Comma), "yes");
         assert_eq!(meets_key(Some(d("8")), "7.5", NumberFormat::Point), "yes");
         assert_eq!(
             meets_key(Some(d("8")), "7 5", NumberFormat::Comma),

@@ -20,6 +20,23 @@ use super::{
     MSG_YEARS_MAX,
 };
 
+/// One line of a pasted column (G1 I review): a value to write (`None` = a blank line, an empty
+/// gap), or a line refused as a non-number / an ambiguous number whose cell is kept as it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PastedLine {
+    Set(Option<Money>),
+    Keep,
+}
+
+/// What a paste did: the lines consumed inside the grid (the caller compares it with the column
+/// length to surface the « some lines dropped » notice) and the years whose cells were kept
+/// because their line was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PasteOutcome {
+    pub filled: usize,
+    pub kept_years: Vec<i32>,
+}
+
 /// The scope of a bulk "unlock all" (Story 2.5): the whole study, a single year column, or a single
 /// metric (one §3 column / §2 row) across all years. Each flips every `✓` it covers back to `?`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -362,18 +379,18 @@ impl JournalState {
     }
 
     /// Paste a parsed column into consecutive years of the **same field**, downward from
-    /// `start_year` (FR16). Each value is already a locale-parsed [`Money`] / `None`
-    /// ([`entry::parse_pasted_column`]); a `None` line leaves its cell an empty to-fill gap (**never
-    /// `0`**). Lines past the last year are dropped. One upsert for the whole column (one
-    /// `logical_version` bump). Returns the number of cells actually filled (the caller compares it
-    /// with the column length to surface a neutral "some lines dropped" notice).
+    /// `start_year` (FR16). Each line is already read ([`entry::parse_pasted_column`]):
+    /// [`PastedLine::Set`] writes a locale-parsed [`Money`], or `None` for a blank line (an empty
+    /// to-fill gap, **never `0`**); [`PastedLine::Keep`] (a non-number or an ambiguous number, G1 I
+    /// review) leaves its cell exactly as it was and names its year in the outcome. Lines past the
+    /// last year are dropped. One upsert for the whole column (one `logical_version` bump).
     pub fn paste_column(
         &mut self,
         study_id: Uuid,
         start_year: usize,
         field: &str,
-        values: &[Option<Money>],
-    ) -> Result<usize, String> {
+        values: &[PastedLine],
+    ) -> Result<PasteOutcome, String> {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
@@ -389,9 +406,18 @@ impl JournalState {
                 entry::materialize_year_window(&study.created_at, &self.manual_provenance());
         }
         let mut filled = 0usize;
-        for (offset, value) in values.iter().enumerate() {
+        let mut kept_years = Vec::new();
+        for (offset, line) in values.iter().enumerate() {
             let Some(year) = study.years.get_mut(start_year + offset) else {
                 break; // ran past the grid bottom — drop the surplus line
+            };
+            let value = match line {
+                PastedLine::Set(value) => value,
+                PastedLine::Keep => {
+                    kept_years.push(year.year);
+                    filled += 1;
+                    continue;
+                }
             };
             let base = entry::get_cell(year, field)
                 .unwrap_or_else(|| entry::tofill_cell(self.manual_provenance()));
@@ -415,7 +441,7 @@ impl JournalState {
                 if before != study {
                     self.history.record(before);
                 }
-                Ok(filled)
+                Ok(PasteOutcome { filled, kept_years })
             }
             Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
             Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
