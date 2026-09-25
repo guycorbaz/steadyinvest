@@ -162,10 +162,13 @@ reviewed PR (G3) or listed under Defer.
 - [ ] [Review][Patch] Studies read failure shown as « aucune étude » in the position dialog (#95) [app/src/wiring/holdings.rs:211-221,861-882]
 - [ ] [Review][Patch] « Tout non classé » band compares list lengths (0 == 0 when concentration is unavailable) [app/ui/screens/portfolio.slint:385]
 - [ ] [Review][Patch] Portfolio rename with an unparsable id reports success; stop / sell return false without a cause [app/src/wiring/holdings.rs:138-145]
-- [ ] [Review][Patch] A refused dossier switch clears the open dossier's location status [app/src/wiring/journal.rs:163-166]
+- [x] [Review][Patch] A refused dossier switch clears the open dossier's location status [app/src/wiring/journal.rs:163-166]
 - [ ] [Review][Patch] Adoption chips (#213/#214): no year shown, may come from a very old year, est-low EPS ≤ 0 proposed; candidate (a) has no positivity guard; (a)/(d) overflow names the wrong reason [app/src/viewmodel/engine.rs:380-381,448-470, core/src/ssg/risk_reward.rs:34-38]
 - [ ] [Review][Patch] Orphan confirm properties and dead code (`study-action-confirm-visible`, `import-confirm`, `restore-confirm`, `Dialog.notice`, `LabeledDropdown.changed`, `NARROW_NBSP` misnamed) [app/ui/state.slint:784,900,908]
 - [ ] [Review][Patch] Tests: #217 per-share rebasing coverage lost in `eodhd_mapping.rs`; no n=3 / fractional split test [ingestion/tests/eodhd_mapping.rs]
 - [x] [Review][Defer] Focus taken through a 30 ms timer (Slint 1.17 workaround) [app/ui/components/action_button.slint] — deferred, cross-cutting
 - [x] [Review][Defer] Same-day ledger rows ordered by entry time → a back-dated buy after a same-day sale is refused as an oversell [persistence/src/transactions.rs:464,516] — deferred, design of day-granular dates
 - [x] [Review][Defer] Some states still plain text instead of bands (candidates panel, watchlist « Aucune étude liée », consolidation rows); success notices of Études in a StatusBand [portfolio.slint:201, watchlist.slint:123, dashboard.slint:264] — deferred, cosmetic
+
+Fixed in PR G (G1, branch `fix/g1-g-dossier-switch`): a refused switch recomputes the open
+dossier's own status (never blanks it, never keeps a stale reclaim offer).
