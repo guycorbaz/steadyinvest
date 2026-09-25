@@ -15,7 +15,9 @@ use crate::provider::ProviderChoice;
 use crate::state::{self, JournalState};
 use crate::viewmodel::engine::build_frame;
 use crate::viewmodel::format::NumberFormat;
-use crate::viewmodel::quick_screen::{QuickScreenHeader, meets_key, quick_screen_view};
+use crate::viewmodel::quick_screen::{
+    QuickScreenHeader, meets_key, quick_screen_view, respell_objective,
+};
 use crate::wiring::Session;
 use crate::wiring::fetch::resolve_chain;
 use crate::wiring::studies::refresh_studies;
@@ -127,14 +129,20 @@ fn push(ui: &MainWindow, session: &QuickScreenSession, today: &str, format: Numb
     q.set_notice(SharedString::new());
 }
 
-/// Re-render the examination of the moment in `format` (a number-format change — G1 final
-/// review, re-render completeness). The reader's fields stay; the notice slot keeps its message.
+/// Re-render the examination of the moment in `format` (a number-format change from `old` — G1
+/// final review, re-render completeness). The reader's objective is re-spelled into the new
+/// format (a valid « 7,5 % » never turns « non lu » by the switch); the other fields stay; the
+/// notice slot keeps its message.
 pub(crate) fn rerender(
     ui: &MainWindow,
     state: &JournalState,
     slot: &std::cell::RefCell<Option<QuickScreenSession>>,
+    old: NumberFormat,
     format: NumberFormat,
 ) {
+    let q = ui.global::<QuickScreen>();
+    let objective = respell_objective(&q.get_objective(), old, format);
+    q.set_objective(objective.into());
     if let Some(session) = slot.borrow().as_ref() {
         let notice = ui.global::<QuickScreen>().get_notice();
         push(ui, session, &today(state), format);
@@ -208,17 +216,68 @@ pub(crate) fn session_from_study(
     })
 }
 
+/// A kept « Examiner » outcome (G1 final review): the result, or the failure, of a request whose
+/// answer arrived while the studies list was not on screen — named on the list's « Examiner un
+/// titre » card, never laid as a screen or a dialog over what the reader had open.
+pub(crate) enum KeptExamination {
+    Result(Box<QuickScreenSession>),
+    Failure { ticker: String, message: String },
+}
+
+/// The kept slot (session-only; one outcome at most).
+pub(crate) type KeptSlot = std::cell::RefCell<Option<KeptExamination>>;
+
+/// What changes the kept slot — its whole lifecycle (G1 final review).
+pub(crate) enum KeptEvent {
+    /// A new « Examiner » request is sent: the older outcome is superseded by the reader's choice.
+    NewRequest,
+    /// An examination is shown (a result on the list, one from a study or the criblage, or the
+    /// kept one opened): whatever was kept is older than what is now on screen — dropped, so
+    /// « Ouvrir l'examen » can never replace a fresher examination.
+    Shown,
+    /// A newer outcome is kept: it replaces the previous one explicitly.
+    Kept(KeptExamination),
+    /// « Compris » on a kept failure, or a dossier change.
+    Cleared,
+}
+
+/// PURE: the kept slot after `event`.
+pub(crate) fn kept_after(event: KeptEvent) -> Option<KeptExamination> {
+    match event {
+        KeptEvent::Kept(kept) => Some(kept),
+        KeptEvent::NewRequest | KeptEvent::Shown | KeptEvent::Cleared => None,
+    }
+}
+
+/// Apply `event` to the kept slot and mirror it on the card (`ready-ticker` / `ready-failure`) —
+/// the one path that writes either.
+pub(crate) fn update_kept(ui: &MainWindow, kept: &KeptSlot, event: KeptEvent) {
+    let next = kept_after(event);
+    let q = ui.global::<QuickScreen>();
+    let (ticker, failure) = match &next {
+        Some(KeptExamination::Result(s)) => (s.ticker.clone(), String::new()),
+        Some(KeptExamination::Failure { ticker, message }) => (ticker.clone(), message.clone()),
+        None => (String::new(), String::new()),
+    };
+    q.set_ready_ticker(ticker.into());
+    q.set_ready_failure(failure.into());
+    *kept.borrow_mut() = next;
+}
+
 /// Push `session` to the screen, keep it as the examination of the moment, open the screen. A
 /// new examination starts with blank reader's answers (G1 review: the reasons and answers typed for
 /// one company never carry over to the next one's screen or PDF); the objective stays — it is the
-/// reader's bar for the session (spec Q1).
+/// reader's bar for the session (spec Q1). A kept « Examiner » outcome is older than this one: it
+/// goes ([`KeptEvent::Shown`]).
 pub(crate) fn show(
     ui: &MainWindow,
     state: &JournalState,
     format: NumberFormat,
     slot: &Rc<std::cell::RefCell<Option<QuickScreenSession>>>,
+    kept: &KeptSlot,
     session: QuickScreenSession,
 ) {
+    update_kept(ui, kept, KeptEvent::Shown);
     let q = ui.global::<QuickScreen>();
     q.set_reasons(SharedString::new());
     q.set_factors_continue(SharedString::new());
@@ -300,15 +359,13 @@ pub(crate) fn close_screen(
 pub(crate) fn clear_examination(
     ui: &MainWindow,
     slot: &std::cell::RefCell<Option<QuickScreenSession>>,
-    ready: &std::cell::RefCell<Option<QuickScreenSession>>,
+    kept: &KeptSlot,
     request: &Cell<u64>,
 ) {
     supersede_request(ui, request);
     *slot.borrow_mut() = None;
-    // A kept « Examiner » result was asked in the previous dossier: it goes too.
-    *ready.borrow_mut() = None;
-    ui.global::<QuickScreen>()
-        .set_ready_ticker(SharedString::new());
+    // A kept « Examiner » outcome was asked in the previous dossier: it goes too.
+    update_kept(ui, kept, KeptEvent::Cleared);
     ui.global::<Studies>().set_screen_open(false);
     ui.global::<QuickScreen>().set_notice(SharedString::new());
 }
@@ -326,6 +383,27 @@ pub(crate) struct FetchedExamination {
 /// row is the fiscal year in progress, which [`session_from_fetch`] drops).
 pub(crate) fn has_analysis_years(fetched: &FetchedFinancials) -> bool {
     fetched.canonical.years.iter().any(|y| y.sales.is_some())
+}
+
+/// Where a (current) « Examiner » outcome goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Landing {
+    /// The result opens on the list.
+    Show,
+    /// The failure is refused in the dialog (the list is on screen, nothing is covered).
+    Refuse,
+    /// Kept and named on the list's card — result or failure alike (G1 final review: never a
+    /// screen, nor a dialog, over an open study, comparison or examination).
+    Keep,
+}
+
+/// PURE: the landing of an outcome — `ok` = a result with analysis years.
+pub(crate) fn landing(lands_now: bool, ok: bool) -> Landing {
+    match (lands_now, ok) {
+        (true, true) => Landing::Show,
+        (true, false) => Landing::Refuse,
+        (false, _) => Landing::Keep,
+    }
 }
 
 /// PURE (G1 final review): an « Examiner » result opens at once only when the studies LIST is what
@@ -350,7 +428,7 @@ pub(crate) fn on_fetched(
     state: &JournalState,
     format: NumberFormat,
     slot: &Rc<std::cell::RefCell<Option<QuickScreenSession>>>,
-    ready: &std::cell::RefCell<Option<QuickScreenSession>>,
+    kept: &KeptSlot,
     request: &Cell<u64>,
     outcome: FetchedExamination,
 ) {
@@ -358,36 +436,57 @@ pub(crate) fn on_fetched(
         tracing::info!(ticker = %outcome.ticker, "superseded quick screen result dropped");
         return;
     }
-    let q = ui.global::<QuickScreen>();
-    q.set_fetching(false);
-    match outcome.result {
-        Ok(fetched) if !has_analysis_years(&fetched) => {
-            crate::wiring::dialog::refuse(ui, state::MSG_PROVIDER_NO_DATA);
-        }
-        Ok(fetched) => {
+    ui.global::<QuickScreen>().set_fetching(false);
+    let studies = ui.global::<Studies>();
+    let now = lands_now(
+        ui.get_current_screen(),
+        studies.get_study_open(),
+        studies.get_compare_open(),
+        studies.get_screen_open(),
+    );
+    // The result, or the failure's own cause.
+    let result = match outcome.result {
+        Ok(fetched) if !has_analysis_years(&fetched) => Err(state::MSG_PROVIDER_NO_DATA),
+        Ok(fetched) => Ok(fetched),
+        Err(error) => Err(state::provider_failure_notice(&error)),
+    };
+    match (landing(now, result.is_ok()), result) {
+        (Landing::Show, Ok(fetched)) => {
             let session = session_from_fetch(
                 &outcome.ticker,
                 &outcome.currency,
                 fetched,
                 outcome.effective,
             );
-            let studies = ui.global::<Studies>();
-            if lands_now(
-                ui.get_current_screen(),
-                studies.get_study_open(),
-                studies.get_compare_open(),
-                studies.get_screen_open(),
-            ) {
-                show(ui, state, format, slot, session);
-            } else {
-                tracing::info!(ticker = %session.ticker, "quick screen result kept for the list");
-                q.set_ready_ticker(session.ticker.as_str().into());
-                *ready.borrow_mut() = Some(session);
-            }
+            show(ui, state, format, slot, kept, session);
         }
-        Err(error) => {
-            crate::wiring::dialog::refuse(ui, state::provider_failure_notice(&error));
+        (Landing::Keep, Ok(fetched)) => {
+            tracing::info!(ticker = %outcome.ticker, "quick screen result kept for the list");
+            let session = session_from_fetch(
+                &outcome.ticker,
+                &outcome.currency,
+                fetched,
+                outcome.effective,
+            );
+            update_kept(
+                ui,
+                kept,
+                KeptEvent::Kept(KeptExamination::Result(Box::new(session))),
+            );
         }
+        (Landing::Keep, Err(message)) => {
+            tracing::info!(ticker = %outcome.ticker, "quick screen failure kept for the list");
+            let ticker = outcome.ticker.to_uppercase();
+            let message = message.to_string();
+            update_kept(
+                ui,
+                kept,
+                KeptEvent::Kept(KeptExamination::Failure { ticker, message }),
+            );
+        }
+        (_, Err(message)) => crate::wiring::dialog::refuse(ui, message),
+        // `landing` never refuses a result.
+        (Landing::Refuse, Ok(_)) => {}
     }
 }
 
@@ -426,7 +525,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         config,
         current_study,
         quick_screen: slot,
-        quick_screen_ready: ready,
+        quick_screen_ready: kept,
         quick_screen_request: request,
         fetch_tx,
         ..
@@ -437,6 +536,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let config = Rc::clone(config);
         let request = Rc::clone(request);
+        let kept = Rc::clone(kept);
         let fetch_tx = fetch_tx.clone();
         ui.global::<QuickScreen>().on_examine(move |ticker, currency| {
             let ui = ui_weak.unwrap();
@@ -468,6 +568,8 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
             let q = ui.global::<QuickScreen>();
             q.set_pick_currency(currency.as_str().into());
             q.set_fetching(true);
+            // A new request supersedes a kept outcome (the reader asked for another one).
+            update_kept(&ui, &kept, KeptEvent::NewRequest);
             let request_id = request.get() + 1;
             request.set(request_id);
             let primary = config.borrow().preferred_provider;
@@ -503,6 +605,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let current_study = Rc::clone(current_study);
         let slot = Rc::clone(slot);
+        let kept = Rc::clone(kept);
         ui.global::<QuickScreen>().on_examine_study(move || {
             let ui = ui_weak.unwrap();
             let Some(study) = current_study
@@ -523,7 +626,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
             let format = config.borrow().number_format;
             // An « Examiner » fetch in flight is NOT cancelled (G1 final review): its result is
             // kept for the list ([`lands_now`]), never dropped in silence.
-            show(&ui, &journal_state.borrow(), format, &slot, session);
+            show(&ui, &journal_state.borrow(), format, &slot, &kept, session);
         });
     }
     {
@@ -532,16 +635,38 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         let config = Rc::clone(config);
         let slot = Rc::clone(slot);
-        let ready = Rc::clone(ready);
+        let kept = Rc::clone(kept);
         ui.global::<QuickScreen>().on_open_ready(move || {
             let ui = ui_weak.unwrap();
-            let Some(session) = ready.borrow_mut().take() else {
+            // Only over the list (the card's home): never over an open examination, whose typed
+            // answers `show` would blank.
+            let studies = ui.global::<Studies>();
+            if !lands_now(
+                ui.get_current_screen(),
+                studies.get_study_open(),
+                studies.get_compare_open(),
+                studies.get_screen_open(),
+            ) {
                 return;
+            }
+            let session = match kept.borrow_mut().take() {
+                Some(KeptExamination::Result(session)) => *session,
+                other => {
+                    *kept.borrow_mut() = other;
+                    return;
+                }
             };
-            ui.global::<QuickScreen>()
-                .set_ready_ticker(SharedString::new());
             let format = config.borrow().number_format;
-            show(&ui, &journal_state.borrow(), format, &slot, session);
+            // `show` drops the (now taken) kept slot and clears the card.
+            show(&ui, &journal_state.borrow(), format, &slot, &kept, session);
+        });
+    }
+    {
+        // « Compris » on a kept failure.
+        let ui_weak = ui.as_weak();
+        let kept = Rc::clone(kept);
+        ui.global::<QuickScreen>().on_dismiss_ready(move || {
+            update_kept(&ui_weak.unwrap(), &kept, KeptEvent::Cleared);
         });
     }
     {
@@ -675,6 +800,34 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn kept_failure() -> KeptExamination {
+        KeptExamination::Failure {
+            ticker: "NESN.SW".into(),
+            message: "m".into(),
+        }
+    }
+
+    #[test]
+    fn the_kept_outcome_lives_until_a_newer_one_or_a_shown_examination() {
+        // Kept, then replaced explicitly by a newer kept outcome.
+        assert!(kept_after(KeptEvent::Kept(kept_failure())).is_some());
+        // A new « Examiner » request, any shown examination (fresher than the kept one — so
+        // « Ouvrir l'examen » never replaces it), « Compris » or a dossier change: gone.
+        assert!(kept_after(KeptEvent::NewRequest).is_none());
+        assert!(kept_after(KeptEvent::Shown).is_none());
+        assert!(kept_after(KeptEvent::Cleared).is_none());
+    }
+
+    #[test]
+    fn a_current_outcome_lands_over_the_list_or_is_kept_never_laid_over() {
+        assert_eq!(landing(true, true), Landing::Show);
+        assert_eq!(landing(true, false), Landing::Refuse);
+        // A failure with a study / the comparison / an examination open: kept for the card,
+        // never a dialog over what the reader has open.
+        assert_eq!(landing(false, false), Landing::Keep);
+        assert_eq!(landing(false, true), Landing::Keep);
+    }
 
     #[test]
     fn an_examiner_result_opens_at_once_only_over_the_studies_list() {

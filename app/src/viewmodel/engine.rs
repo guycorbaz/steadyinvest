@@ -443,30 +443,57 @@ pub fn mgmt_computed(outputs: &SsgOutputs, years: &[i32], format: NumberFormat) 
         .iter()
         .map(|y| fmt_pct(lookup(*y).and_then(|r| r.roe_pct), format).into())
         .collect();
-    let (avg_years, avg_years_b) = avg_years_title(
+    let (ptp_years, roe_years) = (
         m.avg_ptp_pct.map(|_| m.ptp_avg_years),
         m.avg_roe_pct.map(|_| m.roe_avg_years),
     );
+    let title = avg_years_title(ptp_years, roe_years);
+    // Spans that differ: the title says « Moyenne » and each average names its own span.
+    let cell = |avg: Option<Decimal>, years: Option<usize>| -> slint::SharedString {
+        let shown = fmt_pct(avg, format);
+        match years {
+            Some(n) if title.is_none() => with_avg_years(&shown, n).into(),
+            _ => shown.into(),
+        }
+    };
     MgmtComputed {
         ptp: slint::ModelRc::new(slint::VecModel::from(ptp)),
         roe: slint::ModelRc::new(slint::VecModel::from(roe)),
-        avg_ptp: fmt_pct(m.avg_ptp_pct, format).into(),
-        avg_roe: fmt_pct(m.avg_roe_pct, format).into(),
+        avg_ptp: cell(m.avg_ptp_pct, ptp_years),
+        avg_roe: cell(m.avg_roe_pct, roe_years),
         ptp_trend: fmt_trend(m.ptp_trend).into(),
         roe_trend: fmt_trend(m.roe_trend).into(),
-        avg_years,
-        avg_years_b,
+        avg_years: title.map_or(0, |n| i32::try_from(n).unwrap_or(i32::MAX)),
     }
 }
 
-/// PURE: the §2 « Moy. n ans » column title's years (G1, #237) — `(n, 0)` when every SHOWN
-/// average (PTP, ROE) runs over n years (`(0, 0)`: none shown), `(ptp, roe)` when they differ.
-pub(crate) fn avg_years_title(ptp: Option<usize>, roe: Option<usize>) -> (i32, i32) {
-    let n = |x: usize| i32::try_from(x).unwrap_or(i32::MAX);
+/// PURE: the §2 « Moy. n ans » column title's years (G1, #237) — `Some(n)` when every SHOWN
+/// average (PTP, ROE) runs over n years; `None` when none is shown or the two differ (the title
+/// then says « Moyenne » and each average cell names its span — never « a / b », which reads
+/// « a of b » elsewhere in the app).
+pub(crate) fn avg_years_title(ptp: Option<usize>, roe: Option<usize>) -> Option<usize> {
     match (ptp.filter(|x| *x > 0), roe.filter(|x| *x > 0)) {
-        (Some(a), Some(b)) if a != b => (n(a), n(b)),
-        (Some(a), _) | (None, Some(a)) => (n(a), 0),
-        (None, None) => (0, 0),
+        (Some(a), Some(b)) if a != b => None,
+        (Some(a), _) | (None, Some(a)) => Some(a),
+        (None, None) => None,
+    }
+}
+
+/// A §2 average's cell naming its own span, when the spans differ (G1, #237) — « 47,6 % sur 3
+/// ans · ↑ hausse » (comparison, trend attached) or « 47,6 % sur 3 ans » (study screen). An empty
+/// or « — » cell stays as is; `years` 0 leaves it as is.
+pub fn with_avg_years(cell: &str, years: usize) -> String {
+    if cell.is_empty() || cell == EMPTY_SLOT || years == 0 {
+        return cell.to_string();
+    }
+    let span = if years == 1 {
+        AVG_OVER_ONE_YEAR.to_string()
+    } else {
+        AVG_OVER_YEARS.replace("{n}", &years.to_string())
+    };
+    match cell.split_once(" · ") {
+        Some((avg, trend)) => format!("{avg} {span} · {trend}"),
+        None => format!("{cell} {span}"),
     }
 }
 
@@ -1156,17 +1183,40 @@ mod tests {
     }
 
     /// G1 (#237): the §2 average column says the years actually averaged, never « 5 ans » over
-    /// three; two different spans are both stated (PTP / ROE).
+    /// three; two different spans leave the title « Moyenne » and each cell names its own.
     #[test]
     fn the_average_column_title_says_the_years_averaged() {
-        assert_eq!(avg_years_title(Some(5), Some(5)), (5, 0));
-        assert_eq!(avg_years_title(Some(3), Some(3)), (3, 0));
-        assert_eq!(avg_years_title(Some(3), Some(5)), (3, 5));
+        assert_eq!(avg_years_title(Some(5), Some(5)), Some(5));
+        assert_eq!(avg_years_title(Some(3), Some(3)), Some(3));
+        assert_eq!(avg_years_title(Some(3), Some(5)), None);
         // An absent average does not vote.
-        assert_eq!(avg_years_title(None, Some(4)), (4, 0));
-        assert_eq!(avg_years_title(Some(2), None), (2, 0));
-        assert_eq!(avg_years_title(None, None), (0, 0));
-        assert_eq!(avg_years_title(Some(0), Some(0)), (0, 0));
+        assert_eq!(avg_years_title(None, Some(4)), Some(4));
+        assert_eq!(avg_years_title(Some(2), None), Some(2));
+        assert_eq!(avg_years_title(None, None), None);
+        assert_eq!(avg_years_title(Some(0), Some(0)), None);
+        // The cells then carry the span; an absent one stays « — ».
+        assert_eq!(with_avg_years("47,6 %", 3), "47,6 % sur 3 ans");
+        assert_eq!(with_avg_years(EMPTY_SLOT, 3), EMPTY_SLOT);
+    }
+
+    /// The study screen's §2 cells over two different spans (a year with pre-tax profit but no
+    /// book value): « Moyenne » title, each average naming its span.
+    #[test]
+    fn two_different_spans_are_named_in_the_average_cells() {
+        let study = crate::viewmodel::verify::demo_study().unwrap();
+        let frame = build_frame(&study).unwrap();
+        let mut o = frame.snapshot.outputs().clone();
+        o.management.ptp_avg_years = 5;
+        o.management.roe_avg_years = 4;
+        let years: Vec<i32> = study.years.iter().map(|y| y.year).collect();
+        let m = mgmt_computed(&o, &years, NumberFormat::Comma);
+        assert_eq!(m.avg_years, 0, "the title says « Moyenne »");
+        assert!(m.avg_ptp.ends_with(" sur 5 ans"), "{}", m.avg_ptp);
+        assert!(m.avg_roe.ends_with(" sur 4 ans"), "{}", m.avg_roe);
+        o.management.roe_avg_years = 5;
+        let m = mgmt_computed(&o, &years, NumberFormat::Comma);
+        assert_eq!(m.avg_years, 5);
+        assert!(!m.avg_ptp.contains(" sur "));
     }
 
     /// G1 review (#214): the per-year chips name their year, come only from a RECENT year, and

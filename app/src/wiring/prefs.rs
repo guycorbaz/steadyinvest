@@ -216,6 +216,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     return;
                 }
                 let ui = ui_weak.unwrap();
+                let old_format = config.borrow().number_format;
                 push_samples(&ui, format);
                 ui.global::<Prefs>()
                     .set_number_format(format.as_str().into());
@@ -257,6 +258,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     &ui,
                     &journal_state.borrow(),
                     &quick_screen,
+                    old_format,
                     format,
                 );
                 crate::wiring::comparison::rerender_comparison(

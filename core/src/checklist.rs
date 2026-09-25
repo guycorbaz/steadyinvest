@@ -57,6 +57,9 @@ pub struct Ladder {
     /// `true` when the series holds no two non-overlapping consecutive pairs inside the six-year
     /// window: every line is `None`.
     pub unavailable: bool,
+    /// `true` when the series holds no figure at all (then also `unavailable`) — the absence of
+    /// the series, told apart from a short window (G1 final review).
+    pub absent: bool,
 }
 
 /// One row of the §3 price record.
@@ -157,6 +160,7 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
     let Some((recent_year, old_year)) = ladder_pairs(points) else {
         return Ladder {
             unavailable: true,
+            absent: points.is_empty(),
             ..Ladder::default()
         };
     };
@@ -210,6 +214,7 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
         compound_rate_pct,
         span_years: span,
         unavailable: false,
+        absent: false,
     }
 }
 
@@ -584,6 +589,13 @@ mod tests {
         let mut absent = l("5", 2025);
         absent.compound_rate_pct = None;
         assert_eq!(compare_rates(&absent, &l("5", 2025)), None);
+    }
+
+    #[test]
+    fn an_absent_series_is_told_apart_from_a_short_window() {
+        assert!(ladder(&[]).absent && ladder(&[]).unavailable);
+        let short = ladder(&[(2024, d("1")), (2025, d("2"))]);
+        assert!(short.unavailable && !short.absent);
     }
 
     #[test]

@@ -14,9 +14,9 @@ use uuid::Uuid;
 
 use crate::state::{self, JournalState};
 use crate::viewmodel::comparison::{
-    comparison_column, missing_column, unavailable_column, uncomputable_column, with_avg_years,
+    comparison_column, missing_column, unavailable_column, uncomputable_column,
 };
-use crate::viewmodel::engine::build_frame;
+use crate::viewmodel::engine::{build_frame, with_avg_years};
 use crate::wiring::Session;
 use crate::wiring::studies::study_choices;
 use crate::{Comparison, ComparisonHeader, MainWindow, Studies, StudyChoice};
@@ -279,6 +279,26 @@ pub(crate) fn comparison_columns(
         .collect()
 }
 
+/// PURE: rows 5 / 6 say the years their averages run over (G1, #237) — the row's number when
+/// the columns agree (returned, for the label), else each cell names its own span.
+fn name_average_spans(
+    keyed: &mut [(Option<Uuid>, steadyinvest_report::ComparisonColumn)],
+) -> (Option<usize>, Option<usize>) {
+    let plain: Vec<steadyinvest_report::ComparisonColumn> =
+        keyed.iter().map(|(_, x)| x.clone()).collect();
+    let ptp_years = steadyinvest_report::average_years(&plain, 5);
+    let roe_years = steadyinvest_report::average_years(&plain, 6);
+    for (_, col) in keyed.iter_mut() {
+        if ptp_years.is_none() {
+            col.rows[4] = with_avg_years(&col.rows[4], col.ptp_avg_years);
+        }
+        if roe_years.is_none() {
+            col.rows[5] = with_avg_years(&col.rows[5], col.roe_avg_years);
+        }
+    }
+    (ptp_years, roe_years)
+}
+
 /// Push the comparison of the current picks into the `Comparison` global.
 pub(crate) fn push_comparison(
     ui: &MainWindow,
@@ -296,20 +316,7 @@ pub(crate) fn push_comparison(
         })
         .collect();
     let mut keyed = comparison_columns(state, &picks, format);
-    // Rows 5 / 6 say the years their averages run over (G1, #237): one number in the label when
-    // the columns agree, else each cell names its own.
-    let plain: Vec<steadyinvest_report::ComparisonColumn> =
-        keyed.iter().map(|(_, x)| x.clone()).collect();
-    let ptp_years = steadyinvest_report::average_years(&plain, 5);
-    let roe_years = steadyinvest_report::average_years(&plain, 6);
-    for (_, col) in &mut keyed {
-        if ptp_years.is_none() {
-            col.rows[4] = with_avg_years(&col.rows[4], col.ptp_avg_years);
-        }
-        if roe_years.is_none() {
-            col.rows[5] = with_avg_years(&col.rows[5], col.roe_avg_years);
-        }
-    }
+    let (ptp_years, roe_years) = name_average_spans(&mut keyed);
     c.set_ptp_avg_years(ptp_years.unwrap_or(0) as i32);
     c.set_roe_avg_years(roe_years.unwrap_or(0) as i32);
     let cols: Vec<&steadyinvest_report::ComparisonColumn> = keyed.iter().map(|(_, x)| x).collect();
@@ -573,6 +580,45 @@ mod tests {
         // Out of range: no pick, never a neighbour's.
         assert_eq!(picked_id(&choices, &picked, 1, 2), "");
         assert_eq!(picked_id(&choices, &picked, 1, -1), "");
+    }
+
+    #[test]
+    fn a_short_window_study_names_its_span_in_rows_5_and_6() {
+        use crate::viewmodel::comparison::comparison_column;
+        use crate::viewmodel::engine::build_frame;
+        use crate::viewmodel::format::NumberFormat;
+        use crate::viewmodel::verify::demo_study;
+        let full = demo_study().unwrap();
+        // The same study cut to its last three years: a three-year window.
+        let mut short = full.clone();
+        let keep = short.years.len() - 3;
+        short.years.drain(..keep);
+        let column = |study: &steadyinvest_contract::Study| {
+            comparison_column(study, &build_frame(study).unwrap(), NumberFormat::Comma)
+        };
+        let (a, b) = (column(&full), column(&short));
+        assert_eq!((a.ptp_avg_years, b.ptp_avg_years), (5, 3));
+        let mut keyed = vec![(None, a.clone()), (None, b.clone())];
+        let (ptp, roe) = name_average_spans(&mut keyed);
+        assert_eq!(
+            (ptp, roe),
+            (None, None),
+            "the columns differ: no number in the label"
+        );
+        assert!(
+            keyed[0].1.rows[4].contains(" sur 5 ans · "),
+            "{}",
+            keyed[0].1.rows[4]
+        );
+        assert!(
+            keyed[1].1.rows[4].contains(" sur 3 ans · "),
+            "{}",
+            keyed[1].1.rows[4]
+        );
+        // Two full studies agree: the label says « 5 ans », the cells stay as the study screen's.
+        let mut same = vec![(None, a.clone()), (None, a.clone())];
+        assert_eq!(name_average_spans(&mut same), (Some(5), Some(5)));
+        assert_eq!(same[0].1.rows[4], a.rows[4]);
     }
 
     #[test]

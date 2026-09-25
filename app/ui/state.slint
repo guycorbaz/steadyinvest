@@ -63,7 +63,12 @@ export struct ScreeningRow {
     pe-position: string,    // higher | similar | lower | ""
     price-vs-high: string,  // signed %, "" = unknown
     has-study: bool,
-    window-short: bool,     // a ladder's six-year window holds no two disjoint pairs
+    // Why `years` / a rate is empty (G1 final review): years-gap ∈ sales-absent | eps-absent |
+    // both-absent | sales-window | eps-window | both-window | ""; a rate gap ∈ absent | window |
+    // nonpositive | "".
+    years-gap: string,
+    sales-rate-gap: string,
+    eps-rate-gap: string,
 }
 
 // One stored exchange rate (Story 6.5, FR28): dated + source-aware, BASE → QUOTE (the reference
@@ -388,10 +393,9 @@ export struct MgmtComputed {
     avg-roe: string,
     ptp-trend: string,
     roe-trend: string,
-    // The « Moy. n ans » column title (G1, #237): the years the shown averages run over —
-    // `avg-years` when they agree (0 = none shown), else `avg-years` / `avg-years-b` = PTP / ROE.
+    // The « Moy. n ans » column title (G1, #237): the years the shown averages run over when
+    // they agree; 0 = none shown or they differ (title « Moyenne », each cell names its span).
     avg-years: int,
-    avg-years-b: int,
 }
 
 // §3 P/E summary results.
@@ -1309,11 +1313,14 @@ export global QuickScreen {
     in-out property <string> pick-currency;
     callback examine(string, string);   // ticker, currency → fetch, then open
     callback examine-study();           // the open study's own years → open
-    // G1 final review: an « Examiner » result that arrived while the list was not on screen (or
+    // G1 final review: an « Examiner » outcome that arrived while the list was not on screen (or
     // with a study / the comparison / another examination open) is KEPT, never lost nor laid
-    // over what the reader has open — its ticker is named here and « Ouvrir l'examen » opens it.
+    // over what the reader has open — a result is named with « Ouvrir l'examen », a failure with
+    // its cause and « Compris ».
     in-out property <string> ready-ticker;
+    in-out property <string> ready-failure;   // "" = a kept result; else the kept failure's cause
     callback open-ready();
+    callback dismiss-ready();                 // « Compris » on a kept failure
     callback close();
     callback export-pdf();
     callback create-study();

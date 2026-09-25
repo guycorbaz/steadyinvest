@@ -698,9 +698,12 @@ mod tests {
         // measured. The same pass, area 4 (#237): the rate « — » cause, the « different years »
         // band and criblage word, the criblage's « fenêtre incomplète », the kept-examination band
         // and its « Ouvrir l'examen » (the ladder's unavailable band is reworded in place): +6 =
-        // 966, measured.
+        // 966, measured. Its G3 review: the study screen's « Moy. a / b ans » goes (−1); the
+        // criblage names which ladder is short or absent (6 years-column words, the « fenêtre
+        // incomplète » one reworded: +5) and a rate's « — » cause (+3); the kept failure's band
+        // and its « Compris » (+2): +9 = 975, measured.
         assert!(
-            total >= 966,
+            total >= 975,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

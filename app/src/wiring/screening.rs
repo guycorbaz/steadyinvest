@@ -69,7 +69,9 @@ fn push(ui: &MainWindow, session: &ScreeningSession, format: NumberFormat) {
                 pe_position: v.pe_position.into(),
                 price_vs_high: v.price_vs_high.into(),
                 has_study: v.has_study,
-                window_short: v.window_short,
+                years_gap: v.years_gap.into(),
+                sales_rate_gap: v.sales_rate_gap.into(),
+                eps_rate_gap: v.eps_rate_gap.into(),
             }
         })
         .collect();
@@ -206,6 +208,7 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
         journal_state,
         config,
         quick_screen,
+        quick_screen_ready,
         screening,
         fetch_tx,
         ..
@@ -298,6 +301,7 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let slot = Rc::clone(screening);
         let quick_screen = Rc::clone(quick_screen);
+        let kept = Rc::clone(quick_screen_ready);
         ui.global::<Watchlist>().on_open_screening(move |index| {
             let ui = ui_weak.unwrap();
             let session = slot
@@ -312,7 +316,14 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
             let format = config.borrow().number_format;
             // G1 final review: an « Examiner » fetch in flight is NOT cancelled in silence — its
             // result is kept and named on the studies list (`quick_screen::lands_now`).
-            show(&ui, &journal_state.borrow(), format, &quick_screen, session);
+            show(
+                &ui,
+                &journal_state.borrow(),
+                format,
+                &quick_screen,
+                &kept,
+                session,
+            );
             // The examination screen lives under Études.
             ui.set_current_screen(0);
         });

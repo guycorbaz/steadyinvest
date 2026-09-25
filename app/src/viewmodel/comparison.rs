@@ -161,23 +161,6 @@ fn range(
     }
 }
 
-/// Rows 5 / 6 when the columns average over different spans (G1, #237): the cell names its own
-/// years — « 47,6 % sur 3 ans · ↑ hausse ». An empty cell stays empty; `years` 0 leaves it as is.
-pub fn with_avg_years(cell: &str, years: usize) -> String {
-    if cell.is_empty() || years == 0 {
-        return cell.to_string();
-    }
-    let span = if years == 1 {
-        crate::viewmodel::engine::AVG_OVER_ONE_YEAR.to_string()
-    } else {
-        crate::viewmodel::engine::AVG_OVER_YEARS.replace("{n}", &years.to_string())
-    };
-    match cell.split_once(" · ") {
-        Some((avg, trend)) => format!("{avg} {span} · {trend}"),
-        None => format!("{cell} {span}"),
-    }
-}
-
 /// One study → its thirty rows, from the frame the study screen shows.
 pub fn comparison_column(
     study: &Study,
@@ -327,6 +310,7 @@ mod tests {
         assert_eq!(u.rows.len(), 30);
     }
 
+    use crate::viewmodel::engine::with_avg_years;
     use crate::viewmodel::engine::{
         build_frame, growth_computed, mgmt_computed, pe_computed, pe_year_cells, return_computed,
         risk_computed,
