@@ -170,3 +170,17 @@ Still open, pre-existing (5.6): the study PDF ignores the number locale (« 2.9 
 
 Fixed in PR G (G1, branch `fix/g1-g-dossier-switch`): every dossier change ends the examination
 (fetch superseded, slot emptied, screen closed) and the criblage (run stopped, card hidden).
+
+### Review Findings — G1 final review (2026-09-25, #237)
+
+- [x] [Review][Patch] « BPA face aux ventes » decided on the raw rates, possibly over different periods — **decided on the rates as displayed, over the same four years only; different years read « années différentes » (screen, criblage, PDF)** [core/src/checklist.rs:341-346, app/src/viewmodel/{quick_screen,screening}.rs, report/src/quick_screen.rs]
+- [x] [Review][Patch] An « Examiner » result landing off the studies list is lost (the rail closes it) and may cover an open study — **opens at once only over the list; elsewhere it is kept and named on the « Examiner un titre » card with « Ouvrir l'examen »** [app/src/wiring/quick_screen.rs:198-213, app/src/wiring/mod.rs:96-110]
+- [x] [Review][Patch] « indisponible » / « < 4 / 6 » misstate the cause (the six-year window) — **the ladder band, the PDF and the criblage (« fenêtre incomplète ») name the window** [app/src/viewmodel/screening.rs:115-118, app/ui/screens/quick_screen.slint:70, report/src/quick_screen.rs]
+- [x] [Review][Patch] The rate's « — » is unexplained when an average is ≤ 0 — **named under the rate, screen and PDF** [core/src/checklist.rs:187-190]
+- [x] [Review][Dismiss] The primary's quota overrides the fallback's own cause on the latching row — deliberate (e10375c: the criblage stop keys off each member's final answer; the row that latched the stop reads « limite d'usage » like the rows behind it)
+- [x] [Review][Patch] A number-format change does not re-render a finished criblage card — **the card (running or finished), the examination and the open comparison re-render** [app/src/wiring/prefs.rs:204-246]
+- [x] [Review][Patch] « Ouvrir l'examen » (criblage) silently cancels an in-flight « Examiner » fetch — **no longer cancelled (nor from a study): its result is kept for the list** [app/src/wiring/screening.rs:303]
+- [x] [Review][Patch] Unchecked `Decimal` arithmetic in the P/E « voisin » band [core/src/checklist.rs:292-295]
+- [x] [Review][Patch] Nits: `MIN_LADDER_YEARS` unused with a misleading doc (removed); a French cause hard-coded in the rail (now `MSG_FETCH_WORKER_GONE`, also used by the two fetch rails) [core/src/checklist.rs:23, app/src/wiring/quick_screen.rs:443]
+
+Fixed in the G1 final-review branch `fix/g1-m-comparison-screen`.
