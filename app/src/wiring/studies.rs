@@ -62,6 +62,67 @@ fn safe_stem(ticker: &str) -> String {
     }
 }
 
+/// G1 final (L12) — the PDF's path as picked, with `.pdf` appended unless it already ends so
+/// (any case). rfd does not force the filter's extension everywhere, and a picked name such as
+/// « etude-NESN.SW » HAS an extension (« SW ») — so the test is the extension's value, and the
+/// suffix is appended, never swapped for the name's own last dot-part.
+fn with_pdf_extension(path: std::path::PathBuf) -> std::path::PathBuf {
+    let is_pdf = path
+        .extension()
+        .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("pdf"));
+    if is_pdf {
+        return path;
+    }
+    let mut name = path.into_os_string();
+    name.push(".pdf");
+    std::path::PathBuf::from(name)
+}
+
+/// What the list's notice slot shows after an export outcome, and the part of it that belongs
+/// to another source (kept above the outcome).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ExportNotice {
+    shown: String,
+    kept: String,
+}
+
+thread_local! {
+    // The UI is single-threaded (every callback runs on the event loop) — the `dialog` precedent.
+    static LAST_EXPORT_NOTICE: std::cell::RefCell<Option<ExportNotice>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The notice-slot rule (F4, docs/review-checklist.md §3) for an EXPORT outcome in the list's
+/// slot (G1 final, M4). Pure — unit-tested. The slot is shared with sources that do not say what
+/// they wrote (a startup state, a fetch or examination failure), so an export outcome never
+/// overwrites what it did not write itself: it replaces its own earlier outcome (the slot still
+/// shows exactly what the export left there), fills an empty slot, and otherwise is written
+/// UNDER the notice on show, which stays whole.
+fn compose_export_notice(shown: &str, last: Option<&ExportNotice>, outcome: &str) -> ExportNotice {
+    let kept = match last {
+        Some(prev) if prev.shown == shown => prev.kept.clone(),
+        _ => shown.to_string(),
+    };
+    let shown = if kept.is_empty() {
+        outcome.to_string()
+    } else {
+        format!("{kept}\n{outcome}")
+    };
+    ExportNotice { shown, kept }
+}
+
+/// Show an export outcome in the list's slot under the F4 rule ([`compose_export_notice`]).
+fn show_export_outcome(ui: &MainWindow, outcome: &str) {
+    let studies = ui.global::<Studies>();
+    let shown = studies.get_notice().to_string();
+    let next = LAST_EXPORT_NOTICE.with(|last| {
+        let next = compose_export_notice(&shown, last.borrow().as_ref(), outcome);
+        *last.borrow_mut() = Some(next.clone());
+        next
+    });
+    studies.set_notice(next.shown.into());
+}
+
 /// One pickable study (G1 decision 3, #237): the `id` is the key carried end to end; the `label`
 /// is display only — « TICKER », or « TICKER · CUR » when the ticker has several studies (then
 /// « · date » and « · n » only if a currency is still shared or unreadable), unique within one
@@ -447,19 +508,23 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_export_study(move |id| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Ok(uuid) = Uuid::parse_str(&id) else {
                 return;
             };
             let outcome = match journal_state.borrow().export_study(uuid) {
                 Ok(json) => match write_study_export(uuid, &json) {
                     Ok(path) => Ok(format!("{} {}", state::MSG_STUDY_EXPORTED, path.display())),
-                    Err(e) => Err(format!("{} {e}", state::MSG_SAVE_FAILED)),
+                    // G1 final (M4): the write failure is named in French, the OS cause logged.
+                    Err(error) => {
+                        tracing::warn!(study_id = %uuid, %error, "study export write failed");
+                        Err(state::MSG_EXPORT_WRITE_FAILED.to_string())
+                    }
                 },
                 Err(message) => Err(message),
             };
             match outcome {
-                Ok(notice) => studies.set_notice(notice.into()),
+                // F4: an export outcome never overwrites another source's notice.
+                Ok(notice) => show_export_outcome(&ui, &notice),
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
         });
@@ -473,22 +538,36 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_export_study_pdf(move |id| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Ok(uuid) = Uuid::parse_str(&id) else {
                 return;
             };
             // Fetch + render BEFORE opening a dialog, so a study that does not compute never prompts
-            // for a destination it can't fill.
-            let Some(study) = journal_state.borrow().get_study(uuid) else {
-                crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
-                return;
+            // for a destination it can't fill. G1 final (M3): each refusal names its own cause —
+            // a read failure (« illisible »), a vanished study (« introuvable »), a study whose data
+            // do not prepare — never « L'enregistrement a échoué », which nothing here attempted.
+            let read = journal_state.borrow().try_get_study(uuid);
+            let study = match read {
+                Ok(Some(study)) => study,
+                Ok(None) => {
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_MISSING);
+                    return;
+                }
+                Err(_) => {
+                    // The cause is logged by `try_get_study`.
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_UNREADABLE);
+                    return;
+                }
             };
             // G1 I: the PDF's figures in the user's number format, as on the screen.
             let numbers = journal_state.borrow().number_format().report_style();
-            let Ok(bytes) = steadyinvest_report::render_study_pdf(&study, numbers) else {
-                // The study does not compute as entered — a neutral refusal, no panic, no leak.
-                crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
-                return;
+            let bytes = match steadyinvest_report::render_study_pdf(&study, numbers) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    // The study does not compute as entered — a named refusal, no panic, no leak.
+                    tracing::warn!(study_id = %uuid, %error, "study PDF not rendered");
+                    crate::wiring::dialog::refuse(&ui, state::MSG_STUDY_PDF_UNRENDERABLE);
+                    return;
+                }
             };
             // Native save picker on the UI thread (modal — the established `rfd` pattern, cf. the
             // journal export/create rails). Cancel → no notice, nothing written.
@@ -503,17 +582,21 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             let Some(path) = dialog.save_file() else {
                 return;
             };
-            // rfd does not force the filter extension on every platform — ensure `.pdf`.
-            let path = if path.extension().is_some() {
-                path
-            } else {
-                path.with_extension("pdf")
-            };
-            let notice = match std::fs::write(&path, &bytes) {
-                Ok(()) => format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
-                Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
-            };
-            studies.set_notice(notice.into());
+            // rfd does not force the filter extension on every platform — ensure `.pdf` (L12).
+            let path = with_pdf_extension(path);
+            match std::fs::write(&path, &bytes) {
+                // F4: an export outcome never overwrites another source's notice (M4).
+                Ok(()) => show_export_outcome(
+                    &ui,
+                    &format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
+                ),
+                // A write failure is a refusal, like its neighbours — named in French, the OS
+                // cause logged (M4).
+                Err(error) => {
+                    tracing::warn!(study_id = %uuid, %error, "study PDF write failed");
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_WRITE_FAILED);
+                }
+            }
         });
     }
     {
@@ -868,6 +951,42 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_picked_pdf_name_always_ends_in_pdf() {
+        // G1 final (L12): « etude-NESN.SW » has an extension (« SW ») — `.pdf` is appended.
+        let p = |s: &str| with_pdf_extension(std::path::PathBuf::from(s));
+        assert_eq!(
+            p("/x/etude-NESN.SW"),
+            std::path::PathBuf::from("/x/etude-NESN.SW.pdf")
+        );
+        assert_eq!(p("/x/etude"), std::path::PathBuf::from("/x/etude.pdf"));
+        assert_eq!(p("/x/etude.pdf"), std::path::PathBuf::from("/x/etude.pdf"));
+        assert_eq!(p("/x/etude.PDF"), std::path::PathBuf::from("/x/etude.PDF"));
+        assert_eq!(
+            p("/x/notes.txt"),
+            std::path::PathBuf::from("/x/notes.txt.pdf")
+        );
+    }
+
+    #[test]
+    fn an_export_outcome_never_overwrites_another_sources_notice() {
+        // G1 final (M4), the F4 rule on the list's slot.
+        let first = compose_export_notice("", None, "exportée A");
+        assert_eq!(first.shown, "exportée A", "an empty slot takes the outcome");
+        // Its own earlier outcome is replaced.
+        let second = compose_export_notice(&first.shown, Some(&first), "exportée B");
+        assert_eq!(second.shown, "exportée B");
+        // A notice it did not write (a fetch failure, a startup state) stays whole, above it.
+        let third = compose_export_notice("échec du fournisseur", Some(&second), "exportée C");
+        assert_eq!(third.shown, "échec du fournisseur\nexportée C");
+        // The next export replaces only its own line; the other notice is still kept.
+        let fourth = compose_export_notice(&third.shown, Some(&third), "exportée D");
+        assert_eq!(fourth.shown, "échec du fournisseur\nexportée D");
+        // Once the other source has cleared the slot, the outcome is alone again.
+        let fifth = compose_export_notice("", Some(&fourth), "exportée E");
+        assert_eq!(fifth.shown, "exportée E");
+    }
 
     fn facts(n: u128, ticker: &str, currency: &str, date: &str) -> ChoiceFacts {
         ChoiceFacts {
