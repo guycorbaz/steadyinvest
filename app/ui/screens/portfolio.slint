@@ -185,37 +185,53 @@ export component PortfolioScreen inherits Rectangle {
                 if Holdings.candidate-rows.length == 0 && !Holdings.candidates-unavailable: CaptionLine {
                     text: @tr("La liste de suivi est vide.");
                 }
-                for candidate in Holdings.candidate-rows: HorizontalLayout {
-                    spacing: Tokens.space-8;
-                    FactLine {
-                        text: candidate.data == "no-study"
-                            ? @tr("{} — aucune étude", candidate.ticker)
-                            // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
-                            : candidate.data == "study-unavailable"
-                            ? @tr("{} — étude indisponible", candidate.ticker)
-                            // Issue #48: a price BELOW the recorded band is its own neutral fact.
-                            : candidate.below-band
-                            ? @tr("{} — sous la bande de prévision", candidate.ticker)
-                            : candidate.data == "insufficient"
-                                ? @tr("{} — données insuffisantes", candidate.ticker)
-                                : candidate.in-buy-zone
-                                    ? @tr("{} — dans la zone d'achat", candidate.ticker)
-                                    : candidate.distance != ""
-                                        ? @tr("{} — à {} % au-dessus de la zone d'achat", candidate.ticker, candidate.distance)
-                                        // A known zone without a statable distance (degenerate
-                                        // band bottom) — the zone noun IS the fact. The key
-                                        // comparisons stay OUTSIDE @tr (the register precedent).
-                                        : candidate.zone == "neutral"
-                                            ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-hold)
-                                            : candidate.zone == "sell"
-                                                ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-sell)
-                                                : @tr("{} — zone : {}", candidate.ticker, Labels.zone-buy);
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    if candidate.ud != "": FactLine {
-                        text: @tr("H/B {}", candidate.ud);
-                        vertical-alignment: center;
+                // G1 final check (on screen): the facts wrap on their own lines UNDER the candidate
+                // line — side by side, each wrapping Text took a sliver of width and the row grew
+                // to hundreds of pixels of one-word lines.
+                for candidate in Holdings.candidate-rows: VerticalLayout {
+                    spacing: Tokens.space-4;
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        FactLine {
+                            text: candidate.data == "no-study"
+                                ? @tr("{} — aucune étude", candidate.ticker)
+                                // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
+                                : candidate.data == "study-unavailable"
+                                ? @tr("{} — étude indisponible", candidate.ticker)
+                                // Issue #48: a price BELOW the recorded band is its own neutral fact.
+                                : candidate.below-band
+                                ? @tr("{} — sous la bande de prévision", candidate.ticker)
+                                : candidate.data == "insufficient"
+                                    ? @tr("{} — données insuffisantes", candidate.ticker)
+                                    : candidate.in-buy-zone
+                                        ? @tr("{} — dans la zone d'achat", candidate.ticker)
+                                        : candidate.distance != ""
+                                            ? @tr("{} — à {} % au-dessus de la zone d'achat", candidate.ticker, candidate.distance)
+                                            // A known zone without a statable distance (degenerate
+                                            // band bottom) — the zone noun IS the fact. The key
+                                            // comparisons stay OUTSIDE @tr (the register precedent).
+                                            : candidate.zone == "neutral"
+                                                ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-hold)
+                                                : candidate.zone == "sell"
+                                                    ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-sell)
+                                                    : @tr("{} — zone : {}", candidate.ticker, Labels.zone-buy);
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        if candidate.ud != "": FactLine {
+                            text: @tr("H/B {}", candidate.ud);
+                            vertical-alignment: center;
+                        }
+                        if candidate.study-id != "": ActionButton {
+                            label: @tr("Ouvrir l'étude");
+                            enabled: true;
+                            clicked => { Holdings.open-candidate-study(candidate.study-id); }
+                        }
+                        if candidate.study-id == "": ActionButton {
+                            label: @tr("Études");
+                            enabled: true;
+                            clicked => { Holdings.go-to-studies(); }
+                        }
                     }
                     if candidate.held-share != "": CaptionLine {
                         text: candidate.held-flagged
@@ -260,16 +276,6 @@ export component PortfolioScreen inherits Rectangle {
                     if candidate.currency != "" && candidate.currency-missing == "" && candidate.currency-share == "": CaptionLine {
                         text: @tr("devise {} : exposition indisponible", candidate.currency);
                         vertical-alignment: center;
-                    }
-                    if candidate.study-id != "": ActionButton {
-                        label: @tr("Ouvrir l'étude");
-                        enabled: true;
-                        clicked => { Holdings.open-candidate-study(candidate.study-id); }
-                    }
-                    if candidate.study-id == "": ActionButton {
-                        label: @tr("Études");
-                        enabled: true;
-                        clicked => { Holdings.go-to-studies(); }
                     }
                 }
                 // Issue #98 (FR48): the sector blind spot, stated once at panel level — the
