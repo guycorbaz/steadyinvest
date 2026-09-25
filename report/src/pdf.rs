@@ -62,6 +62,7 @@ const ZONEBAR_H_RESERVE: f32 = ZONEBAR_H + 2.0 * LINE_H + 12.0; // the bar + its
 const SECTION_H: f32 = HEAD_FONT + LINE_H; // the advance of one section heading
 const SERIES_PAD_DECADES: f64 = 0.12; // per-series head/foot room (issue #25)
 const MIN_SERIES_DECADES: f64 = 0.6; // a flat series still gets this much span (no false drama)
+const YEAR_PAD: f64 = 0.5; // room (in years) at each end of the §1 x axis — no bar on the frame
 // Issue #207: the growth guide lines of the printed form — compound rates from the last EPS point.
 const GUIDE_RATES_PCT: [u32; 6] = [5, 10, 15, 20, 25, 30];
 // The form's quarterly box, under the plot (owner decision 7): size and the space around it.
@@ -134,15 +135,21 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         .as_deref()
         .filter(|n| !n.trim().is_empty())
         .unwrap_or(EM_DASH);
+    // G1 final (L7): « et saisie manuelle » is never elided — see `DataSource::header_lines`.
+    let sources = data_source(study)
+        .header_lines(header_room((PAGE_W - 2.0 * MARGIN) / 3.0), FONT)
+        .join("\n");
     doc.header_box(&[
         [
             ("Société", company),
             ("Symbole", &study.security_ticker),
-            ("Date", &date_prefix(&study.created_at.0)),
+            // G1 final (L11): the date is the study's CREATION date, labelled as the screen
+            // labels it (« Créée le ») — the comparison PDF's per-study date is the same one.
+            (CREATED_ON, &date_prefix(&study.created_at.0)),
         ],
         [
             ("Monnaie", &study.native_currency),
-            ("Données", &data_source(study)),
+            ("Données", &sources),
             ("Préparé par", EM_DASH),
         ],
     ]);
@@ -268,26 +275,23 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
 
     // ── §3 Price / earnings history — the form's columns A–H over the window, totals, averages,
     //    the average and current P/E. ──
-    doc.section("3. Historique cours / bénéfice");
+    //    G1 final (L10): the rows and the notes under the table are gathered first, and the whole
+    //    section is reserved as one block when it fits on a page — a note never lands alone at
+    //    the top of the next page, away from its heading and its table.
     {
         let v = &outputs.valuation;
-        doc.grid_begin(v.per_year.len() + 2);
-        doc.grid_row_num(
-            &[
-                "Année",
-                "A · Haut",
-                "B · Bas",
-                "C · BPA",
-                "D · A÷C",
-                "E · B÷C",
-                "F · Div.",
-                "G · F÷C %",
-                "H · F÷B %",
-            ],
-            &COLS9,
-            true,
-            1,
-        );
+        let head = [
+            "Année",
+            "A · Haut",
+            "B · Bas",
+            "C · BPA",
+            "D · A÷C",
+            "E · B÷C",
+            "F · Div.",
+            "G · F÷C %",
+            "H · F÷B %",
+        ];
+        let mut body: Vec<[String; 9]> = Vec::new();
         for row in &v.per_year {
             let cy = frame.series.iter().find(|y| y.year == row.year);
             let (hp, lp, ep, dv) = match cy {
@@ -305,8 +309,7 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
                 nf.pct(row.payout_pct),
                 nf.pct(row.high_yield_pct),
             ];
-            let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
-            doc.grid_row_num(&refs, &COLS9, false, 1);
+            body.push(cells);
         }
         // G1 F — a column's total is stated only over EVERY year of the window: an unknown year,
         // an undefined ratio (its denominator — the EPS, or the low price for H — not positive)
@@ -353,8 +356,7 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             nf.pct(total_of(&totals[2])),
             nf.pct(total_of(&totals[3])),
         ];
-        let refs: Vec<&str> = total.iter().map(String::as_str).collect();
-        doc.grid_row_num(&refs, &COLS9, false, 1);
+        body.push(total);
         let avg = [
             "Moyenne".to_string(),
             String::new(),
@@ -366,14 +368,13 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             nf.pct(v.avg_payout_pct),
             nf.pct(v.avg_high_yield_pct),
         ];
-        let refs: Vec<&str> = avg.iter().map(String::as_str).collect();
-        doc.grid_row_num(&refs, &COLS9, false, 1);
-        doc.grid_end(&COLS9);
+        body.push(avg);
+        let mut notes = Block::default();
         if totals
             .iter()
             .any(|t| matches!(t, Total::Absent { unknown: true, .. }))
         {
-            doc.small_line(TOTAL_UNKNOWN_YEAR);
+            notes.small_line(TOTAL_UNKNOWN_YEAR);
         }
         if totals.iter().any(|t| {
             matches!(
@@ -384,23 +385,44 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
                 }
             )
         }) {
-            doc.small_line(TOTAL_UNDEFINED);
+            notes.small_line(TOTAL_UNDEFINED);
         }
         if totals.contains(&Total::Overflow) {
-            doc.small_line(TOTAL_OVERFLOW);
+            notes.small_line(TOTAL_OVERFLOW);
         }
-        doc.line(&format!(
+        notes.line(&format!(
             "8 · C/B moyen (D et E) : {}   ·   9 · C/B actuel : {}   ·   valeur relative : {}",
             nf.num(v.avg_pe),
             nf.num(v.current_pe),
             nf.pct(v.relative_value_pct),
         ));
-        doc.line(&format!(
+        notes.line(&format!(
             "Cours actuel : {}   ·   plus haut de l'année en cours : {}   ·   plus bas de l'année en cours : {}",
             nf.money(current_price),
             EM_DASH,
             EM_DASH,
         ));
+        let body_refs: Vec<Vec<&str>> = body
+            .iter()
+            .map(|r| r.iter().map(String::as_str).collect())
+            .collect();
+        // The grid's own advances: its top rule (`grid_begin`), its rows, its close (`grid_end`).
+        let mut table_h = doc.grid_rows_height(&head, &COLS9, FONT) + 3.0;
+        for r in &body_refs {
+            table_h += doc.grid_rows_height(r, &COLS9, FONT);
+        }
+        let notes_h = doc.block_height(&notes);
+        doc.keep_together_if_it_fits(SECTION_H + table_h + notes_h);
+        doc.section("3. Historique cours / bénéfice");
+        doc.grid_begin(body.len());
+        doc.grid_row_num(&head, &COLS9, true, 1);
+        for r in &body_refs {
+            doc.grid_row_num(r, &COLS9, false, 1);
+        }
+        doc.grid_end(&COLS9);
+        // Should the table itself run past a page, its notes still move as one block.
+        doc.keep_together(notes_h);
+        doc.block(&notes);
     }
     doc.gap(6.0);
 
@@ -471,11 +493,16 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
                     nf.money(Some(z.neutral_top)),
                     nf.money(Some(z.forecast_high)),
                 ));
-                b.indent_line(&format!(
-                    "Le cours actuel {} se situe : {}",
-                    nf.money(current_price),
-                    zone_label(r.present_price_zone),
-                ));
+                // G1 final (M1): an absent current price is said absent — never « outside the
+                // range », which would state a position it does not have.
+                match current_price {
+                    Some(_) => b.indent_line(&format!(
+                        "Le cours actuel {} se situe : {}",
+                        nf.money(current_price),
+                        price_position(price_place(z, current_price)),
+                    )),
+                    None => b.indent_line(PRICE_ABSENT),
+                }
             }
             None => b.line("C · Zonage : — (prévision incomplète ou plage dégénérée)"),
         }
@@ -663,7 +690,9 @@ impl NumberStyle {
     pub(crate) fn fmt_dec(self, v: Option<Decimal>, field: DisplayField) -> String {
         match v {
             None => EM_DASH.to_string(),
-            Some(d) => self.spell(round_for_display(d, field).normalize()),
+            // G1 final (L6): the screen's path — `round_for_display`, never `normalize` — so a
+            // « 4,0 % » on the screen is « 4,0 % » in the PDF, never « 4 % ».
+            Some(d) => self.spell(round_for_display(d, field)),
         }
     }
 
@@ -764,7 +793,7 @@ fn option_label(option: steadyinvest_contract::ForecastLowOption) -> &'static st
 /// with both names both. A computed cell (`Source::Derived`) descends from the others, so it adds
 /// no origin of its own and is never passed off as a manual entry — it reads « calculé » only when
 /// nothing else is valued. No valued cell → the em-dash. Data, not prose; never a path or key.
-fn data_source(study: &Study) -> String {
+fn data_source(study: &Study) -> DataSource {
     use steadyinvest_contract::Source;
     let mut tags: Vec<&str> = Vec::new();
     let (mut untagged, mut manual, mut derived) = (false, false, false);
@@ -805,11 +834,62 @@ fn data_source(study: &Study) -> String {
         many => Some(format!("{PROVIDER_MANY} {}", many.join(", "))),
     };
     match (provider, manual) {
-        (Some(p), true) => format!("{p} {AND_MANUAL}"),
-        (Some(p), false) => p,
-        (None, true) => MANUAL_ENTRY.to_string(),
-        (None, false) if derived => COMPUTED.to_string(),
-        (None, false) => EM_DASH.to_string(),
+        (Some(p), true) => DataSource {
+            head: p,
+            and_manual: true,
+        },
+        (Some(p), false) => DataSource::alone(p),
+        (None, true) => DataSource::alone(MANUAL_ENTRY),
+        (None, false) if derived => DataSource::alone(COMPUTED),
+        (None, false) => DataSource::alone(EM_DASH),
+    }
+}
+
+/// The header's « Données » value (G1 final, L7): the provider part, and whether « et saisie
+/// manuelle » follows — kept apart so a shortened header never loses the manual entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DataSource {
+    head: String,
+    and_manual: bool,
+}
+
+impl DataSource {
+    fn alone(head: impl Into<String>) -> Self {
+        DataSource {
+            head: head.into(),
+            and_manual: false,
+        }
+    }
+
+    /// The whole phrase, as one line of prose.
+    fn phrase(&self) -> String {
+        if self.and_manual {
+            format!("{} {AND_MANUAL}", self.head)
+        } else {
+            self.head.clone()
+        }
+    }
+
+    /// The value's lines in a header cell `room` wide at `size` — at most two. The whole phrase
+    /// when it fits one line; else, with a manual entry, the provider part on the first line
+    /// (ended by « … » only when it alone overflows) and « et saisie manuelle » whole on the
+    /// second — never elided, never split; else the phrase wrapped onto two lines at most.
+    fn header_lines(&self, room: f32, size: f32) -> Vec<String> {
+        let whole = wrap_to_width(&self.phrase(), room, size);
+        if whole.len() <= 1 {
+            return whole;
+        }
+        if self.and_manual {
+            vec![fit(&self.head, room, size), AND_MANUAL.to_string()]
+        } else if whole.len() <= 2 {
+            whole
+        } else {
+            let mut lines = whole;
+            lines.truncate(2);
+            let rest = lines[1].clone();
+            lines[1] = fit(&format!("{rest}…"), room, size);
+            lines
+        }
     }
 }
 
@@ -837,12 +917,43 @@ fn trend(t: Option<Trend>) -> &'static str {
     }
 }
 
-fn zone_label(z: Option<Zone>) -> &'static str {
-    match z {
-        Some(Zone::Buy) => "dans la zone basse",
-        Some(Zone::Neutral) => "dans la zone médiane",
-        Some(Zone::Sell) => "dans la zone haute",
-        None => "hors de la plage prévue",
+/// Where the current price sits against the §4 zoning (G1 final, M1 / L9): in one of the three
+/// zones (the engine's own interval comparators), below the forecast low, above the forecast
+/// high — or `Absent` when there is no current price. Read off the price and the bounds, never off
+/// the engine's `present_price_zone == None`, which means « absent » and « out of range » alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PricePlace {
+    In(Zone),
+    Below,
+    Above,
+    Absent,
+}
+
+fn price_place(z: &ZoneBounds, price: Option<Decimal>) -> PricePlace {
+    let Some(p) = price else {
+        return PricePlace::Absent;
+    };
+    if p < z.forecast_low {
+        PricePlace::Below
+    } else if p > z.forecast_high {
+        PricePlace::Above
+    } else if p <= z.buy_top {
+        PricePlace::In(Zone::Buy)
+    } else if p <= z.neutral_top {
+        PricePlace::In(Zone::Neutral)
+    } else {
+        PricePlace::In(Zone::Sell)
+    }
+}
+
+fn price_position(place: PricePlace) -> &'static str {
+    match place {
+        PricePlace::In(Zone::Buy) => "dans la zone basse",
+        PricePlace::In(Zone::Neutral) => "dans la zone médiane",
+        PricePlace::In(Zone::Sell) => "dans la zone haute",
+        PricePlace::Below => BELOW_RANGE,
+        PricePlace::Above => ABOVE_RANGE,
+        PricePlace::Absent => EM_DASH,
     }
 }
 
@@ -880,6 +991,7 @@ pub(crate) const EM_DASH: &str = "—";
 const VERDICT_FULL: &str = "Tous les critères validés et à jour";
 const VERDICT_PROVISIONAL: &str = "Provisoire — données à revérifier ou confiance réduite";
 const VERDICT_WITHHELD: &str = "En attente — au moins une donnée requise manque";
+const CREATED_ON: &str = "Créée le";
 const PROVIDER_ONE: &str = "fournisseur";
 const PROVIDER_MANY: &str = "fournisseurs";
 const MANUAL_ENTRY: &str = "saisie manuelle";
@@ -920,6 +1032,14 @@ const ZONE_LOW: &str = "Zone basse";
 const ZONE_MID: &str = "Zone médiane";
 const ZONE_HIGH: &str = "Zone haute";
 const CURRENT_PRICE: &str = "Cours actuel";
+// G1 final (M1 / L9): the current price's place when it is not inside a zone — named, never
+// « hors de la plage » for an absent price, never a marker pinned at the edge as if on it.
+const PRICE_ABSENT: &str =
+    "Le cours actuel est absent : sa place dans le zonage n'est pas établie.";
+const BELOW_RANGE: &str = "sous la plage prévue (sous le prix bas)";
+const ABOVE_RANGE: &str = "au-dessus de la plage prévue (au-dessus du prix haut)";
+const MARKER_BELOW: &str = "sous la plage";
+const MARKER_ABOVE: &str = "au-dessus de la plage";
 
 #[cfg(test)]
 const REPORT_USER_FACING: &[&str] = &[
@@ -927,7 +1047,7 @@ const REPORT_USER_FACING: &[&str] = &[
     "Analyse de sélection de titre",
     "Société",
     "Symbole",
-    "Date",
+    CREATED_ON,
     "Monnaie",
     "Données",
     "Préparé par",
@@ -1051,6 +1171,11 @@ const REPORT_USER_FACING: &[&str] = &[
     ZONE_MID,
     ZONE_HIGH,
     CURRENT_PRICE,
+    PRICE_ABSENT,
+    BELOW_RANGE,
+    ABOVE_RANGE,
+    MARKER_BELOW,
+    MARKER_ABOVE,
     OPTION_A,
     OPTION_B,
     OPTION_C,
@@ -1195,6 +1320,15 @@ impl Doc {
         self.ensure(need);
     }
 
+    /// G1 final (L10) — [`keep_together`] for a block that may be taller than a page: reserved as
+    /// one when a fresh page can hold it, else left to break where it must (never chasing a
+    /// too-tall block onto a new page for nothing).
+    pub(crate) fn keep_together_if_it_fits(&mut self, need: f32) {
+        if need <= self.page_h - MARGIN - BOTTOM {
+            self.ensure(need);
+        }
+    }
+
     pub(crate) fn gap(&mut self, h: f32) {
         self.y += h;
     }
@@ -1280,9 +1414,21 @@ impl Doc {
     /// G1 F: each label and value is fitted to its column's padded width at the real Helvetica
     /// widths (an over-long company or dossier name ends in « … »), never cut by a character
     /// count that lets a wide name run over the next cell.
+    ///
+    /// G1 final (L7): a value may carry an explicit line break (`\n`) — its row grows by a line
+    /// (the « Données » value keeps « et saisie manuelle » on its own line when the providers
+    /// fill the first).
     pub(crate) fn header_box(&mut self, rows: &[[(&str, &str); 3]]) {
-        let row_h = LINE_H + SMALL + 2.0;
-        let h = row_h * rows.len() as f32 + 4.0;
+        let value_step = FONT + 1.5;
+        let row_h = |row: &[(&str, &str); 3]| {
+            let lines = row
+                .iter()
+                .map(|(_, v)| v.split('\n').count())
+                .max()
+                .unwrap_or(1);
+            LINE_H + SMALL + 2.0 + (lines - 1) as f32 * value_step
+        };
+        let h = rows.iter().map(row_h).sum::<f32>() + 4.0;
         self.ensure(h + 4.0);
         let (x0, x1) = (MARGIN, self.page_w - MARGIN);
         let col_w = (x1 - x0) / 3.0;
@@ -1291,12 +1437,12 @@ impl Doc {
         for c in 1..3 {
             vline(&mut self.cur, x0 + col_w * c as f32, top, top + h, 0.4);
         }
+        let mut ry = top + 2.0;
         for (r, row) in rows.iter().enumerate() {
-            let ry = top + 2.0 + row_h * r as f32;
             if r > 0 {
                 hline(&mut self.cur, x0, x1, ry - 1.0, 0.4);
             }
-            let room = col_w - 2.0 * CELL_PAD;
+            let room = header_room(col_w);
             for (c, (label, value)) in row.iter().enumerate() {
                 let x = x0 + col_w * c as f32 + CELL_PAD;
                 text(
@@ -1306,14 +1452,17 @@ impl Doc {
                     SMALL,
                     &fit(label, room, SMALL),
                 );
-                text(
-                    &mut self.cur,
-                    x,
-                    ry + SMALL + FONT + 1.5,
-                    FONT,
-                    &fit(value, room, FONT),
-                );
+                for (k, line) in value.split('\n').enumerate() {
+                    text(
+                        &mut self.cur,
+                        x,
+                        ry + SMALL + value_step + k as f32 * value_step,
+                        FONT,
+                        &fit(line, room, FONT),
+                    );
+                }
             }
+            ry += row_h(row);
         }
         self.y = top + h + 3.0;
     }
@@ -1470,6 +1619,16 @@ impl Doc {
             .unwrap_or(1)
             .max(1);
         LINE_H + (lines - 1) as f32 * self.grid_line_step()
+    }
+
+    /// The height one grid row will take at `font` — measured before a table is drawn (G1 final,
+    /// L10: the §3 block is reserved whole).
+    fn grid_rows_height(&mut self, cells: &[&str], edges: &[f32], font: f32) -> f32 {
+        let saved = self.grid_font;
+        self.grid_font = font;
+        let h = self.grid_row_height(cells, edges);
+        self.grid_font = saved;
+        h
     }
 
     /// The body of a grid row: its cells at the cursor, wrapped within their columns, the ones in
@@ -1684,9 +1843,12 @@ impl Doc {
         let x0 = MARGIN + CHART_AXIS_W;
         let x1 = self.page_w - MARGIN;
         let plot_w = x1 - x0;
-        // The horizontal domain: the first year … the last year + the forecast horizon.
-        let span = f64::from(last_year - first_year + horizon).max(1.0);
-        let px = |year: f64| year_x(year, first_year, span, x0, plot_w);
+        // The horizontal domain: the first year … the last year + the forecast horizon, with half a
+        // year of room at each end (G1 final, L5: the first year's price bar is never drawn on the
+        // frame's edge).
+        let span = f64::from(last_year - first_year + horizon) + 2.0 * YEAR_PAD;
+        let origin = f64::from(first_year) - YEAR_PAD;
+        let px = |year: f64| year_x(year, origin, span, x0, plot_w);
         let py = |v: f64, lmin: f64, lmax: f64| {
             let t = ((v.max(1e-9).log10() - lmin) / (lmax - lmin)).clamp(0.0, 1.0);
             top + (f64::from(chart_h) * (1.0 - t)) as f32
@@ -1763,19 +1925,37 @@ impl Doc {
                 }
             }
         }
-        // The Sales (thin) and EPS (thick) lines, each on its own scale (greyscale: weight).
-        let draw =
-            |cur: &mut Content, pts: &[(i32, f64)], b: Option<(f64, f64)>, w: f32, dash: &[f32]| {
-                if let Some((lmin, lmax)) = b {
-                    let p: Vec<(f32, f32)> = pts
-                        .iter()
-                        .map(|(year, v)| (px(f64::from(*year)), py(*v, lmin, lmax)))
-                        .collect();
-                    polyline(cur, &p, w, SERIES_GRAY, dash);
-                }
+        // The Sales (thin) and EPS (thick) lines, each on its own scale (greyscale: weight). G1
+        // final (M2 / L5): each line is drawn run by run — it breaks at a missing year and at a
+        // value the log scale cannot hold, and a lone point shows as a dot.
+        let draw = |cur: &mut Content, runs: &[Vec<(i32, f64)>], b: Option<(f64, f64)>, w: f32| {
+            let Some((lmin, lmax)) = b else {
+                return;
             };
-        draw(&mut self.cur, &sales, sales_b, 0.8, &[]);
-        draw(&mut self.cur, &eps, eps_b, 1.6, &[]);
+            for run in runs {
+                let p: Vec<(f32, f32)> = run
+                    .iter()
+                    .map(|(year, v)| (px(f64::from(*year)), py(*v, lmin, lmax)))
+                    .collect();
+                match p.as_slice() {
+                    [(x, y)] => {
+                        let r = w + 0.6;
+                        fill_rect(cur, x - r, y - r, 2.0 * r, 2.0 * r, SERIES_GRAY);
+                    }
+                    _ => polyline(cur, &p, w, SERIES_GRAY, &[]),
+                }
+            }
+        };
+        let runs_of = |get: &dyn Fn(&CanonicalYear) -> Option<Decimal>| {
+            plot_runs(
+                &series
+                    .iter()
+                    .map(|cy| (cy.year, get(cy).and_then(|d| d.to_f64())))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        draw(&mut self.cur, &runs_of(&|cy| cy.sales), sales_b, 0.8);
+        draw(&mut self.cur, &runs_of(&|cy| cy.eps), eps_b, 1.6);
         // Projection to est-high / est-low (dotted, EPS scale): from the latest usable year's EPS
         // (the estimates' base) to that year + the horizon — or not drawn (see `base_year`).
         if let (Some((lmin, lmax)), Some((by, bv))) = (eps_b, projection_start) {
@@ -1891,23 +2071,42 @@ impl Doc {
         let hi_lbl = nf.money(Some(z.forecast_high));
         text_right(&mut self.cur, x1, by, 7.0, &hi_lbl);
 
-        // Current-price marker: a vertical line through the bar + a caption above.
-        if let Some(cp) = current_price.and_then(|d| d.to_f64()) {
-            let mx = fx(cp);
-            polyline(
-                &mut self.cur,
-                &[(mx, top - 4.0), (mx, top + ZONEBAR_H + 2.0)],
-                1.3,
-                0.0,
-                &[],
-            );
-            text_centered(
-                &mut self.cur,
-                mx,
-                top - 6.0,
-                7.0,
-                &format!("{CURRENT_PRICE} {}", nf.money(current_price)),
-            );
+        // Current-price marker: a vertical line through the bar + a caption above. G1 final (L9):
+        // a price outside the range is never pinned on the edge as if it stood at the edge price —
+        // an arrow at that edge points OUT of the bar and the caption says the price is outside.
+        // No price → no marker (M1; the §4 text says it is absent).
+        let caption = |outside: Option<&str>| match outside {
+            None => format!("{CURRENT_PRICE} {}", nf.money(current_price)),
+            Some(side) => format!("{CURRENT_PRICE} {} — {side}", nf.money(current_price)),
+        };
+        match price_place(z, current_price) {
+            PricePlace::In(_) => {
+                let cp = current_price.and_then(|d| d.to_f64()).unwrap_or(lo);
+                let mx = fx(cp);
+                polyline(
+                    &mut self.cur,
+                    &[(mx, top - 4.0), (mx, top + ZONEBAR_H + 2.0)],
+                    1.3,
+                    0.0,
+                    &[],
+                );
+                // Kept inside the margins: a price near an edge never runs its caption off.
+                let label = caption(None);
+                let half = text_width(&label, 7.0) / 2.0;
+                let cx = mx.min(x1 - half).max(x0 + half);
+                text_centered(&mut self.cur, cx, top - 6.0, 7.0, &label);
+            }
+            PricePlace::Below => {
+                edge_arrow(&mut self.cur, x0, top + ZONEBAR_H / 2.0, -1.0);
+                let label = caption(Some(MARKER_BELOW));
+                text(&mut self.cur, x0, top - 4.0, 7.0, &label);
+            }
+            PricePlace::Above => {
+                edge_arrow(&mut self.cur, x1, top + ZONEBAR_H / 2.0, 1.0);
+                let label = caption(Some(MARKER_ABOVE));
+                text_right(&mut self.cur, x1, top - 4.0, 7.0, &label);
+            }
+            PricePlace::Absent => {}
         }
         self.y = by + 4.0;
     }
@@ -1970,6 +2169,11 @@ impl Doc {
         }
         pdf.finish()
     }
+}
+
+/// The padded room of a [`Doc::header_box`] value in a column `col_w` wide.
+fn header_room(col_w: f32) -> f32 {
+    col_w - 2.0 * CELL_PAD
 }
 
 /// A page's content stream: black text, mid-grey rules; on a non-A4-portrait page, a translate
@@ -2271,6 +2475,25 @@ fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, gray: f32, da
     content.set_stroke_gray(RULE_GRAY);
 }
 
+/// G1 final (L9) — the §4 marker of a price outside the zoning: a black arrow leaving the bar
+/// through its `edge_x` at top-origin `y`, pointing outward (`dir` −1 = left, +1 = right), drawn
+/// in the margin so it never reads as a position ON the bar.
+fn edge_arrow(content: &mut Content, edge_x: f32, y: f32, dir: f32) {
+    let tip = edge_x + dir * 14.0;
+    polyline(content, &[(edge_x + dir * 2.0, y), (tip, y)], 1.3, 0.0, &[]);
+    polyline(
+        content,
+        &[
+            (tip - dir * 4.0, y - 3.5),
+            (tip, y),
+            (tip - dir * 4.0, y + 3.5),
+        ],
+        1.3,
+        0.0,
+        &[],
+    );
+}
+
 /// A stroked rectangle outline at top-origin `(x, top_y)`, size `w × h`.
 pub(crate) fn stroke_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, width: f32) {
     content.set_line_width(width);
@@ -2318,10 +2541,39 @@ fn series_log_bounds(values: &[f64]) -> Option<(f64, f64)> {
     Some((lo - pad, hi + pad))
 }
 
-/// G1 F — the x of `year` on the §1 plot: the domain starts at `first_year` and spans `span`
-/// years across `plot_w` from `x0`. By year, never by index, so a gap year keeps its place.
-fn year_x(year: f64, first_year: i32, span: f64, x0: f32, plot_w: f32) -> f32 {
-    x0 + (((year - f64::from(first_year)) / span) * f64::from(plot_w)) as f32
+/// G1 F — the x of `year` on the §1 plot: the domain starts at `origin` (the first year less
+/// [`YEAR_PAD`]) and spans `span` years across `plot_w` from `x0`. By year, never by index, so a
+/// gap year keeps its place.
+fn year_x(year: f64, origin: f64, span: f64, x0: f32, plot_w: f32) -> f32 {
+    x0 + (((year - origin) / span.max(1.0)) * f64::from(plot_w)) as f32
+}
+
+/// G1 final (M2 / L5) — a series' drawable runs: consecutive years (by YEAR, `year + 1`) whose
+/// value is plottable on a log scale (finite, positive). A missing year, an absent value or a value
+/// the log scale cannot hold (zero, negative) BREAKS the line — never bridged, which would draw a
+/// path through a year the data does not describe. A run of one point is kept (drawn as a dot).
+fn plot_runs(points: &[(i32, Option<f64>)]) -> Vec<Vec<(i32, f64)>> {
+    let mut sorted: Vec<(i32, Option<f64>)> = points.to_vec();
+    sorted.sort_by_key(|p| p.0);
+    let mut runs: Vec<Vec<(i32, f64)>> = Vec::new();
+    let mut run: Vec<(i32, f64)> = Vec::new();
+    for (year, value) in sorted {
+        let plottable = value.filter(|v| v.is_finite() && *v > 0.0);
+        let follows = run.last().is_some_and(|p| p.0 + 1 == year);
+        match plottable {
+            Some(v) if follows || run.is_empty() => run.push((year, v)),
+            Some(v) => {
+                runs.push(std::mem::take(&mut run));
+                run.push((year, v));
+            }
+            None if !run.is_empty() => runs.push(std::mem::take(&mut run)),
+            None => {}
+        }
+    }
+    if !run.is_empty() {
+        runs.push(run);
+    }
+    runs
 }
 
 /// G1 F — where a growth guide ends: `rate_pct` compounded from `(anchor_year, anchor_eps)` over
@@ -2702,8 +2954,15 @@ mod tests {
         for s in REPORT_USER_FACING {
             assert_neutral(s);
         }
-        for z in [Some(Zone::Buy), Some(Zone::Neutral), Some(Zone::Sell), None] {
-            assert_neutral(zone_label(z));
+        for p in [
+            PricePlace::In(Zone::Buy),
+            PricePlace::In(Zone::Neutral),
+            PricePlace::In(Zone::Sell),
+            PricePlace::Below,
+            PricePlace::Above,
+            PricePlace::Absent,
+        ] {
+            assert_neutral(price_position(p));
         }
         for t in [Some(Trend::Up), Some(Trend::Even), Some(Trend::Down), None] {
             assert_neutral(trend(t));
@@ -2996,14 +3255,17 @@ mod tests {
         let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
         assert!(contains(&bytes, TOTAL_UNKNOWN_YEAR));
         assert!(!contains(&bytes, TOTAL_UNDEFINED));
-        assert!(!contains(&bytes, "160 %"), "no partial G total (4 × 40 %)");
+        assert!(
+            !contains(&bytes, "160.0 %") && !contains(&bytes, "160 %"),
+            "no partial G total (4 × 40 %)"
+        );
         let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         assert!(
             !contains(&bytes, TOTAL_UNKNOWN_YEAR),
             "no note when all is known"
         );
         assert!(
-            contains(&bytes, "200 %"),
+            contains(&bytes, "200.0 %"),
             "G total over five known years: 5 × 40 %"
         );
     }
@@ -3075,7 +3337,7 @@ mod tests {
     #[test]
     fn the_data_source_reads_every_cell_and_never_calls_derived_manual() {
         let mut s = demo_study();
-        assert_eq!(data_source(&s), MANUAL_ENTRY);
+        assert_eq!(data_source(&s).phrase(), MANUAL_ENTRY);
         let provider = |c: &mut Cell| {
             c.source = Source::Provider;
             c.provenance.hash_of_dependencies = "eodhd:abc".to_string();
@@ -3096,10 +3358,13 @@ mod tests {
                 provider(c);
             }
         }
-        assert_eq!(data_source(&s), "fournisseur eodhd");
+        assert_eq!(data_source(&s).phrase(), "fournisseur eodhd");
         // One manual cell elsewhere than the sales is named too.
         s.years[0].eps.source = Source::Manual;
-        assert_eq!(data_source(&s), "fournisseur eodhd et saisie manuelle");
+        assert_eq!(
+            data_source(&s).phrase(),
+            "fournisseur eodhd et saisie manuelle"
+        );
         // Only computed cells: « calculé », never « saisie manuelle ».
         let mut d = demo_study();
         for y in &mut d.years {
@@ -3115,9 +3380,9 @@ mod tests {
             y.pre_tax_profit = None;
             y.book_value_per_share = None;
         }
-        assert_eq!(data_source(&d), COMPUTED);
+        assert_eq!(data_source(&d).phrase(), COMPUTED);
         d.years.clear();
-        assert_eq!(data_source(&d), EM_DASH);
+        assert_eq!(data_source(&d).phrase(), EM_DASH);
     }
 
     #[test]
@@ -3126,14 +3391,18 @@ mod tests {
         // entered; dividend 2 ÷ average high yield 4 % (2 ÷ 50) = 50.
         for nf in [NumberStyle::Point, NumberStyle::Comma] {
             let bytes = render_study_pdf(&demo_study(), nf).unwrap();
+            // G1 final (L6): the yield keeps its decimal place, as on the screen (« 4,0 % »).
+            let yield_4 = nf.spell(rust_decimal::Decimal::new(40, 1));
             for line in [
-                "(a) PER bas moyen 10 × BPA estimé bas 4 = 40",
-                "(b) Prix bas moyen des 5 dernières années = 50",
-                "(c) Plus bas sévère récent = —",
-                "(d) Prix soutenu par le dividende : dividende 2 ÷ rendement haut moyen 4 % = 50",
-                "Prix bas retenu (PER bas × BPA bas) = 40",
+                "(a) PER bas moyen 10 × BPA estimé bas 4 = 40".to_string(),
+                "(b) Prix bas moyen des 5 dernières années = 50".to_string(),
+                "(c) Plus bas sévère récent = —".to_string(),
+                format!(
+                    "(d) Prix soutenu par le dividende : dividende 2 ÷ rendement haut moyen {yield_4} % = 50"
+                ),
+                "Prix bas retenu (PER bas × BPA bas) = 40".to_string(),
             ] {
-                assert!(contains(&bytes, line), "missing under {nf:?}: {line}");
+                assert!(contains(&bytes, &line), "missing under {nf:?}: {line}");
             }
         }
         // A fractional candidate is spelled per format (G1 I review).
@@ -3193,7 +3462,7 @@ mod tests {
         let per_year = (v / 2.0).log10() / f64::from(h);
         assert!((per_year - 1.1f64.log10()).abs() < 1e-12);
         // The x axis is by year: a gap year keeps its place.
-        let x = |y: i32| year_x(f64::from(y), 2015, 15.0, 100.0, 300.0);
+        let x = |y: i32| year_x(f64::from(y), 2015.0, 15.0, 100.0, 300.0);
         assert!(((x(2019) - x(2017)) - 2.0 * (x(2018) - x(2017))).abs() < 1e-3);
         assert_eq!(x(2015), 100.0);
         assert_eq!(x(2030), 400.0);
@@ -3321,5 +3590,205 @@ mod tests {
                 "the PDF must carry no NAIC wordmark"
             );
         }
+    }
+
+    // ── G1 final (#237) — the study PDF's remaining findings ──
+
+    #[test]
+    fn an_absent_current_price_is_said_absent_never_out_of_range() {
+        // M1: the demo's zoning holds (40 … 162), the price is removed.
+        let mut s = demo_study();
+        s.judgment.current_price = None;
+        let bytes = render_study_pdf(&s, NumberStyle::Comma).unwrap();
+        assert!(contains(&bytes, PRICE_ABSENT));
+        assert!(!contains(&bytes, "hors de la plage"));
+        assert!(!contains(&bytes, BELOW_RANGE) && !contains(&bytes, ABOVE_RANGE));
+        // No marker: its caption is never written.
+        assert!(!contains(&bytes, &format!("{CURRENT_PRICE} {EM_DASH}")));
+        // The place itself, read off the price and the bounds (never off the engine's `None`).
+        let z = ZoneBounds {
+            forecast_low: Decimal::from(40),
+            buy_top: Decimal::from(80),
+            neutral_top: Decimal::from(120),
+            forecast_high: Decimal::from(160),
+        };
+        assert_eq!(price_place(&z, None), PricePlace::Absent);
+        assert_eq!(price_place(&z, Some(Decimal::from(10))), PricePlace::Below);
+        assert_eq!(price_place(&z, Some(Decimal::from(200))), PricePlace::Above);
+        assert_eq!(
+            price_place(&z, Some(Decimal::from(40))),
+            PricePlace::In(Zone::Buy)
+        );
+        assert_eq!(
+            price_place(&z, Some(Decimal::from(120))),
+            PricePlace::In(Zone::Neutral)
+        );
+        assert_eq!(
+            price_place(&z, Some(Decimal::from(160))),
+            PricePlace::In(Zone::Sell)
+        );
+    }
+
+    #[test]
+    fn a_price_outside_the_zoning_is_named_and_marked_outside() {
+        // L9: below the forecast low (40) and above the forecast high (162).
+        let mut s = demo_study();
+        s.judgment.current_price = Some(money_of("10"));
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        assert!(contains(
+            &bytes,
+            &format!("Le cours actuel 10 se situe : {BELOW_RANGE}")
+        ));
+        assert!(contains(
+            &bytes,
+            &format!("{CURRENT_PRICE} 10 — {MARKER_BELOW}")
+        ));
+        s.judgment.current_price = Some(money_of("500"));
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        assert!(contains(
+            &bytes,
+            &format!("Le cours actuel 500 se situe : {ABOVE_RANGE}")
+        ));
+        assert!(contains(
+            &bytes,
+            &format!("{CURRENT_PRICE} 500 — {MARKER_ABOVE}")
+        ));
+        // Inside: the plain caption, no « outside » word.
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        assert!(contains(&bytes, &format!("{CURRENT_PRICE} 80")));
+        assert!(!contains(&bytes, MARKER_BELOW) && !contains(&bytes, MARKER_ABOVE));
+    }
+
+    #[test]
+    fn a_chart_line_breaks_at_a_gap_and_at_a_non_plottable_value() {
+        // M2 / L5: never bridged over a missing year, an absent value, a zero or a negative.
+        let runs = plot_runs(&[
+            (2016, Some(1.0)),
+            (2015, Some(0.5)),
+            (2017, Some(-1.0)), // negative: no place on a log scale
+            (2018, Some(2.0)),
+            (2019, Some(3.0)),
+            // 2020 missing from the series
+            (2021, Some(4.0)),
+            (2022, None),
+            (2023, Some(0.0)),
+            (2024, Some(f64::NAN)),
+        ]);
+        assert_eq!(
+            runs,
+            vec![
+                vec![(2015, 0.5), (2016, 1.0)],
+                vec![(2018, 2.0), (2019, 3.0)],
+                vec![(2021, 4.0)], // a lone point: kept, drawn as a dot
+            ]
+        );
+        assert!(plot_runs(&[]).is_empty());
+        assert!(plot_runs(&[(2020, Some(-2.0))]).is_empty());
+    }
+
+    #[test]
+    fn the_first_year_is_not_drawn_on_the_frame_edge() {
+        // L5: half a year of room at each end of the axis.
+        let (first, last) = (2015, 2024);
+        let span = f64::from(last - first + FORECAST_HORIZON_YEARS as i32) + 2.0 * YEAR_PAD;
+        let origin = f64::from(first) - YEAR_PAD;
+        let x = |y: i32| year_x(f64::from(y), origin, span, 100.0, 300.0);
+        assert!(
+            x(first) > 100.0 + 5.0,
+            "the first bar clears the left frame"
+        );
+        let end = last + FORECAST_HORIZON_YEARS as i32;
+        assert!(
+            x(end) < 400.0 - 5.0,
+            "the horizon's end clears the right frame"
+        );
+    }
+
+    #[test]
+    fn a_figure_keeps_its_trailing_zeros_as_on_the_screen() {
+        // L6: the screen spells `round_for_display` as is — « 141,00 », « 4,0 % ».
+        let d = |s: &str| Some(rust_decimal::Decimal::from_str_exact(s).unwrap());
+        assert_eq!(NumberStyle::Comma.money(d("141.00")), "141,00");
+        assert_eq!(NumberStyle::Point.pct(d("4.00")), "4.0 %");
+        assert_eq!(NumberStyle::Comma.num(d("12.50")), "12,5");
+        // Rounding still applies (never more places than the field's scale).
+        assert_eq!(NumberStyle::Point.money(d("1.23456")), "1.23");
+    }
+
+    #[test]
+    fn the_data_header_never_loses_the_manual_entry() {
+        // L7: providers that fill the cell push « et saisie manuelle » to its own line, whole.
+        let room = header_room((PAGE_W - 2.0 * MARGIN) / 3.0);
+        let long = DataSource {
+            head: format!(
+                "{PROVIDER_MANY} {}",
+                ["aaaaaaaaaaaaaaaaaaaaaaa"; 6].join(", ")
+            ),
+            and_manual: true,
+        };
+        let lines = long.header_lines(room, FONT);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1], AND_MANUAL);
+        assert!(lines.iter().all(|l| text_width(l, FONT) <= room));
+        // Two providers: the providers whole on the first line, the manual entry on the second.
+        let two = DataSource {
+            head: format!("{PROVIDER_MANY} eodhd, yahoo"),
+            and_manual: true,
+        };
+        assert_eq!(
+            two.header_lines(room, FONT),
+            vec![
+                "fournisseurs eodhd, yahoo".to_string(),
+                AND_MANUAL.to_string()
+            ]
+        );
+        // A short phrase stays on one line.
+        let one = DataSource {
+            head: format!("{PROVIDER_ONE} eodhd"),
+            and_manual: true,
+        };
+        assert_eq!(one.header_lines(room, FONT).len(), 1);
+        // End to end: two providers and a manual cell — the whole fact is in the PDF.
+        let mut s = demo_study();
+        for (i, y) in s.years.iter_mut().enumerate() {
+            y.sales.source = Source::Provider;
+            y.sales.provenance.hash_of_dependencies =
+                format!("{}:x", if i % 2 == 0 { "eodhd" } else { "yahoo" });
+        }
+        let bytes = render_study_pdf(&s, NumberStyle::Comma).unwrap();
+        assert!(contains(&bytes, AND_MANUAL));
+    }
+
+    #[test]
+    fn the_header_date_is_labelled_as_the_creation_date() {
+        // L11: the date shown is the study's creation, labelled as the screen labels it.
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Comma).unwrap();
+        assert!(contains(&bytes, CREATED_ON));
+        assert!(contains(&bytes, "2026-03-09"));
+    }
+
+    #[test]
+    fn a_block_that_fits_a_page_moves_whole_one_that_cannot_does_not() {
+        // L10: the §3 block (heading, table, notes) is reserved as one when a page can hold it.
+        let mut doc = Doc::new();
+        doc.y = PAGE_H - BOTTOM - 100.0;
+        doc.keep_together_if_it_fits(200.0);
+        assert_eq!(doc.page_index(), 1, "moved whole to the next page");
+        let mut doc = Doc::new();
+        doc.y = PAGE_H - BOTTOM - 100.0;
+        doc.keep_together_if_it_fits(PAGE_H);
+        assert_eq!(
+            doc.page_index(),
+            0,
+            "a block taller than a page is not chased"
+        );
+        // End to end: the demo's §3 notes sit on the page of its heading.
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let pages = page_streams(&bytes);
+        let with = |s: &str| pages.iter().position(|p| contains(p, s));
+        assert_eq!(
+            with("3. Historique cours / bénéfice"),
+            with("8 · C/B moyen (D et E) :")
+        );
     }
 }
