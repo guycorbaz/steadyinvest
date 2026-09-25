@@ -3,7 +3,9 @@
 //! save picker (the 5.6 rail). Formatting happens HERE (the one float→string boundary of the app);
 //! the state read carries engine values, the report carries its own labels.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use rust_decimal::Decimal;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -11,7 +13,7 @@ use steadyinvest_core::rounding::DisplayField;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
-use crate::state::{self, JournalState, PortfolioReviewFacts, ReviewStudy};
+use crate::state::{self, JournalState, PortfolioReviewFacts, ReviewStudy, StopUncompared};
 use crate::viewmodel::engine::fmt_ud;
 use crate::viewmodel::format::{NumberFormat, format_amount, format_scaled};
 use crate::wiring::Session;
@@ -26,7 +28,8 @@ fn pct(v: Option<Decimal>, format: NumberFormat) -> SharedString {
 
 /// An invested amount in the reference currency. G1 final review: the SAME precision as the
 /// Portefeuille screen for the same figure (its consolidation and concentration amounts are
-/// `DisplayField::Price`, two decimals) — a total read on one screen and checked on the other must
+/// `DisplayField::Price`: rounded to at most two decimals, trailing zeros not padded — « 1 234,5 »
+/// stays « 1 234,5 », as there) — a total read on one screen and checked on the other must
 /// agree digit for digit; the checklist's locale rule (§4) asks for one spelling per figure.
 fn amount(v: Option<Decimal>, currency: &str, format: NumberFormat) -> SharedString {
     v.map(|d| {
@@ -148,19 +151,71 @@ fn global_absence(
     )
 }
 
-/// Re-push the review when it is the screen on display — the re-render every async mutation
-/// owes a shown surface (checklist §7): a price or FX result landing while « Revue » is open
-/// (G1 final review). Off-screen, the arrival re-render covers it.
-pub(crate) fn refresh_review_if_shown(
-    ui: &MainWindow,
-    state: &JournalState,
-    freshness: &HoldingFreshnessMap,
-    dismissed: &HashSet<String>,
-    config: &AppConfig,
-) {
-    if ui.get_current_screen() == REVIEW_SCREEN {
-        push_review(ui, state, freshness, dismissed, config);
+/// The coalescing latch of the async re-push (G3 review: a 40-ticker price batch re-composed
+/// the whole review 40 times). The first request of a burst schedules ONE re-push; the ones
+/// that land before it fires ride along. Pure — the timer is the caller's.
+#[derive(Default)]
+pub(crate) struct RepushLatch {
+    pending: std::cell::Cell<bool>,
+}
+
+impl RepushLatch {
+    /// A re-push is wanted: `true` when the caller must schedule it (none is pending yet).
+    pub(crate) fn request(&self) -> bool {
+        !self.pending.replace(true)
     }
+
+    /// The scheduled re-push runs: the latch opens for the next burst.
+    pub(crate) fn fire(&self) {
+        self.pending.set(false);
+    }
+}
+
+thread_local! {
+    /// The UI thread's one latch (the review is one surface).
+    static REPUSH: RepushLatch = RepushLatch::default();
+}
+
+/// Re-push the review when it is the screen on display — the re-render every async mutation
+/// owes a shown surface (checklist §7): a price, FX or study result landing while « Revue » is
+/// open (G1 final review). Coalesced (G3 review): a burst of results re-pushes ONCE, on the
+/// next event-loop turn (a zero-delay single-shot timer). Off-screen, the arrival re-render
+/// covers it.
+pub(crate) fn request_review_refresh(
+    ui: &MainWindow,
+    journal_state: &Rc<RefCell<JournalState>>,
+    freshness: &Rc<RefCell<HoldingFreshnessMap>>,
+    dismissed: &Rc<RefCell<HashSet<String>>>,
+    config: &Rc<RefCell<AppConfig>>,
+) {
+    if ui.get_current_screen() != REVIEW_SCREEN || !REPUSH.with(RepushLatch::request) {
+        return;
+    }
+    let ui_weak = ui.as_weak();
+    let journal_state = Rc::clone(journal_state);
+    let freshness = Rc::clone(freshness);
+    let dismissed = Rc::clone(dismissed);
+    let config = Rc::clone(config);
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+        REPUSH.with(RepushLatch::fire);
+        let Some(ui) = ui_weak.upgrade() else { return };
+        // Still on display? (the user may have left in the meantime — the arrival re-renders.)
+        if ui.get_current_screen() == REVIEW_SCREEN {
+            push_review(
+                &ui,
+                &journal_state.borrow(),
+                &freshness.borrow(),
+                &dismissed.borrow(),
+                &config.borrow(),
+            );
+        }
+    });
+}
+
+/// Empty the export-outcome slot — on arrival and at the start of an export (the F4 slot is
+/// free again for the next outcome; a stale « exportée » never survives a navigation).
+pub(crate) fn clear_notice(ui: &MainWindow) {
+    ui.global::<Review>().set_notice(SharedString::new());
 }
 
 /// The « Revue » screen's index (`MainWindow.current-screen`).
@@ -200,10 +255,9 @@ pub(crate) fn push_review(
     config: &AppConfig,
 ) {
     let review = ui.global::<Review>();
-    // The export outcome belongs to the render it reported on: every (re)push clears it — a
-    // dossier switch or a later arrival never shows a stale « exportée » (the F4 slot is empty
-    // again for the next outcome).
-    review.set_notice(SharedString::new());
+    // The export notice is NOT cleared here (G3 review): an async re-push (a price landing)
+    // must keep « Revue exportée : chemin ». It is cleared on arrival ([`clear_notice`], the
+    // screen-activated arm), at the start of an export, and on a dossier switch.
     let format = config.number_format;
     let Some(f) = facts(state, config) else {
         review.set_unavailable(true);
@@ -259,7 +313,8 @@ pub(crate) fn push_review(
     // models are EMPTIED (never stale rows the export would print). A dossier without any
     // position has nothing to classify: one « aucune position classée » statement, never three
     // « indisponible » classes (G1 final review — an empty dossier is not a failed read).
-    let size_empty = !d.unavailable && d.rows.is_empty();
+    // Keyed by the review's own positions (G3 review), not by the 6.7 read's row list.
+    let size_empty = !d.unavailable && f.positions.is_empty();
     review.set_size_empty(size_empty);
     let size_rows = if d.unavailable || size_empty {
         Vec::new()
@@ -443,7 +498,17 @@ pub(crate) fn push_review(
                 // A legacy lot's stop is never compared (its unit is unknown): named apart, with
                 // the reason on the screen (G1 final review — absence honesty).
                 stop_no_currency: stops_text(
-                    p.stops.iter().filter(|s| s.currency.is_none()),
+                    p.stops
+                        .iter()
+                        .filter(|s| s.uncompared == Some(StopUncompared::NoCurrency)),
+                    format,
+                )
+                .into(),
+                // …and a lot whose study could not be read (G3 review): its cause named too.
+                stop_unreadable: stops_text(
+                    p.stops
+                        .iter()
+                        .filter(|s| s.uncompared == Some(StopUncompared::StudyUnreadable)),
                     format,
                 )
                 .into(),
@@ -452,9 +517,25 @@ pub(crate) fn push_review(
                     dismissed.contains(&id.to_string())
                 })
                 .into(),
-                mixed_links: p.mixed_links.join(" · ").into(),
                 ..Default::default()
             };
+            // The lots link to different studies: every fact of the band — the read studies'
+            // currencies, a lot without a study, an unreadable one, and what the OTHER studies
+            // carry (signals, high zone) so the row hides nothing (G3 review).
+            if let Some(m) = &p.mixed {
+                row.mixed = true;
+                row.mixed_links = m.currencies.join(" · ").into();
+                row.mixed_no_study = m.no_study;
+                row.mixed_unreadable = m.unreadable;
+                row.other_flagged = m
+                    .other_flagged
+                    .iter()
+                    .map(|(currency, n)| format!("{currency} ({n})"))
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+                    .into();
+                row.other_high_zone = m.other_high_zone.join(" · ").into();
+            }
             match &p.study {
                 ReviewStudy::None { other_currency } => {
                     row.study = "none".into();
@@ -622,11 +703,17 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
                 price: p.price.to_string(),
                 last_saved: p.last_saved.to_string(),
                 last_saved_unknown: p.last_saved_unknown,
+                mixed: p.mixed,
                 mixed_links: p.mixed_links.to_string(),
+                mixed_no_study: p.mixed_no_study,
+                mixed_unreadable: p.mixed_unreadable,
+                other_flagged: p.other_flagged.to_string(),
+                other_high_zone: p.other_high_zone.to_string(),
                 stop: p.stop.to_string(),
                 stop_breached: p.stop_breached,
                 stop_breached_levels: p.stop_breached_levels.to_string(),
                 stop_no_currency: p.stop_no_currency.to_string(),
+                stop_unreadable: p.stop_unreadable.to_string(),
                 trigger: p.trigger.to_string(),
             })
             .collect(),
@@ -690,6 +777,9 @@ pub(crate) fn wire_review(ui: &MainWindow, s: &Session) {
         let holding_dismissed = std::rc::Rc::clone(holding_dismissed);
         ui.global::<Review>().on_export_pdf(move || {
             let ui = ui_weak.unwrap();
+            // A new export: the previous outcome leaves the slot (G3 review — the re-push no
+            // longer clears it).
+            clear_notice(&ui);
             push_review(
                 &ui,
                 &journal_state.borrow(),
@@ -840,6 +930,19 @@ mod tests {
     }
 
     #[test]
+    fn a_burst_of_async_results_schedules_one_re_push() {
+        let latch = RepushLatch::default();
+        assert!(latch.request(), "the first result of a burst schedules");
+        assert!(!latch.request(), "the next ones ride along");
+        assert!(!latch.request());
+        latch.fire();
+        assert!(
+            latch.request(),
+            "after the re-push, a new burst schedules again"
+        );
+    }
+
+    #[test]
     fn the_global_totals_absence_names_every_cause() {
         let pairs = vec!["EUR → CHF".to_string()];
         assert_eq!(global_absence(false, &pairs, true), (String::new(), false));
@@ -860,7 +963,7 @@ mod tests {
     #[test]
     fn amounts_rates_and_stops_are_spelled_as_elsewhere() {
         let comma = NumberFormat::Comma;
-        // Portefeuille's precision for an invested amount: two decimals.
+        // Portefeuille's precision for an invested amount: up to two decimals (never rounded to the unit).
         assert_eq!(
             amount(Some(d("1234.5")), "CHF", comma).as_str(),
             format!(
@@ -884,6 +987,7 @@ mod tests {
             currency: currency.map(str::to_string),
             bank: "UBS".into(),
             breached: false,
+            uncompared: None,
         };
         assert_eq!(
             stops_text([stop(None), stop(Some("CHF"))].iter(), comma),

@@ -696,8 +696,11 @@ mod tests {
         // G1 final review of the « Revue » (area 2): the empty dossier's size statement, the
         // global total's both-causes band and the not-compared legacy stop: 953 + 3 = 956,
         // measured (the reworded trigger / mixed-links / due-subtitle lines replace, not add).
+        // Its G3 review: the mixed-links band's four more variants (a lot without a study, an
+        // unreadable one), the other studies' signals / high zone, the unreadable lot's stop, and
+        // the due count on its own line: 956 + 8 = 964, measured.
         assert!(
-            total >= 956,
+            total >= 964,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

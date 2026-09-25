@@ -1110,8 +1110,14 @@ export struct ReviewPositionRow {
     stop-breached: bool,
     stop-breached-levels: string, // the breached stop(s) among `stop` (which level, which bank)
     stop-no-currency: string, // the stop(s) of a lot without a declared currency: unit unknown, never compared
+    stop-unreadable: string,  // the stop(s) of a lot whose study could not be read: never compared
     trigger: string,        // stop | sell | ""
-    mixed-links: string,    // the lots link to different studies: their currencies, joined; "" when one study
+    mixed: bool,            // the lots do not all link to the same study
+    mixed-links: string,    // the READ studies' currencies, joined (mixed only)
+    mixed-no-study: bool,   // a lot has no study at all
+    mixed-unreadable: bool, // a lot's study could not be read
+    other-flagged: string,  // the studies the row does NOT show that carry signals: « CHF (2) », joined
+    other-high-zone: string, // the studies the row does NOT show in the high zone or above: currencies, joined
     last-saved: string,
     last-saved-unknown: bool, // the FR51 history read failed — the date is unknown, never the creation date
     due: bool,

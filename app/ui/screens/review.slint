@@ -251,15 +251,40 @@ export component ReviewScreen inherits Rectangle {
                         // The lots of this ticker do not all link to the same study (a legacy lot
                         // matched ticker-only, lots in two currencies): stated, the row showing
                         // the most recent study (chosen by identity, never by lot position).
-                        if row.mixed-links != "": StatusBand {
+                        // G3 review: « aucune étude » and « indisponible » are two facts; with an
+                        // unreadable lot the row cannot claim to show the most recent study.
+                        if row.mixed && !row.mixed-unreadable: StatusBand {
                             icon: "◦";
-                            text: @tr("Les lots de ce titre sont liés à des études différentes (études en {}) ; la ligne montre la plus récente.", row.mixed-links);
+                            text: row.mixed-no-study
+                                ? @tr("Les lots de ce titre ne sont pas tous liés à la même étude (études en {}, et un lot sans étude) ; la ligne montre la plus récente.", row.mixed-links)
+                                : @tr("Les lots de ce titre sont liés à des études différentes (études en {}) ; la ligne montre la plus récente.", row.mixed-links);
                         }
-                        // A lot without a declared currency: its stop's unit is unknown — never
-                        // compared with a price, and the row says why (absence honesty).
+                        if row.mixed && row.mixed-unreadable: StatusBand {
+                            icon: "⊘";
+                            text: row.mixed-links == ""
+                                ? @tr("Un lot de ce titre n'a aucune étude et l'étude d'un autre lot n'a pas pu être lue.")
+                                : row.mixed-no-study
+                                    ? @tr("Les lots de ce titre ne sont pas tous liés à la même étude (études en {}, et un lot sans étude) et l'étude d'un lot n'a pas pu être lue ; la ligne montre une étude lue, sans pouvoir dire si c'est la plus récente.", row.mixed-links)
+                                    : @tr("Les lots de ce titre ne sont pas tous liés à la même étude (études en {}) et l'étude d'un lot n'a pas pu être lue ; la ligne montre une étude lue, sans pouvoir dire si c'est la plus récente.", row.mixed-links);
+                        }
+                        // What the OTHER studies carry — nothing hidden behind the shown one.
+                        if row.other-flagged != "": StatusBand {
+                            icon: "⚠";
+                            text: @tr("Autre étude de ce titre avec des signaux : {}", row.other-flagged);
+                        }
+                        if row.other-high-zone != "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Autre étude de ce titre dans la zone haute ou au-dessus : {}", row.other-high-zone);
+                        }
+                        // A stop that cannot be compared with a price says why (absence honesty):
+                        // a lot without a declared currency, a lot whose study could not be read.
                         if row.stop-no-currency != "": StatusBand {
                             icon: "◦";
-                            text: @tr("Seuil suiveur {} non comparé au prix : la position n'a pas de devise renseignée.", row.stop-no-currency);
+                            text: @tr("Seuil suiveur {} non comparé au prix : le lot n'a pas de devise renseignée.", row.stop-no-currency);
+                        }
+                        if row.stop-unreadable != "": StatusBand {
+                            icon: "⊘";
+                            text: @tr("Seuil suiveur {} non comparé au prix : l'étude du lot n'a pas pu être lue.", row.stop-unreadable);
                         }
                         if row.flags != "": StatusBand {
                             icon: "⚠";
@@ -313,7 +338,10 @@ export component ReviewScreen inherits Rectangle {
             if !Review.unavailable: PanelCard {
                 title: @tr("En chiffres");
                 FactLine { text: @tr("{} positions · {} avec une étude · {} critères validés · {} provisoires · {} en attente · {} non calculables", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld, Review.count-not-computable); }
-                FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur · {} à revoir", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached, Review.count-due); }
+                // Positions, as their rows show them (G3 review); the due count counts STUDIES —
+                // on its own line, never read as positions.
+                FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached); }
+                FactLine { text: @tr("{} études à revoir", Review.count-due); }
             }
         }
     }

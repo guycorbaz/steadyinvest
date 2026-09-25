@@ -160,13 +160,18 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
                 );
             }
             // Revue (Story 7.2): the whole roll-up re-derives on arrival.
-            3 => crate::wiring::review::push_review(
-                &ui,
-                &journal_state.borrow(),
-                &holding_freshness.borrow(),
-                &holding_dismissed.borrow(),
-                &config.borrow(),
-            ),
+            // The export outcome belongs to the visit it reported on: cleared on arrival, never by
+            // an async re-push (G3 review).
+            3 => {
+                crate::wiring::review::clear_notice(&ui);
+                crate::wiring::review::push_review(
+                    &ui,
+                    &journal_state.borrow(),
+                    &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
+                    &config.borrow(),
+                );
+            }
             _ => {}
         }
     });

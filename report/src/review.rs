@@ -56,9 +56,17 @@ pub struct ReviewLine {
     pub last_saved: String,
     /// The last save is unknown (the history read failed) — stated, never a dash.
     pub last_saved_unknown: bool,
-    /// The lots do not all link to the same study: the distinct links' study currencies, joined
-    /// (`"—"` for a lot without a readable study); `""` when every lot shares the study.
+    /// The lots do not all link to the same study.
+    pub mixed: bool,
+    /// The READ studies' currencies, joined (`mixed` only; may be empty).
     pub mixed_links: String,
+    /// A lot has no study at all / a lot's study could not be read (G3 review: two facts).
+    pub mixed_no_study: bool,
+    pub mixed_unreadable: bool,
+    /// The studies the row does NOT show that carry signals (« CHF (2) »), joined; `""` when none.
+    pub other_flagged: String,
+    /// The studies the row does NOT show in the high zone or above (currencies), joined.
+    pub other_high_zone: String,
     /// `stale` | `fresh` | `""`, and the as-of date.
     pub data_state: String,
     pub as_of: String,
@@ -70,6 +78,8 @@ pub struct ReviewLine {
     /// The stop(s) of a lot without a declared currency — unit unknown, never compared with the
     /// price (G1 final review); `""` when none.
     pub stop_no_currency: String,
+    /// The stop(s) of a lot whose study could not be read — never compared (G3 review).
+    pub stop_unreadable: String,
     /// `stop` | `sell` | `""`.
     pub trigger: String,
 }
@@ -194,7 +204,12 @@ const STUDY_UNAVAILABLE: &str = "indisponible";
 const STUDY_NOT_COMPUTABLE: &str = "non calculable";
 const PRICE_LABEL: &str = "prix actuel :";
 const LAST_SAVED_LABEL: &str = "dernière sauvegarde :";
-const MIXED_LINKS: &str = "lots liés à des études différentes, études en";
+const MIXED_LINKS: &str = "lots liés à des études différentes";
+const MIXED_CURRENCIES: &str = "études en";
+const MIXED_NO_STUDY: &str = "un lot sans étude";
+const MIXED_UNREADABLE: &str = "l'étude d'un lot n'a pas pu être lue";
+const OTHER_FLAGGED: &str = "autre étude de ce titre avec des signaux :";
+const OTHER_HIGH_ZONE: &str = "autre étude de ce titre dans la zone haute ou au-dessus :";
 const LOW_CONFIDENCE: &str = "confiance réduite";
 const ZONE_BUY: &str = "basse";
 const ZONE_NEUTRAL: &str = "médiane";
@@ -208,7 +223,8 @@ const DATA_NEVER: &str = "données : pas encore rafraîchies";
 const FLAGS_LABEL: &str = "Signaux";
 const STOP_LABEL: &str = "Seuil suiveur :";
 const STOP_BREACHED: &str = "sous le seuil";
-const STOP_NO_CURRENCY: &str = "non comparé au prix : la position n'a pas de devise renseignée";
+const STOP_NO_CURRENCY: &str = "non comparé au prix : le lot n'a pas de devise renseignée";
+const STOP_UNREADABLE: &str = "non comparé au prix : l'étude du lot n'a pas pu être lue";
 const TRIGGER_STOP: &str = "Le prix a atteint le seuil suiveur.";
 const TRIGGER_SELL: &str = "Le prix est dans la zone haute.";
 const D_TICKER: &str = "Titre";
@@ -230,7 +246,7 @@ const K_NOT_COMPUTABLE: &str = "non calculables";
 const K_FLAGGED: &str = "avec au moins un signal";
 const K_HIGH_ZONE: &str = "dans la zone haute ou au-dessus";
 const K_STOP_BREACHED: &str = "sous leur seuil suiveur";
-const K_DUE: &str = "à revoir";
+const K_DUE: &str = "études à revoir";
 const EMPTY_BLOCK: &str = "Aucune donnée.";
 
 #[cfg(test)]
@@ -301,6 +317,11 @@ const REVIEW_USER_FACING: &[&str] = &[
     PRICE_LABEL,
     LAST_SAVED_LABEL,
     MIXED_LINKS,
+    MIXED_CURRENCIES,
+    MIXED_NO_STUDY,
+    MIXED_UNREADABLE,
+    OTHER_FLAGGED,
+    OTHER_HIGH_ZONE,
     LOW_CONFIDENCE,
     ZONE_BUY,
     ZONE_NEUTRAL,
@@ -314,6 +335,7 @@ const REVIEW_USER_FACING: &[&str] = &[
     STOP_LABEL,
     STOP_BREACHED,
     STOP_NO_CURRENCY,
+    STOP_UNREADABLE,
     TRIGGER_STOP,
     TRIGGER_SELL,
     D_TICKER,
@@ -341,7 +363,7 @@ const REVIEW_USER_FACING: &[&str] = &[
 
 // The share blocks: label · amount · share · target, then the note — prose, left-aligned and
 // given the room (a note wraps inside its column, never across the rules).
-// G1 final review: the amount column holds « 12 345 678,00 CHF » (two decimals, as on Portefeuille).
+// G1 final review: the amount column holds up to « 12 345 678,99 CHF » (at most two decimals, as on Portefeuille).
 const COLS_SHARE: [f32; 6] = [
     MARGIN,
     MARGIN + 144.0,
@@ -354,8 +376,8 @@ const COLS_SHARE: [f32; 6] = [
 // The positions table: a symbol column wide enough for « NESN.SW », the banks (they wrap), then
 // the figures — each column sized to its longest word at the grid font plus the cell padding
 // (on-screen check 2: « au-dessus de la bande » needs ≈ 101 pt; the relative value and H/B had
-// room to give; G1 final review: the invested amount now carries two decimals, as on
-// Portefeuille — « 12 345 678,00 CHF » needs ≈ 89 pt, taken from the symbol and relative-value
+// room to give; G1 final review: the invested amount now carries up to two decimals, as on
+// Portefeuille — « 12 345 678,99 CHF » needs ≈ 89 pt, taken from the symbol and relative-value
 // columns). Guarded by `every_positions_word_fits_its_column`.
 const COLS_POSITIONS: [f32; 9] = [
     MARGIN,
@@ -681,8 +703,26 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                     l.other_currency, l.currency
                 ));
             }
-            if !l.mixed_links.is_empty() {
-                extra.push(format!("{MIXED_LINKS} {}", l.mixed_links));
+            if l.mixed {
+                // Every fact of the screen's band: the read studies, a lot without a study, an
+                // unreadable one (G3 review — two facts, never one « — »).
+                let mut mixed = vec![MIXED_LINKS.to_string()];
+                if !l.mixed_links.is_empty() {
+                    mixed.push(format!("{MIXED_CURRENCIES} {}", l.mixed_links));
+                }
+                if l.mixed_no_study {
+                    mixed.push(MIXED_NO_STUDY.to_string());
+                }
+                if l.mixed_unreadable {
+                    mixed.push(MIXED_UNREADABLE.to_string());
+                }
+                extra.push(mixed.join(", "));
+            }
+            if !l.other_flagged.is_empty() {
+                extra.push(format!("{OTHER_FLAGGED} {}", l.other_flagged));
+            }
+            if !l.other_high_zone.is_empty() {
+                extra.push(format!("{OTHER_HIGH_ZONE} {}", l.other_high_zone));
             }
             if !l.price.is_empty() {
                 extra.push(format!("{PRICE_LABEL} {}", l.price));
@@ -708,6 +748,12 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 extra.push(format!(
                     "{STOP_LABEL} {} {STOP_NO_CURRENCY}",
                     l.stop_no_currency
+                ));
+            }
+            if !l.stop_unreadable.is_empty() {
+                extra.push(format!(
+                    "{STOP_LABEL} {} {STOP_UNREADABLE}",
+                    l.stop_unreadable
                 ));
             }
             if l.last_saved_unknown {
@@ -1037,7 +1083,37 @@ mod tests {
         r.positions[0].stop_no_currency = "63,00 (UBS)".into();
         let bytes = render_portfolio_review(&r);
         assert!(carries(&bytes, "63,00 (UBS)"));
-        assert!(carries(&bytes, "pas de devise"));
+        assert!(carries(&bytes, "le lot n'a pas"), "the LOT has no currency");
+        // G3 review: a lot whose study could not be read — its cause, too.
+        let mut r = sample();
+        r.positions[0].flags = String::new();
+        r.positions[0].stop_unreadable = "70,00 CHF (UBS)".into();
+        let bytes = render_portfolio_review(&r);
+        assert!(carries(&bytes, "70,00 CHF (UBS)"));
+        assert!(carries(&bytes, "lu"), "the unreadable cause");
+        assert!(carries(&bytes, "pas pu"));
+    }
+
+    #[test]
+    fn mixed_links_state_every_fact_and_the_other_studies_signals() {
+        let mut r = sample();
+        let p = &mut r.positions[0];
+        p.flags = String::new();
+        p.mixed = true;
+        p.mixed_links = "CHF".into();
+        p.mixed_no_study = true;
+        p.mixed_unreadable = true;
+        p.other_flagged = "CHF (2)".into();
+        p.other_high_zone = "CHF".into();
+        let bytes = render_portfolio_review(&r);
+        assert!(carries(&bytes, "un lot sans"), "« aucune étude »");
+        assert!(carries(&bytes, "CHF (2)"), "the other study's signals");
+        assert!(carries(&bytes, "autre"), "named as the other study");
+        // The due count counts studies.
+        let mut r = sample();
+        r.counts = vec![("due".into(), "2".into())];
+        assert!(carries(&render_portfolio_review(&r), "tudes "));
+        assert_eq!(K_DUE, "études à revoir");
     }
 
     #[test]
@@ -1107,12 +1183,12 @@ mod tests {
         fits(0, "NESN.SW");
         fits(1, "Swissquote");
         let share_room = COLS_SHARE[2] - COLS_SHARE[1];
-        let need = text_width("12 345 678,00 CHF", FONT) + 2.0 * PAD;
+        let need = text_width("12 345 678,99 CHF", FONT) + 2.0 * PAD;
         assert!(
             need <= share_room,
             "a share block amount needs {need} pt, has {share_room}"
         );
-        fits(2, "12 345 678,00 CHF");
+        fits(2, "12 345 678,99 CHF");
         fits(2, UNAVAILABLE);
         fits(3, "100,0 %");
         fits(6, "123,4:1");
@@ -1127,6 +1203,7 @@ mod tests {
         p.price = "123 USD".into();
         p.last_saved = String::new();
         p.last_saved_unknown = true;
+        p.mixed = true;
         p.mixed_links = "CHF".into();
         p.stop = "63 CHF UBS".into();
         p.stop_breached = true;
