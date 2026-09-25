@@ -541,38 +541,8 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         Err(error) => tracing::warn!(error = %error, "provider key test failed"),
                     }
                     let prefs = ui.global::<Prefs>();
-                    let status = match result {
-                        Ok(()) => state::MSG_KEY_OK.to_string(),
-                        Err(steadyinvest_ingestion::IngestionError::Provider(
-                            steadyinvest_ingestion::ProviderError::InvalidOrAbsentKey,
-                        )) => state::MSG_KEY_INVALID.to_string(),
-                        // 403: the key is valid but the plan/account is not authorized (e.g. EODHD
-                        // free tier excludes fundamentals) — say so honestly, not "key invalid".
-                        Err(steadyinvest_ingestion::IngestionError::Provider(
-                            steadyinvest_ingestion::ProviderError::Forbidden { .. },
-                        )) => state::MSG_KEY_FORBIDDEN.to_string(),
-                        // Issue #42: a quota reply PROVES the provider accepted the key (it ran the
-                        // request and hit the rate limit) — acceptance, never a rejected key.
-                        Err(steadyinvest_ingestion::IngestionError::Provider(
-                            steadyinvest_ingestion::ProviderError::Quota { .. },
-                        )) => state::MSG_KEY_OK_QUOTA.to_string(),
-                        // Issue #42: a network failure never reached the provider — the key is neither
-                        // confirmed nor refused (inconclusive), so it must not read as "clé invalide".
-                        Err(steadyinvest_ingestion::IngestionError::Provider(
-                            steadyinvest_ingestion::ProviderError::Network { .. },
-                        )) => state::MSG_KEY_TEST_INCONCLUSIVE.to_string(),
-                        // G1 H (#237): the key reached `/splits` only after `/fundamentals` and
-                        // `/eod` answered — it is accepted; the split history's own named notice
-                        // says what is missing (e.g. a plan without `/splits`), never raw English.
-                        Err(
-                            ref error @ steadyinvest_ingestion::IngestionError::Provider(
-                                steadyinvest_ingestion::ProviderError::SplitHistory { .. },
-                            ),
-                        ) => state::provider_failure_notice(error).to_string(),
-                        Err(error) => {
-                            state::MSG_PROVIDER_FAILED.replace("{cause}", &error.to_string())
-                        }
-                    };
+                    // The verdict is the pure `state::key_test_status` (G1 H review: tested there).
+                    let status = state::key_test_status(&result);
                     prefs.set_provider_status(status.into());
                     // Issue #40: the test resolved — clear the in-flight flag so the panel's buttons
                     // re-enable (whatever the verdict).

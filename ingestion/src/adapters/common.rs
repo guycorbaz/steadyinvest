@@ -157,11 +157,14 @@ pub(crate) struct DatedSplit {
 /// A raw price `value` dated `date`, brought into TODAY's shares: for every split dated strictly
 /// after the bar, × `denominator / numerator` (a 10:1 split divides the pre-split prices by 10).
 /// ISO dates compare lexicographically; a bar ON the split date is already post-split. The
-/// numerators and denominators are compounded separately and the price divided ONCE, so a 3:2
-/// split of 150 is exactly 100 (no 0.666…7 factor). A quotient that does not terminate within 8
-/// decimals (an odd price over 1.5) is rounded to 4 dp, like the other derived per-share figures
-/// (#119). No split after the bar → the value untouched. `None` on an (astronomically unlikely)
-/// overflow — the caller then withholds that whole year rather than mis-scale it.
+/// numerators and denominators are compounded separately and the price divided ONCE (a 3:2 split
+/// of 150 is 100, no 0.666…7 factor compounded in).
+///
+/// ONE rounding rule (G1 H review): a rebased price is a DERIVED per-share figure, so whenever at
+/// least one split applies it is rounded to 4 dp (`round_dp`, banker's midpoint) — exactly like
+/// book value and dividend per share (#119). No split after the bar → the served value, untouched
+/// (never re-rounded). `None` on an (astronomically unlikely) overflow — the caller then withholds
+/// that whole year rather than mis-scale it.
 fn rebase_price(value: Decimal, date: &str, splits: &[DatedSplit]) -> Option<Decimal> {
     let mut numerators = Decimal::ONE;
     let mut denominators = Decimal::ONE;
@@ -175,12 +178,7 @@ fn rebase_price(value: Decimal, date: &str, splits: &[DatedSplit]) -> Option<Dec
         return Some(value);
     }
     let quotient = value.checked_mul(denominators)?.checked_div(numerators)?;
-    let exact = quotient.round_dp(8);
-    Some(if exact == quotient {
-        quotient
-    } else {
-        quotient.round_dp(4)
-    })
+    Some(quotient.round_dp(4))
 }
 
 /// [`reduce_high_low`] with each DAILY bar first rebased into today's shares by the splits dated
@@ -333,12 +331,13 @@ mod tests {
         assert_eq!(h0[&2020], d("800"));
     }
 
-    /// G1 H (#237): a fractional ratio (3:2, served "1.500000/1.000000") applies exactly — the
-    /// numerators and denominators compound separately and the price divides once, so 150 → 100
-    /// with no 0.666…7 residue; a non-terminating quotient is rounded to 4 dp (#119's figure
-    /// rule); a bar ON the split date is already post-split; a reverse split (1:10) multiplies.
+    /// G1 H (#237): a fractional ratio (3:2, served "1.500000/1.000000") applies — the numerators
+    /// and denominators compound separately and the price divides once, so 150 → 100; whenever a
+    /// split applies the result is rounded to 4 dp (#119's per-share rule — one rule, G1 H
+    /// review), including a terminating 5-dp quotient; a bar ON the split date is already
+    /// post-split and served untouched (never re-rounded); a reverse split (1:10) multiplies.
     #[test]
-    fn rebase_price_applies_fractional_and_reverse_ratios_exactly() {
+    fn rebase_price_applies_fractional_and_reverse_ratios_with_one_rounding_rule() {
         let d = |s: &str| Decimal::from_str_exact(s).unwrap();
         let three_for_two = [DatedSplit {
             date: "2022-06-01".into(),
@@ -354,10 +353,20 @@ mod tests {
             Some(d("66.6667")),
             "100 ÷ 1.5 does not terminate → 4 dp"
         );
+        let forty = [DatedSplit {
+            date: "2022-06-01".into(),
+            numerator: d("40"),
+            denominator: d("1"),
+        }];
         assert_eq!(
-            rebase_price(d("150"), "2022-06-01", &three_for_two),
-            Some(d("150")),
-            "the split-date bar is already post-split"
+            rebase_price(d("589.07"), "2020-01-15", &forty),
+            Some(d("14.7268")),
+            "589.07 ÷ 40 = 14.72675 terminates, yet is rounded to 4 dp too (one rule)"
+        );
+        assert_eq!(
+            rebase_price(d("150.123456"), "2022-06-01", &three_for_two),
+            Some(d("150.123456")),
+            "the split-date bar is already post-split — served untouched, not re-rounded"
         );
         let reverse = [DatedSplit {
             date: "2022-06-01".into(),

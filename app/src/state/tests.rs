@@ -1639,6 +1639,74 @@ fn provider_failure_notice_maps_each_cause() {
     }
 }
 
+/// G1 H review: the key test's verdict is about the KEY. A failure of EODHD's `/splits` (reached
+/// only after the key served `/fundamentals` and `/eod`) is classified on its root cause — the
+/// #42 verdicts hold through the wrap; a plan without `/splits` or an unreadable body reads « valid
+/// key, split history inaccessible », never the fetch's split notice. The direct causes keep their
+/// verdicts, and an unclassified failure keeps the named MSG_PROVIDER_FAILED form.
+#[test]
+fn key_test_status_is_a_key_verdict_even_through_a_split_history_failure() {
+    use steadyinvest_ingestion::{IngestionError, ProviderError};
+    let status = |e: ProviderError| key_test_status(&Err(IngestionError::Provider(e)));
+    let splits = |cause: ProviderError| ProviderError::SplitHistory {
+        cause: Box::new(cause),
+    };
+    assert_eq!(key_test_status(&Ok(())), MSG_KEY_OK);
+    assert_eq!(
+        status(splits(ProviderError::Quota {
+            retry_after_secs: Some(5)
+        })),
+        MSG_KEY_OK_QUOTA
+    );
+    assert_eq!(
+        status(splits(ProviderError::Network {
+            detail: "reset".into()
+        })),
+        MSG_KEY_TEST_INCONCLUSIVE
+    );
+    assert_eq!(
+        status(splits(ProviderError::InvalidOrAbsentKey)),
+        MSG_KEY_INVALID
+    );
+    for other in [
+        ProviderError::Forbidden {
+            detail: "plan".into(),
+        },
+        ProviderError::Parse {
+            detail: "error object".into(),
+        },
+    ] {
+        assert_eq!(status(splits(other)), MSG_KEY_OK_NO_SPLITS);
+    }
+    // The direct (non-split) causes keep their #42 / 3.2 verdicts.
+    assert_eq!(status(ProviderError::InvalidOrAbsentKey), MSG_KEY_INVALID);
+    assert_eq!(
+        status(ProviderError::Forbidden {
+            detail: "plan".into()
+        }),
+        MSG_KEY_FORBIDDEN
+    );
+    assert_eq!(
+        status(ProviderError::Quota {
+            retry_after_secs: None
+        }),
+        MSG_KEY_OK_QUOTA
+    );
+    assert_eq!(
+        status(ProviderError::Network {
+            detail: "dns".into()
+        }),
+        MSG_KEY_TEST_INCONCLUSIVE
+    );
+    let parse = status(ProviderError::Parse {
+        detail: "shape".into(),
+    });
+    assert!(
+        parse.starts_with(&MSG_PROVIDER_FAILED.replace("{cause}", "")),
+        "{parse}"
+    );
+}
+
 #[test]
 fn mark_provider_stale_flags_provider_cells_and_retains_values() {
     let dir = TempDir::new().unwrap();

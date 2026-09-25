@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 
+use chrono::{Datelike, NaiveDate};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde_json::Value;
@@ -88,7 +89,10 @@ impl MarketDataProvider for EodhdProvider {
         let splits = get_json(&self.http, &splits_url, ticker)
             .await
             .map_err(split_history_failure)?;
-        let financials = map_eodhd(&fundamentals, &prices, &splits, ticker)?;
+        // G1 H review: the fetch day bounds the split history (a split dated after it is refused).
+        // Read here, in the I/O shell; the mapping below stays pure and takes it as a parameter.
+        let fetch_day = chrono::Utc::now().date_naive();
+        let financials = map_eodhd(&fundamentals, &prices, &splits, fetch_day, ticker)?;
         // Story 4.4: the latest `/eod` close (the series is `order=a`, so the last bar is the most
         // recent) is the present market price for the §4 zone marker — `None` if the series is empty.
         // Issue #72: the bar carries its session `date`, threaded on for the confront cache key.
@@ -180,11 +184,12 @@ pub fn fx_pair_symbol(base: &str, quote: &str) -> String {
 /// sheet shares behind the derived dividend and book value per share) into today's shares, but
 /// serves the daily price bars RAW. So the split history adjusts the price bars here, and the
 /// returned `splits` stay EMPTY: `normalize` must not rebase the already-restated per-share figures a
-/// second time.
+/// second time. `fetch_day` (UTC) bounds the split history: a split dated after it is refused.
 pub fn map_eodhd(
     fundamentals: &Value,
     prices: &Value,
     splits: &Value,
+    fetch_day: NaiveDate,
     ticker: &str,
 ) -> Result<RawFinancials, ProviderError> {
     let currency = fundamentals
@@ -203,7 +208,7 @@ pub fn map_eodhd(
     // Per-year high/low reduced from the daily EOD bars (root array, `"date"`-keyed), each bar
     // first rebased into today's shares by the splits dated after it (issue #217). An unreadable
     // split history fails the whole mapping, named (G1 H) — never « no splits ».
-    let split_history = map_split_history(splits).map_err(split_history_failure)?;
+    let split_history = map_split_history(splits, fetch_day).map_err(split_history_failure)?;
     let (highs, lows) = reduce_high_low_adjusted(Some(prices), "date", &split_history);
 
     // Union of every fiscal year mentioned by any section, ascending.
@@ -282,13 +287,22 @@ fn split_history_failure(cause: ProviderError) -> ProviderError {
 /// stated reason » was weighed and refused: every price before that split would still be served
 /// at the wrong scale (the #217 defect itself), and the study has no channel to carry the reason
 /// beside the figures it corrupts. The detail names the row, from the body only (key-free).
-fn map_split_history(body: &Value) -> Result<Vec<DatedSplit>, ProviderError> {
+///
+/// G1 H review — two more refusals, same strict policy:
+/// - **Two rows on one date** (a duplicated 2:1 would compound into ÷4; two different ratios on
+///   one day are ambiguous) — refused, never compounded nor de-duplicated by guess.
+/// - **A split dated after `fetch_day`** (an announced, not-yet-effective split) — refused: applied,
+///   it would rebase EVERY served bar, today's included, by a split that has not happened. The
+///   bound is the FETCH DAY, not the last bar: a split effective today (or after a lagging last
+///   bar) is real and must stay applied — the last-bar bound would refuse exactly that case.
+fn map_split_history(body: &Value, fetch_day: NaiveDate) -> Result<Vec<DatedSplit>, ProviderError> {
     let Some(rows) = body.as_array() else {
         return Err(ProviderError::Parse {
             detail: cap_detail(&format!("split history is not a list: {body}")),
         });
     };
-    let mut out = Vec::with_capacity(rows.len());
+    let today = iso_date(fetch_day);
+    let mut out: Vec<DatedSplit> = Vec::with_capacity(rows.len());
     for (index, row) in rows.iter().enumerate() {
         let bad = |what: &str| ProviderError::Parse {
             detail: cap_detail(&format!("split history row {index}: {what}: {row}")),
@@ -303,6 +317,12 @@ fn map_split_history(body: &Value) -> Result<Vec<DatedSplit>, ProviderError> {
             .and_then(Value::as_str)
             .and_then(parse_split_ratio)
             .ok_or_else(|| bad("malformed ratio"))?;
+        if date > today.as_str() {
+            return Err(bad(&format!("dated after the fetch day {today}")));
+        }
+        if out.iter().any(|s| s.date == date) {
+            return Err(bad("a second split on the same date"));
+        }
         out.push(DatedSplit {
             date: date.to_string(),
             numerator,
@@ -313,15 +333,25 @@ fn map_split_history(body: &Value) -> Result<Vec<DatedSplit>, ProviderError> {
     Ok(out)
 }
 
-/// Exactly `YYYY-MM-DD` (ASCII digits and dashes) — the form the bar dates share, so the split
-/// dates compare with them lexicographically = chronologically.
+/// `YYYY-MM-DD` of a calendar date — the form the split and bar dates share.
+fn iso_date(day: NaiveDate) -> String {
+    format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day())
+}
+
+/// Exactly `YYYY-MM-DD` (ASCII digits and dashes) naming a real calendar day — the form the bar
+/// dates share, so the split dates compare with them lexicographically = chronologically.
 fn is_iso_date(s: &str) -> bool {
     let b = s.as_bytes();
-    b.len() == 10
+    let shaped = b.len() == 10
         && b.iter().enumerate().all(|(i, c)| match i {
             4 | 7 => *c == b'-',
             _ => c.is_ascii_digit(),
-        })
+        });
+    shaped
+        && match (s[0..4].parse(), s[5..7].parse(), s[8..10].parse()) {
+            (Ok(y), Ok(m), Ok(d)) => NaiveDate::from_ymd_opt(y, m, d).is_some(),
+            _ => false,
+        }
 }
 
 /// `"num/den"` → two exact, strictly positive `Decimal`s (G1 H: "1.500000/1.000000" is a 3:2
@@ -402,6 +432,11 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// A fixed fetch day — never the wall clock in a test.
+    fn day() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 9, 25).unwrap()
+    }
+
     #[test]
     fn latest_eod_close_reads_the_last_bar_in_ascending_order() {
         // `/eod?order=a` → ascending; the LAST bar is the most recent close (the present price for
@@ -464,7 +499,7 @@ mod tests {
                 } },
             }
         });
-        let fin = map_eodhd(&fundamentals, &json!([]), &json!([]), "AAPL.US").expect("maps");
+        let fin = map_eodhd(&fundamentals, &json!([]), &json!([]), day(), "AAPL.US").expect("maps");
         let y = |year: i32| {
             fin.years
                 .iter()
@@ -526,13 +561,13 @@ mod tests {
             { "date": "2024-06-10", "split": "10.000000/1.000000" },
             { "date": "2021-07-20", "split": "4.000000/1.000000" }
         ]);
-        let fin = map_eodhd(&fundamentals, &prices, &splits, "NVDA.US").expect("maps");
+        let fin = map_eodhd(&fundamentals, &prices, &splits, day(), "NVDA.US").expect("maps");
         let y2020 = fin.years.iter().find(|y| y.year == 2020).expect("2020");
         let d = |s: &str| Decimal::from_str_exact(s).unwrap();
         assert_eq!(
             y2020.high_price.as_ref().map(|a| a.value),
-            Some(d("14.72675")),
-            "589.07 ÷ 40"
+            Some(d("14.7268")),
+            "589.07 ÷ 40 = 14.72675, rounded to 4 dp (the one rule)"
         );
         assert_eq!(
             y2020.low_price.as_ref().map(|a| a.value),
@@ -552,7 +587,7 @@ mod tests {
             "nothing left for normalize to rebase"
         );
         // Both rows kept, sorted by date.
-        let history = map_split_history(&splits).expect("a well-formed history");
+        let history = map_split_history(&splits, day()).expect("a well-formed history");
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].date, "2021-07-20");
     }
@@ -561,8 +596,58 @@ mod tests {
     #[test]
     fn an_empty_split_history_is_no_splits() {
         assert_eq!(
-            map_split_history(&json!([])).expect("empty is valid"),
+            map_split_history(&json!([]), day()).expect("empty is valid"),
             vec![]
+        );
+    }
+
+    /// G1 H review: two rows on one date are refused (named), never compounded — a duplicated
+    /// 2:1 would otherwise divide the pre-split prices by 4; two ratios on one day are ambiguous.
+    #[test]
+    fn a_duplicated_split_date_is_refused_never_compounded() {
+        for second in ["2.000000/1.000000", "3.000000/1.000000"] {
+            let body = json!([
+                { "date": "2024-06-01", "split": "2.000000/1.000000" },
+                { "date": "2024-06-01", "split": second },
+            ]);
+            let err = map_split_history(&body, day()).unwrap_err();
+            let ProviderError::Parse { detail } = &err else {
+                panic!("expected Parse, got {err:?}");
+            };
+            assert!(
+                detail.contains("row 1") && detail.contains("same date"),
+                "{detail}"
+            );
+        }
+    }
+
+    /// G1 H review: a split dated after the FETCH day (announced, not yet effective) is refused,
+    /// named — applied, it would rebase today's bars too. A split ON the fetch day, or after a
+    /// lagging last bar but not after the fetch day, is real and stays applied.
+    #[test]
+    fn a_split_dated_after_the_fetch_day_is_refused_but_a_past_one_after_the_last_bar_applies() {
+        let future = json!([{ "date": "2026-09-26", "split": "2.000000/1.000000" }]);
+        let err = map_split_history(&future, day()).unwrap_err();
+        let ProviderError::Parse { detail } = &err else {
+            panic!("expected Parse, got {err:?}");
+        };
+        assert!(
+            detail.contains("after the fetch day 2026-09-25"),
+            "{detail}"
+        );
+        assert!(
+            map_split_history(&json!([{ "date": "2026-09-25", "split": "2/1" }]), day()).is_ok(),
+            "a split effective on the fetch day is real"
+        );
+        // The last bar predates a PAST split (a lagging series): the split still applies.
+        let fundamentals = json!({ "General": { "CurrencyCode": "USD" } });
+        let prices = json!([{ "date": "2026-09-22", "high": "40", "low": "30" }]);
+        let past = json!([{ "date": "2026-09-24", "split": "2.000000/1.000000" }]);
+        let fin = map_eodhd(&fundamentals, &prices, &past, day(), "X.US").expect("maps");
+        let y = fin.years.iter().find(|y| y.year == 2026).expect("2026");
+        assert_eq!(
+            y.high_price.as_ref().map(|a| a.value),
+            Some(Decimal::from(20))
         );
     }
 
@@ -578,7 +663,7 @@ mod tests {
             json!("Unauthenticated"),
             json!(null),
         ] {
-            let err = map_eodhd(&fundamentals, &prices, &body, "NVDA.US").unwrap_err();
+            let err = map_eodhd(&fundamentals, &prices, &body, day(), "NVDA.US").unwrap_err();
             let ProviderError::SplitHistory { cause } = &err else {
                 panic!("expected a named split-history failure, got {err:?}");
             };
@@ -595,6 +680,7 @@ mod tests {
     fn a_malformed_split_row_fails_the_history_named() {
         for row in [
             json!({ "date": "bad", "split": "2/1" }),
+            json!({ "date": "2021-13-45", "split": "2/1" }),
             json!({ "date": "2021-07-20" }),
             json!({ "date": "2021-07-20", "split": "4.000000" }),
             json!({ "date": "2021-07-20", "split": "0/1" }),
@@ -603,7 +689,7 @@ mod tests {
             json!({ "split": "2/1" }),
         ] {
             let body = json!([{ "date": "2024-06-10", "split": "10.000000/1.000000" }, row]);
-            let err = map_split_history(&body).unwrap_err();
+            let err = map_split_history(&body, day()).unwrap_err();
             let ProviderError::Parse { detail } = &err else {
                 panic!("expected Parse, got {err:?}");
             };

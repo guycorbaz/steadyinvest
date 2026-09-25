@@ -7,8 +7,10 @@
 //! Issue #217 / G1 H (#237): the fixtures carry a REAL split — a 2:1 on 2024-06-01, served by the
 //! `/splits` endpoint (`eodhd-splits-DEMO.json`), in the middle of fiscal 2024. The fundamentals'
 //! own `SplitsDividends` block carries only `LastSplitFactor` / `LastSplitDate` (the live shape),
-//! which the mapper does not read.
+//! which the mapper does not read. The `/eod` fixture is RAW like the live series: the bars before
+//! the split trade around 20–30, the post-split November bar around 14–17 (half the scale).
 
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use steadyinvest_core::normalize::RawYear;
 use steadyinvest_ingestion::ProviderError;
@@ -20,6 +22,11 @@ const SPLITS: &str = include_str!("fixtures/eodhd-splits-DEMO.json");
 
 fn dec(s: &str) -> Decimal {
     Decimal::from_str_exact(s).unwrap()
+}
+
+/// A fixed fetch day, after every fixture date — never the wall clock in a test.
+fn day() -> NaiveDate {
+    NaiveDate::from_ymd_opt(2026, 9, 25).unwrap()
 }
 
 fn json(s: &str) -> serde_json::Value {
@@ -35,7 +42,14 @@ fn year(raw: &steadyinvest_core::normalize::RawFinancials, y: i32) -> &RawYear {
 
 #[test]
 fn maps_eodhd_fundamentals_and_prices_to_raw_financials() {
-    let raw = map_eodhd(&json(FUNDAMENTALS), &json(EOD), &json(SPLITS), "DEMO").expect("maps");
+    let raw = map_eodhd(
+        &json(FUNDAMENTALS),
+        &json(EOD),
+        &json(SPLITS),
+        day(),
+        "DEMO",
+    )
+    .expect("maps");
 
     assert_eq!(raw.native_currency, "USD");
     assert_eq!(raw.years.len(), 2, "two reported fiscal years");
@@ -55,12 +69,16 @@ fn maps_eodhd_fundamentals_and_prices_to_raw_financials() {
     assert_eq!(y23.sales.as_ref().unwrap().currency, "USD");
 
     // 2024 — the split falls INSIDE the year: the February bar (30 / 26) is pre-split → 15 / 13,
-    // the November bar (33 / 21) is post-split and untouched. The yearly high is 33 (not a raw
-    // 30 nor a mixed-base max), the low 13 (the rebased February low, below November's 21).
+    // the November bar (17 / 14) is post-split and untouched. The yearly high is November's 17
+    // (a raw, mixed-base max would read 30), the low the rebased February 13 (below November's 14).
     let y24 = year(&raw, 2024);
     assert_eq!(y24.sales.as_ref().unwrap().value, dec("1100"));
     assert!(y24.eps.is_none(), "a null epsActual maps to None, not 0");
-    assert_eq!(y24.high_price.as_ref().unwrap().value, dec("33"));
+    assert_eq!(
+        y24.high_price.as_ref().unwrap().value,
+        dec("17"),
+        "not the raw 30"
+    );
     assert_eq!(y24.low_price.as_ref().unwrap().value, dec("13"), "26 ÷ 2");
 
     // Issue #217: nothing is passed on to `normalize` — the prices are already in today's shares
@@ -83,7 +101,14 @@ fn maps_eodhd_fundamentals_and_prices_to_raw_financials() {
 #[test]
 fn per_share_fundamentals_across_a_split_are_taken_as_served_pinned_on_the_share_count_assumption()
 {
-    let raw = map_eodhd(&json(FUNDAMENTALS), &json(EOD), &json(SPLITS), "DEMO").expect("maps");
+    let raw = map_eodhd(
+        &json(FUNDAMENTALS),
+        &json(EOD),
+        &json(SPLITS),
+        day(),
+        "DEMO",
+    )
+    .expect("maps");
     let y23 = year(&raw, 2023);
     assert_eq!(
         y23.eps.as_ref().unwrap().value,
@@ -113,6 +138,7 @@ fn an_empty_split_history_leaves_the_bars_raw() {
         &json(FUNDAMENTALS),
         &json(EOD),
         &serde_json::json!([]),
+        day(),
         "DEMO",
     )
     .expect("maps");
@@ -121,8 +147,12 @@ fn an_empty_split_history_leaves_the_bars_raw() {
         dec("25")
     );
     assert_eq!(
+        year(&raw, 2024).high_price.as_ref().unwrap().value,
+        dec("30")
+    );
+    assert_eq!(
         year(&raw, 2024).low_price.as_ref().unwrap().value,
-        dec("21")
+        dec("14")
     );
 }
 
@@ -132,7 +162,7 @@ fn an_empty_split_history_leaves_the_bars_raw() {
 #[test]
 fn a_split_body_that_is_not_the_array_fails_named_never_no_splits() {
     let body = serde_json::json!({ "code": 403, "message": "plan does not include splits" });
-    let err = map_eodhd(&json(FUNDAMENTALS), &json(EOD), &body, "DEMO").unwrap_err();
+    let err = map_eodhd(&json(FUNDAMENTALS), &json(EOD), &body, day(), "DEMO").unwrap_err();
     match err {
         ProviderError::SplitHistory { cause } => {
             assert!(matches!(*cause, ProviderError::Parse { .. }), "{cause:?}")
@@ -141,11 +171,11 @@ fn a_split_body_that_is_not_the_array_fails_named_never_no_splits() {
     }
 }
 
-/// G1 H (#237): a fractional ratio (3:2 served "1.500000/1.000000") is applied exactly.
+/// G1 H (#237): a fractional ratio (3:2 served "1.500000/1.000000") is applied, 4 dp.
 #[test]
 fn a_fractional_split_ratio_is_applied_exactly() {
     let splits = serde_json::json!([{ "date": "2025-01-01", "split": "1.500000/1.000000" }]);
-    let raw = map_eodhd(&json(FUNDAMENTALS), &json(EOD), &splits, "DEMO").expect("maps");
+    let raw = map_eodhd(&json(FUNDAMENTALS), &json(EOD), &splits, day(), "DEMO").expect("maps");
     // Every bar predates the split: 2023 high 25 ÷ 1.5 = 16.6667 (4 dp), low 18 ÷ 1.5 = 12.
     assert_eq!(
         year(&raw, 2023).high_price.as_ref().unwrap().value,
@@ -155,10 +185,10 @@ fn a_fractional_split_ratio_is_applied_exactly() {
         year(&raw, 2023).low_price.as_ref().unwrap().value,
         dec("12")
     );
-    // 2024 high 33 ÷ 1.5 = 22 exactly.
+    // 2024 high: the raw 30 ÷ 1.5 = 20 (this hypothetical split postdates every bar).
     assert_eq!(
         year(&raw, 2024).high_price.as_ref().unwrap().value,
-        dec("22")
+        dec("20")
     );
 }
 
@@ -166,7 +196,14 @@ fn a_fractional_split_ratio_is_applied_exactly() {
 fn missing_currency_is_a_parse_error_not_a_panic() {
     let fundamentals = serde_json::json!({ "Financials": {} });
     let prices = serde_json::json!([]);
-    let err = map_eodhd(&fundamentals, &prices, &serde_json::json!([]), "DEMO").unwrap_err();
+    let err = map_eodhd(
+        &fundamentals,
+        &prices,
+        &serde_json::json!([]),
+        day(),
+        "DEMO",
+    )
+    .unwrap_err();
     assert!(
         err.to_string().to_lowercase().contains("currencycode")
             || matches!(err, ProviderError::Parse { .. })
@@ -178,7 +215,14 @@ fn the_mapped_raw_normalizes_through_core() {
     // The mapped raw is accepted by core::normalize (no structural error), and — because the
     // mapper hands on NO splits — normalize rebases nothing a second time: the canonical 2023
     // high is the mapper's already-rebased 12.5 (not 6.25) and the EPS the served 1.50 (not 0.75).
-    let raw = map_eodhd(&json(FUNDAMENTALS), &json(EOD), &json(SPLITS), "DEMO").unwrap();
+    let raw = map_eodhd(
+        &json(FUNDAMENTALS),
+        &json(EOD),
+        &json(SPLITS),
+        day(),
+        "DEMO",
+    )
+    .unwrap();
     let canonical = steadyinvest_core::normalize::normalize(raw).expect("normalizes");
     assert_eq!(canonical.years.len(), 2);
     let y23 = &canonical.years[0];

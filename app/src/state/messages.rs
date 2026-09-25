@@ -479,6 +479,10 @@ pub const MSG_KEY_OK_QUOTA: &str =
 pub const MSG_KEY_TEST_INCONCLUSIVE: &str = "Test non concluant : le fournisseur n'a pas pu être joint ; la clé n'est ni confirmée ni refusée.";
 pub const MSG_KEY_INVALID: &str = "La clé est invalide ou absente ; le fournisseur l'a refusée.";
 pub const MSG_KEY_FORBIDDEN: &str = "La clé est valide, mais l'abonnement ne couvre pas ces données ; le fournisseur a refusé l'accès.";
+/// G1 H review: the key test reached EODHD's `/splits` only after `/fundamentals` and `/eod`
+/// answered — the key IS valid — but the split history was refused (a plan without `/splits`) or
+/// unreadable, so no study fetch can complete. Both causes are named, neither is guessed away.
+pub const MSG_KEY_OK_NO_SPLITS: &str = "La clé est valide, mais l'historique des divisions d'actions est inaccessible (abonnement qui ne le couvre pas, ou réponse illisible) ; les données d'étude ne peuvent pas être récupérées.";
 pub const MSG_KEYCHAIN_UNAVAILABLE: &str =
     "Le trousseau du système est indisponible ; la clé n'a pas été enregistrée.";
 /// Issue #44 (F11): the slot has more than one stored credential — actionable, not a generic error.
@@ -602,6 +606,38 @@ pub fn provider_failure_notice(error: &steadyinvest_ingestion::IngestionError) -
         // The fetched data reached us but did not normalize (a structural payload error).
         IngestionError::Normalize(_) => MSG_NORMALIZE_FAILED,
     }
+}
+
+/// PURE: the key test's verdict (Story 3.2) for Réglages — a statement about the KEY, cause-named.
+/// Issue #42: a quota proves acceptance, a network cut is inconclusive; a 403 is a valid key on a
+/// plan that does not cover the data. G1 H review: a failure of EODHD's `/splits` (reached only
+/// after `/fundamentals` and `/eod` answered) is classified on its ROOT cause — never a split
+/// notice in place of a key verdict: quota → accepted-with-quota, network → inconclusive, a
+/// rejected key → invalid, any other (a plan without `/splits`, an unreadable body) → valid key
+/// without the split history.
+pub fn key_test_status(result: &Result<(), steadyinvest_ingestion::IngestionError>) -> String {
+    use steadyinvest_ingestion::{IngestionError, ProviderError};
+    let Err(error) = result else {
+        return MSG_KEY_OK.to_string();
+    };
+    let verdict = match error {
+        IngestionError::Provider(ProviderError::SplitHistory { cause }) => {
+            match cause.root_cause() {
+                ProviderError::Quota { .. } => MSG_KEY_OK_QUOTA,
+                ProviderError::Network { .. } => MSG_KEY_TEST_INCONCLUSIVE,
+                ProviderError::InvalidOrAbsentKey => MSG_KEY_INVALID,
+                _ => MSG_KEY_OK_NO_SPLITS,
+            }
+        }
+        IngestionError::Provider(ProviderError::InvalidOrAbsentKey) => MSG_KEY_INVALID,
+        // 403: the key is valid but the plan/account is not authorized (e.g. EODHD free tier
+        // excludes fundamentals) — say so honestly, not "key invalid".
+        IngestionError::Provider(ProviderError::Forbidden { .. }) => MSG_KEY_FORBIDDEN,
+        IngestionError::Provider(ProviderError::Quota { .. }) => MSG_KEY_OK_QUOTA,
+        IngestionError::Provider(ProviderError::Network { .. }) => MSG_KEY_TEST_INCONCLUSIVE,
+        other => return MSG_PROVIDER_FAILED.replace("{cause}", &other.to_string()),
+    };
+    verdict.to_string()
 }
 
 /// The completion notice after a dashboard lifecycle action on `ticker` completes (Story 2.12).
@@ -771,4 +807,5 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SPLITS_UNAVAILABLE,
     MSG_SPLITS_FORBIDDEN,
     MSG_SPLITS_QUOTA,
+    MSG_KEY_OK_NO_SPLITS,
 ];

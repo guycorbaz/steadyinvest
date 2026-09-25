@@ -798,10 +798,11 @@ mod tests {
         // MSG_QUICK_SCREEN_STUDY_EMPTY) and the criblage's unreadable-watchlist refusal
         // (MSG_SCREENING_LIST_UNREADABLE): 142. G1 H (#237) names the split-history failure
         // apart from the fundamentals / prices ones (MSG_SPLITS_UNAVAILABLE, MSG_SPLITS_FORBIDDEN,
-        // MSG_SPLITS_QUOTA): 142 + 3 = 145.
+        // MSG_SPLITS_QUOTA): 142 + 3 = 145. Its review adds the key-test verdict for a valid key
+        // without the split history (MSG_KEY_OK_NO_SPLITS): 145 + 1 = 146.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            145,
+            146,
             "state.rs message inventory changed — register the new notice"
         );
     }
