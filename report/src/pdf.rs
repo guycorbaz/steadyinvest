@@ -17,8 +17,8 @@
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use steadyinvest_contract::Study;
-use steadyinvest_core::method::FORECAST_HORIZON_YEARS;
-use steadyinvest_core::normalize::NormalizeError;
+use steadyinvest_core::method::{FORECAST_HORIZON_YEARS, USABLE_YEARS_FLOOR};
+use steadyinvest_core::normalize::{CanonicalYear, NormalizeError};
 use steadyinvest_core::rounding::{DisplayField, round_for_display};
 use steadyinvest_core::ssg::{Trend, UpsideDownside, Zone, ZoneBounds};
 
@@ -58,10 +58,16 @@ pub(crate) const BOTTOM: f32 = MARGIN + 24.0; // keep clear of the footer discla
 const CHART_MIN_H: f32 = 150.0; // the §1 plot never gets shorter than this (points)
 const CHART_AXIS_W: f32 = 30.0; // left gutter for the y-axis decade labels
 const ZONEBAR_H: f32 = 26.0; // §4 zone bar height (points)
+const ZONEBAR_H_RESERVE: f32 = ZONEBAR_H + 2.0 * LINE_H + 12.0; // the bar + its labels, as reserved
+const SECTION_H: f32 = HEAD_FONT + LINE_H; // the advance of one section heading
 const SERIES_PAD_DECADES: f64 = 0.12; // per-series head/foot room (issue #25)
 const MIN_SERIES_DECADES: f64 = 0.6; // a flat series still gets this much span (no false drama)
 // Issue #207: the growth guide lines of the printed form — compound rates from the last EPS point.
 const GUIDE_RATES_PCT: [u32; 6] = [5, 10, 15, 20, 25, 30];
+// The form's quarterly box, under the plot (owner decision 7): size and the space around it.
+const QUARTER_BOX_W: f32 = 200.0;
+const QUARTER_BOX_H: f32 = 4.0 * (SMALL + 3.0) + 8.0;
+const QUARTER_BOX_GAP: f32 = 4.0;
 
 // ── grid tables (issue #104 — visible SSG grid) ──
 const CELL_PAD: f32 = 5.0; // left/right padding of text inside a grid cell
@@ -115,22 +121,21 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
 
     // ── Page 1 — the header block (neutral — NOT the form's wordmark) ──
     doc.title("Analyse de sélection de titre");
-    // Issue #74: a pathological identifier is truncated so the header cannot run past the A4
-    // right edge (else it is silently clipped by the media box).
+    // Issue #74 / G1 F: a pathological identifier cannot run past its cell — `header_box` fits
+    // every value to its column at the real glyph widths.
     let company = study
         .company_name
         .as_deref()
         .filter(|n| !n.trim().is_empty())
-        .map(|n| truncate(n, 48))
-        .unwrap_or_else(|| EM_DASH.to_string());
+        .unwrap_or(EM_DASH);
     doc.header_box(&[
         [
-            ("Société", company.as_str()),
-            ("Symbole", &truncate(&study.security_ticker, 24)),
+            ("Société", company),
+            ("Symbole", &study.security_ticker),
             ("Date", &date_prefix(&study.created_at.0)),
         ],
         [
-            ("Monnaie", &truncate(&study.native_currency, 16)),
+            ("Monnaie", &study.native_currency),
             ("Données", &data_source(study)),
             ("Préparé par", EM_DASH),
         ],
@@ -208,7 +213,19 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         if rows.is_empty() {
             head.push(EM_DASH.to_string());
         }
-        head.push("Moy. 5 ans".to_string());
+        // G1 F — « Moy. 5 ans » only when five years were averaged: the average runs over the
+        // known ratios of the usable-years window (the §3 window), which may hold fewer.
+        let window: Vec<i32> = outputs.valuation.per_year.iter().map(|v| v.year).collect();
+        let averaged = |pick: fn(&steadyinvest_core::ssg::YearRatios) -> Option<Decimal>| {
+            m.per_year
+                .iter()
+                .filter(|r| window.contains(&r.year) && pick(r).is_some())
+                .count()
+        };
+        let (n_a, n_b) = (averaged(|r| r.ptp_pct), averaged(|r| r.roe_pct));
+        let floor = USABLE_YEARS_FLOOR as usize;
+        let five = n_a >= floor && n_b >= floor;
+        head.push(if five { AVG_FIVE } else { AVG_FEWER }.to_string());
         head.push("Tendance".to_string());
         let head_refs: Vec<&str> = head.iter().map(String::as_str).collect();
         doc.grid_begin(2);
@@ -232,6 +249,13 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         let refs: Vec<&str> = roe.iter().map(String::as_str).collect();
         doc.grid_row_small(&refs, &edges, false, 1);
         doc.grid_end(&edges);
+        if !five {
+            doc.small_line(&format!(
+                "{AVG_FEWER_NOTE} A : {}, B : {}.",
+                years_count(n_a),
+                years_count(n_b)
+            ));
+        }
     }
     doc.small_line("A = bénéfice avant impôt ÷ ventes × 100   ·   B = BPA ÷ valeur comptable par action × 100   ·   tendance = dernière année face à la moyenne");
     doc.gap(6.0);
@@ -258,7 +282,6 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             true,
             1,
         );
-        let (mut sum_d, mut sum_e, mut sum_g, mut sum_h) = (None, None, None, None);
         for row in &v.per_year {
             let cy = frame.series.iter().find(|y| y.year == row.year);
             let (hp, lp, ep, dv) = match cy {
@@ -278,21 +301,51 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             ];
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
             doc.grid_row_num(&refs, &COLS9, false, 1);
-            sum_d = add_known(sum_d, row.high_pe);
-            sum_e = add_known(sum_e, row.low_pe);
-            sum_g = add_known(sum_g, row.payout_pct);
-            sum_h = add_known(sum_h, row.high_yield_pct);
         }
+        // G1 F — a column's total is stated only over EVERY year of the window: an unknown year,
+        // an undefined ratio (its denominator — the EPS, or the low price for H — not positive)
+        // or a sum past the decimal range leaves it absent, never a partial sum passed off as
+        // the total; each reason is named under the table, the right one (never « no figure »
+        // for a ratio the method leaves undefined).
+        let non_positive = |year: i32, pick: fn(&CanonicalYear) -> Option<Decimal>| {
+            frame
+                .series
+                .iter()
+                .find(|y| y.year == year)
+                .and_then(pick)
+                .is_some_and(|d| d <= Decimal::ZERO)
+        };
+        let entries = |value: fn(&steadyinvest_core::ssg::YearValuation) -> Option<Decimal>,
+                       denominator: fn(&CanonicalYear) -> Option<Decimal>| {
+            v.per_year
+                .iter()
+                .map(|r| match value(r) {
+                    Some(d) => Entry::Known(d),
+                    None if non_positive(r.year, denominator) => Entry::Undefined,
+                    None => Entry::Unknown,
+                })
+                .collect::<Vec<Entry>>()
+        };
+        let totals = [
+            column_total(entries(|r| r.high_pe, |y| y.eps)),
+            column_total(entries(|r| r.low_pe, |y| y.eps)),
+            column_total(entries(|r| r.payout_pct, |y| y.eps)),
+            column_total(entries(|r| r.high_yield_pct, |y| y.low_price)),
+        ];
+        let total_of = |t: &Total| match t {
+            Total::Sum(d) => Some(*d),
+            _ => None,
+        };
         let total = [
             "Total".to_string(),
             String::new(),
             String::new(),
             String::new(),
-            num(sum_d),
-            num(sum_e),
+            num(total_of(&totals[0])),
+            num(total_of(&totals[1])),
             String::new(),
-            pct(sum_g),
-            pct(sum_h),
+            pct(total_of(&totals[2])),
+            pct(total_of(&totals[3])),
         ];
         let refs: Vec<&str> = total.iter().map(String::as_str).collect();
         doc.grid_row_num(&refs, &COLS9, false, 1);
@@ -310,6 +363,26 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         let refs: Vec<&str> = avg.iter().map(String::as_str).collect();
         doc.grid_row_num(&refs, &COLS9, false, 1);
         doc.grid_end(&COLS9);
+        if totals
+            .iter()
+            .any(|t| matches!(t, Total::Absent { unknown: true, .. }))
+        {
+            doc.small_line(TOTAL_UNKNOWN_YEAR);
+        }
+        if totals.iter().any(|t| {
+            matches!(
+                t,
+                Total::Absent {
+                    undefined: true,
+                    ..
+                }
+            )
+        }) {
+            doc.small_line(TOTAL_UNDEFINED);
+        }
+        if totals.contains(&Total::Overflow) {
+            doc.small_line(TOTAL_OVERFLOW);
+        }
         doc.line(&format!(
             "8 · C/B moyen (D et E) : {}   ·   9 · C/B actuel : {}   ·   valeur relative : {}",
             num(v.avg_pe),
@@ -326,35 +399,36 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     doc.gap(6.0);
 
     // ── §4 Risk & reward — the form's A–E with every intermediate figure ──
-    doc.keep_together(HEAD_FONT + 14.0 * LINE_H + ZONEBAR_H);
-    doc.section("4. Risque et rendement sur 5 ans");
     {
         let r = &outputs.risk_reward;
+        // G1 F: the block is measured before it is drawn, so its keep-together reserve counts
+        // every wrapped line (a long formula line wraps at the margin).
+        let mut b = Block::default();
         let c = &r.low_candidates;
         let est_high = outputs.growth.estimated_high_eps;
         let est_low = outputs.growth.estimated_low_eps;
-        doc.line(&format!(
+        b.line(&format!(
             "A · Prix haut à 5 ans : PER haut moyen {} × BPA estimé haut {} = {}",
             num(judgment.judged_avg_high_pe.map(|m| m.as_decimal())),
             fmt_dec(est_high, DisplayField::PerShare),
             money(r.forecast_high),
         ));
-        doc.line("B · Prix bas à 5 ans, les quatre candidats :");
-        doc.indent_line(&format!(
+        b.line("B · Prix bas à 5 ans, les quatre candidats :");
+        b.indent_line(&format!(
             "(a) PER bas moyen {} × BPA estimé bas {} = {}",
             num(judgment.judged_avg_low_pe.map(|m| m.as_decimal())),
             fmt_dec(est_low, DisplayField::PerShare),
             money(c.avg_low_pe_times_eps),
         ));
-        doc.indent_line(&format!(
+        b.indent_line(&format!(
             "(b) Prix bas moyen des 5 dernières années = {}",
             money(c.avg_low_price_last_5y),
         ));
-        doc.indent_line(&format!(
+        b.indent_line(&format!(
             "(c) Plus bas sévère récent = {}",
             money(c.recent_severe_low),
         ));
-        doc.indent_line(&format!(
+        b.indent_line(&format!(
             "(d) Prix soutenu par le dividende : dividende {} ÷ rendement haut moyen {} = {}",
             fmt_dec(
                 judgment.present_full_year_dividend.map(|m| m.as_decimal()),
@@ -363,7 +437,7 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             pct(outputs.valuation.avg_high_yield_pct),
             money(c.dividend_supported),
         ));
-        doc.indent_line(&format!(
+        b.indent_line(&format!(
             "Prix bas retenu ({}) = {}",
             option_label(judgment.forecast_low_option),
             money(r.forecast_low),
@@ -372,14 +446,14 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             Some(z) => {
                 let range = z.forecast_high - z.forecast_low;
                 let third = z.buy_top - z.forecast_low;
-                doc.line(&format!(
+                b.line(&format!(
                     "C · Zonage : étendue {} − {} = {}   ·   un tiers = {}",
                     money(Some(z.forecast_high)),
                     money(Some(z.forecast_low)),
                     money(Some(range)),
                     money(Some(third)),
                 ));
-                doc.indent_line(&format!(
+                b.indent_line(&format!(
                     "{} : {} à {}   ·   {} : {} à {}   ·   {} : {} à {}",
                     ZONE_LOW,
                     money(Some(z.forecast_low)),
@@ -391,15 +465,15 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
                     money(Some(z.neutral_top)),
                     money(Some(z.forecast_high)),
                 ));
-                doc.indent_line(&format!(
+                b.indent_line(&format!(
                     "Le cours actuel {} se situe : {}",
                     money(current_price),
                     zone_label(r.present_price_zone),
                 ));
             }
-            None => doc.line("C · Zonage : — (prévision incomplète ou plage dégénérée)"),
+            None => b.line("C · Zonage : — (prévision incomplète ou plage dégénérée)"),
         }
-        doc.line(&format!(
+        b.line(&format!(
             "D · Ratio hausse / baisse : (prix haut {} − cours {}) ÷ (cours {} − prix bas {}) = {}",
             money(r.forecast_high),
             money(current_price),
@@ -407,12 +481,20 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             money(r.forecast_low),
             upside(&r.upside_downside),
         ));
-        doc.line(&format!(
+        b.line(&format!(
             "E · Objectif de cours : (prix haut {} ÷ cours {} × 100) − 100 = {} d'appréciation",
             money(r.forecast_high),
             money(current_price),
             pct(outputs.returns.projected_appreciation_pct),
         ));
+        let bar_h = if r.zones.is_some() {
+            ZONEBAR_H_RESERVE
+        } else {
+            0.0
+        };
+        doc.keep_together(SECTION_H + doc.block_height(&b) + 4.0 + bar_h);
+        doc.section("4. Risque et rendement sur 5 ans");
+        doc.block(&b);
         doc.gap(4.0);
         // Issue #105 — the zone bar (low/median/high thirds + the current-price marker).
         doc.zone_bar(r.zones.as_ref(), current_price);
@@ -420,11 +502,10 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
     doc.gap(6.0);
 
     // ── §5 Five-year potential — the form's A–C with the intermediate figures ──
-    doc.keep_together(HEAD_FONT + 7.0 * LINE_H);
-    doc.section("5. Potentiel à 5 ans");
     {
         let ret = &outputs.returns;
-        doc.line(&format!(
+        let mut b = Block::default();
+        b.line(&format!(
             "A · Rendement présent : dividende {} ÷ cours {} × 100 = {}",
             fmt_dec(
                 judgment.present_full_year_dividend.map(|m| m.as_decimal()),
@@ -433,32 +514,35 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             money(current_price),
             pct(ret.present_yield_pct),
         ));
-        doc.line(&format!(
+        b.line(&format!(
             "B · Rendement moyen sur 5 ans : BPA moyen projeté {} × % distribution moyen {} = dividende moyen {}",
             fmt_dec(ret.avg_annual_eps, DisplayField::PerShare),
             pct(outputs.valuation.avg_payout_pct),
             fmt_dec(ret.avg_annual_dividend, DisplayField::PerShare),
         ));
-        doc.indent_line(&format!(
+        b.indent_line(&format!(
             "dividende moyen {} ÷ cours {} × 100 = {}",
             fmt_dec(ret.avg_annual_dividend, DisplayField::PerShare),
             money(current_price),
             pct(ret.avg_yield_pct),
         ));
-        doc.line(&format!(
+        b.line(&format!(
             "C · Rendement annuel total estimé : appréciation sur 5 ans {}, soit {} annualisée",
             pct(ret.projected_appreciation_pct),
             pct(ret.projected_annualized_appreciation_pct),
         ));
-        doc.indent_line(&format!(
+        b.indent_line(&format!(
             "appréciation annualisée {} + rendement moyen {} = {}",
             pct(ret.projected_annualized_appreciation_pct),
             pct(ret.avg_yield_pct),
             total_return(ret),
         ));
-        doc.small_line(
+        b.small_line(
             "Les taux annualisés sont composés (et non simples) : (haut ÷ cours)^(1/5) − 1.",
         );
+        doc.keep_together(SECTION_H + doc.block_height(&b));
+        doc.section("5. Potentiel à 5 ans");
+        doc.block(&b);
     }
     doc.gap(8.0);
 
@@ -548,13 +632,57 @@ fn pct_bare(v: Option<Decimal>) -> String {
     fmt_dec(v, DisplayField::Percent)
 }
 
-/// A running sum over KNOWN values only (the form's « Total » row sums the filled cells; an unknown
-/// year is skipped, never counted as 0). `None` until the first known value.
-fn add_known(acc: Option<Decimal>, v: Option<Decimal>) -> Option<Decimal> {
-    match (acc, v) {
-        (Some(a), Some(b)) => a.checked_add(b),
-        (None, Some(b)) => Some(b),
-        (acc, None) => acc,
+/// A §3 column's « Total » (G1 F): the sum over EVERY year of the window, or the reason it cannot
+/// be stated — never a partial sum over the known years passed off as the total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Total {
+    Sum(Decimal),
+    /// The window is empty: nothing to sum (the table has no row either).
+    Empty,
+    /// At least one year of the window has no figure in the column: `unknown` when an input is
+    /// missing, `undefined` when the ratio's denominator is not positive (both can hold).
+    Absent {
+        unknown: bool,
+        undefined: bool,
+    },
+    /// The sum left the decimal range (absent, never restarted from the next year).
+    Overflow,
+}
+
+/// One year's cell of a §3 ratio column, as far as its total is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entry {
+    Known(Decimal),
+    /// An input of the ratio is missing.
+    Unknown,
+    /// The ratio is undefined: its denominator (EPS, or the low price) is not positive.
+    Undefined,
+}
+
+fn column_total(entries: Vec<Entry>) -> Total {
+    let unknown = entries.contains(&Entry::Unknown);
+    let undefined = entries.contains(&Entry::Undefined);
+    if unknown || undefined {
+        return Total::Absent { unknown, undefined };
+    }
+    let mut sum: Option<Decimal> = None;
+    for e in entries {
+        if let Entry::Known(v) = e {
+            match sum.map_or(Some(v), |s| s.checked_add(v)) {
+                Some(s) => sum = Some(s),
+                None => return Total::Overflow,
+            }
+        }
+    }
+    sum.map_or(Total::Empty, Total::Sum)
+}
+
+/// « 1 an », « 3 ans », « aucune année » — the §2 average's year count.
+fn years_count(n: usize) -> String {
+    match n {
+        0 => NO_YEAR.to_string(),
+        1 => format!("1 {YEAR_ONE}"),
+        n => format!("{n} {YEAR_MANY}"),
     }
 }
 
@@ -569,23 +697,58 @@ fn option_label(option: steadyinvest_contract::ForecastLowOption) -> &'static st
     }
 }
 
-/// Where the figures came from — the provider tag of the latest sales cell's provenance
-/// (`"{tag}:{sha}"`, Story 6.9) or « saisie manuelle » (data, not prose; never a path or key).
+/// Where the figures came from (G1 F): read off EVERY valued cell of the study's years, not the
+/// latest sales cell alone. A provider-fetched cell names its provider (the tag of its
+/// provenance, `"{tag}:{sha}"`, Story 6.9); a user-entered one reads « saisie manuelle »; a study
+/// with both names both. A computed cell (`Source::Derived`) descends from the others, so it adds
+/// no origin of its own and is never passed off as a manual entry — it reads « calculé » only when
+/// nothing else is valued. No valued cell → the em-dash. Data, not prose; never a path or key.
 fn data_source(study: &Study) -> String {
     use steadyinvest_contract::Source;
-    let latest = study.years.iter().rev().find(|y| y.sales.value.is_some());
-    match latest {
-        Some(y) if y.sales.source == Source::Provider => y
-            .sales
-            .provenance
-            .hash_of_dependencies
-            .split(':')
-            .next()
-            .filter(|tag| !tag.is_empty() && tag.len() <= 24)
-            .map(|tag| format!("fournisseur {tag}"))
-            .unwrap_or_else(|| "fournisseur".to_string()),
-        Some(_) => "saisie manuelle".to_string(),
-        None => EM_DASH.to_string(),
+    let mut tags: Vec<&str> = Vec::new();
+    let (mut untagged, mut manual, mut derived) = (false, false, false);
+    for y in &study.years {
+        let cells = [
+            Some(&y.sales),
+            Some(&y.eps),
+            Some(&y.high_price),
+            Some(&y.low_price),
+            y.dividend_per_share.as_ref(),
+            y.pre_tax_profit.as_ref(),
+            y.book_value_per_share.as_ref(),
+        ];
+        for c in cells.into_iter().flatten().filter(|c| c.value.is_some()) {
+            match c.source {
+                Source::Provider => {
+                    let tag = c
+                        .provenance
+                        .hash_of_dependencies
+                        .split(':')
+                        .next()
+                        .filter(|tag| !tag.is_empty() && tag.len() <= 24);
+                    match tag {
+                        Some(t) if !tags.contains(&t) => tags.push(t),
+                        Some(_) => {}
+                        None => untagged = true,
+                    }
+                }
+                Source::Manual => manual = true,
+                Source::Derived => derived = true,
+            }
+        }
+    }
+    let provider = match tags.as_slice() {
+        [] if untagged => Some(PROVIDER_ONE.to_string()),
+        [] => None,
+        [one] if !untagged => Some(format!("{PROVIDER_ONE} {one}")),
+        many => Some(format!("{PROVIDER_MANY} {}", many.join(", "))),
+    };
+    match (provider, manual) {
+        (Some(p), true) => format!("{p} {AND_MANUAL}"),
+        (Some(p), false) => p,
+        (None, true) => MANUAL_ENTRY.to_string(),
+        (None, false) if derived => COMPUTED.to_string(),
+        (None, false) => EM_DASH.to_string(),
     }
 }
 
@@ -656,18 +819,6 @@ fn date_prefix(ts: &str) -> String {
     ts.chars().take(10).collect()
 }
 
-/// Truncate a display string to at most `max` characters, appending an ellipsis when cut (issue #74)
-/// — so a pathological ticker/currency cannot run past the page's right edge. Char-based (never byte
-/// slicing), so multibyte accents stay intact; `max` is assumed ≥ 1.
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let kept: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{kept}…")
-    }
-}
-
 pub(crate) const EM_DASH: &str = "—";
 
 // ── neutral user-facing string inventory (FR13) ──
@@ -680,6 +831,21 @@ pub(crate) const EM_DASH: &str = "—";
 const VERDICT_FULL: &str = "Tous les critères validés et à jour";
 const VERDICT_PROVISIONAL: &str = "Provisoire — données à revérifier ou confiance réduite";
 const VERDICT_WITHHELD: &str = "En attente — au moins une donnée requise manque";
+const PROVIDER_ONE: &str = "fournisseur";
+const PROVIDER_MANY: &str = "fournisseurs";
+const MANUAL_ENTRY: &str = "saisie manuelle";
+const AND_MANUAL: &str = "et saisie manuelle";
+const COMPUTED: &str = "calculé";
+const AVG_FIVE: &str = "Moy. 5 ans";
+const AVG_FEWER: &str = "Moyenne";
+const AVG_FEWER_NOTE: &str = "Moyenne sur moins de cinq années connues —";
+const NO_YEAR: &str = "aucune année";
+const YEAR_ONE: &str = "an";
+const YEAR_MANY: &str = "ans";
+const TOTAL_UNKNOWN_YEAR: &str =
+    "Total « — » : au moins une année de la période n'a pas le chiffre de la colonne.";
+const TOTAL_OVERFLOW: &str = "Total « — » : la somme dépasse la plage calculable.";
+const TOTAL_UNDEFINED: &str = "Total « — » : ratio non défini pour au moins une année (BPA, ou cours bas pour H, négatif ou nul).";
 const OPTION_A: &str = "PER bas × BPA bas";
 const OPTION_B: &str = "prix bas moyen 5 ans";
 const OPTION_C: &str = "plus bas sévère récent";
@@ -687,7 +853,16 @@ const OPTION_D: &str = "soutenu par le dividende";
 
 // ── issue #105 / #207 — the embedded charts' neutral labels (greyscale legend + zone bands) ──
 const CHART_LEGEND: &str = "BPA (trait épais)   ·   Ventes (trait fin)   ·   Cours haut–bas (barres)   ·   projection (pointillés)   ·   guides de croissance 5–30 % (gris clair)";
-const CHART_SCALE_NOTE: &str = "Échelle logarithmique, propre à chaque série (l'axe gradué est celui du BPA) ; les guides partent du dernier BPA connu.";
+const CHART_SCALE: &str =
+    "Échelle logarithmique, propre à chaque série (l'axe gradué est celui du BPA)";
+const GUIDES_FROM: &str = "les guides partent du BPA positif de";
+const GUIDES_SPAN: &str = "et couvrent les";
+const YEARS_OF_FORECAST: &str = "ans de la prévision";
+const NO_POSITIVE_EPS: &str = "aucun BPA positif : pas de guides";
+const PROJECTION_FROM: &str = "la projection part du BPA de";
+const PROJECTION_NONE: &str = "projection non tracée : le BPA de";
+const NOT_POSITIVE: &str = "n'est pas positif";
+const PROJECTION_NO_BASE: &str = "projection non tracée : aucune année utilisable";
 const QUARTER_BOX_TITLE: &str = "Chiffres trimestriels récents";
 const QUARTER_LATEST: &str = "Dernier trimestre";
 const QUARTER_YEAR_AGO: &str = "Même trimestre, un an avant";
@@ -707,8 +882,11 @@ const REPORT_USER_FACING: &[&str] = &[
     "Monnaie",
     "Données",
     "Préparé par",
-    "fournisseur",
-    "saisie manuelle",
+    PROVIDER_ONE,
+    PROVIDER_MANY,
+    MANUAL_ENTRY,
+    AND_MANUAL,
+    COMPUTED,
     "Capitalisation — actions en circulation :",
     "actions privilégiées :",
     "dette à long terme :",
@@ -727,7 +905,12 @@ const REPORT_USER_FACING: &[&str] = &[
     "(3) Croissance historique du BPA :",
     "(4) Croissance estimée du BPA :",
     // §2.
-    "Moy. 5 ans",
+    AVG_FIVE,
+    AVG_FEWER,
+    AVG_FEWER_NOTE,
+    NO_YEAR,
+    YEAR_ONE,
+    YEAR_MANY,
     "Tendance",
     "A · % marge avant impôt",
     "B · % rendement des c. propres",
@@ -744,6 +927,9 @@ const REPORT_USER_FACING: &[&str] = &[
     "H · F÷B %",
     "Total",
     "Moyenne",
+    TOTAL_UNKNOWN_YEAR,
+    TOTAL_OVERFLOW,
+    TOTAL_UNDEFINED,
     "8 · C/B moyen (D et E) :",
     "9 · C/B actuel :",
     "valeur relative :",
@@ -799,7 +985,15 @@ const REPORT_USER_FACING: &[&str] = &[
     "Val. compt./act.",
     // The embedded charts' labels.
     CHART_LEGEND,
-    CHART_SCALE_NOTE,
+    CHART_SCALE,
+    GUIDES_FROM,
+    GUIDES_SPAN,
+    YEARS_OF_FORECAST,
+    NO_POSITIVE_EPS,
+    PROJECTION_FROM,
+    PROJECTION_NONE,
+    NOT_POSITIVE,
+    PROJECTION_NO_BASE,
     QUARTER_BOX_TITLE,
     QUARTER_LATEST,
     QUARTER_YEAR_AGO,
@@ -824,6 +1018,52 @@ const REPORT_USER_FACING: &[&str] = &[
 
 // ── the document builder: coordinate layout + simple pagination ──
 
+/// The kinds of prose line a [`Block`] holds — the same three as [`Doc::line`],
+/// [`Doc::indent_line`] and [`Doc::small_line`].
+#[derive(Clone, Copy)]
+enum ProseKind {
+    Body,
+    Indent,
+    Small,
+}
+
+impl ProseKind {
+    /// `(x, size, line_h)`, as the matching `Doc` method lays it out.
+    fn metrics(self) -> (f32, f32, f32) {
+        match self {
+            ProseKind::Body => (MARGIN, FONT, LINE_H),
+            ProseKind::Indent => (MARGIN + 18.0, FONT, LINE_H),
+            ProseKind::Small => (MARGIN, SMALL, LINE_H - 2.0),
+        }
+    }
+}
+
+/// G1 F — a run of prose lines gathered before it is drawn, so a keep-together reserve can
+/// measure it with every wrapped line ([`Doc::block_height`]) instead of guessing a line count.
+#[derive(Default)]
+struct Block {
+    lines: Vec<(ProseKind, String)>,
+}
+
+impl Block {
+    fn line(&mut self, s: &str) {
+        self.lines.push((ProseKind::Body, s.to_string()));
+    }
+    fn indent_line(&mut self, s: &str) {
+        self.lines.push((ProseKind::Indent, s.to_string()));
+    }
+    fn small_line(&mut self, s: &str) {
+        self.lines.push((ProseKind::Small, s.to_string()));
+    }
+}
+
+/// One header row of a grid, kept so it can be replayed on each continuation page (G1 C).
+struct GridHeaderRow {
+    cells: Vec<String>,
+    numeric: std::ops::Range<usize>,
+    font: f32,
+}
+
 /// Accumulates content across one or more A4 pages, tracking a top-origin cursor and starting a new
 /// page when the next line would cross the bottom margin.
 pub(crate) struct Doc {
@@ -831,9 +1071,14 @@ pub(crate) struct Doc {
     cur: Content,
     y: f32,        // top-origin cursor (distance from the page top)
     grid_top: f32, // the top of the grid table currently being drawn (issue #104)
-    // Issue #74: the current table's column header, remembered on the header row so it can be
-    // replayed at the top of each continuation page when the table spans a break.
-    grid_header: Vec<String>,
+    // Issue #74 / G1 C: the current table's header rows — EVERY head row given before the first
+    // body row (the comparison has two: « TICKER (CUR) », then the names). They are held back and
+    // drawn together with the first body row (so they are never orphaned at a page foot), then
+    // replayed, all of them, at the top of each continuation page when the table spans a break.
+    grid_header: Vec<GridHeaderRow>,
+    // Whether the current grid has started drawing (its header rows are on the page). A head row
+    // given after that is an underlined body row (the quick screen's totals), never a header.
+    grid_started: bool,
     // The font size of the grid being drawn (body, or caption for a wide table).
     grid_font: f32,
     /// The vertical extents of the current grid's full-width note rows ([`Doc::grid_note_row`]):
@@ -863,6 +1108,7 @@ impl Doc {
             y: MARGIN,
             grid_top: MARGIN,
             grid_header: Vec::new(),
+            grid_started: false,
             grid_font: FONT,
             grid_spans: Vec::new(),
             page_w,
@@ -925,17 +1171,20 @@ impl Doc {
     }
 
     pub(crate) fn line(&mut self, s: &str) {
-        self.prose(s, MARGIN, FONT, LINE_H);
+        let (x, size, line_h) = ProseKind::Body.metrics();
+        self.prose(s, x, size, line_h);
     }
 
     /// A caption-sized line (the form's small print: formulas, footnotes).
     pub(crate) fn small_line(&mut self, s: &str) {
-        self.prose(s, MARGIN, SMALL, LINE_H - 2.0);
+        let (x, size, line_h) = ProseKind::Small.metrics();
+        self.prose(s, x, size, line_h);
     }
 
     /// A body line indented under its lettered parent (the §4 candidates, the zoning lines).
     pub(crate) fn indent_line(&mut self, s: &str) {
-        self.prose(s, MARGIN + 18.0, FONT, LINE_H);
+        let (x, size, line_h) = ProseKind::Indent.metrics();
+        self.prose(s, x, size, line_h);
     }
 
     /// One line of prose from `x`, wrapped at the right margin (the 7.5 walk: a reader's long note
@@ -946,6 +1195,25 @@ impl Doc {
             self.y += size;
             text(&mut self.cur, x, self.y, size, &chunk);
             self.y += line_h - size;
+        }
+    }
+
+    /// The height a [`Block`] takes once laid out — every wrapped line counted (G1 F).
+    fn block_height(&self, b: &Block) -> f32 {
+        b.lines
+            .iter()
+            .map(|(kind, s)| {
+                let (x, size, line_h) = kind.metrics();
+                wrap_to_width(s, self.right() - x, size).len() as f32 * line_h
+            })
+            .sum()
+    }
+
+    /// Lay out a [`Block`]'s lines, in order.
+    fn block(&mut self, b: &Block) {
+        for (kind, s) in &b.lines {
+            let (x, size, line_h) = kind.metrics();
+            self.prose(s, x, size, line_h);
         }
     }
 
@@ -960,6 +1228,9 @@ impl Doc {
 
     /// Issue #207 — the form's identity block: a boxed grid of `label : value` pairs, `rows` rows
     /// of three pairs each. Labels in small print above the values, the box ruled between columns.
+    /// G1 F: each label and value is fitted to its column's padded width at the real Helvetica
+    /// widths (an over-long company or dossier name ends in « … »), never cut by a character
+    /// count that lets a wide name run over the next cell.
     pub(crate) fn header_box(&mut self, rows: &[[(&str, &str); 3]]) {
         let row_h = LINE_H + SMALL + 2.0;
         let h = row_h * rows.len() as f32 + 4.0;
@@ -976,10 +1247,23 @@ impl Doc {
             if r > 0 {
                 hline(&mut self.cur, x0, x1, ry - 1.0, 0.4);
             }
+            let room = col_w - 2.0 * CELL_PAD;
             for (c, (label, value)) in row.iter().enumerate() {
                 let x = x0 + col_w * c as f32 + CELL_PAD;
-                text(&mut self.cur, x, ry + SMALL, SMALL, label);
-                text(&mut self.cur, x, ry + SMALL + FONT + 1.5, FONT, value);
+                text(
+                    &mut self.cur,
+                    x,
+                    ry + SMALL,
+                    SMALL,
+                    &fit(label, room, SMALL),
+                );
+                text(
+                    &mut self.cur,
+                    x,
+                    ry + SMALL + FONT + 1.5,
+                    FONT,
+                    &fit(value, room, FONT),
+                );
             }
         }
         self.y = top + h + 3.0;
@@ -1041,33 +1325,84 @@ impl Doc {
         head: bool,
         numeric: std::ops::Range<usize>,
     ) {
-        let height = self.grid_row_height(cells, edges);
-        if head {
-            self.grid_header = cells.iter().map(|s| s.to_string()).collect();
-        } else if self.page_h - self.y - height < BOTTOM {
-            self.close_grid_box(edges);
-            self.new_page();
-            self.grid_top = self.y;
-            let header = self.grid_header.clone();
-            let refs: Vec<&str> = header.iter().map(String::as_str).collect();
-            self.draw_grid_cells_aligned(&refs, edges, true, numeric.clone());
+        if head && !self.grid_started {
+            // A header row: held back and drawn with the first body row (G1 C).
+            self.grid_header.push(GridHeaderRow {
+                cells: cells.iter().map(|s| s.to_string()).collect(),
+                numeric,
+                font: self.grid_font,
+            });
+            return;
         }
+        let height = self.grid_row_height(cells, edges);
+        self.grid_break_before(height, edges);
         self.draw_grid_cells_aligned(cells, edges, head, numeric);
     }
 
-    /// Each cell's lines, wrapped to its column (a cell never crosses a rule). A text that fits
-    /// between the rules stays whole even if it eats into the padding (a narrow year column's
-    /// « 2016 »); only a longer one wraps at the padded width.
-    fn grid_cell_lines(&self, cells: &[&str], edges: &[f32]) -> Vec<Vec<String>> {
-        let size = self.grid_font;
+    /// Make room for the next `need` points of grid rows (G1 C / D). Before the first body row the
+    /// held-back header rows are drawn first, and they move to the next page WITH that row when
+    /// both do not fit (a header row is never orphaned at a page foot). Later, a row that does not
+    /// fit closes the box, starts a new page and replays EVERY header row there. A block taller
+    /// than a whole page is not chased from page to page: at the top of a page it is drawn as is.
+    fn grid_break_before(&mut self, need: f32, edges: &[f32]) {
+        let at_top = self.y <= MARGIN + 0.5;
+        if !self.grid_started {
+            let head_h = self.grid_header_height(edges);
+            if self.page_h - self.y - head_h - need < BOTTOM && !at_top {
+                // Nothing of this grid is on the page yet: no box to close.
+                self.new_page();
+                self.grid_top = self.y;
+                self.grid_spans.clear();
+            }
+            self.draw_grid_header(edges);
+            self.grid_started = true;
+            return;
+        }
+        if self.page_h - self.y - need < BOTTOM && !at_top {
+            self.close_grid_box(edges);
+            self.new_page();
+            self.grid_top = self.y;
+            self.draw_grid_header(edges);
+        }
+    }
+
+    /// The height the current grid's header rows take together.
+    fn grid_header_height(&mut self, edges: &[f32]) -> f32 {
+        let font = self.grid_font;
+        let header = std::mem::take(&mut self.grid_header);
+        let mut h = 0.0;
+        for row in &header {
+            self.grid_font = row.font;
+            let cells: Vec<&str> = row.cells.iter().map(String::as_str).collect();
+            h += self.grid_row_height(&cells, edges);
+        }
+        self.grid_header = header;
+        self.grid_font = font;
+        h
+    }
+
+    /// Draw every header row of the current grid at the cursor, each in its own size.
+    fn draw_grid_header(&mut self, edges: &[f32]) {
+        let font = self.grid_font;
+        let header = std::mem::take(&mut self.grid_header);
+        for row in &header {
+            self.grid_font = row.font;
+            let cells: Vec<&str> = row.cells.iter().map(String::as_str).collect();
+            self.draw_grid_cells_aligned(&cells, edges, true, row.numeric.clone());
+        }
+        self.grid_header = header;
+        self.grid_font = font;
+    }
+
+    /// Each cell's lines and point size, laid out in its column by [`cell_layout`] (a cell never
+    /// crosses a rule, and a figure is never cut).
+    fn grid_cell_lines(&self, cells: &[&str], edges: &[f32]) -> Vec<(Vec<String>, f32)> {
         cells
             .iter()
             .enumerate()
             .map(|(i, s)| match edges.get(i + 1) {
-                Some(right) if text_width(s, size) > right - edges[i] - 2.0 * GRID_INSET => {
-                    wrap_to_width(s, right - edges[i] - 2.0 * CELL_PAD, size)
-                }
-                _ => vec![s.to_string()],
+                Some(right) => cell_layout(s, right - edges[i], self.grid_font),
+                None => (vec![s.to_string()], self.grid_font),
             })
             .collect()
     }
@@ -1081,7 +1416,7 @@ impl Doc {
         let lines = self
             .grid_cell_lines(cells, edges)
             .iter()
-            .map(Vec::len)
+            .map(|(l, _)| l.len())
             .max()
             .unwrap_or(1)
             .max(1);
@@ -1097,29 +1432,24 @@ impl Doc {
         head: bool,
         numeric: std::ops::Range<usize>,
     ) {
-        let size = self.grid_font;
         let step = self.grid_line_step();
         let lines = self.grid_cell_lines(cells, edges);
-        let rows = lines.iter().map(Vec::len).max().unwrap_or(1).max(1);
-        let top = self.y + size;
-        for (i, cell_lines) in lines.iter().enumerate() {
+        let rows = lines.iter().map(|(l, _)| l.len()).max().unwrap_or(1).max(1);
+        let top = self.y + self.grid_font;
+        for (i, (cell_lines, size)) in lines.iter().enumerate() {
+            let size = *size;
             for (k, line) in cell_lines.iter().enumerate() {
                 let y = top + k as f32 * step;
                 let Some(right) = edges.get(i + 1) else {
                     text(&mut self.cur, edges[i] + CELL_PAD, y, size, line);
                     continue;
                 };
-                // The padded position, shifted back inside the rules when the text is wider.
                 let w = text_width(line, size);
-                let x = if numeric.contains(&i) {
-                    right - CELL_PAD - w
-                } else {
-                    (edges[i] + CELL_PAD).min(right - GRID_INSET - w)
-                };
-                text(&mut self.cur, x.max(edges[i] + GRID_INSET), y, size, line);
+                let x = cell_x(numeric.contains(&i), edges[i], *right, w);
+                text(&mut self.cur, x, y, size, line);
             }
         }
-        self.y = top + (rows - 1) as f32 * step + (LINE_H - size);
+        self.y = top + (rows - 1) as f32 * step + (LINE_H - self.grid_font);
         if head {
             hline(
                 &mut self.cur,
@@ -1133,11 +1463,14 @@ impl Doc {
 
     /// Issue #104 — start a boxed grid table. Reserve only the header + first row together (the
     /// section heading already reserved a few rows), and record the table top so [`grid_end`] can
-    /// draw the outer box + column rules. Issue #74: a grid may SPAN page breaks — [`grid_row_num`]
-    /// closes the box at a break and replays the header on the continuation page.
+    /// draw the outer box + column rules. Issue #74: a grid may SPAN page breaks — a body row that
+    /// does not fit closes the box at a break and replays the header rows on the continuation page.
     pub(crate) fn grid_begin(&mut self, _rows: usize) {
         self.keep_together(2.0 * LINE_H + 4.0);
         self.grid_top = self.y;
+        self.grid_header.clear();
+        self.grid_started = false;
+        self.grid_spans.clear();
     }
 
     /// Draw the grid's outer box from [`grid_top`] to the current cursor + a vertical rule at each
@@ -1165,80 +1498,146 @@ impl Doc {
         }
     }
 
-    /// A small-print note under a grid row, spanning from `left` to the table's right edge and
-    /// wrapped there; the interior column rules stop above it and resume below (the review's
-    /// « Signaux · Données » line under each position).
-    pub(crate) fn grid_note_row(&mut self, s: &str, left: f32, edges: &[f32]) {
+    /// A body row followed by its small-print note, spanning from `note_left` to the table's
+    /// right edge and wrapped there; the interior column rules stop above the note and resume
+    /// below (the review's « Signaux · Données » line under each position). G1 D: the row and
+    /// its note are ONE block — a page break never falls between them (the note would read as
+    /// the next position's, or as nobody's).
+    pub(crate) fn grid_row_num_with_note(
+        &mut self,
+        cells: &[&str],
+        edges: &[f32],
+        numeric_from: usize,
+        note: &str,
+        note_left: f32,
+    ) {
         let right = edges[edges.len() - 1];
-        let outer = [edges[0], left, right];
+        let outer = [edges[0], note_left, right];
+        self.grid_font = FONT;
+        let row_h = self.grid_row_height(cells, edges);
         self.grid_font = SMALL;
-        let height = self.grid_row_height(&["", s], &outer);
-        if self.page_h - self.y - height < BOTTOM {
-            self.close_grid_box(edges);
-            self.new_page();
-            self.grid_top = self.y;
-            let header = self.grid_header.clone();
-            let refs: Vec<&str> = header.iter().map(String::as_str).collect();
-            self.grid_font = FONT;
-            self.draw_grid_cells_aligned(&refs, edges, true, 2..usize::MAX);
-            self.grid_font = SMALL;
-        }
+        let note_h = self.grid_row_height(&["", note], &outer);
+        self.grid_font = FONT;
+        self.grid_break_before(row_h + note_h, edges);
+        self.draw_grid_cells_aligned(cells, edges, false, numeric_from..usize::MAX);
+        self.grid_font = SMALL;
         let from = self.y;
-        self.draw_grid_cells_aligned(&["", s], &outer, false, usize::MAX..usize::MAX);
+        self.draw_grid_cells_aligned(&["", note], &outer, false, usize::MAX..usize::MAX);
         self.grid_spans.push((from, self.y));
+        self.grid_font = FONT;
     }
 
-    /// Close the grid: box the final (or only) page's portion, then advance past it.
+    /// Close the grid: draw its header rows if no body row did (a header-only table), box the
+    /// final (or only) page's portion, then advance past it.
     pub(crate) fn grid_end(&mut self, edges: &[f32]) {
+        if !self.grid_started {
+            self.grid_break_before(0.0, edges);
+        }
         self.close_grid_box(edges);
+        self.grid_header.clear();
+        self.grid_started = false;
         self.y += 2.0;
     }
 
     /// Issue #105 / #207 — the §1 semi-log growth chart, filling the rest of page 1 like the printed
     /// form. Sales / EPS / Price on log scales (each series its own — issue #25; the EPS scale is the
     /// labelled one), the yearly high–low PRICE as vertical bars, the est-high / est-low EPS
-    /// projection from the last EPS point to the forecast horizon, and the form's growth GUIDE lines
-    /// (5–30 % compound from the last EPS point, light grey, labelled at the right edge). Greyscale-
-    /// safe: weight + dash + shade, NEVER colour. Nothing is drawn when there is no plottable data
-    /// (the annexe already carries the em-dashes).
+    /// projection over the forecast horizon, and the form's growth GUIDE lines (5–30 % compound
+    /// from the last positive EPS point, light grey, labelled at their end). Greyscale-safe:
+    /// weight + dash + shade, NEVER colour. Nothing is drawn when there is no plottable data (the
+    /// annexe already carries the em-dashes).
+    ///
+    /// G1 F: the x axis is by YEAR (a gap year keeps its place, the years after it do not slide
+    /// left); the guides and the projection run from their anchor year over exactly the horizon, so
+    /// each is drawn at the slope it is labelled with; the plot's height is measured after any page
+    /// break; a year with only one of its high / low prices still shows that price as a tick; and
+    /// the form's quarterly box sits BELOW the plot (owner decision 7), never over plotted data.
     fn growth_chart(&mut self, frame: &crate::form::StudyFrame) {
+        use steadyinvest_core::normalize::YearUsability;
         let series = &frame.series;
         let outputs = frame.snapshot.outputs();
-        let pts_of =
-            |get: &dyn Fn(&steadyinvest_core::normalize::CanonicalYear) -> Option<Decimal>| {
-                series
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, cy)| {
-                        get(cy)
-                            .and_then(|d| d.to_f64())
-                            .filter(|v| *v > 0.0)
-                            .map(|v| (i, v))
-                    })
-                    .collect::<Vec<(usize, f64)>>()
-            };
+        let pts_of = |get: &dyn Fn(&CanonicalYear) -> Option<Decimal>| {
+            series
+                .iter()
+                .filter_map(|cy| {
+                    get(cy)
+                        .and_then(|d| d.to_f64())
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .map(|v| (cy.year, v))
+                })
+                .collect::<Vec<(i32, f64)>>()
+        };
         let sales = pts_of(&|cy| cy.sales);
         let eps = pts_of(&|cy| cy.eps);
         let highs = pts_of(&|cy| cy.high_price);
         let lows = pts_of(&|cy| cy.low_price);
-        let est_high = outputs.growth.estimated_high_eps.and_then(|d| d.to_f64());
-        let est_low = outputs.growth.estimated_low_eps.and_then(|d| d.to_f64());
+        let est_high = outputs
+            .growth
+            .estimated_high_eps
+            .and_then(|d| d.to_f64())
+            .filter(|v| v.is_finite() && *v > 0.0);
+        let est_low = outputs
+            .growth
+            .estimated_low_eps
+            .and_then(|d| d.to_f64())
+            .filter(|v| v.is_finite() && *v > 0.0);
 
-        if series.is_empty() || (sales.is_empty() && eps.is_empty() && highs.is_empty()) {
+        let (Some(first_year), Some(last_year)) = (
+            series.iter().map(|y| y.year).min(),
+            series.iter().map(|y| y.year).max(),
+        ) else {
+            return;
+        };
+        if sales.is_empty() && eps.is_empty() && highs.is_empty() && lows.is_empty() {
             return;
         }
+        let horizon = FORECAST_HORIZON_YEARS as i32;
+        // The guides start from the last POSITIVE EPS point (a log scale has no place for the
+        // others), named in the scale note — it may lie years before the latest year.
+        let anchor = eps.last().copied();
+        // G1 F review — the projection starts where the estimates start: they are the EPS a
+        // horizon after the latest usable year, compounded from THAT year's EPS. When that EPS is
+        // not positive there is no honest start on a log scale — a line from an older positive
+        // EPS would draw a path the estimates do not describe — so the projection is not drawn,
+        // and the note says why.
+        let base_year = series
+            .iter()
+            .filter(|y| matches!(y.usability, YearUsability::Usable))
+            .map(|y| y.year)
+            .max();
+        let projection_start = base_year.and_then(|b| eps.iter().find(|p| p.0 == b).copied());
+        let has_estimate = est_high.is_some() || est_low.is_some();
+        let scale_note = chart_scale_note(
+            anchor.map(|a| a.0),
+            base_year,
+            projection_start.is_some(),
+            has_estimate,
+        );
 
-        // The plot takes what is left of the page above the four growth lines + the legend.
-        let reserved_below = 5.0 * LINE_H + 16.0;
+        // What goes under the plot: the year labels, the legend and the scale note (measured with
+        // their wrapped lines), the quarterly box, then the caller's gap and four growth lines.
+        let small_h = |s: &str| {
+            let (x, size, line_h) = ProseKind::Small.metrics();
+            wrap_to_width(s, self.right() - x, size).len() as f32 * line_h
+        };
+        let reserved_below = 13.0
+            + small_h(CHART_LEGEND)
+            + small_h(&scale_note)
+            + QUARTER_BOX_GAP
+            + QUARTER_BOX_H
+            + QUARTER_BOX_GAP
+            + 2.0
+            + 2.0 * LINE_H;
+        // Break first, THEN measure: after a page break the plot fills the new page too.
+        self.ensure(CHART_MIN_H + reserved_below);
         let chart_h = (self.page_h - self.y - BOTTOM - reserved_below).max(CHART_MIN_H);
-        self.ensure(chart_h + reserved_below);
         let top = self.y;
         let x0 = MARGIN + CHART_AXIS_W;
         let x1 = self.page_w - MARGIN;
         let plot_w = x1 - x0;
-        let n = series.len();
-        let span = ((n as f64 - 1.0) + f64::from(FORECAST_HORIZON_YEARS)).max(1.0);
-        let px = |i: f64| x0 + ((i / span) * f64::from(plot_w)) as f32;
+        // The horizontal domain: the first year … the last year + the forecast horizon.
+        let span = f64::from(last_year - first_year + horizon).max(1.0);
+        let px = |year: f64| year_x(year, first_year, span, x0, plot_w);
         let py = |v: f64, lmin: f64, lmax: f64| {
             let t = ((v.max(1e-9).log10() - lmin) / (lmax - lmin)).clamp(0.0, 1.0);
             top + (f64::from(chart_h) * (1.0 - t)) as f32
@@ -1246,17 +1645,18 @@ impl Doc {
 
         // Issue #25 (multi-scale): each series on its OWN log range so none is crushed by another's
         // magnitude. The EPS scale (the decision series, its projection and the guides) is labelled.
-        let vals = |pts: &[(usize, f64)]| pts.iter().map(|p| p.1).collect::<Vec<f64>>();
+        let vals = |pts: &[(i32, f64)]| pts.iter().map(|p| p.1).collect::<Vec<f64>>();
         let sales_b = series_log_bounds(&vals(&sales));
         let mut price_vals = vals(&highs);
         price_vals.extend(vals(&lows));
         let price_b = series_log_bounds(&price_vals);
         let mut eps_scale_vals = vals(&eps);
-        eps_scale_vals.extend(est_high.filter(|v| *v > 0.0));
-        eps_scale_vals.extend(est_low.filter(|v| *v > 0.0));
-        // The steepest guide (30 % over the horizon from the last EPS) reserves headroom.
-        if let Some((_, lv)) = eps.last() {
-            eps_scale_vals.push(lv * 1.30f64.powi(FORECAST_HORIZON_YEARS as i32));
+        eps_scale_vals.extend(est_high);
+        eps_scale_vals.extend(est_low);
+        // The steepest guide's end reserves headroom — kept only when finite and positive.
+        if let Some((ly, lv)) = anchor {
+            let (_, top_guide) = guide_end(ly, lv, GUIDE_RATES_PCT[GUIDE_RATES_PCT.len() - 1]);
+            eps_scale_vals.extend(Some(top_guide).filter(|v| v.is_finite() && *v > 0.0));
         }
         let eps_b = series_log_bounds(&eps_scale_vals);
 
@@ -1269,113 +1669,86 @@ impl Doc {
                 text(&mut self.cur, MARGIN, gy + 2.5, 7.0, &lbl);
             }
         }
-        // Issue #207 — the growth guide lines: from the last historical EPS point, each rate compounded
-        // over the horizon, light grey, labelled at the right edge (the printed form's fan).
-        if let (Some((lmin, lmax)), Some((li, lv))) = (eps_b, eps.last().copied()) {
-            let (ox, oy) = (px(li as f64), py(lv, lmin, lmax));
+        // Issue #207 — the growth guide lines: from the last positive EPS point, each rate
+        // compounded over the horizon and ending at the anchor year + the horizon, light grey,
+        // labelled at their end (the printed form's fan).
+        if let (Some((lmin, lmax)), Some((ly, lv))) = (eps_b, anchor) {
+            let (ox, oy) = (px(f64::from(ly)), py(lv, lmin, lmax));
             for rate in GUIDE_RATES_PCT {
-                let end = lv * (1.0 + f64::from(rate) / 100.0).powi(FORECAST_HORIZON_YEARS as i32);
-                let ey = py(end, lmin, lmax);
-                polyline(
-                    &mut self.cur,
-                    &[(ox, oy), (px(span), ey)],
-                    0.4,
-                    GUIDE_GRAY,
-                    &[],
-                );
+                let (ey_year, end) = guide_end(ly, lv, rate);
+                let (ex, ey) = (px(f64::from(ey_year)), py(end, lmin, lmax));
+                polyline(&mut self.cur, &[(ox, oy), (ex, ey)], 0.4, GUIDE_GRAY, &[]);
                 text(
                     &mut self.cur,
-                    x1 - 19.0,
+                    ex.min(x1) - 19.0,
                     ey - 2.0,
                     5.5,
                     &format!("{rate} %"),
                 );
             }
         }
-        // The yearly high–low price bars (price scale): a vertical segment with short caps.
+        // The yearly high–low price bars (price scale): a vertical segment with short caps. A year
+        // with only one of the two prices still shows it, as a lone cap (never dropped).
         if let Some((lmin, lmax)) = price_b {
-            for (i, hv) in &highs {
-                if let Some((_, lo)) = lows.iter().find(|(j, _)| j == i) {
-                    let x = px(*i as f64);
-                    let (yh, yl) = (py(*hv, lmin, lmax), py(*lo, lmin, lmax));
+            let mut years: Vec<i32> = highs.iter().chain(lows.iter()).map(|p| p.0).collect();
+            years.sort_unstable();
+            years.dedup();
+            let cap = |cur: &mut Content, x: f32, y: f32| {
+                polyline(cur, &[(x - 2.0, y), (x + 2.0, y)], 0.8, SERIES_GRAY, &[]);
+            };
+            for year in years {
+                let x = px(f64::from(year));
+                let hi = highs
+                    .iter()
+                    .find(|p| p.0 == year)
+                    .map(|p| py(p.1, lmin, lmax));
+                let lo = lows
+                    .iter()
+                    .find(|p| p.0 == year)
+                    .map(|p| py(p.1, lmin, lmax));
+                if let (Some(yh), Some(yl)) = (hi, lo) {
                     polyline(&mut self.cur, &[(x, yh), (x, yl)], 0.8, SERIES_GRAY, &[]);
-                    polyline(
-                        &mut self.cur,
-                        &[(x - 2.0, yh), (x + 2.0, yh)],
-                        0.8,
-                        SERIES_GRAY,
-                        &[],
-                    );
-                    polyline(
-                        &mut self.cur,
-                        &[(x - 2.0, yl), (x + 2.0, yl)],
-                        0.8,
-                        SERIES_GRAY,
-                        &[],
-                    );
+                }
+                for y in hi.into_iter().chain(lo) {
+                    cap(&mut self.cur, x, y);
                 }
             }
         }
         // The Sales (thin) and EPS (thick) lines, each on its own scale (greyscale: weight).
-        let draw = |cur: &mut Content,
-                    pts: &[(usize, f64)],
-                    b: Option<(f64, f64)>,
-                    w: f32,
-                    dash: &[f32]| {
-            if let Some((lmin, lmax)) = b {
-                let p: Vec<(f32, f32)> = pts
-                    .iter()
-                    .map(|(i, v)| (px(*i as f64), py(*v, lmin, lmax)))
-                    .collect();
-                polyline(cur, &p, w, SERIES_GRAY, dash);
-            }
-        };
+        let draw =
+            |cur: &mut Content, pts: &[(i32, f64)], b: Option<(f64, f64)>, w: f32, dash: &[f32]| {
+                if let Some((lmin, lmax)) = b {
+                    let p: Vec<(f32, f32)> = pts
+                        .iter()
+                        .map(|(year, v)| (px(f64::from(*year)), py(*v, lmin, lmax)))
+                        .collect();
+                    polyline(cur, &p, w, SERIES_GRAY, dash);
+                }
+            };
         draw(&mut self.cur, &sales, sales_b, 0.8, &[]);
         draw(&mut self.cur, &eps, eps_b, 1.6, &[]);
-        // Projection from the last EPS point to est-high / est-low at the horizon (dotted), EPS scale.
-        if let (Some((lmin, lmax)), Some((li, lv))) = (eps_b, eps.last().copied()) {
-            let (ox, oy) = (px(li as f64), py(lv, lmin, lmax));
-            if let Some(h) = est_high.filter(|v| *v > 0.0) {
-                polyline(
-                    &mut self.cur,
-                    &[(ox, oy), (px(span), py(h, lmin, lmax))],
-                    1.2,
-                    SERIES_GRAY,
-                    &[1.5, 2.0],
-                );
-            }
-            if let Some(l) = est_low.filter(|v| *v > 0.0) {
-                polyline(
-                    &mut self.cur,
-                    &[(ox, oy), (px(span), py(l, lmin, lmax))],
-                    1.0,
-                    SERIES_GRAY,
-                    &[1.5, 2.0],
-                );
+        // Projection to est-high / est-low (dotted, EPS scale): from the latest usable year's EPS
+        // (the estimates' base) to that year + the horizon — or not drawn (see `base_year`).
+        if let (Some((lmin, lmax)), Some((by, bv))) = (eps_b, projection_start) {
+            let (ox, oy) = (px(f64::from(by)), py(bv, lmin, lmax));
+            let ex = px(f64::from(by + horizon));
+            for (est, w) in [(est_high, 1.2), (est_low, 1.0)] {
+                if let Some(v) = est {
+                    polyline(
+                        &mut self.cur,
+                        &[(ox, oy), (ex, py(v, lmin, lmax))],
+                        w,
+                        SERIES_GRAY,
+                        &[1.5, 2.0],
+                    );
+                }
             }
         }
-        // Issue #207 — the form's « recent quarterly figures » box, top-left inside the plot. v1
-        // carries no quarterly data: the box states the absence (em-dashes), never a guessed figure.
-        {
-            let (bx, by, bw, bh) = (x0 + 6.0, top + 6.0, 200.0, 4.0 * (SMALL + 3.0) + 8.0);
-            fill_rect(&mut self.cur, bx, by, bw, bh, 1.0);
-            stroke_rect(&mut self.cur, bx, by, bw, bh, 0.4);
-            let mut ty = by + 4.0 + SMALL;
-            text(&mut self.cur, bx + 4.0, ty, SMALL, QUARTER_BOX_TITLE);
-            text_right(&mut self.cur, bx + bw - 44.0, ty, SMALL, "Ventes");
-            text_right(&mut self.cur, bx + bw - 4.0, ty, SMALL, "BPA");
-            for label in [QUARTER_LATEST, QUARTER_YEAR_AGO, QUARTER_CHANGE] {
-                ty += SMALL + 3.0;
-                text(&mut self.cur, bx + 4.0, ty, SMALL, label);
-                text_right(&mut self.cur, bx + bw - 44.0, ty, SMALL, EM_DASH);
-                text_right(&mut self.cur, bx + bw - 4.0, ty, SMALL, EM_DASH);
-            }
-        }
-        // Issue #104 — year labels along the x-axis (each historical year under its column).
-        for (i, cy) in series.iter().enumerate() {
+        // Issue #104 — year labels along the x-axis (each historical year under its own place).
+        for cy in series {
             text_centered(
                 &mut self.cur,
-                px(i as f64),
+                px(f64::from(cy.year)),
                 top + chart_h + 9.0,
                 6.5,
                 &cy.year.to_string(),
@@ -1383,7 +1756,24 @@ impl Doc {
         }
         self.y = top + chart_h + 13.0;
         self.small_line(CHART_LEGEND);
-        self.small_line(CHART_SCALE_NOTE);
+        self.small_line(&scale_note);
+        // Issue #207 — the form's « recent quarterly figures » box, under the plot (owner decision
+        // 7: never over plotted data). v1 carries no quarterly data: the box states the absence
+        // (em-dashes), never a guessed figure.
+        self.y += QUARTER_BOX_GAP;
+        let (bx, by, bw, bh) = (x0, self.y, QUARTER_BOX_W, QUARTER_BOX_H);
+        stroke_rect(&mut self.cur, bx, by, bw, bh, 0.4);
+        let mut ty = by + 4.0 + SMALL;
+        text(&mut self.cur, bx + 4.0, ty, SMALL, QUARTER_BOX_TITLE);
+        text_right(&mut self.cur, bx + bw - 44.0, ty, SMALL, "Ventes");
+        text_right(&mut self.cur, bx + bw - 4.0, ty, SMALL, "BPA");
+        for label in [QUARTER_LATEST, QUARTER_YEAR_AGO, QUARTER_CHANGE] {
+            ty += SMALL + 3.0;
+            text(&mut self.cur, bx + 4.0, ty, SMALL, label);
+            text_right(&mut self.cur, bx + bw - 44.0, ty, SMALL, EM_DASH);
+            text_right(&mut self.cur, bx + bw - 4.0, ty, SMALL, EM_DASH);
+        }
+        self.y = by + bh + QUARTER_BOX_GAP;
     }
 
     /// Issue #105 — the §4 zone bar. A horizontal band from forecast-low to forecast-high split into
@@ -1401,7 +1791,7 @@ impl Doc {
         if hi <= lo {
             return;
         }
-        self.ensure(ZONEBAR_H + 2.0 * LINE_H + 12.0);
+        self.ensure(ZONEBAR_H_RESERVE);
         let (x0, x1) = (MARGIN, self.page_w - MARGIN);
         let w = x1 - x0;
         let top = self.y + 10.0; // room above for the current-price marker label
@@ -1576,26 +1966,36 @@ const HELVETICA_ASCII: [u16; 95] = [
     334, 260, 334, 584, // '{'…'~'
 ];
 
-/// One glyph's Helvetica width (1/1000 em) — accented letters take their base letter's width, as
-/// in the AFM; anything [`winansi`] cannot encode renders as '?' (556).
+/// G1 F — Helvetica advance widths for the WinAnsi upper half 0x80..=0xFF, by code (the same AFM:
+/// œ 944, Œ Æ ‰ ™ … 1000, ß ø 611, æ 889, © ® 737, • 350 …). The five codes WinAnsi leaves
+/// undefined (0x81 0x8D 0x8F 0x90 0x9D) are never emitted by [`winansi_byte`]; they carry '?'s 556.
+#[rustfmt::skip]
+const HELVETICA_HIGH: [u16; 128] = [
+    // 0x80 € ? ‚ ƒ „ … † ‡ ˆ ‰ Š ‹ Œ ? Ž ?
+    556, 556, 222, 556, 333, 1000, 556, 556, 333, 1000, 667, 333, 1000, 556, 611, 556,
+    // 0x90 ? ‘ ’ “ ” • – — ˜ ™ š › œ ? ž Ÿ
+    556, 222, 222, 333, 333, 350, 556, 1000, 333, 1000, 500, 333, 944, 556, 500, 667,
+    // 0xA0 nbsp ¡ ¢ £ ¤ ¥ ¦ § ¨ © ª « ¬ shy ® ¯
+    278, 333, 556, 556, 556, 556, 260, 556, 333, 737, 370, 556, 584, 333, 737, 333,
+    // 0xB0 ° ± ² ³ ´ µ ¶ · ¸ ¹ º » ¼ ½ ¾ ¿
+    400, 584, 333, 333, 333, 556, 537, 278, 333, 333, 365, 556, 834, 834, 834, 611,
+    // 0xC0 À Á Â Ã Ä Å Æ Ç È É Ê Ë Ì Í Î Ï
+    667, 667, 667, 667, 667, 667, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278,
+    // 0xD0 Ð Ñ Ò Ó Ô Õ Ö × Ø Ù Ú Û Ü Ý Þ ß
+    722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611,
+    // 0xE0 à á â ã ä å æ ç è é ê ë ì í î ï
+    556, 556, 556, 556, 556, 556, 889, 500, 556, 556, 556, 556, 278, 278, 278, 278,
+    // 0xF0 ð ñ ò ó ô õ ö ÷ ø ù ú û ü ý þ ÿ
+    556, 556, 556, 556, 556, 556, 556, 584, 611, 556, 556, 556, 556, 500, 556, 500,
+];
+
+/// One glyph's Helvetica width (1/1000 em), read off the byte [`winansi_byte`] writes for it — so
+/// the measure is always the width of what is printed (anything unencodable prints as '?').
 fn glyph_width(c: char) -> u16 {
-    match c {
-        ' '..='~' => HELVETICA_ASCII[c as usize - 32],
-        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'è' | 'é' | 'ê' | 'ë' => 556,
-        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ù' | 'ú' | 'û' | 'ü' | 'ñ' => 556,
-        'ì' | 'í' | 'î' | 'ï' | 'Ì' | 'Í' | 'Î' | 'Ï' => 278,
-        'ç' | 'ý' | 'ÿ' => 500,
-        'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'È' | 'É' | 'Ê' | 'Ë' => 667,
-        'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' => 778,
-        'Ù' | 'Ú' | 'Û' | 'Ü' | 'Ç' | 'Ñ' => 722,
-        '—' | '…' => 1000,
-        '–' | '«' | '»' | '€' => 556,
-        '’' => 222,
-        '·' | '\u{a0}' => 278,
-        '°' => 400,
-        '×' | '÷' => 584,
-        '−' => 333, // encoded as the hyphen-minus
-        _ => 556,
+    match winansi_byte(c) {
+        b @ 0x20..=0x7E => HELVETICA_ASCII[usize::from(b) - 32],
+        b @ 0x80..=0xFF => HELVETICA_HIGH[usize::from(b) - 0x80],
+        _ => 0, // the C0 controls (and DEL) have no glyph
     }
 }
 
@@ -1604,12 +2004,17 @@ pub(crate) fn text_width(s: &str, size: f32) -> f32 {
     s.chars().map(|c| f32::from(glyph_width(c))).sum::<f32>() * size / 1000.0
 }
 
-/// `s` cut to fit `width` points at `size`, ending with « … » when cut (never spilling over).
+/// `s` cut to fit `width` points at `size`, ending with « … » when cut (never spilling over). When
+/// not even the ellipsis fits (a zero or negative width), the result is empty — never wider than
+/// asked.
 pub(crate) fn fit(s: &str, width: f32, size: f32) -> String {
     if text_width(s, size) <= width {
         return s.to_string();
     }
     let room = width - text_width("…", size);
+    if room < 0.0 {
+        return String::new();
+    }
     let mut out = String::new();
     let mut used = 0.0;
     for c in s.chars() {
@@ -1624,25 +2029,140 @@ pub(crate) fn fit(s: &str, width: f32, size: f32) -> String {
 }
 
 /// `s` broken at spaces into lines no wider than `width` points at `size`; a single word wider
-/// than the line is cut with « … » ([`fit`]). An empty `s` is one empty line.
+/// than the line is cut with « … » ([`fit`]). An empty `s` is one empty line. A run of spaces
+/// inside a line is kept (the « A   ·   B » separators); at a break it is dropped, so no line
+/// starts or ends with the spaces it was broken at. A width ≤ 0 holds nothing: one empty line.
 pub(crate) fn wrap_to_width(s: &str, width: f32, size: f32) -> Vec<String> {
+    wrap(s, width, size, false)
+}
+
+/// Whether a word carries a figure (a digit) — such a word is never cut with « … » in a grid cell.
+fn carries_figure(word: &str) -> bool {
+    word.chars().any(|c| c.is_ascii_digit())
+}
+
+/// The shared line breaker of [`wrap_to_width`] and [`cell_layout`]. With `keep_figures` (a grid
+/// cell), a line is never cut down to nothing and a line carrying a figure or the absence mark
+/// « — » is never passed through [`fit`]: a figure wider than the line goes whole on its own line
+/// (never split into pieces that would read as two numbers), and an absence is never erased.
+fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
+    if !keep_figures && (width.is_nan() || width <= 0.0) {
+        return vec![String::new()];
+    }
+    let push = |lines: &mut Vec<String>, line: &str| {
+        let kept = if keep_figures && (carries_figure(line) || line == EM_DASH) {
+            line.to_string()
+        } else {
+            match fit(line, width, size) {
+                // A grid cell never shows nothing where its text was.
+                cut if keep_figures && cut.is_empty() => line.to_string(),
+                cut => cut,
+            }
+        };
+        lines.push(kept);
+    };
+    // (spaces before, word): a run of spaces is remembered with the word it precedes.
+    let mut tokens: Vec<(usize, &str)> = Vec::new();
+    let mut spaces = 0;
+    for (i, word) in s.split(' ').enumerate() {
+        if i > 0 {
+            spaces += 1;
+        }
+        if !word.is_empty() {
+            tokens.push((spaces, word));
+            spaces = 0;
+        }
+    }
     let mut lines: Vec<String> = Vec::new();
     let mut line = String::new();
-    for word in s.split(' ') {
-        let candidate = if line.is_empty() {
-            word.to_string()
-        } else {
-            format!("{line} {word}")
-        };
-        if line.is_empty() || text_width(&candidate, size) <= width {
+    for (gap, word) in tokens {
+        if line.is_empty() {
+            line = word.to_string();
+            continue;
+        }
+        let candidate = format!("{line}{}{word}", " ".repeat(gap.max(1)));
+        if text_width(&candidate, size) <= width {
             line = candidate;
         } else {
-            lines.push(fit(&line, width, size));
+            push(&mut lines, &line);
             line = word.to_string();
         }
     }
-    lines.push(fit(&line, width, size));
+    push(&mut lines, &line);
     lines
+}
+
+/// The smallest type a grid figure is shrunk to (points). Below it the figure is printed whole at
+/// this size, even across its column's rule — never split, never unreadable.
+const MIN_FIGURE_FONT: f32 = 6.0;
+
+/// One grid cell's lines and point size, for a column `col_w` wide, at the grid's `size`.
+///
+/// A text that fits between the rules at the grid's size stays whole on one line, even if it eats
+/// into the padding (a narrow year column's « 2016 »); a longer one wraps at the padded width.
+///
+/// G1 F — a figure is shown whole, never cut to « 1… » (§2 over ten years, the annexe sales of a
+/// JPY / KRW issuer): the widest word carrying a digit, when wider than the padded width, shrinks
+/// the cell's type until it fits THAT width — so a shrunk figure ends on the column's normal right
+/// edge and the column still reads on its units, the way a hand-filled form writes a long number
+/// smaller. The type stops at [`MIN_FIGURE_FONT`]; a figure still too wide there is printed whole,
+/// on its own line, across the rule if it must — never split into pieces. Only a word without a
+/// digit (a label) may still end in « … »; a cell's text, and the absence mark « — », is never
+/// reduced to nothing. A column whose padding leaves no room falls back on the room between the
+/// rules; one with no room at all prints its text as is.
+fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
+    let rule_w = col_w - 2.0 * GRID_INSET;
+    if text_width(s, size) <= rule_w {
+        return (vec![s.to_string()], size);
+    }
+    let pad_w = col_w - 2.0 * CELL_PAD;
+    let room = if pad_w > 0.0 { pad_w } else { rule_w };
+    if room.is_nan() || room <= 0.0 {
+        return (vec![s.to_string()], size);
+    }
+    // A cell with a figure and no letter (« 1234,5 % », « 2,1 : 1 ») is ONE figure: it shrinks
+    // whole, the unit kept on the number's line.
+    let whole_figure = carries_figure(s) && !s.chars().any(char::is_alphabetic);
+    let widest_figure = if whole_figure {
+        text_width(s, size)
+    } else {
+        s.split(' ')
+            .filter(|w| carries_figure(w))
+            .map(|w| text_width(w, size))
+            .fold(0.0_f32, f32::max)
+    };
+    let size = if widest_figure > room {
+        // A hair under the exact ratio, so float rounding cannot tip it back over the room.
+        (size * room / widest_figure * 0.999)
+            .max(MIN_FIGURE_FONT)
+            .min(size)
+    } else {
+        size
+    };
+    if whole_figure {
+        return (vec![s.to_string()], size);
+    }
+    (wrap(s, room, size, true), size)
+}
+
+/// The x of a grid cell's text line `w` wide in the column `left..right`: a figure (`numeric`)
+/// ends at the padded right edge, a label starts at the padded left edge; either is shifted back
+/// inside the rules when it is wider than its padded room. A figure wider than the rules (printed
+/// whole at the smallest type) keeps its right edge and crosses the LEFT rule, so the column
+/// still reads on its units.
+fn cell_x(numeric: bool, left: f32, right: f32, w: f32) -> f32 {
+    if numeric {
+        let x = right - CELL_PAD - w;
+        if w <= right - left - 2.0 * GRID_INSET {
+            x.max(left + GRID_INSET)
+        } else {
+            x
+        }
+    } else {
+        (left + CELL_PAD)
+            .min(right - GRID_INSET - w)
+            .max(left + GRID_INSET)
+    }
 }
 
 /// A horizontal rule at top-origin `top_y`, in mid-grey.
@@ -1721,7 +2241,7 @@ fn series_log_bounds(values: &[f64]) -> Option<(f64, f64)> {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     for v in values {
-        if *v > 0.0 {
+        if v.is_finite() && *v > 0.0 {
             lo = lo.min(v.log10());
             hi = hi.max(v.log10());
         }
@@ -1736,6 +2256,53 @@ fn series_log_bounds(values: &[f64]) -> Option<(f64, f64)> {
     }
     let pad = (hi - lo) * SERIES_PAD_DECADES;
     Some((lo - pad, hi + pad))
+}
+
+/// G1 F — the x of `year` on the §1 plot: the domain starts at `first_year` and spans `span`
+/// years across `plot_w` from `x0`. By year, never by index, so a gap year keeps its place.
+fn year_x(year: f64, first_year: i32, span: f64, x0: f32, plot_w: f32) -> f32 {
+    x0 + (((year - f64::from(first_year)) / span) * f64::from(plot_w)) as f32
+}
+
+/// G1 F — where a growth guide ends: `rate_pct` compounded from `(anchor_year, anchor_eps)` over
+/// exactly the forecast horizon, so the drawn slope is the labelled rate.
+fn guide_end(anchor_year: i32, anchor_eps: f64, rate_pct: u32) -> (i32, f64) {
+    let horizon = FORECAST_HORIZON_YEARS as i32;
+    (
+        anchor_year + horizon,
+        anchor_eps * (1.0 + f64::from(rate_pct) / 100.0).powi(horizon),
+    )
+}
+
+/// G1 F review — the §1 scale note, stating where the guides and the projection really start:
+/// the guides from the last positive EPS (`anchor_year`, possibly years before the latest year),
+/// the projection from the latest usable year (`base_year`) — named when it differs from the
+/// guides' start, or said not drawn when that year's EPS is not positive (`projection_drawn`
+/// false) or there is no usable year. Nothing about the projection when there is no estimate.
+fn chart_scale_note(
+    anchor_year: Option<i32>,
+    base_year: Option<i32>,
+    projection_drawn: bool,
+    has_estimate: bool,
+) -> String {
+    let mut parts = vec![CHART_SCALE.to_string()];
+    parts.push(match anchor_year {
+        Some(a) => {
+            format!("{GUIDES_FROM} {a} {GUIDES_SPAN} {FORECAST_HORIZON_YEARS} {YEARS_OF_FORECAST}")
+        }
+        None => NO_POSITIVE_EPS.to_string(),
+    });
+    if has_estimate {
+        match (base_year, projection_drawn) {
+            (Some(b), true) if Some(b) != anchor_year => {
+                parts.push(format!("{PROJECTION_FROM} {b}"));
+            }
+            (Some(_), true) => {}
+            (Some(b), false) => parts.push(format!("{PROJECTION_NONE} {b} {NOT_POSITIVE}")),
+            (None, _) => parts.push(PROJECTION_NO_BASE.to_string()),
+        }
+    }
+    format!("{}.", parts.join(" ; "))
 }
 
 /// Nice `1 / 2 / 5 × 10^k` tick values (+ their compact labels) inside a log scale `[10^lmin, 10^lmax]`.
@@ -1766,24 +2333,53 @@ fn compact_num(v: f64) -> String {
     }
 }
 
-/// Encode a UTF-8 string as WinAnsi (Latin-1 for the accent range we use, plus a few WinAnsi-only
-/// code points). Characters outside the encoding fall back to '?', never panic.
+/// Encode a UTF-8 string as WinAnsi (Latin-1 for 0xA0–0xFF, plus WinAnsi's own 0x80–0x9F range).
+/// Characters outside the encoding fall back to '?', never panic.
 fn winansi(s: &str) -> Vec<u8> {
-    s.chars()
-        .map(|c| match c as u32 {
-            0x2014 => 0x97,            // — em dash
-            0x2013 => 0x96,            // – en dash
-            0x2026 => 0x85,            // … horizontal ellipsis (issue #74 truncation)
-            0x2019 => 0x92,            // ’ right single quote
-            0x2212 => 0x2D,            // − minus sign → hyphen-minus (formulas)
-            0x20AC => 0x80,            // € euro
-            n if n <= 0x7F => n as u8, // ASCII
-            // Latin-1 high range == WinAnsi (é è à ç ° …). The C1 controls 0x80–0x9F are NOT
-            // identity-mapped in WinAnsi, so they fall through to '?' rather than mis-render.
-            n if (0xA0..=0xFF).contains(&n) => n as u8,
-            _ => b'?',
-        })
-        .collect()
+    s.chars().map(winansi_byte).collect()
+}
+
+/// One character's WinAnsi byte. G1 F: the 0x80–0x9F range is WinAnsi's own (œ Œ “ ” ‘ ’ • ‰ ™
+/// Š š Ž ž Ÿ … — Latin-1 has C1 controls there), so each is mapped by name rather than printed as
+/// '?'; the Latin-1 letters (Æ æ Ø ø ß © ® …) are identity-mapped. [`glyph_width`] measures the
+/// byte written here, so what is measured is what is printed.
+fn winansi_byte(c: char) -> u8 {
+    match c as u32 {
+        n if n <= 0x7F => n as u8, // ASCII
+        0x20AC => 0x80,            // € euro
+        0x201A => 0x82,            // ‚ single low-9 quote
+        0x0192 => 0x83,            // ƒ florin
+        0x201E => 0x84,            // „ double low-9 quote
+        0x2026 => 0x85,            // … horizontal ellipsis (issue #74 truncation)
+        0x2020 => 0x86,            // † dagger
+        0x2021 => 0x87,            // ‡ double dagger
+        0x02C6 => 0x88,            // ˆ modifier circumflex
+        0x2030 => 0x89,            // ‰ per mille
+        0x0160 => 0x8A,            // Š
+        0x2039 => 0x8B,            // ‹ single left guillemet
+        0x0152 => 0x8C,            // Œ
+        0x017D => 0x8E,            // Ž
+        0x2018 => 0x91,            // ‘ left single quote
+        0x2019 => 0x92,            // ’ right single quote
+        0x201C => 0x93,            // “ left double quote
+        0x201D => 0x94,            // ” right double quote
+        0x2022 => 0x95,            // • bullet
+        0x2013 => 0x96,            // – en dash
+        0x2014 => 0x97,            // — em dash
+        0x02DC => 0x98,            // ˜ small tilde
+        0x2122 => 0x99,            // ™ trade mark
+        0x0161 => 0x9A,            // š
+        0x203A => 0x9B,            // › single right guillemet
+        0x0153 => 0x9C,            // œ
+        0x017E => 0x9E,            // ž
+        0x0178 => 0x9F,            // Ÿ
+        0x2212 => 0x2D,            // − minus sign → hyphen-minus (formulas)
+        0x202F => 0xA0,            // narrow no-break space → no-break space (pasted figures)
+        // Latin-1 high range == WinAnsi (é è à ç ° Æ ø ß © ® …). The C1 controls 0x80–0x9F are
+        // NOT identity-mapped in WinAnsi, so they fall through to '?' rather than mis-render.
+        n if (0xA0..=0xFF).contains(&n) => n as u8,
+        _ => b'?',
+    }
 }
 
 #[cfg(test)]
@@ -2046,17 +2642,508 @@ mod tests {
         );
     }
 
+    // ── G1 F (#237) — the PDF engine and the study PDF of #216 ──
+
+    /// The two ways the content stream can carry `s`: `pdf-writer` writes a string with a byte
+    /// outside printable ASCII as hex (`<…>`), else as a literal with `( ) \` escaped — and a
+    /// needle may sit inside a longer string written either way.
+    fn encodings(s: &str) -> [Vec<u8>; 2] {
+        let raw = winansi(s);
+        let mut literal = Vec::new();
+        for b in &raw {
+            if matches!(b, b'(' | b')' | b'\\') {
+                literal.push(b'\\');
+            }
+            literal.push(*b);
+        }
+        let hex = raw
+            .iter()
+            .flat_map(|b| format!("{b:02X}").into_bytes())
+            .collect();
+        [literal, hex]
+    }
+
+    fn contains(hay: &[u8], s: &str) -> bool {
+        occurrences(hay, s) > 0
+    }
+
+    fn occurrences(hay: &[u8], s: &str) -> usize {
+        encodings(s)
+            .iter()
+            .map(|needle| {
+                hay.windows(needle.len())
+                    .filter(|w| *w == needle.as_slice())
+                    .count()
+            })
+            .sum()
+    }
+
+    /// The content streams, one per page, in page order (the only streams in the file).
+    fn page_streams(bytes: &[u8]) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut rest = bytes;
+        while let Some(end) = rest.windows(9).position(|w| w == b"endstream") {
+            out.push(rest[..end].to_vec());
+            rest = &rest[end + 9..];
+        }
+        out
+    }
+
     #[test]
-    fn an_over_long_identifier_is_truncated_with_an_ellipsis() {
-        // Issue #74: the header truncates a pathological ticker/currency instead of running it off
-        // the page (clipped by the media box).
-        let long = "X".repeat(200);
-        let t = truncate(&long, 40);
-        assert_eq!(t.chars().count(), 40, "clamped to the max width");
-        assert!(t.ends_with('…'), "a cut string ends with an ellipsis");
-        // A string within budget is returned untouched — no spurious ellipsis.
-        assert_eq!(truncate("NESN", 40), "NESN");
-        assert_eq!(truncate("CHF", 16), "CHF");
+    fn the_header_box_fits_each_value_to_its_column_by_width() {
+        // G1 F: 48 characters of « W » are ~ 380 pt — the old character cap let a wide name run
+        // over the next cell. The value written is the one fitted at the real glyph widths.
+        let mut s = demo_study();
+        let name = "W".repeat(48);
+        s.company_name = Some(name.clone());
+        let bytes = render_study_pdf(&s).unwrap();
+        let room = (PAGE_W - 2.0 * MARGIN) / 3.0 - 2.0 * CELL_PAD;
+        let fitted = fit(&name, room, FONT);
+        assert!(fitted.ends_with('…') && text_width(&fitted, FONT) <= room);
+        assert!(
+            contains(&bytes, &fitted),
+            "the fitted name is what is written"
+        );
+        assert!(!contains(&bytes, &name), "never the whole over-wide name");
+        // A name that fits is written whole, no spurious ellipsis.
+        let bytes = render_study_pdf(&demo_study()).unwrap();
+        assert!(contains(&bytes, "NESN"));
+    }
+
+    #[test]
+    fn a_grid_figure_is_never_cut_it_shrinks_whole_to_its_padded_room() {
+        // The annexe sales of a JPY issuer: 14 digits in a 70 pt column at 9 pt.
+        let col = 70.0;
+        let (lines, size) = cell_layout("31234567890123", col, FONT);
+        assert_eq!(lines, vec!["31234567890123".to_string()], "one line, whole");
+        assert!((MIN_FIGURE_FONT..FONT).contains(&size));
+        // Shrunk to the PADDED width: it ends on the column's normal right edge, like its
+        // unshrunk neighbours (the units stay aligned).
+        let w = text_width(&lines[0], size);
+        assert!(w <= col - 2.0 * CELL_PAD);
+        assert_eq!(cell_x(true, 0.0, col, w) + w, col - CELL_PAD);
+        let short = text_width("180", FONT);
+        assert_eq!(cell_x(true, 0.0, col, short) + short, col - CELL_PAD);
+        // A figure with its unit shrinks whole, the unit on the number's line.
+        let (lines, _) = cell_layout("1234,5 %", 25.0, SMALL);
+        assert_eq!(lines, vec!["1234,5 %".to_string()]);
+        // Past the smallest type the figure is printed whole at that size, on ONE line — never
+        // split into pieces reading as two numbers — keeping its right edge (across the left rule).
+        let long = "12345678901234567890";
+        let (lines, size) = cell_layout(long, 20.0, FONT);
+        assert_eq!(size, MIN_FIGURE_FONT);
+        assert_eq!(lines, vec![long.to_string()]);
+        let w = text_width(long, size);
+        assert!(w > 20.0);
+        assert_eq!(cell_x(true, 0.0, 20.0, w) + w, 20.0 - CELL_PAD);
+        // A figure among words is never split either.
+        let (lines, _) = cell_layout("soit 12345678901234567890 au total", 20.0, FONT);
+        assert!(lines.contains(&long.to_string()), "{lines:?}");
+        // A label without a digit may still end in « … ».
+        let (lines, _) = cell_layout("Supercalifragilistique", 40.0, FONT);
+        assert!(lines[0].ends_with('…'));
+        // End to end: the study annexe prints the 14-digit figure whole.
+        let mut s = demo_study();
+        s.years[0].sales = cell("31234567890123");
+        let bytes = render_study_pdf(&s).unwrap();
+        assert!(contains(&bytes, "31234567890123"));
+    }
+
+    #[test]
+    fn a_degenerate_column_never_erases_a_cells_text_or_absence() {
+        // No room at all: the text as is — the absence mark « — » above all.
+        assert_eq!(cell_layout(EM_DASH, 1.0, FONT).0, vec![EM_DASH.to_string()]);
+        assert_eq!(
+            cell_layout(EM_DASH, -4.0, FONT).0,
+            vec![EM_DASH.to_string()]
+        );
+        // The padding leaves no room (8 pt column): the room between the rules is used, and
+        // neither a figure nor a word comes out empty.
+        let (lines, _) = cell_layout("12 abc", 8.0, FONT);
+        assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
+        assert!(lines.contains(&"12".to_string()));
+        // A word narrower than nothing but « … » is kept rather than blanked.
+        let (lines, _) = cell_layout("en hausse", 12.0, SMALL);
+        assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
+        let (lines, _) = cell_layout("— · —", 6.0, FONT);
+        assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
+    }
+
+    #[test]
+    fn fit_and_wrap_hold_zero_widths_and_space_runs() {
+        assert_eq!(fit("abc", 0.0, FONT), "");
+        assert_eq!(fit("abc", -5.0, FONT), "");
+        assert_eq!(fit("abcdef", 3.0, FONT), "", "narrower than « … » itself");
+        assert_eq!(wrap_to_width("a b", 0.0, FONT), vec![String::new()]);
+        assert_eq!(wrap_to_width("a b", -1.0, FONT), vec![String::new()]);
+        // A run of spaces inside a line is kept …
+        let sep = "A = x   ·   B = y";
+        assert_eq!(wrap_to_width(sep, 1000.0, FONT), vec![sep.to_string()]);
+        // … and dropped at a break: no line starts or ends with spaces, none is too wide.
+        let long = "alpha   ·   beta   ·   gamma   ·   delta   ·   epsilon";
+        let lines = wrap_to_width(long, 60.0, FONT);
+        assert!(lines.len() > 1);
+        for l in &lines {
+            assert!(!l.starts_with(' ') && !l.ends_with(' '), "{l:?}");
+            assert!(text_width(l, FONT) <= 60.0, "{l:?}");
+        }
+        // Leading spaces never produce an empty first line.
+        assert_eq!(wrap_to_width("  mot", 100.0, FONT), vec!["mot".to_string()]);
+    }
+
+    #[test]
+    fn winansi_maps_its_own_upper_range_and_measures_latin1_letters() {
+        let s = "œŒ“”‘’•‰™ŠšŽžŸ…€–—";
+        let bytes = winansi(s);
+        assert!(
+            !bytes.contains(&b'?'),
+            "every one has a WinAnsi code: {bytes:?}"
+        );
+        assert_eq!(
+            winansi("œŒ“”•‰™"),
+            vec![0x9C, 0x8C, 0x93, 0x94, 0x95, 0x89, 0x99]
+        );
+        assert_eq!(
+            winansi("ÆæØøß©®"),
+            vec![0xC6, 0xE6, 0xD8, 0xF8, 0xDF, 0xA9, 0xAE]
+        );
+        assert_eq!(winansi("→"), vec![b'?'], "outside the encoding: '?'");
+        // The standard Helvetica AFM widths (1/1000 em at 1000 pt = the AFM unit).
+        for (c, w) in [
+            ("œ", 944.0),
+            ("Œ", 1000.0),
+            ("Æ", 1000.0),
+            ("æ", 889.0),
+            ("Ø", 778.0),
+            ("ø", 611.0),
+            ("ß", 611.0),
+            ("©", 737.0),
+            ("®", 737.0),
+            ("•", 350.0),
+            ("‰", 1000.0),
+            ("™", 1000.0),
+            ("“", 333.0),
+            ("é", 556.0),
+            ("?", 556.0),
+            ("→", 556.0),
+        ] {
+            assert_eq!(text_width(c, 1000.0), w, "{c}");
+        }
+    }
+
+    #[test]
+    fn a_section_3_total_is_the_whole_sum_or_absent_never_partial() {
+        let d = |s: &str| Entry::Known(rust_decimal::Decimal::from_str_exact(s).unwrap());
+        assert_eq!(
+            column_total(vec![d("1.5"), d("2.5")]),
+            Total::Sum(rust_decimal::Decimal::from(4))
+        );
+        assert_eq!(
+            column_total(vec![d("1"), Entry::Unknown, d("2")]),
+            Total::Absent {
+                unknown: true,
+                undefined: false
+            }
+        );
+        assert_eq!(
+            column_total(vec![Entry::Undefined, Entry::Unknown]),
+            Total::Absent {
+                unknown: true,
+                undefined: true
+            }
+        );
+        assert_eq!(column_total(Vec::new()), Total::Empty);
+        // An overflow is absent — never restarted from the next year's figure.
+        let max = Entry::Known(rust_decimal::Decimal::MAX);
+        assert_eq!(column_total(vec![max, max, d("1")]), Total::Overflow);
+        // End to end: a window year without a dividend → G and H totals absent, reason named;
+        // never the undefined-ratio reason, which does not apply.
+        let mut s = demo_study();
+        s.years[4].dividend_per_share = None;
+        let bytes = render_study_pdf(&s).unwrap();
+        assert!(contains(&bytes, TOTAL_UNKNOWN_YEAR));
+        assert!(!contains(&bytes, TOTAL_UNDEFINED));
+        assert!(!contains(&bytes, "160 %"), "no partial G total (4 × 40 %)");
+        let bytes = render_study_pdf(&demo_study()).unwrap();
+        assert!(
+            !contains(&bytes, TOTAL_UNKNOWN_YEAR),
+            "no note when all is known"
+        );
+        assert!(
+            contains(&bytes, "200 %"),
+            "G total over five known years: 5 × 40 %"
+        );
+    }
+
+    #[test]
+    fn a_total_absent_for_a_non_positive_eps_names_the_undefined_ratio() {
+        // Every figure is entered; the EPS of one window year is negative, so its P/E and payout
+        // are undefined — not « missing ». The note names that cause, not a missing figure.
+        let mut s = demo_study();
+        s.years[2].eps = cell("-1");
+        let bytes = render_study_pdf(&s).unwrap();
+        assert!(contains(&bytes, TOTAL_UNDEFINED));
+        assert!(
+            !contains(&bytes, TOTAL_UNKNOWN_YEAR),
+            "misattribution: no figure is missing"
+        );
+    }
+
+    #[test]
+    fn the_scale_note_names_where_the_guides_and_the_projection_start() {
+        let h = FORECAST_HORIZON_YEARS;
+        // The usual case: both start from the latest year's EPS — one start, named once.
+        let n = chart_scale_note(Some(2025), Some(2025), true, true);
+        assert!(n.contains(&format!(
+            "{GUIDES_FROM} 2025 {GUIDES_SPAN} {h} {YEARS_OF_FORECAST}"
+        )));
+        assert!(!n.contains(PROJECTION_FROM) && !n.contains(PROJECTION_NONE));
+        // The latest EPS not positive: the guides start years earlier (named); the projection,
+        // whose base is the latest usable year, is not drawn, and the note says why.
+        let n = chart_scale_note(Some(2023), Some(2025), false, true);
+        assert!(n.contains(&format!("{GUIDES_FROM} 2023")));
+        assert!(n.contains(&format!("{PROJECTION_NONE} 2025 {NOT_POSITIVE}")));
+        // A projection drawn from a start other than the guides' is named.
+        let n = chart_scale_note(Some(2025), Some(2024), true, true);
+        assert!(n.contains(&format!("{PROJECTION_FROM} 2024")));
+        // No estimate: nothing said about a projection; no positive EPS: no guides.
+        let n = chart_scale_note(None, Some(2025), false, false);
+        assert!(n.contains(NO_POSITIVE_EPS) && !n.contains("projection"));
+        // End to end: the last two EPS negative.
+        let mut s = demo_study();
+        s.years[3].eps = cell("-1");
+        s.years[4].eps = cell("-2");
+        let bytes = render_study_pdf(&s).unwrap();
+        assert!(contains(&bytes, &format!("{GUIDES_FROM} 2023")));
+        assert!(contains(
+            &bytes,
+            &format!("{PROJECTION_NONE} 2025 {NOT_POSITIVE}")
+        ));
+    }
+
+    #[test]
+    fn the_section_2_average_says_how_many_years_it_covers() {
+        let bytes = render_study_pdf(&demo_study()).unwrap();
+        assert!(contains(&bytes, AVG_FIVE));
+        assert!(!contains(&bytes, AVG_FEWER_NOTE));
+        let mut s = demo_study();
+        s.years.truncate(3);
+        let bytes = render_study_pdf(&s).unwrap();
+        assert!(
+            !contains(&bytes, AVG_FIVE),
+            "never « Moy. 5 ans » over three years"
+        );
+        assert!(contains(&bytes, AVG_FEWER_NOTE));
+        assert!(contains(&bytes, "A : 3 ans, B : 3 ans."));
+        assert_eq!(years_count(0), NO_YEAR);
+        assert_eq!(years_count(1), "1 an");
+    }
+
+    #[test]
+    fn the_data_source_reads_every_cell_and_never_calls_derived_manual() {
+        let mut s = demo_study();
+        assert_eq!(data_source(&s), MANUAL_ENTRY);
+        let provider = |c: &mut Cell| {
+            c.source = Source::Provider;
+            c.provenance.hash_of_dependencies = "eodhd:abc".to_string();
+        };
+        for y in &mut s.years {
+            provider(&mut y.sales);
+            provider(&mut y.eps);
+            provider(&mut y.high_price);
+            provider(&mut y.low_price);
+            for c in [
+                &mut y.dividend_per_share,
+                &mut y.pre_tax_profit,
+                &mut y.book_value_per_share,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                provider(c);
+            }
+        }
+        assert_eq!(data_source(&s), "fournisseur eodhd");
+        // One manual cell elsewhere than the sales is named too.
+        s.years[0].eps.source = Source::Manual;
+        assert_eq!(data_source(&s), "fournisseur eodhd et saisie manuelle");
+        // Only computed cells: « calculé », never « saisie manuelle ».
+        let mut d = demo_study();
+        for y in &mut d.years {
+            for c in [
+                &mut y.sales,
+                &mut y.eps,
+                &mut y.high_price,
+                &mut y.low_price,
+            ] {
+                c.source = Source::Derived;
+            }
+            y.dividend_per_share = None;
+            y.pre_tax_profit = None;
+            y.book_value_per_share = None;
+        }
+        assert_eq!(data_source(&d), COMPUTED);
+        d.years.clear();
+        assert_eq!(data_source(&d), EM_DASH);
+    }
+
+    #[test]
+    fn section_4_states_the_four_low_price_candidates() {
+        // demo: judged low P/E 10 × est. low EPS 4 = 40; the five lows are 50; no severe low
+        // entered; dividend 2 ÷ average high yield 4 % (2 ÷ 50) = 50.
+        let bytes = render_study_pdf(&demo_study()).unwrap();
+        for line in [
+            "(a) PER bas moyen 10 × BPA estimé bas 4 = 40",
+            "(b) Prix bas moyen des 5 dernières années = 50",
+            "(c) Plus bas sévère récent = —",
+            "(d) Prix soutenu par le dividende : dividende 2 ÷ rendement haut moyen 4 % = 50",
+            "Prix bas retenu (PER bas × BPA bas) = 40",
+        ] {
+            assert!(contains(&bytes, line), "missing: {line}");
+        }
+    }
+
+    #[test]
+    fn a_block_reserve_counts_its_wrapped_lines() {
+        let doc = Doc::new();
+        let mut b = Block::default();
+        b.line("court");
+        assert_eq!(doc.block_height(&b), LINE_H);
+        b.line(&"mot ".repeat(60));
+        assert!(doc.block_height(&b) >= 3.0 * LINE_H, "the long line wraps");
+        b.small_line("note");
+        assert!(doc.block_height(&b) >= 3.0 * LINE_H + LINE_H - 2.0);
+    }
+
+    #[test]
+    fn the_study_is_the_forms_two_pages_then_the_annexe() {
+        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let pages = page_streams(&bytes);
+        assert_eq!(pages.len(), 3, "page 1, page 2, annexe");
+        assert!(contains(
+            &pages[0],
+            "1. Analyse visuelle des ventes, bénéfices et cours"
+        ));
+        assert!(contains(&pages[0], QUARTER_BOX_TITLE));
+        assert!(contains(&pages[0], "(4) Croissance estimée du BPA"));
+        assert!(contains(&pages[1], "2. Évaluation de la gestion"));
+        assert!(contains(&pages[1], "5. Potentiel à 5 ans"));
+        assert!(contains(&pages[2], "Annexe — données historiques"));
+    }
+
+    #[test]
+    fn the_guides_run_over_the_horizon_from_their_anchor_year() {
+        let h = FORECAST_HORIZON_YEARS as i32;
+        let (year, v) = guide_end(2023, 2.0, 10);
+        assert_eq!(
+            year,
+            2023 + h,
+            "ends a horizon after the LAST POSITIVE EPS year"
+        );
+        assert!((v - 2.0 * 1.1f64.powi(h)).abs() < 1e-9);
+        // The drawn slope per year is the labelled rate.
+        let per_year = (v / 2.0).log10() / f64::from(h);
+        assert!((per_year - 1.1f64.log10()).abs() < 1e-12);
+        // The x axis is by year: a gap year keeps its place.
+        let x = |y: i32| year_x(f64::from(y), 2015, 15.0, 100.0, 300.0);
+        assert!(((x(2019) - x(2017)) - 2.0 * (x(2018) - x(2017))).abs() < 1e-3);
+        assert_eq!(x(2015), 100.0);
+        assert_eq!(x(2030), 400.0);
+        // Headroom and bounds ignore a non-finite value.
+        assert_eq!(
+            series_log_bounds(&[f64::INFINITY, f64::NAN]),
+            None,
+            "no bounds from non-finite values"
+        );
+        assert!(series_log_bounds(&[1.0, 10.0, f64::INFINITY]).is_some());
+    }
+
+    #[test]
+    fn the_chart_fills_the_page_it_lands_on() {
+        // A break before the plot measures its height on the NEW page, not the old remainder.
+        let frame = crate::form::build_frame(&demo_study()).unwrap();
+        let mut doc = Doc::new();
+        doc.y = PAGE_H - BOTTOM - 120.0;
+        doc.growth_chart(&frame);
+        assert_eq!(doc.page_index(), 1, "the plot moved to a new page");
+        // What is left under it is the caller's gap + the four growth lines.
+        assert!(
+            doc.y >= PAGE_H - BOTTOM - 2.0 - 2.0 * LINE_H - 1.0,
+            "the plot fills the new page, y = {}",
+            doc.y
+        );
+    }
+
+    #[test]
+    fn the_quarterly_box_is_drawn_below_the_plot() {
+        // Owner decision 7: the box leaves the plot — no opaque white fill is painted on page 1
+        // (the zone bar's greys are on page 2; `1 g` is the white fill the box used to paint).
+        let bytes = render_study_pdf(&demo_study()).unwrap();
+        let pages = page_streams(&bytes);
+        assert!(
+            !contains(&pages[0], "\n1 g\n"),
+            "no white box over the plot"
+        );
+        assert!(contains(&pages[0], QUARTER_BOX_TITLE));
+    }
+
+    #[test]
+    fn every_header_row_repeats_after_a_break_and_none_is_orphaned() {
+        let edges = [MARGIN, MARGIN + 100.0, PAGE_W - MARGIN];
+        let mut doc = Doc::new();
+        doc.grid_begin(0);
+        doc.grid_row_small(&["", "HEADONE"], &edges, true, 1);
+        doc.grid_row_small(&["", "HEADTWO"], &edges, true, 1);
+        for i in 0..120 {
+            doc.grid_row_small(&[&format!("r{i}"), "1"], &edges, false, 1);
+        }
+        // A head row after the body (the quick screen's totals) is an underlined row, not a
+        // header: it never replaces the header rows on a continuation page.
+        doc.grid_row_small(&["TOTALROW", "9"], &edges, true, 1);
+        for i in 0..60 {
+            doc.grid_row_small(&[&format!("s{i}"), "1"], &edges, false, 1);
+        }
+        doc.grid_end(&edges);
+        let pages = doc.page_index() + 1;
+        let bytes = doc.finish();
+        assert!(pages >= 3);
+        assert_eq!(occurrences(&bytes, "HEADONE"), pages);
+        assert_eq!(occurrences(&bytes, "HEADTWO"), pages);
+        assert_eq!(occurrences(&bytes, "TOTALROW"), 1);
+
+        // Room for the two header rows but not for them + the first body row: all move on.
+        let mut doc = Doc::new();
+        doc.grid_begin(0);
+        doc.y = PAGE_H - BOTTOM - 2.0 * LINE_H - 1.0;
+        doc.grid_row_small(&["", "HEADONE"], &edges, true, 1);
+        doc.grid_row_small(&["", "HEADTWO"], &edges, true, 1);
+        doc.grid_row_small(&["BODYONE", "1"], &edges, false, 1);
+        doc.grid_end(&edges);
+        assert_eq!(doc.page_index(), 1);
+        let pages = page_streams(&doc.finish());
+        assert!(!contains(&pages[0], "HEADONE") && !contains(&pages[0], "HEADTWO"));
+        assert!(contains(&pages[1], "HEADONE") && contains(&pages[1], "BODYONE"));
+    }
+
+    #[test]
+    fn a_row_and_its_note_are_never_split_by_a_page_break() {
+        let edges = [MARGIN, MARGIN + 80.0, PAGE_W - MARGIN];
+        let mut doc = Doc::new();
+        doc.grid_begin(0);
+        doc.grid_row_num(&["HEAD", "X"], &edges, true, 1);
+        doc.grid_row_num(&["FIRST", "1"], &edges, false, 1);
+        // Room for the row alone, not for the row + its note.
+        doc.y = PAGE_H - BOTTOM - LINE_H - 1.0;
+        doc.grid_row_num_with_note(&["ROWX", "2"], &edges, 1, "NOTEX", edges[1]);
+        doc.grid_end(&edges);
+        assert_eq!(doc.page_index(), 1);
+        let pages = page_streams(&doc.finish());
+        assert!(!contains(&pages[0], "ROWX") && !contains(&pages[0], "NOTEX"));
+        assert!(contains(&pages[1], "ROWX") && contains(&pages[1], "NOTEX"));
+        assert!(
+            contains(&pages[1], "HEAD"),
+            "the header is replayed above them"
+        );
     }
 
     #[test]
