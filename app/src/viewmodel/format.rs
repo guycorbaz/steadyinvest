@@ -55,7 +55,7 @@ impl NumberFormat {
         }
     }
 
-    fn thousands_separator(self) -> char {
+    pub(crate) fn thousands_separator(self) -> char {
         match self {
             NumberFormat::Comma => NARROW_NBSP,
             NumberFormat::Point => ',',

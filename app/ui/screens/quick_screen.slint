@@ -47,6 +47,7 @@ component Ladder inherits VerticalLayout {
     in property <[string]> years;
     in property <string> rate;
     in property <string> span;
+    in property <bool> nonpositive-base;  // line (10) absent: the old average is ≤ 0
     in property <bool> unavailable;
     in property <string> rate-label;
     in property <string> recent-label;
@@ -79,7 +80,10 @@ component Ladder inherits VerticalLayout {
         LadderLine { label: @tr("(7) Total de (5) + (6)"); value: root.at(6); }
         LadderLine { label: @tr("(8) (7) divisé par 2"); value: root.at(7); }
         LadderLine { label: @tr("(9) Hausse sur la période, (4) − (8)"); value: root.at(8); }
-        LadderLine { label: @tr("(10) Hausse en pour cent, (9) ÷ (8)"); value: root.at(9); }
+        LadderLine {
+            label: root.nonpositive-base ? @tr("(10) Hausse en pour cent, (9) ÷ (8) : base non positive") : @tr("(10) Hausse en pour cent, (9) ÷ (8)");
+            value: root.at(9);
+        }
         HorizontalLayout {
             spacing: Tokens.space-8;
             min-height: Tokens.row-height * 0.8;
@@ -118,6 +122,15 @@ export component QuickScreenScreen inherits Rectangle {
         return "";
     }
     pure function or-dash(s: string) -> string { return s != "" ? s : "—"; }
+    // « plus haut / plus bas / au même niveau » from the Rust key (decided on the displayed
+    // percentage) and the percentage — the PDF's words (G1 D review: screen / PDF parity).
+    pure function vs-high() -> string {
+        if (QuickScreen.price-vs-high-pct == "") { return "—"; }
+        if (QuickScreen.price-vs-high == "higher") { return @tr("{} ({})", @tr("plus haut"), QuickScreen.price-vs-high-pct); }
+        if (QuickScreen.price-vs-high == "lower") { return @tr("{} ({})", @tr("plus bas"), QuickScreen.price-vs-high-pct); }
+        if (QuickScreen.price-vs-high == "same") { return @tr("{} ({})", @tr("au même niveau"), QuickScreen.price-vs-high-pct); }
+        return "—";
+    }
     pure function pe-words() -> string {
         if (QuickScreen.pe-position == "higher") { return @tr("au-dessus"); }
         if (QuickScreen.pe-position == "similar") { return @tr("voisin"); }
@@ -173,6 +186,7 @@ export component QuickScreenScreen inherits Rectangle {
                     years: QuickScreen.sales-years;
                     rate: QuickScreen.sales-rate;
                     span: QuickScreen.sales-span;
+                    nonpositive-base: QuickScreen.sales-nonpositive-base;
                     unavailable: QuickScreen.sales-unavailable;
                     rate-label: @tr("Taux annuel composé de croissance des ventes");
                     recent-label: @tr("(1) Ventes de l'année la plus récente");
@@ -188,6 +202,7 @@ export component QuickScreenScreen inherits Rectangle {
                     years: QuickScreen.eps-years;
                     rate: QuickScreen.eps-rate;
                     span: QuickScreen.eps-span;
+                    nonpositive-base: QuickScreen.eps-nonpositive-base;
                     unavailable: QuickScreen.eps-unavailable;
                     rate-label: @tr("Taux annuel composé de croissance du BPA");
                     recent-label: @tr("(1) BPA de l'année la plus récente");
@@ -264,11 +279,13 @@ export component QuickScreenScreen inherits Rectangle {
                 // (the bases come from Rust); a shorter or partial record states its count; the three
                 // facts always show, « — » where a figure is absent (spec §6) — never vanish.
                 if QuickScreen.pe-basis == "partial": Label {
-                    text: @tr("Totaux et moyennes des PER sur {} des {} années du relevé ; un BPA absent ou non positif ne donne pas de PER.", QuickScreen.pe-years, QuickScreen.record-years);
+                    text: @tr("Totaux et moyennes des PER sur {} des {} années du relevé ; un cours ou un BPA absent ou non positif ne donne pas de PER.", QuickScreen.pe-years, QuickScreen.record-years);
                 }
                 Label {
                     text: QuickScreen.pe-basis == "five"
                         ? @tr("Moyenne des PER moyens haut et bas sur cinq ans : {}", root.or-dash(QuickScreen.pe-avg-of-avgs))
+                        : QuickScreen.pe-basis != "" && QuickScreen.pe-years == "1"
+                        ? @tr("Moyenne des PER moyens haut et bas sur la seule année du relevé : {}", root.or-dash(QuickScreen.pe-avg-of-avgs))
                         : QuickScreen.pe-basis != ""
                         ? @tr("Moyenne des PER moyens haut et bas sur {} années du relevé : {}", QuickScreen.pe-years, root.or-dash(QuickScreen.pe-avg-of-avgs))
                         : @tr("Moyenne des PER moyens haut et bas : {}", "—");
@@ -276,15 +293,19 @@ export component QuickScreenScreen inherits Rectangle {
                 StatusBand {
                     icon: "◦";
                     text: QuickScreen.high-basis == "five"
-                        ? @tr("Cours actuel par rapport au cours haut d'il y a cinq ans ({}) : {}", root.or-dash(QuickScreen.high-five-years-ago), root.or-dash(QuickScreen.price-vs-high-pct))
+                        ? @tr("Cours actuel par rapport au cours haut d'il y a cinq ans ({}) : {}", root.or-dash(QuickScreen.high-five-years-ago), root.vs-high())
                         : QuickScreen.high-basis == "year"
-                        ? @tr("Cours actuel par rapport au cours haut de {} ({}) : {}", QuickScreen.high-year, root.or-dash(QuickScreen.high-five-years-ago), root.or-dash(QuickScreen.price-vs-high-pct))
+                        ? @tr("Cours actuel par rapport au cours haut de {} ({}) : {}", QuickScreen.high-year, root.or-dash(QuickScreen.high-five-years-ago), root.vs-high())
                         : @tr("Cours actuel par rapport au cours haut du début du relevé : {}", "—");
                 }
                 StatusBand {
                     icon: "◦";
                     text: QuickScreen.sold-basis == "five"
                         ? @tr("L'action s'est vendue aussi haut que le cours actuel au cours de {} des cinq dernières années.", QuickScreen.years-sold-as-high)
+                        : QuickScreen.sold-basis == "count" && QuickScreen.sold-of == "1" && QuickScreen.years-sold-as-high == "1"
+                        ? @tr("L'action s'est vendue aussi haut que le cours actuel lors de la seule année dont le cours haut est connu.")
+                        : QuickScreen.sold-basis == "count" && QuickScreen.sold-of == "1"
+                        ? @tr("L'action ne s'est pas vendue aussi haut que le cours actuel lors de la seule année dont le cours haut est connu.")
                         : QuickScreen.sold-basis == "count"
                         ? @tr("L'action s'est vendue aussi haut que le cours actuel au cours de {} des {} années dont le cours haut est connu.", QuickScreen.years-sold-as-high, QuickScreen.sold-of)
                         : @tr("Années où l'action s'est vendue aussi haut que le cours actuel : {}", "—");
@@ -295,6 +316,8 @@ export component QuickScreenScreen inherits Rectangle {
                         ? @tr("Le PER actuel ({}) par rapport à la moyenne des PER du relevé ({}) : {}", root.or-dash(QuickScreen.present-pe), root.or-dash(QuickScreen.pe-avg-of-avgs), "—")
                         : QuickScreen.pe-basis == "five"
                         ? @tr("Le PER actuel ({}) est {} de la moyenne des cinq ans ({}).", QuickScreen.present-pe, root.pe-words(), QuickScreen.pe-avg-of-avgs)
+                        : QuickScreen.pe-years == "1"
+                        ? @tr("Le PER actuel ({}) est {} du PER moyen de la seule année du relevé ({}).", QuickScreen.present-pe, root.pe-words(), QuickScreen.pe-avg-of-avgs)
                         : @tr("Le PER actuel ({}) est {} de la moyenne des {} années du relevé ({}).", QuickScreen.present-pe, root.pe-words(), QuickScreen.pe-years, QuickScreen.pe-avg-of-avgs);
                 }
                 Label { text: @tr("PER inhabituels, moyenne à ajuster (votre note, non enregistrée) :"); }
@@ -349,6 +372,8 @@ export component QuickScreenScreen inherits Rectangle {
                 Label {
                     text: root.pe-words() != "" && QuickScreen.pe-basis == "five"
                         ? @tr("4. Le cours : PER actuel {} de la norme des cinq ans.", root.pe-words())
+                        : root.pe-words() != "" && QuickScreen.pe-years == "1"
+                        ? @tr("4. Le cours : PER actuel {} de la norme de la seule année du relevé.", root.pe-words())
                         : root.pe-words() != ""
                         ? @tr("4. Le cours : PER actuel {} de la norme des {} années du relevé.", root.pe-words(), QuickScreen.pe-years)
                         : QuickScreen.pe-absent == "average"

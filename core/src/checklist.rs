@@ -65,7 +65,7 @@ pub struct PriceRow {
     pub high: Option<Decimal>,
     pub low: Option<Decimal>,
     pub eps: Option<Decimal>,
-    /// (A ÷ C), (B ÷ C) — `None` on a missing or non-positive EPS.
+    /// (A ÷ C), (B ÷ C) — `None` on a missing or non-positive price or EPS.
     pub pe_high: Option<Decimal>,
     pub pe_low: Option<Decimal>,
 }
@@ -209,9 +209,12 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
     }
 }
 
+/// A P/E needs a positive price AND a positive EPS: a zero or negative price is a data fault, not
+/// a « PER de 0 » — absent, never wrong (G1 D review). Every P/E, and so every P/E average, is
+/// then positive when present.
 fn pe(price: Option<Decimal>, eps: Option<Decimal>) -> Option<Decimal> {
     match (price, eps) {
-        (Some(p), Some(e)) if e > Decimal::ZERO => p.checked_div(e),
+        (Some(p), Some(e)) if p > Decimal::ZERO && e > Decimal::ZERO => p.checked_div(e),
         _ => None,
     }
 }
@@ -498,6 +501,13 @@ mod tests {
         assert_eq!(out.price.rows[4].pe_high, None);
         assert_eq!(out.price.present_pe, None);
         assert_eq!(out.price.pe_position, None);
+        // A zero price yields no P/E either — never a « PER de 0 » averaged in.
+        let mut zero = years.clone();
+        zero[5].low_price = Some(d("0"));
+        let out = quick_screen(&zero, Some(d("0")), Some(d("5")));
+        assert_eq!(out.price.rows[4].pe_low, None);
+        assert_eq!(out.price.present_pe, None);
+        assert_eq!(out.price.pe_years, 4);
     }
 
     /// Six years whose two-year averages are `old` (2021–2022) and `recent` (2025–2026).

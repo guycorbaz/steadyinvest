@@ -684,10 +684,13 @@ mod tests {
         // quick-screen figures fix (D) words the §3 facts over a short / partial record (the
         // counted variants, the « — » lines that replace the vanishing ones, the partial-P/E note)
         // and names what conclusions 1, 2 and 4 miss (rate absent, objective unread, the record's
-        // average): +17 templates, the « — » fallbacks now through `or-dash`, measures 906. Floor
-        // strict.
+        // average): net +14 (17 new templates, 3 in-@tr « — » fallbacks moved to `or-dash`),
+        // measures 906. Its review pass (G1 D review) words « plus haut / plus bas / au même
+        // niveau » on screen (3 words + 3 « {} ({}) »), the singular one-year variants (5), and
+        // line (10)'s « base non positive » caption (1); the criblage heads are reworded in place:
+        // net +12, measures 918. Floor strict.
         assert!(
-            total >= 906,
+            total >= 918,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

@@ -73,11 +73,13 @@ fn push(ui: &MainWindow, session: &QuickScreenSession, today: &str, format: Numb
     q.set_sales_years(strings(&view.sales.years));
     q.set_sales_rate(view.sales.rate.into());
     q.set_sales_span(view.sales.span_years.into());
+    q.set_sales_nonpositive_base(view.sales.nonpositive_base);
     q.set_sales_unavailable(view.sales.unavailable);
     q.set_eps_lines(strings(&view.eps.lines));
     q.set_eps_years(strings(&view.eps.years));
     q.set_eps_rate(view.eps.rate.into());
     q.set_eps_span(view.eps.span_years.into());
+    q.set_eps_nonpositive_base(view.eps.nonpositive_base);
     q.set_eps_unavailable(view.eps.unavailable);
     q.set_eps_vs_sales(view.eps_vs_sales.into());
     let rows: Vec<QuickPriceRow> = view
@@ -108,6 +110,7 @@ fn push(ui: &MainWindow, session: &QuickScreenSession, today: &str, format: Numb
     q.set_high_basis(view.high_basis.into());
     q.set_high_year(view.high_year.into());
     q.set_price_vs_high_pct(view.price_vs_high_pct.into());
+    q.set_price_vs_high(view.price_vs_high.into());
     q.set_years_sold_as_high(view.years_sold_as_high.into());
     q.set_pe_position(view.pe_position.into());
     q.set_sold_basis(view.sold_basis.into());

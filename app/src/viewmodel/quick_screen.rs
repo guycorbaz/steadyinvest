@@ -53,6 +53,8 @@ fn ladder(l: &Ladder, field: DisplayField, format: NumberFormat) -> QuickScreenL
         ],
         rate: pct(l.compound_rate_pct, format),
         span_years: l.span_years.to_string(),
+        // Line (10) is absent on a non-positive old average: the layouts say why (G1 D review).
+        nonpositive_base: l.old_avg.is_some_and(|o| o <= Decimal::ZERO),
         unavailable: false,
     }
 }
@@ -100,6 +102,8 @@ fn price_bases(p: &PriceRecord) -> PriceBases {
         (Some(_), _, _) => "",
         (None, None, None) => "both",
         (None, None, Some(_)) => "pe",
+        // A present P/E without a position: the record's average is absent (core yields no P/E on
+        // a non-positive price or EPS, so a present average is always positive — G1 D review).
         (None, Some(_), _) => "average",
     };
     PriceBases {
@@ -199,6 +203,12 @@ pub fn meets_key(rate_pct: Option<Decimal>, objective: &str, format: NumberForma
     if cleaned.is_empty() {
         return String::new();
     }
+    // A growth objective carries no grouping: under the Point preset « 7,5 » would otherwise lose
+    // its comma to the thousands rule and read 75 — unread, never a silently different target
+    // (G1 D review). Inner spaces are grouping too.
+    if cleaned.contains(format.thousands_separator()) || cleaned.contains(char::is_whitespace) {
+        return "unread".into();
+    }
     let Some(target) = parse_amount(cleaned, format).map(|m| m.as_decimal()) else {
         return "unread".into();
     };
@@ -231,6 +241,31 @@ mod tests {
             meets_key(Some(d("8.1")), "sept", NumberFormat::Comma),
             "unread"
         );
+    }
+
+    #[test]
+    fn a_grouped_objective_is_unread_never_a_different_number() {
+        assert_eq!(
+            meets_key(Some(d("8")), "7,5", NumberFormat::Point),
+            "unread"
+        );
+        assert_eq!(meets_key(Some(d("8")), "7.5", NumberFormat::Point), "yes");
+        assert_eq!(
+            meets_key(Some(d("8")), "7 5", NumberFormat::Comma),
+            "unread"
+        );
+        assert_eq!(meets_key(Some(d("8")), "7,5 %", NumberFormat::Comma), "yes");
+    }
+
+    #[test]
+    fn a_non_positive_old_average_is_named_on_line_10() {
+        let mut out = QuickScreenOutputs::default();
+        out.eps.old_avg = Some(d("-1"));
+        out.eps.increase = Some(d("2"));
+        let v = quick_screen_view(head(), &out, NumberFormat::Comma);
+        assert!(v.eps.nonpositive_base);
+        assert_eq!(v.eps.lines[9], "");
+        assert!(!v.sales.nonpositive_base);
     }
 
     /// The decision is taken on the rate as shown: 6,96 % reads « 7,0 % », which meets 7.

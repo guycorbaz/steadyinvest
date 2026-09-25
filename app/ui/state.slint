@@ -1192,11 +1192,13 @@ export global QuickScreen {
     in-out property <[string]> sales-years;
     in-out property <string> sales-rate;
     in-out property <string> sales-span;
+    in-out property <bool> sales-nonpositive-base;   // line (10) absent: old average ≤ 0
     in-out property <bool> sales-unavailable;
     in-out property <[string]> eps-lines;
     in-out property <[string]> eps-years;
     in-out property <string> eps-rate;
     in-out property <string> eps-span;
+    in-out property <bool> eps-nonpositive-base;
     in-out property <bool> eps-unavailable;
     in-out property <string> eps-vs-sales;   // eps | sales | same | ""
     // §3
@@ -1215,6 +1217,7 @@ export global QuickScreen {
     in-out property <string> present-pe;
     in-out property <string> high-five-years-ago;
     in-out property <string> price-vs-high-pct;   // signed, "" = unknown
+    in-out property <string> price-vs-high;       // higher | lower | same | "" (on the displayed %)
     in-out property <string> high-basis;          // five | year | "" (no high)
     in-out property <string> high-year;
     in-out property <string> years-sold-as-high;

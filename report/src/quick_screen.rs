@@ -16,6 +16,8 @@ pub struct QuickScreenLadder {
     pub rate: String,
     /// The span in years the rate was computed over (« 5 »); `""` when the ladder is unavailable.
     pub span_years: String,
+    /// Line (10) is absent because the old average (8) is zero or negative (G1 D review).
+    pub nonpositive_base: bool,
     pub unavailable: bool,
 }
 
@@ -107,6 +109,7 @@ const L_TOTAL_B: &str = "(7) Total de (5) + (6)";
 const L_HALF_B: &str = "(8) (7) divisé par 2";
 const L_INCREASE: &str = "(9) Hausse sur la période, (4) − (8)";
 const L_INCREASE_PCT: &str = "(10) Hausse en pour cent, (9) ÷ (8)";
+const L_INCREASE_PCT_NONPOS: &str = "(10) Hausse en pour cent, (9) ÷ (8) : base non positive";
 const E_RECENT: &str = "(1) BPA de l'année la plus récente";
 const E_RECENT_PRIOR: &str = "(2) BPA de l'année précédente";
 const E_OLD: &str = "(5) BPA il y a {} ans";
@@ -138,8 +141,9 @@ const TOTALS: &str = "Totaux";
 const AVERAGES: &str = "Moyennes";
 const AVG_OF_AVGS: &str = "Moyenne des PER moyens haut et bas sur cinq ans";
 const AVG_OF_AVGS_N: &str = "Moyenne des PER moyens haut et bas sur {} années du relevé";
+const AVG_OF_AVGS_1: &str = "Moyenne des PER moyens haut et bas sur la seule année du relevé";
 const AVG_OF_AVGS_NONE: &str = "Moyenne des PER moyens haut et bas";
-const PE_PARTIAL: &str = "Totaux et moyennes des PER sur {} des {} années du relevé ; un BPA absent ou non positif ne donne pas de PER.";
+const PE_PARTIAL: &str = "Totaux et moyennes des PER sur {} des {} années du relevé ; un cours ou un BPA absent ou non positif ne donne pas de PER.";
 const PRICE_VS_HIGH: &str = "Cours actuel par rapport au cours haut d'il y a cinq ans ({}) : {}";
 const PRICE_VS_HIGH_YEAR: &str = "Cours actuel par rapport au cours haut de {} ({}) : {}";
 const PRICE_VS_HIGH_NONE: &str = "Cours actuel par rapport au cours haut du début du relevé : {}";
@@ -148,10 +152,13 @@ const LOWER: &str = "plus bas";
 const SAME_LEVEL: &str = "au même niveau";
 const SOLD_AS_HIGH: &str = "L'action s'est vendue aussi haut que le cours actuel au cours de {} des cinq dernières années.";
 const SOLD_AS_HIGH_N: &str = "L'action s'est vendue aussi haut que le cours actuel au cours de {} des {} années dont le cours haut est connu.";
+const SOLD_AS_HIGH_ONE_YES: &str = "L'action s'est vendue aussi haut que le cours actuel lors de la seule année dont le cours haut est connu.";
+const SOLD_AS_HIGH_ONE_NO: &str = "L'action ne s'est pas vendue aussi haut que le cours actuel lors de la seule année dont le cours haut est connu.";
 const SOLD_AS_HIGH_NONE: &str =
     "Années où l'action s'est vendue aussi haut que le cours actuel : {}";
 const PE_POS: &str = "Le PER actuel ({}) est {} de la moyenne des cinq ans ({}).";
 const PE_POS_N: &str = "Le PER actuel ({}) est {} de la moyenne des {} années du relevé ({}).";
+const PE_POS_1: &str = "Le PER actuel ({}) est {} du PER moyen de la seule année du relevé ({}).";
 const PE_POS_NONE: &str = "Le PER actuel ({}) par rapport à la moyenne des PER du relevé ({}) : {}";
 const PE_HIGHER: &str = "au-dessus";
 const PE_SIMILAR: &str = "voisin";
@@ -174,6 +181,7 @@ const C2_UNREAD: &str =
 const C3: &str = "3. Croissance possible du BPA sur cinq ans, avis du lecteur : {}";
 const C4: &str = "4. Le cours : PER actuel {} de la norme des cinq ans.";
 const C4_N: &str = "4. Le cours : PER actuel {} de la norme des {} années du relevé.";
+const C4_1: &str = "4. Le cours : PER actuel {} de la norme de la seule année du relevé.";
 const C4_NO_PE: &str = "4. Le cours : PER actuel indisponible.";
 const C4_NO_AVG: &str = "4. Le cours : moyenne des PER du relevé indisponible.";
 const C4_NO_BOTH: &str = "4. Le cours : PER actuel et moyenne des PER du relevé indisponibles.";
@@ -203,6 +211,7 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     L_HALF_B,
     L_INCREASE,
     L_INCREASE_PCT,
+    L_INCREASE_PCT_NONPOS,
     E_RECENT,
     E_RECENT_PRIOR,
     E_OLD,
@@ -233,6 +242,7 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     AVERAGES,
     AVG_OF_AVGS,
     AVG_OF_AVGS_N,
+    AVG_OF_AVGS_1,
     AVG_OF_AVGS_NONE,
     PE_PARTIAL,
     PRICE_VS_HIGH,
@@ -243,9 +253,12 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     SAME_LEVEL,
     SOLD_AS_HIGH,
     SOLD_AS_HIGH_N,
+    SOLD_AS_HIGH_ONE_YES,
+    SOLD_AS_HIGH_ONE_NO,
     SOLD_AS_HIGH_NONE,
     PE_POS,
     PE_POS_N,
+    PE_POS_1,
     PE_POS_NONE,
     PE_HIGHER,
     PE_SIMILAR,
@@ -264,6 +277,7 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     C3,
     C4,
     C4_N,
+    C4_1,
     C4_NO_PE,
     C4_NO_AVG,
     C4_NO_BOTH,
@@ -315,7 +329,15 @@ fn ladder(doc: &mut Doc, l: &QuickScreenLadder, labels: [&str; 10], rate_label: 
         (labels[6].to_string(), get(6)),
         (labels[7].to_string(), get(7)),
         (labels[8].to_string(), get(8)),
-        (labels[9].to_string(), get(9)),
+        // Line (10) is absent on a non-positive old average: its label says why (G1 D review).
+        (
+            if l.nonpositive_base {
+                L_INCREASE_PCT_NONPOS.to_string()
+            } else {
+                labels[9].to_string()
+            },
+            get(9),
+        ),
     ];
     for (label, value) in rows {
         doc.two_columns(&label, or_dash(value));
@@ -362,11 +384,19 @@ fn price_facts(q: &QuickScreen) -> [String; 3] {
     };
     let sold = match q.sold_basis.as_str() {
         "five" => fill(SOLD_AS_HIGH, &[&q.years_sold_as_high]),
+        // One known high: « de 1 des 1 années » would not read — the singular says it plainly.
+        "count" if q.sold_of == "1" => match q.years_sold_as_high.as_str() {
+            "1" => SOLD_AS_HIGH_ONE_YES.to_string(),
+            _ => SOLD_AS_HIGH_ONE_NO.to_string(),
+        },
         "count" => fill(SOLD_AS_HIGH_N, &[&q.years_sold_as_high, &q.sold_of]),
         _ => fill(SOLD_AS_HIGH_NONE, &[EM_DASH]),
     };
     let pe = match (pe_word(q), q.pe_basis.as_str()) {
         (Some(word), "five") => fill(PE_POS, &[&q.present_pe, word, &q.pe_avg_of_avgs]),
+        (Some(word), _) if q.pe_years == "1" => {
+            fill(PE_POS_1, &[&q.present_pe, word, &q.pe_avg_of_avgs])
+        }
         (Some(word), _) => fill(
             PE_POS_N,
             &[&q.present_pe, word, &q.pe_years, &q.pe_avg_of_avgs],
@@ -397,6 +427,7 @@ fn conclusion(templates: [&str; 4], rate: &str, key: &str) -> String {
 fn conclusion_4(q: &QuickScreen) -> String {
     match (pe_word(q), q.pe_basis.as_str(), q.pe_absent.as_str()) {
         (Some(word), "five", _) => fill(C4, &[word]),
+        (Some(word), _, _) if q.pe_years == "1" => fill(C4_1, &[word]),
         (Some(word), _, _) => fill(C4_N, &[word, &q.pe_years]),
         (None, _, "average") => C4_NO_AVG.to_string(),
         (None, _, "both") => C4_NO_BOTH.to_string(),
@@ -485,8 +516,12 @@ pub fn render_quick_screen(q: &QuickScreen) -> Vec<u8> {
     doc.indent_line(factors);
     doc.gap(4.0);
 
-    // The form's two pages: §1–§2 on the first, §3–§4 on the second (spec §5, §7).
-    doc.new_page();
+    // The form's two pages: §1–§2 on the first, §3–§4 on the second (spec §5, §7) — a break
+    // only while still on the first page: when a long note already carried §2 onto page 2, §3
+    // follows it there rather than jumping to a third (G1 D review).
+    if doc.page_index() == 0 {
+        doc.new_page();
+    }
     doc.section(S3);
     doc.two_columns(PRESENT_PRICE, or_dash(&q.present_price));
     doc.two_columns(PRESENT_EPS, or_dash(&q.present_eps));
@@ -548,6 +583,7 @@ pub fn render_quick_screen(q: &QuickScreen) -> Vec<u8> {
     }
     let avg_label = match q.pe_basis.as_str() {
         "five" => AVG_OF_AVGS.to_string(),
+        "all" | "partial" if q.pe_years == "1" => AVG_OF_AVGS_1.to_string(),
         "all" | "partial" => fill(AVG_OF_AVGS_N, &[&q.pe_years]),
         _ => AVG_OF_AVGS_NONE.to_string(),
     };
@@ -602,6 +638,7 @@ mod tests {
             years: vec!["2026".into(), "2025".into(), "2021".into(), "2020".into()],
             rate: rate.into(),
             span_years: "5".into(),
+            nonpositive_base: false,
             unavailable: false,
         };
         QuickScreen {
@@ -755,6 +792,40 @@ mod tests {
         for f in facts {
             assert!(!f.contains("cinq"), "{f}");
         }
+    }
+
+    #[test]
+    fn a_single_year_reads_in_the_singular() {
+        let mut q = sample();
+        q.pe_basis = "all".into();
+        q.pe_years = "1".into();
+        q.high_basis = "year".into();
+        q.sold_basis = "count".into();
+        q.sold_of = "1".into();
+        q.years_sold_as_high = "0".into();
+        let facts = price_facts(&q);
+        assert_eq!(facts[1], SOLD_AS_HIGH_ONE_NO);
+        assert_eq!(
+            facts[2],
+            "Le PER actuel (22,0) est au-dessus du PER moyen de la seule année du relevé (15,0)."
+        );
+        assert_eq!(
+            conclusion_4(&q),
+            "4. Le cours : PER actuel au-dessus de la norme de la seule année du relevé."
+        );
+        q.years_sold_as_high = "1".into();
+        assert_eq!(price_facts(&q)[1], SOLD_AS_HIGH_ONE_YES);
+        for f in price_facts(&q) {
+            assert!(!f.contains(" 1 années") && !f.contains("des 1 "), "{f}");
+        }
+    }
+
+    /// A long note that already carries §2 onto page 2: §3 follows it there, never on a third.
+    #[test]
+    fn a_long_note_does_not_push_section_3_to_a_third_page() {
+        let mut q = sample();
+        q.reasons = "une raison de la croissance passée, notée longuement. ".repeat(90);
+        assert_eq!(page_count(&render_quick_screen(&q)), 2);
     }
 
     #[test]

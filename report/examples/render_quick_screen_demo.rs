@@ -10,6 +10,7 @@ fn main() {
         years: vec!["2025".into(), "2024".into(), "2020".into(), "2019".into()],
         rate: rate.into(),
         span_years: "5".into(),
+        nonpositive_base: false,
         unavailable: false,
     };
     let q = QuickScreen {

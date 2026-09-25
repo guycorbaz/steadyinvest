@@ -211,8 +211,10 @@ export component WatchlistScreen inherits Rectangle {
                     Head { text: @tr("Ventes, taux annuel"); width: Cols.rate; }
                     Head { text: @tr("BPA, taux annuel"); width: Cols.rate; }
                     Head { text: @tr("BPA face aux ventes"); width: Cols.versus; }
-                    Head { text: @tr("PER actuel face à la moyenne 5 ans"); width: Cols.pe; }
-                    Head { text: @tr("Cours face au haut d'il y a 5 ans"); width: Cols.price; }
+                    // Neutral heads (G1 D review): a row's record may hold fewer than five years —
+                    // the examination itself states the count.
+                    Head { text: @tr("PER actuel face à la moyenne du relevé"); width: Cols.pe; }
+                    Head { text: @tr("Cours face au haut le plus ancien du relevé"); width: Cols.price; }
                     Head { text: @tr("Étude"); width: Cols.study; }
                     Rectangle { horizontal-stretch: 1; }
                     Rectangle { width: Cols.action; }
