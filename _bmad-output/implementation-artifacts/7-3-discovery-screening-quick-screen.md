@@ -170,21 +170,3 @@ Still open, pre-existing (5.6): the study PDF ignores the number locale (« 2.9 
 
 Fixed in PR G (G1, branch `fix/g1-g-dossier-switch`): every dossier change ends the examination
 (fetch superseded, slot emptied, screen closed) and the criblage (run stopped, card hidden).
-
-### Study PDF and its export — G1 final review (area 5, 2026-09-25)
-
-- [x] [Review][Patch] §4 with the current price absent read « hors de la plage prévue » — **the price is said absent, the zone bar draws no marker; the place is read off the price and the bounds** [report/src/pdf.rs:474-478,840-847] — pre-existing
-- [x] [Review][Patch] Chart lines bridge missing years and non-plottable (≤ 0) EPS — **drawn run by run, broken at a gap or a value the log scale cannot hold** [report/src/pdf.rs:1608-1618,1767-1778]
-- [x] [Review][Patch] Study PDF export: a read / render failure reported as « L'enregistrement a échoué » — **unreadable / missing / data that do not prepare, each named (MSG_STUDY_PDF_UNRENDERABLE)** [app/src/wiring/studies.rs:481-491]
-- [x] [Review][Patch] Export success notice can overwrite a list-slot failure (F4); write failure not via `refuse` — **JSON and PDF export: an outcome replaces only its own, else is written under the notice on show; write failures refused with MSG_EXPORT_WRITE_FAILED, the OS cause logged** [app/src/wiring/studies.rs:462,512-516] — the import (535) and archive / delete (782) outcomes write the same slot and are left to the studies wiring
-- [x] [Review][Patch] An isolated point is not drawn; the first year's bar sits on the frame edge — **a lone point is a dot; half a year of room at each end of the axis**
-- [x] [Review][Patch] The PDF drops trailing zeros the screen keeps — **`round_for_display` spelled as is, no `normalize`** [report/src/pdf.rs:666]
-- [x] [Review][Patch] The header « Données » is elided and may lose « et saisie manuelle » — **the provider list on the first line, « et saisie manuelle » whole on the second** [report/src/pdf.rs:1314]
-- [x] [Review][Patch] The zone-bar marker is pinned on the edge when the price is out of range — **an arrow leaves the bar through that edge, the caption says « sous / au-dessus de la plage »; the §4 line names below / above** [report/src/pdf.rs:1895-1911]
-- [x] [Review][Patch] §3 notes / summary lines can be orphaned on the next page — **§3 reserved as one block when a page holds it; the notes move together otherwise** [report/src/pdf.rs:372-403]
-- [x] [Review][Patch] Header « Date » is the creation date — **labelled « Créée le », as the screen does; the comparison PDF carries the same creation date per study** [report/src/pdf.rs:141] — pre-existing
-- [x] [Review][Patch] A picked file name without `.pdf` is kept (« etude-NESN.SW » has an extension) — **`.pdf` appended unless the name ends in it** [app/src/wiring/studies.rs:505-511]
-- [x] [Review][Defer] A non-WinAnsi company name prints « ??? » — deferred to the layout debt (G6)
-
-Fixed in PR N (G1, branch `fix/g1-n-study-pdf`): the items checked above. Posture:
-USER_FACING_MESSAGES 158 → 160.
