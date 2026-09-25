@@ -111,10 +111,10 @@ and listed as due (« données non calculables »); an unknown last-save date li
 
 ### Review Findings — G1 final review, area 2 (2026-09-25, #237, on integ/g1-final e686141)
 
-- [x] [Review][Patch] M1 — A legacy lot (no declared currency): its stop was labelled in the reference currency, and the study price in the position's currency — **the stop carries no currency and is never compared; the row (and the PDF) say why (« non comparé au prix : la position n'a pas de devise renseignée »); the price is labelled with the STUDY's currency**. The register (`wiring/holdings.rs`) computes its own comparison (not shared) and still compares unconditionally — left to the portfolio branch [app/src/state/review.rs, app/src/wiring/review.rs]
+- [x] [Review][Patch] M1 — A legacy lot (no declared currency): its stop was labelled in the reference currency, and the study price in the position's currency — **the stop carries no currency and is never compared; the row (and the PDF) say why (« non comparé au prix : le lot n'a pas de devise renseignée », worded per lot after G3); the price is labelled with the STUDY's currency**. The register (`wiring/holdings.rs`) computes its own comparison (not shared) and still compares unconditionally — left to the portfolio branch [app/src/state/review.rs, app/src/wiring/review.rs]
 - [x] [Review][Patch] M2 — The row's study was `links[0]` (lot position); counts / due read the first lot's study only — **chosen by identity (the newest linked study — the ticker's own; a failed read before « aucune étude »); flag / zone counts and the due list read every lot's study (« NESN (USD) » when the lots link to different studies); the verdict partition follows the row's study** [app/src/state/review.rs]
 - [x] [Review][Patch] M3 — The review was not re-pushed when a price / FX / study fetch landed while shown; the PDF exported the pushed rows as they were — **re-pushed on every async arrival while on display; the export re-pushes first** [app/src/wiring/fetch.rs, app/src/wiring/review.rs]
-- [x] [Review][Patch] L4 — Amounts at 0 dp (`LargeMonetary`) where Portefeuille shows `Price` (2 dp) — **`Price`, as Portefeuille; the PDF columns widened for « 12 345 678,00 CHF »** [app/src/wiring/review.rs, report/src/review.rs]
+- [x] [Review][Patch] L4 — Amounts at 0 dp (`LargeMonetary`) where Portefeuille shows `Price` (at most 2 dp) — **`Price` (at most two decimals, trailing zeros not padded), as Portefeuille; the PDF columns widened for « 12 345 678,99 CHF »** [app/src/wiring/review.rs, report/src/review.rs]
 - [x] [Review][Patch] L5 — An empty dossier read three « indisponible » size classes — **one statement « Aucune position classée : le dossier ne contient aucune position. », screen and PDF**
 - [x] [Review][Patch] L6 — PDF share / target columns without « % » (the test data carried it) — **the layout writes the unit; the sample hands the bare figure, as the app does**
 - [x] [Review][Patch] L7 — FX footnote rate as the stored « 0.8 » — **through the user's number format** (Portefeuille's footnote is the same and is left to the portfolio branch)
@@ -123,3 +123,15 @@ and listed as due (« données non calculables »); an unknown last-save date li
 - [x] [Review][Patch] L10 — Trigger words differed screen / PDF; the due subtitle named three of five reasons — **« Le prix a atteint le seuil suiveur. » / « Le prix est dans la zone haute. » on both; the subtitle lists all five**
 
 Fixed on branch `fix/g1-l-review`.
+
+#### G3 review of `fix/g1-l-review` (2026-09-25)
+
+- [x] [Review][Patch] M-a — Counts « avec au moins un signal » / « zone haute » read every lot's study while the row shows one — **read the row's shown study only; the due count is worded « {} études à revoir » on its own line (screen and PDF); the mixed-links band names the OTHER studies' signals / high zone**
+- [x] [Review][Patch] M-c — One full re-composition per async result (recompute storm) — **coalesced: a latch + one zero-delay single-shot timer per burst (`RepushLatch`, tested)**
+- [x] [Review][Patch] L-a — An async re-push cleared « Revue exportée : chemin » — **the notice is cleared on arrival (screen-activated arm) and at the start of an export only**
+- [x] [Review][Patch] L-b — Row currency taken from the shown lot's effective currency — **the shown study's own currency; without a study every lot's declared currency, « — » kept for a lot declaring none**
+- [x] [Review][Patch] L-c — « aucune étude » and « indisponible » merged into one « — »; the band claimed « la plus récente » over an unreadable lot; an unreadable lot's stop was silently « not breached » — **two facts on the band; « une étude lue, sans pouvoir dire si c'est la plus récente »; the stop reads « non comparé au prix : l'étude du lot n'a pas pu être lue »**
+- [x] [Review][Patch] L-d — « la position » → « le lot n'a pas de devise renseignée » (screen + PDF)
+- [x] [Review][Patch] L-e — `size_empty` keyed by the review's own positions
+- [x] [Review][Patch] L-g — Tests: three lots CHF / USD / CHF with studies created on different days (the newer with the smaller id), an identity tie; the « at most two decimals » comments
+- M-b (register side) and L-f (Portefeuille's FX footnote) belong to the portfolio branch — not touched here.
