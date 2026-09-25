@@ -145,7 +145,13 @@ pub(crate) fn declared_quota(error: &IngestionError) -> Option<Option<u64>> {
 
 /// A job for the worker thread.
 pub enum WorkerJob {
-    Fetch(FetchRequest),
+    /// A study fetch (Story 3.1), stamped with the dossier GENERATION it was asked in (G1 final
+    /// review M1): the result rides it back, and a result whose dossier has since changed (another
+    /// dossier opened or created, a backup restored — same study ids included) is dropped unwritten.
+    Fetch {
+        request: FetchRequest,
+        generation: u64,
+    },
     /// Story 7.3: an « Examen rapide » of a ticker with no study — the same fundamentals fetch
     /// as [`WorkerJob::Fetch`] (`study_id` unused), routed to the examination screen and kept in
     /// the session only; nothing is written unless « Créer l'étude » follows.
@@ -170,6 +176,8 @@ pub enum WorkerJob {
 /// chain failed (the error names itself).
 pub struct FetchOutcome {
     pub study_id: Uuid,
+    /// The dossier generation stamped at enqueue (see [`WorkerJob::Fetch`]).
+    pub generation: u64,
     pub result: Result<FetchedFinancials, IngestionError>,
     pub fell_back_to: Option<ProviderChoice>,
 }
@@ -400,7 +408,10 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                 std::collections::HashMap::new();
             while let Ok(job) = rx.recv() {
                 let outcome = match job {
-                    WorkerJob::Fetch(req) => {
+                    WorkerJob::Fetch {
+                        request: req,
+                        generation,
+                    } => {
                         let (result, _, fell_back_to) = run_chain(
                             &mut last_request,
                             select,
@@ -412,6 +423,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                         );
                         WorkerOutcome::Fetch(FetchOutcome {
                             study_id: req.study_id,
+                            generation,
                             result,
                             fell_back_to,
                         })

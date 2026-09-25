@@ -451,6 +451,10 @@ pub const MSG_RESTORE_REASON_FOREIGN: &str = "Cette sauvegarde appartient à un 
 pub const MSG_JOURNAL_OPENED: &str = "Le dossier a été ouvert.";
 pub const MSG_JOURNAL_CREATED: &str = "Le nouveau dossier a été créé et ouvert.";
 pub const MSG_JOURNAL_OPEN_FAILED: &str = "Le dossier n'a pas pu être ouvert.";
+/// G1 final review L10: after a refused switch the previous dossier could not be reopened either —
+/// the location status states that no dossier is open (never the previous one's « ouvert »).
+pub const MSG_NO_JOURNAL_OPEN: &str =
+    "Aucun dossier n'est ouvert : le dossier précédent n'a pas pu être rouvert.";
 pub const MSG_JOURNAL_LOCKED: &str = "Ce dossier est déjà ouvert dans une autre fenêtre ou un autre processus ; il n'a pas été ouvert.";
 pub const MSG_JOURNAL_LOCK_RECLAIMABLE: &str =
     "Ce dossier porte un verrou laissé par une session interrompue ; le verrou peut être levé.";
@@ -907,6 +911,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_JOURNAL_OPENED,
     MSG_JOURNAL_CREATED,
     MSG_JOURNAL_OPEN_FAILED,
+    MSG_NO_JOURNAL_OPEN,
     MSG_JOURNAL_LOCKED,
     MSG_JOURNAL_LOCK_RECLAIMABLE,
     MSG_SYNC_FOLDER_WARNING,

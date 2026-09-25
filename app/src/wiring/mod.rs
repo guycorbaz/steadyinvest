@@ -75,6 +75,12 @@ pub(crate) struct Session {
     /// Issue #100: the shared worker cancel flag — raised by a Cancel intent to drain the current
     /// batch, lowered when a new batch is enqueued.
     pub(crate) fetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// G1 final review (M1): the open dossier's GENERATION — bumped by every dossier change (open,
+    /// create, recent, reclaim, restore, a lost journal), through `journal::clear_dossier_session`.
+    /// A study fetch is stamped with it at enqueue; a result stamped with an older one belongs to
+    /// a dossier no longer open (a restore keeps the study ids, so the id alone cannot tell) and is
+    /// dropped unwritten.
+    pub(crate) dossier_generation: Rc<std::cell::Cell<u64>>,
 }
 
 /// Persist `config`, surfacing (not swallowing) a failure — a config that cannot be written is

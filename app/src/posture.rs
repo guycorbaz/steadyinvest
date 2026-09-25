@@ -816,10 +816,12 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            158,
+            159,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
-            // issue #96): 157 + 1 = 158, measured.
+            // issue #96): 157 + 1 = 158, measured. The G1 final review (L10) states that no
+            // dossier is open after a refused switch that lost the previous one
+            // (MSG_NO_JOURNAL_OPEN): 158 + 1 = 159, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }
