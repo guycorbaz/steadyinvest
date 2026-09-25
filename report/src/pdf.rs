@@ -18,7 +18,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use steadyinvest_contract::Study;
 use steadyinvest_core::method::{FORECAST_HORIZON_YEARS, USABLE_YEARS_FLOOR};
-use steadyinvest_core::normalize::NormalizeError;
+use steadyinvest_core::normalize::{CanonicalYear, NormalizeError};
 use steadyinvest_core::rounding::{DisplayField, round_for_display};
 use steadyinvest_core::ssg::{Trend, UpsideDownside, Zone, ZoneBounds};
 
@@ -302,14 +302,35 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
             doc.grid_row_num(&refs, &COLS9, false, 1);
         }
-        // G1 F — a column's total is stated only over EVERY year of the window: an unknown year
-        // (or a sum past the decimal range) leaves it absent, never a partial sum passed off as
-        // the total; the reason is named under the table.
+        // G1 F — a column's total is stated only over EVERY year of the window: an unknown year,
+        // an undefined ratio (its denominator — the EPS, or the low price for H — not positive)
+        // or a sum past the decimal range leaves it absent, never a partial sum passed off as
+        // the total; each reason is named under the table, the right one (never « no figure »
+        // for a ratio the method leaves undefined).
+        let non_positive = |year: i32, pick: fn(&CanonicalYear) -> Option<Decimal>| {
+            frame
+                .series
+                .iter()
+                .find(|y| y.year == year)
+                .and_then(pick)
+                .is_some_and(|d| d <= Decimal::ZERO)
+        };
+        let entries = |value: fn(&steadyinvest_core::ssg::YearValuation) -> Option<Decimal>,
+                       denominator: fn(&CanonicalYear) -> Option<Decimal>| {
+            v.per_year
+                .iter()
+                .map(|r| match value(r) {
+                    Some(d) => Entry::Known(d),
+                    None if non_positive(r.year, denominator) => Entry::Undefined,
+                    None => Entry::Unknown,
+                })
+                .collect::<Vec<Entry>>()
+        };
         let totals = [
-            column_total(v.per_year.iter().map(|r| r.high_pe)),
-            column_total(v.per_year.iter().map(|r| r.low_pe)),
-            column_total(v.per_year.iter().map(|r| r.payout_pct)),
-            column_total(v.per_year.iter().map(|r| r.high_yield_pct)),
+            column_total(entries(|r| r.high_pe, |y| y.eps)),
+            column_total(entries(|r| r.low_pe, |y| y.eps)),
+            column_total(entries(|r| r.payout_pct, |y| y.eps)),
+            column_total(entries(|r| r.high_yield_pct, |y| y.low_price)),
         ];
         let total_of = |t: &Total| match t {
             Total::Sum(d) => Some(*d),
@@ -342,8 +363,22 @@ pub fn render_study_pdf(study: &Study) -> Result<Vec<u8>, ReportError> {
         let refs: Vec<&str> = avg.iter().map(String::as_str).collect();
         doc.grid_row_num(&refs, &COLS9, false, 1);
         doc.grid_end(&COLS9);
-        if totals.contains(&Total::UnknownYear) {
+        if totals
+            .iter()
+            .any(|t| matches!(t, Total::Absent { unknown: true, .. }))
+        {
             doc.small_line(TOTAL_UNKNOWN_YEAR);
+        }
+        if totals.iter().any(|t| {
+            matches!(
+                t,
+                Total::Absent {
+                    undefined: true,
+                    ..
+                }
+            )
+        }) {
+            doc.small_line(TOTAL_UNDEFINED);
         }
         if totals.contains(&Total::Overflow) {
             doc.small_line(TOTAL_OVERFLOW);
@@ -604,32 +639,42 @@ enum Total {
     Sum(Decimal),
     /// The window is empty: nothing to sum (the table has no row either).
     Empty,
-    /// At least one year of the window lacks the column's figure.
-    UnknownYear,
+    /// At least one year of the window has no figure in the column: `unknown` when an input is
+    /// missing, `undefined` when the ratio's denominator is not positive (both can hold).
+    Absent {
+        unknown: bool,
+        undefined: bool,
+    },
     /// The sum left the decimal range (absent, never restarted from the next year).
     Overflow,
 }
 
-fn column_total(values: impl Iterator<Item = Option<Decimal>>) -> Total {
+/// One year's cell of a §3 ratio column, as far as its total is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entry {
+    Known(Decimal),
+    /// An input of the ratio is missing.
+    Unknown,
+    /// The ratio is undefined: its denominator (EPS, or the low price) is not positive.
+    Undefined,
+}
+
+fn column_total(entries: Vec<Entry>) -> Total {
+    let unknown = entries.contains(&Entry::Unknown);
+    let undefined = entries.contains(&Entry::Undefined);
+    if unknown || undefined {
+        return Total::Absent { unknown, undefined };
+    }
     let mut sum: Option<Decimal> = None;
-    let mut overflow = false;
-    for v in values {
-        let Some(v) = v else {
-            return Total::UnknownYear;
-        };
-        if overflow {
-            continue; // keep scanning: an unknown year later is still the reason to name
-        }
-        match sum.map_or(Some(v), |s| s.checked_add(v)) {
-            Some(s) => sum = Some(s),
-            None => overflow = true,
+    for e in entries {
+        if let Entry::Known(v) = e {
+            match sum.map_or(Some(v), |s| s.checked_add(v)) {
+                Some(s) => sum = Some(s),
+                None => return Total::Overflow,
+            }
         }
     }
-    match (sum, overflow) {
-        (_, true) => Total::Overflow,
-        (Some(s), false) => Total::Sum(s),
-        (None, false) => Total::Empty,
-    }
+    sum.map_or(Total::Empty, Total::Sum)
 }
 
 /// « 1 an », « 3 ans », « aucune année » — the §2 average's year count.
@@ -800,6 +845,7 @@ const YEAR_MANY: &str = "ans";
 const TOTAL_UNKNOWN_YEAR: &str =
     "Total « — » : au moins une année de la période n'a pas le chiffre de la colonne.";
 const TOTAL_OVERFLOW: &str = "Total « — » : la somme dépasse la plage calculable.";
+const TOTAL_UNDEFINED: &str = "Total « — » : ratio non défini pour au moins une année (BPA, ou cours bas pour H, négatif ou nul).";
 const OPTION_A: &str = "PER bas × BPA bas";
 const OPTION_B: &str = "prix bas moyen 5 ans";
 const OPTION_C: &str = "plus bas sévère récent";
@@ -807,7 +853,16 @@ const OPTION_D: &str = "soutenu par le dividende";
 
 // ── issue #105 / #207 — the embedded charts' neutral labels (greyscale legend + zone bands) ──
 const CHART_LEGEND: &str = "BPA (trait épais)   ·   Ventes (trait fin)   ·   Cours haut–bas (barres)   ·   projection (pointillés)   ·   guides de croissance 5–30 % (gris clair)";
-const CHART_SCALE_NOTE: &str = "Échelle logarithmique, propre à chaque série (l'axe gradué est celui du BPA) ; les guides partent du dernier BPA positif et couvrent les 5 ans de la prévision.";
+const CHART_SCALE: &str =
+    "Échelle logarithmique, propre à chaque série (l'axe gradué est celui du BPA)";
+const GUIDES_FROM: &str = "les guides partent du BPA positif de";
+const GUIDES_SPAN: &str = "et couvrent les";
+const YEARS_OF_FORECAST: &str = "ans de la prévision";
+const NO_POSITIVE_EPS: &str = "aucun BPA positif : pas de guides";
+const PROJECTION_FROM: &str = "la projection part du BPA de";
+const PROJECTION_NONE: &str = "projection non tracée : le BPA de";
+const NOT_POSITIVE: &str = "n'est pas positif";
+const PROJECTION_NO_BASE: &str = "projection non tracée : aucune année utilisable";
 const QUARTER_BOX_TITLE: &str = "Chiffres trimestriels récents";
 const QUARTER_LATEST: &str = "Dernier trimestre";
 const QUARTER_YEAR_AGO: &str = "Même trimestre, un an avant";
@@ -874,6 +929,7 @@ const REPORT_USER_FACING: &[&str] = &[
     "Moyenne",
     TOTAL_UNKNOWN_YEAR,
     TOTAL_OVERFLOW,
+    TOTAL_UNDEFINED,
     "8 · C/B moyen (D et E) :",
     "9 · C/B actuel :",
     "valeur relative :",
@@ -929,7 +985,15 @@ const REPORT_USER_FACING: &[&str] = &[
     "Val. compt./act.",
     // The embedded charts' labels.
     CHART_LEGEND,
-    CHART_SCALE_NOTE,
+    CHART_SCALE,
+    GUIDES_FROM,
+    GUIDES_SPAN,
+    YEARS_OF_FORECAST,
+    NO_POSITIVE_EPS,
+    PROJECTION_FROM,
+    PROJECTION_NONE,
+    NOT_POSITIVE,
+    PROJECTION_NO_BASE,
     QUARTER_BOX_TITLE,
     QUARTER_LATEST,
     QUARTER_YEAR_AGO,
@@ -1380,14 +1444,9 @@ impl Doc {
                     text(&mut self.cur, edges[i] + CELL_PAD, y, size, line);
                     continue;
                 };
-                // The padded position, shifted back inside the rules when the text is wider.
                 let w = text_width(line, size);
-                let x = if numeric.contains(&i) {
-                    right - CELL_PAD - w
-                } else {
-                    (edges[i] + CELL_PAD).min(right - GRID_INSET - w)
-                };
-                text(&mut self.cur, x.max(edges[i] + GRID_INSET), y, size, line);
+                let x = cell_x(numeric.contains(&i), edges[i], *right, w);
+                text(&mut self.cur, x, y, size, line);
             }
         }
         self.y = top + (rows - 1) as f32 * step + (LINE_H - self.grid_font);
@@ -1494,7 +1553,7 @@ impl Doc {
     /// break; a year with only one of its high / low prices still shows that price as a tick; and
     /// the form's quarterly box sits BELOW the plot (owner decision 7), never over plotted data.
     fn growth_chart(&mut self, frame: &crate::form::StudyFrame) {
-        use steadyinvest_core::normalize::{CanonicalYear, YearUsability};
+        use steadyinvest_core::normalize::YearUsability;
         let series = &frame.series;
         let outputs = frame.snapshot.outputs();
         let pts_of = |get: &dyn Fn(&CanonicalYear) -> Option<Decimal>| {
@@ -1533,6 +1592,27 @@ impl Doc {
             return;
         }
         let horizon = FORECAST_HORIZON_YEARS as i32;
+        // The guides start from the last POSITIVE EPS point (a log scale has no place for the
+        // others), named in the scale note — it may lie years before the latest year.
+        let anchor = eps.last().copied();
+        // G1 F review — the projection starts where the estimates start: they are the EPS a
+        // horizon after the latest usable year, compounded from THAT year's EPS. When that EPS is
+        // not positive there is no honest start on a log scale — a line from an older positive
+        // EPS would draw a path the estimates do not describe — so the projection is not drawn,
+        // and the note says why.
+        let base_year = series
+            .iter()
+            .filter(|y| matches!(y.usability, YearUsability::Usable))
+            .map(|y| y.year)
+            .max();
+        let projection_start = base_year.and_then(|b| eps.iter().find(|p| p.0 == b).copied());
+        let has_estimate = est_high.is_some() || est_low.is_some();
+        let scale_note = chart_scale_note(
+            anchor.map(|a| a.0),
+            base_year,
+            projection_start.is_some(),
+            has_estimate,
+        );
 
         // What goes under the plot: the year labels, the legend and the scale note (measured with
         // their wrapped lines), the quarterly box, then the caller's gap and four growth lines.
@@ -1542,7 +1622,7 @@ impl Doc {
         };
         let reserved_below = 13.0
             + small_h(CHART_LEGEND)
-            + small_h(CHART_SCALE_NOTE)
+            + small_h(&scale_note)
             + QUARTER_BOX_GAP
             + QUARTER_BOX_H
             + QUARTER_BOX_GAP
@@ -1574,7 +1654,6 @@ impl Doc {
         eps_scale_vals.extend(est_high);
         eps_scale_vals.extend(est_low);
         // The steepest guide's end reserves headroom — kept only when finite and positive.
-        let anchor = eps.last().copied();
         if let Some((ly, lv)) = anchor {
             let (_, top_guide) = guide_end(ly, lv, GUIDE_RATES_PCT[GUIDE_RATES_PCT.len() - 1]);
             eps_scale_vals.extend(Some(top_guide).filter(|v| v.is_finite() && *v > 0.0));
@@ -1648,18 +1727,11 @@ impl Doc {
             };
         draw(&mut self.cur, &sales, sales_b, 0.8, &[]);
         draw(&mut self.cur, &eps, eps_b, 1.6, &[]);
-        // Projection to est-high / est-low (dotted, EPS scale): the estimates are the EPS five years
-        // after the latest usable year, so each line ends at that year + the horizon, from the last
-        // positive EPS point.
-        if let (Some((lmin, lmax)), Some((ly, lv))) = (eps_b, anchor) {
-            let base_year = series
-                .iter()
-                .filter(|y| matches!(y.usability, YearUsability::Usable))
-                .map(|y| y.year)
-                .max()
-                .unwrap_or(ly);
-            let (ox, oy) = (px(f64::from(ly)), py(lv, lmin, lmax));
-            let ex = px(f64::from(base_year + horizon));
+        // Projection to est-high / est-low (dotted, EPS scale): from the latest usable year's EPS
+        // (the estimates' base) to that year + the horizon — or not drawn (see `base_year`).
+        if let (Some((lmin, lmax)), Some((by, bv))) = (eps_b, projection_start) {
+            let (ox, oy) = (px(f64::from(by)), py(bv, lmin, lmax));
+            let ex = px(f64::from(by + horizon));
             for (est, w) in [(est_high, 1.2), (est_low, 1.0)] {
                 if let Some(v) = est {
                     polyline(
@@ -1684,7 +1756,7 @@ impl Doc {
         }
         self.y = top + chart_h + 13.0;
         self.small_line(CHART_LEGEND);
-        self.small_line(CHART_SCALE_NOTE);
+        self.small_line(&scale_note);
         // Issue #207 — the form's « recent quarterly figures » box, under the plot (owner decision
         // 7: never over plotted data). v1 carries no quarterly data: the box states the absence
         // (em-dashes), never a guessed figure.
@@ -1969,13 +2041,26 @@ fn carries_figure(word: &str) -> bool {
     word.chars().any(|c| c.is_ascii_digit())
 }
 
-/// The shared line breaker of [`wrap_to_width`] and [`cell_layout`]. With `keep_figures`, a word
-/// carrying a digit that is wider than the line is broken at character boundaries across lines
-/// (every digit kept) instead of being cut with « … ».
+/// The shared line breaker of [`wrap_to_width`] and [`cell_layout`]. With `keep_figures` (a grid
+/// cell), a line is never cut down to nothing and a line carrying a figure or the absence mark
+/// « — » is never passed through [`fit`]: a figure wider than the line goes whole on its own line
+/// (never split into pieces that would read as two numbers), and an absence is never erased.
 fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
-    if width.is_nan() || width <= 0.0 {
+    if !keep_figures && (width.is_nan() || width <= 0.0) {
         return vec![String::new()];
     }
+    let push = |lines: &mut Vec<String>, line: &str| {
+        let kept = if keep_figures && (carries_figure(line) || line == EM_DASH) {
+            line.to_string()
+        } else {
+            match fit(line, width, size) {
+                // A grid cell never shows nothing where its text was.
+                cut if keep_figures && cut.is_empty() => line.to_string(),
+                cut => cut,
+            }
+        };
+        lines.push(kept);
+    };
     // (spaces before, word): a run of spaces is remembered with the word it precedes.
     let mut tokens: Vec<(usize, &str)> = Vec::new();
     let mut spaces = 0;
@@ -1991,15 +2076,6 @@ fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut line = String::new();
     for (gap, word) in tokens {
-        if keep_figures && carries_figure(word) && text_width(word, size) > width {
-            if !line.is_empty() {
-                lines.push(fit(&line, width, size));
-            }
-            let mut chunks = split_chars(word, width, size);
-            line = chunks.pop().unwrap_or_default();
-            lines.extend(chunks);
-            continue;
-        }
         if line.is_empty() {
             line = word.to_string();
             continue;
@@ -2008,70 +2084,54 @@ fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
         if text_width(&candidate, size) <= width {
             line = candidate;
         } else {
-            lines.push(fit(&line, width, size));
+            push(&mut lines, &line);
             line = word.to_string();
         }
     }
-    lines.push(fit(&line, width, size));
+    push(&mut lines, &line);
     lines
 }
 
-/// `word` broken into consecutive pieces no wider than `width` (each piece at least one
-/// character, so nothing is ever dropped).
-fn split_chars(word: &str, width: f32, size: f32) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut piece = String::new();
-    let mut used = 0.0;
-    for c in word.chars() {
-        let w = f32::from(glyph_width(c)) * size / 1000.0;
-        if !piece.is_empty() && used + w > width {
-            out.push(std::mem::take(&mut piece));
-            used = 0.0;
-        }
-        piece.push(c);
-        used += w;
-    }
-    out.push(piece);
-    out
-}
-
-/// The smallest type a grid figure is shrunk to before it is broken across lines (points).
-const MIN_FIGURE_FONT: f32 = 4.5;
+/// The smallest type a grid figure is shrunk to (points). Below it the figure is printed whole at
+/// this size, even across its column's rule — never split, never unreadable.
+const MIN_FIGURE_FONT: f32 = 6.0;
 
 /// One grid cell's lines and point size, for a column `col_w` wide, at the grid's `size`.
 ///
-/// A text that fits between the rules stays whole on one line, even if it eats into the padding
-/// (a narrow year column's « 2016 »); a longer one wraps at the padded width.
+/// A text that fits between the rules at the grid's size stays whole on one line, even if it eats
+/// into the padding (a narrow year column's « 2016 »); a longer one wraps at the padded width.
 ///
 /// G1 F — a figure is shown whole, never cut to « 1… » (§2 over ten years, the annexe sales of a
-/// JPY / KRW issuer): the widest word carrying a digit, when wider than its room, shrinks the
-/// cell's type until it fits — the figure keeps its one line and its column still reads on the
-/// units, the way a hand-filled form writes a long number smaller. Below [`MIN_FIGURE_FONT`] the
-/// type stops shrinking and the figure is broken across lines at a character boundary, every
-/// digit kept. Only a word without a digit (a label) may still end in « … ».
+/// JPY / KRW issuer): the widest word carrying a digit, when wider than the padded width, shrinks
+/// the cell's type until it fits THAT width — so a shrunk figure ends on the column's normal right
+/// edge and the column still reads on its units, the way a hand-filled form writes a long number
+/// smaller. The type stops at [`MIN_FIGURE_FONT`]; a figure still too wide there is printed whole,
+/// on its own line, across the rule if it must — never split into pieces. Only a word without a
+/// digit (a label) may still end in « … »; a cell's text, and the absence mark « — », is never
+/// reduced to nothing. A column whose padding leaves no room falls back on the room between the
+/// rules; one with no room at all prints its text as is.
 fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
     let rule_w = col_w - 2.0 * GRID_INSET;
     if text_width(s, size) <= rule_w {
         return (vec![s.to_string()], size);
     }
     let pad_w = col_w - 2.0 * CELL_PAD;
-    let words: Vec<&str> = s.split(' ').filter(|w| !w.is_empty()).collect();
+    let room = if pad_w > 0.0 { pad_w } else { rule_w };
+    if room.is_nan() || room <= 0.0 {
+        return (vec![s.to_string()], size);
+    }
     // A cell with a figure and no letter (« 1234,5 % », « 2,1 : 1 ») is ONE figure: it shrinks
     // whole, the unit kept on the number's line.
     let whole_figure = carries_figure(s) && !s.chars().any(char::is_alphabetic);
-    let single = words.len() <= 1 || whole_figure;
-    // A lone word may use the room between the rules; words that wrap keep the padding.
-    let room = if single { rule_w } else { pad_w };
     let widest_figure = if whole_figure {
         text_width(s, size)
     } else {
-        words
-            .iter()
+        s.split(' ')
             .filter(|w| carries_figure(w))
             .map(|w| text_width(w, size))
             .fold(0.0_f32, f32::max)
     };
-    let size = if widest_figure > room && room > 0.0 {
+    let size = if widest_figure > room {
         // A hair under the exact ratio, so float rounding cannot tip it back over the room.
         (size * room / widest_figure * 0.999)
             .max(MIN_FIGURE_FONT)
@@ -2079,10 +2139,30 @@ fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
     } else {
         size
     };
-    if single && text_width(s, size) <= rule_w {
+    if whole_figure {
         return (vec![s.to_string()], size);
     }
     (wrap(s, room, size, true), size)
+}
+
+/// The x of a grid cell's text line `w` wide in the column `left..right`: a figure (`numeric`)
+/// ends at the padded right edge, a label starts at the padded left edge; either is shifted back
+/// inside the rules when it is wider than its padded room. A figure wider than the rules (printed
+/// whole at the smallest type) keeps its right edge and crosses the LEFT rule, so the column
+/// still reads on its units.
+fn cell_x(numeric: bool, left: f32, right: f32, w: f32) -> f32 {
+    if numeric {
+        let x = right - CELL_PAD - w;
+        if w <= right - left - 2.0 * GRID_INSET {
+            x.max(left + GRID_INSET)
+        } else {
+            x
+        }
+    } else {
+        (left + CELL_PAD)
+            .min(right - GRID_INSET - w)
+            .max(left + GRID_INSET)
+    }
 }
 
 /// A horizontal rule at top-origin `top_y`, in mid-grey.
@@ -2192,6 +2272,37 @@ fn guide_end(anchor_year: i32, anchor_eps: f64, rate_pct: u32) -> (i32, f64) {
         anchor_year + horizon,
         anchor_eps * (1.0 + f64::from(rate_pct) / 100.0).powi(horizon),
     )
+}
+
+/// G1 F review — the §1 scale note, stating where the guides and the projection really start:
+/// the guides from the last positive EPS (`anchor_year`, possibly years before the latest year),
+/// the projection from the latest usable year (`base_year`) — named when it differs from the
+/// guides' start, or said not drawn when that year's EPS is not positive (`projection_drawn`
+/// false) or there is no usable year. Nothing about the projection when there is no estimate.
+fn chart_scale_note(
+    anchor_year: Option<i32>,
+    base_year: Option<i32>,
+    projection_drawn: bool,
+    has_estimate: bool,
+) -> String {
+    let mut parts = vec![CHART_SCALE.to_string()];
+    parts.push(match anchor_year {
+        Some(a) => {
+            format!("{GUIDES_FROM} {a} {GUIDES_SPAN} {FORECAST_HORIZON_YEARS} {YEARS_OF_FORECAST}")
+        }
+        None => NO_POSITIVE_EPS.to_string(),
+    });
+    if has_estimate {
+        match (base_year, projection_drawn) {
+            (Some(b), true) if Some(b) != anchor_year => {
+                parts.push(format!("{PROJECTION_FROM} {b}"));
+            }
+            (Some(_), true) => {}
+            (Some(b), false) => parts.push(format!("{PROJECTION_NONE} {b} {NOT_POSITIVE}")),
+            (None, _) => parts.push(PROJECTION_NO_BASE.to_string()),
+        }
+    }
+    format!("{}.", parts.join(" ; "))
 }
 
 /// Nice `1 / 2 / 5 × 10^k` tick values (+ their compact labels) inside a log scale `[10^lmin, 10^lmax]`.
@@ -2600,22 +2711,34 @@ mod tests {
     }
 
     #[test]
-    fn a_grid_figure_is_never_cut_it_shrinks_or_breaks_whole() {
+    fn a_grid_figure_is_never_cut_it_shrinks_whole_to_its_padded_room() {
         // The annexe sales of a JPY issuer: 14 digits in a 70 pt column at 9 pt.
-        let (lines, size) = cell_layout("31234567890123", 70.0, FONT);
+        let col = 70.0;
+        let (lines, size) = cell_layout("31234567890123", col, FONT);
         assert_eq!(lines, vec!["31234567890123".to_string()], "one line, whole");
         assert!((MIN_FIGURE_FONT..FONT).contains(&size));
-        assert!(text_width(&lines[0], size) <= 70.0 - 2.0 * GRID_INSET);
+        // Shrunk to the PADDED width: it ends on the column's normal right edge, like its
+        // unshrunk neighbours (the units stay aligned).
+        let w = text_width(&lines[0], size);
+        assert!(w <= col - 2.0 * CELL_PAD);
+        assert_eq!(cell_x(true, 0.0, col, w) + w, col - CELL_PAD);
+        let short = text_width("180", FONT);
+        assert_eq!(cell_x(true, 0.0, col, short) + short, col - CELL_PAD);
         // A figure with its unit shrinks whole, the unit on the number's line.
         let (lines, _) = cell_layout("1234,5 %", 25.0, SMALL);
         assert_eq!(lines, vec!["1234,5 %".to_string()]);
-        // Past the smallest type, the figure is broken across lines — every digit kept.
+        // Past the smallest type the figure is printed whole at that size, on ONE line — never
+        // split into pieces reading as two numbers — keeping its right edge (across the left rule).
         let long = "12345678901234567890";
         let (lines, size) = cell_layout(long, 20.0, FONT);
         assert_eq!(size, MIN_FIGURE_FONT);
-        assert!(lines.len() > 1);
-        assert_eq!(lines.concat(), long);
-        assert!(lines.iter().all(|l| !l.contains('…')));
+        assert_eq!(lines, vec![long.to_string()]);
+        let w = text_width(long, size);
+        assert!(w > 20.0);
+        assert_eq!(cell_x(true, 0.0, 20.0, w) + w, 20.0 - CELL_PAD);
+        // A figure among words is never split either.
+        let (lines, _) = cell_layout("soit 12345678901234567890 au total", 20.0, FONT);
+        assert!(lines.contains(&long.to_string()), "{lines:?}");
         // A label without a digit may still end in « … ».
         let (lines, _) = cell_layout("Supercalifragilistique", 40.0, FONT);
         assert!(lines[0].ends_with('…'));
@@ -2624,6 +2747,26 @@ mod tests {
         s.years[0].sales = cell("31234567890123");
         let bytes = render_study_pdf(&s).unwrap();
         assert!(contains(&bytes, "31234567890123"));
+    }
+
+    #[test]
+    fn a_degenerate_column_never_erases_a_cells_text_or_absence() {
+        // No room at all: the text as is — the absence mark « — » above all.
+        assert_eq!(cell_layout(EM_DASH, 1.0, FONT).0, vec![EM_DASH.to_string()]);
+        assert_eq!(
+            cell_layout(EM_DASH, -4.0, FONT).0,
+            vec![EM_DASH.to_string()]
+        );
+        // The padding leaves no room (8 pt column): the room between the rules is used, and
+        // neither a figure nor a word comes out empty.
+        let (lines, _) = cell_layout("12 abc", 8.0, FONT);
+        assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
+        assert!(lines.contains(&"12".to_string()));
+        // A word narrower than nothing but « … » is kept rather than blanked.
+        let (lines, _) = cell_layout("en hausse", 12.0, SMALL);
+        assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
+        let (lines, _) = cell_layout("— · —", 6.0, FONT);
+        assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
     }
 
     #[test]
@@ -2690,28 +2833,36 @@ mod tests {
 
     #[test]
     fn a_section_3_total_is_the_whole_sum_or_absent_never_partial() {
-        let d = |s: &str| Some(rust_decimal::Decimal::from_str_exact(s).unwrap());
+        let d = |s: &str| Entry::Known(rust_decimal::Decimal::from_str_exact(s).unwrap());
         assert_eq!(
-            column_total([d("1.5"), d("2.5")].into_iter()),
+            column_total(vec![d("1.5"), d("2.5")]),
             Total::Sum(rust_decimal::Decimal::from(4))
         );
         assert_eq!(
-            column_total([d("1"), None, d("2")].into_iter()),
-            Total::UnknownYear
+            column_total(vec![d("1"), Entry::Unknown, d("2")]),
+            Total::Absent {
+                unknown: true,
+                undefined: false
+            }
         );
-        assert_eq!(column_total(std::iter::empty()), Total::Empty);
-        // An overflow is absent — never restarted from the next year's figure.
-        let max = Some(rust_decimal::Decimal::MAX);
         assert_eq!(
-            column_total([max, max, d("1")].into_iter()),
-            Total::Overflow
+            column_total(vec![Entry::Undefined, Entry::Unknown]),
+            Total::Absent {
+                unknown: true,
+                undefined: true
+            }
         );
+        assert_eq!(column_total(Vec::new()), Total::Empty);
+        // An overflow is absent — never restarted from the next year's figure.
+        let max = Entry::Known(rust_decimal::Decimal::MAX);
+        assert_eq!(column_total(vec![max, max, d("1")]), Total::Overflow);
         // End to end: a window year without a dividend → G and H totals absent, reason named;
-        // the D / E totals (every year known) still stated.
+        // never the undefined-ratio reason, which does not apply.
         let mut s = demo_study();
         s.years[4].dividend_per_share = None;
         let bytes = render_study_pdf(&s).unwrap();
         assert!(contains(&bytes, TOTAL_UNKNOWN_YEAR));
+        assert!(!contains(&bytes, TOTAL_UNDEFINED));
         assert!(!contains(&bytes, "160 %"), "no partial G total (4 × 40 %)");
         let bytes = render_study_pdf(&demo_study()).unwrap();
         assert!(
@@ -2722,6 +2873,52 @@ mod tests {
             contains(&bytes, "200 %"),
             "G total over five known years: 5 × 40 %"
         );
+    }
+
+    #[test]
+    fn a_total_absent_for_a_non_positive_eps_names_the_undefined_ratio() {
+        // Every figure is entered; the EPS of one window year is negative, so its P/E and payout
+        // are undefined — not « missing ». The note names that cause, not a missing figure.
+        let mut s = demo_study();
+        s.years[2].eps = cell("-1");
+        let bytes = render_study_pdf(&s).unwrap();
+        assert!(contains(&bytes, TOTAL_UNDEFINED));
+        assert!(
+            !contains(&bytes, TOTAL_UNKNOWN_YEAR),
+            "misattribution: no figure is missing"
+        );
+    }
+
+    #[test]
+    fn the_scale_note_names_where_the_guides_and_the_projection_start() {
+        let h = FORECAST_HORIZON_YEARS;
+        // The usual case: both start from the latest year's EPS — one start, named once.
+        let n = chart_scale_note(Some(2025), Some(2025), true, true);
+        assert!(n.contains(&format!(
+            "{GUIDES_FROM} 2025 {GUIDES_SPAN} {h} {YEARS_OF_FORECAST}"
+        )));
+        assert!(!n.contains(PROJECTION_FROM) && !n.contains(PROJECTION_NONE));
+        // The latest EPS not positive: the guides start years earlier (named); the projection,
+        // whose base is the latest usable year, is not drawn, and the note says why.
+        let n = chart_scale_note(Some(2023), Some(2025), false, true);
+        assert!(n.contains(&format!("{GUIDES_FROM} 2023")));
+        assert!(n.contains(&format!("{PROJECTION_NONE} 2025 {NOT_POSITIVE}")));
+        // A projection drawn from a start other than the guides' is named.
+        let n = chart_scale_note(Some(2025), Some(2024), true, true);
+        assert!(n.contains(&format!("{PROJECTION_FROM} 2024")));
+        // No estimate: nothing said about a projection; no positive EPS: no guides.
+        let n = chart_scale_note(None, Some(2025), false, false);
+        assert!(n.contains(NO_POSITIVE_EPS) && !n.contains("projection"));
+        // End to end: the last two EPS negative.
+        let mut s = demo_study();
+        s.years[3].eps = cell("-1");
+        s.years[4].eps = cell("-2");
+        let bytes = render_study_pdf(&s).unwrap();
+        assert!(contains(&bytes, &format!("{GUIDES_FROM} 2023")));
+        assert!(contains(
+            &bytes,
+            &format!("{PROJECTION_NONE} 2025 {NOT_POSITIVE}")
+        ));
     }
 
     #[test]
