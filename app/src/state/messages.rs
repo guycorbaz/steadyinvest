@@ -514,6 +514,22 @@ pub const MSG_RESTORE_UNCHECKPOINTED: &str = "La sauvegarde est accompagnée d'u
 /// (so its `.db` holds every write) and its safety snapshot (the rollback if the restored file will
 /// not open). Either failure refuses the restore by name; nothing is replaced.
 pub const MSG_RESTORE_CHECKPOINT_FAILED: &str = "Le dossier actuel n'a pas pu être consolidé (ses écritures les plus récentes restent dans son fichier -wal) ; rien n'a été restauré.";
+/// G1 P (G3 M1): a `-prerestore` file from an earlier restore sits beside the dossier — it may be
+/// the only copy of an original, so it is never replaced nor deleted. Template: `{file}`.
+pub const MSG_RESTORE_SNAPSHOT_EXISTS: &str = "Une copie de sécurité d'une restauration précédente existe déjà ({file}) ; elle n'est ni remplacée ni supprimée, et rien n'a été restauré.";
+/// G1 P (G3 M1): the restored file would not open AND the return to the original failed — the
+/// dossier WAS replaced; the original survives only in the named snapshot. Template: `{file}`.
+pub const MSG_RESTORE_ROLLBACK_FAILED: &str = "Le fichier restauré ne s'ouvre pas et le retour au dossier d'origine a échoué : le dossier a été remplacé. L'original est conservé dans {file}.";
+
+/// [`MSG_RESTORE_SNAPSHOT_EXISTS`] filled with the snapshot's path.
+pub fn restore_snapshot_exists_message(snapshot: &std::path::Path) -> String {
+    MSG_RESTORE_SNAPSHOT_EXISTS.replace("{file}", &snapshot.display().to_string())
+}
+
+/// [`MSG_RESTORE_ROLLBACK_FAILED`] filled with the snapshot's path.
+pub fn restore_rollback_failed_message(snapshot: &std::path::Path) -> String {
+    MSG_RESTORE_ROLLBACK_FAILED.replace("{file}", &snapshot.display().to_string())
+}
 pub const MSG_RESTORE_SNAPSHOT_FAILED: &str = "La copie de sécurité du dossier actuel n'a pas pu être créée à côté de lui ; rien n'a été restauré.";
 /// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
 pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (dossier {jid}, version {ver}) ? {reason}Le dossier actuel sera remplacé.";
@@ -1002,6 +1018,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_RESTORE_UNCHECKPOINTED,
     MSG_RESTORE_CHECKPOINT_FAILED,
     MSG_RESTORE_SNAPSHOT_FAILED,
+    MSG_RESTORE_SNAPSHOT_EXISTS,
+    MSG_RESTORE_ROLLBACK_FAILED,
     MSG_RESTORE_CONFIRM,
     MSG_RESTORE_REASON_STALE,
     MSG_RESTORE_REASON_FOREIGN,

@@ -709,30 +709,100 @@ fn confirm_restore_is_refused_on_a_read_only_dossier() {
 }
 
 #[test]
-fn confirm_restore_is_refused_when_the_safety_snapshot_cannot_be_written() {
-    // G1 final review (L12): the snapshot is a PRECONDITION — without it a restored file that
-    // will not open could not be rolled back. Refused by name; the live dossier stays and reopens.
+fn a_restore_never_replaces_nor_deletes_an_earlier_prerestore_copy() {
+    // G1 P (G3 M1): a `-prerestore` left beside the dossier (an earlier failed rollback) may be
+    // the ONLY copy of an original — the restore is refused, the file named, and it is kept
+    // byte for byte; the live dossier is untouched and still open.
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x547); // live id 0xC0FFEE
     let study = state.create_study("NESN", "CHF").unwrap();
     make_backup(&dir, "src.db", 0xBEEF, true);
-    // A directory squatting the snapshot's name makes the copy fail.
-    let squatter = dir.path().join("journal.db-prerestore");
-    std::fs::create_dir(&squatter).unwrap();
+    let earlier = dir.path().join("journal.db-prerestore");
+    std::fs::write(&earlier, b"the only copy of an earlier original").unwrap();
     state
         .request_restore(dir.path().join("src.db").to_str().unwrap())
         .unwrap();
     assert_eq!(
         state.confirm_restore(),
-        Err(MSG_RESTORE_SNAPSHOT_FAILED.to_string())
+        Err(restore_snapshot_exists_message(&earlier))
     );
     assert_eq!(
-        state.journal_id(),
-        Some(Uuid::from_u128(0xC0FFEE)),
-        "the live dossier was not replaced, and is open again"
+        std::fs::read(&earlier).unwrap(),
+        b"the only copy of an earlier original",
+        "never overwritten, never deleted"
     );
+    assert_eq!(state.journal_id(), Some(Uuid::from_u128(0xC0FFEE)));
     assert!(state.get_study(study).is_some(), "nothing was lost");
-    assert!(squatter.is_dir(), "a directory not ours is left alone");
+}
+
+#[test]
+fn a_second_restore_works_once_the_first_left_no_snapshot() {
+    // G1 P (G3 M1): a successful restore removes its own snapshot, so the next one is not
+    // refused by the leftover guard.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x548);
+    make_backup(&dir, "src.db", 0xBEEF, true);
+    make_backup(&dir, "src2.db", 0xBEEF, true);
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    state.confirm_restore().unwrap();
+    assert!(!dir.path().join("journal.db-prerestore").exists());
+    state
+        .request_restore(dir.path().join("src2.db").to_str().unwrap())
+        .unwrap();
+    state.confirm_restore().unwrap();
+    assert_eq!(state.journal_id(), Some(Uuid::from_u128(0xBEEF)));
+}
+
+#[test]
+fn a_failed_rollback_says_the_dossier_was_replaced_and_keeps_the_named_snapshot() {
+    // G1 P (G3 M1): the restored file will not open AND the return to the original fails — the
+    // refusal says the dossier WAS replaced and names the snapshot, which stays on disk.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x549);
+    let live = dir.path().join("journal.db");
+    let snapshot = dir.path().join("journal.db-prerestore");
+    std::fs::copy(&live, &snapshot).unwrap();
+    state.journal = None;
+    let result = state.open_swapped(
+        &live,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "rollback failed".to_string(),
+            })
+        },
+    );
+    assert_eq!(result, Err(restore_rollback_failed_message(&snapshot)));
+    assert!(
+        result.unwrap_err().contains("a été remplacé"),
+        "the dossier WAS replaced"
+    );
+    assert!(snapshot.exists(), "the only copy of the original is kept");
+    // A rollback that succeeds removes the snapshot and says the plain failure.
+    state.journal = None;
+    let result = state.open_swapped(
+        &live,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| Ok(()),
+    );
+    assert_eq!(result, Err(MSG_RESTORE_FAILED.to_string()));
+    assert!(!snapshot.exists());
+    assert!(
+        state.journal_id().is_some(),
+        "the live dossier is open again"
+    );
 }
 
 #[test]

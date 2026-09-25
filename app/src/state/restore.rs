@@ -16,7 +16,8 @@ use super::{
     JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_RESTORE_CHECKPOINT_FAILED,
     MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY, MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL,
     MSG_RESTORE_SNAPSHOT_FAILED, MSG_RESTORE_UNCHECKPOINTED, MSG_RESTORE_UNREADABLE,
-    path_with_suffix, same_file_path, sync_mode_for,
+    path_with_suffix, restore_rollback_failed_message, restore_snapshot_exists_message,
+    same_file_path, sync_mode_for,
 };
 
 /// How a candidate backup compares to the current journal (Story 5.4, AC2).
@@ -201,20 +202,26 @@ impl JournalState {
         // restored file that will not open could not be rolled back. Either failure refuses the
         // restore by name, before anything is touched (the handle stays open on a checkpoint
         // failure; the live journal is reopened on a snapshot failure).
-        if let Some(journal) = self.journal.as_ref()
-            && let Err(error) = journal.checkpoint()
-        {
+        // G1 P (G3 M1): a path without an open handle cannot be checkpointed — never skipped.
+        let Some(journal) = self.journal.as_ref() else {
+            return Err(MSG_NO_JOURNAL.to_string());
+        };
+        if let Err(error) = journal.checkpoint() {
             tracing::warn!("restore refused: the live journal could not be checkpointed: {error}");
             return Err(MSG_RESTORE_CHECKPOINT_FAILED.to_string());
         }
-        self.journal = None;
+        // G1 P (G3 M1): a `-prerestore` left by an earlier restore (whose rollback failed) may be
+        // the ONLY copy of an original — never overwritten, never deleted: the restore is refused,
+        // the file named.
         let snapshot = path_with_suffix(&live, "-prerestore");
-        if let Err(error) = std::fs::copy(&live, &snapshot) {
+        if std::fs::symlink_metadata(&snapshot).is_ok() {
+            return Err(restore_snapshot_exists_message(&snapshot));
+        }
+        self.journal = None;
+        if let Err(error) = write_snapshot(&live, &snapshot) {
             tracing::warn!("restore refused: the safety snapshot could not be written: {error}");
-            // A partial copy is no snapshot; a directory squatting the name is not ours to remove.
-            if snapshot.is_file() {
-                let _ = std::fs::remove_file(&snapshot);
-            }
+            // A partial copy is no snapshot — and it is ours (created new just above).
+            let _ = std::fs::remove_file(&snapshot);
             self.reopen_live(&live);
             return Err(MSG_RESTORE_SNAPSHOT_FAILED.to_string());
         }
@@ -229,9 +236,29 @@ impl JournalState {
             return Err(MSG_RESTORE_FAILED.to_string());
         }
 
-        match Journal::open_with_mode(&live, sync_mode_for(&live)) {
+        self.open_swapped(
+            &live,
+            &snapshot,
+            |path| Journal::open_with_mode(path, sync_mode_for(path)),
+            restore_journal_file,
+        )
+    }
+
+    /// The tail of a restore once the file was swapped: open the restored file, or — when it will
+    /// not open — roll the snapshot back. `open` / `rollback` are the real calls in production
+    /// (injected so the failure paths are testable). A failed ROLLBACK is its own refusal (G1 P,
+    /// G3 M1): the dossier WAS replaced, and the snapshot — then the only copy of the original —
+    /// stays on disk, named.
+    pub(super) fn open_swapped(
+        &mut self,
+        live: &Path,
+        snapshot: &Path,
+        open: impl FnOnce(&Path) -> Result<Journal, PersistError>,
+        rollback: impl FnOnce(&Path, &Path) -> Result<(), PersistError>,
+    ) -> Result<(), String> {
+        match open(live) {
             Ok(journal) => {
-                let _ = std::fs::remove_file(&snapshot);
+                let _ = std::fs::remove_file(snapshot);
                 self.read_only = journal.is_read_only();
                 self.journal = Some(journal);
                 self.reset_undo();
@@ -241,13 +268,13 @@ impl JournalState {
                 // The swap succeeded but the restored file will not open — roll the snapshot back so
                 // the user's original journal is not lost, then reopen it.
                 tracing::warn!("the restored journal will not open: {error}");
-                if let Err(rollback) = restore_journal_file(&live, &snapshot) {
-                    // Keep the snapshot on disk: it is then the only copy of the original.
-                    tracing::warn!("rollback to the pre-restore snapshot failed: {rollback}");
-                } else {
-                    let _ = std::fs::remove_file(&snapshot);
+                if let Err(rollback_error) = rollback(live, snapshot) {
+                    tracing::warn!("rollback to the pre-restore snapshot failed: {rollback_error}");
+                    self.reopen_live(live);
+                    return Err(restore_rollback_failed_message(snapshot));
                 }
-                self.reopen_live(&live);
+                let _ = std::fs::remove_file(snapshot);
+                self.reopen_live(live);
                 Err(MSG_RESTORE_FAILED.to_string())
             }
         }
@@ -282,4 +309,16 @@ impl JournalState {
             }
         }
     }
+}
+
+/// Write the pre-restore snapshot as a NEW file (never over an existing one — the TOCTOU twin of
+/// the `-prerestore` existence refusal above).
+fn write_snapshot(live: &Path, snapshot: &Path) -> std::io::Result<()> {
+    let mut source = std::fs::File::open(live)?;
+    let mut target = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(snapshot)?;
+    std::io::copy(&mut source, &mut target)?;
+    target.sync_all()
 }
