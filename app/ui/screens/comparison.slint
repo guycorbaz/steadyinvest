@@ -53,8 +53,8 @@ component CmpRow inherits HorizontalLayout {
         if (key == "buy") { return @tr("Zone basse"); }
         if (key == "neutral") { return @tr("Zone médiane"); }
         if (key == "sell") { return @tr("Zone haute"); }
-        if (key == "below") { return @tr("sous la bande"); }
-        if (key == "above") { return @tr("au-dessus de la bande"); }
+        if (key == "below") { return @tr("Sous la bande"); }
+        if (key == "above") { return @tr("Au-dessus de la bande"); }
         return "—";
     }
     pure function state-words(c: ComparisonHeader) -> string {
