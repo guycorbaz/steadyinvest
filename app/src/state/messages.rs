@@ -412,6 +412,15 @@ pub const MSG_STUDY_PDF_UNRENDERABLE: &str =
 /// logged, never appended in English).
 pub const MSG_EXPORT_WRITE_FAILED: &str =
     "Le fichier n'a pas pu être écrit à cet emplacement ; rien n'a été exporté.";
+/// G1 final review (M-b) — the PDF name was completed with « .pdf » and a file of that name
+/// already exists (the picker asked only about the name it returned). `{name}` is the file name
+/// (user data, not scanned).
+pub const MSG_EXPORT_NAME_TAKEN: &str = "Un fichier « {name} » existe déjà à cet emplacement ; choisissez un autre nom. Rien n'a été exporté.";
+
+/// [`MSG_EXPORT_NAME_TAKEN`] with the file name substituted.
+pub fn export_name_taken_message(name: &str) -> String {
+    MSG_EXPORT_NAME_TAKEN.replace("{name}", name)
+}
 pub const MSG_IMPORT_INTEGRITY: &str = "Le fichier ne correspond pas à son empreinte d'intégrité (fichier corrompu ou incomplet) ; rien n'a été importé.";
 pub const MSG_IMPORT_VERSION: &str =
     "Le fichier provient d'une version incompatible du format ; rien n'a été importé.";
@@ -897,6 +906,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_EXPORT_UNREADABLE,
     MSG_STUDY_PDF_UNRENDERABLE,
     MSG_EXPORT_WRITE_FAILED,
+    MSG_EXPORT_NAME_TAKEN,
     MSG_IMPORT_INTEGRITY,
     MSG_IMPORT_VERSION,
     MSG_IMPORT_MALFORMED,

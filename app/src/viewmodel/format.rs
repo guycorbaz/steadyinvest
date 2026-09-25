@@ -116,9 +116,11 @@ pub fn format_amount(canonical: &str, format: NumberFormat) -> String {
 /// app never invents a rounding mode or a scale (Cardinal Rule / architecture §rounding): it reads
 /// `core`'s and only *presents*. Story 2.6 uses this for every engine result string (§2–§5).
 pub fn format_scaled(value: Decimal, field: DisplayField, format: NumberFormat) -> String {
-    // `round_for_display` returns a `Decimal` carrying exactly `field.scale()` decimals, so the
-    // canonical string already shows the fixed places (e.g. price → "141.00"); `format_amount`
-    // only re-groups it for the locale. No arithmetic here.
+    // `round_for_display` returns a `Decimal` carrying AT MOST `field.scale()` decimals — it
+    // rounds a longer scale down, never pads a shorter one: « 141.004 » → "141.00", « 141.00 »
+    // stays "141.00", « 80 » stays "80". The canonical string is shown as is (the study PDF spells
+    // the same value the same way, G1 final review); `format_amount` only re-groups it for the
+    // locale. No arithmetic here.
     format_amount(&round_for_display(value, field).to_string(), format)
 }
 

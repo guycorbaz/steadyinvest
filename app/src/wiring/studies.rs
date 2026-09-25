@@ -16,9 +16,9 @@ use crate::config::StudyViewState;
 use crate::regime::Regime;
 use crate::state::JournalState;
 use crate::wiring::push::{push_form, push_view_state};
-use crate::wiring::study_notice;
 use crate::wiring::watchlist::refresh_watchlist;
 use crate::wiring::{Session, persist};
+use crate::wiring::{list_notice, study_notice};
 use crate::{FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, Verify};
 use crate::{regime, state, viewmodel};
 
@@ -62,65 +62,25 @@ fn safe_stem(ticker: &str) -> String {
     }
 }
 
-/// G1 final (L12) — the PDF's path as picked, with `.pdf` appended unless it already ends so
-/// (any case). rfd does not force the filter's extension everywhere, and a picked name such as
-/// « etude-NESN.SW » HAS an extension (« SW ») — so the test is the extension's value, and the
-/// suffix is appended, never swapped for the name's own last dot-part.
-fn with_pdf_extension(path: std::path::PathBuf) -> std::path::PathBuf {
-    let is_pdf = path
-        .extension()
-        .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("pdf"));
-    if is_pdf {
-        return path;
+/// G1 final (L12) — the PDF's path as picked, with `.pdf` appended unless its name already ends
+/// so (any case, « .pdf » alone included); `true` when the path was changed. rfd does not force
+/// the filter's extension everywhere, and a picked name such as « etude-NESN.SW » HAS an extension
+/// (« SW ») — so the test is the name's ending, and the suffix is appended, never swapped for the
+/// name's own last dot-part. A name ending in a bare dot (« etude. ») takes « pdf », never
+/// « ..pdf ».
+fn with_pdf_extension(path: std::path::PathBuf) -> (std::path::PathBuf, bool) {
+    let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+        return (path, false);
+    };
+    let lower = name.to_lowercase();
+    if lower.ends_with(".pdf") {
+        return (path, false);
     }
-    let mut name = path.into_os_string();
-    name.push(".pdf");
-    std::path::PathBuf::from(name)
-}
-
-/// What the list's notice slot shows after an export outcome, and the part of it that belongs
-/// to another source (kept above the outcome).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct ExportNotice {
-    shown: String,
-    kept: String,
-}
-
-thread_local! {
-    // The UI is single-threaded (every callback runs on the event loop) — the `dialog` precedent.
-    static LAST_EXPORT_NOTICE: std::cell::RefCell<Option<ExportNotice>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// The notice-slot rule (F4, docs/review-checklist.md §3) for an EXPORT outcome in the list's
-/// slot (G1 final, M4). Pure — unit-tested. The slot is shared with sources that do not say what
-/// they wrote (a startup state, a fetch or examination failure), so an export outcome never
-/// overwrites what it did not write itself: it replaces its own earlier outcome (the slot still
-/// shows exactly what the export left there), fills an empty slot, and otherwise is written
-/// UNDER the notice on show, which stays whole.
-fn compose_export_notice(shown: &str, last: Option<&ExportNotice>, outcome: &str) -> ExportNotice {
-    let kept = match last {
-        Some(prev) if prev.shown == shown => prev.kept.clone(),
-        _ => shown.to_string(),
+    let named = match name.strip_suffix('.') {
+        Some(stem) => format!("{stem}.pdf"),
+        None => format!("{name}.pdf"),
     };
-    let shown = if kept.is_empty() {
-        outcome.to_string()
-    } else {
-        format!("{kept}\n{outcome}")
-    };
-    ExportNotice { shown, kept }
-}
-
-/// Show an export outcome in the list's slot under the F4 rule ([`compose_export_notice`]).
-fn show_export_outcome(ui: &MainWindow, outcome: &str) {
-    let studies = ui.global::<Studies>();
-    let shown = studies.get_notice().to_string();
-    let next = LAST_EXPORT_NOTICE.with(|last| {
-        let next = compose_export_notice(&shown, last.borrow().as_ref(), outcome);
-        *last.borrow_mut() = Some(next.clone());
-        next
-    });
-    studies.set_notice(next.shown.into());
+    (path.with_file_name(named), true)
 }
 
 /// One pickable study (G1 decision 3, #237): the `id` is the key carried end to end; the `label`
@@ -524,7 +484,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             match outcome {
                 // F4: an export outcome never overwrites another source's notice.
-                Ok(notice) => show_export_outcome(&ui, &notice),
+                Ok(notice) => list_notice::show(&ui, list_notice::Source::Export, &notice),
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
         });
@@ -583,11 +543,22 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 return;
             };
             // rfd does not force the filter extension on every platform — ensure `.pdf` (L12).
-            let path = with_pdf_extension(path);
+            let (path, renamed) = with_pdf_extension(path);
+            // The picker asked about overwriting the name it returned, not the one completed
+            // here: an existing file under the completed name is never overwritten in silence.
+            if renamed && path.exists() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                crate::wiring::dialog::refuse(&ui, &state::export_name_taken_message(&name));
+                return;
+            }
             match std::fs::write(&path, &bytes) {
                 // F4: an export outcome never overwrites another source's notice (M4).
-                Ok(()) => show_export_outcome(
+                Ok(()) => list_notice::show(
                     &ui,
+                    list_notice::Source::Export,
                     &format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
                 ),
                 // A write failure is a refusal, like its neighbours — named in French, the OS
@@ -615,7 +586,8 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 Err(_) => Err(state::MSG_IMPORT_MALFORMED.to_string()),
             };
             match outcome {
-                Ok(notice) => ui.global::<Studies>().set_notice(notice.into()),
+                // F4: an import outcome never overwrites another source's failure.
+                Ok(notice) => list_notice::show(&ui, list_notice::Source::Import, notice),
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
             refresh_studies(&ui, &journal_state.borrow());
@@ -862,7 +834,12 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             match result {
                 Ok(()) => {
-                    studies.set_notice(state::study_action_done_message(&action, &ticker).into());
+                    // F4: the outcome never overwrites another source's failure.
+                    list_notice::show(
+                        &ui,
+                        list_notice::Source::StudyAction,
+                        &state::study_action_done_message(&action, &ticker),
+                    );
                     // If the affected study is the one currently open, close it back to the dashboard
                     // (a hidden/removed study must not stay mounted).
                     let is_open =
@@ -955,37 +932,21 @@ mod tests {
     #[test]
     fn a_picked_pdf_name_always_ends_in_pdf() {
         // G1 final (L12): « etude-NESN.SW » has an extension (« SW ») — `.pdf` is appended.
-        let p = |s: &str| with_pdf_extension(std::path::PathBuf::from(s));
-        assert_eq!(
-            p("/x/etude-NESN.SW"),
-            std::path::PathBuf::from("/x/etude-NESN.SW.pdf")
-        );
-        assert_eq!(p("/x/etude"), std::path::PathBuf::from("/x/etude.pdf"));
-        assert_eq!(p("/x/etude.pdf"), std::path::PathBuf::from("/x/etude.pdf"));
-        assert_eq!(p("/x/etude.PDF"), std::path::PathBuf::from("/x/etude.PDF"));
-        assert_eq!(
-            p("/x/notes.txt"),
-            std::path::PathBuf::from("/x/notes.txt.pdf")
-        );
-    }
-
-    #[test]
-    fn an_export_outcome_never_overwrites_another_sources_notice() {
-        // G1 final (M4), the F4 rule on the list's slot.
-        let first = compose_export_notice("", None, "exportée A");
-        assert_eq!(first.shown, "exportée A", "an empty slot takes the outcome");
-        // Its own earlier outcome is replaced.
-        let second = compose_export_notice(&first.shown, Some(&first), "exportée B");
-        assert_eq!(second.shown, "exportée B");
-        // A notice it did not write (a fetch failure, a startup state) stays whole, above it.
-        let third = compose_export_notice("échec du fournisseur", Some(&second), "exportée C");
-        assert_eq!(third.shown, "échec du fournisseur\nexportée C");
-        // The next export replaces only its own line; the other notice is still kept.
-        let fourth = compose_export_notice(&third.shown, Some(&third), "exportée D");
-        assert_eq!(fourth.shown, "échec du fournisseur\nexportée D");
-        // Once the other source has cleared the slot, the outcome is alone again.
-        let fifth = compose_export_notice("", Some(&fourth), "exportée E");
-        assert_eq!(fifth.shown, "exportée E");
+        let p = |s: &str| {
+            let (path, renamed) = with_pdf_extension(std::path::PathBuf::from(s));
+            (path.to_string_lossy().to_string(), renamed)
+        };
+        let changed = |s: &str| (s.to_string(), true);
+        let kept = |s: &str| (s.to_string(), false);
+        assert_eq!(p("/x/etude-NESN.SW"), changed("/x/etude-NESN.SW.pdf"));
+        assert_eq!(p("/x/etude"), changed("/x/etude.pdf"));
+        assert_eq!(p("/x/notes.txt"), changed("/x/notes.txt.pdf"));
+        // A bare trailing dot takes « pdf » — never « ..pdf ».
+        assert_eq!(p("/x/etude."), changed("/x/etude.pdf"));
+        // Already a PDF name, any case — « .pdf » alone too (never « .pdf.pdf »).
+        assert_eq!(p("/x/etude.pdf"), kept("/x/etude.pdf"));
+        assert_eq!(p("/x/etude.PDF"), kept("/x/etude.PDF"));
+        assert_eq!(p("/x/.pdf"), kept("/x/.pdf"));
     }
 
     fn facts(n: u128, ticker: &str, currency: &str, date: &str) -> ChoiceFacts {

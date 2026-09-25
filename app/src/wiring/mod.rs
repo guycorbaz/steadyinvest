@@ -14,6 +14,7 @@ pub(crate) mod fx;
 pub(crate) mod holdings;
 pub(crate) mod journal;
 pub(crate) mod judgment;
+pub(crate) mod list_notice;
 pub(crate) mod overlays;
 pub(crate) mod prefs;
 pub(crate) mod push;
