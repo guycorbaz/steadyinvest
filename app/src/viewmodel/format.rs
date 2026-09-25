@@ -5,7 +5,6 @@
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use steadyinvest_contract::Money;
 use steadyinvest_core::rounding::{DisplayField, round_for_display};
 
 /// True minus sign (U+2212) used for display — visually distinct from the ASCII hyphen.
@@ -323,15 +322,19 @@ pub fn parse_decimal(input: &str, format: NumberFormat) -> Option<Decimal> {
 
 /// Parse a **user-entered** amount under the active locale preset into an exact [`Money`], or
 /// `None` for blank / ambiguous / non-numeric input — **never `0`** (the prior project's
-/// blank-coercion bug). The production INVERSE of [`format_amount`] (Story 2.4); the reading rule
-/// is [`parse_decimal`]'s.
-pub fn parse_amount(input: &str, format: NumberFormat) -> Option<Money> {
-    parse_decimal(input, format).map(Money::from)
+/// blank-coercion bug). The INVERSE of [`format_amount`] (Story 2.4); the reading rule
+/// is [`parse_decimal`]'s. Test-only since the G1 I re-review: every typed rail reads through
+/// [`read_number`] (via `state::typed_entry` / `read_typed`) to tell a blank, a non-number and an
+/// ambiguous number apart.
+#[cfg(test)]
+pub fn parse_amount(input: &str, format: NumberFormat) -> Option<steadyinvest_contract::Money> {
+    parse_decimal(input, format).map(steadyinvest_contract::Money::from)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use steadyinvest_contract::Money;
 
     #[test]
     fn comma_preset_groups_with_narrow_nbsp_and_decimal_comma() {
@@ -525,6 +528,36 @@ mod tests {
             ("\u{2212}12,5", "-12.5"),
         ] {
             assert_eq!(read_number(input, f), value(expected), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn comma_format_reads_a_grouped_point_decimal_and_leading_zeros() {
+        // G1 I re-review: a grouping (apostrophe, space) before a point that cannot be a thousands
+        // point, trailing zeros after it, and leading zeros before a decimal comma.
+        let f = NumberFormat::Comma;
+        for (input, expected) in [
+            ("1'234.5", "1234.5"),
+            ("1\u{2019}234.5", "1234.5"),
+            ("1'234'567.25", "1234567.25"),
+            ("1 234.500", "1234.5"),
+            ("00,5", "0.5"),
+        ] {
+            assert_eq!(read_number(input, f), value(expected), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn a_plus_sign_a_detached_sign_or_too_many_digits_is_no_number() {
+        let thirty_digits = "123456789012345678901234567890";
+        for format in [NumberFormat::Comma, NumberFormat::Point] {
+            for input in ["+5", "- 5", thirty_digits] {
+                assert_eq!(
+                    read_number(input, format),
+                    NumberReading::NotANumber,
+                    "{input:?} under {format:?}"
+                );
+            }
         }
     }
 

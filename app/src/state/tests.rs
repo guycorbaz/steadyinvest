@@ -7115,6 +7115,22 @@ fn a_refused_pasted_line_keeps_its_cell_and_names_its_year() {
 }
 
 #[test]
+fn a_paste_names_every_kind_of_unwritten_line_together() {
+    // G1 I re-review: refused lines AND surplus lines are both named — one never hides the other.
+    let kept = paste_lines_kept_message(&[2019]);
+    assert_eq!(paste_outcome_message(&[], 3, 3), None);
+    assert_eq!(paste_outcome_message(&[2019], 3, 3), Some(kept.clone()));
+    assert_eq!(
+        paste_outcome_message(&[], 2, 3),
+        Some(MSG_PASTE_CLIPPED.to_string())
+    );
+    assert_eq!(
+        paste_outcome_message(&[2019], 2, 3),
+        Some(format!("{kept} {MSG_PASTE_CLIPPED}"))
+    );
+}
+
+#[test]
 fn a_typed_study_entry_is_blank_a_value_or_a_named_refusal() {
     use crate::viewmodel::format::NumberFormat;
     assert_eq!(typed_entry("  ", NumberFormat::Comma), Ok(None));

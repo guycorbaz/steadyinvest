@@ -133,6 +133,25 @@ pub(crate) fn setting_input(
     }
 }
 
+/// A diversify-by-size field as typed: [`setting_input`], every refusal naming the field (issue
+/// #96) — an ambiguous number too (G1 I re-review), with the spelling the format expects.
+pub(crate) fn size_field_input(
+    value: &str,
+    format: NumberFormat,
+    valid: fn(&str) -> bool,
+    label: &str,
+) -> Result<Option<String>, String> {
+    if read_number(value, format) == NumberReading::Ambiguous {
+        return Err(crate::state::size_field_ambiguous_message(label, format));
+    }
+    setting_input(
+        value,
+        format,
+        valid,
+        &crate::state::size_field_invalid_message(label),
+    )
+}
+
 /// Wire the preferences domain: theme / label-set / number-format / reference-currency /
 /// default-trailing-stop / provider-choice, applied live and persisted on change.
 pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
@@ -187,6 +206,11 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 let Some(format) = NumberFormat::parse(&value) else {
                     return;
                 };
+                // G1 I re-review: the already-selected chip changes nothing — above all, it never
+                // bumps the epoch below, which would wipe the Réglages cards' unsaved text.
+                if format == config.borrow().number_format {
+                    return;
+                }
                 let ui = ui_weak.unwrap();
                 push_samples(&ui, format);
                 ui.global::<Prefs>()
@@ -386,16 +410,16 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 // format (an ambiguous number is refused as such), stored canonical.
                 let format = config.borrow().number_format;
                 let mut refusal: Option<String> = None;
-                let mut field = |v: &str, valid: fn(&str) -> bool, label: &'static str| {
-                    let invalid = crate::state::size_field_invalid_message(label);
-                    match setting_input(v, format, valid, &invalid) {
+                let mut field =
+                    |v: &str, valid: fn(&str) -> bool, label: &'static str| match size_field_input(
+                        v, format, valid, label,
+                    ) {
                         Ok(stored) => stored,
                         Err(message) => {
                             refusal.get_or_insert(message);
                             None
                         }
-                    }
-                };
+                    };
                 let bound = |v: &str| config::is_valid_size_bound(v);
                 let target = |v: &str| config::is_valid_size_target_pct(v);
                 let small = field(&small_max, bound, "Borne petite");
@@ -563,6 +587,36 @@ mod tests {
         assert_eq!(
             setting_input("12.500", NumberFormat::Comma, valid, "invalide"),
             Err(crate::state::MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+        );
+    }
+
+    #[test]
+    fn a_size_field_names_itself_in_every_refusal() {
+        // Issue #96, G1 I re-review: an ambiguous number names its field too, with the spelling
+        // the format expects.
+        let bound = |v: &str| crate::config::is_valid_size_bound(v);
+        assert_eq!(
+            size_field_input("12.500", NumberFormat::Comma, bound, "Borne petite"),
+            Err("« Borne petite » : nombre ambigu ; écrivez-le 1\u{00A0}234,5 ou 1234,5 (format des nombres choisi dans les Réglages) ; rien n'a été enregistré.".to_string())
+        );
+        assert_eq!(
+            size_field_input("1,5", NumberFormat::Point, bound, "Cible petite"),
+            Err(crate::state::size_field_ambiguous_message(
+                "Cible petite",
+                NumberFormat::Point
+            ))
+        );
+        assert_eq!(
+            size_field_input("abc", NumberFormat::Comma, bound, "Borne moyenne"),
+            Err(crate::state::size_field_invalid_message("Borne moyenne"))
+        );
+        assert_eq!(
+            size_field_input("1 000", NumberFormat::Comma, bound, "Borne moyenne"),
+            Ok(Some("1000".to_string()))
+        );
+        assert_eq!(
+            size_field_input("", NumberFormat::Comma, bound, "Borne moyenne"),
+            Ok(None)
         );
     }
 }

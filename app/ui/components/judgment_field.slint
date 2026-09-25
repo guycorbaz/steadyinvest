@@ -107,14 +107,20 @@ export component JudgmentField inherits VerticalLayout {
                 init => {
                     self.text = root.value;
                 }
+                // G1 I on-screen check: a refused entry (Rust raises the refusal dialog) shows the
+                // stored value again — never a refused text that looks saved.
                 accepted => {
                     if (self.text != root.value) {
-                        Studies.set-judgment(root.field-key, self.text);
+                        if (!Studies.set-judgment(root.field-key, self.text)) {
+                            self.text = root.value;
+                        }
                     }
                 }
                 changed has-focus => {
                     if (!self.has-focus && self.text != root.value) {
-                        Studies.set-judgment(root.field-key, self.text);
+                        if (!Studies.set-judgment(root.field-key, self.text)) {
+                            self.text = root.value;
+                        }
                     }
                     if (self.has-focus) {
                         self.select-all();

@@ -464,6 +464,9 @@ export struct ScenarioOutcome {
 export struct ScenarioCompareState {
     visible: bool,
     alt-input: string,
+    // G1 I review: the refusal of an alternate that is no number or an ambiguous one ("" = none);
+    // the alternate column keeps its last placement — never a silent empty column.
+    notice: string,
     current: ScenarioOutcome,
     alternate: ScenarioOutcome,
 }
@@ -696,7 +699,9 @@ export global Studies {
     // (a cleared field is None, never 0), persists to `Study.judgment`, recomputes the snapshot.
     // Field keys: "sales_growth"|"eps_growth"|"est_high_eps"|"est_low_eps"|"high_pe"|"low_pe"|
     // "recent_severe_low"|"current_price"|"dividend".
-    callback set-judgment(string, string);
+    // Returns written? — false on a refusal (raised in the refusal dialog); the field re-shows the
+    // stored value (G1 I on-screen check).
+    callback set-judgment(string, string) -> bool;
     // Select the §4 forecast-low option (option-key).
     callback set-forecast-low-option(string);
     // Open / close the traceability surface for a result key (v1: "verdict").

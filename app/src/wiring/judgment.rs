@@ -27,8 +27,10 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
     } = s;
     // ── Numeric judgment-input editing + the §4 selector + traceability (Story 2.6) ──
 
-    // Commit a numeric judgment field: parse locale-aware (None for blank/unparseable → cleared,
-    // never 0), persist to `Study.judgment`, then re-read + re-push (which recomputes the snapshot).
+    // Commit a numeric judgment field: read under the user's number format (blank → cleared, never
+    // 0), persist to `Study.judgment`, then re-read + re-push (which recomputes the snapshot). G1 I:
+    // a text that is no number, or an ambiguous one, is refused with its reason; every refusal goes
+    // to the refusal dialog and returns `false`, so the field re-shows its stored value.
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
@@ -38,19 +40,17 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
             let Some(id_text) = current_study.borrow().clone() else {
-                return;
+                return false;
             };
             let Ok(id) = Uuid::parse_str(&id_text) else {
-                return;
+                return false;
             };
             let format = config.borrow().number_format;
-            // G1 I review: blank clears the field; a non-number or an ambiguous number is refused
-            // with its reason, the saved value left as it was.
             let value = match state::typed_entry(&text, format) {
                 Ok(value) => value,
                 Err(message) => {
-                    studies.set_notice(message.into());
-                    return;
+                    crate::wiring::dialog::refuse(&ui, &message);
+                    return false;
                 }
             };
             let result = journal_state
@@ -62,8 +62,12 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
+                    true
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => {
+                    crate::wiring::dialog::refuse(&ui, &message);
+                    false
+                }
             }
         });
     }

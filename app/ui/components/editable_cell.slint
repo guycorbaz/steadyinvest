@@ -51,14 +51,16 @@ export component EditableCell inherits Rectangle {
     }
 
     // Commit the typed text iff it differs from the displayed model value (so tabbing through
-    // untouched cells writes nothing — no no-op put_study, no polluted FR51 history). A blank /
-    // unparseable text clears the cell to a to-fill gap (Rust parses locale-aware → None, never 0).
-    // A refusal (read-only / save failure) keeps the user's text for a retry; Rust sets the notice.
+    // untouched cells writes nothing — no no-op put_study, no polluted FR51 history). A blank text
+    // clears the cell to a to-fill gap (never 0). G1 I on-screen check: a refusal (a text that is
+    // no number, an ambiguous number, read-only, soft-lock, save failure) is raised by Rust in the
+    // refusal dialog, and the cell shows its STORED value again — never a refused text that looks
+    // saved while the cursor moves on.
     function commit() {
-        // The written? result is intentionally ignored: on a refusal Rust sets the neutral notice
-        // and `commit()` leaves `input.text` untouched, so the user's text is retained either way.
         if (input.text != root.state.value) {
-            Studies.commit-cell(root.state.year-index, root.state.field, input.text);
+            if (!Studies.commit-cell(root.state.year-index, root.state.field, input.text)) {
+                input.text = root.state.value;
+            }
         }
     }
 

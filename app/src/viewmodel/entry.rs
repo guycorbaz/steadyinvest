@@ -4,7 +4,7 @@
 //! adapter and `state.rs` share.
 //!
 //! **Presentation/addressing only — nothing here calculates** (Cardinal Rule). The one number-shaped
-//! thing 2.4 does is *parse* a locale string into a [`Money`] ([`crate::viewmodel::format::parse_amount`]),
+//! thing 2.4 does is *parse* a locale string into a [`Money`] ([`crate::viewmodel::format::read_number`]),
 //! which is string→`Decimal`, not arithmetic. The manual-mutation itself goes through
 //! [`contract::Cell::edited`]; this module only locates which cell and builds the skeleton rows.
 

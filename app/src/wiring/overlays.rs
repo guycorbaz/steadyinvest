@@ -93,7 +93,18 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
                 return;
             };
             let format = config.borrow().number_format;
-            let value = viewmodel::format::parse_amount(&text, format);
+            // G1 I re-review: the alternate reads under the same rule as every typed number (blank
+            // → no value). A text that is no number, or an ambiguous one, is STATED in the overlay
+            // and the alternate column keeps its last placement — never a silent empty column.
+            let value = match state::typed_entry(&text, format) {
+                Ok(value) => value,
+                Err(message) => {
+                    let mut shown = studies.get_scenario_compare();
+                    shown.notice = message.into();
+                    studies.set_scenario_compare(shown);
+                    return;
+                }
+            };
             let mut alternate = current.clone();
             // The alternate placement is the user's typed est-high-EPS (the §4-forecast driver).
             state::apply_judgment_field(&mut alternate.judgment, "est_high_eps", value);

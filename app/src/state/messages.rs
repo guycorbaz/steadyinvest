@@ -713,6 +713,9 @@ pub const MSG_NUMBER_AMBIGUOUS_POINT: &str = "Nombre ambigu : écrivez-le 1,234.
 /// value left as it was — never turned into an empty « à remplir » hole.
 pub const MSG_VALUE_NOT_A_NUMBER: &str =
     "Ce texte ne se lit pas comme un nombre ; la valeur est inchangée.";
+/// A diversify-by-size field typed with an ambiguous number (G1 I re-review): the field is named
+/// (issue #96) with the expected spelling; the table commits whole or not at all.
+pub const MSG_SIZE_FIELD_AMBIGUOUS: &str = "« {field} » : nombre ambigu ; écrivez-le {spelling} (format des nombres choisi dans les Réglages) ; rien n'a été enregistré.";
 /// A pasted column whose some lines are no number or an ambiguous one (G1 I review): those lines
 /// are named (their years) and their cells left as they were; the others are pasted.
 pub const MSG_PASTE_LINES_KEPT: &str =
@@ -730,6 +733,36 @@ pub fn ambiguous_number_message(format: crate::viewmodel::format::NumberFormat) 
 pub fn paste_lines_kept_message(years: &[i32]) -> String {
     let years: Vec<String> = years.iter().map(i32::to_string).collect();
     MSG_PASTE_LINES_KEPT.replace("{years}", &years.join(", "))
+}
+
+/// What a paste of `lines` lines left unwritten, or `None` when every line was written: the kept
+/// years (refused lines) and the surplus lines past the grid bottom, BOTH named when both happened
+/// (G1 I re-review — one notice never hides the other).
+pub fn paste_outcome_message(kept_years: &[i32], filled: usize, lines: usize) -> Option<String> {
+    let mut parts = Vec::new();
+    if !kept_years.is_empty() {
+        parts.push(paste_lines_kept_message(kept_years));
+    }
+    if filled < lines {
+        parts.push(MSG_PASTE_CLIPPED.to_string());
+    }
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+/// The diversify-by-size refusal of an AMBIGUOUS number, naming its field like
+/// [`size_field_invalid_message`] (issue #96; G1 I re-review) with the spelling the user's format
+/// expects.
+pub fn size_field_ambiguous_message(
+    field: &str,
+    format: crate::viewmodel::format::NumberFormat,
+) -> String {
+    let spelling = match format {
+        crate::viewmodel::format::NumberFormat::Comma => "1\u{00A0}234,5 ou 1234,5",
+        crate::viewmodel::format::NumberFormat::Point => "1,234.5 ou 1234.5",
+    };
+    MSG_SIZE_FIELD_AMBIGUOUS
+        .replace("{field}", field)
+        .replace("{spelling}", spelling)
 }
 
 /// Every static user-facing message above — exposed so the crate-local posture gate (FR13) scans
@@ -842,6 +875,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_TRAILING_STOP_INVALID,
     MSG_WITHHOLDING_INVALID,
     MSG_SIZE_FIELD_INVALID,
+    MSG_SIZE_FIELD_AMBIGUOUS,
     MSG_SIZE_PAIR_CROSSED,
     MSG_PROVIDER_FALLBACK,
     MSG_FALLBACK_NO_KEY,

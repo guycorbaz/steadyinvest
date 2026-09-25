@@ -44,9 +44,11 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
     //    (validate→mutate→persist→rebuild — the 2.3 single-source-of-truth shape). Every refusal
     //    surfaces a neutral banner, never a silent `.ok()`. ──
 
-    // Commit a typed cell: parse the text locale-aware (None for blank/unparseable → a to-fill gap,
-    // never 0), edit + persist, then rebuild the form from the re-read study. Returns written? so
-    // the cell keeps the user's text on a recoverable refusal.
+    // Commit a typed cell: read the text under the user's number format (blank → a to-fill gap,
+    // never 0), edit + persist, then rebuild the form from the re-read study. G1 I: a text that is
+    // no number, or an ambiguous one, is refused with its reason. Every refusal goes to the refusal
+    // dialog (the study screen has no notice slot) and returns `false`, so the cell re-shows its
+    // stored value (G1 I on-screen check) — a refused text never stays looking saved.
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
@@ -72,7 +74,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                         value.map(|m| viewmodel::entry::entered_to_stored(m, field.as_str()))
                     }
                     Err(message) => {
-                        studies.set_notice(message.into());
+                        crate::wiring::dialog::refuse(&ui, &message);
                         return false;
                     }
                 };
@@ -91,7 +93,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                         true
                     }
                     Err(message) => {
-                        studies.set_notice(message.into());
+                        crate::wiring::dialog::refuse(&ui, &message);
                         false
                     }
                 }
@@ -99,8 +101,8 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
     }
 
     // Paste a clipboard column downward from the active cell (same field). Read the clipboard via
-    // `arboard`; a failure is a neutral notice, never a panic. Surplus lines past the grid bottom
-    // are dropped with a neutral count notice.
+    // `arboard`; a failure is a neutral notice, never a panic. Lines left unwritten (refused, or
+    // past the grid bottom) are named in the refusal dialog.
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
@@ -152,20 +154,22 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(outcome) => {
-                        if !outcome.kept_years.is_empty() {
-                            studies.set_notice(
-                                state::paste_lines_kept_message(&outcome.kept_years).into(),
-                            );
-                        } else if outcome.filled < values.len() {
-                            studies.set_notice(state::MSG_PASTE_CLIPPED.into());
-                        } else {
-                            studies.set_notice(SharedString::new());
-                        }
+                        studies.set_notice(SharedString::new());
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
+                        // G1 I on-screen check: the lines left unwritten (refused, or past the
+                        // grid bottom — both named when both) go to the refusal dialog, the one
+                        // surface the study screen shows.
+                        if let Some(message) = state::paste_outcome_message(
+                            &outcome.kept_years,
+                            outcome.filled,
+                            values.len(),
+                        ) {
+                            crate::wiring::dialog::refuse(&ui, &message);
+                        }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => crate::wiring::dialog::refuse(&ui, &message),
                 }
             });
     }

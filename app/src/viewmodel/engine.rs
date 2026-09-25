@@ -728,6 +728,7 @@ pub fn scenario_compare(
     ScenarioCompareState {
         visible: true,
         alt_input: alt_input.into(),
+        notice: Default::default(),
         current: outcome(current),
         alternate: outcome(alternate),
     }
