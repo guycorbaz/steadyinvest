@@ -290,6 +290,7 @@ fn main() -> Result<(), slint::PlatformError> {
         refresh_total: Rc::clone(&refresh_total),
         fetch_cancel,
     };
+    wiring::dialog::wire_dialog(&ui);
     wiring::fetch::wire_fetch(&ui, &session);
     wiring::studies::wire_studies(&ui, &session);
     wiring::overlays::wire_overlays(&ui, &session);

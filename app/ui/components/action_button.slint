@@ -11,7 +11,14 @@ export component ActionButton inherits Rectangle {
     // tick: a `focus()` inside `init` of a conditionally created element is dropped before the
     // element is attached to the window (observed 2026-09-23, Slint 1.17).
     in property <bool> autofocus: false;
+    // Take the focus whenever this counter changes (the modal's focus trap — G1 review). A
+    // disabled button cannot take it; the trap then asks another one.
+    in property <int> focus-request;
     callback clicked();
+
+    changed focus-request => {
+        fs.focus();
+    }
 
     accessible-role: button;
     accessible-label: root.label;
@@ -29,7 +36,9 @@ export component ActionButton inherits Rectangle {
     height: Tokens.row-height + Tokens.space-4;
     forward-focus: fs;
     horizontal-stretch: 0;
-    min-width: Tokens.space-48 * 2;
+    // Never narrower than its own label (on-screen check, 2026-09-25: a crowded row clipped
+    // « Transactions » to « Transactior »): the label plus its padding, with the old floor.
+    min-width: max(Tokens.space-48 * 2, label-text.preferred-width + 2 * Tokens.space-16);
     border-radius: Tokens.radius;
     opacity: root.enabled ? 1.0 : 0.5;
     background: touch.pressed ? Tokens.surface : Tokens.surface-alt;
@@ -68,7 +77,7 @@ export component ActionButton inherits Rectangle {
         padding-left: Tokens.space-16;
         padding-right: Tokens.space-16;
 
-        Text {
+        label-text := Text {
             text: root.label;
             color: Tokens.text-high;
             font-size: Tokens.font-body;

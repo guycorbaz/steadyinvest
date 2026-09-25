@@ -507,12 +507,14 @@ export component SettingsScreen inherits Rectangle {
                     ActionButton {
                         label: @tr("Enregistrer");
                         enabled: true;
-                        // Issue #88: after the handler runs, re-sync the field to the effective value —
+                        // Issue #88: after a WRITTEN save, re-sync the field to the effective value —
                         // the two-way `text <=> draft` severed the declarative binding, so a normalized
-                        // save (or a refused invalid entry) would otherwise never refresh the field.
+                        // save would otherwise never refresh the field. A refusal keeps the typed
+                        // text (G1 review, spec AC1): the dialog names the cause, the user corrects.
                         clicked => {
-                            Prefs.default-trailing-stop-pct-changed(stop-panel.draft);
-                            stop-panel.draft = Prefs.default-trailing-stop-pct;
+                            if (Prefs.default-trailing-stop-pct-changed(stop-panel.draft)) {
+                                stop-panel.draft = Prefs.default-trailing-stop-pct;
+                            }
                         }
                     }
                     ActionButton {
@@ -544,11 +546,12 @@ export component SettingsScreen inherits Rectangle {
                     ActionButton {
                         label: @tr("Enregistrer");
                         enabled: true;
-                        // Issue #88: re-sync the field to the effective value after the handler (see the
-                        // trailing-stop panel — the two-way binding severs the declarative refresh).
+                        // Issue #88: re-sync the field to the effective value after a written save
+                        // (see the trailing-stop panel); a refusal keeps the typed text (G1, AC1).
                         clicked => {
-                            Prefs.withholding-rate-pct-changed(withholding-panel.draft);
-                            withholding-panel.draft = Prefs.withholding-rate-pct;
+                            if (Prefs.withholding-rate-pct-changed(withholding-panel.draft)) {
+                                withholding-panel.draft = Prefs.withholding-rate-pct;
+                            }
                         }
                     }
                 }
@@ -582,10 +585,12 @@ export component SettingsScreen inherits Rectangle {
                         // Issue #93: re-sync the field to the effective value after the handler — the
                         // two-way `text <=> draft` severs the declarative binding, so a normalized save
                         // (or a refused invalid entry) would otherwise leave stale text on screen (the
-                        // same fix the trailing-stop / withholding panels got in #88).
+                        // same fix the trailing-stop / withholding panels got in #88). Only after a
+                        // WRITTEN save: a refusal keeps the typed text (G1 review, spec AC1).
                         clicked => {
-                            Prefs.concentration-threshold-pct-changed(size-panel.draft-threshold);
-                            size-panel.draft-threshold = Prefs.concentration-threshold-pct;
+                            if (Prefs.concentration-threshold-pct-changed(size-panel.draft-threshold)) {
+                                size-panel.draft-threshold = Prefs.concentration-threshold-pct;
+                            }
                         }
                     }
                 }
@@ -656,28 +661,24 @@ export component SettingsScreen inherits Rectangle {
                         label: @tr("Enregistrer la table");
                         enabled: true;
                         clicked => {
-                            Prefs.size-table-changed(
-                                size-panel.draft-small-max,
-                                size-panel.draft-medium-max,
-                                size-panel.draft-target-small,
-                                size-panel.draft-target-medium,
-                                size-panel.draft-target-large);
-                            // Issue #93: re-sync every field to its effective value after the handler
-                            // (normalized save OR refused entry) — the two-way bindings would otherwise
-                            // leave stale text (the #88 fix, extended to the whole size table).
-                            size-panel.draft-small-max = Prefs.size-small-max;
-                            size-panel.draft-medium-max = Prefs.size-medium-max;
-                            size-panel.draft-target-small = Prefs.size-target-small-pct;
-                            size-panel.draft-target-medium = Prefs.size-target-medium-pct;
-                            size-panel.draft-target-large = Prefs.size-target-large-pct;
+                            // Issue #93: re-sync every field to its effective value after a WRITTEN
+                            // save — the two-way bindings would otherwise leave stale text (the #88
+                            // fix, extended to the whole size table). A refusal keeps every typed
+                            // field as is (G1 review, spec AC1).
+                            if (Prefs.size-table-changed(
+                                    size-panel.draft-small-max,
+                                    size-panel.draft-medium-max,
+                                    size-panel.draft-target-small,
+                                    size-panel.draft-target-medium,
+                                    size-panel.draft-target-large)) {
+                                size-panel.draft-small-max = Prefs.size-small-max;
+                                size-panel.draft-medium-max = Prefs.size-medium-max;
+                                size-panel.draft-target-small = Prefs.size-target-small-pct;
+                                size-panel.draft-target-medium = Prefs.size-target-medium-pct;
+                                size-panel.draft-target-large = Prefs.size-target-large-pct;
+                            }
                         }
                     }
-                }
-                if Prefs.risk-settings-status != "": Text {
-                    text: Prefs.risk-settings-status;
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
-                    wrap: word-wrap;
                 }
             }
 

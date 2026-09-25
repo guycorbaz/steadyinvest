@@ -274,9 +274,12 @@ export struct GrowthComputed {
 export struct JudgmentSuggestions {
     sales-growth: string,
     eps-growth: string,
-    // Issue #214: the low edge of the §1 least-squares seed band — proposed for « BPA estimé bas »
-    // (adopting it is the judgment; the seed alone never flows into §4).
+    // Issue #214: the latest known (positive) EPS — proposed for « BPA estimé bas », the method's
+    // downside case (adopting it is the judgment; nothing flows into §4 by itself).
     est-low-eps: string,
+    // G1 review: the year the two per-year proposals come from ("" with no proposal) — shown on
+    // the chip, so a proposal never passes for a current figure.
+    est-low-eps-year: string,
     high-pe: string,
     low-pe: string,
     // The lowest low price over the §3 window (core `recent_severe_low_proposal`) — proposed for
@@ -285,6 +288,7 @@ export struct JudgmentSuggestions {
     // Issue #214: the latest year's known dividend per share — proposed for « Dividende annuel
     // courant » (last year's figure, not the current run-rate: the adoption is the judgment).
     dividend: string,
+    dividend-year: string,
 }
 
 // ── Story 2.8 — the §1 interactive semi-log growth chart ──
@@ -400,7 +404,8 @@ export struct RiskComputed {
     forecast-low: string,
     // Issue #213: the four forecast-low candidates (a)–(d), each with its value ("" when unknown)
     // and a reason KEY for the absence ("" | "est_low_eps" | "low_pe" | "low_prices" |
-    // "severe_low" | "dividend" | "yield") — the screen turns the key into words.
+    // "severe_low" | "dividend" | "yield" |
+    // "overflow") — the screen turns the key into words.
     low-a: string,
     low-a-why: string,
     low-b: string,
@@ -583,7 +588,7 @@ export global Studies {
     // User intents — handled in Rust (validate + persist + refresh).
     // create-study returns true only when a study was actually written, so the UI keeps the
     // user's typed input on a recoverable refusal (blank field / read-only / save failure).
-    callback create-study(string, string) -> bool; // ticker, native-currency → written?
+    callback create-study(string, string, string) -> bool; // ticker, native-currency, company name ("" = none) → written?
     callback open-study(string); // row id (stringified UUID)
     // 2026-07-12: rebuild the dashboard rows (per-row §5 potential / « à compléter » / zone) —
     // invoked by the in-form « Retour aux études » button, which flips `study-open` in pure Slint
@@ -778,11 +783,7 @@ export global Studies {
     callback request-study-action(string, string);
     callback confirm-study-action();
     callback cancel-study-action();
-    // The dashboard confirm overlay state, pushed by Rust — DISTINCT from the study-screen `unlock`
-    // overlay (`confirm-visible`/`confirm-message`) so the two never clobber each other. `destructive`
-    // is true for delete, so the UI can label the confirm button as an irreversible removal.
-    in-out property <bool> study-action-confirm-visible;
-    in-out property <string> study-action-message;
+    // true for delete, so the modal confirm labels its verb as an irreversible removal.
     in-out property <bool> study-action-destructive;
 
     // ── Story 2.13 — the read-only demonstration study (FR62). `load-demo` opens the bundled
@@ -866,7 +867,7 @@ export global Prefs {
     in-out property <string> withholding-rate-pct;
     // ── Story 6.7 (FR45) — concentration threshold + the diversify-by-size table, mirrored from
     //    the validated AppConfig accessors (always effective values, defaults when unset). The
-    //    commits are validated in Rust; a refusal names itself in `risk-settings-status` and
+    //    commits are validated in Rust; a refusal names itself in a modal notice and
     //    writes nothing (the table commits whole or not at all). ──
     in-out property <string> concentration-threshold-pct;
     in-out property <string> size-small-max;
@@ -874,7 +875,6 @@ export global Prefs {
     in-out property <string> size-target-small-pct;
     in-out property <string> size-target-medium-pct;
     in-out property <string> size-target-large-pct;
-    in-out property <string> risk-settings-status;
     // ── Story 6.9 (FR26) — the per-field-type FALLBACK providers, mirrored from the validated
     //    config accessors (wire strings; "" = no fallback). The PRIMARY stays `provider` above.
     //    The fundamentals row never offers Twelve Data (declared capability: no fundamentals). ──
@@ -883,9 +883,9 @@ export global Prefs {
     in-out property <string> fx-fallback;
     // field key ("price" | "fundamentals" | "fx"), provider wire ("" clears the fallback)
     callback fallback-provider-selected(string, string);
-    callback concentration-threshold-pct-changed(string); // "" resets to the default (50)
+    callback concentration-threshold-pct-changed(string) -> bool; // "" resets to the default (50); → written? (a refusal keeps the typed text)
     // small-max, medium-max, target-small, target-medium, target-large ("" = that field's default)
-    callback size-table-changed(string, string, string, string, string);
+    callback size-table-changed(string, string, string, string, string) -> bool; // → written?
     // ── Story 5.3 — whole-journal export / import (FR60) ──
     // The latest neutral outcome of an export/import (with counts on a successful import), set by Rust.
     in-out property <string> journal-status;
@@ -895,17 +895,13 @@ export global Prefs {
     callback export-journal();
     callback import-journal(string); // path to a whole-journal envelope file
     callback pick-and-import-journal(); // rfd open .json → import-journal (the picker runs in Rust)
-    // Issue #65: the arbitration prompt for an OLDER same-journal import ("" = no banner) — the
-    // version regression is stated and explicitly confirmed, never merged silently.
-    in-out property <string> import-confirm;
+    // Issue #65: an OLDER same-journal import parks behind the modal confirm (Rust raises it) —
+    // the version regression is stated and explicitly confirmed, never merged silently.
     callback confirm-import();
     callback cancel-import();
     // ── Story 5.4 — backup / restore of the raw .db (FR61) ──
     // Latest neutral backup/restore outcome (set by Rust).
     in-out property <string> restore-status;
-    // The confirm prompt for a parked restore — non-empty reveals the confirm banner (the backup's
-    // (journal_id, version) + stale/foreign warning). A restore is never applied silently.
-    in-out property <string> restore-confirm;
     callback create-backup();
     callback request-restore(string); // path to a backup .db → validate + (maybe) park for confirm
     callback pick-and-restore-backup(); // rfd open .db → request-restore (the picker runs in Rust)
@@ -930,8 +926,8 @@ export global Prefs {
     callback number-format-selected(string); // "comma" | "point"
     callback provider-selected(string); // "eodhd" | "none"
     callback reference-currency-selected(string); // "CHF" | "EUR" | "USD" | "GBP" | …
-    callback default-trailing-stop-pct-changed(string); // "" clears; else a percent in (0,100)
-    callback withholding-rate-pct-changed(string); // "" resets to 35; else a percent in [0,100]
+    callback default-trailing-stop-pct-changed(string) -> bool; // "" clears; else a percent in (0,100); → written?
+    callback withholding-rate-pct-changed(string) -> bool; // "" resets to 35; else a percent in [0,100]; → written?
     // The key travels ONE WAY into Rust as a call argument — never stored in an `in-out` property
     // that could round-trip back out to config/UI (NFR-S1). Issue #41: `key-saved` returns whether a
     // save actually happened, so the field is cleared ONLY on a real save (a blank/failed save keeps
@@ -1000,7 +996,14 @@ export global Dialog {
     in-out property <string> context;     // a fact shown under the sentence (the amounts' currency, a linked study…)
     in-out property <string> field-error; // a refusal raised BY the open form (kept inline, next to the fields)
     in-out property <bool> flag;          // form-specific (stop: the holding already has a stop)
+    in-out property <string> txn-kind;    // txn-edit: the edited row's kind (buy | sell | dividend)
+    // G1 review: true only while the open form's OWN submit runs — Rust routes a refusal into
+    // `field-error` then; any other refusal waits in Rust's queue until the overlay closes.
+    in-out property <bool> gesture;
+    // Fired by `close()` — Rust shows the next queued refusal / confirm, if any.
+    callback closed();
     // The form drafts — one set, reset on every open.
+    in-out property <string> draft-study-id; // holding-add: the chosen study (identity, not its ticker)
     in-out property <string> draft-ticker;
     in-out property <string> draft-quantity;
     in-out property <string> draft-price;
@@ -1016,11 +1019,8 @@ export global Dialog {
         self.form-id = "";
         self.action = "";
         self.field-error = "";
-    }
-    public function notice(message: string) {
-        self.title = "";
-        self.body = message;
-        self.kind = "notice";
+        self.gesture = false;
+        self.closed();
     }
     public function confirm(title: string, body: string, verb: string, action: string, target: string) {
         self.title = title;
@@ -1031,6 +1031,8 @@ export global Dialog {
         self.kind = "confirm";
     }
     public function form(id: string, title: string, body: string, target: string, context: string) {
+        self.draft-study-id = "";
+        self.txn-kind = "";
         self.draft-ticker = "";
         self.draft-quantity = "";
         self.draft-price = "";
@@ -1286,6 +1288,16 @@ export struct PortfolioRow {
     name: string,
 }
 
+// G1 review (decision 3): one study a position can be added for — its id travels end to end; the
+// label is « TICKER » or « TICKER · CUR » (pure data, no prose); `name` is its company name ("" = none).
+export struct StudyChoiceRow {
+    id: string,
+    label: string,
+    ticker: string,
+    currency: string,
+    name: string,
+}
+
 // Story 6.2 (FR38): one per-currency capital-at-risk subtotal. `amount`/`pct` are already-formatted
 // display strings (`pct` is "" when nothing is invested in that currency). There is deliberately NO
 // consolidated global total — currencies are never mixed until FX lands (Story 6.5 / 6.6).
@@ -1398,10 +1410,12 @@ export global Holdings {
     // capital-at-risk panel so "0 % du capital investi" (no stop set) is not misread as "no downside".
     // Empty when every holding is stop-protected.
     in-out property <[string]> unstopped-exposure;
-    // Issue #218: a position exists only for a ticker with a study and takes that study's currency
-    // (no currency argument — the rail refuses a symbol without a study).
-    // ticker, quantity, purchase-price, sector ("" = non renseigné) → written?
-    callback add-holding(string, string, string, string) -> bool;
+    // Issue #218 + G1 decision 3: a position is added for a chosen STUDY (its id) and takes that
+    // study's ticker and currency (the currency is never picked).
+    // study id, its ticker + currency as shown (the fallback when that study was deleted
+    // meanwhile), quantity, purchase-price, sector ("" = non renseigné) → written?
+    callback add-holding(string, string, string, string, string, string) -> bool;
+    // G1 decision 4: the edit never changes the holding's currency.
     // id, ticker, quantity, purchase-price, sector → written?
     callback edit-holding(string, string, string, string, string) -> bool;
     callback remove-holding(string); // id
@@ -1481,18 +1495,30 @@ export global Holdings {
     //    active portfolio's holdings. Add/rename/delete are guarded (neutral notices on refusal). ──
     in-out property <[PortfolioRow]> portfolios;
     in-out property <string> active-portfolio-id;
+    in-out property <string> active-portfolio-name; // G1 review: « Renommer… » opens prefilled
     callback select-portfolio(string);          // id → make active
     callback add-portfolio(string) -> bool;             // name → created?
     callback rename-portfolio(string, string) -> bool;  // id, name → renamed?
     callback delete-portfolio(string);          // id
-    // The UX pass: the add-position dialog looks the study up as the symbol is typed — its
-    // native currency (the picker's default, so a USD study never gets a CHF position by
-    // reflex) and its company name ("" when no study / no name). Read-only lookups.
-    pure callback study-currency-for(string) -> string;
-    pure callback study-name-for(string) -> string;
-    // Guy, 2026-09-24: the symbols a position can be added for (every study's ticker, unique,
-    // sorted) — the add-position dialog offers them as a drop-down list, never free text.
+    // Guy, 2026-09-24: every study's ticker, unique, sorted (the comparison pickers' list).
     in-out property <[string]> study-tickers;
+    // G1 review (Guy's decision 3): the position dialog's choices are STUDIES — one per (ticker,
+    // currency), the id carried end to end; `study-choice-labels` is the same list's labels
+    // (« TICKER », or « TICKER · CUR » when the ticker has studies in several currencies). Pushed
+    // FRESH by `load-position-choices` when the dialog opens (never a stale list), with
+    // `edit-tickers` (the edit form's symbols: every study ticker plus the holding's own) and
+    // `study-choices-unavailable` (issue #95: a failed read is « indisponible », never « aucune étude »).
+    in-out property <[StudyChoiceRow]> study-choices;
+    in-out property <[string]> study-choice-labels;
+    in-out property <[string]> edit-tickers;
+    in-out property <bool> study-choices-unavailable;
+    callback load-position-choices(string); // the edited holding's ticker ("" on add)
+    // G1 review (spec §5.1): the delete guards run BEFORE the confirm — a portfolio holding
+    // positions is refused with its count; only an empty, non-last one reaches the confirm.
+    callback request-delete-portfolio(string); // id
+    // G1 review (the discriminator rule): true when EVERY listed security is unclassified by size
+    // — keyed by ticker identity in Rust, never a comparison of two list lengths.
+    in-out property <bool> size-none-classified;
     // ── Story 6.8 (FR48): the replacement-candidates panel — a PORTFOLIO-LEVEL pushed state
     //    (a whole-position sell removes its row, so the panel outlives it). Auto-opened by Rust
     //    after a successful sell (both paths), manually via the trigger-panel « Candidats »;

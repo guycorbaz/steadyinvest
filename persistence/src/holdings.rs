@@ -338,6 +338,28 @@ impl Journal {
         currency: &str,
         sector: Option<&str>,
     ) -> Result<()> {
+        self.update_holding_with_currency(
+            id,
+            security_ticker,
+            quantity,
+            purchase_price,
+            Some(currency),
+            sector,
+        )
+    }
+
+    /// [`Self::update_holding`] with the stored currency as an `Option` (G1 review of 7.0): the
+    /// app's « Modifier » never changes a holding's currency, so a pre-6.2 legacy row keeps its
+    /// NULL (`None` writes NULL — unchanged for such a row, hence no phantom materialization).
+    pub fn update_holding_with_currency(
+        &mut self,
+        id: Uuid,
+        security_ticker: &str,
+        quantity: &str,
+        purchase_price: &str,
+        currency: Option<&str>,
+        sector: Option<&str>,
+    ) -> Result<()> {
         self.check_writable()?;
         let tx = self.conn.transaction()?;
         // The `CASE … security_ticker IS NOT ?2` reads the OLD ticker (SET exprs see pre-update row),

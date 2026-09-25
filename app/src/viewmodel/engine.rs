@@ -377,20 +377,56 @@ pub fn judgment_suggestions(
     // trend-low of 18 against a current 4.09 pushed the forecast low to 619 and the price
     // « sous la bande »). Adopting stays the judgment. The dividend proposal = the latest year
     // with a known dividend per share.
-    let est_low_eps = series.iter().rev().find_map(|y| y.eps);
-    let dividend = series.iter().rev().find_map(|y| y.dividend_per_share);
+    //
+    // G1 review: both chips now carry the YEAR they come from (shown on the chip), and come only
+    // from a RECENT year (see `recent_year_value`) — never a figure from a long-past year dressed
+    // as current. The est-low EPS must also be POSITIVE: a zero/negative EPS makes candidate (a)
+    // meaningless (a nonpositive forecast low), so no chip rather than a trap.
+    let est_low_eps = recent_year_value(series, |y| y.eps).filter(|(_, v)| *v > Decimal::ZERO);
+    let dividend = recent_year_value(series, |y| y.dividend_per_share);
+    let year_of = |v: &Option<(i32, Decimal)>| -> slint::SharedString {
+        v.map(|(year, _)| year.to_string())
+            .unwrap_or_default()
+            .into()
+    };
     JudgmentSuggestions {
         sales_growth: opt(outputs.growth.sales_cagr_pct, DisplayField::Percent),
         eps_growth: opt(outputs.growth.eps_cagr_pct, DisplayField::Percent),
-        est_low_eps: opt(est_low_eps, DisplayField::PerShare),
+        est_low_eps: opt(est_low_eps.map(|(_, v)| v), DisplayField::PerShare),
+        est_low_eps_year: year_of(&est_low_eps),
         high_pe: opt(outputs.valuation.avg_high_pe, DisplayField::PeRatio),
         low_pe: opt(outputs.valuation.avg_low_pe, DisplayField::PeRatio),
         recent_severe_low: opt(
             steadyinvest_core::ssg::recent_severe_low_proposal(series),
             DisplayField::Price,
         ),
-        dividend: opt(dividend, DisplayField::PerShare),
+        dividend: opt(dividend.map(|(_, v)| v), DisplayField::PerShare),
+        dividend_year: year_of(&dividend),
     }
+}
+
+/// How far behind the study's latest reported year a « hist. » per-year proposal may lie (G1
+/// review, #214): the latest year itself or the one before — a figure older than that is not a
+/// « current » dividend nor a « current » EPS, so no chip is offered.
+const SUGGESTION_MAX_AGE_YEARS: i32 = 1;
+
+/// The latest year carrying `pick`, with its value — only when that year is within
+/// [`SUGGESTION_MAX_AGE_YEARS`] of the study's latest REPORTED year (the newest year with sales or
+/// EPS; an empty roll-forward column does not count). `None` when there is no such recent value.
+fn recent_year_value(
+    series: &[normalize::CanonicalYear],
+    pick: impl Fn(&normalize::CanonicalYear) -> Option<Decimal>,
+) -> Option<(i32, Decimal)> {
+    let latest_reported = series
+        .iter()
+        .filter(|y| y.sales.is_some() || y.eps.is_some())
+        .map(|y| y.year)
+        .max()?;
+    series
+        .iter()
+        .filter_map(|y| pick(y).map(|v| (y.year, v)))
+        .max_by_key(|(year, _)| *year)
+        .filter(|(year, _)| *year >= latest_reported - SUGGESTION_MAX_AGE_YEARS)
 }
 
 /// The §2 management computed results (per-year PTP%/ROE%, the 5-yr averages + trends). The per-year
@@ -432,8 +468,15 @@ pub fn pe_computed(outputs: &SsgOutputs, format: NumberFormat) -> PeComputed {
 /// The §4 risk/reward computed results (forecast high/low, the four low candidates, U/D,
 /// appreciation). Issue #213: each candidate (a)–(d) carries its value ("" when unknown) AND a
 /// reason KEY for the absence — the words live in Slint (posture-gated), the key names the
-/// missing input: "est_low_eps" | "low_pe" | "low_prices" | "severe_low" | "dividend" | "yield" | "".
-pub fn risk_computed(outputs: &SsgOutputs, format: NumberFormat) -> RiskComputed {
+/// missing input: "est_low_eps" | "low_pe" | "low_prices" | "severe_low" | "dividend" | "yield" |
+/// "overflow" | "". The G1 review made the (a)
+/// and (d) reasons exact: each is read from the INPUTS (`judgment`), so an overflowing product is
+/// « calcul hors limites » — never misattributed to a present input.
+pub fn risk_computed(
+    outputs: &SsgOutputs,
+    judgment: &steadyinvest_contract::Judgment,
+    format: NumberFormat,
+) -> RiskComputed {
     let r = &outputs.risk_reward;
     let c = &r.low_candidates;
     let price = |v: Option<Decimal>| -> slint::SharedString {
@@ -444,27 +487,16 @@ pub fn risk_computed(outputs: &SsgOutputs, format: NumberFormat) -> RiskComputed
     let why = |value: Option<Decimal>, reason: &'static str| -> slint::SharedString {
         if value.is_some() { "" } else { reason }.into()
     };
-    // (a): the est-low EPS is the usual gap (a pure judgment), else the judged low P/E.
-    let why_a = if c.avg_low_pe_times_eps.is_some() {
-        ""
-    } else if outputs.growth.estimated_low_eps.is_none() {
-        "est_low_eps"
-    } else {
-        "low_pe"
-    };
-    // (d): a non-positive / unknown average high yield is named first (the §9 guard); with a
-    // usable yield, the only remaining gap is the dividend judgment.
-    let why_d = if c.dividend_supported.is_some() {
-        ""
-    } else if outputs
-        .valuation
-        .avg_high_yield_pct
-        .is_none_or(|y| y <= Decimal::ZERO)
-    {
-        "yield"
-    } else {
-        "dividend"
-    };
+    let why_a = low_a_reason(
+        c.avg_low_pe_times_eps.is_some(),
+        outputs.growth.estimated_low_eps,
+        judgment.judged_avg_low_pe.map(|m| m.as_decimal()),
+    );
+    let why_d = low_d_reason(
+        c.dividend_supported.is_some(),
+        outputs.valuation.avg_high_yield_pct,
+        judgment.present_full_year_dividend.map(|m| m.as_decimal()),
+    );
     RiskComputed {
         forecast_high: fmt(r.forecast_high, DisplayField::Price, format).into(),
         forecast_low: fmt(r.forecast_low, DisplayField::Price, format).into(),
@@ -478,6 +510,42 @@ pub fn risk_computed(outputs: &SsgOutputs, format: NumberFormat) -> RiskComputed
         low_d_why: why_d.into(),
         ud_ratio: fmt_ud(&r.upside_downside, format).into(),
         appreciation: fmt_pct(outputs.returns.projected_appreciation_pct, format).into(),
+    }
+}
+
+/// Why candidate (a) — avg low P/E × est. low EPS — is absent (G1 review): the missing input
+/// first (the est-low EPS is the usual gap, a pure judgment), and only when both are present the
+/// checked product overflowed. (Core computes (a) for any sign — a positivity rule would be a
+/// method change, left to the owner; no figure changes here.)
+fn low_a_reason(
+    present: bool,
+    est_low_eps: Option<Decimal>,
+    low_pe: Option<Decimal>,
+) -> &'static str {
+    match (present, est_low_eps, low_pe) {
+        (true, _, _) => "",
+        (false, None, _) => "est_low_eps",
+        (false, Some(_), None) => "low_pe",
+        (false, Some(_), Some(_)) => "overflow",
+    }
+}
+
+/// Why candidate (d) — dividend ÷ avg high yield — is absent (G1 review): a non-positive /
+/// unknown yield first (the §9 guard), then the dividend judgment, else the checked division
+/// overflowed.
+fn low_d_reason(
+    present: bool,
+    avg_high_yield_pct: Option<Decimal>,
+    dividend: Option<Decimal>,
+) -> &'static str {
+    if present {
+        ""
+    } else if avg_high_yield_pct.is_none_or(|y| y <= Decimal::ZERO) {
+        "yield"
+    } else if dividend.is_none() {
+        "dividend"
+    } else {
+        "overflow"
     }
 }
 
@@ -1063,6 +1131,77 @@ mod tests {
         s
     }
 
+    /// G1 review (#214): the per-year chips name their year, come only from a RECENT year, and
+    /// the est-low EPS chip is never a nonpositive EPS.
+    #[test]
+    fn per_year_suggestions_carry_their_year_and_are_recent_and_positive() {
+        let format = NumberFormat::default();
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let frame = build_frame(&study_with(years, full_judgment())).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
+        assert_eq!(s.est_low_eps_year.as_str(), "2025");
+        assert_eq!(s.dividend_year.as_str(), "2025");
+
+        // The dividend known only in 2021 (four years before the latest reported 2025) → no
+        // dividend chip; a dividend one year back (2024) is still offered, with its year.
+        let old_dividend: Vec<YearData> = (2021..=2025)
+            .map(|y| YearData {
+                dividend_per_share: (y == 2021).then(|| validated_cell("2")),
+                ..year(y, validated_cell)
+            })
+            .collect();
+        let frame = build_frame(&study_with(old_dividend, full_judgment())).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
+        assert_eq!(
+            s.dividend.as_str(),
+            "",
+            "a long-past dividend is no « current » one"
+        );
+        assert_eq!(s.dividend_year.as_str(), "");
+        let last_year_dividend: Vec<YearData> = (2021..=2025)
+            .map(|y| YearData {
+                dividend_per_share: (y <= 2024).then(|| validated_cell("2")),
+                ..year(y, validated_cell)
+            })
+            .collect();
+        let frame =
+            build_frame(&study_with(last_year_dividend, full_judgment())).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
+        assert_eq!(s.dividend_year.as_str(), "2024");
+
+        // A negative latest EPS → no est-low chip (never an older positive one either).
+        let loss: Vec<YearData> = (2021..=2025)
+            .map(|y| YearData {
+                eps: if y == 2025 {
+                    validated_cell("-1")
+                } else {
+                    validated_cell("5")
+                },
+                ..year(y, validated_cell)
+            })
+            .collect();
+        let frame = build_frame(&study_with(loss, full_judgment())).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
+        assert_eq!(s.est_low_eps.as_str(), "");
+        assert_eq!(s.est_low_eps_year.as_str(), "");
+    }
+
+    /// G1 review (#213): the (a)/(d) absence reasons are read from the inputs — an overflow is
+    /// never blamed on a present input.
+    #[test]
+    fn low_candidate_reasons_name_the_real_cause() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        assert_eq!(low_a_reason(true, Some(d("2")), Some(d("10"))), "");
+        assert_eq!(low_a_reason(false, None, Some(d("10"))), "est_low_eps");
+        assert_eq!(low_a_reason(false, Some(d("2")), None), "low_pe");
+        assert_eq!(low_a_reason(false, Some(d("2")), Some(d("10"))), "overflow");
+        assert_eq!(low_d_reason(true, Some(d("4")), Some(d("2"))), "");
+        assert_eq!(low_d_reason(false, None, Some(d("2"))), "yield");
+        assert_eq!(low_d_reason(false, Some(d("0")), Some(d("2"))), "yield");
+        assert_eq!(low_d_reason(false, Some(d("4")), None), "dividend");
+        assert_eq!(low_d_reason(false, Some(d("4")), Some(d("2"))), "overflow");
+    }
+
     /// 2026-07-12: the « hist. » proposals mirror the §1 historical CAGRs and §3 P/E averages
     /// (per-field display scale, so an adopted value round-trips through set-judgment like typed
     /// text), and an UNKNOWN figure yields the empty string — the chip is hidden, never an
@@ -1384,7 +1523,7 @@ mod tests {
             "current P/E is honestly unknown (no quarterly data), never 0"
         );
 
-        let risk = risk_computed(snap.outputs(), NumberFormat::Comma);
+        let risk = risk_computed(snap.outputs(), &study.judgment, NumberFormat::Comma);
         assert_ne!(
             risk.forecast_high.as_str(),
             EMPTY_SLOT,
