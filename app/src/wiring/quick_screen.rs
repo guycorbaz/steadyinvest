@@ -207,6 +207,77 @@ pub(crate) fn supersede_request(ui: &MainWindow, request: &Cell<u64>) {
     ui.global::<QuickScreen>().set_fetching(false);
 }
 
+/// How the examination screen is being closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CloseVia {
+    /// « Retour » on the screen: back where the examination was opened.
+    Back,
+    /// « Études » on the nav rail: the reader chose the destination (the studies list), and the
+    /// nav's own arrival re-derives the list.
+    NavRail,
+}
+
+/// Where the reader lands once the examination screen closes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AfterClose {
+    /// Liste de suivi, re-rendered (its criblage card still shown).
+    Watchlist,
+    /// The studies list, re-rendered.
+    StudiesList,
+    /// Nothing to do: the open study underneath shows again, or the nav rail already handles it.
+    Stay,
+}
+
+/// PURE: the « Retour » destination follows the examination's origin; the nav rail's close keeps
+/// the reader's choice (Études) whatever the origin.
+pub(crate) fn after_close(from_study: bool, from_watchlist: bool, via: CloseVia) -> AfterClose {
+    match via {
+        CloseVia::NavRail => AfterClose::Stay,
+        CloseVia::Back if from_watchlist => AfterClose::Watchlist,
+        CloseVia::Back if from_study => AfterClose::Stay,
+        CloseVia::Back => AfterClose::StudiesList,
+    }
+}
+
+/// Close the examination screen — the ONE close path, for « Retour » and for the nav rail (G1 G:
+/// the rail no longer writes `screen-open` behind this handler's back). The examination of the
+/// moment stays in the slot (a re-open always replaces it through [`show`]).
+pub(crate) fn close_screen(
+    ui: &MainWindow,
+    state: &JournalState,
+    slot: &Rc<std::cell::RefCell<Option<QuickScreenSession>>>,
+    via: CloseVia,
+) {
+    ui.global::<Studies>().set_screen_open(false);
+    let (from_study, from_watchlist) = slot
+        .borrow()
+        .as_ref()
+        .map_or((false, false), |s| (s.from_study, s.from_watchlist));
+    match after_close(from_study, from_watchlist, via) {
+        AfterClose::Watchlist => {
+            ui.set_current_screen(1);
+            crate::wiring::watchlist::refresh_watchlist(ui, state);
+        }
+        AfterClose::StudiesList => refresh_studies(ui, state),
+        AfterClose::Stay => {}
+    }
+}
+
+/// End the examination of the moment — the dossier-switch reset (G1 G): a fetch in flight is
+/// superseded (its result, asked in the previous dossier, is dropped), the session is emptied
+/// (« Créer l'étude » could otherwise write the previous dossier's fetch into the new one), the
+/// screen closes and its notice goes.
+pub(crate) fn clear_examination(
+    ui: &MainWindow,
+    slot: &std::cell::RefCell<Option<QuickScreenSession>>,
+    request: &Cell<u64>,
+) {
+    supersede_request(ui, request);
+    *slot.borrow_mut() = None;
+    ui.global::<Studies>().set_screen_open(false);
+    ui.global::<QuickScreen>().set_notice(SharedString::new());
+}
+
 /// A worker examination result, with the identity and the currency of its request.
 pub(crate) struct FetchedExamination {
     pub(crate) request_id: u64,
@@ -398,18 +469,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         let slot = Rc::clone(slot);
         ui.global::<QuickScreen>().on_close(move || {
             let ui = ui_weak.unwrap();
-            ui.global::<Studies>().set_screen_open(false);
-            let (from_study, from_watchlist) = slot
-                .borrow()
-                .as_ref()
-                .map_or((false, false), |s| (s.from_study, s.from_watchlist));
-            if from_watchlist {
-                // Back where the row was opened: Liste de suivi (its criblage card still shown).
-                ui.set_current_screen(1);
-                crate::wiring::watchlist::refresh_watchlist(&ui, &journal_state.borrow());
-            } else if !from_study {
-                refresh_studies(&ui, &journal_state.borrow());
-            }
+            close_screen(&ui, &journal_state.borrow(), &slot, CloseVia::Back);
         });
     }
     {
@@ -511,5 +571,32 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn back_follows_the_origin_and_the_nav_rail_keeps_the_readers_choice() {
+        // « Retour »: back where the examination was opened.
+        assert_eq!(
+            after_close(false, true, CloseVia::Back),
+            AfterClose::Watchlist
+        );
+        assert_eq!(after_close(true, false, CloseVia::Back), AfterClose::Stay);
+        assert_eq!(
+            after_close(false, false, CloseVia::Back),
+            AfterClose::StudiesList
+        );
+        // The nav rail's « Études »: never sent to Liste de suivi, whatever the origin (its own
+        // arrival re-derives the studies list).
+        for (from_study, from_watchlist) in [(false, false), (true, false), (false, true)] {
+            assert_eq!(
+                after_close(from_study, from_watchlist, CloseVia::NavRail),
+                AfterClose::Stay
+            );
+        }
     }
 }

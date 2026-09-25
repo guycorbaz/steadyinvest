@@ -100,6 +100,7 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
         config,
         holding_freshness,
         holding_dismissed,
+        quick_screen,
         ..
     } = s;
     let ui_weak = ui.as_weak();
@@ -107,13 +108,28 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
     let config = std::rc::Rc::clone(config);
     let holding_freshness = std::rc::Rc::clone(holding_freshness);
     let holding_dismissed = std::rc::Rc::clone(holding_dismissed);
+    let quick_screen = std::rc::Rc::clone(quick_screen);
     ui.on_screen_activated(move |index| {
         let ui = ui_weak.unwrap();
         match index {
-            // Études: the list's per-row §5 potential / « à compléter » / zone re-derive from the
-            // CURRENT studies (2026-07-12: they were startup-only — finishing an analysis and
-            // coming back showed stale rows).
-            0 => crate::wiring::studies::refresh_studies(&ui, &journal_state.borrow()),
+            // Études: the rail is the « back to the list » gesture — the comparison and the
+            // examination close through their own close paths (G1 G: the rail no longer writes
+            // their flags behind Rust's back), then the list's per-row §5 potential /
+            // « à compléter » / zone re-derive from the CURRENT studies (2026-07-12: they were
+            // startup-only — finishing an analysis and coming back showed stale rows).
+            0 => {
+                let state = journal_state.borrow();
+                crate::wiring::comparison::close_screen(&ui);
+                if ui.global::<crate::Studies>().get_screen_open() {
+                    crate::wiring::quick_screen::close_screen(
+                        &ui,
+                        &state,
+                        &quick_screen,
+                        crate::wiring::quick_screen::CloseVia::NavRail,
+                    );
+                }
+                crate::wiring::studies::refresh_studies(&ui, &state);
+            }
             // Liste de suivi: the per-item buy-zone flags re-derive from the CURRENT studies.
             1 => crate::wiring::watchlist::refresh_watchlist(&ui, &journal_state.borrow()),
             // Portefeuille: zones/prices/triggers + the 6.7/6.8 blocks re-derive (this also

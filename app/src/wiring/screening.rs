@@ -311,16 +311,61 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let slot = Rc::clone(screening);
         ui.global::<Watchlist>().on_close_screening(move || {
-            let ui = ui_weak.unwrap();
-            if let Some(previous) = slot.borrow_mut().take() {
-                previous.stop.store(true, Ordering::Relaxed);
-            }
-            let w = ui.global::<Watchlist>();
-            w.set_screening_shown(false);
-            w.set_screening_running(false);
-            // The watchlist's notice slot is left alone (F4): nothing the criblage raised lives
-            // there — its refusals go through the dialog.
-            w.set_screening_rows(ModelRc::new(VecModel::from(Vec::<ScreeningRow>::new())));
+            close_screening(&ui_weak.unwrap(), &slot);
         });
+    }
+}
+
+/// Stop the run of the moment (its queued rows drain unfetched, its late results find no
+/// session) and empty the slot. `true` when there was a run. The batch counter is NOT here: it
+/// outlives the run (it lives in `wire_screening`), so the next run still gets a new number.
+fn stop_run(slot: &RefCell<Option<ScreeningSession>>) -> bool {
+    match slot.borrow_mut().take() {
+        Some(previous) => {
+            previous.stop.store(true, Ordering::Relaxed);
+            true
+        }
+        None => false,
+    }
+}
+
+/// End the criblage: stop the run, empty the slot, hide the card — « Fermer le criblage », and
+/// the dossier-switch reset (G1 G: a run of the previous dossier never lands in the next one).
+pub(crate) fn close_screening(ui: &MainWindow, slot: &RefCell<Option<ScreeningSession>>) {
+    stop_run(slot);
+    let w = ui.global::<Watchlist>();
+    w.set_screening_shown(false);
+    w.set_screening_running(false);
+    w.set_screening_done(0);
+    w.set_screening_total(0);
+    w.set_screening_quota(false);
+    // The watchlist's notice slot is left alone (F4): nothing the criblage raised lives
+    // there — its refusals go through the dialog.
+    w.set_screening_rows(ModelRc::new(VecModel::from(Vec::<ScreeningRow>::new())));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stopping_a_run_latches_its_stop_flag_and_empties_the_slot() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let slot = RefCell::new(Some(ScreeningSession {
+            batch: 7,
+            rows: vec![ScreeningEntry {
+                ticker: "NESN.SW".into(),
+                has_study: false,
+                state: RowState::Pending,
+            }],
+            stop: Arc::clone(&stop),
+        }));
+        assert!(stop_run(&slot));
+        // The worker's queued rows see the latch and drain unfetched.
+        assert!(stop.load(Ordering::Relaxed));
+        // A late outcome of the stopped run finds no session to land in.
+        assert!(slot.borrow().is_none());
+        // Nothing to stop: a no-op, never a panic.
+        assert!(!stop_run(&slot));
     }
 }

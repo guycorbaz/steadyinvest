@@ -124,12 +124,12 @@ export component MainWindow inherits Window {
                             // study, comparison or examination) — the nav rail is the natural "back to the list" gesture.
                             // Also clear any in-flight drag flag (review P5) so closing the study
                             // mid-drag can never leave the form's scroll disabled.
-                            // The 7.5 walk: the comparison and the examen rapide screens close the
-                            // same way (they sit over the list on the same destination).
+                            // The 7.5 walk: the comparison and the examen rapide screens close too
+                            // (they sit over the list on the same destination) — in Rust, through
+                            // their own close paths, from `screen-activated(0)` below (G1 G: never
+                            // by writing their flags here behind the Rust handlers' back).
                             if (index == 0) {
                                 Studies.study-open = false;
-                                Studies.compare-open = false;
-                                Studies.screen-open = false;
                                 Studies.judgment-dragging = false;
                             }
                             // Issue #94: let Rust refresh the destination's study-derived facts.
