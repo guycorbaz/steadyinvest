@@ -163,8 +163,20 @@ export component ComparisonScreen inherits Rectangle {
             }
             if Comparison.columns.length > 0: PanelCard {
                 title: @tr("Gestion (section 2)");
-                CmpRow { number: 5; label: @tr("Marge avant impôt, moyenne 5 ans · tendance"); }
-                CmpRow { number: 6; label: @tr("Rendement des capitaux propres, moyenne 5 ans · tendance"); }
+                // Rows 5 / 6 say the years their averages actually run over (G1, #237) — never
+                // « 5 ans » over three; the PDF words them the same (report `row_label`).
+                CmpRow {
+                    number: 5;
+                    label: Comparison.ptp-avg-years == 1 ? @tr("Marge avant impôt, moyenne 1 an · tendance")
+                        : Comparison.ptp-avg-years > 1 ? @tr("Marge avant impôt, moyenne {} ans · tendance", Comparison.ptp-avg-years)
+                        : @tr("Marge avant impôt, moyenne · tendance");
+                }
+                CmpRow {
+                    number: 6;
+                    label: Comparison.roe-avg-years == 1 ? @tr("Rendement des capitaux propres, moyenne 1 an · tendance")
+                        : Comparison.roe-avg-years > 1 ? @tr("Rendement des capitaux propres, moyenne {} ans · tendance", Comparison.roe-avg-years)
+                        : @tr("Rendement des capitaux propres, moyenne · tendance");
+                }
                 CmpRow { number: 7; label: @tr("Part du capital détenue par la direction"); }
             }
             if Comparison.columns.length > 0: PanelCard {

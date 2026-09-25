@@ -161,6 +161,23 @@ fn range(
     }
 }
 
+/// Rows 5 / 6 when the columns average over different spans (G1, #237): the cell names its own
+/// years — « 47,6 % sur 3 ans · ↑ hausse ». An empty cell stays empty; `years` 0 leaves it as is.
+pub fn with_avg_years(cell: &str, years: usize) -> String {
+    if cell.is_empty() || years == 0 {
+        return cell.to_string();
+    }
+    let span = if years == 1 {
+        crate::viewmodel::engine::AVG_OVER_ONE_YEAR.to_string()
+    } else {
+        crate::viewmodel::engine::AVG_OVER_YEARS.replace("{n}", &years.to_string())
+    };
+    match cell.split_once(" · ") {
+        Some((avg, trend)) => format!("{avg} {span} · {trend}"),
+        None => format!("{cell} {span}"),
+    }
+}
+
 /// One study → its thirty rows, from the frame the study screen shows.
 pub fn comparison_column(
     study: &Study,
@@ -246,6 +263,9 @@ pub fn comparison_column(
         zone: zone_position_key(r, current).to_string(),
         state: verdict_state(frame.snapshot.verdict()).to_string(),
         low_confidence: outputs.low_confidence,
+        // The years each shown average runs over (0 when no average is shown).
+        ptp_avg_years: m.avg_ptp_pct.map_or(0, |_| m.ptp_avg_years),
+        roe_avg_years: m.avg_roe_pct.map_or(0, |_| m.roe_avg_years),
         ..ComparisonColumn::default()
     }
 }
@@ -498,6 +518,25 @@ mod tests {
             (None, None)
         );
         assert_eq!(window_pe_extremes(&v.per_year[1..]), (None, None));
+    }
+
+    #[test]
+    fn rows_5_and_6_carry_the_years_actually_averaged() {
+        let study = demo_study().unwrap();
+        let frame = build_frame(&study).unwrap();
+        let col = comparison_column(&study, &frame, F);
+        let m = &frame.snapshot.outputs().management;
+        assert_eq!(col.ptp_avg_years, m.ptp_avg_years);
+        assert_eq!(col.roe_avg_years, m.roe_avg_years);
+        assert!(col.ptp_avg_years > 0);
+        // A cell names its own span only when asked (the columns differ).
+        assert_eq!(
+            with_avg_years("47,6 % · ↑ hausse", 3),
+            "47,6 % sur 3 ans · ↑ hausse"
+        );
+        assert_eq!(with_avg_years("47,6 % · —", 1), "47,6 % sur 1 an · —");
+        assert_eq!(with_avg_years("", 3), "", "an absent average stays absent");
+        assert_eq!(with_avg_years("47,6 % · ↑ hausse", 0), "47,6 % · ↑ hausse");
     }
 
     #[test]

@@ -425,18 +425,19 @@ export component DashboardScreen inherits Rectangle {
                 title: @tr("Comparer des études");
                 subtitle: @tr("Jusqu'à cinq études côte à côte, sur les trente lignes du formulaire de comparaison ; des faits, jamais un classement.");
                 // G1 decision 3 (#237): each list names STUDIES (« TICKER · CUR » when a ticker has
-                // several); a pick resolves to its study id in Rust and leaves the other lists.
+                // several); a pick resolves to its study id in Rust BY INDEX (the dropdown contract)
+                // and leaves the other lists.
                 if Comparison.choices-unavailable: StatusBand {
                     icon: "◦";
                     text: @tr("La liste des études est indisponible : aucune étude ne peut être choisie pour la comparaison.");
                 }
                 HorizontalLayout {
                     spacing: Tokens.space-8;
-                    Dropdown { options: Comparison.options1; value <=> Comparison.pick1; placeholder: @tr("étude 1"); horizontal-stretch: 1; picked(i) => { Comparison.picked(0, Comparison.options1[i]); } }
-                    Dropdown { options: Comparison.options2; value <=> Comparison.pick2; placeholder: @tr("étude 2"); horizontal-stretch: 1; picked(i) => { Comparison.picked(1, Comparison.options2[i]); } }
-                    Dropdown { options: Comparison.options3; value <=> Comparison.pick3; placeholder: @tr("étude 3"); horizontal-stretch: 1; picked(i) => { Comparison.picked(2, Comparison.options3[i]); } }
-                    Dropdown { options: Comparison.options4; value <=> Comparison.pick4; placeholder: @tr("étude 4"); horizontal-stretch: 1; picked(i) => { Comparison.picked(3, Comparison.options4[i]); } }
-                    Dropdown { options: Comparison.options5; value <=> Comparison.pick5; placeholder: @tr("étude 5"); horizontal-stretch: 1; picked(i) => { Comparison.picked(4, Comparison.options5[i]); } }
+                    Dropdown { options: Comparison.options1; value <=> Comparison.pick1; placeholder: @tr("étude 1"); horizontal-stretch: 1; picked(i) => { Comparison.picked(0, i); } }
+                    Dropdown { options: Comparison.options2; value <=> Comparison.pick2; placeholder: @tr("étude 2"); horizontal-stretch: 1; picked(i) => { Comparison.picked(1, i); } }
+                    Dropdown { options: Comparison.options3; value <=> Comparison.pick3; placeholder: @tr("étude 3"); horizontal-stretch: 1; picked(i) => { Comparison.picked(2, i); } }
+                    Dropdown { options: Comparison.options4; value <=> Comparison.pick4; placeholder: @tr("étude 4"); horizontal-stretch: 1; picked(i) => { Comparison.picked(3, i); } }
+                    Dropdown { options: Comparison.options5; value <=> Comparison.pick5; placeholder: @tr("étude 5"); horizontal-stretch: 1; picked(i) => { Comparison.picked(4, i); } }
                 }
                 HorizontalLayout {
                     alignment: start;

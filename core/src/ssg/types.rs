@@ -315,6 +315,11 @@ pub struct ManagementOutputs {
     pub avg_ptp_pct: Option<Decimal>,
     /// Mean ROE over the window, excluding unknown years.
     pub avg_roe_pct: Option<Decimal>,
+    /// How many years `avg_ptp_pct` actually averages (the window's years whose ratio is known;
+    /// may be fewer than five) — a label says this number, never « 5 ans » over three (G1, #237).
+    pub ptp_avg_years: usize,
+    /// How many years `avg_roe_pct` actually averages (same rule).
+    pub roe_avg_years: usize,
     /// The latest usable year's ratio — the "recent" side of the trend comparison, and the
     /// `roe_low` flag input.
     pub latest_ptp_pct: Option<Decimal>,

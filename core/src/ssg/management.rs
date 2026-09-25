@@ -109,8 +109,10 @@ pub(super) fn compute(
         window.iter().filter_map(|y| ratio_of(y, pick)).collect()
     };
 
-    let avg_ptp_pct = mean(&window_values(|r| r.ptp_pct));
-    let avg_roe_pct = mean(&window_values(|r| r.roe_pct));
+    let ptp_values = window_values(|r| r.ptp_pct);
+    let roe_values = window_values(|r| r.roe_pct);
+    let avg_ptp_pct = mean(&ptp_values);
+    let avg_roe_pct = mean(&roe_values);
     let latest = window.last();
     let latest_ptp_pct = latest.and_then(|y| ratio_of(y, |r| r.ptp_pct));
     let latest_roe_pct = latest.and_then(|y| ratio_of(y, |r| r.roe_pct));
@@ -119,6 +121,8 @@ pub(super) fn compute(
         per_year,
         avg_ptp_pct,
         avg_roe_pct,
+        ptp_avg_years: ptp_values.len(),
+        roe_avg_years: roe_values.len(),
         latest_ptp_pct,
         latest_roe_pct,
         ptp_trend: trend(latest_ptp_pct, avg_ptp_pct),

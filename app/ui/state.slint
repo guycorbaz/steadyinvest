@@ -387,6 +387,10 @@ export struct MgmtComputed {
     avg-roe: string,
     ptp-trend: string,
     roe-trend: string,
+    // The « Moy. n ans » column title (G1, #237): the years the shown averages run over —
+    // `avg-years` when they agree (0 = none shown), else `avg-years` / `avg-years-b` = PTP / ROE.
+    avg-years: int,
+    avg-years-b: int,
 }
 
 // §3 P/E summary results.
@@ -1182,6 +1186,8 @@ export struct ComparisonHeader {
     zone: string,           // buy | neutral | sell | below | above | ""
     state: string,          // full | provisional | withheld | ""
     low-confidence: bool,
+    ptp-avg-years: int,     // rows 5 / 6: the years this column's average runs over (0 = none)
+    roe-avg-years: int,
 }
 // G1 decision 3 (#237): one pickable STUDY — the id is the key, the label display only;
 // `ordinal` = the label's « · n » (0 = none), carried into the column header.
@@ -1215,7 +1221,11 @@ export global Comparison {
     in-out property <string> pick5;
     in-out property <[string]> pick-ids;
     in-out property <int> distinct-picks;   // distinct picked studies — « Comparer » at ≥ 2
-    callback picked(int, string);  // slot (0-based), label → resolve its study id
+    // Rows 5 / 6 (G1, #237): the years every shown average of the row runs over — the label says
+    // « moyenne n ans »; 0 = none shown or the columns differ (each cell then names its years).
+    in-out property <int> ptp-avg-years;
+    in-out property <int> roe-avg-years;
+    callback picked(int, int);     // slot (0-based), option INDEX → its study id (the dropdown contract)
     callback clear-picks();
     callback compare();            // build the table from the picks and open it
     callback close();              // back to the list

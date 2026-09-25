@@ -443,6 +443,10 @@ pub fn mgmt_computed(outputs: &SsgOutputs, years: &[i32], format: NumberFormat) 
         .iter()
         .map(|y| fmt_pct(lookup(*y).and_then(|r| r.roe_pct), format).into())
         .collect();
+    let (avg_years, avg_years_b) = avg_years_title(
+        m.avg_ptp_pct.map(|_| m.ptp_avg_years),
+        m.avg_roe_pct.map(|_| m.roe_avg_years),
+    );
     MgmtComputed {
         ptp: slint::ModelRc::new(slint::VecModel::from(ptp)),
         roe: slint::ModelRc::new(slint::VecModel::from(roe)),
@@ -450,6 +454,19 @@ pub fn mgmt_computed(outputs: &SsgOutputs, years: &[i32], format: NumberFormat) 
         avg_roe: fmt_pct(m.avg_roe_pct, format).into(),
         ptp_trend: fmt_trend(m.ptp_trend).into(),
         roe_trend: fmt_trend(m.roe_trend).into(),
+        avg_years,
+        avg_years_b,
+    }
+}
+
+/// PURE: the §2 « Moy. n ans » column title's years (G1, #237) — `(n, 0)` when every SHOWN
+/// average (PTP, ROE) runs over n years (`(0, 0)`: none shown), `(ptp, roe)` when they differ.
+pub(crate) fn avg_years_title(ptp: Option<usize>, roe: Option<usize>) -> (i32, i32) {
+    let n = |x: usize| i32::try_from(x).unwrap_or(i32::MAX);
+    match (ptp.filter(|x| *x > 0), roe.filter(|x| *x > 0)) {
+        (Some(a), Some(b)) if a != b => (n(a), n(b)),
+        (Some(a), _) | (None, Some(a)) => (n(a), 0),
+        (None, None) => (0, 0),
     }
 }
 
@@ -1012,6 +1029,10 @@ pub const CONFIDENCE_LOW: &str = "Historique insuffisant — confiance réduite"
 /// is unknown (no dividend history) but the annualised appreciation is computable. Fact-stating,
 /// no imperative — scanned by the posture gate alongside the other engine labels.
 pub const TOTAL_RETURN_NO_DIV: &str = "hors div.";
+/// The years a §2 average runs over, named in a comparison cell when the columns of rows 5 / 6
+/// differ (G1, #237: never « 5 ans » over three). `{n}` is the count.
+pub const AVG_OVER_ONE_YEAR: &str = "sur 1 an";
+pub const AVG_OVER_YEARS: &str = "sur {n} ans";
 
 /// Every Story-2.6 Rust-side user-facing label, exposed so the crate-local posture gate (FR13)
 /// scans them for banned verbs alongside the `@tr()` literals and `state::USER_FACING_MESSAGES`.
@@ -1040,6 +1061,8 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TRACE_VERDICT_FORMULA,
     CONFIDENCE_LOW,
     TOTAL_RETURN_NO_DIV,
+    AVG_OVER_ONE_YEAR,
+    AVG_OVER_YEARS,
 ];
 
 #[cfg(test)]
@@ -1130,6 +1153,20 @@ mod tests {
         );
         s.years = years;
         s
+    }
+
+    /// G1 (#237): the §2 average column says the years actually averaged, never « 5 ans » over
+    /// three; two different spans are both stated (PTP / ROE).
+    #[test]
+    fn the_average_column_title_says_the_years_averaged() {
+        assert_eq!(avg_years_title(Some(5), Some(5)), (5, 0));
+        assert_eq!(avg_years_title(Some(3), Some(3)), (3, 0));
+        assert_eq!(avg_years_title(Some(3), Some(5)), (3, 5));
+        // An absent average does not vote.
+        assert_eq!(avg_years_title(None, Some(4)), (4, 0));
+        assert_eq!(avg_years_title(Some(2), None), (2, 0));
+        assert_eq!(avg_years_title(None, None), (0, 0));
+        assert_eq!(avg_years_title(Some(0), Some(0)), (0, 0));
     }
 
     /// G1 review (#214): the per-year chips name their year, come only from a RECENT year, and

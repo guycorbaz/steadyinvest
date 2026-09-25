@@ -693,8 +693,11 @@ mod tests {
         // integ/g1-a-to-h (G1 fix PRs A–H combined): 892 + B 11 + C 9 + D 26 + E 15 = 953, measured.
         // G1 I (locale numbers + its review) adds no @tr literal (its refusals are MSG_*; the new
         // Slint lines are callbacks and handlers): 953 + 0 = 953, measured.
+        // G1 M (#237): rows 5 / 6 of the comparison and the study screen's §2 average column say
+        // the years actually averaged (comparison 2 → 6 labels, study 1 → 4 titles): +7 = 960,
+        // measured.
         assert!(
-            total >= 953,
+            total >= 960,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -840,7 +843,9 @@ mod tests {
         }
         assert_eq!(
             crate::viewmodel::engine::USER_FACING_LABELS.len(),
-            23,
+            // G1 M (#237): the years a comparison cell's §2 average runs over (AVG_OVER_ONE_YEAR,
+            // AVG_OVER_YEARS): 23 + 2 = 25.
+            25,
             "engine.rs label inventory changed — register the new label"
         );
     }

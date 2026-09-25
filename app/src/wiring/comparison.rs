@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::state::{self, JournalState};
 use crate::viewmodel::comparison::{
-    comparison_column, missing_column, unavailable_column, uncomputable_column,
+    comparison_column, missing_column, unavailable_column, uncomputable_column, with_avg_years,
 };
 use crate::viewmodel::engine::build_frame;
 use crate::wiring::Session;
@@ -109,8 +109,14 @@ fn relabel_picks(
     })
 }
 
-/// PURE: one drop-down's list — every study but those picked in the OTHER slots (spec §2).
-fn slot_options(choices: &[(String, String)], ids: &[String; SLOTS], slot: usize) -> Vec<String> {
+/// PURE: one drop-down's list as `(id, label)` — every study but those picked in the OTHER
+/// slots (spec §2). The drop-down shows the labels; a pick resolves by its INDEX in this list
+/// (the dropdown contract — identity, never a re-match of the label).
+fn slot_options(
+    choices: &[(String, String)],
+    ids: &[String; SLOTS],
+    slot: usize,
+) -> Vec<(String, String)> {
     choices
         .iter()
         .filter(|(id, _)| {
@@ -118,8 +124,22 @@ fn slot_options(choices: &[(String, String)], ids: &[String; SLOTS], slot: usize
                 .enumerate()
                 .any(|(i, picked)| i != slot && picked == id)
         })
-        .map(|(_, label)| label.clone())
+        .cloned()
         .collect()
+}
+
+/// PURE: the study id picked at `index` of slot `slot`'s list (`""` when out of range).
+fn picked_id(
+    choices: &[(String, String)],
+    ids: &[String; SLOTS],
+    slot: usize,
+    index: i32,
+) -> String {
+    usize::try_from(index)
+        .ok()
+        .and_then(|i| slot_options(choices, ids, slot).into_iter().nth(i))
+        .map(|(id, _)| id)
+        .unwrap_or_default()
 }
 
 /// PURE: the distinct picked study ids, in slot order — the columns' identities.
@@ -133,14 +153,25 @@ fn distinct_ids(ids: &[String; SLOTS]) -> Vec<(usize, String)> {
     out
 }
 
+/// PURE: the distinct picks « Comparer » counts — those whose study is still listed (a gone pick
+/// still makes its « introuvable » column, but is no study to compare). When the listing FAILED
+/// (`listed_ok` false) nothing is known gone: every distinct pick counts (a read failure is not
+/// an absence).
+fn live_distinct(ids: &[String; SLOTS], choices: &[(String, String)], listed_ok: bool) -> usize {
+    distinct_ids(ids)
+        .iter()
+        .filter(|(_, id)| !listed_ok || choices.iter().any(|(cid, _)| cid == id))
+        .count()
+}
+
 /// Re-derive the five lists and the distinct-pick count from the choices and the pick ids.
 fn sync_picker(c: &Comparison<'_>) {
     let choices = choices(c);
     let ids = pick_ids(c);
-    let lists: [Vec<String>; SLOTS] =
+    let lists: [Vec<(String, String)>; SLOTS] =
         std::array::from_fn(|slot| slot_options(&choices, &ids, slot));
-    let model = |v: &Vec<String>| {
-        let v: Vec<SharedString> = v.iter().map(SharedString::from).collect();
+    let model = |v: &Vec<(String, String)>| {
+        let v: Vec<SharedString> = v.iter().map(|(_, l)| SharedString::from(l)).collect();
         ModelRc::new(VecModel::from(v))
     };
     c.set_options1(model(&lists[0]));
@@ -148,7 +179,7 @@ fn sync_picker(c: &Comparison<'_>) {
     c.set_options3(model(&lists[2]));
     c.set_options4(model(&lists[3]));
     c.set_options5(model(&lists[4]));
-    c.set_distinct_picks(distinct_ids(&ids).len() as i32);
+    c.set_distinct_picks(live_distinct(&ids, &choices, !c.get_choices_unavailable()) as i32);
 }
 
 /// Push the dossier's studies into the picker (called from `refresh_studies`). A failed listing
@@ -264,7 +295,23 @@ pub(crate) fn push_comparison(
             id,
         })
         .collect();
-    let keyed = comparison_columns(state, &picks, format);
+    let mut keyed = comparison_columns(state, &picks, format);
+    // Rows 5 / 6 say the years their averages run over (G1, #237): one number in the label when
+    // the columns agree, else each cell names its own.
+    let plain: Vec<steadyinvest_report::ComparisonColumn> =
+        keyed.iter().map(|(_, x)| x.clone()).collect();
+    let ptp_years = steadyinvest_report::average_years(&plain, 5);
+    let roe_years = steadyinvest_report::average_years(&plain, 6);
+    for (_, col) in &mut keyed {
+        if ptp_years.is_none() {
+            col.rows[4] = with_avg_years(&col.rows[4], col.ptp_avg_years);
+        }
+        if roe_years.is_none() {
+            col.rows[5] = with_avg_years(&col.rows[5], col.roe_avg_years);
+        }
+    }
+    c.set_ptp_avg_years(ptp_years.unwrap_or(0) as i32);
+    c.set_roe_avg_years(roe_years.unwrap_or(0) as i32);
     let cols: Vec<&steadyinvest_report::ComparisonColumn> = keyed.iter().map(|(_, x)| x).collect();
     // The notice slot holds only the export outcome of THIS table: a new table clears it.
     c.set_notice(SharedString::new());
@@ -302,6 +349,8 @@ pub(crate) fn push_comparison(
             zone: col.zone.clone().into(),
             state: col.state.clone().into(),
             low_confidence: col.low_confidence,
+            ptp_avg_years: col.ptp_avg_years as i32,
+            roe_avg_years: col.roe_avg_years as i32,
         })
         .collect();
     c.set_columns(ModelRc::new(VecModel::from(headers)));
@@ -334,6 +383,8 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::Comparison {
             zone: h.zone.to_string(),
             state: h.state.to_string(),
             low_confidence: h.low_confidence,
+            ptp_avg_years: usize::try_from(h.ptp_avg_years).unwrap_or(0),
+            roe_avg_years: usize::try_from(h.roe_avg_years).unwrap_or(0),
         })
         .collect();
     steadyinvest_report::Comparison {
@@ -349,10 +400,11 @@ pub(crate) fn wire_comparison(ui: &MainWindow, s: &Session) {
         config,
         ..
     } = s;
-    // A drop-down pick: its label (unique in the pushed list) → its study id; the lists re-derive.
+    // A drop-down pick: its INDEX in that slot's list → its study id (the dropdown contract:
+    // identity, never a re-match of the label); the lists re-derive.
     {
         let ui_weak = ui.as_weak();
-        ui.global::<Comparison>().on_picked(move |slot, label| {
+        ui.global::<Comparison>().on_picked(move |slot, index| {
             let ui = ui_weak.unwrap();
             let c = ui.global::<Comparison>();
             let Ok(slot) = usize::try_from(slot) else {
@@ -362,11 +414,7 @@ pub(crate) fn wire_comparison(ui: &MainWindow, s: &Session) {
                 return;
             }
             let mut ids = pick_ids(&c);
-            ids[slot] = choices(&c)
-                .into_iter()
-                .find(|(_, l)| *l == label.as_str())
-                .map(|(id, _)| id)
-                .unwrap_or_default();
+            ids[slot] = picked_id(&choices(&c), &ids, slot, index);
             set_pick_ids(&c, &ids);
             sync_picker(&c);
         });
@@ -479,15 +527,54 @@ mod tests {
             .map(|(i, l)| (i.to_string(), l.to_string()))
             .collect();
         let picked = ids(["a", "", "c", "", ""]);
+        let labels = |slot| -> Vec<String> {
+            slot_options(&choices, &picked, slot)
+                .into_iter()
+                .map(|(_, l)| l)
+                .collect()
+        };
+        assert_eq!(labels(0), ["AAPL.US · USD", "AAPL.US · CHF"]);
+        assert_eq!(labels(1), ["AAPL.US · CHF"]);
+        assert_eq!(labels(2), ["AAPL.US · CHF", "NESN.SW"]);
+    }
+
+    #[test]
+    fn a_pick_resolves_by_its_index_in_the_slots_own_list() {
+        // The dropdown contract: the index into THIS slot's list names the study, whatever the
+        // label says — even two identical labels would resolve to their own ids.
+        let choices: Vec<(String, String)> = [("a", "SAME"), ("b", "SAME"), ("c", "NESN.SW")]
+            .iter()
+            .map(|(i, l)| (i.to_string(), l.to_string()))
+            .collect();
+        let none = ids(["", "", "", "", ""]);
+        assert_eq!(picked_id(&choices, &none, 0, 0), "a");
+        assert_eq!(picked_id(&choices, &none, 0, 1), "b");
+        // Slot 1's list lacks the study picked in slot 0: index 0 there is « b ».
+        let picked = ids(["a", "", "", "", ""]);
+        assert_eq!(picked_id(&choices, &picked, 1, 0), "b");
+        assert_eq!(picked_id(&choices, &picked, 1, 1), "c");
+        // Out of range: no pick, never a neighbour's.
+        assert_eq!(picked_id(&choices, &picked, 1, 2), "");
+        assert_eq!(picked_id(&choices, &picked, 1, -1), "");
+    }
+
+    #[test]
+    fn a_gone_pick_does_not_count_toward_two_studies() {
+        let listed: Vec<(String, String)> = [("a", "AAPL.US"), ("c", "ROG.SW")]
+            .iter()
+            .map(|(i, l)| (i.to_string(), l.to_string()))
+            .collect();
+        // « a » is listed, « b » is gone: one study to compare, « Comparer » stays off.
         assert_eq!(
-            slot_options(&choices, &picked, 0),
-            ["AAPL.US · USD", "AAPL.US · CHF"]
+            live_distinct(&ids(["a", "b", "", "", ""]), &listed, true),
+            1
         );
-        assert_eq!(slot_options(&choices, &picked, 1), ["AAPL.US · CHF"]);
         assert_eq!(
-            slot_options(&choices, &picked, 2),
-            ["AAPL.US · CHF", "NESN.SW"]
+            live_distinct(&ids(["a", "b", "c", "", ""]), &listed, true),
+            2
         );
+        // A failed listing marks nothing gone (a read failure is not an absence).
+        assert_eq!(live_distinct(&ids(["a", "b", "", "", ""]), &[], false), 2);
     }
 
     #[test]
