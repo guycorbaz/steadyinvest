@@ -152,47 +152,53 @@ export component EditableCell inherits Rectangle {
         visible: root.state.coverage == "present" && root.state.stale;
         text: Tokens.stale-dot;
         color: Tokens.text-low;
-        font-size: Tokens.font-caption;
-        // G1 J review: AFTER the ?/✓ box, never inside it (the markers never overlap each other).
-        x: root.box-end;
-        y: (parent.height - self.height) / 2;
+        font-size: Tokens.mark-font;
+        // G1 final review M4: the trailing marker column, bottom half (see the marker-space rule).
+        width: Tokens.mark-col;
+        height: parent.height / 2;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: root.trail-col-x;
+        y: parent.height / 2;
     }
-    // Story 2.7 — the plausibility warning glyph (△). Anchored at the TOP edge, just trailing of the
-    // leading trust-marker box and clear of the right-centred coverage/stale markers (AC3: a corner
-    // distinct from the review marker AND the coverage glyph, no collision). Neutral ink, never a hue;
+    // Story 2.7 — the plausibility warning glyph (△). Anchored at the TOP edge, in the trailing
+    // marker column (G1 final review M4) — the top-right corner, clear of the review mark (top-left)
+    // and of the stale dot under it (AC3: a corner distinct from the review marker AND the coverage
+    // glyph, no collision). Neutral ink, never a hue;
     // a static glyph (no animation → reduced-motion-safe by construction, AC5). Its human-readable
     // fact is revealed on focus via `Studies.active-warning` (the source-on-demand mirror).
-    // G1 J: its horizontal span is RESERVED out of the value room (`lead` below), so the glyph is
+    // G1 J: its horizontal span is RESERVED out of the value room (`trail` below), so the glyph is
     // never drawn over a wide figure (the on-screen 2020 « 14,726750 » overlap).
     warn := Text {
         visible: root.state.warning;
         text: Tokens.warn-glyph;
         color: Tokens.gap-ink;
-        font-size: Tokens.font-caption;
-        // G1 J review: next in the leading run (after the ?/✓ box and the stale dot, when shown) —
-        // compact when alone, never on top of another marker.
-        x: root.stale-end;
+        font-size: Tokens.mark-font;
+        // G1 final review M4: the trailing marker column, top half (see the marker-space rule).
+        width: Tokens.mark-col;
+        height: parent.height / 2;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: root.trail-col-x;
         y: 0;
     }
 
     // Marker-space rule (G1 J, #237): the value never shares pixels with a marker, and the markers
-    // never share pixels with each other (G1 J review). The LEADING markers are laid out as a run —
-    // the ?/✓ box (when a tag is set), then the stale dot, then the warning △ — and `lead` is the
-    // run's right edge plus a gap; `trail` reserves the trailing lock affordance / « n/a ». The
-    // value's TextInput lives strictly between them and shrinks its font (`CellFit`) down to the
-    // floor; past the floor the cell shows the overflow mark and reveals the figure on focus.
-    property <length> marker-box: Tokens.font-body + Tokens.space-8; // = TrustMarker's fixed width
-    property <length> box-end: root.state.review != "none" ? root.marker-box : Tokens.space-4;
-    property <length> stale-end: stale.visible ? stale.x + stale.width + 2px : root.box-end;
-    property <length> warn-end: warn.visible ? warn.x + warn.width : root.stale-end;
-    property <length> lead: max(Tokens.space-8, root.warn-end + Tokens.space-4);
-    // G1 final review M4: the lock affordance shows — and takes its room — only while the cell
-    // has focus (the moment a value edit is attempted, and the lock is clickable then: a click on
-    // it does not take the focus away). Unfocused, the ✓ alone says « validated », and the figure
-    // keeps the room the lock would otherwise eat at `grid-col-min`.
-    property <bool> lock-shown: root.locked && input.has-focus;
+    // never share pixels with each other (G1 J review). G1 final review M4 (G3 rework): the markers
+    // sit in two narrow COLUMNS of constant geometry (`Tokens.mark-col`, the arithmetic in
+    // tokens.slint) — LEADING: the ?/✓ review mark (top half) and the lock (bottom half); TRAILING:
+    // the △ warning (top half) and the ◦ stale dot (bottom half). A column is reserved (`lead` /
+    // `trail`) only when one of its markers shows; otherwise the bare 8 px padding. Focus never
+    // changes the geometry (display ↔ edit never resizes). `trail` also reserves « n/a ». The value's
+    // TextInput lives strictly between them and shrinks its font (`CellFit`) down to the floor;
+    // past the floor the cell shows the overflow mark and reveals the figure on focus.
+    property <length> mark-span: Tokens.mark-inset * 2 + Tokens.mark-col;
+    property <bool> lead-col: root.state.review != "none";
+    property <bool> trail-col: stale.visible || warn.visible;
+    property <length> trail-col-x: root.width - Tokens.mark-inset - Tokens.mark-col;
+    property <length> lead: root.lead-col ? root.mark-span : Tokens.space-8;
     property <length> trail: max(
-        max(Tokens.space-8, root.lock-shown ? root.marker-box + Tokens.space-4 : 0px),
+        root.trail-col ? root.mark-span : Tokens.space-8,
         na.visible ? na.width + Tokens.space-8 * 2 : 0px);
     // The shown/typed text measured at the body size — drives the shrink-to-fit font.
     measure := Text {
@@ -338,9 +344,9 @@ export component EditableCell inherits Rectangle {
     // a locked cell it stays the way to reach the cycle by mouse. Constant geometry: a fixed box, so
     // the cell never resizes on a tag change. Reduced-motion mirrored from the platform.
     TrustMarker {
-        x: 0;
+        x: Tokens.mark-inset;
         y: 0;
-        height: 100%;
+        height: parent.height / 2; // the leading column's top half (G1 final review M4)
         review: root.state.review;
         reduced-motion: Studies.reduced-motion;
         clicked => {
@@ -348,13 +354,15 @@ export component EditableCell inherits Rectangle {
         }
     }
     // Calm lock affordance on a soft-locked cell — a glyph (NO colour spent), clickable to reach the
-    // deliberate clear-✓ → ? release by mouse. Shown while the cell has focus (G1 final review M4,
-    // see `lock-shown`); Ctrl+Backspace is the same release from the keyboard. Distinct from the cycle marker so the first gesture
-    // clears and a normal edit needs the cleared (?) cell — never both in one keystroke.
-    if root.lock-shown: TouchArea {
-        width: Tokens.font-body + Tokens.space-8;
-        height: 100%;
-        x: parent.width - self.width;
+    // deliberate clear-✓ → ? release by mouse (Ctrl+Backspace from the keyboard). Distinct from the
+    // cycle marker so the first gesture clears and a normal edit needs the cleared (?) cell — never
+    // both in one keystroke. G1 final review M4/5: always shown on a ✓ cell, in the leading column's
+    // bottom half under the ✓ — no room of its own taken from the figure, no layout shift.
+    if root.locked: TouchArea {
+        width: Tokens.mark-col;
+        height: parent.height / 2;
+        x: Tokens.mark-inset;
+        y: parent.height / 2;
         mouse-cursor: no-drop;
         clicked => {
             root.clear-validation();
@@ -364,7 +372,7 @@ export component EditableCell inherits Rectangle {
         Text {
             text: "⦸";
             color: Tokens.text-low;
-            font-size: Tokens.font-body;
+            font-size: Tokens.mark-font;
             horizontal-alignment: center;
             vertical-alignment: center;
         }

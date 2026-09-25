@@ -26,8 +26,10 @@ export component TrustMarker inherits Rectangle {
     in property <bool> reduced-motion;    // OS reduced-motion → disable the ✓ draw micro-animation
     callback clicked();
 
-    // Fixed marker box — constant geometry whatever the tag (no resize on cycle, UX-DR6).
-    width: Tokens.font-body + Tokens.space-8;
+    // Fixed marker box — constant geometry whatever the tag (no resize on cycle, UX-DR6). G1 final
+    // review M4: the box is the cell's narrow leading marker column (`Tokens.mark-col`), glyphs at
+    // `Tokens.mark-font` — a validated cell's figure keeps its room at `grid-col-min`.
+    width: Tokens.mark-col;
     horizontal-stretch: 0;
     background: transparent;
 
@@ -39,7 +41,7 @@ export component TrustMarker inherits Rectangle {
     // Regime-INDEPENDENT (no `regime-emphasis`): the negative signal never attenuates (AC 4).
     Rectangle {
         visible: root.review == "to-review";
-        width: Tokens.font-body + Tokens.space-4;
+        width: Tokens.mark-col;
         height: self.width;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
@@ -50,7 +52,7 @@ export component TrustMarker inherits Rectangle {
         Text {
             text: "?";
             color: Tokens.text-high;
-            font-size: Tokens.font-body;
+            font-size: Tokens.mark-font - 3px; // inside its ring
             font-weight: Tokens.weight-semibold;  // slightly larger/heavier than the ◦ stale dot
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -64,7 +66,7 @@ export component TrustMarker inherits Rectangle {
         text: "✓";
         // Geofenced desaturated ink-green in entry; drops to neutral ink in contemplation (AC 1/4).
         color: Tokens.regime-emphasis >= 1.0 ? Tokens.validated-ink : Tokens.text-mid;
-        font-size: Tokens.font-body;
+        font-size: Tokens.mark-font;
         font-weight: Tokens.weight-semibold;
         horizontal-alignment: center;
         vertical-alignment: center;
