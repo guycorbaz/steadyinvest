@@ -275,155 +275,7 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
 
     // ── §3 Price / earnings history — the form's columns A–H over the window, totals, averages,
     //    the average and current P/E. ──
-    //    G1 final (L10): the rows and the notes under the table are gathered first, and the whole
-    //    section is reserved as one block when it fits on a page — a note never lands alone at
-    //    the top of the next page, away from its heading and its table.
-    {
-        let v = &outputs.valuation;
-        let head = [
-            "Année",
-            "A · Haut",
-            "B · Bas",
-            "C · BPA",
-            "D · A÷C",
-            "E · B÷C",
-            "F · Div.",
-            "G · F÷C %",
-            "H · F÷B %",
-        ];
-        let mut body: Vec<[String; 9]> = Vec::new();
-        for row in &v.per_year {
-            let cy = frame.series.iter().find(|y| y.year == row.year);
-            let (hp, lp, ep, dv) = match cy {
-                Some(y) => (y.high_price, y.low_price, y.eps, y.dividend_per_share),
-                None => (None, None, None, None),
-            };
-            let cells = [
-                row.year.to_string(),
-                nf.money(hp),
-                nf.money(lp),
-                nf.fmt_dec(ep, DisplayField::PerShare),
-                nf.num(row.high_pe),
-                nf.num(row.low_pe),
-                nf.fmt_dec(dv, DisplayField::PerShare),
-                nf.pct(row.payout_pct),
-                nf.pct(row.high_yield_pct),
-            ];
-            body.push(cells);
-        }
-        // G1 F — a column's total is stated only over EVERY year of the window: an unknown year,
-        // an undefined ratio (its denominator — the EPS, or the low price for H — not positive)
-        // or a sum past the decimal range leaves it absent, never a partial sum passed off as
-        // the total; each reason is named under the table, the right one (never « no figure »
-        // for a ratio the method leaves undefined).
-        let non_positive = |year: i32, pick: fn(&CanonicalYear) -> Option<Decimal>| {
-            frame
-                .series
-                .iter()
-                .find(|y| y.year == year)
-                .and_then(pick)
-                .is_some_and(|d| d <= Decimal::ZERO)
-        };
-        let entries = |value: fn(&steadyinvest_core::ssg::YearValuation) -> Option<Decimal>,
-                       denominator: fn(&CanonicalYear) -> Option<Decimal>| {
-            v.per_year
-                .iter()
-                .map(|r| match value(r) {
-                    Some(d) => Entry::Known(d),
-                    None if non_positive(r.year, denominator) => Entry::Undefined,
-                    None => Entry::Unknown,
-                })
-                .collect::<Vec<Entry>>()
-        };
-        let totals = [
-            column_total(entries(|r| r.high_pe, |y| y.eps)),
-            column_total(entries(|r| r.low_pe, |y| y.eps)),
-            column_total(entries(|r| r.payout_pct, |y| y.eps)),
-            column_total(entries(|r| r.high_yield_pct, |y| y.low_price)),
-        ];
-        let total_of = |t: &Total| match t {
-            Total::Sum(d) => Some(*d),
-            _ => None,
-        };
-        let total = [
-            "Total".to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            nf.num(total_of(&totals[0])),
-            nf.num(total_of(&totals[1])),
-            String::new(),
-            nf.pct(total_of(&totals[2])),
-            nf.pct(total_of(&totals[3])),
-        ];
-        body.push(total);
-        let avg = [
-            "Moyenne".to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            nf.num(v.avg_high_pe),
-            nf.num(v.avg_low_pe),
-            String::new(),
-            nf.pct(v.avg_payout_pct),
-            nf.pct(v.avg_high_yield_pct),
-        ];
-        body.push(avg);
-        let mut notes = Block::default();
-        if totals
-            .iter()
-            .any(|t| matches!(t, Total::Absent { unknown: true, .. }))
-        {
-            notes.small_line(TOTAL_UNKNOWN_YEAR);
-        }
-        if totals.iter().any(|t| {
-            matches!(
-                t,
-                Total::Absent {
-                    undefined: true,
-                    ..
-                }
-            )
-        }) {
-            notes.small_line(TOTAL_UNDEFINED);
-        }
-        if totals.contains(&Total::Overflow) {
-            notes.small_line(TOTAL_OVERFLOW);
-        }
-        notes.line(&format!(
-            "8 · C/B moyen (D et E) : {}   ·   9 · C/B actuel : {}   ·   valeur relative : {}",
-            nf.num(v.avg_pe),
-            nf.num(v.current_pe),
-            nf.pct(v.relative_value_pct),
-        ));
-        notes.line(&format!(
-            "Cours actuel : {}   ·   plus haut de l'année en cours : {}   ·   plus bas de l'année en cours : {}",
-            nf.money(current_price),
-            EM_DASH,
-            EM_DASH,
-        ));
-        let body_refs: Vec<Vec<&str>> = body
-            .iter()
-            .map(|r| r.iter().map(String::as_str).collect())
-            .collect();
-        // The grid's own advances: its top rule (`grid_begin`), its rows, its close (`grid_end`).
-        let mut table_h = doc.grid_rows_height(&head, &COLS9, FONT) + 3.0;
-        for r in &body_refs {
-            table_h += doc.grid_rows_height(r, &COLS9, FONT);
-        }
-        let notes_h = doc.block_height(&notes);
-        doc.keep_together_if_it_fits(SECTION_H + table_h + notes_h);
-        doc.section("3. Historique cours / bénéfice");
-        doc.grid_begin(body.len());
-        doc.grid_row_num(&head, &COLS9, true, 1);
-        for r in &body_refs {
-            doc.grid_row_num(r, &COLS9, false, 1);
-        }
-        doc.grid_end(&COLS9);
-        // Should the table itself run past a page, its notes still move as one block.
-        doc.keep_together(notes_h);
-        doc.block(&notes);
-    }
+    price_earnings_section(&mut doc, &frame, nf, current_price);
     doc.gap(6.0);
 
     // ── §4 Risk & reward — the form's A–E with every intermediate figure ──
@@ -634,6 +486,165 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
     doc.grid_end(&COLS8);
 
     Ok(doc.finish())
+}
+
+/// §3 — the price–earnings history: the form's columns A–H over the window, the totals and
+/// averages, the notes naming an absent total, the average and current P/E.
+///
+/// G1 final (L10): the rows and the notes under the table are gathered first, and the whole
+/// section is reserved as one block when it fits on a page — a note never lands alone at the top
+/// of the next page, away from its heading and its table.
+fn price_earnings_section(
+    doc: &mut Doc,
+    frame: &crate::form::StudyFrame,
+    nf: NumberStyle,
+    current_price: Option<Decimal>,
+) {
+    let outputs = frame.snapshot.outputs();
+    let v = &outputs.valuation;
+    let head = [
+        "Année",
+        "A · Haut",
+        "B · Bas",
+        "C · BPA",
+        "D · A÷C",
+        "E · B÷C",
+        "F · Div.",
+        "G · F÷C %",
+        "H · F÷B %",
+    ];
+    let mut body: Vec<[String; 9]> = Vec::new();
+    for row in &v.per_year {
+        let cy = frame.series.iter().find(|y| y.year == row.year);
+        let (hp, lp, ep, dv) = match cy {
+            Some(y) => (y.high_price, y.low_price, y.eps, y.dividend_per_share),
+            None => (None, None, None, None),
+        };
+        let cells = [
+            row.year.to_string(),
+            nf.money(hp),
+            nf.money(lp),
+            nf.fmt_dec(ep, DisplayField::PerShare),
+            nf.num(row.high_pe),
+            nf.num(row.low_pe),
+            nf.fmt_dec(dv, DisplayField::PerShare),
+            nf.pct(row.payout_pct),
+            nf.pct(row.high_yield_pct),
+        ];
+        body.push(cells);
+    }
+    // G1 F — a column's total is stated only over EVERY year of the window: an unknown year,
+    // an undefined ratio (its denominator — the EPS, or the low price for H — not positive)
+    // or a sum past the decimal range leaves it absent, never a partial sum passed off as
+    // the total; each reason is named under the table, the right one (never « no figure »
+    // for a ratio the method leaves undefined).
+    let non_positive = |year: i32, pick: fn(&CanonicalYear) -> Option<Decimal>| {
+        frame
+            .series
+            .iter()
+            .find(|y| y.year == year)
+            .and_then(pick)
+            .is_some_and(|d| d <= Decimal::ZERO)
+    };
+    let entries = |value: fn(&steadyinvest_core::ssg::YearValuation) -> Option<Decimal>,
+                   denominator: fn(&CanonicalYear) -> Option<Decimal>| {
+        v.per_year
+            .iter()
+            .map(|r| match value(r) {
+                Some(d) => Entry::Known(d),
+                None if non_positive(r.year, denominator) => Entry::Undefined,
+                None => Entry::Unknown,
+            })
+            .collect::<Vec<Entry>>()
+    };
+    let totals = [
+        column_total(entries(|r| r.high_pe, |y| y.eps)),
+        column_total(entries(|r| r.low_pe, |y| y.eps)),
+        column_total(entries(|r| r.payout_pct, |y| y.eps)),
+        column_total(entries(|r| r.high_yield_pct, |y| y.low_price)),
+    ];
+    let total_of = |t: &Total| match t {
+        Total::Sum(d) => Some(*d),
+        _ => None,
+    };
+    let total = [
+        "Total".to_string(),
+        String::new(),
+        String::new(),
+        String::new(),
+        nf.num(total_of(&totals[0])),
+        nf.num(total_of(&totals[1])),
+        String::new(),
+        nf.pct(total_of(&totals[2])),
+        nf.pct(total_of(&totals[3])),
+    ];
+    body.push(total);
+    let avg = [
+        "Moyenne".to_string(),
+        String::new(),
+        String::new(),
+        String::new(),
+        nf.num(v.avg_high_pe),
+        nf.num(v.avg_low_pe),
+        String::new(),
+        nf.pct(v.avg_payout_pct),
+        nf.pct(v.avg_high_yield_pct),
+    ];
+    body.push(avg);
+    let mut notes = Block::default();
+    if totals
+        .iter()
+        .any(|t| matches!(t, Total::Absent { unknown: true, .. }))
+    {
+        notes.small_line(TOTAL_UNKNOWN_YEAR);
+    }
+    if totals.iter().any(|t| {
+        matches!(
+            t,
+            Total::Absent {
+                undefined: true,
+                ..
+            }
+        )
+    }) {
+        notes.small_line(TOTAL_UNDEFINED);
+    }
+    if totals.contains(&Total::Overflow) {
+        notes.small_line(TOTAL_OVERFLOW);
+    }
+    notes.line(&format!(
+        "8 · C/B moyen (D et E) : {}   ·   9 · C/B actuel : {}   ·   valeur relative : {}",
+        nf.num(v.avg_pe),
+        nf.num(v.current_pe),
+        nf.pct(v.relative_value_pct),
+    ));
+    notes.line(&format!(
+            "Cours actuel : {}   ·   plus haut de l'année en cours : {}   ·   plus bas de l'année en cours : {}",
+            nf.money(current_price),
+            EM_DASH,
+            EM_DASH,
+        ));
+    let body_refs: Vec<Vec<&str>> = body
+        .iter()
+        .map(|r| r.iter().map(String::as_str).collect())
+        .collect();
+    // The grid's own advances: its top rule (`grid_begin`), its rows, its close (`grid_end`).
+    let mut table_h = doc.grid_rows_height(&head, &COLS9, FONT) + 3.0;
+    for r in &body_refs {
+        table_h += doc.grid_rows_height(r, &COLS9, FONT);
+    }
+    let notes_h = doc.block_height(&notes);
+    doc.keep_together_if_it_fits(SECTION_H + table_h + notes_h);
+    doc.section("3. Historique cours / bénéfice");
+    doc.grid_begin(body.len());
+    doc.grid_row_num(&head, &COLS9, true, 1);
+    for r in &body_refs {
+        doc.grid_row_num(r, &COLS9, false, 1);
+    }
+    doc.grid_end(&COLS9);
+    // Should the table itself run past a page, its notes still move as one block.
+    doc.keep_together(notes_h);
+    doc.block(&notes);
 }
 
 // ── neutral formatting helpers (None → em-dash, never 0; exact-decimal display rounding) ──
@@ -1843,11 +1854,7 @@ impl Doc {
         let x0 = MARGIN + CHART_AXIS_W;
         let x1 = self.page_w - MARGIN;
         let plot_w = x1 - x0;
-        // The horizontal domain: the first year … the last year + the forecast horizon, with half a
-        // year of room at each end (G1 final, L5: the first year's price bar is never drawn on the
-        // frame's edge).
-        let span = f64::from(last_year - first_year + horizon) + 2.0 * YEAR_PAD;
-        let origin = f64::from(first_year) - YEAR_PAD;
+        let (origin, span) = year_domain(first_year, last_year);
         let px = |year: f64| year_x(year, origin, span, x0, plot_w);
         let py = |v: f64, lmin: f64, lmax: f64| {
             let t = ((v.max(1e-9).log10() - lmin) / (lmax - lmin)).clamp(0.0, 1.0);
@@ -2099,12 +2106,12 @@ impl Doc {
             PricePlace::Below => {
                 edge_arrow(&mut self.cur, x0, top + ZONEBAR_H / 2.0, -1.0);
                 let label = caption(Some(MARKER_BELOW));
-                text(&mut self.cur, x0, top - 4.0, 7.0, &label);
+                text(&mut self.cur, x0, top - 6.0, 7.0, &label);
             }
             PricePlace::Above => {
                 edge_arrow(&mut self.cur, x1, top + ZONEBAR_H / 2.0, 1.0);
                 let label = caption(Some(MARKER_ABOVE));
-                text_right(&mut self.cur, x1, top - 4.0, 7.0, &label);
+                text_right(&mut self.cur, x1, top - 6.0, 7.0, &label);
             }
             PricePlace::Absent => {}
         }
@@ -2546,6 +2553,17 @@ fn series_log_bounds(values: &[f64]) -> Option<(f64, f64)> {
 /// gap year keeps its place.
 fn year_x(year: f64, origin: f64, span: f64, x0: f32, plot_w: f32) -> f32 {
     x0 + (((year - origin) / span.max(1.0)) * f64::from(plot_w)) as f32
+}
+
+/// G1 final (L5) — the §1 x axis's `(origin, span)` in years: the first year … the last year +
+/// the forecast horizon, with [`YEAR_PAD`] of room at each end, so the first year's price bar is
+/// never drawn on the frame's edge.
+fn year_domain(first_year: i32, last_year: i32) -> (f64, f64) {
+    let horizon = FORECAST_HORIZON_YEARS as i32;
+    (
+        f64::from(first_year) - YEAR_PAD,
+        f64::from(last_year - first_year + horizon) + 2.0 * YEAR_PAD,
+    )
 }
 
 /// G1 final (M2 / L5) — a series' drawable runs: consecutive years (by YEAR, `year + 1`) whose
@@ -3689,9 +3707,9 @@ mod tests {
     #[test]
     fn the_first_year_is_not_drawn_on_the_frame_edge() {
         // L5: half a year of room at each end of the axis.
+        // The chart's own domain helper, as `growth_chart` calls it.
         let (first, last) = (2015, 2024);
-        let span = f64::from(last - first + FORECAST_HORIZON_YEARS as i32) + 2.0 * YEAR_PAD;
-        let origin = f64::from(first) - YEAR_PAD;
+        let (origin, span) = year_domain(first, last);
         let x = |y: i32| year_x(f64::from(y), origin, span, 100.0, 300.0);
         assert!(
             x(first) > 100.0 + 5.0,
@@ -3782,13 +3800,32 @@ mod tests {
             0,
             "a block taller than a page is not chased"
         );
-        // End to end: the demo's §3 notes sit on the page of its heading.
-        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
-        let pages = page_streams(&bytes);
-        let with = |s: &str| pages.iter().position(|p| contains(p, s));
-        assert_eq!(
-            with("3. Historique cours / bénéfice"),
-            with("8 · C/B moyen (D et E) :")
+    }
+
+    #[test]
+    fn section_3_moves_whole_when_it_would_straddle_a_page_break() {
+        // L10, end to end: §3 started where its heading and a few rows fit (the heading's own reserve)
+        // but not the whole section — the section moves whole, nothing of it stays behind.
+        let frame = crate::form::build_frame(&demo_study()).unwrap();
+        let mut doc = Doc::new();
+        doc.y = PAGE_H - BOTTOM - (HEAD_FONT + 5.0 * LINE_H + 20.0);
+        price_earnings_section(
+            &mut doc,
+            &frame,
+            NumberStyle::Point,
+            Some(Decimal::from(80)),
         );
+        let pages = page_streams(&doc.finish());
+        assert_eq!(pages.len(), 2);
+        for part in [
+            "3. Historique cours / bénéfice",
+            "Année",
+            "Moyenne",
+            "8 · C/B moyen (D et E) :",
+            "Cours actuel :",
+        ] {
+            assert!(!contains(&pages[0], part), "left behind: {part}");
+            assert!(contains(&pages[1], part), "not with its section: {part}");
+        }
     }
 }
