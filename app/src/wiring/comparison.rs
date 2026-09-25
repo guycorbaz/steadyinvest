@@ -356,6 +356,23 @@ pub(crate) fn push_comparison(
     c.set_columns(ModelRc::new(VecModel::from(headers)));
 }
 
+/// Re-render the table on screen in `format` (a number-format change — G1 final review,
+/// re-render completeness); the notice slot keeps its export outcome (this is the same table). A
+/// closed comparison is rebuilt by « Comparer » when it reopens.
+pub(crate) fn rerender_comparison(
+    ui: &MainWindow,
+    state: &JournalState,
+    format: crate::viewmodel::format::NumberFormat,
+) {
+    let c = ui.global::<Comparison>();
+    if !ui.global::<Studies>().get_compare_open() || c.get_column_count() == 0 {
+        return;
+    }
+    let notice = c.get_notice();
+    push_comparison(ui, state, format);
+    c.set_notice(notice);
+}
+
 /// The report's value from the pushed global (one formatting path, no drift).
 fn report_value(ui: &MainWindow) -> steadyinvest_report::Comparison {
     let c = ui.global::<Comparison>();

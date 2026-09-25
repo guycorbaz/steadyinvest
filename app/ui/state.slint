@@ -59,10 +59,11 @@ export struct ScreeningRow {
     years: string,
     sales-rate: string,
     eps-rate: string,
-    eps-vs-sales: string,   // eps | sales | same | ""
+    eps-vs-sales: string,   // eps | sales | same | years | "" (years = different periods)
     pe-position: string,    // higher | similar | lower | ""
     price-vs-high: string,  // signed %, "" = unknown
     has-study: bool,
+    window-short: bool,     // a ladder's six-year window holds no two disjoint pairs
 }
 
 // One stored exchange rate (Story 6.5, FR28): dated + source-aware, BASE → QUOTE (the reference
@@ -1261,12 +1262,14 @@ export global QuickScreen {
     in-out property <string> sales-span;
     in-out property <bool> sales-nonpositive-base;   // line (10) absent: old average ≤ 0
     in-out property <bool> sales-unavailable;
+    in-out property <bool> sales-rate-nonpositive;   // rate absent: average (4) or (8) ≤ 0
     in-out property <[string]> eps-lines;
     in-out property <[string]> eps-years;
     in-out property <string> eps-rate;
     in-out property <string> eps-span;
     in-out property <bool> eps-nonpositive-base;
     in-out property <bool> eps-unavailable;
+    in-out property <bool> eps-rate-nonpositive;
     in-out property <string> eps-vs-sales;   // eps | sales | same | ""
     // §3
     in-out property <[QuickPriceRow]> price-rows;
@@ -1306,6 +1309,11 @@ export global QuickScreen {
     in-out property <string> pick-currency;
     callback examine(string, string);   // ticker, currency → fetch, then open
     callback examine-study();           // the open study's own years → open
+    // G1 final review: an « Examiner » result that arrived while the list was not on screen (or
+    // with a study / the comparison / another examination open) is KEPT, never lost nor laid
+    // over what the reader has open — its ticker is named here and « Ouvrir l'examen » opens it.
+    in-out property <string> ready-ticker;
+    callback open-ready();
     callback close();
     callback export-pdf();
     callback create-study();

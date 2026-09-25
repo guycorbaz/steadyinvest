@@ -21,7 +21,6 @@ use crate::wiring::Session;
 use crate::wiring::fetch::resolve_chain;
 use crate::wiring::quick_screen::{
     QuickScreenSession, has_analysis_years, session_from_fetch, session_from_study, show,
-    supersede_request,
 };
 use crate::{MainWindow, ScreeningRow, Watchlist};
 
@@ -70,6 +69,7 @@ fn push(ui: &MainWindow, session: &ScreeningSession, format: NumberFormat) {
                 pe_position: v.pe_position.into(),
                 price_vs_high: v.price_vs_high.into(),
                 has_study: v.has_study,
+                window_short: v.window_short,
             }
         })
         .collect();
@@ -85,6 +85,18 @@ fn push(ui: &MainWindow, session: &ScreeningSession, format: NumberFormat) {
     w.set_screening_done(done as i32);
     w.set_screening_total(session.rows.len() as i32);
     w.set_screening_quota(session.stop.load(Ordering::Relaxed));
+}
+
+/// Re-render the criblage card of the run of the moment — running or finished — in `format`
+/// (G1 final review, re-render completeness: a number-format change re-spells its rates).
+pub(crate) fn rerender_screening(
+    ui: &MainWindow,
+    slot: &RefCell<Option<ScreeningSession>>,
+    format: NumberFormat,
+) {
+    if let Some(session) = slot.borrow().as_ref() {
+        push(ui, session, format);
+    }
 }
 
 /// One row's fetch outcome: `quota` = this row latched the run's quota stop.
@@ -194,7 +206,6 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
         journal_state,
         config,
         quick_screen,
-        quick_screen_request,
         screening,
         fetch_tx,
         ..
@@ -287,7 +298,6 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let slot = Rc::clone(screening);
         let quick_screen = Rc::clone(quick_screen);
-        let request = Rc::clone(quick_screen_request);
         ui.global::<Watchlist>().on_open_screening(move |index| {
             let ui = ui_weak.unwrap();
             let session = slot
@@ -300,7 +310,8 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
                 });
             let Some(session) = session else { return };
             let format = config.borrow().number_format;
-            supersede_request(&ui, &request);
+            // G1 final review: an « Examiner » fetch in flight is NOT cancelled in silence — its
+            // result is kept and named on the studies list (`quick_screen::lands_now`).
             show(&ui, &journal_state.borrow(), format, &quick_screen, session);
             // The examination screen lives under Études.
             ui.set_current_screen(0);

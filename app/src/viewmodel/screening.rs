@@ -59,8 +59,12 @@ pub struct ScreeningRowView {
     pub ticker: String,
     /// pending | done | unavailable | quota
     pub state: String,
-    /// « 6 / 6 », « 4 / 6 », « < 4 / 6 »; "" before the examination.
+    /// « 6 / 6 », « 4 / 6 »; "" before the examination or when a ladder is unavailable.
     pub years: String,
+    /// A ladder is unavailable: its six-year window holds no two disjoint consecutive pairs — the
+    /// screen words the cause (the window), never « < 4 » (G1 final review: a long series with a
+    /// gap in the window is not « fewer than four years »).
+    pub window_short: bool,
     pub sales_rate: String,
     pub eps_rate: String,
     /// eps | sales | same | ""
@@ -112,16 +116,17 @@ pub fn screening_row_view(
     };
     ScreeningRowView {
         state: "done".into(),
-        years: match years_used(out) {
-            Some(n) => format!("{n} / {FORM_YEARS}"),
-            None => format!("< 4 / {FORM_YEARS}"),
-        },
+        years: years_used(out)
+            .map(|n| format!("{n} / {FORM_YEARS}"))
+            .unwrap_or_default(),
+        window_short: years_used(out).is_none(),
         sales_rate: pct(out.sales.compound_rate_pct, format),
         eps_rate: pct(out.eps.compound_rate_pct, format),
         eps_vs_sales: match out.eps_vs_sales {
             Some(RateComparison::EpsFaster) => "eps",
             Some(RateComparison::SalesFaster) => "sales",
             Some(RateComparison::Same) => "same",
+            Some(RateComparison::DifferentYears) => "years",
             None => "",
         }
         .into(),
@@ -232,7 +237,19 @@ mod tests {
         let mut out = QuickScreenOutputs::default();
         out.sales.unavailable = true;
         let v = screening_row_view("x", false, &RowState::Examined(&out), NumberFormat::Comma);
-        assert_eq!(v.years, "< 4 / 6");
+        assert_eq!(v.years, "", "never « < 4 / 6 »: the cause is the window");
+        assert!(v.window_short);
         assert_eq!(v.sales_rate, "");
+        // Two ladders over different years: said, never compared.
+        let mut out = QuickScreenOutputs {
+            sales: ladder(2025, 2020, "8.2"),
+            eps: ladder(2024, 2019, "5.1"),
+            eps_vs_sales: Some(RateComparison::DifferentYears),
+            ..QuickScreenOutputs::default()
+        };
+        let v = screening_row_view("x", false, &RowState::Examined(&out), NumberFormat::Comma);
+        assert_eq!(v.eps_vs_sales, "years");
+        assert!(!v.window_short);
+        out.eps_vs_sales = None;
     }
 }

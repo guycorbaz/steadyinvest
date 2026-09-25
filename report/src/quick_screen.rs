@@ -18,6 +18,9 @@ pub struct QuickScreenLadder {
     pub span_years: String,
     /// Line (10) is absent because the old average (8) is zero or negative (G1 D review).
     pub nonpositive_base: bool,
+    /// The rate is absent because an average, (4) or (8), is zero or negative — a compound rate
+    /// is not defined there (G1 final review: the « — » names its cause).
+    pub rate_nonpositive: bool,
     pub unavailable: bool,
 }
 
@@ -32,7 +35,8 @@ pub struct QuickScreenPriceRow {
     pub pe_low: String,
 }
 
-/// The examination, ready to lay out. Keys: `eps_vs_sales` ∈ eps | sales | same | "";
+/// The examination, ready to lay out. Keys: `eps_vs_sales` ∈ eps | sales | same | years | ""
+/// (`years` = the two ladders read different years: not compared);
 /// `factors_continue` ∈ yes | less | no | ""; `pe_position` ∈ higher | similar | lower | "";
 /// `sales_meets` / `eps_meets` ∈ yes | no | no-rate | unread | "" (`""` = objective blank,
 /// `no-rate` = the rate is absent, `unread` = the objective is not a number);
@@ -117,8 +121,11 @@ const E_OLD_PRIOR: &str = "(6) BPA il y a {} ans";
 const RATE_SALES: &str = "Taux annuel composé de croissance des ventes";
 const RATE_EPS: &str = "Taux annuel composé de croissance du BPA";
 const SPAN_NOTE: &str = "Base : deux moyennes de deux ans, à {} ans d'écart (formulaire : 5).";
-const UNAVAILABLE: &str =
-    "indisponible (les années exploitables ne forment pas deux paires consécutives)";
+const UNAVAILABLE: &str = "indisponible (moins de deux paires d'années consécutives distinctes dans la fenêtre de six ans du formulaire)";
+const RATE_NONPOSITIVE: &str =
+    "Taux « — » : la moyenne (4) ou (8) n'est pas positive ; un taux composé n'y est pas défini.";
+const DIFFERENT_YEARS: &str =
+    "Le BPA et les ventes ne couvrent pas les mêmes années : leurs taux ne sont pas comparés.";
 const EPS_FASTER: &str = "Le BPA a augmenté plus vite que les ventes sur la période.";
 const SALES_FASTER: &str = "Le BPA a augmenté moins vite que les ventes sur la période.";
 const SAME_PACE: &str = "Le BPA et les ventes ont augmenté au même rythme sur la période.";
@@ -220,6 +227,8 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     RATE_EPS,
     SPAN_NOTE,
     UNAVAILABLE,
+    RATE_NONPOSITIVE,
+    DIFFERENT_YEARS,
     EPS_FASTER,
     SALES_FASTER,
     SAME_PACE,
@@ -343,7 +352,26 @@ fn ladder(doc: &mut Doc, l: &QuickScreenLadder, labels: [&str; 10], rate_label: 
         doc.two_columns(&label, or_dash(value));
     }
     doc.two_columns(rate_label, or_dash(&l.rate));
+    if let Some(note) = rate_note(l) {
+        doc.small_line(note);
+    }
     doc.small_line(&fill(SPAN_NOTE, &[span]));
+}
+
+/// Why a ladder's rate reads « — », when the cause is a non-positive average (G1 final review).
+fn rate_note(l: &QuickScreenLadder) -> Option<&'static str> {
+    (l.rate_nonpositive && l.rate.is_empty()).then_some(RATE_NONPOSITIVE)
+}
+
+/// The EPS-versus-sales fact from its key; two different periods say so (G1 final review).
+fn eps_vs_sales_line(key: &str) -> Option<&'static str> {
+    match key {
+        "eps" => Some(EPS_FASTER),
+        "sales" => Some(SALES_FASTER),
+        "same" => Some(SAME_PACE),
+        "years" => Some(DIFFERENT_YEARS),
+        _ => None,
+    }
 }
 
 fn price_vs_high_word(key: &str) -> Option<&'static str> {
@@ -498,11 +526,8 @@ pub fn render_quick_screen(q: &QuickScreen) -> Vec<u8> {
         ],
         RATE_EPS,
     );
-    match q.eps_vs_sales.as_str() {
-        "eps" => doc.line(EPS_FASTER),
-        "sales" => doc.line(SALES_FASTER),
-        "same" => doc.line(SAME_PACE),
-        _ => {}
+    if let Some(line) = eps_vs_sales_line(&q.eps_vs_sales) {
+        doc.line(line);
     }
     doc.small_line(REASONS);
     doc.indent_line(or_dash(&q.reasons));
@@ -639,6 +664,7 @@ mod tests {
             rate: rate.into(),
             span_years: "5".into(),
             nonpositive_base: false,
+            rate_nonpositive: false,
             unavailable: false,
         };
         QuickScreen {
@@ -706,6 +732,20 @@ mod tests {
         let mut q = QuickScreen::default();
         assert!(render_quick_screen(&q).starts_with(b"%PDF-"));
         q.sales.unavailable = true;
+        assert!(render_quick_screen(&q).starts_with(b"%PDF-"));
+    }
+
+    #[test]
+    fn an_absent_rate_and_an_uncompared_pair_name_their_causes() {
+        let mut q = sample();
+        assert_eq!(rate_note(&q.sales), None);
+        q.sales.rate.clear();
+        q.sales.rate_nonpositive = true;
+        assert_eq!(rate_note(&q.sales), Some(RATE_NONPOSITIVE));
+        assert_eq!(eps_vs_sales_line("years"), Some(DIFFERENT_YEARS));
+        assert_eq!(eps_vs_sales_line("sales"), Some(SALES_FASTER));
+        assert_eq!(eps_vs_sales_line(""), None);
+        q.eps_vs_sales = "years".into();
         assert!(render_quick_screen(&q).starts_with(b"%PDF-"));
     }
 

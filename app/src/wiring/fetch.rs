@@ -184,6 +184,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         fetch_cancel,
         fetch_tx,
         quick_screen,
+        quick_screen_ready,
         quick_screen_request,
         screening,
         ..
@@ -194,6 +195,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         let config = Rc::clone(config);
         let quick_screen = Rc::clone(quick_screen);
+        let quick_screen_ready = Rc::clone(quick_screen_ready);
         let quick_screen_request = Rc::clone(quick_screen_request);
         let screening = Rc::clone(screening);
         let holding_freshness = Rc::clone(holding_freshness);
@@ -328,6 +330,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         &journal_state.borrow(),
                         format,
                         &quick_screen,
+                        &quick_screen_ready,
                         &quick_screen_request,
                         crate::wiring::quick_screen::FetchedExamination {
                             request_id,
@@ -630,8 +633,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 study_notice::fail(
                     &ui,
                     Source::Fetch,
-                    &state::MSG_PROVIDER_FAILED
-                        .replace("{cause}", "le service de récupération est indisponible"),
+                    &state::MSG_PROVIDER_FAILED.replace("{cause}", state::MSG_FETCH_WORKER_GONE),
                 );
             }
         });
@@ -734,7 +736,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             {
                 prefs.set_provider_status(
                     state::MSG_PROVIDER_FAILED
-                        .replace("{cause}", "le service de récupération est indisponible")
+                        .replace("{cause}", state::MSG_FETCH_WORKER_GONE)
                         .into(),
                 );
             } else {

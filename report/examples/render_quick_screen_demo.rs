@@ -11,6 +11,7 @@ fn main() {
         rate: rate.into(),
         span_years: "5".into(),
         nonpositive_base: false,
+        rate_nonpositive: false,
         unavailable: false,
     };
     let q = QuickScreen {

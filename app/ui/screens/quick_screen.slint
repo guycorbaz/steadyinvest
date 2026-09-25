@@ -49,6 +49,7 @@ component Ladder inherits VerticalLayout {
     in property <string> span;
     in property <bool> nonpositive-base;  // line (10) absent: the old average is ≤ 0
     in property <bool> unavailable;
+    in property <bool> rate-nonpositive;  // rate absent: average (4) or (8) is ≤ 0
     in property <string> rate-label;
     in property <string> recent-label;
     in property <string> recent-prior-label;
@@ -67,7 +68,7 @@ component Ladder inherits VerticalLayout {
     }
     if root.unavailable: StatusBand {
         icon: "◦";
-        text: @tr("indisponible : les années exploitables ne forment pas deux paires consécutives");
+        text: @tr("indisponible : moins de deux paires d'années consécutives distinctes dans la fenêtre de six ans du formulaire");
     }
     if !root.unavailable: VerticalLayout {
         spacing: Tokens.space-4;
@@ -106,6 +107,10 @@ component Ladder inherits VerticalLayout {
                 vertical-alignment: center;
                 width: 180px;
             }
+        }
+        // The rate's « — » names its cause (G1 final review).
+        if root.rate-nonpositive && root.rate == "": Label {
+            text: @tr("Taux « — » : la moyenne (4) ou (8) n'est pas positive ; un taux composé n'y est pas défini.");
         }
         Label { text: @tr("Base : deux moyennes de deux ans, à {} ans d'écart (formulaire : 5).", root.span); }
     }
@@ -188,6 +193,7 @@ export component QuickScreenScreen inherits Rectangle {
                     span: QuickScreen.sales-span;
                     nonpositive-base: QuickScreen.sales-nonpositive-base;
                     unavailable: QuickScreen.sales-unavailable;
+                    rate-nonpositive: QuickScreen.sales-rate-nonpositive;
                     rate-label: @tr("Taux annuel composé de croissance des ventes");
                     recent-label: @tr("(1) Ventes de l'année la plus récente");
                     recent-prior-label: @tr("(2) Ventes de l'année précédente");
@@ -204,6 +210,7 @@ export component QuickScreenScreen inherits Rectangle {
                     span: QuickScreen.eps-span;
                     nonpositive-base: QuickScreen.eps-nonpositive-base;
                     unavailable: QuickScreen.eps-unavailable;
+                    rate-nonpositive: QuickScreen.eps-rate-nonpositive;
                     rate-label: @tr("Taux annuel composé de croissance du BPA");
                     recent-label: @tr("(1) BPA de l'année la plus récente");
                     recent-prior-label: @tr("(2) BPA de l'année précédente");
@@ -213,6 +220,7 @@ export component QuickScreenScreen inherits Rectangle {
                 if QuickScreen.eps-vs-sales == "eps": StatusBand { icon: "◦"; text: @tr("Le BPA a augmenté plus vite que les ventes sur la période."); }
                 if QuickScreen.eps-vs-sales == "sales": StatusBand { icon: "◦"; text: @tr("Le BPA a augmenté moins vite que les ventes sur la période."); }
                 if QuickScreen.eps-vs-sales == "same": StatusBand { icon: "◦"; text: @tr("Le BPA et les ventes ont augmenté au même rythme sur la période."); }
+                if QuickScreen.eps-vs-sales == "years": StatusBand { icon: "◦"; text: @tr("Le BPA et les ventes ne couvrent pas les mêmes années : leurs taux ne sont pas comparés."); }
                 Label { text: @tr("Raisons apparentes de l'écart et de la croissance passée (votre note, non enregistrée) :"); }
                 TextField {
                     placeholder: @tr("p. ex. un nouveau produit, une reprise cyclique, une acquisition…");

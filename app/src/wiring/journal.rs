@@ -76,6 +76,7 @@ pub(crate) fn render_journal_panel(ui: &MainWindow, state: &JournalState, config
 pub(crate) struct DossierSession {
     current_study: Rc<RefCell<Option<String>>>,
     quick_screen: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
+    quick_screen_ready: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
     quick_screen_request: Rc<std::cell::Cell<u64>>,
     screening: Rc<RefCell<Option<crate::wiring::screening::ScreeningSession>>>,
     /// `(path, status)` of the last SUCCESSFUL open/create/switch — the open dossier's own status
@@ -90,6 +91,7 @@ impl DossierSession {
         Self {
             current_study: Rc::clone(&s.current_study),
             quick_screen: Rc::clone(&s.quick_screen),
+            quick_screen_ready: Rc::clone(&s.quick_screen_ready),
             quick_screen_request: Rc::clone(&s.quick_screen_request),
             screening: Rc::clone(&s.screening),
             opened_status: Rc::new(RefCell::new(None)),
@@ -133,6 +135,7 @@ fn clear_dossier_session(ui: &MainWindow, session: &DossierSession) {
     crate::wiring::quick_screen::clear_examination(
         ui,
         &session.quick_screen,
+        &session.quick_screen_ready,
         &session.quick_screen_request,
     );
     crate::wiring::screening::close_screening(ui, &session.screening);

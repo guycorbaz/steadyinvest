@@ -695,9 +695,12 @@ mod tests {
         // Slint lines are callbacks and handlers): 953 + 0 = 953, measured.
         // G1 M (#237): rows 5 / 6 of the comparison and the study screen's §2 average column say
         // the years actually averaged (comparison 2 → 6 labels, study 1 → 4 titles): +7 = 960,
-        // measured.
+        // measured. The same pass, area 4 (#237): the rate « — » cause, the « different years »
+        // band and criblage word, the criblage's « fenêtre incomplète », the kept-examination band
+        // and its « Ouvrir l'examen » (the ladder's unavailable band is reworded in place): +6 =
+        // 966, measured.
         assert!(
-            total >= 960,
+            total >= 966,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -819,7 +822,9 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            158,
+            159,
+            // G1 final review: the worker-gone cause moves out of three rails into a registered
+            // message (MSG_FETCH_WORKER_GONE): 158 + 1 = 159, measured.
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured.

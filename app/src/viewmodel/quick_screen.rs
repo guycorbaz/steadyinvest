@@ -55,6 +55,11 @@ fn ladder(l: &Ladder, field: DisplayField, format: NumberFormat) -> QuickScreenL
         span_years: l.span_years.to_string(),
         // Line (10) is absent on a non-positive old average: the layouts say why (G1 D review).
         nonpositive_base: l.old_avg.is_some_and(|o| o <= Decimal::ZERO),
+        // The rate's « — » names its cause when an average is ≤ 0 (G1 final review).
+        rate_nonpositive: l.compound_rate_pct.is_none()
+            && [l.recent_avg, l.old_avg]
+                .iter()
+                .any(|a| a.is_some_and(|a| a <= Decimal::ZERO)),
         unavailable: false,
     }
 }
@@ -144,6 +149,7 @@ pub fn quick_screen_view(
             Some(RateComparison::EpsFaster) => "eps",
             Some(RateComparison::SalesFaster) => "sales",
             Some(RateComparison::Same) => "same",
+            Some(RateComparison::DifferentYears) => "years",
             None => "",
         }
         .into(),
@@ -285,6 +291,35 @@ mod tests {
         assert!(v.eps.nonpositive_base);
         assert_eq!(v.eps.lines[9], "");
         assert!(!v.sales.nonpositive_base);
+        // The rate's « — » names its cause too — an old OR a recent average ≤ 0 (G1 final).
+        assert!(v.eps.rate_nonpositive);
+        out.eps.old_avg = Some(d("2"));
+        out.eps.recent_avg = Some(d("0"));
+        assert!(
+            quick_screen_view(head(), &out, NumberFormat::Comma)
+                .eps
+                .rate_nonpositive
+        );
+        // A present rate, or absent averages: nothing to explain by a sign.
+        out.eps.compound_rate_pct = Some(d("3"));
+        assert!(
+            !quick_screen_view(head(), &out, NumberFormat::Comma)
+                .eps
+                .rate_nonpositive
+        );
+        assert!(!v.sales.rate_nonpositive);
+    }
+
+    #[test]
+    fn two_ladders_over_different_years_are_said_not_compared() {
+        let out = QuickScreenOutputs {
+            eps_vs_sales: Some(RateComparison::DifferentYears),
+            ..QuickScreenOutputs::default()
+        };
+        assert_eq!(
+            quick_screen_view(head(), &out, NumberFormat::Comma).eps_vs_sales,
+            "years"
+        );
     }
 
     /// The decision is taken on the rate as shown: 6,96 % reads « 7,0 % », which meets 7.

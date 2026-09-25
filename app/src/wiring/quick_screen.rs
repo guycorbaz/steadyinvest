@@ -76,12 +76,14 @@ fn push(ui: &MainWindow, session: &QuickScreenSession, today: &str, format: Numb
     q.set_sales_span(view.sales.span_years.into());
     q.set_sales_nonpositive_base(view.sales.nonpositive_base);
     q.set_sales_unavailable(view.sales.unavailable);
+    q.set_sales_rate_nonpositive(view.sales.rate_nonpositive);
     q.set_eps_lines(strings(&view.eps.lines));
     q.set_eps_years(strings(&view.eps.years));
     q.set_eps_rate(view.eps.rate.into());
     q.set_eps_span(view.eps.span_years.into());
     q.set_eps_nonpositive_base(view.eps.nonpositive_base);
     q.set_eps_unavailable(view.eps.unavailable);
+    q.set_eps_rate_nonpositive(view.eps.rate_nonpositive);
     q.set_eps_vs_sales(view.eps_vs_sales.into());
     let rows: Vec<QuickPriceRow> = view
         .price_rows
@@ -123,6 +125,21 @@ fn push(ui: &MainWindow, session: &QuickScreenSession, today: &str, format: Numb
     );
     q.set_eps_meets(meets_key(session.outputs.eps.compound_rate_pct, &objective, format).into());
     q.set_notice(SharedString::new());
+}
+
+/// Re-render the examination of the moment in `format` (a number-format change — G1 final
+/// review, re-render completeness). The reader's fields stay; the notice slot keeps its message.
+pub(crate) fn rerender(
+    ui: &MainWindow,
+    state: &JournalState,
+    slot: &std::cell::RefCell<Option<QuickScreenSession>>,
+    format: NumberFormat,
+) {
+    if let Some(session) = slot.borrow().as_ref() {
+        let notice = ui.global::<QuickScreen>().get_notice();
+        push(ui, session, &today(state), format);
+        ui.global::<QuickScreen>().set_notice(notice);
+    }
 }
 
 /// The examination from a canonical series + the present facts.
@@ -212,8 +229,9 @@ pub(crate) fn show(
     ui.global::<Studies>().set_screen_open(true);
 }
 
-/// Supersede any examination fetch in flight: its result will be dropped (another examination
-/// is now the one of the moment).
+/// Supersede any examination fetch in flight: its result will be dropped — the dossier-switch
+/// reset only (G1 final review: opening another examination no longer cancels an « Examiner » in
+/// silence; its result lands in the kept slot instead, see [`lands_now`]).
 pub(crate) fn supersede_request(ui: &MainWindow, request: &Cell<u64>) {
     request.set(request.get() + 1);
     ui.global::<QuickScreen>().set_fetching(false);
@@ -282,10 +300,15 @@ pub(crate) fn close_screen(
 pub(crate) fn clear_examination(
     ui: &MainWindow,
     slot: &std::cell::RefCell<Option<QuickScreenSession>>,
+    ready: &std::cell::RefCell<Option<QuickScreenSession>>,
     request: &Cell<u64>,
 ) {
     supersede_request(ui, request);
     *slot.borrow_mut() = None;
+    // A kept « Examiner » result was asked in the previous dossier: it goes too.
+    *ready.borrow_mut() = None;
+    ui.global::<QuickScreen>()
+        .set_ready_ticker(SharedString::new());
     ui.global::<Studies>().set_screen_open(false);
     ui.global::<QuickScreen>().set_notice(SharedString::new());
 }
@@ -305,14 +328,29 @@ pub(crate) fn has_analysis_years(fetched: &FetchedFinancials) -> bool {
     fetched.canonical.years.iter().any(|y| y.sales.is_some())
 }
 
+/// PURE (G1 final review): an « Examiner » result opens at once only when the studies LIST is what
+/// the reader has on screen — Études, with no study, comparison or examination open. Anywhere
+/// else it is kept (never lost when the reader comes back, never laid over what they have open).
+pub(crate) fn lands_now(
+    current_screen: i32,
+    study_open: bool,
+    compare_open: bool,
+    screen_open: bool,
+) -> bool {
+    current_screen == 0 && !study_open && !compare_open && !screen_open
+}
+
 /// The worker's examination result (called from the fetch outcome handler). Only the LATEST
 /// request is shown — a superseded one is dropped (G1 review: keyed by request identity, never by
-/// « whatever arrives last »), and its currency is the one picked when it was asked.
+/// « whatever arrives last »), and its currency is the one picked when it was asked. It opens at
+/// once on the studies list; elsewhere it is kept in `ready` and named on the list's
+/// « Examiner un titre » card ([`lands_now`]).
 pub(crate) fn on_fetched(
     ui: &MainWindow,
     state: &JournalState,
     format: NumberFormat,
     slot: &Rc<std::cell::RefCell<Option<QuickScreenSession>>>,
+    ready: &std::cell::RefCell<Option<QuickScreenSession>>,
     request: &Cell<u64>,
     outcome: FetchedExamination,
 ) {
@@ -333,7 +371,19 @@ pub(crate) fn on_fetched(
                 fetched,
                 outcome.effective,
             );
-            show(ui, state, format, slot, session);
+            let studies = ui.global::<Studies>();
+            if lands_now(
+                ui.get_current_screen(),
+                studies.get_study_open(),
+                studies.get_compare_open(),
+                studies.get_screen_open(),
+            ) {
+                show(ui, state, format, slot, session);
+            } else {
+                tracing::info!(ticker = %session.ticker, "quick screen result kept for the list");
+                q.set_ready_ticker(session.ticker.as_str().into());
+                *ready.borrow_mut() = Some(session);
+            }
         }
         Err(error) => {
             crate::wiring::dialog::refuse(ui, state::provider_failure_notice(&error));
@@ -376,6 +426,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         config,
         current_study,
         quick_screen: slot,
+        quick_screen_ready: ready,
         quick_screen_request: request,
         fetch_tx,
         ..
@@ -440,7 +491,7 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
                 crate::wiring::dialog::refuse(
                     &ui,
                     &state::MSG_PROVIDER_FAILED
-                        .replace("{cause}", "le service de récupération est indisponible"),
+                        .replace("{cause}", state::MSG_FETCH_WORKER_GONE),
                 );
             }
         });
@@ -452,7 +503,6 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let current_study = Rc::clone(current_study);
         let slot = Rc::clone(slot);
-        let request = Rc::clone(request);
         ui.global::<QuickScreen>().on_examine_study(move || {
             let ui = ui_weak.unwrap();
             let Some(study) = current_study
@@ -471,7 +521,26 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
                 }
             };
             let format = config.borrow().number_format;
-            supersede_request(&ui, &request);
+            // An « Examiner » fetch in flight is NOT cancelled (G1 final review): its result is
+            // kept for the list ([`lands_now`]), never dropped in silence.
+            show(&ui, &journal_state.borrow(), format, &slot, session);
+        });
+    }
+    {
+        // « Ouvrir l'examen » on the list's card: the kept « Examiner » result (G1 final review).
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let slot = Rc::clone(slot);
+        let ready = Rc::clone(ready);
+        ui.global::<QuickScreen>().on_open_ready(move || {
+            let ui = ui_weak.unwrap();
+            let Some(session) = ready.borrow_mut().take() else {
+                return;
+            };
+            ui.global::<QuickScreen>()
+                .set_ready_ticker(SharedString::new());
+            let format = config.borrow().number_format;
             show(&ui, &journal_state.borrow(), format, &slot, session);
         });
     }
@@ -606,6 +675,20 @@ pub(crate) fn wire_quick_screen(ui: &MainWindow, s: &Session) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_examiner_result_opens_at_once_only_over_the_studies_list() {
+        // The list itself, on screen: it opens.
+        assert!(lands_now(0, false, false, false));
+        // Another destination, or something open over the list: kept, never laid over it.
+        assert!(!lands_now(2, false, false, false), "on Portefeuille");
+        assert!(!lands_now(0, true, false, false), "a study is open");
+        assert!(!lands_now(0, false, true, false), "the comparison is open");
+        assert!(
+            !lands_now(0, false, false, true),
+            "another examination is open (e.g. from the criblage)"
+        );
+    }
 
     #[test]
     fn back_follows_the_origin_and_the_nav_rail_keeps_the_readers_choice() {

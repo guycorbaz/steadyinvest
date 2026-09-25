@@ -80,6 +80,9 @@ pub const MSG_PROVIDER_NONE: &str =
     "Aucun fournisseur de données n'est sélectionné ; la récupération n'a pas eu lieu.";
 pub const MSG_PROVIDER_FETCHING: &str = "Récupération des données du fournisseur en cours.";
 pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause}";
+/// The `{cause}` of [`MSG_PROVIDER_FAILED`] when the fetch worker is gone (a registered message,
+/// never French baked into a rail — G1 final review).
+pub const MSG_FETCH_WORKER_GONE: &str = "le service de récupération est indisponible";
 
 /// Graceful-failure cause-named copy (Story 3.5, FR23/FR24) — fact-stating, posture-gated. Each
 /// names the cause; last-known values stay in place and affected provider data is flagged stale. The
@@ -802,6 +805,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_PROVIDER_NONE,
     MSG_PROVIDER_FETCHING,
     MSG_PROVIDER_FAILED,
+    MSG_FETCH_WORKER_GONE,
     MSG_PROVIDER_OFFLINE,
     MSG_PROVIDER_QUOTA,
     MSG_PROVIDER_NO_DATA,

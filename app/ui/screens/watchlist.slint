@@ -240,7 +240,12 @@ export component WatchlistScreen inherits Rectangle {
                         }
                         if row.state == "done": HorizontalLayout {
                             spacing: Tokens.space-8;
-                            Cell { text: row.years; width: Cols.years; }
+                            // A ladder unavailable: the cause is the window, never « < 4 » (G1 final).
+                            Cell {
+                                text: row.window-short ? @tr("fenêtre incomplète") : row.years;
+                                width: Cols.years;
+                                wrap: word-wrap;
+                            }
                             Cell { text: row.sales-rate != "" ? row.sales-rate : "—"; width: Cols.rate; }
                             Cell { text: row.eps-rate != "" ? row.eps-rate : "—"; width: Cols.rate; }
                             Cell {
@@ -248,7 +253,9 @@ export component WatchlistScreen inherits Rectangle {
                                 text: row.eps-vs-sales == "eps" ? @tr("plus vite")
                                     : row.eps-vs-sales == "sales" ? @tr("moins vite")
                                     : row.eps-vs-sales == "same" ? @tr("même rythme")
+                                    : row.eps-vs-sales == "years" ? @tr("années différentes")
                                     : "—";
+                                wrap: word-wrap;
                             }
                             Cell {
                                 width: Cols.pe;
