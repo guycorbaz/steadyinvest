@@ -167,6 +167,9 @@ fn clear_dossier_session(ui: &MainWindow, session: &DossierSession) {
     crate::wiring::screening::close_screening(ui, &session.screening);
     ui.global::<crate::Review>()
         .set_notice(slint::SharedString::new());
+    // The legacy-stops notice names the previous dossier's lots — it goes with that dossier.
+    ui.global::<crate::Prefs>()
+        .set_reference_currency_notice(slint::SharedString::new());
 }
 
 /// PURE on the session cells (tested): what a dossier change ends outside the UI — the generation
