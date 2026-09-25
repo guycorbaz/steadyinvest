@@ -709,6 +709,33 @@ fn confirm_restore_is_refused_on_a_read_only_dossier() {
 }
 
 #[test]
+fn confirm_restore_is_refused_when_the_safety_snapshot_cannot_be_written() {
+    // G1 final review (L12): the snapshot is a PRECONDITION — without it a restored file that
+    // will not open could not be rolled back. Refused by name; the live dossier stays and reopens.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x547); // live id 0xC0FFEE
+    let study = state.create_study("NESN", "CHF").unwrap();
+    make_backup(&dir, "src.db", 0xBEEF, true);
+    // A directory squatting the snapshot's name makes the copy fail.
+    let squatter = dir.path().join("journal.db-prerestore");
+    std::fs::create_dir(&squatter).unwrap();
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    assert_eq!(
+        state.confirm_restore(),
+        Err(MSG_RESTORE_SNAPSHOT_FAILED.to_string())
+    );
+    assert_eq!(
+        state.journal_id(),
+        Some(Uuid::from_u128(0xC0FFEE)),
+        "the live dossier was not replaced, and is open again"
+    );
+    assert!(state.get_study(study).is_some(), "nothing was lost");
+    assert!(squatter.is_dir(), "a directory not ours is left alone");
+}
+
+#[test]
 fn restoring_the_journal_onto_itself_is_a_safe_no_op() {
     // Review CRITICAL: fs::copy(live, live) truncates to 0 bytes — the same-path guard must make a
     // self-restore a no-op that loses nothing.

@@ -473,6 +473,11 @@ pub const MSG_RESTORE_UNREADABLE: &str =
 /// Issue #67: a non-empty sibling `-wal` = a raw copy of a live journal — its most recent
 /// writes are NOT in the `.db` file, so restoring it would silently drop them.
 pub const MSG_RESTORE_UNCHECKPOINTED: &str = "La sauvegarde est accompagnée d'un fichier -wal non vidé : ses écritures les plus récentes n'y figurent pas. Recréez la sauvegarde depuis l'application ; rien n'a été restauré.";
+/// G1 final review (L12): the restore's two preconditions on the CURRENT dossier — its checkpoint
+/// (so its `.db` holds every write) and its safety snapshot (the rollback if the restored file will
+/// not open). Either failure refuses the restore by name; nothing is replaced.
+pub const MSG_RESTORE_CHECKPOINT_FAILED: &str = "Le dossier actuel n'a pas pu être consolidé (ses écritures les plus récentes restent dans son fichier -wal) ; rien n'a été restauré.";
+pub const MSG_RESTORE_SNAPSHOT_FAILED: &str = "La copie de sécurité du dossier actuel n'a pas pu être créée à côté de lui ; rien n'a été restauré.";
 /// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
 pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (dossier {jid}, version {ver}) ? {reason}Le dossier actuel sera remplacé.";
 pub const MSG_RESTORE_REASON_STALE: &str =
@@ -947,6 +952,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_RESTORE_NOT_A_JOURNAL,
     MSG_RESTORE_UNREADABLE,
     MSG_RESTORE_UNCHECKPOINTED,
+    MSG_RESTORE_CHECKPOINT_FAILED,
+    MSG_RESTORE_SNAPSHOT_FAILED,
     MSG_RESTORE_CONFIRM,
     MSG_RESTORE_REASON_STALE,
     MSG_RESTORE_REASON_FOREIGN,
