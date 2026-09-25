@@ -38,22 +38,37 @@ impl JournalState {
 
     /// Every portfolio, ordered deterministically (Story 6.1). Empty when no journal / none yet.
     pub fn list_portfolios(&self) -> Vec<PortfolioItem> {
-        self.journal
-            .as_ref()
-            .and_then(|j| j.list_portfolios().ok())
-            .unwrap_or_default()
+        self.try_list_portfolios().unwrap_or_default()
+    }
+
+    /// Fallible [`Self::list_portfolios`] (G1 final review, M5): `Err` is a read FAILURE — the
+    /// register then says « indisponible », never an empty-looking « aucune position ». No journal
+    /// open → `Ok(empty)` (a true absence).
+    pub fn try_list_portfolios(&self) -> Result<Vec<PortfolioItem>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        journal.list_portfolios().map_err(|error| {
+            tracing::warn!("list_portfolios failed: {error}");
+            error.to_string()
+        })
     }
 
     /// The **active** portfolio (Story 6.1): the user-selected one when it still exists, else the
     /// first (deterministic). `None` only when no portfolio exists yet. A pure read.
     pub fn active_portfolio(&self) -> Option<PortfolioItem> {
-        let portfolios = self.list_portfolios();
+        self.try_active_portfolio().ok().flatten()
+    }
+
+    /// Fallible [`Self::active_portfolio`]: `Err` when the portfolios could not be read.
+    fn try_active_portfolio(&self) -> Result<Option<PortfolioItem>, String> {
+        let portfolios = self.try_list_portfolios()?;
         if let Some(id) = self.active_portfolio_id
             && let Some(p) = portfolios.iter().find(|p| p.id == id)
         {
-            return Some(p.clone());
+            return Ok(Some(p.clone()));
         }
-        portfolios.into_iter().next()
+        Ok(portfolios.into_iter().next())
     }
 
     /// The active portfolio id (for `main.rs` to persist into `AppConfig`). `None` = no portfolio yet.
@@ -180,15 +195,22 @@ impl JournalState {
     /// The **active** portfolio's holdings, ordered by creation. Empty when no journal / no portfolio
     /// exists yet. A pure read — it never creates the portfolio (that happens on the first add).
     pub fn list_holdings(&self) -> Vec<HoldingItem> {
+        self.try_list_holdings().unwrap_or_default()
+    }
+
+    /// Fallible [`Self::list_holdings`] (G1 final review, M5): `Err` when the portfolios or the
+    /// holdings could not be read — « indisponible », never « aucune position ». No journal / no
+    /// portfolio yet → `Ok(empty)` (a true absence).
+    pub fn try_list_holdings(&self) -> Result<Vec<HoldingItem>, String> {
         let Some(journal) = self.journal.as_ref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let Some(portfolio) = self.active_portfolio() else {
-            return Vec::new();
+        let Some(portfolio) = self.try_active_portfolio()? else {
+            return Ok(Vec::new());
         };
-        journal.list_holdings(portfolio.id).unwrap_or_else(|error| {
+        journal.list_holdings(portfolio.id).map_err(|error| {
             tracing::warn!("list_holdings failed: {error}");
-            Vec::new()
+            error.to_string()
         })
     }
 
@@ -198,23 +220,29 @@ impl JournalState {
     /// surface). Their ledger stays readable via [`Self::holding_ledger`] and a re-buy through
     /// [`Self::record_buy_for`] re-opens the position.
     pub fn sold_holdings(&self) -> Vec<HoldingItem> {
+        self.try_sold_holdings().unwrap_or_default()
+    }
+
+    /// Fallible [`Self::sold_holdings`] (G1 final review, M5): `Err` on a read failure — the
+    /// section then says « indisponible » instead of vanishing.
+    pub fn try_sold_holdings(&self) -> Result<Vec<HoldingItem>, String> {
         let Some(journal) = self.journal.as_ref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let Some(portfolio) = self.active_portfolio() else {
-            return Vec::new();
+        let Some(portfolio) = self.try_active_portfolio()? else {
+            return Ok(Vec::new());
         };
         let mut sold: Vec<HoldingItem> = journal
             .list_all_holdings()
-            .unwrap_or_else(|error| {
+            .map_err(|error| {
                 tracing::warn!("sold_holdings failed: {error}");
-                Vec::new()
-            })
+                error.to_string()
+            })?
             .into_iter()
             .filter(|h| h.portfolio_id == portfolio.id && h.sold_at.is_some())
             .collect();
         sold.sort_by(|a, b| b.sold_at.cmp(&a.sold_at).then_with(|| a.id.cmp(&b.id)));
-        sold
+        Ok(sold)
     }
 
     /// The active portfolio's **capital-at-risk** + **total invested**, grouped **per currency**

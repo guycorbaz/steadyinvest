@@ -15,8 +15,13 @@ use crate::{fetch, state};
 /// number format — G1 I —, day, source).
 pub(crate) fn push_fx_rates(ui: &MainWindow, state: &JournalState) {
     let format = state.number_format();
-    let rows: Vec<FxRateRow> = state
-        .list_fx_rates()
+    // G1 final review (M5): a failed read is « indisponible », never an empty list.
+    let (rates, unavailable) = match state.try_list_fx_rates() {
+        Ok(rates) => (rates, false),
+        Err(_) => (Vec::new(), true),
+    };
+    ui.global::<Fx>().set_rates_unavailable(unavailable);
+    let rows: Vec<FxRateRow> = rates
         .iter()
         .map(|r| FxRateRow {
             id: r.id.to_string().into(),

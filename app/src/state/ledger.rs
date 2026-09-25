@@ -279,10 +279,19 @@ impl JournalState {
     /// journal or on a read failure (a DISPLAY surface, never a hard error). Write rails must use
     /// [`Self::ledger_rows_strict`] instead.
     pub fn holding_ledger(&self, holding_id: Uuid) -> Vec<TransactionItem> {
-        self.journal
-            .as_ref()
-            .and_then(|j| j.list_transactions(holding_id).ok())
-            .unwrap_or_default()
+        self.try_holding_ledger(holding_id).unwrap_or_default()
+    }
+
+    /// Fallible [`Self::holding_ledger`] for the ledger PANEL (G1 final review, M5): `Err` on a
+    /// read failure — the panel says « indisponible », never « Aucune transaction enregistrée ».
+    pub fn try_holding_ledger(&self, holding_id: Uuid) -> Result<Vec<TransactionItem>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        journal.list_transactions(holding_id).map_err(|error| {
+            tracing::warn!("list_transactions failed: {error}");
+            error.to_string()
+        })
     }
 
     /// The holding's ledger rows for a WRITE rail (2026-07-02 review, HIGH): a failed read is a

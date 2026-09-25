@@ -93,8 +93,13 @@ export component WatchlistScreen inherits Rectangle {
                     text: @tr("{} valeur(s) dans leur zone d'achat.", Watchlist.in-buy-zone-count);
                 }
 
+                // ── G1 final review (M5): a failed read is « indisponible », never the empty state ──
+                if Watchlist.unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Liste de suivi indisponible : elle n'a pas pu être lue.");
+                }
                 // ── Empty state ──
-                if Watchlist.count == 0: Text {
+                if !Watchlist.unavailable && Watchlist.count == 0: Text {
                     text: @tr("Aucune valeur suivie pour le moment ; « Ajouter une valeur… » en crée une.");
                     color: Tokens.text-mid;
                     font-size: Tokens.font-body;
@@ -120,7 +125,10 @@ export component WatchlistScreen inherits Rectangle {
                             vertical-alignment: center;
                         }
                         Text {
-                            text: row.linked ? @tr("Étude : {}", row.study-link) : @tr("Aucune étude liée");
+                            // G1 final review (L6): an unreadable link is « indisponible ».
+                            text: !row.linked ? @tr("Aucune étude liée")
+                                : row.study-unavailable ? @tr("Étude indisponible")
+                                : @tr("Étude : {}", row.study-link);
                             color: Tokens.text-mid;
                             font-size: Tokens.font-caption;
                             vertical-alignment: center;

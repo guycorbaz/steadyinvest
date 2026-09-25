@@ -94,7 +94,12 @@ pub(crate) fn refresh_holdings(
 ) {
     use steadyinvest_core::rounding::DisplayField;
     let holdings = ui.global::<Holdings>();
-    let items = state.list_holdings();
+    // G1 final review (M5): a failed read is « indisponible » (a band), never the empty state.
+    let (items, holdings_unavailable) = match state.try_list_holdings() {
+        Ok(items) => (items, false),
+        Err(_) => (Vec::new(), true),
+    };
+    holdings.set_holdings_unavailable(holdings_unavailable);
     // Story 6.2 (FR38): the global reference currency is the fallback for a pre-6.2 holding whose own
     // currency is NULL (None) — the app coalesces None → reference at this read boundary.
     let reference_currency = holdings.get_reference_currency().to_string();
@@ -241,8 +246,12 @@ pub(crate) fn refresh_holdings(
     // ── Issue #84: the « Positions vendues » section — retired holdings, most recently sold
     // first. Read-only facts (ticker, sold day, currency); the ledger opens through the same
     // `ledger-holding-id` mechanism as the register, and the re-buy rides the record-buy rail. ──
-    let sold_rows: Vec<SoldRow> = state
-        .sold_holdings()
+    let (sold, sold_unavailable) = match state.try_sold_holdings() {
+        Ok(sold) => (sold, false),
+        Err(_) => (Vec::new(), true),
+    };
+    holdings.set_sold_unavailable(sold_unavailable);
+    let sold_rows: Vec<SoldRow> = sold
         .iter()
         .map(|h| SoldRow {
             id: h.id.to_string().into(),
@@ -576,8 +585,12 @@ pub(crate) fn refresh_holdings(
 
     // Story 6.1 (FR37): the portfolio selector + the active id (the register above is the active
     // portfolio's holdings). Pushed here so every holdings re-render keeps the selector in sync.
-    let portfolios: Vec<PortfolioRow> = state
-        .list_portfolios()
+    let (portfolios, portfolios_unavailable) = match state.try_list_portfolios() {
+        Ok(portfolios) => (portfolios, false),
+        Err(_) => (Vec::new(), true),
+    };
+    holdings.set_portfolios_unavailable(portfolios_unavailable);
+    let portfolios: Vec<PortfolioRow> = portfolios
         .iter()
         .map(|p| PortfolioRow {
             id: p.id.to_string().into(),
@@ -608,8 +621,13 @@ pub(crate) fn refresh_holdings(
 /// date part); a `NULL` legacy `kind` renders as a sell (the only pre-6.3 writer).
 pub(crate) fn push_ledger(ui: &MainWindow, state: &JournalState, holding_id: Uuid) {
     let format = state.number_format();
-    let rows: Vec<LedgerRow> = state
-        .holding_ledger(holding_id)
+    // G1 final review (M5): a failed read is « indisponible », never « aucune transaction ».
+    let (ledger, unavailable) = match state.try_holding_ledger(holding_id) {
+        Ok(rows) => (rows, false),
+        Err(_) => (Vec::new(), true),
+    };
+    ui.global::<Holdings>().set_ledger_unavailable(unavailable);
+    let rows: Vec<LedgerRow> = ledger
         .iter()
         .map(|t| LedgerRow {
             id: t.id.to_string().into(),
@@ -657,14 +675,20 @@ pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_i
     if open_for.as_str() != holding_id.to_string() {
         return;
     }
-    if state.list_holdings().iter().any(|h| h.id == holding_id)
-        || state.sold_holdings().iter().any(|h| h.id == holding_id)
+    // A failed register read proves nothing about the holding: keep the panel (its own read then
+    // states whether the ledger is readable) rather than close it as if the holding were gone.
+    let still_there = |rows: Result<Vec<steadyinvest_persistence::HoldingItem>, String>| match rows
     {
+        Ok(rows) => rows.iter().any(|h| h.id == holding_id),
+        Err(_) => true,
+    };
+    if still_there(state.try_list_holdings()) || still_there(state.try_sold_holdings()) {
         push_ledger(ui, state, holding_id);
     } else {
         let holdings = ui.global::<Holdings>();
         holdings.set_ledger_rows(ModelRc::new(VecModel::from(Vec::<LedgerRow>::new())));
         holdings.set_ledger_holding_id(SharedString::new());
+        holdings.set_ledger_unavailable(false);
     }
 }
 
@@ -1280,6 +1304,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             let holdings = ui.global::<Holdings>();
             holdings.set_ledger_rows(ModelRc::new(VecModel::from(Vec::<LedgerRow>::new())));
             holdings.set_ledger_holding_id(SharedString::new());
+            holdings.set_ledger_unavailable(false);
         });
     }
     {

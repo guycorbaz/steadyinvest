@@ -120,6 +120,12 @@ pub const MSG_REFRESH_UNMATCHED_YEARS: &str =
 /// but no saved study matches the watched ticker.
 pub const MSG_WATCH_NO_STUDY: &str =
     "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études.";
+/// G1 final review (L6): « Lier une étude » when the studies (or the list itself) could not be
+/// READ — named, never « aucune étude pour ce symbole ».
+pub const MSG_WATCH_STUDY_UNAVAILABLE: &str =
+    "Les études du dossier ne peuvent pas être lues ; aucun lien n'a été enregistré.";
+pub const MSG_WATCH_LINK_LIST_UNREADABLE: &str =
+    "La liste de suivi n'a pas pu être lue ; aucun lien n'a été enregistré.";
 /// Walk finding (2026-09-24): the same symbol twice on the watchlist is a slip, not a wish.
 pub const MSG_WATCH_DUPLICATE: &str = "Ce symbole est déjà dans la liste de suivi.";
 
@@ -851,6 +857,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_UNMATCHED_YEARS,
     MSG_WATCH_NO_STUDY,
     MSG_WATCH_DUPLICATE,
+    MSG_WATCH_STUDY_UNAVAILABLE,
+    MSG_WATCH_LINK_LIST_UNREADABLE,
     MSG_HOLDING_NO_STUDY,
     MSG_HOLDING_STUDY_UNAVAILABLE,
     MSG_HOLDING_STUDY_DELETED,

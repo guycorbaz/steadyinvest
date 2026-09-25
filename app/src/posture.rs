@@ -693,8 +693,12 @@ mod tests {
         // integ/g1-a-to-h (G1 fix PRs A–H combined): 892 + B 11 + C 9 + D 26 + E 15 = 953, measured.
         // G1 I (locale numbers + its review) adds no @tr literal (its refusals are MSG_*; the new
         // Slint lines are callbacks and handlers): 953 + 0 = 953, measured.
+        // G1 final review (K): every read failure of the portfolio, watchlist and FX surfaces is
+        // « indisponible » (portfolios, positions, ledger ×2, sold positions title + band, FX
+        // rates, watchlist, a watched study): 953 + 9 = 962, measured. (The ledger sale's
+        // « Quantité vendue » replaces its « (vide = toute la position) » occurrence: ±0.)
         assert!(
-            total >= 953,
+            total >= 962,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -816,7 +820,7 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            173,
+            175,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured.
@@ -828,7 +832,9 @@ mod tests {
             // sale and the stop (MSG_SELL_STUDY_UNAVAILABLE, MSG_STOP_STUDY_UNAVAILABLE):
             // 160 + 11 = 171, measured. A restore whose checkpoint or safety snapshot of the
             // current dossier fails is refused by name (MSG_RESTORE_CHECKPOINT_FAILED,
-            // MSG_RESTORE_SNAPSHOT_FAILED): 171 + 2 = 173, measured.
+            // MSG_RESTORE_SNAPSHOT_FAILED): 171 + 2 = 173, measured. « Lier une étude » names an
+            // unreadable study list or watchlist (MSG_WATCH_STUDY_UNAVAILABLE,
+            // MSG_WATCH_LINK_LIST_UNREADABLE): 173 + 2 = 175, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }

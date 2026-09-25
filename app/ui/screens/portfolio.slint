@@ -115,6 +115,11 @@ export component PortfolioScreen inherits Rectangle {
                     text: @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; les positions se consultent mais ne se modifient pas.");
                 }
 
+                // G1 final review (M5): a failed read is « indisponible », never a silent selector.
+                if Holdings.portfolios-unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Portefeuilles indisponibles : la liste des portefeuilles n'a pas pu être lue.");
+                }
                 if Holdings.portfolios.length > 1: Flickable {
                     height: Tokens.row-height + Tokens.space-8;
                     viewport-width: chips.preferred-width;
@@ -465,8 +470,13 @@ export component PortfolioScreen inherits Rectangle {
                     text: Holdings.notice;
                 }
 
+                // ── G1 final review (M5): a failed read is « indisponible », never the empty state ──
+                if Holdings.holdings-unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Positions indisponibles : le registre du portefeuille n'a pas pu être lu.");
+                }
                 // ── Empty state ──
-                if Holdings.holding-count == 0: Text {
+                if !Holdings.holdings-unavailable && Holdings.holding-count == 0: Text {
                     text: @tr("Aucune position pour le moment ; « Ajouter une position… » en crée une.");
                     color: Tokens.text-mid;
                     font-size: Tokens.font-body;
@@ -682,7 +692,11 @@ export component PortfolioScreen inherits Rectangle {
                                     clicked => { root.open-dividend(row.id, row.ticker, row.currency); }
                                 }
                             }
-                            if Holdings.ledger-rows.length == 0: CaptionLine {
+                            // G1 final review (M5): a failed read is never « aucune transaction ».
+                            if Holdings.ledger-unavailable: CaptionLine {
+                                text: @tr("Transactions indisponibles : le registre de cette position n'a pas pu être lu.");
+                            }
+                            if !Holdings.ledger-unavailable && Holdings.ledger-rows.length == 0: CaptionLine {
                                 text: @tr("Aucune transaction enregistrée pour cette position.");
                             }
                             for lrow in Holdings.ledger-rows: HorizontalLayout {
@@ -757,7 +771,16 @@ export component PortfolioScreen inherits Rectangle {
             // by default. Each row states the neutral facts (ticker, sold day, currency) and opens its
             // ledger READ-ONLY through the same `ledger-holding-id` mechanism as the register; the one
             // write offered is a re-buy (the record-buy rail), which re-opens the position. ──
-            if Holdings.sold-rows.length > 0: PanelCard {
+            // G1 final review (M5): a failed read shows the section with its « indisponible »
+            // band — never a section that silently vanishes.
+            if Holdings.sold-unavailable: PanelCard {
+                title: @tr("Positions vendues");
+                StatusBand {
+                    icon: "⊘";
+                    text: @tr("Positions vendues indisponibles : elles n'ont pas pu être lues.");
+                }
+            }
+            if !Holdings.sold-unavailable && Holdings.sold-rows.length > 0: PanelCard {
                 title: @tr("Positions vendues ({})", Holdings.sold-rows.length);
 
                 HorizontalLayout {
@@ -807,7 +830,10 @@ export component PortfolioScreen inherits Rectangle {
                             }
                             if Holdings.ledger-holding-id == srow.id: VerticalLayout {
                                 spacing: Tokens.space-8;
-                                if Holdings.ledger-rows.length == 0: CaptionLine {
+                                if Holdings.ledger-unavailable: CaptionLine {
+                                    text: @tr("Transactions indisponibles : le registre de cette position n'a pas pu être lu.");
+                                }
+                                if !Holdings.ledger-unavailable && Holdings.ledger-rows.length == 0: CaptionLine {
                                     text: @tr("Aucune transaction enregistrée pour cette position.");
                                 }
                                 // Read-only history (the product decision: lecture + ré-achat only —

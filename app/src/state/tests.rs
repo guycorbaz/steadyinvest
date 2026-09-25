@@ -6355,6 +6355,68 @@ fn try_get_study_distinguishes_a_read_failure_from_a_true_absence() {
     );
 }
 
+/// Make every row of `table` unreadable behind the journal's back (G1 final review, M5): an id
+/// that is no UUID fails the typed read — the vehicle of a real IO/corruption failure.
+fn make_table_unreadable(dir: &TempDir, table: &str) {
+    let conn = rusqlite::Connection::open(dir.path().join("journal.db")).unwrap();
+    // The referencing rows keep their old ids — the point is an unreadable table, not a
+    // consistent one.
+    conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+    conn.execute(
+        &format!("UPDATE {table} SET id = 'not-a-uuid-' || rowid"),
+        [],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_failed_register_read_is_an_error_never_an_empty_register() {
+    // G1 final review (M5): each surface's read tells a FAILURE from a true absence, so the
+    // screen can say « indisponible » instead of « aucune position / aucun taux / … ».
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x959);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "2026-07-01", "1", "100", "0", "", "CHF")
+        .unwrap();
+    state.add_watch_item("ROG", None).unwrap();
+    state
+        .upsert_manual_fx_rate("EUR", "0,95", "", "CHF")
+        .unwrap();
+    // A true state first: everything reads.
+    assert_eq!(state.try_list_holdings().map(|h| h.len()), Ok(1));
+    assert_eq!(state.try_sold_holdings().map(|h| h.len()), Ok(0));
+    assert_eq!(state.try_holding_ledger(id).map(|t| t.len()), Ok(2));
+    assert_eq!(state.try_list_watch_items().map(|w| w.len()), Ok(1));
+    assert_eq!(state.try_list_fx_rates().map(|r| r.len()), Ok(1));
+
+    make_table_unreadable(&dir, "transactions");
+    assert!(
+        state.try_holding_ledger(id).is_err(),
+        "never « aucune transaction »"
+    );
+    make_table_unreadable(&dir, "watchlist_items");
+    assert!(
+        state.try_list_watch_items().is_err(),
+        "never « aucune valeur suivie »"
+    );
+    make_table_unreadable(&dir, "fx_rates");
+    assert!(state.try_list_fx_rates().is_err(), "never « aucun taux »");
+    make_table_unreadable(&dir, "holdings");
+    assert!(
+        state.try_list_holdings().is_err(),
+        "never « aucune position »"
+    );
+    assert!(state.try_sold_holdings().is_err());
+    make_table_unreadable(&dir, "portfolios");
+    assert!(state.try_list_portfolios().is_err());
+    assert!(
+        state.try_list_holdings().is_err(),
+        "an unreadable portfolio list is no « no portfolio yet »"
+    );
+}
+
 #[test]
 fn an_unreadable_study_refuses_the_trigger_sale_and_the_stop_never_the_cost_basis() {
     // G1 final review (L7): the cost basis stands in only for a TRUE absence — a linked study

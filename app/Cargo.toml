@@ -57,6 +57,9 @@ rfd = { workspace = true }
 [dev-dependencies]
 # Config tests write to temp paths only — never the real config dir.
 tempfile = { workspace = true }
+# G1 final review (M5): the « indisponible » tests make a stored row unreadable behind the journal's
+# back (an id that is no UUID). Already in the lock tree via persistence — adds nothing to it.
+rusqlite = { workspace = true }
 
 [build-dependencies]
 slint-build = { workspace = true }
