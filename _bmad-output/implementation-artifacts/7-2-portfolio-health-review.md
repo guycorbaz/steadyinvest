@@ -136,3 +136,4 @@ Fixed on branch `fix/g1-l-review`.
 - [x] [Review][Patch] L-g — Tests: three lots CHF / USD / CHF with studies created on different days (the newer with the smaller id), an identity tie; the « at most two decimals » comments
 - M-b (register side) and L-f (Portefeuille's FX footnote) belong to the portfolio branch — not touched here.
 - G1 P (`fix/g1-p-followups`): D5 — a currency-less lot is presumed in the reference currency; its stop is compared against a reference-currency study and, against a study in another currency, « non comparé au prix : le lot n'a pas de devise renseignée et l'étude est en USD » (screen + PDF), through the register's own rule (`state::stop_basis`). The unreadable-study cause is kept.
+- G1 P review H1: the review's lot link is `try_lot_study` (a legacy lot links by the reference currency, never ticker-only); a legacy lot with only another-currency study links none and its stop names that study's currency (the hint).
