@@ -143,14 +143,14 @@ Guy's (2026-09-25).
 
 - [x] [Review][Decision] Story 7.5 (FR53) was closed without its own story file, as covered by the 7.1 / 7.2 / 7.3 PDFs (spec Q4) and the layout fixes #233 / #234 — **ratified by Guy as a recorded decision**.
 - [x] [Review][Decision] Study PDF vs the NAIC form (#207, PR #216): no shared semi-log grid (guides on the EPS scale only), §5 conversion table reduced to a footnote, always-« — » boxes; the opaque quarterly box hides plotted data — **the quarterly box moves out of the plot; the fidelity gaps are listed on #207 for Guy's side-by-side check (G9)**
-- [ ] [Review][Patch] `header_box` cuts values at 48 characters, not by width → text over the next cell; the review's dossier name is uncapped [report/src/pdf.rs:124,958-978, report/src/review.rs:384]
-- [ ] [Review][Patch] Numeric grid cells are wrapped / cut to « 1… » (§2 over ten years, annexe sales of JPY / KRW issuers) [report/src/pdf.rs:1056-1066,1603-1619]
-- [ ] [Review][Patch] §3 « Total » is a partial sum over the known years; `add_known` restarts after an overflow; « Moy. 5 ans » over fewer years; « saisie manuelle » also for derived cells [report/src/pdf.rs:211,553-558,587]
-- [ ] [Review][Patch] §4 / §5 `keep_together` reserves ignore wrapped lines [report/src/pdf.rs:525,632]
-- [ ] [Review][Patch] Chart: guides and projection start at the last positive EPS but end at the fixed horizon (drawn flatter than labelled; `CHART_SCALE_NOTE` then false); x axis by index (gap years collapse); the 30 % headroom value not filtered positive; a high-without-low year vanishes; the chart fills the page only on page 1 [report/src/pdf.rs:1202-1377]
-- [ ] [Review][Patch] WinAnsi 0x80–0x9F (œ “ ” • ‰ ™) print « ? »; glyph widths default to 556 (Æ œ ß © ®) [report/src/pdf.rs:1576-1594,1766-1782]
-- [ ] [Review][Patch] `fit` / `wrap_to_width` return wider text when the width is below « … »; wrapping on consecutive spaces [report/src/pdf.rs:1603-1619]
-- [ ] [Review][Patch] Tests for #216: §3 totals / averages, §4 candidates, the header box, the two-page split, the guides [report/src/pdf.rs]
+- [x] [Review][Patch] `header_box` cuts values at 48 characters, not by width → text over the next cell; the review's dossier name is uncapped [report/src/pdf.rs:124,958-978, report/src/review.rs:384]
+- [x] [Review][Patch] Numeric grid cells are wrapped / cut to « 1… » (§2 over ten years, annexe sales of JPY / KRW issuers) [report/src/pdf.rs:1056-1066,1603-1619]
+- [x] [Review][Patch] §3 « Total » is a partial sum over the known years; `add_known` restarts after an overflow; « Moy. 5 ans » over fewer years; « saisie manuelle » also for derived cells [report/src/pdf.rs:211,553-558,587]
+- [x] [Review][Patch] §4 / §5 `keep_together` reserves ignore wrapped lines [report/src/pdf.rs:525,632]
+- [x] [Review][Patch] Chart: guides and projection start at the last positive EPS but end at the fixed horizon (drawn flatter than labelled; `CHART_SCALE_NOTE` then false); x axis by index (gap years collapse); the 30 % headroom value not filtered positive; a high-without-low year vanishes; the chart fills the page only on page 1 [report/src/pdf.rs:1202-1377]
+- [x] [Review][Patch] WinAnsi 0x80–0x9F (œ “ ” • ‰ ™) print « ? »; glyph widths default to 556 (Æ œ ß © ®) [report/src/pdf.rs:1576-1594,1766-1782]
+- [x] [Review][Patch] `fit` / `wrap_to_width` return wider text when the width is below « … »; wrapping on consecutive spaces [report/src/pdf.rs:1603-1619]
+- [x] [Review][Patch] Tests for #216: §3 totals / averages, §4 candidates, the header box, the two-page split, the guides [report/src/pdf.rs]
 - [x] [Review][Defer] PDF exports write in place (no temp + rename, no self-alias guard against the dossier file) — all exports, including the 5.6 study export [app/src/wiring/{studies,comparison,review,quick_screen}.rs] — deferred, pre-existing
 - [x] [Review][Defer] Year and guide labels overlap on 30+ year studies [report/src/pdf.rs:1281-1287,1370-1377] — deferred, rare
 
@@ -161,3 +161,9 @@ Fixed in PR D (G1, branch `fix/g1-d-quick-screen-figures`): the checklist arithm
 conclusions, the §3 facts without a price and the tests (27 % → 5 % at the form's whole-percent
 precision; 27,6 % → « 5,0 % » at display precision). The PDF breaks before §3 while on page 1,
 for the form's two pages (spec §5, §7).
+
+Fixed in PR F (G1, branch `fix/g1-f-pdf-layout`): the study-PDF items above, decision 7 (the
+quarterly box below the chart), plus the shared engine fixes for 7.1 (every header row repeated,
+never orphaned) and 7.2 (a row and its note kept together) — checked off in those records once the
+PRs are merged. Figures are never cut: a figure too wide is shrunk (floor 6 pt), printed whole.
+Still open, pre-existing (5.6): the study PDF ignores the number locale (« 2.9 % »).
