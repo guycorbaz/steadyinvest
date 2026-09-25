@@ -246,7 +246,11 @@ impl JournalState {
             }
             Err(error) => {
                 tracing::warn!("could not reopen journal after a failed restore: {error}");
+                // G3 #10 (the L10 rule): no journal open → no path either, so nothing reads the
+                // live path as an open dossier.
                 self.journal = None;
+                self.path = None;
+                self.read_only = false;
             }
         }
     }

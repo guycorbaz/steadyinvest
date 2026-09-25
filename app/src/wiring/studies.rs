@@ -277,7 +277,8 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
 
 /// G1 final review M3: what belongs to the study on screen and must never show over another study
 /// or the demo — the traceability panel, the scenario comparison (its overlay and cached
-/// baseline) and the §1 chart's drag/hover flags (a stuck flag disables the form's scroll).
+/// baseline), the « Historique » panel and the §1 chart's drag/hover flags (a stuck flag disables
+/// the form's scroll).
 fn reset_study_overlays(
     ui: &MainWindow,
     compare_study: &Rc<std::cell::RefCell<Option<steadyinvest_contract::Study>>>,
@@ -288,6 +289,9 @@ fn reset_study_overlays(
     studies.set_trace(TraceState::default());
     studies.set_judgment_dragging(false);
     studies.set_judgment_hover(false);
+    // G3 #9: the study's « Historique » panel too (through its own close path).
+    studies.invoke_close_history();
+    studies.set_history_unavailable(false);
 }
 
 /// Wire the studies domain: create / open (with per-study view-state restore) / fold / regime,
@@ -594,6 +598,8 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             studies.set_study_open(false);
             studies.set_demo_active(false);
             reset_study_overlays(&ui, &compare_study);
+            // G3 #6: a fetch result kept for a hidden study is said in the list's slot from here.
+            study_notice::drop_pending();
         });
     }
 
@@ -626,6 +632,10 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             // result, a refusal) may read as this one's. Before the render, so a normalize failure
             // of THIS study still shows.
             study_notice::reset(&ui);
+            // G1 final review (G3 #6): …except THIS study's own fetch result, said while it was
+            // not on screen — the reader opening it (from the Revue, the candidates panel, the
+            // comparison) sees it here.
+            study_notice::take_pending(&ui, id);
             let format = config.borrow().number_format;
             push_form(&ui, &journal_state.borrow(), &study, format);
             // A freshly-opened form has no active entry cell (the cursor appears on first focus).

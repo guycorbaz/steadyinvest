@@ -281,10 +281,15 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     // G1 final review M5: a study open but HIDDEN gets its result in its own slot
                     // (seen if the reader comes back to it) AND in the list's slot — every return to
                     // Études by the rail closes the study onto the list, so the result is seen
-                    // either way, never left in a slot nobody will open.
+                    // either way, never left in a slot nobody will open. G3 #6: the list's slot is
+                    // taken under F4 (`study_notice::list_fetch`), and a result said while its study
+                    // was not on screen is KEPT for that study — the next open of it (the Revue's,
+                    // the candidates panel's, the comparison's « Ouvrir l'étude » empty the slot)
+                    // shows it again.
                     let say = |failed: bool, text: &str| {
                         if route != StudyFetchRoute::OpenShown {
-                            studies.set_notice(text.into());
+                            study_notice::list_fetch(&ui, text);
+                            study_notice::hold_for(outcome.study_id, failed, text);
                         }
                         match (still_open, failed) {
                             (false, _) => {}
@@ -423,6 +428,13 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     );
                 }
                 fetch::WorkerOutcome::HoldingFetch(outcome) => {
+                    // G1 final review (G3 #2): a price asked in a dossier no longer open (a restore
+                    // keeps the study ids) is dropped whole — no price written, no « périmé » mark,
+                    // no notice, and no batch counter moved: the dossier change reset the batch.
+                    if outcome.generation != dossier_generation.get() {
+                        tracing::info!(ticker = %outcome.ticker, "price refresh result dropped: the dossier changed while it ran");
+                        return;
+                    }
                     // Story 4.4 (FR40): a holdings price-refresh result → the holdings surface (NOT
                     // the study screen). Success fills `current_price` (the §4 zone recomputes) +
                     // stamps a fresh `as_of`; a failure / no-data flags the ticker `périmé`, keeping
@@ -526,21 +538,44 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     // One job resolved — advance the batch counter, clear the latch when fully drained.
                     advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
                 }
-                fetch::WorkerOutcome::HoldingSkipped => {
+                fetch::WorkerOutcome::HoldingSkipped { generation } => {
                     // Issue #100: a cancelled per-ticker job the worker drained without fetching — it
-                    // only advances the batch counter (no price applied, no re-render needed).
+                    // only advances the batch counter (no price applied, no re-render needed). G3
+                    // #2: a job of a previous dossier's batch never moves this dossier's counter.
+                    if generation != dossier_generation.get() {
+                        return;
+                    }
                     advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
                 }
-                fetch::WorkerOutcome::FxProgress { done, total } => {
-                    // Issue #100: mid-batch FX progress — count up instead of a frozen banner.
+                fetch::WorkerOutcome::FxProgress {
+                    done,
+                    total,
+                    generation,
+                } => {
+                    // Issue #100: mid-batch FX progress — count up instead of a frozen banner. G3
+                    // #2: never a previous dossier's batch's count.
+                    if generation != dossier_generation.get() {
+                        return;
+                    }
                     ui.global::<Fx>()
                         .set_refresh_progress(format!("{done} / {total}").into());
                 }
                 fetch::WorkerOutcome::FxRates {
                     journal_id,
+                    generation,
                     results,
                     fell_back_to,
                 } => {
+                    // G1 final review (G3 #2): rates asked in a dossier no longer open are dropped
+                    // silently — a restore keeps the journal id, so the id check below cannot tell;
+                    // the FX panel's flag and notice were reset by the dossier change (a refresh of
+                    // the new dossier may be running: its flag is not this batch's to clear).
+                    if generation != dossier_generation.get() {
+                        tracing::info!(
+                            "fx refresh result dropped: the dossier changed while it ran"
+                        );
+                        return;
+                    }
                     // Story 6.5 (FR28) + review: the outcome only applies to the journal that
                     // ASKED (an in-flight journal switch must not write phantom rates into the
                     // new one). Story 6.9 (FR26): each pair's stamped source is its EFFECTIVE
