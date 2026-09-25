@@ -650,14 +650,20 @@ impl JournalState {
             .into_iter()
             .find(|h| h.id == holding_id)
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
-        let reference_price = self
-            // Issue #81: match the study in the holding's own currency (a cross-currency study must
-            // not seed this stop level). G1 final review (L7): the cost basis seeds the level only
-            // for a TRUE absence — an unreadable study refuses by name.
-            .try_matched_study_in_currency(&holding.security_ticker, holding.currency.as_deref())
-            .map_err(|_| MSG_STOP_STUDY_UNAVAILABLE.to_string())?
-            .and_then(|s| s.judgment.current_price)
-            .map(|m| m.as_decimal())
+        // Issue #81: match the study in the holding's own currency (a cross-currency study must
+        // not seed this stop level). G1 final review (L7): the cost basis seeds the level only for
+        // a TRUE absence — an unreadable study refuses by name. A legacy holding WITHOUT a declared
+        // currency links ticker-only, so no study price is known to be in its unit: its own cost
+        // basis seeds the level (the review screen's rule — never a cross-currency price).
+        let study_price = match holding.currency.as_deref() {
+            Some(currency) => self
+                .try_matched_study_in_currency(&holding.security_ticker, Some(currency))
+                .map_err(|_| MSG_STOP_STUDY_UNAVAILABLE.to_string())?
+                .and_then(|s| s.judgment.current_price)
+                .map(|m| m.as_decimal()),
+            None => None,
+        };
+        let reference_price = study_price
             .or_else(|| Decimal::from_str_exact(&holding.purchase_price).ok())
             .ok_or(MSG_HOLDING_INVALID_STOP.to_string())?;
         // Seed fresh (no prior level) — an explicit set is the user redefining the stop, not an
@@ -697,13 +703,14 @@ impl JournalState {
             .list_holdings()
             .into_iter()
             // Issue #81: ratchet only holdings in the study's OWN currency — the study's price is in
-            // that currency, so a cross-currency same-ticker holding must not be ratcheted with it. A
-            // holding that declares no currency still ratchets (today's behaviour).
+            // that currency, so a cross-currency same-ticker holding must not be ratcheted with it.
+            // G1 final review (the review screen's rule): a legacy holding that declares NO currency
+            // is not ratcheted either — the price's currency cannot be told to match its stop's.
             .filter(|h| {
                 h.security_ticker.eq_ignore_ascii_case(&ticker)
                     && h.currency
                         .as_deref()
-                        .is_none_or(|c| c.eq_ignore_ascii_case(&study_currency))
+                        .is_some_and(|c| c.eq_ignore_ascii_case(&study_currency))
             })
             .filter_map(|h| {
                 let pct = h

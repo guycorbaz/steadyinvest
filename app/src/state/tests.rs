@@ -3147,6 +3147,40 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
     );
 }
 
+#[test]
+fn a_legacy_lot_without_a_currency_is_never_ratcheted_by_a_study_price() {
+    // G1 final review (the review screen's rule): a lot without a declared currency links its
+    // study ticker-only — the study's price may be in any currency, so it never moves (nor seeds)
+    // the lot's stop; the cost basis seeds it.
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x57, "2026-06-28T10:00:00Z");
+    let study = state.create_study("NESN", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    // Make it a pre-6.2 legacy row: no declared currency.
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .update_holding_with_currency(id, "NESN", "10", "100", None, None)
+        .unwrap();
+    assert!(state.list_holdings()[0].currency.is_none());
+    state.set_holding_trailing_stop(id, "20").unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "seeded from the cost basis"
+    );
+    state
+        .ratchet_trailing_stops_for_study(study, Decimal::from(500))
+        .unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "a USD study's price never ratchets a lot of unknown currency"
+    );
+}
+
 // ── Story 4.6 — simple capital-at-risk (the portfolio downside figure) ──
 
 #[test]

@@ -156,10 +156,17 @@ pub(crate) fn refresh_holdings(
                 .trailing_stop_level
                 .as_deref()
                 .and_then(|s| rust_decimal::Decimal::from_str_exact(s).ok());
-            let current_price_dec = study
-                .as_ref()
-                .and_then(|s| s.judgment.current_price)
-                .map(|m| m.as_decimal());
+            // G1 final review: the stop is compared only to a price KNOWN to be in the lot's
+            // currency — a legacy lot without a declared currency matches its study ticker-only,
+            // so its stop is never compared (no breach, no margin, no stop trigger); stated.
+            let current_price_dec = study.as_ref().and_then(|s| {
+                stop_comparable_price(
+                    h.currency.as_deref(),
+                    &s.native_currency,
+                    s.judgment.current_price.map(|m| m.as_decimal()),
+                )
+            });
+            let stop_uncompared = stop_level_dec.is_some() && h.currency.is_none();
             let stop_breached = match (stop_level_dec, current_price_dec) {
                 (Some(level), Some(price)) => steadyinvest_core::risk::stop_breached(level, price),
                 _ => false,
@@ -222,6 +229,7 @@ pub(crate) fn refresh_holdings(
                 stop_level: stop_level_display.into(),
                 stop_breached,
                 stop_distance: stop_distance.into(),
+                stop_uncompared,
                 trigger_kind: trigger_kind.into(),
                 dismissed,
             }
@@ -690,6 +698,21 @@ pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_i
         holdings.set_ledger_holding_id(SharedString::new());
         holdings.set_ledger_unavailable(false);
     }
+}
+
+/// The study price a lot's trailing stop may be compared to (G1 final review — the review
+/// screen's rule): only a price KNOWN to be in the lot's currency. A legacy lot without a
+/// declared currency links ticker-only, so its study's price may be in any currency — `None`,
+/// never a cross-currency comparison.
+fn stop_comparable_price(
+    lot_currency: Option<&str>,
+    study_currency: &str,
+    price: Option<Decimal>,
+) -> Option<Decimal> {
+    lot_currency
+        .is_some_and(|c| c.trim().eq_ignore_ascii_case(study_currency.trim()))
+        .then_some(price)
+        .flatten()
 }
 
 /// What an Enter in the trigger-sale dialog shows when the quantity is not a typed number (G1 I
@@ -1595,6 +1618,23 @@ mod tests {
     use crate::state::StudyChoice;
     use crate::viewmodel::format::NumberFormat;
     use uuid::Uuid;
+
+    #[test]
+    fn a_stop_is_compared_only_to_a_price_known_in_the_lots_currency() {
+        // G1 final review: a legacy lot (no declared currency) is never compared — its study
+        // matched ticker-only; a declared lot is compared to its own-currency study only.
+        let price = Some(rust_decimal::Decimal::from(80));
+        assert_eq!(super::stop_comparable_price(None, "USD", price), None);
+        assert_eq!(
+            super::stop_comparable_price(Some("chf"), "CHF", price),
+            price
+        );
+        assert_eq!(
+            super::stop_comparable_price(Some("CHF"), "USD", price),
+            None
+        );
+        assert_eq!(super::stop_comparable_price(Some("CHF"), "CHF", None), None);
+    }
 
     #[test]
     fn a_success_never_erases_the_in_flight_refresh_banner() {

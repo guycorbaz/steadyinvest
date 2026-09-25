@@ -697,8 +697,10 @@ mod tests {
         // « indisponible » (portfolios, positions, ledger ×2, sold positions title + band, FX
         // rates, watchlist, a watched study): 953 + 9 = 962, measured. (The ledger sale's
         // « Quantité vendue » replaces its « (vide = toute la position) » occurrence: ±0.)
+        // The legacy lot's uncompared stop is stated (« non comparé au prix : le lot n'a pas de
+        // devise renseignée »): 962 + 1 = 963, measured.
         assert!(
-            total >= 962,
+            total >= 963,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

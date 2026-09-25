@@ -1406,6 +1406,9 @@ export struct HoldingRow {
     stop-breached: bool,
     // The current price's margin above the stop level (display string; "" when breached or unknown).
     stop-distance: string,
+    // G1 final review: a legacy lot with NO declared currency has a stop that is never compared
+    // to (nor ratcheted by) a price whose currency cannot be told to match — stated, no trigger.
+    stop-uncompared: bool,
     // Story 4.7 (FR46/FR47): the neutral trigger this holding fires — "stop" (breached, takes
     // priority), "sell" (in its Sell zone), or "" (none). `dismissed` is true while the user has
     // hidden this trigger's action panel for the session (transient; never persisted).
