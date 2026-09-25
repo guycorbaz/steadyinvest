@@ -33,6 +33,21 @@ pub(crate) struct HoldingFreshness {
 }
 pub(crate) type HoldingFreshnessMap = std::collections::HashMap<String, HoldingFreshness>;
 
+/// The FR45 concentration murmur shared by Portefeuille and the Revue (Decision 6, G1 review —
+/// « identical »): the core band (`core::risk::concentration_flagged`, from 10 points below the
+/// threshold), on a PRESENT positive share whose figure no missing pair blocks — an absent or
+/// zero share never flags, even under a ≤ 10 threshold whose band floors at 0.
+pub(crate) fn concentration_murmur(
+    share: Option<Decimal>,
+    blocked: bool,
+    threshold: Decimal,
+) -> bool {
+    !blocked
+        && share.is_some_and(|s| {
+            s > Decimal::ZERO && steadyinvest_core::risk::concentration_flagged(s, threshold)
+        })
+}
+
 /// Flag a holding's transient freshness `stale` (Story 4.4, AC4) after a failed / no-data refresh,
 /// **preserving** the last successful `as_of` so the row still states when it was last fresh while
 /// keeping its last-known zone visibly marked stale — never a fresh-looking wrong zone.
@@ -450,11 +465,9 @@ pub(crate) fn refresh_holdings(
                             viewmodel::format::format_scaled(s, DisplayField::Percent, format)
                         });
                         // The FR45 murmur: near/above the configured majority share — a neutral
-                        // fact stated in the line's own words, never a hue (colour budget).
-                        let flagged = r
-                            .share_pct
-                            .map(|s| steadyinvest_core::risk::concentration_flagged(s, threshold))
-                            .unwrap_or(false);
+                        // fact stated in the line's own words, never a hue (colour budget). The
+                        // ONE rule the Revue shares (Decision 6, G1 review).
+                        let flagged = concentration_murmur(r.share_pct, false, threshold);
                         ConcentrationLine {
                             ticker: r.ticker.clone().into(),
                             amount: format!(

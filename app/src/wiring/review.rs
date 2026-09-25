@@ -13,7 +13,7 @@ use crate::state::{self, JournalState, PortfolioReviewFacts, ReviewStudy};
 use crate::viewmodel::engine::fmt_ud;
 use crate::viewmodel::format::{NumberFormat, format_scaled};
 use crate::wiring::Session;
-use crate::wiring::holdings::HoldingFreshnessMap;
+use crate::wiring::holdings::{HoldingFreshnessMap, concentration_murmur};
 use crate::{MainWindow, Review, ReviewDueRow, ReviewPositionRow, ReviewShareRow, Studies};
 
 fn pct(v: Option<Decimal>, format: NumberFormat) -> SharedString {
@@ -51,16 +51,6 @@ fn threshold_pct(raw: &str) -> Decimal {
         .unwrap_or_default()
 }
 
-/// Decision 6 (G1 review) — a security's concentration murmur: the core band, exactly as
-/// Portefeuille computes it (`core::risk::concentration_flagged`, from 10 points below), on a
-/// PRESENT positive share whose figure no missing pair blocks (an absent fact never flags).
-fn concentration_murmur(share: Option<Decimal>, blocked: bool, threshold: Decimal) -> bool {
-    !blocked
-        && share.is_some_and(|s| {
-            s > Decimal::ZERO && steadyinvest_core::risk::concentration_flagged(s, threshold)
-        })
-}
-
 /// Decision 6 (G1 review) — a sector murmurs only AT or OVER the threshold (no « approaching »
 /// band: the spec's sector rule). Currencies never murmur (no call site).
 fn sector_murmur(share: Option<Decimal>, threshold: Decimal) -> bool {
@@ -83,11 +73,30 @@ fn blocking_pairs(share_present: bool, own: &[String], global: &[String]) -> Str
 
 /// The union of the rows' own missing pairs (deduplicated, sorted) — the pairs that absent an
 /// exposure block's global total (the 6.8 reads carry them per row only).
-fn union_pairs<'a>(pairs: impl IntoIterator<Item = Option<&'a String>>) -> Vec<String> {
-    let mut all: Vec<String> = pairs.into_iter().flatten().cloned().collect();
+fn union_pairs<'a>(pairs: impl IntoIterator<Item = &'a String>) -> Vec<String> {
+    let mut all: Vec<String> = pairs.into_iter().cloned().collect();
     all.sort();
     all.dedup();
     all
+}
+
+/// Stops as data: « 63,00 CHF (UBS) · 50,00 CHF (Swissquote) » — level through the locale path,
+/// the stop's own currency, the bank holding the lot (no prose).
+fn stops_text<'a>(
+    stops: impl Iterator<Item = &'a state::StopFact>,
+    format: NumberFormat,
+) -> String {
+    stops
+        .map(|s| {
+            format!(
+                "{} {} ({})",
+                format_scaled(s.level, DisplayField::Price, format),
+                s.currency,
+                s.bank
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 fn rates_note(rates: &[steadyinvest_persistence::FxRateItem]) -> SharedString {
@@ -225,18 +234,19 @@ pub(crate) fn push_review(
     match &f.sectors {
         Some(e) => {
             review.set_sectors_unavailable(false);
-            let global = union_pairs(e.rows.iter().map(|r| r.missing_pair.as_ref()));
+            let global = union_pairs(e.rows.iter().flat_map(|r| &r.missing_pairs));
             let rows: Vec<ReviewShareRow> = e
                 .rows
                 .iter()
                 .map(|r| {
-                    let own: Vec<String> = r.missing_pair.iter().cloned().collect();
+                    // Every pair of the sector's own currencies (G1 review — not the first).
+                    let own = &r.missing_pairs;
                     share_row(
                         r.sector.clone().unwrap_or_default(),
                         None,
                         r.share_pct,
                         String::new(),
-                        blocking_pairs(r.share_pct.is_some(), &own, &global),
+                        blocking_pairs(r.share_pct.is_some(), own, &global),
                         sector_murmur(r.share_pct, threshold),
                     )
                 })
@@ -251,7 +261,7 @@ pub(crate) fn push_review(
     match &f.currencies {
         Some(e) => {
             review.set_currencies_unavailable(false);
-            let global = union_pairs(e.rows.iter().map(|r| r.missing_pair.as_ref()));
+            let global = union_pairs(e.rows.iter().flat_map(|r| &r.missing_pair));
             let rows: Vec<ReviewShareRow> = e
                 .rows
                 .iter()
@@ -357,16 +367,14 @@ pub(crate) fn push_review(
                     .and_then(|x| x.as_of.clone())
                     .unwrap_or_default()
                     .into(),
-                // Every lot's stop level (every bank), in the position's currency.
-                stop: p
-                    .stop_levels
-                    .iter()
-                    .map(|l| format_scaled(*l, DisplayField::Price, format))
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-                    .into(),
+                // Every lot's stop (every bank), each in its own currency and named by its bank;
+                // the breached ones listed apart — which level, which bank (G1 review).
+                stop: stops_text(p.stops.iter(), format).into(),
                 stop_breached: p.stop_breached,
+                stop_breached_levels: stops_text(p.stops.iter().filter(|s| s.breached), format)
+                    .into(),
                 trigger: p.trigger.into(),
+                mixed_links: p.mixed_links.join(" · ").into(),
                 ..Default::default()
             };
             match &p.study {
@@ -375,10 +383,14 @@ pub(crate) fn push_review(
                     row.other_currency = other_currency.clone().unwrap_or_default().into();
                 }
                 ReviewStudy::Unavailable => row.study = "unavailable".into(),
-                ReviewStudy::NotComputable(id) => {
-                    // Still openable — the study screen is where its data gets repaired.
+                ReviewStudy::NotComputable(s) => {
+                    // Still openable — the study screen is where its data gets repaired; its
+                    // annual-review clock is known without the engine.
                     row.study = "not_computable".into();
-                    row.study_id = id.to_string().into();
+                    row.study_id = s.study_id.to_string().into();
+                    row.last_saved = s.last_saved.clone().unwrap_or_default().into();
+                    row.last_saved_unknown = s.last_saved.is_none();
+                    row.due = s.due_for_review;
                 }
                 ReviewStudy::Linked(s) => {
                     row.study = s.verdict.into();
@@ -430,8 +442,10 @@ pub(crate) fn push_review(
             date: d.last_saved.clone().unwrap_or_default().into(),
             date_unknown: d.last_saved.is_none(),
             age: d.reasons.contains(&"age"),
+            age_unknown: d.reasons.contains(&"age_unknown"),
             withheld: d.reasons.contains(&"withheld"),
             low_confidence: d.reasons.contains(&"low_confidence"),
+            not_computable: d.reasons.contains(&"not_computable"),
         })
         .collect();
     review.set_due(ModelRc::new(VecModel::from(due)));
@@ -441,6 +455,7 @@ pub(crate) fn push_review(
     review.set_count_full(k.full as i32);
     review.set_count_provisional(k.provisional as i32);
     review.set_count_withheld(k.withheld as i32);
+    review.set_count_not_computable(k.not_computable as i32);
     review.set_count_flagged(k.flagged as i32);
     review.set_count_high_zone(k.high_zone as i32);
     review.set_count_stop_breached(k.stop_breached as i32);
@@ -523,12 +538,13 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
                     String::new()
                 },
                 as_of: p.as_of.to_string(),
-                stop: if p.stop.is_empty() {
-                    String::new()
-                } else {
-                    format!("{} {}", p.stop, p.currency)
-                },
+                price: p.price.to_string(),
+                last_saved: p.last_saved.to_string(),
+                last_saved_unknown: p.last_saved_unknown,
+                mixed_links: p.mixed_links.to_string(),
+                stop: p.stop.to_string(),
                 stop_breached: p.stop_breached,
+                stop_breached_levels: p.stop_breached_levels.to_string(),
                 trigger: p.trigger.to_string(),
             })
             .collect(),
@@ -540,8 +556,10 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
                 date_unknown: d.date_unknown,
                 reasons: [
                     (d.age, "age"),
+                    (d.age_unknown, "age_unknown"),
                     (d.withheld, "withheld"),
                     (d.low_confidence, "low_confidence"),
+                    (d.not_computable, "not_computable"),
                 ]
                 .into_iter()
                 .filter(|(on, _)| *on)
@@ -555,6 +573,10 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
             ("full".into(), r.get_count_full().to_string()),
             ("provisional".into(), r.get_count_provisional().to_string()),
             ("withheld".into(), r.get_count_withheld().to_string()),
+            (
+                "not_computable".into(),
+                r.get_count_not_computable().to_string(),
+            ),
             ("flagged".into(), r.get_count_flagged().to_string()),
             ("high_zone".into(), r.get_count_high_zone().to_string()),
             (
@@ -636,8 +658,10 @@ mod tests {
 
     #[test]
     fn the_concentration_murmur_is_portefeuilles_core_band() {
-        // Decision 6: identical to Portefeuille — `core::risk::concentration_flagged` (from 10
-        // points below the threshold), on a present positive share no missing pair blocks.
+        // Decision 6: identical to Portefeuille BY CONSTRUCTION — both surfaces call the one
+        // `wiring::holdings::concentration_murmur` (the core band from 10 points below the
+        // threshold, on a present positive share no missing pair blocks); the zero case below
+        // holds on Portefeuille too (its `share > 0` guard, G1 review).
         let t = d("50");
         for share in ["39.9", "40", "45", "50", "65.9"] {
             assert_eq!(
@@ -696,10 +720,7 @@ mod tests {
         );
         let a = "EUR → CHF".to_string();
         let b = "USD → CHF".to_string();
-        assert_eq!(
-            union_pairs([Some(&b), None, Some(&a), Some(&b)]),
-            vec![a.clone(), b.clone()]
-        );
+        assert_eq!(union_pairs([&b, &a, &b]), vec![a.clone(), b.clone()]);
     }
 
     #[test]

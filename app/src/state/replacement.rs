@@ -55,7 +55,9 @@ impl CurrencyExposure {
 pub struct SectorShare {
     pub sector: Option<String>,
     pub share_pct: Option<Decimal>,
-    pub missing_pair: Option<String>,
+    /// EVERY `BASE → reference` pair its holdings needed but the store lacks (a sector held in
+    /// two unconvertible currencies names both — G1 review), deduplicated, in holding order.
+    pub missing_pairs: Vec<String>,
 }
 
 /// The journal-wide per-sector exposure (issue #98, FR48): one row per held sector plus the
@@ -70,14 +72,18 @@ pub struct SectorExposure {
 impl SectorExposure {
     /// The exposure fact for `sector`: its held share, or an HONEST zero when the journal holds
     /// nothing in it and the total is known — `(None, None)` when the total is absent (an absent
-    /// fact never flags, never passes as zero). The [`CurrencyExposure::share_for`] contract.
+    /// fact never flags, never passes as zero). The [`CurrencyExposure::share_for`] contract; the
+    /// missing pairs are all named, joined.
     pub fn share_for(&self, sector: &str) -> (Option<Decimal>, Option<String>) {
         match self
             .rows
             .iter()
             .find(|r| r.sector.as_deref() == Some(sector))
         {
-            Some(row) => (row.share_pct, row.missing_pair.clone()),
+            Some(row) => (
+                row.share_pct,
+                (!row.missing_pairs.is_empty()).then(|| row.missing_pairs.join(" · ")),
+            ),
             None => (self.global_positive.then_some(Decimal::ZERO), None),
         }
     }
@@ -242,9 +248,8 @@ impl JournalState {
         }
         // One rate lookup per currency (memoized): Some(rate) usable, None missing/invalid.
         let mut rate_memo: BTreeMap<String, Option<Decimal>> = BTreeMap::new();
-        // Per-sector accumulator: (amount — None once any member could not state, missing pair).
-        let mut buckets: BTreeMap<Option<String>, (Option<Decimal>, Option<String>)> =
-            BTreeMap::new();
+        // Per-sector accumulator: (amount — None once a member cannot state; every missing pair).
+        let mut buckets: BTreeMap<Option<String>, (Option<Decimal>, Vec<String>)> = BTreeMap::new();
         for h in &all_holdings {
             let (Ok(avg_cost), Ok(quantity)) = (
                 Decimal::from_str_exact(&h.purchase_price),
@@ -278,13 +283,15 @@ impl JournalState {
             };
             let bucket = buckets
                 .entry(h.sector.clone())
-                .or_insert((Some(Decimal::ZERO), None));
+                .or_insert((Some(Decimal::ZERO), Vec::new()));
             bucket.0 = match (bucket.0, converted) {
                 (Some(sum), Some(v)) => sum.checked_add(v),
                 _ => None,
             };
-            if bucket.1.is_none() {
-                bucket.1 = missing;
+            if let Some(pair) = missing
+                && !bucket.1.contains(&pair)
+            {
+                bucket.1.push(pair);
             }
         }
         // The checked global — None as soon as one bucket is (never a partial total, 6.6 rule).
@@ -297,10 +304,10 @@ impl JournalState {
         // Option ordering — moved last for display honesty (the blind spot closes the list).
         let mut rows: Vec<SectorShare> = buckets
             .into_iter()
-            .map(|(sector, (amount, missing_pair))| SectorShare {
+            .map(|(sector, (amount, missing_pairs))| SectorShare {
                 sector,
                 share_pct: amount.zip(global).and_then(|(a, g)| share_pct(a, g)),
-                missing_pair,
+                missing_pairs,
             })
             .collect();
         rows.sort_by(|a, b| match (&a.sector, &b.sector) {

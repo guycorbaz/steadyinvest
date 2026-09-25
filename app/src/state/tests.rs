@@ -2551,7 +2551,10 @@ fn portfolio_review_aggregates_two_banks_and_reads_every_lots_stop() {
     let row = &review.positions[0];
     assert_eq!(row.banks.len(), 2);
     assert!(row.banks.contains(&"Swissquote".to_string()));
-    assert_eq!(row.stop_levels, vec![Decimal::from(63)]);
+    assert_eq!(row.stops.len(), 1, "only the lot that carries a stop");
+    assert_eq!(row.stops[0].level, Decimal::from(63));
+    assert_eq!(row.stops[0].bank, "Swissquote");
+    assert!(row.mixed_links.is_empty(), "both lots link the same study");
     assert!(!row.stop_breached, "70 is above 63");
     // The price falls through the second bank's stop: the breach is read on THAT lot.
     state
@@ -2559,8 +2562,121 @@ fn portfolio_review_aggregates_two_banks_and_reads_every_lots_stop() {
         .unwrap();
     let review = review_of(&state);
     assert!(review.positions[0].stop_breached);
+    assert!(review.positions[0].stops[0].breached);
     assert_eq!(review.positions[0].trigger, "stop");
     assert_eq!(review.counts.stop_breached, 1);
+}
+
+#[test]
+fn a_study_the_engine_cannot_compute_still_reads_the_stop_counts_and_is_due() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7600);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    state
+        .apply_provider_refresh(id, &fetched_for(&[2020, 2021, 2022, 2023, 2024]))
+        .unwrap();
+    state
+        .set_judgment_field(id, "current_price", Some(und_money(70)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let lot = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(lot, "10").unwrap(); // level 63
+    state
+        .set_judgment_field(id, "current_price", Some(und_money(60)))
+        .unwrap();
+    // A duplicated year: the study still READS, but no longer normalizes.
+    let mut study = state.get_study(id).unwrap();
+    let dup = study.years[0].clone();
+    study.years.push(dup);
+    state.journal.as_mut().unwrap().put_study(&study).unwrap();
+    assert!(engine::build_snapshot(&state.get_study(id).unwrap()).is_err());
+
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    let ReviewStudy::NotComputable(f) = &row.study else {
+        panic!("a normalize failure is its own state, got {:?}", row.study);
+    };
+    assert_eq!(f.current_price, Some(Decimal::from(60)));
+    assert!(
+        row.stop_breached,
+        "the register reads this breach — so does the review"
+    );
+    assert_eq!(row.trigger, "stop");
+    assert_eq!(review.counts.linked, 1, "still a study");
+    assert_eq!(review.counts.not_computable, 1);
+    assert_eq!(review.due.len(), 1);
+    assert_eq!(review.due[0].reasons, vec!["not_computable"]);
+}
+
+#[test]
+fn lots_in_two_currencies_read_each_stop_against_their_own_study() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7700);
+    let chf = state.create_study("NESN", "CHF").unwrap();
+    let usd = state.create_study("NESN", "USD").unwrap();
+    state
+        .set_judgment_field(chf, "current_price", Some(und_money(70)))
+        .unwrap();
+    state
+        .set_judgment_field(usd, "current_price", Some(und_money(100)))
+        .unwrap();
+    // Each lot's stop is set in its own bank (the active portfolio's register): CHF 63, USD 90.
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let lot = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(lot, "10").unwrap();
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "1", "90", "USD", "").unwrap();
+    let lot = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(lot, "10").unwrap();
+    state
+        .set_judgment_field(chf, "current_price", Some(und_money(60)))
+        .unwrap();
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    // Stated: the lots do not share one study.
+    assert_eq!(row.mixed_links.len(), 2);
+    assert!(row.mixed_links.contains(&"CHF".to_string()));
+    assert!(row.mixed_links.contains(&"USD".to_string()));
+    let by = |c: &str| row.stops.iter().find(|s| s.currency == c).unwrap();
+    assert_eq!(by("CHF").level, Decimal::from(63));
+    assert!(by("CHF").breached, "60 CHF reached the CHF stop");
+    assert_eq!(by("USD").level, Decimal::from(90));
+    assert!(!by("USD").breached, "the USD lot reads the USD study's 100");
+    assert!(row.stop_breached);
+}
+
+#[test]
+fn a_legacy_lot_matches_ticker_only_and_is_never_compared_across_currencies() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7800);
+    let chf = state.create_study("NESN", "CHF").unwrap();
+    let usd = state.create_study("NESN", "USD").unwrap(); // the newest
+    state
+        .set_judgment_field(usd, "current_price", Some(und_money(10)))
+        .unwrap();
+    // The register's match: a legacy (NULL-currency) lot links ticker-only — the newest study —
+    // while a declared CHF lot links the CHF study.
+    let legacy = state.lot_link("NESN", None, None);
+    let declared = state.lot_link("NESN", Some("CHF"), None);
+    assert_eq!(legacy.identity, Some(usd));
+    assert_eq!(declared.identity, Some(chf));
+    assert_eq!(
+        super::review::mixed_links(&[&legacy, &declared]),
+        vec!["USD", "CHF"],
+        "the two links are stated"
+    );
+    // The legacy lot's stop is in its effective (reference) currency, CHF: the USD study's 10
+    // is never compared with it.
+    let stop = super::review::lot_stop(
+        Some("63"),
+        "CHF",
+        "UBS",
+        legacy.study_currency.as_deref(),
+        legacy.price,
+    )
+    .unwrap();
+    assert!(!stop.breached);
 }
 
 // ── Story 4.5 — trailing stop per holding (validate, seed, ratchet) ──
@@ -6339,6 +6455,34 @@ fn a_missing_rate_absents_the_sector_shares_and_names_the_pair() {
         "the global is absent too — never a partial total (the 6.6 rule)"
     );
     assert!(!exposure.global_positive);
+}
+
+#[test]
+fn a_sector_held_in_two_unconvertible_currencies_names_both_pairs() {
+    // G1 review: the sector row kept only its first missing pair.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x986);
+    state
+        .add_holding("SAP", "1", "100", "EUR", "Technology")
+        .unwrap();
+    state
+        .add_holding("AAPL", "1", "100", "USD", "Technology")
+        .unwrap();
+    state
+        .add_holding("MSFT", "1", "100", "USD", "Technology")
+        .unwrap();
+    let exposure = state.journal_sector_exposure("CHF").unwrap();
+    let row = exposure
+        .rows
+        .iter()
+        .find(|r| r.sector.as_deref() == Some("Technology"))
+        .unwrap();
+    let mut pairs = row.missing_pairs.clone();
+    pairs.sort();
+    assert_eq!(pairs, vec!["EUR → CHF", "USD → CHF"], "each pair once");
+    let (_, joined) = exposure.share_for("Technology");
+    let joined = joined.unwrap();
+    assert!(joined.contains("EUR → CHF") && joined.contains("USD → CHF"));
 }
 
 #[test]

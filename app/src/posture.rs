@@ -684,9 +684,12 @@ mod tests {
         // 7.2 adds the sector murmur « atteint ou dépassé » (Decision 6), the size block's and the
         // global total's plain « indisponible », « Parts indisponibles. », the « non calculable »
         // study band and the two unknown-last-save variants (position caption, due line): +7 =
-        // 899. Floor strict.
+        // 899. Its follow-up review adds the two due reasons « ancienneté inconnue » and
+        // « données non calculables » and the mixed-links band (lots linked to different
+        // studies); the stop captions and the counts line are reworded in place: +3 = 902.
+        // Floor strict.
         assert!(
-            total >= 899,
+            total >= 902,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

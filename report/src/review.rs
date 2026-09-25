@@ -50,17 +50,29 @@ pub struct ReviewLine {
     pub flags: String,
     /// How many flags `flags` carries (« Signaux (n) », as on the screen).
     pub flag_count: usize,
+    /// The study's present price WITH its currency (« 123,45 USD »), `""` when unknown.
+    pub price: String,
+    /// The study's last effective save (`YYYY-MM-DD`), `""` without a study.
+    pub last_saved: String,
+    /// The last save is unknown (the history read failed) — stated, never a dash.
+    pub last_saved_unknown: bool,
+    /// The lots do not all link to the same study: the distinct links' study currencies, joined
+    /// (`"—"` for a lot without a readable study); `""` when every lot shares the study.
+    pub mixed_links: String,
     /// `stale` | `fresh` | `""`, and the as-of date.
     pub data_state: String,
     pub as_of: String,
+    /// Every lot's stop — level, currency and bank — joined (data, formatted by the app).
     pub stop: String,
     pub stop_breached: bool,
+    /// The breached stop(s) among `stop` (G1 review: which level, which bank).
+    pub stop_breached_levels: String,
     /// `stop` | `sell` | `""`.
     pub trigger: String,
 }
 
-/// A study due for review, with every reason that applies: `age` · `withheld` ·
-/// `low_confidence`.
+/// A study due for review, with every reason that applies: `age` · `age_unknown` · `withheld`
+/// · `low_confidence` · `not_computable`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DueLine {
     pub ticker: String,
@@ -106,7 +118,7 @@ pub struct PortfolioReview {
     pub positions: Vec<ReviewLine>,
     pub due: Vec<DueLine>,
     /// `(count-key, value)` — keys: positions · linked · full · provisional · withheld ·
-    /// flagged · high_zone · stop_breached · due.
+    /// not_computable · flagged · high_zone · stop_breached · due.
     pub counts: Vec<(String, String)>,
 }
 
@@ -173,6 +185,9 @@ const STUDY_WITHHELD: &str = "en attente";
 const STUDY_NONE: &str = "aucune étude";
 const STUDY_UNAVAILABLE: &str = "indisponible";
 const STUDY_NOT_COMPUTABLE: &str = "non calculable";
+const PRICE_LABEL: &str = "prix actuel :";
+const LAST_SAVED_LABEL: &str = "dernière sauvegarde :";
+const MIXED_LINKS: &str = "lots liés à des études différentes, études en";
 const LOW_CONFIDENCE: &str = "confiance réduite";
 const ZONE_BUY: &str = "basse";
 const ZONE_NEUTRAL: &str = "médiane";
@@ -192,6 +207,8 @@ const D_REASON: &str = "Motif";
 const DUE_AGE: &str = "plus de 12 mois";
 const DUE_WITHHELD: &str = "une donnée requise manque";
 const DUE_LOW_CONFIDENCE: &str = "confiance réduite";
+const DUE_AGE_UNKNOWN: &str = "ancienneté inconnue";
+const DUE_NOT_COMPUTABLE: &str = "données non calculables";
 const DUE_NONE: &str = "Aucune étude à revoir.";
 const DUE_DATE_UNKNOWN: &str = "inconnue (historique indisponible)";
 const K_POSITIONS: &str = "positions";
@@ -199,6 +216,7 @@ const K_LINKED: &str = "avec une étude";
 const K_FULL: &str = "critères validés";
 const K_PROVISIONAL: &str = "provisoires";
 const K_WITHHELD: &str = "en attente";
+const K_NOT_COMPUTABLE: &str = "non calculables";
 const K_FLAGGED: &str = "avec au moins un signal";
 const K_HIGH_ZONE: &str = "dans la zone haute ou au-dessus";
 const K_STOP_BREACHED: &str = "sous leur seuil suiveur";
@@ -269,6 +287,9 @@ const REVIEW_USER_FACING: &[&str] = &[
     STUDY_NONE,
     STUDY_UNAVAILABLE,
     STUDY_NOT_COMPUTABLE,
+    PRICE_LABEL,
+    LAST_SAVED_LABEL,
+    MIXED_LINKS,
     LOW_CONFIDENCE,
     ZONE_BUY,
     ZONE_NEUTRAL,
@@ -288,6 +309,8 @@ const REVIEW_USER_FACING: &[&str] = &[
     DUE_AGE,
     DUE_WITHHELD,
     DUE_LOW_CONFIDENCE,
+    DUE_AGE_UNKNOWN,
+    DUE_NOT_COMPUTABLE,
     DUE_NONE,
     DUE_DATE_UNKNOWN,
     K_POSITIONS,
@@ -295,6 +318,7 @@ const REVIEW_USER_FACING: &[&str] = &[
     K_FULL,
     K_PROVISIONAL,
     K_WITHHELD,
+    K_NOT_COMPUTABLE,
     K_FLAGGED,
     K_HIGH_ZONE,
     K_STOP_BREACHED,
@@ -589,7 +613,13 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             let cells = [
                 l.ticker.clone(),
                 l.banks.clone(),
-                or_dash(&l.invested),
+                // An absent amount reads « indisponible » as on the screen (its pair, when
+                // nameable, is in the note line) — never a bare dash.
+                if l.invested.is_empty() {
+                    UNAVAILABLE.to_string()
+                } else {
+                    l.invested.clone()
+                },
                 or_dash(&l.share),
                 study_label(l).to_string(),
                 zone_label(&l.zone).to_string(),
@@ -614,6 +644,12 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                     l.other_currency, l.currency
                 ));
             }
+            if !l.mixed_links.is_empty() {
+                extra.push(format!("{MIXED_LINKS} {}", l.mixed_links));
+            }
+            if !l.price.is_empty() {
+                extra.push(format!("{PRICE_LABEL} {}", l.price));
+            }
             if l.low_confidence {
                 extra.push(LOW_CONFIDENCE.to_string());
             }
@@ -622,12 +658,18 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             }
             extra.push(format!("{P_DATA} : {}", data_label(l)));
             if !l.stop.is_empty() {
+                // Which level(s) — and bank(s) — the price reached, never a blanket mark.
                 let breached = if l.stop_breached {
-                    format!(" ({STOP_BREACHED})")
+                    format!(" ({STOP_BREACHED} : {})", l.stop_breached_levels)
                 } else {
                     String::new()
                 };
                 extra.push(format!("{STOP_LABEL} {}{breached}", l.stop));
+            }
+            if l.last_saved_unknown {
+                extra.push(format!("{LAST_SAVED_LABEL} {DUE_DATE_UNKNOWN}"));
+            } else if !l.last_saved.is_empty() {
+                extra.push(format!("{LAST_SAVED_LABEL} {}", l.last_saved));
             }
             match l.trigger.as_str() {
                 "stop" => extra.push(TRIGGER_STOP.to_string()),
@@ -656,6 +698,8 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                     "age" => DUE_AGE,
                     "withheld" => DUE_WITHHELD,
                     "low_confidence" => DUE_LOW_CONFIDENCE,
+                    "age_unknown" => DUE_AGE_UNKNOWN,
+                    "not_computable" => DUE_NOT_COMPUTABLE,
                     _ => EM_DASH,
                 })
                 .collect::<Vec<_>>()
@@ -679,6 +723,7 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             "full" => K_FULL,
             "provisional" => K_PROVISIONAL,
             "withheld" => K_WITHHELD,
+            "not_computable" => K_NOT_COMPUTABLE,
             "flagged" => K_FLAGGED,
             "high_zone" => K_HIGH_ZONE,
             "stop_breached" => K_STOP_BREACHED,
@@ -896,6 +941,53 @@ mod tests {
             &render_portfolio_review(&r),
             "(historique indisponible)"
         ));
+    }
+
+    #[test]
+    fn the_position_line_carries_what_the_screen_states() {
+        let mut r = sample();
+        let p = &mut r.positions[0];
+        p.price = "123 USD".into();
+        p.last_saved = String::new();
+        p.last_saved_unknown = true;
+        p.mixed_links = "CHF".into();
+        p.stop = "63 CHF UBS".into();
+        p.stop_breached = true;
+        p.stop_breached_levels = "BREACHEDLVL".into();
+        p.invested = String::new();
+        r.due = vec![DueLine {
+            ticker: "ROG.SW".into(),
+            date_unknown: true,
+            reasons: vec!["age_unknown".into(), "not_computable".into()],
+            ..Default::default()
+        }];
+        r.counts = vec![("not_computable".into(), "1".into())];
+        let bytes = render_portfolio_review(&r);
+        assert!(
+            carries(&bytes, "prix actuel : 123 USD"),
+            "the present price"
+        );
+        assert!(
+            carries(&bytes, "sauvegarde : inconnue"),
+            "the unknown last save"
+        );
+        assert!(
+            carries(&bytes, "BREACHEDLVL"),
+            "which stop level is breached"
+        );
+        assert!(
+            carries(&bytes, "indisponible"),
+            "an absent amount is stated"
+        );
+        assert!(carries(&bytes, "anciennet"), "the unknown-age due reason");
+        assert!(
+            carries(&bytes, "non calculables"),
+            "the not-computable reason / count"
+        );
+        // A known last save is printed as a date.
+        let mut r = sample();
+        r.positions[0].last_saved = "2026-01-02".into();
+        assert!(carries(&render_portfolio_review(&r), "2026-01-02"));
     }
 
     #[test]

@@ -1085,9 +1085,11 @@ export struct ReviewPositionRow {
     flag-count: int,
     stale: bool,
     as-of: string,
-    stop: string,
+    stop: string,           // every lot's stop: level, currency, bank — joined (data)
     stop-breached: bool,
+    stop-breached-levels: string, // the breached stop(s) among `stop` (which level, which bank)
     trigger: string,        // stop | sell | ""
+    mixed-links: string,    // the lots link to different studies: their currencies, joined; "" when one study
     last-saved: string,
     last-saved-unknown: bool, // the FR51 history read failed — the date is unknown, never the creation date
     due: bool,
@@ -1099,8 +1101,10 @@ export struct ReviewDueRow {
     date-unknown: bool,     // the history read failed (the date is unknown)
     // Every reason that applies (G1 review — one reason hid the others).
     age: bool,
+    age-unknown: bool,      // the last save is unknown (history read failed)
     withheld: bool,
     low-confidence: bool,
+    not-computable: bool,   // the study's data does not normalize
 }
 export global Review {
     in-out property <bool> unavailable;
@@ -1131,6 +1135,7 @@ export global Review {
     in-out property <int> count-full;
     in-out property <int> count-provisional;
     in-out property <int> count-withheld;
+    in-out property <int> count-not-computable;
     in-out property <int> count-flagged;
     in-out property <int> count-high-zone;
     in-out property <int> count-stop-breached;

@@ -99,13 +99,14 @@ export component ReviewScreen inherits Rectangle {
         if (key == "above") { return @tr("au-dessus de la bande de prévision"); }
         return "—";
     }
-    // Every reason that applies, in the fixed order age · withheld · low confidence.
+    // Every reason that applies, in the fixed order age · age unknown · withheld · low confidence
+    // · not computable; each reason after the first is preceded by the separator.
     pure function due-words(d: ReviewDueRow) -> string {
         return (d.age ? @tr("dernière sauvegarde de plus de 12 mois") : "")
-            + (d.age && (d.withheld || d.low-confidence) ? " · " : "")
-            + (d.withheld ? @tr("une donnée requise manque") : "")
-            + (d.withheld && d.low-confidence ? " · " : "")
-            + (d.low-confidence ? @tr("confiance réduite") : "");
+            + (d.age-unknown ? (d.age ? " · " : "") + @tr("ancienneté inconnue") : "")
+            + (d.withheld ? (d.age || d.age-unknown ? " · " : "") + @tr("une donnée requise manque") : "")
+            + (d.low-confidence ? (d.age || d.age-unknown || d.withheld ? " · " : "") + @tr("confiance réduite") : "")
+            + (d.not-computable ? (d.age || d.age-unknown || d.withheld || d.low-confidence ? " · " : "") + @tr("données non calculables") : "");
     }
 
     Flickable {
@@ -243,6 +244,13 @@ export component ReviewScreen inherits Rectangle {
                             icon: "⊘";
                             text: @tr("Étude non calculable : ses données ne peuvent pas être préparées.");
                         }
+                        // The lots of this ticker do not all link to the same study (a legacy lot
+                        // matched ticker-only, lots in two currencies): stated, the row showing
+                        // the first lot's study.
+                        if row.mixed-links != "": StatusBand {
+                            icon: "◦";
+                            text: @tr("Les lots de ce titre sont liés à des études différentes (études en {}) ; la ligne montre celle du premier lot.", row.mixed-links);
+                        }
                         if row.flags != "": StatusBand {
                             icon: "⚠";
                             text: @tr("Signaux ({}) : {}", row.flag-count, row.flags);
@@ -254,11 +262,11 @@ export component ReviewScreen inherits Rectangle {
                                 text: row.stale ? @tr("◦ données périmées") : (row.as-of != "" ? @tr("données à jour le {}", row.as-of) : @tr("données : pas encore rafraîchies"));
                             }
                             if row.stop != "": CaptionLine {
-                                text: row.stop-breached ? @tr("seuil suiveur {} {} — sous le seuil", row.stop, row.currency) : @tr("seuil suiveur {} {}", row.stop, row.currency);
+                                text: row.stop-breached ? @tr("seuil suiveur {} — sous le seuil : {}", row.stop, row.stop-breached-levels) : @tr("seuil suiveur {}", row.stop);
                             }
                             if row.trigger == "stop": CaptionLine { text: @tr("◆ Le prix a atteint votre stop."); }
                             if row.trigger == "sell": CaptionLine { text: @tr("◆ Le prix est dans la zone de vente."); }
-                            if row.linked: CaptionLine {
+                            if row.linked || row.study == "not_computable": CaptionLine {
                                 text: row.last-saved-unknown ? @tr("dernière sauvegarde : inconnue (historique indisponible)") : @tr("dernière sauvegarde : {}", row.last-saved);
                             }
                         }
@@ -289,7 +297,7 @@ export component ReviewScreen inherits Rectangle {
 
             if !Review.unavailable: PanelCard {
                 title: @tr("En chiffres");
-                FactLine { text: @tr("{} positions · {} avec une étude · {} critères validés · {} provisoires · {} en attente", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld); }
+                FactLine { text: @tr("{} positions · {} avec une étude · {} critères validés · {} provisoires · {} en attente · {} non calculables", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld, Review.count-not-computable); }
                 FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur · {} à revoir", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached, Review.count-due); }
             }
         }
