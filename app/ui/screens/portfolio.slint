@@ -33,19 +33,26 @@ export component PortfolioScreen inherits Rectangle {
     property <bool> sold-open: false;
 
     // ── The dialog openers (the @tr titles/sentences live HERE, posture-gated like every string). ──
+    // The position dialogs read their choices FRESH on open (G1 review — never a list pushed at
+    // the last register render, which a study created or deleted since would leave stale).
     function open-add-holding() {
         Dialog.form("holding-add", @tr("Ajouter une position"),
-            @tr("Une position se crée pour un symbole qui a déjà une étude ; elle en prend la devise, et l'étude lui donne sa zone et son prix actuel."),
+            @tr("Une position se crée pour une étude existante ; elle en prend le symbole et la devise, et l'étude lui donne sa zone et son prix actuel."),
             "", "");
+        Holdings.load-position-choices("");
     }
     function open-edit-holding(row: HoldingRow) {
+        // G1 decision 4: the sentence states the edit's real rules — the currency never changes;
+        // a ledger-backed position keeps its quantity and price (the ledger corrects them).
         Dialog.form("holding-edit", @tr("Modifier la position {}", row.ticker),
-            @tr("Une position adossée à un registre de transactions garde sa quantité, son prix et sa devise ; seuls le symbole et le secteur sont modifiables ici."),
+            @tr("La devise d'une position ne change pas. Un autre symbole doit avoir une étude dans cette devise ; une position adossée à un registre de transactions garde sa quantité et son prix, que le registre corrige."),
             row.id, "");
         Dialog.draft-ticker = row.ticker;
         Dialog.draft-quantity = row.quantity;
         Dialog.draft-price = row.purchase-price;
         Dialog.draft-sector = row.sector;
+        Dialog.draft-currency = row.currency;
+        Holdings.load-position-choices(row.ticker);
     }
     function open-buy(id: string, ticker: string, currency: string) {
         Dialog.form("buy", @tr("Achat de {}", ticker),
@@ -102,6 +109,12 @@ export component PortfolioScreen inherits Rectangle {
                 title: @tr("Portefeuilles");
                 subtitle: @tr("Un portefeuille par banque ou compte ; devise de référence : {} (modifiable dans Réglages).", Holdings.reference-currency);
 
+                // G1 review (spec §5.1): the read-only state is a band, not only greyed buttons.
+                if Holdings.read-only: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; les positions se consultent mais ne se modifient pas.");
+                }
+
                 if Holdings.portfolios.length > 1: Flickable {
                     height: Tokens.row-height + Tokens.space-8;
                     viewport-width: chips.preferred-width;
@@ -132,17 +145,19 @@ export component PortfolioScreen inherits Rectangle {
                         label: @tr("Renommer…");
                         enabled: !Holdings.read-only && Holdings.active-portfolio-id != "";
                         clicked => {
-                            Dialog.form("portfolio-rename", @tr("Renommer le portefeuille"), "", Holdings.active-portfolio-id, "");
+                            // Prefilled with the current name (spec §5.1).
+                            Dialog.form("portfolio-rename", @tr("Renommer le portefeuille"),
+                                @tr("Le nouveau nom remplace l'ancien ; les positions et leur historique ne changent pas."),
+                                Holdings.active-portfolio-id, "");
+                            Dialog.draft-name = Holdings.active-portfolio-name;
                         }
                     }
                     ActionButton {
                         label: @tr("Supprimer le portefeuille");
                         enabled: !Holdings.read-only && Holdings.active-portfolio-id != "";
-                        clicked => {
-                            Dialog.confirm(@tr("Supprimer ce portefeuille ?"),
-                                @tr("Un portefeuille qui contient un historique de positions n'est pas supprimé ; le dernier portefeuille non plus."),
-                                @tr("Supprimer"), "delete-portfolio", Holdings.active-portfolio-id);
-                        }
+                        // G1 review (spec §5.1): Rust checks the guards FIRST — a portfolio holding
+                        // positions is a refusal naming the count; only an empty one is confirmed.
+                        clicked => { Holdings.request-delete-portfolio(Holdings.active-portfolio-id); }
                     }
                 }
             }
@@ -378,11 +393,14 @@ export component PortfolioScreen inherits Rectangle {
                 if Holdings.size-mix-rows.length > 0: CaptionLine {
                     text: @tr("Répartition par taille (chiffre d'affaires) :");
                 }
-                // The walk's « rien ne s'affiche » : every class at 0 % because NOTHING is
-                // classified — the reason bands below explain it, this band says it first.
-                if Holdings.size-mix-rows.length > 0 && Holdings.size-unclassified-rows.length == Holdings.concentration-rows.length: StatusBand {
+                // The walk's « rien ne s'affiche » : every class empty because NOTHING is
+                // classified — the reason bands below explain it, this band says it first. G1
+                // review: keyed by ticker identity in Rust (`size-none-classified`), never by
+                // comparing two list lengths; the words no longer assert a 0 % the lines may not
+                // show (a share can be « indisponible »).
+                if Holdings.size-mix-rows.length > 0 && Holdings.size-none-classified: StatusBand {
                     icon: "◦";
-                    text: @tr("Aucune position n'a pu être classée par taille ; les parts ci-dessous sont à 0 % pour cette raison.");
+                    text: @tr("Aucune position n'a pu être classée par taille ; les classes ci-dessous ne contiennent donc aucune position.");
                 }
                 for unclassified in Holdings.size-unclassified-rows: StatusBand {
                     icon: "◦";
@@ -678,9 +696,14 @@ export component PortfolioScreen inherits Rectangle {
                                     label: @tr("Modifier…");
                                     enabled: !Holdings.read-only;
                                     clicked => {
+                                        // G1 review: a dividend row opens with the dividend's
+                                        // labels (`txn-kind`), never the buy/sell « Frais ».
                                         Dialog.form("txn-edit", @tr("Modifier la transaction du {}", lrow.date),
-                                            @tr("Le type et la devise de la transaction ne changent pas ; la position est recalculée depuis son registre."),
+                                            lrow.kind == "dividend"
+                                                ? @tr("Le type et la devise du dividende ne changent pas ; son net est recalculé.")
+                                                : @tr("Le type et la devise de la transaction ne changent pas ; la position est recalculée depuis son registre."),
                                             lrow.id, @tr("Montants en {}", lrow.currency));
+                                        Dialog.txn-kind = lrow.kind;
                                         Dialog.draft-date = lrow.date;
                                         Dialog.draft-quantity = lrow.quantity;
                                         Dialog.draft-price = lrow.unit-price;

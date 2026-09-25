@@ -8,7 +8,7 @@
 // Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
 import { Tokens } from "../tokens.slint";
-import { Comparison, Dialog, Holdings, Labels, Prefs, Studies, StudyRow, Confront } from "../state.slint";
+import { Comparison, Dialog, Holdings, Labels, Studies, StudyRow, Confront } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
@@ -256,7 +256,8 @@ export component DashboardScreen inherits Rectangle {
                         Dialog.form("study-create", @tr("Créer une étude"),
                             @tr("Le symbole est celui du fournisseur de données (p. ex. NESN.SW) ; la devise est celle dans laquelle les chiffres du titre sont publiés."),
                             "", "");
-                        Dialog.draft-currency = Prefs.reference-currency;
+                        // G1 decision 8: no currency prefilled — an explicit pick, never the
+                        // reference currency by reflex (the CHF/USD trap of the walk).
                     }
                 }
             }

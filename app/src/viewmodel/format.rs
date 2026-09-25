@@ -15,12 +15,12 @@ pub const MINUS_SIGN: char = '\u{2212}';
 /// UI's default font has no glyph for it and drew « 1540 » in a status band while the numeric
 /// font drew « 1 540 » beside it (walk finding, 2026-09-24) — so the plain no-break space
 /// (U+00A0), which every font carries, is emitted; the paste parser accepts both.
-const NARROW_NBSP: char = '\u{00A0}';
+const NBSP: char = '\u{00A0}';
 /// The typographic narrow variant (U+202F): never emitted, always accepted on parse (pasted
 /// columns from CH/EU sources carry it).
 const TYPOGRAPHIC_NARROW_NBSP: char = '\u{202F}';
 
-/// The two shipped presets: `Comma` → `1 234,56` (narrow no-break space + decimal comma),
+/// The two shipped presets: `Comma` → `1 234,56` (no-break space + decimal comma),
 /// `Point` → `1,234.56` (comma thousands + decimal point).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -57,7 +57,7 @@ impl NumberFormat {
 
     fn thousands_separator(self) -> char {
         match self {
-            NumberFormat::Comma => NARROW_NBSP,
+            NumberFormat::Comma => NBSP,
             NumberFormat::Point => ',',
         }
     }
@@ -137,7 +137,7 @@ pub fn parse_amount(input: &str, format: NumberFormat) -> Option<Money> {
             // Grouping separators are dropped: the preset's own, plus the narrow no-break space and
             // a plain ASCII space the user may type in its place.
             c if c == thousands => continue,
-            ' ' | NARROW_NBSP | TYPOGRAPHIC_NARROW_NBSP => continue,
+            ' ' | NBSP | TYPOGRAPHIC_NARROW_NBSP => continue,
             // The decimal separator (preset-specific) becomes the canonical point.
             c if c == decimal => canonical.push('.'),
             // Accept the true minus sign as the ASCII hyphen.

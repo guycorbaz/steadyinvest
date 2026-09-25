@@ -32,9 +32,13 @@ fn low_candidates(
             .checked_div(yield_fraction)
     });
     ForecastLowCandidates {
+        // Option (a) needs BOTH factors positive (G1 review of #213): a zero or negative low P/E
+        // or estimated low EPS yields a nonpositive « price », which is no forecast low — unknown,
+        // never a number that would invert the zones.
         avg_low_pe_times_eps: judgment
             .judged_avg_low_pe
             .zip(growth.estimated_low_eps)
+            .filter(|(pe, eps)| *pe > Decimal::ZERO && *eps > Decimal::ZERO)
             .and_then(|(pe, eps)| pe.checked_mul(eps)),
         avg_low_price_last_5y: valuation.avg_low_price,
         recent_severe_low: judgment.recent_severe_low,
@@ -269,6 +273,18 @@ mod tests {
         let c = low_candidates(&judgment, &growth_with(None), &valuation);
         assert_eq!(c.avg_low_pe_times_eps, None);
         assert_eq!(c.avg_low_price_last_5y, Some(d(30, 0)));
+        // G1 review: a zero / negative est-low EPS or low P/E makes (a) unknown — never a
+        // nonpositive « forecast low ».
+        for eps in [Decimal::ZERO, d(-3, 0)] {
+            let c = low_candidates(&judgment, &growth_with(Some(eps)), &valuation);
+            assert_eq!(c.avg_low_pe_times_eps, None, "est-low EPS {eps}");
+        }
+        let negative_pe = JudgmentInputs {
+            judged_avg_low_pe: Some(d(-10, 0)),
+            ..judgment.clone()
+        };
+        let c = low_candidates(&negative_pe, &growth, &valuation);
+        assert_eq!(c.avg_low_pe_times_eps, None, "a negative low P/E");
     }
 
     #[test]

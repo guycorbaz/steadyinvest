@@ -93,6 +93,18 @@ impl JournalState {
     /// sources, all-`None` judgment, `Study::new` schema-stamped, written with `put_study` (which
     /// bumps `logical_version`). Returns the new id on success, or a neutral notice for a banner.
     pub fn create_study(&mut self, ticker: &str, currency: &str) -> Result<Uuid, String> {
+        self.create_study_named(ticker, currency, "")
+    }
+
+    /// [`Self::create_study`] with the optional company name of the « Créer une étude » dialog (UX
+    /// spec §5.3, G1 review decision 8): trimmed, empty ⇒ absent (the [`Self::set_company_name`]
+    /// rule), written in the SAME first put — so the creation stays one timeline entry.
+    pub fn create_study_named(
+        &mut self,
+        ticker: &str,
+        currency: &str,
+        company_name: &str,
+    ) -> Result<Uuid, String> {
         let ticker = ticker.trim();
         let currency = currency.trim();
         if ticker.is_empty() {
@@ -108,7 +120,7 @@ impl JournalState {
             return Err(MSG_NO_JOURNAL.to_string());
         };
 
-        let study = Study::new(
+        let mut study = Study::new(
             self.idgen.new_id(),
             journal.id(),
             ticker,
@@ -116,6 +128,8 @@ impl JournalState {
             empty_judgment(),
             self.clock.now(),
         );
+        let company_name = company_name.trim();
+        study.company_name = (!company_name.is_empty()).then(|| company_name.to_string());
         let id = study.id;
         // Issue #34 (FR51): the creation IS the timeline's first entry — the durable history
         // starts at the all-`None` state, same transaction as the row itself.

@@ -17,7 +17,7 @@ use crate::viewmodel::format::{NumberFormat, format_scaled};
 use crate::wiring::{Session, persist};
 use crate::{
     BankCarRow, CapitalAtRiskRow, ConcentrationLine, HoldingRow, Holdings, LedgerRow, MainWindow,
-    PortfolioRow, SizeMixLine, SoldRow, UnclassifiedLine,
+    PortfolioRow, SizeMixLine, SoldRow, StudyChoiceRow, UnclassifiedLine,
 };
 use crate::{fetch, state, viewmodel};
 use rust_decimal::Decimal;
@@ -207,9 +207,9 @@ pub(crate) fn refresh_holdings(
     holdings.set_holding_count(items.len() as i32);
     holdings.set_rows(ModelRc::new(VecModel::from(rows)));
     holdings.set_read_only(state.is_read_only());
-    // The symbols a position can be added for (issue #218 + the drop-down rule): every study's
-    // ticker, unique, sorted. Absence-blind (a read failure lists nothing; the dialog then states
-    // « aucune étude »).
+    // Every study's ticker, unique, sorted — the comparison pickers' list. (The position dialog no
+    // longer reads it: its choices are studies, pushed fresh and fallibly by
+    // `push_position_choices` when it opens — G1 review.)
     let mut tickers: Vec<String> = state
         .list_studies()
         .into_iter()
@@ -547,6 +547,23 @@ pub(crate) fn refresh_holdings(
         Vec::new()
     };
     holdings.set_size_unclassified_rows(ModelRc::new(VecModel::from(unclassified_rows)));
+    // G1 review (the discriminator rule): « nothing could be classified » is keyed by IDENTITY —
+    // every listed security's ticker has its own « non classé » row — never by comparing the two
+    // lists' lengths (which a read failure or a filtered list would make agree by accident).
+    let unclassified_tickers: std::collections::HashSet<String> = div
+        .unclassified
+        .iter()
+        .map(|u| u.ticker.to_uppercase())
+        .collect();
+    holdings.set_size_none_classified(
+        show_div
+            && !div.unavailable
+            && !div.rows.is_empty()
+            && div
+                .rows
+                .iter()
+                .all(|r| unclassified_tickers.contains(&r.ticker.to_uppercase())),
+    );
     // The FR28 footnote — pure data entries, no prose baked into Rust (posture).
     holdings.set_concentration_rates(if show_div {
         div.rates_used
@@ -575,13 +592,15 @@ pub(crate) fn refresh_holdings(
         })
         .collect();
     holdings.set_portfolios(ModelRc::new(VecModel::from(portfolios)));
+    let active = state.active_portfolio();
     holdings.set_active_portfolio_id(
-        state
-            .active_portfolio_id()
-            .map(|id| id.to_string())
+        active
+            .as_ref()
+            .map(|p| p.id.to_string())
             .unwrap_or_default()
             .into(),
     );
+    holdings.set_active_portfolio_name(active.map(|p| p.name).unwrap_or_default().into());
 
     // Story 6.8 (FR48): keep an OPEN candidates panel truthful across every holdings/ledger/FX
     // mutation that re-renders the register (a closed panel costs nothing).
@@ -652,6 +671,70 @@ pub(crate) fn sync_ledger_panel(ui: &MainWindow, state: &JournalState, holding_i
     }
 }
 
+/// Parse a row / form id, or raise `message` as a named refusal (G1 review: an unreadable id used
+/// to return `false` silently — the form then stayed open with no cause shown).
+fn parse_or_refuse(ui: &MainWindow, id: &str, message: &str) -> Option<Uuid> {
+    match Uuid::parse_str(id) {
+        Ok(uuid) => Some(uuid),
+        Err(_) => {
+            crate::wiring::dialog::refuse(ui, message);
+            None
+        }
+    }
+}
+
+/// A study choice's label (G1 decision 3): « TICKER », or « TICKER · CUR » when the ticker has
+/// studies in several currencies. Pure data — codes and a separator, no prose.
+fn study_choice_label(choice: &state::StudyChoice) -> String {
+    if choice.ambiguous {
+        format!("{} · {}", choice.ticker, choice.currency)
+    } else {
+        choice.ticker.clone()
+    }
+}
+
+/// The edit form's symbols (G1 decision 4): every study ticker, unique and sorted, plus the
+/// holding's OWN ticker even without a study — a legacy unlinked position stays editable.
+fn edit_ticker_options(choices: &[state::StudyChoice], current: &str) -> Vec<String> {
+    let mut tickers: Vec<String> = choices.iter().map(|c| c.ticker.clone()).collect();
+    let current = current.trim();
+    if !current.is_empty() && !tickers.iter().any(|t| t.eq_ignore_ascii_case(current)) {
+        tickers.push(current.to_string());
+    }
+    tickers.sort_by_key(|t| t.to_uppercase());
+    tickers.dedup();
+    tickers
+}
+
+/// Push the position dialog's choices (see `load-position-choices`): the study choices and their
+/// labels in ONE order, the edit symbols, and the #95 read-failure flag.
+fn push_position_choices(ui: &MainWindow, state: &JournalState, current_ticker: &str) {
+    let holdings = ui.global::<Holdings>();
+    let (choices, unavailable) = match state.try_study_choices() {
+        Ok(choices) => (choices, false),
+        Err(_) => (Vec::new(), true),
+    };
+    let rows: Vec<StudyChoiceRow> = choices
+        .iter()
+        .map(|c| StudyChoiceRow {
+            id: c.id.to_string().into(),
+            label: study_choice_label(c).into(),
+            ticker: c.ticker.clone().into(),
+            currency: c.currency.clone().into(),
+            name: c.company_name.clone().unwrap_or_default().into(),
+        })
+        .collect();
+    let labels: Vec<SharedString> = rows.iter().map(|r| r.label.clone()).collect();
+    let edit: Vec<SharedString> = edit_ticker_options(&choices, current_ticker)
+        .into_iter()
+        .map(SharedString::from)
+        .collect();
+    holdings.set_study_choices(ModelRc::new(VecModel::from(rows)));
+    holdings.set_study_choice_labels(ModelRc::new(VecModel::from(labels)));
+    holdings.set_edit_tickers(ModelRc::new(VecModel::from(edit)));
+    holdings.set_study_choices_unavailable(unavailable);
+}
+
 /// Surface a holdings write's outcome and re-render the register. A REFUSAL is routed to the modal
 /// dialog (the UX pass — acknowledged, or inline in the open form); a written result clears the
 /// outcome slot (its own success notice, when any, was set by the caller).
@@ -697,12 +780,17 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Holdings>()
-            .on_add_holding(move |ticker, quantity, price, sector| {
+            .on_add_holding(move |study_id, quantity, price, sector| {
                 let ui = ui_weak.unwrap();
-                // Issue #218: the position takes its study's currency (refused without a study).
+                // Issue #218 + G1 decision 3: the position is added for the CHOSEN study (its id —
+                // identity) and takes that study's ticker and currency.
+                let Some(study_id) = parse_or_refuse(&ui, &study_id, state::MSG_HOLDING_NO_STUDY)
+                else {
+                    return false;
+                };
                 let result = journal_state
                     .borrow_mut()
-                    .add_holding_linked(&ticker, &quantity, &price, &sector);
+                    .add_holding_for_study(study_id, &quantity, &price, &sector);
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
@@ -774,9 +862,10 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             let journal_state = Rc::clone(&journal_state);
             let on_change = on_portfolio_change.clone();
             h.on_rename_portfolio(move |id, name| {
+                // G1 review: an unreadable id is a named refusal, never a reported success.
                 let result = match Uuid::parse_str(&id) {
                     Ok(id) => journal_state.borrow_mut().rename_portfolio(id, &name),
-                    Err(_) => Ok(()),
+                    Err(_) => Err(state::MSG_PORTFOLIO_NOT_FOUND.to_string()),
                 };
                 let written = result.is_ok();
                 on_change(result);
@@ -789,9 +878,27 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             h.on_delete_portfolio(move |id| {
                 let result = match Uuid::parse_str(&id) {
                     Ok(id) => journal_state.borrow_mut().delete_portfolio(id),
-                    Err(_) => Ok(()),
+                    Err(_) => Err(state::MSG_PORTFOLIO_NOT_FOUND.to_string()),
                 };
                 on_change(result);
+            });
+        }
+        // G1 review (spec §5.1): the guards BEFORE the confirm — a portfolio with positions is a
+        // refusal naming the count; only a deletable one gets « Supprimer ce portefeuille ? ».
+        {
+            let ui_weak = ui.as_weak();
+            let journal_state = Rc::clone(&journal_state);
+            h.on_request_delete_portfolio(move |id| {
+                let ui = ui_weak.unwrap();
+                let guard = match Uuid::parse_str(&id) {
+                    Ok(uuid) => journal_state.borrow().portfolio_delete_guard(uuid),
+                    Err(_) => Err(state::MSG_PORTFOLIO_NOT_FOUND.to_string()),
+                };
+                match guard {
+                    // The prompt's words live in Slint (the overlay derives them from the action).
+                    Ok(()) => crate::wiring::dialog::confirm_for(&ui, "delete-portfolio", "", &id),
+                    Err(message) => crate::wiring::dialog::refuse(&ui, &message),
+                }
             });
         }
     }
@@ -804,13 +911,15 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>()
             .on_edit_holding(move |id, ticker, quantity, price, sector| {
                 let ui = ui_weak.unwrap();
-                let Ok(id) = Uuid::parse_str(&id) else {
+                let Some(id) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
                     return false;
                 };
-                // Issue #218: the currency follows the ticker's study, never a picker.
-                let result = journal_state
-                    .borrow_mut()
-                    .update_holding_linked(id, &ticker, &quantity, &price, &sector);
+                // G1 decision 4: the edit NEVER changes the holding's currency; a new symbol
+                // needs a study in that currency (else a named refusal).
+                let reference = config.borrow().reference_currency_or_default();
+                let result = journal_state.borrow_mut().update_holding_keeping_currency(
+                    id, &ticker, &quantity, &price, &sector, &reference,
+                );
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
@@ -833,7 +942,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Holdings>().on_remove_holding(move |id| {
             let ui = ui_weak.unwrap();
-            let Ok(id) = Uuid::parse_str(&id) else {
+            let Some(id) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
                 return;
             };
             let result = journal_state.borrow_mut().delete_holding(id);
@@ -852,33 +961,17 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             );
         });
     }
-    // ── The UX pass: the add-position dialog's read-only lookups — the study of that ticker (any
-    //    currency): its native currency seeds the picker (so a USD study never gets a CHF position
-    //    by reflex — the on-display walk's trap) and its company name is shown beside the symbol. ──
+    // ── G1 review (Guy's decision 3, #95, staleness): the position dialog's choices, read FRESH
+    //    when it opens — one per study (ticker, currency), the id carried; a read failure is
+    //    « indisponible », never an empty-looking « aucune étude ». ──
     {
+        let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         ui.global::<Holdings>()
-            .on_study_currency_for(move |ticker| {
-                let state = journal_state.borrow();
-                state
-                    .study_id_for_ticker(ticker.trim())
-                    .and_then(|id| state.get_study(id))
-                    .map(|s| s.native_currency.to_uppercase())
-                    .unwrap_or_default()
-                    .into()
+            .on_load_position_choices(move |current_ticker| {
+                let ui = ui_weak.unwrap();
+                push_position_choices(&ui, &journal_state.borrow(), &current_ticker);
             });
-    }
-    {
-        let journal_state = Rc::clone(journal_state);
-        ui.global::<Holdings>().on_study_name_for(move |ticker| {
-            let state = journal_state.borrow();
-            state
-                .study_id_for_ticker(ticker.trim())
-                .and_then(|id| state.get_study(id))
-                .and_then(|s| s.company_name)
-                .unwrap_or_default()
-                .into()
-        });
     }
     // ── Story 4.4 (FR40) — manual price refresh for every linked holding, off the UI thread. One
     // job per UNIQUE linked ticker (reusing the Epic-3 worker); holdings with no matching study are
@@ -984,7 +1077,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>()
             .on_set_trailing_stop(move |id, pct| {
                 let ui = ui_weak.unwrap();
-                let Ok(id) = Uuid::parse_str(&id) else {
+                let Some(id) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
                     return false;
                 };
                 let result = journal_state
@@ -1014,7 +1107,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>()
             .on_sell_holding(move |id, quantity, rationale| {
                 let ui = ui_weak.unwrap();
-                let Ok(uuid) = Uuid::parse_str(&id) else {
+                let Some(uuid) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
                     return false;
                 };
                 // Story 6.8 (FR48): capture the ticker BEFORE the sell — a whole-position sell
@@ -1133,7 +1226,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>()
             .on_record_buy(move |id, date, quantity, price, fees, rationale| {
                 let ui = ui_weak.unwrap();
-                let Ok(uuid) = Uuid::parse_str(&id) else {
+                let Some(uuid) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
                     return false;
                 };
                 let reference = config.borrow().reference_currency_or_default();
@@ -1181,7 +1274,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>().on_record_sell(
             move |id, date, quantity, price, fees, rationale| {
                 let ui = ui_weak.unwrap();
-                let Ok(uuid) = Uuid::parse_str(&id) else {
+                let Some(uuid) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
                     return false;
                 };
                 // Story 6.8 (FR48): the ticker BEFORE the sell (a whole sell retires the row).
@@ -1249,7 +1342,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         ui.global::<Holdings>().on_record_dividend(
             move |id, date, quantity, gross_per_share, withholding, rationale| {
                 let ui = ui_weak.unwrap();
-                let Ok(uuid) = Uuid::parse_str(&id) else {
+                let Some(uuid) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
                     return false;
                 };
                 let (reference, rate) = {
@@ -1311,6 +1404,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 let (Ok(txn_uuid), Ok(holding_uuid)) =
                     (Uuid::parse_str(&txn_id), Uuid::parse_str(&holding_id))
                 else {
+                    crate::wiring::dialog::refuse(&ui, state::MSG_TRANSACTION_NOT_FOUND);
                     return false;
                 };
                 let reference = config.borrow().reference_currency_or_default();
@@ -1366,6 +1460,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 let (Ok(txn_uuid), Ok(holding_uuid)) =
                     (Uuid::parse_str(&txn_id), Uuid::parse_str(&holding_id))
                 else {
+                    crate::wiring::dialog::refuse(&ui, state::MSG_TRANSACTION_NOT_FOUND);
                     return;
                 };
                 let reference = config.borrow().reference_currency_or_default();
@@ -1399,5 +1494,53 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 }
                 sync_ledger_panel(&ui, &journal_state.borrow(), holding_uuid);
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{edit_ticker_options, study_choice_label};
+    use crate::state::StudyChoice;
+    use uuid::Uuid;
+
+    fn choice(ticker: &str, currency: &str, ambiguous: bool) -> StudyChoice {
+        StudyChoice {
+            id: Uuid::nil(),
+            ticker: ticker.to_string(),
+            currency: currency.to_string(),
+            company_name: None,
+            ambiguous,
+        }
+    }
+
+    #[test]
+    fn a_choice_label_names_the_currency_only_when_the_ticker_is_ambiguous() {
+        assert_eq!(
+            study_choice_label(&choice("NESN.SW", "CHF", false)),
+            "NESN.SW"
+        );
+        assert_eq!(
+            study_choice_label(&choice("NVDA.US", "USD", true)),
+            "NVDA.US · USD"
+        );
+    }
+
+    #[test]
+    fn the_edit_symbols_keep_the_holdings_own_ticker_even_without_a_study() {
+        let choices = [
+            choice("NVDA.US", "CHF", true),
+            choice("NVDA.US", "USD", true),
+            choice("AAPL.US", "USD", false),
+        ];
+        assert_eq!(
+            edit_ticker_options(&choices, "rog.sw"),
+            ["AAPL.US", "NVDA.US", "rog.sw"]
+        );
+        // Already a study ticker (any case) → not duplicated.
+        assert_eq!(
+            edit_ticker_options(&choices, "nvda.us"),
+            ["AAPL.US", "NVDA.US"]
+        );
+        assert_eq!(edit_ticker_options(&choices, ""), ["AAPL.US", "NVDA.US"]);
     }
 }

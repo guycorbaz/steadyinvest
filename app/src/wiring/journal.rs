@@ -257,20 +257,15 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 // modal confirm instead of silently snapping shared entities back.
                 Ok(json) => match journal_state.borrow_mut().request_import_journal(&json) {
                     Ok(state::ImportRequest::Applied(summary)) => {
-                        prefs.set_import_confirm("".into());
                         Ok(state::journal_imported_message(&summary))
                     }
                     Ok(state::ImportRequest::NeedsConfirm { source, current }) => {
                         let prompt = state::import_confirm_message(source, current);
-                        prefs.set_import_confirm(prompt.clone().into());
                         prefs.set_journal_status("".into());
                         crate::wiring::dialog::confirm(&ui, "confirm-import", &prompt);
                         return; // nothing applied yet — no re-render needed
                     }
-                    Err(message) => {
-                        prefs.set_import_confirm("".into());
-                        Err(message)
-                    }
+                    Err(message) => Err(message),
                 },
                 // An unreadable path is the malformed/unreadable case — a neutral refusal, no panic.
                 Err(_) => Err(state::MSG_IMPORT_MALFORMED.to_string()),
@@ -311,7 +306,6 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             let ui = ui_weak.unwrap();
             let result = journal_state.borrow_mut().confirm_import_journal();
             let prefs = ui.global::<Prefs>();
-            prefs.set_import_confirm("".into());
             match result {
                 Ok(summary) => {
                     prefs.set_journal_status(state::journal_imported_message(&summary).into())
@@ -339,12 +333,9 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         });
     }
     {
-        let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>().on_cancel_import(move || {
-            let ui = ui_weak.unwrap();
             journal_state.borrow_mut().cancel_import_journal();
-            ui.global::<Prefs>().set_import_confirm("".into());
         });
     }
 
@@ -394,13 +385,11 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 // A confirmable restore is parked — reveal the confirm banner with the identity/warning.
                 Ok(assessment) => {
                     let prompt = state::restore_confirm_message(&assessment);
-                    prefs.set_restore_confirm(prompt.clone().into());
                     prefs.set_restore_status("".into());
                     crate::wiring::dialog::confirm(&ui, "confirm-restore", &prompt);
                 }
                 // A hard refusal — acknowledged in the dialog, nothing parked.
                 Err(message) => {
-                    prefs.set_restore_confirm("".into());
                     prefs.set_restore_status("".into());
                     crate::wiring::dialog::refuse(&ui, &message);
                 }
@@ -439,7 +428,6 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             let ui = ui_weak.unwrap();
             let result = journal_state.borrow_mut().confirm_restore();
             let prefs = ui.global::<Prefs>();
-            prefs.set_restore_confirm("".into());
             // A successful restore replaces the whole journal — close any open study editor first so a
             // stale in-memory form can't be saved back into the restored journal (an old study_id would
             // otherwise be written into the new journal).
@@ -473,12 +461,9 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         });
     }
     {
-        let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>().on_cancel_restore(move || {
-            let ui = ui_weak.unwrap();
             journal_state.borrow_mut().cancel_restore();
-            ui.global::<Prefs>().set_restore_confirm("".into());
         });
     }
 

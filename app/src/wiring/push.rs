@@ -86,7 +86,7 @@ pub(crate) fn push_form(
             studies.set_growth_computed(engine::growth_computed(outputs, format));
             studies.set_mgmt_computed(engine::mgmt_computed(outputs, &years, format));
             studies.set_pe_computed(engine::pe_computed(outputs, format));
-            studies.set_risk_computed(engine::risk_computed(outputs, format));
+            studies.set_risk_computed(engine::risk_computed(outputs, &study.judgment, format));
             studies.set_return_computed(engine::return_computed(outputs, format));
             studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
             studies.set_verdict(engine::verdict_badge(study, snapshot, format));
@@ -240,7 +240,7 @@ pub(crate) fn push_live_preview(
         // §4/§5 judgment-dependent numbers stay in step with the recolouring bar (review P1) — the
         // forecast high/low + U/D, the projected return, and the §4 study-level warning all move
         // with the est-high-EPS the drag sets, so the §4 surface never disagrees with itself.
-        studies.set_risk_computed(engine::risk_computed(outputs, format));
+        studies.set_risk_computed(engine::risk_computed(outputs, &study.judgment, format));
         studies.set_return_computed(engine::return_computed(outputs, format));
         studies.set_section4_warning_key(
             warnings

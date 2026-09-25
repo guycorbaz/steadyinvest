@@ -1,8 +1,12 @@
 // Dropdown — a constrained choice as a drop-down list (Guy, 2026-09-24: « des menus déroulants
 // partout où c'est possible, cela diminue les erreurs de saisie »). A token-styled box (the TextField
 // look) showing the current value and a ▾ glyph; a click opens a PopupWindow listing the options,
-// one row each; picking a row sets `value`, fires `changed` and closes. No std-widgets (the app's
-// primitives are all restyled), no colour spent. Keyboard: Enter / Space open the list.
+// one row each; picking a row sets `value`, fires `picked(index)` and closes. No std-widgets (the
+// app's primitives are all restyled), no colour spent.
+//
+// Keyboard (G1 review): with the box focused, ↑ / ↓ select the previous / next option and Home /
+// End the first / last — without opening the list, like a native select; Enter / Space open it.
+// The list is capped at `max-rows` rows and scrolls (a long study list stays reachable).
 
 import { Tokens } from "../tokens.slint";
 
@@ -11,7 +15,14 @@ export component Dropdown inherits Rectangle {
     in-out property <string> value;
     in property <string> placeholder;
     in property <bool> enabled: true;
-    callback changed(string);
+    // The list's visible height, in rows; beyond it the list scrolls.
+    in property <int> max-rows: 8;
+    // Fired on every pick (mouse or keyboard) with the option's INDEX — a caller that carries ids in
+    // a parallel list resolves the pick by index (identity), never by re-matching the label.
+    callback picked(int);
+
+    // The index of the current value when it was picked here (-1: none yet, or set from outside).
+    property <int> current: -1;
 
     height: Tokens.row-height + Tokens.space-4;
     border-radius: Tokens.radius;
@@ -21,10 +32,21 @@ export component Dropdown inherits Rectangle {
     opacity: root.enabled ? 1.0 : 0.5;
     forward-focus: fs;
 
+    changed value => {
+        if (root.value == "") { root.current = -1; }
+    }
+
     function open() {
         if (root.enabled && root.options.length > 0) {
             popup.show();
         }
+    }
+
+    function pick(index: int) {
+        if (index < 0 || index >= root.options.length) { return; }
+        root.current = index;
+        root.value = root.options[index];
+        root.picked(index);
     }
 
     fs := FocusScope {
@@ -32,6 +54,22 @@ export component Dropdown inherits Rectangle {
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") {
                 root.open();
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.pick(root.current < 0 ? 0 : min(root.current + 1, root.options.length - 1));
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.pick(root.current < 0 ? root.options.length - 1 : max(root.current - 1, 0));
+                return accept;
+            }
+            if (event.text == Key.Home) {
+                root.pick(0);
+                return accept;
+            }
+            if (event.text == Key.End) {
+                root.pick(root.options.length - 1);
                 return accept;
             }
             reject
@@ -70,6 +108,7 @@ export component Dropdown inherits Rectangle {
         x: 0;
         y: root.height;
         width: root.width;
+        height: min(root.options.length, root.max-rows) * Tokens.row-height + 2 * Tokens.space-4;
         close-policy: close-on-click-outside;
 
         Rectangle {
@@ -78,29 +117,36 @@ export component Dropdown inherits Rectangle {
             border-color: Tokens.separator;
             border-radius: Tokens.radius;
 
-            VerticalLayout {
-                padding: Tokens.space-4;
-                for option in root.options: Rectangle {
-                    height: Tokens.row-height;
-                    border-radius: Tokens.radius;
-                    background: row-touch.has-hover ? Tokens.surface-alt : transparent;
-                    row-touch := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            root.value = option;
-                            root.changed(option);
-                            popup.close();
+            Flickable {
+                x: Tokens.space-4;
+                y: Tokens.space-4;
+                width: parent.width - 2 * Tokens.space-4;
+                height: parent.height - 2 * Tokens.space-4;
+                viewport-height: root.options.length * Tokens.row-height;
+
+                VerticalLayout {
+                    for option[index] in root.options: Rectangle {
+                        height: Tokens.row-height;
+                        border-radius: Tokens.radius;
+                        background: row-touch.has-hover ? Tokens.surface-alt : transparent;
+                        row-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.pick(index);
+                                popup.close();
+                            }
                         }
-                    }
-                    HorizontalLayout {
-                        padding-left: Tokens.space-8;
-                        padding-right: Tokens.space-8;
-                        Text {
-                            text: option;
-                            color: Tokens.text-high;
-                            font-size: Tokens.font-body;
-                            font-weight: option == root.value ? Tokens.weight-semibold : 400;
-                            vertical-alignment: center;
+                        HorizontalLayout {
+                            padding-left: Tokens.space-8;
+                            padding-right: Tokens.space-8;
+                            Text {
+                                text: option;
+                                color: Tokens.text-high;
+                                font-size: Tokens.font-body;
+                                font-weight: option == root.value ? Tokens.weight-semibold : 400;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
                         }
                     }
                 }

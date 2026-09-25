@@ -13,7 +13,7 @@ use steadyinvest_persistence::{
 use uuid::Uuid;
 
 use super::{
-    JournalState, MSG_NO_JOURNAL, MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY,
+    JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY,
     MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL, MSG_RESTORE_UNCHECKPOINTED,
     MSG_RESTORE_UNREADABLE, MSG_SAVE_FAILED, path_with_suffix, same_file_path, sync_mode_for,
 };
@@ -152,6 +152,12 @@ impl JournalState {
             .pending_restore
             .take()
             .ok_or(MSG_RESTORE_FAILED.to_string())?;
+        // G1 review (Guy's decision 5): a dossier open READ-ONLY (written by a newer version) is
+        // never overwritten — the confirm dialog names the reason and blocks its verb, and the rule
+        // lives HERE too, so no other caller can bypass it. The parked restore is dropped.
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
         let live = self.path.clone().ok_or(MSG_NO_JOURNAL.to_string())?;
 
         // Restoring the journal onto itself is a no-op — the live journal already IS this content (and

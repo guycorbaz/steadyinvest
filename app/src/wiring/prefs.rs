@@ -179,15 +179,15 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 let ui = ui_weak.unwrap();
                 let value = value.trim();
                 // Empty clears the default; a malformed percent is REFUSED with a named notice (issue
-                // #88 — no longer a silent swallow; the panel re-syncs its field to the effective value).
+                // #88). G1 review (spec AC1): the refusal returns `false` so the panel KEEPS the
+                // typed text, and it touches no other card's status slot.
                 let stored = if value.is_empty() {
                     None
                 } else if config::is_valid_trailing_stop_pct(value) {
                     Some(value.to_string())
                 } else {
-                    ui.global::<Prefs>().set_risk_settings_status("".into());
                     crate::wiring::dialog::refuse(&ui, crate::state::MSG_TRAILING_STOP_INVALID);
-                    return;
+                    return false;
                 };
                 config.borrow_mut().default_trailing_stop_pct = stored;
                 persist(path.as_ref(), &config.borrow());
@@ -199,6 +199,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                         .into(),
                 );
                 ui.global::<Prefs>().set_risk_settings_status("".into());
+                true
             });
     }
     // ── Story 6.4 (FR41) — the default dividend withholding rate. "" resets to the pinned 35. ──
@@ -211,15 +212,14 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 let ui = ui_weak.unwrap();
                 let value = value.trim();
                 // Empty resets to the default; a malformed/out-of-range percent is REFUSED with a
-                // named notice (issue #88 — no longer a silent swallow; the field re-syncs after).
+                // named notice (issue #88); the refusal keeps the typed text (G1 review, AC1).
                 let stored = if value.is_empty() {
                     None
                 } else if config::is_valid_withholding_rate_pct(value) {
                     Some(value.to_string())
                 } else {
-                    ui.global::<Prefs>().set_risk_settings_status("".into());
                     crate::wiring::dialog::refuse(&ui, crate::state::MSG_WITHHOLDING_INVALID);
-                    return;
+                    return false;
                 };
                 config.borrow_mut().withholding_rate_pct = stored;
                 persist(path.as_ref(), &config.borrow());
@@ -227,6 +227,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     config.borrow().withholding_rate_pct_or_default().into(),
                 );
                 ui.global::<Prefs>().set_risk_settings_status("".into());
+                true
             });
     }
     // ── Story 6.7 (FR45) — the concentration threshold. "" resets to the default (50); else
@@ -248,9 +249,9 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 } else if config::is_valid_trailing_stop_pct(value) {
                     Some(value.to_string())
                 } else {
-                    ui.global::<Prefs>().set_risk_settings_status("".into());
+                    // The refusal keeps the typed text (G1 review, AC1).
                     crate::wiring::dialog::refuse(&ui, crate::state::MSG_CONCENTRATION_INVALID);
-                    return;
+                    return false;
                 };
                 config.borrow_mut().concentration_threshold_pct = stored;
                 persist(path.as_ref(), &config.borrow());
@@ -264,6 +265,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     &holding_dismissed.borrow(),
                     format,
                 );
+                true
             });
     }
     // ── Story 6.7 (FR45) — the diversify-by-size table: two boundaries + three targets, committed
@@ -279,8 +281,9 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         ui.global::<Prefs>().on_size_table_changed(
             move |small_max, medium_max, target_small, target_medium, target_large| {
                 let ui = ui_weak.unwrap();
+                // A refusal names itself in the dialog; it returns `false` so the table KEEPS the
+                // typed text (G1 review, spec AC1) and touches no other card's status slot.
                 let set_status = |msg: String| {
-                    ui.global::<Prefs>().set_risk_settings_status("".into());
                     crate::wiring::dialog::refuse(&ui, &msg);
                 };
                 // "" → None (that field's pinned default); a non-empty field must validate. Issue #96:
@@ -319,7 +322,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 let t_large = target(&target_large, "Cible grande", &mut bad);
                 if let Some(label) = bad {
                     set_status(crate::state::size_field_invalid_message(label));
-                    return;
+                    return false;
                 }
                 // Cross-check on the EFFECTIVE pair (entered or default): small < medium.
                 let effective = |v: &Option<String>, default: &str| {
@@ -332,7 +335,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     (Ok(s), Ok(m)) if s < m => {}
                     _ => {
                         set_status(crate::state::MSG_SIZE_PAIR_CROSSED.to_string());
-                        return;
+                        return false;
                     }
                 }
                 {
@@ -354,6 +357,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     &holding_dismissed.borrow(),
                     format,
                 );
+                true
             },
         );
     }

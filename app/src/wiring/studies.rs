@@ -170,9 +170,14 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>()
-            .on_create_study(move |ticker, currency| {
+            .on_create_study(move |ticker, currency, company_name| {
                 let ui = ui_weak.unwrap();
-                let result = journal_state.borrow_mut().create_study(&ticker, &currency);
+                // G1 review (decision 8): the optional company name rides the same first write.
+                let result = journal_state.borrow_mut().create_study_named(
+                    &ticker,
+                    &currency,
+                    &company_name,
+                );
                 let studies = ui.global::<Studies>();
                 let written = result.is_ok();
                 match result {
@@ -598,8 +603,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 let destructive = action == "delete";
                 *pending_study_action.borrow_mut() = Some((action, id));
                 // The UX pass: the prompt is a modal confirm (the overlay derives the title and
-                // the verb from `study-action-destructive`); the 2.12 banner props keep the facts.
-                studies.set_study_action_message(message.clone().into());
+                // the verb from `study-action-destructive`).
                 studies.set_study_action_destructive(destructive);
                 crate::wiring::dialog::confirm(&ui, "study-action", &message);
             });
@@ -612,7 +616,6 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>().on_confirm_study_action(move || {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
-            studies.set_study_action_confirm_visible(false);
             let Some((action, id)) = pending_study_action.borrow_mut().take() else {
                 return;
             };
@@ -651,13 +654,9 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         });
     }
     {
-        let ui_weak = ui.as_weak();
         let pending_study_action = Rc::clone(pending_study_action);
         ui.global::<Studies>().on_cancel_study_action(move || {
-            let ui = ui_weak.unwrap();
             *pending_study_action.borrow_mut() = None;
-            ui.global::<Studies>()
-                .set_study_action_confirm_visible(false);
         });
     }
 

@@ -59,6 +59,7 @@ pub use cells::*;
 pub use concentration::*;
 pub use confront::*;
 pub use export_import::ImportRequest;
+pub use holdings::StudyChoice;
 pub(crate) use holdings::effective_currency;
 pub use journal_io::*;
 pub use messages::*;

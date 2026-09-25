@@ -680,9 +680,15 @@ mod tests {
         // « Examen rapide » (the picker card, the two ladders' labels, the price record, the
         // reader's fields, the four conclusions) and measures 850. Story 7.3 PR 2 adds the watchlist
         // criblage (the button, the card, its column heads, the row states and fact words, the
-        // quota band, the « Retour à la liste de suivi » label) and measures 892. Floor strict.
+        // quota band, the « Retour à la liste de suivi » label) and measures 892. The G1 review of
+        // 7.0 (fix PR E) — the position dialog's study choices (its label, placeholders, the
+        // « études indisponibles » bands) and the edit form's currency fact, the confirm's
+        // read-only band and the Portefeuille read-only band, the delete-portfolio confirm's
+        // title/verb/sentence, the rename sentence, the dividend-edit labels and sentence, the
+        // study form's « Nom de société », the dated « hist. » chip and the three exact §4
+        // reasons (a)/(d) — measures 909. Floor strict.
         assert!(
-            total >= 892,
+            total >= 909,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -796,10 +802,15 @@ mod tests {
         // blank-symbol refusal: 139. The G1 review adds the examination's blank-currency refusal
         // and the study-created-but-empty notice (MSG_QUICK_BLANK_CURRENCY,
         // MSG_QUICK_SCREEN_STUDY_EMPTY) and the criblage's unreadable-watchlist refusal
-        // (MSG_SCREENING_LIST_UNREADABLE): 142.
+        // (MSG_SCREENING_LIST_UNREADABLE): 142. The G1 review of 7.0 (fix PR E) adds the
+        // position rail's read-failure and other-currency refusals (MSG_HOLDING_STUDY_UNAVAILABLE,
+        // MSG_HOLDING_STUDY_OTHER_CURRENCY) and the three « introuvable » refusals of an
+        // unreadable id (MSG_HOLDING_NOT_FOUND, MSG_TRANSACTION_NOT_FOUND,
+        // MSG_PORTFOLIO_NOT_FOUND); MSG_PORTFOLIO_HAS_HOLDINGS becomes a counted template (no
+        // count change): 147.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            142,
+            147,
             "state.rs message inventory changed — register the new notice"
         );
     }

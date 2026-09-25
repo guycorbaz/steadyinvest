@@ -119,6 +119,36 @@ pub const MSG_WATCH_DUPLICATE: &str = "Ce symbole est déjà dans la liste de su
 /// Issue #218 (Guy's decision, 2026-09-23): a position exists only for a ticker that has a study,
 /// in that study's currency — raised when no saved study matches the symbol; nothing is written.
 pub const MSG_HOLDING_NO_STUDY: &str = "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études, la position en prendra la devise.";
+/// G1 review (issue #95 on the position rail): the studies behind a position could not be READ —
+/// never stated as « aucune étude » (a study may well exist); nothing is written.
+pub const MSG_HOLDING_STUDY_UNAVAILABLE: &str =
+    "Les études du dossier ne peuvent pas être lues ; la position n'a pas été enregistrée.";
+/// G1 review (Guy's decision 4, 2026-09-25): « Modifier » never changes a holding's currency — a
+/// NEW symbol must have a study in the position's own currency; a study in another currency is
+/// named. Template: `{t}` the symbol, `{s}` the study's currency, `{p}` the position's.
+pub const MSG_HOLDING_STUDY_OTHER_CURRENCY: &str = "L'étude de {t} est en {s} et la position en {p} ; la devise d'une position ne change pas, rien n'a été enregistré.";
+/// G1 review: the holding a gesture targets no longer exists (or its id is unreadable) — a
+/// refusal that names itself instead of a form that silently stays open.
+pub const MSG_HOLDING_NOT_FOUND: &str =
+    "La position visée est introuvable ; rien n'a été enregistré.";
+/// G1 review: same, for a ledger row.
+pub const MSG_TRANSACTION_NOT_FOUND: &str =
+    "La transaction visée est introuvable ; rien n'a été enregistré.";
+/// G1 review: same, for a portfolio (an unreadable id no longer reports success).
+pub const MSG_PORTFOLIO_NOT_FOUND: &str =
+    "Le portefeuille visé est introuvable ; rien n'a été enregistré.";
+
+/// [`MSG_HOLDING_STUDY_OTHER_CURRENCY`] with its three facts substituted.
+pub fn holding_study_other_currency_message(
+    ticker: &str,
+    study_currency: &str,
+    position_currency: &str,
+) -> String {
+    MSG_HOLDING_STUDY_OTHER_CURRENCY
+        .replace("{t}", ticker)
+        .replace("{s}", study_currency)
+        .replace("{p}", position_currency)
+}
 
 /// Story 7.2 — the review's export outcome and the nine quality flags as neutral facts (the engine's
 /// `QualityFlagKey`s, worded once here so the review screen and its PDF share the inventory).
@@ -235,7 +265,7 @@ pub const MSG_LEDGER_INVALID_DATE: &str =
 /// holding whose position derives from its transaction ledger (2026-07-02 review, HIGH): a direct
 /// aggregate rewrite would silently desynchronize it from the recorded history — the ledger is the
 /// place to correct the position.
-pub const MSG_LEDGER_BACKED: &str = "La quantité, le prix et la devise de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
+pub const MSG_LEDGER_BACKED: &str = "La quantité et le prix de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
 /// Issue #85: a ledger row carries a transaction `kind` this build does not recognise (a #78
 /// forward-compat case — a journal written by a newer version). The position can't be replayed from
 /// an unknown transaction, so this holding's ledger is suspended; the notice NAMES the cause (a newer
@@ -337,8 +367,15 @@ pub fn fx_refreshed_message(landed: usize, total: usize) -> String {
 /// two guarded-delete refusals (the register never orphans a holding nor drops its last portfolio).
 pub const MSG_PORTFOLIO_INVALID_NAME: &str =
     "Le nom du portefeuille est vide ; aucun portefeuille n'a été créé.";
+/// Template (G1 review, spec §5.1: the guard NAMES the count): `{n}` the positions it holds,
+/// active or sold — the persistence guard counts both.
 pub const MSG_PORTFOLIO_HAS_HOLDINGS: &str =
-    "Ce portefeuille contient un historique de positions ; il n'a pas été supprimé.";
+    "Ce portefeuille contient {n} position(s), en cours ou vendues ; il n'a pas été supprimé.";
+
+/// [`MSG_PORTFOLIO_HAS_HOLDINGS`] with the count substituted.
+pub fn portfolio_has_holdings_message(count: usize) -> String {
+    MSG_PORTFOLIO_HAS_HOLDINGS.replace("{n}", &count.to_string())
+}
 pub const MSG_PORTFOLIO_LAST: &str = "C'est le dernier portefeuille ; il n'a pas été supprimé.";
 
 /// Study export/import copy (Story 5.2, FR59) — fact-stating, posture-gated. The export envelope is
@@ -652,6 +689,11 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_WATCH_NO_STUDY,
     MSG_WATCH_DUPLICATE,
     MSG_HOLDING_NO_STUDY,
+    MSG_HOLDING_STUDY_UNAVAILABLE,
+    MSG_HOLDING_STUDY_OTHER_CURRENCY,
+    MSG_HOLDING_NOT_FOUND,
+    MSG_TRANSACTION_NOT_FOUND,
+    MSG_PORTFOLIO_NOT_FOUND,
     MSG_REVIEW_EXPORTED,
     MSG_COMPARISON_EXPORTED,
     MSG_QUICK_SCREEN_EXPORTED,

@@ -271,6 +271,11 @@ export component StudyScreen inherits Rectangle {
         if (key == "severe_low") { return @tr("plus bas sévère récent à saisir"); }
         if (key == "dividend") { return @tr("dividende annuel courant à saisir"); }
         if (key == "yield") { return @tr("rendement haut moyen nul ou inconnu"); }
+        // G1 review: the exact reasons of (a) and (d) — a nonpositive factor, or a figure beyond
+        // the calculation's range (never misattributed to an input that is present).
+        if (key == "est_low_eps_nonpositive") { return @tr("BPA estimé bas nul ou négatif"); }
+        if (key == "low_pe_nonpositive") { return @tr("PER bas moyen nul ou négatif"); }
+        if (key == "overflow") { return @tr("indisponible (calcul hors limites)"); }
         return FormConst.empty-slot;
     }
     in property <FormHeader> header: Studies.form-header;
@@ -834,6 +839,7 @@ export component StudyScreen inherits Rectangle {
                             value: Studies.judgment.est-low-eps;
                             // Issue #214: the latest EPS (the downside case), adoptable in one click.
                             suggestion: Studies.judgment-suggestions.est-low-eps;
+                            suggestion-year: Studies.judgment-suggestions.est-low-eps-year;
                         }
                         // 2026-09-24 (Guy, from use): the field's meaning stated where it is typed —
                         // a low EPS taken from the growth trend lifts the forecast low above the
@@ -1050,6 +1056,7 @@ export component StudyScreen inherits Rectangle {
                         value: Studies.judgment.dividend;
                         // Issue #214: the latest year's fetched dividend per share, adoptable.
                         suggestion: Studies.judgment-suggestions.dividend;
+                        suggestion-year: Studies.judgment-suggestions.dividend-year;
                     }
                 }
 
