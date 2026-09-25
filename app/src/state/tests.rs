@@ -2346,15 +2346,18 @@ fn apply_holding_price_sets_current_price_only_and_moves_the_zone() {
 fn a_linked_holding_requires_a_study_and_takes_its_currency() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x218);
-    // No such study → refused with the named cause; nothing written.
+    // The chosen study is gone and no study of its pair remains → named as deleted.
     assert_eq!(
-        state.add_holding_for_study(Uuid::from_u128(0xDEAD), "10", "200", ""),
-        Err(MSG_HOLDING_NO_STUDY.to_string())
+        state.add_holding_for_study(Uuid::from_u128(0xDEAD), ("NVDA.US", "USD"), "10", "200", ""),
+        Err(MSG_HOLDING_STUDY_DELETED.to_string())
     );
     assert!(state.list_holdings().is_empty());
-    // A USD study → the position is USD whatever the reference currency, hence linked.
-    let nvda = state.create_study("NVDA.US", "USD").unwrap();
-    state.add_holding_for_study(nvda, "10", "200", "").unwrap();
+    // A USD study → the position is USD whatever the reference currency, hence linked; the
+    // ticker is stored uppercased, as the choice's label shows it.
+    let nvda = state.create_study("nvda.us", "USD").unwrap();
+    state
+        .add_holding_for_study(nvda, ("NVDA.US", "USD"), "10", "200", "")
+        .unwrap();
     let holdings = state.list_holdings();
     assert_eq!(holdings.len(), 1);
     assert_eq!(holdings[0].security_ticker, "NVDA.US");
@@ -2362,8 +2365,31 @@ fn a_linked_holding_requires_a_study_and_takes_its_currency() {
     // Read-only: refused before any lookup.
     state.read_only = true;
     assert_eq!(
-        state.add_holding_for_study(nvda, "1", "1", ""),
+        state.add_holding_for_study(nvda, ("NVDA.US", "USD"), "1", "1", ""),
         Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+}
+
+#[test]
+fn a_deleted_chosen_study_falls_back_to_the_newest_study_of_its_pair() {
+    // G1 E review: the chosen id was deleted before « Enregistrer », but another study of the
+    // same (ticker, currency) remains → the position is added against it, never refused with
+    // « aucune étude pour ce symbole ».
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x2D7);
+    let keep = state.create_study("NVDA.US", "USD").unwrap();
+    let chosen = state.create_study("NVDA.US", "USD").unwrap();
+    state.create_study("NVDA.US", "CHF").unwrap();
+    state.delete_study(chosen).unwrap();
+    state
+        .add_holding_for_study(chosen, ("NVDA.US", "USD"), "3", "100", "")
+        .unwrap();
+    assert_eq!(state.list_holdings()[0].currency.as_deref(), Some("USD"));
+    // The pair has no study left → named as deleted (a CHF study of the ticker does not count).
+    state.delete_study(keep).unwrap();
+    assert_eq!(
+        state.add_holding_for_study(keep, ("NVDA.US", "USD"), "3", "100", ""),
+        Err(MSG_HOLDING_STUDY_DELETED.to_string())
     );
 }
 
@@ -2396,7 +2422,9 @@ fn study_choices_are_one_per_ticker_and_currency_and_carry_the_newest_id() {
     assert_eq!(choices[1].id, chf);
     assert_eq!(choices[2].id, new_usd, "the newest study of the pair");
     // The CHF choice is addable although a newer USD study of the same ticker exists.
-    state.add_holding_for_study(chf, "5", "100", "").unwrap();
+    state
+        .add_holding_for_study(chf, ("NVDA.US", "CHF"), "5", "100", "")
+        .unwrap();
     assert_eq!(state.list_holdings()[0].currency.as_deref(), Some("CHF"));
 }
 
@@ -2473,6 +2501,57 @@ fn editing_a_holding_never_changes_its_currency() {
     assert_eq!(
         state.update_holding_keeping_currency(Uuid::from_u128(1), "X", "1", "1", "", "CHF"),
         Err(MSG_HOLDING_NOT_FOUND.to_string())
+    );
+}
+
+#[test]
+fn editing_a_legacy_null_currency_holding_keeps_it_null_and_links_by_ticker() {
+    // G1 E review: « Modifier » never freezes a pre-6.2 NULL currency to the reference; such a
+    // row follows the register's own link rule (#81: no currency → ticker-only match).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x2D6);
+    state
+        .add_holding("NVDA.US", "10", "100", "CHF", "")
+        .unwrap();
+    let id = state.list_holdings()[0].id;
+    // Make it a legacy row (stored currency NULL), as a pre-6.2 journal holds it.
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .update_holding_with_currency(id, "NVDA.US", "10", "100", None, None)
+        .unwrap();
+    assert_eq!(state.list_holdings()[0].currency, None);
+    state.create_study("NVDA.US", "USD").unwrap();
+    assert!(
+        state
+            .try_matched_study_in_currency("NVDA.US", None)
+            .unwrap()
+            .is_some(),
+        "linked (ticker-only) before the edit"
+    );
+    // A sector-only edit keeps NULL — and so keeps its link.
+    state
+        .update_holding_keeping_currency(id, "NVDA.US", "10", "100", "Tech", "CHF")
+        .unwrap();
+    let h = state.list_holdings()[0].clone();
+    assert_eq!(
+        (h.currency.as_deref(), h.sector.as_deref()),
+        (None, Some("Tech"))
+    );
+    // A new ticker without any study → refused; with a study in ANY currency → applied, NULL kept.
+    assert_eq!(
+        state.update_holding_keeping_currency(id, "ROG.SW", "10", "100", "", "CHF"),
+        Err(MSG_HOLDING_NO_STUDY.to_string())
+    );
+    state.create_study("AAPL.US", "USD").unwrap();
+    state
+        .update_holding_keeping_currency(id, "AAPL.US", "10", "100", "", "CHF")
+        .unwrap();
+    let h = state.list_holdings()[0].clone();
+    assert_eq!(
+        (h.security_ticker.as_str(), h.currency.as_deref()),
+        ("AAPL.US", None)
     );
 }
 

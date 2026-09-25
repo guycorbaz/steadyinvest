@@ -271,10 +271,8 @@ export component StudyScreen inherits Rectangle {
         if (key == "severe_low") { return @tr("plus bas sévère récent à saisir"); }
         if (key == "dividend") { return @tr("dividende annuel courant à saisir"); }
         if (key == "yield") { return @tr("rendement haut moyen nul ou inconnu"); }
-        // G1 review: the exact reasons of (a) and (d) — a nonpositive factor, or a figure beyond
+        // G1 review: the exact reasons of (a) and (d) — a figure beyond
         // the calculation's range (never misattributed to an input that is present).
-        if (key == "est_low_eps_nonpositive") { return @tr("BPA estimé bas nul ou négatif"); }
-        if (key == "low_pe_nonpositive") { return @tr("PER bas moyen nul ou négatif"); }
         if (key == "overflow") { return @tr("indisponible (calcul hors limites)"); }
         return FormConst.empty-slot;
     }

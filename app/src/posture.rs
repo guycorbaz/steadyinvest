@@ -686,9 +686,10 @@ mod tests {
         // read-only band and the Portefeuille read-only band, the delete-portfolio confirm's
         // title/verb/sentence, the rename sentence, the dividend-edit labels and sentence, the
         // study form's « Nom de société », the dated « hist. » chip and the three exact §4
-        // reasons (a)/(d) — measures 909. Floor strict.
+        // reasons (a)/(d) — measures 909. Its review drops the two « nul ou négatif » §4 reasons
+        // (the positivity rule for (a) is a method change, left to the owner): 907. Floor strict.
         assert!(
-            total >= 909,
+            total >= 907,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -807,10 +808,11 @@ mod tests {
         // MSG_HOLDING_STUDY_OTHER_CURRENCY) and the three « introuvable » refusals of an
         // unreadable id (MSG_HOLDING_NOT_FOUND, MSG_TRANSACTION_NOT_FOUND,
         // MSG_PORTFOLIO_NOT_FOUND); MSG_PORTFOLIO_HAS_HOLDINGS becomes a counted template (no
-        // count change): 147.
+        // count change): 147. Its review adds the deleted-chosen-study refusal
+        // (MSG_HOLDING_STUDY_DELETED): 148.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            147,
+            148,
             "state.rs message inventory changed — register the new notice"
         );
     }

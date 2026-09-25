@@ -12,10 +12,10 @@ use uuid::Uuid;
 use super::{
     JournalState, MSG_HOLDING_AMOUNT_OUT_OF_RANGE, MSG_HOLDING_INVALID_CURRENCY,
     MSG_HOLDING_INVALID_NUMBER, MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER,
-    MSG_HOLDING_NO_STUDY, MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_UNAVAILABLE, MSG_LEDGER_BACKED,
-    MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST, MSG_PORTFOLIO_NOT_FOUND,
-    MSG_READ_ONLY_WRITE, holding_study_other_currency_message, portfolio_has_holdings_message,
-    watch_error,
+    MSG_HOLDING_NO_STUDY, MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_DELETED,
+    MSG_HOLDING_STUDY_UNAVAILABLE, MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME,
+    MSG_PORTFOLIO_LAST, MSG_PORTFOLIO_NOT_FOUND, MSG_READ_ONLY_WRITE,
+    holding_study_other_currency_message, portfolio_has_holdings_message, watch_error,
 };
 
 /// One study a position can be added for (G1 review, Guy's decision 3) — the #81 link key
@@ -302,11 +302,17 @@ impl JournalState {
     /// Add a position for the CHOSEN study (issue #218 + Guy's decision 3): the study is resolved
     /// by its id — identity, never the ticker's « latest study » — and the position takes that
     /// study's ticker and native currency, so it is linked from birth. A read failure names itself
-    /// ([`MSG_HOLDING_STUDY_UNAVAILABLE`]); a study gone meanwhile is [`MSG_HOLDING_NO_STUDY`].
-    /// The explicit-currency [`Self::add_holding`] stays for imports and pre-#218 data.
+    /// ([`MSG_HOLDING_STUDY_UNAVAILABLE`]). `pair` is the chosen (ticker, currency) as the dialog
+    /// showed it (G1 E review): when the chosen study was deleted meanwhile, the newest remaining
+    /// study of that SAME pair takes its place (the one the register would link); with none left
+    /// the refusal says the chosen study was deleted ([`MSG_HOLDING_STUDY_DELETED`]) — never « no
+    /// study for this symbol » while one may exist in another currency. The ticker is stored
+    /// uppercased, as the choice's label shows it. The explicit-currency [`Self::add_holding`]
+    /// stays for imports and pre-#218 data.
     pub fn add_holding_for_study(
         &mut self,
         study_id: Uuid,
+        pair: (&str, &str),
         quantity: &str,
         purchase_price: &str,
         sector: &str,
@@ -314,18 +320,26 @@ impl JournalState {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
-        let study = self
-            .try_get_study(study_id)
-            .map_err(|_| MSG_HOLDING_STUDY_UNAVAILABLE.to_string())?
-            .ok_or_else(|| MSG_HOLDING_NO_STUDY.to_string())?;
+        let unavailable = |_| MSG_HOLDING_STUDY_UNAVAILABLE.to_string();
+        let study = match self.try_get_study(study_id).map_err(unavailable)? {
+            Some(study) => study,
+            None => {
+                let (ticker, currency) = pair;
+                let newest = self
+                    .try_study_id_for_ticker_in_currency(ticker.trim(), Some(currency.trim()))
+                    .map_err(unavailable)?;
+                match newest {
+                    Some(id) => self
+                        .try_get_study(id)
+                        .map_err(unavailable)?
+                        .ok_or_else(|| MSG_HOLDING_STUDY_DELETED.to_string())?,
+                    None => return Err(MSG_HOLDING_STUDY_DELETED.to_string()),
+                }
+            }
+        };
+        let ticker = study.security_ticker.trim().to_uppercase();
         let currency = study.native_currency.trim().to_uppercase();
-        self.add_holding(
-            &study.security_ticker,
-            quantity,
-            purchase_price,
-            &currency,
-            sector,
-        )
+        self.add_holding(&ticker, quantity, purchase_price, &currency, sector)
     }
 
     /// « Modifier » (G1 review, Guy's decision 4): the holding's currency NEVER changes here. The
@@ -333,9 +347,10 @@ impl JournalState {
     /// [`Self::update_holding`] — with or without a study. A NEW symbol needs a study in the
     /// holding's own currency (the #81 currency-aware lookup); a study in another currency is a
     /// NAMED refusal, no study at all is [`MSG_HOLDING_NO_STUDY`], a read failure
-    /// [`MSG_HOLDING_STUDY_UNAVAILABLE`]. A pre-6.2 holding without a stored currency keeps its
-    /// effective one (`reference_currency`, the read-boundary coalesce) and, like the register
-    /// link, matches a new symbol's study on the ticker alone.
+    /// [`MSG_HOLDING_STUDY_UNAVAILABLE`]. A pre-6.2 holding without a stored currency KEEPS it NULL
+    /// (G1 E review — never frozen to the reference currency) and, like the register link (#81:
+    /// `None` → ticker-only), accepts a new symbol that has a study in any currency.
+    /// `reference_currency` only words a refusal (the row's effective currency).
     pub fn update_holding_keeping_currency(
         &mut self,
         id: Uuid,
@@ -384,7 +399,14 @@ impl JournalState {
                 });
             }
         }
-        self.update_holding(id, ticker, quantity, purchase_price, &currency, sector)
+        self.update_holding_inner(
+            id,
+            ticker,
+            quantity,
+            purchase_price,
+            current.currency.as_deref(),
+            sector,
+        )
     }
 
     /// Add a holding (FR36): a security symbol, a quantity, a purchase price and the `currency` it is
@@ -443,6 +465,9 @@ impl JournalState {
     /// from the recorded history ("sell all" would become a partial sell). Changing those three is
     /// refused with [`MSG_LEDGER_BACKED`] (the ledger is the correction surface); the **ticker**
     /// stays editable (it is not ledger-derived).
+    /// Test-only since the G1 E review: the UI edits through
+    /// [`Self::update_holding_keeping_currency`] (a currency is never changed by « Modifier »).
+    #[cfg(test)]
     pub fn update_holding(
         &mut self,
         id: Uuid,
@@ -452,6 +477,20 @@ impl JournalState {
         currency: &str,
         sector: &str,
     ) -> Result<(), String> {
+        self.update_holding_inner(id, ticker, quantity, purchase_price, Some(currency), sector)
+    }
+
+    /// The shared edit rail: `currency` is the value STORED after the edit — `None` only for a
+    /// pre-6.2 legacy row whose NULL « Modifier » keeps (G1 E review).
+    fn update_holding_inner(
+        &mut self,
+        id: Uuid,
+        ticker: &str,
+        quantity: &str,
+        purchase_price: &str,
+        currency: Option<&str>,
+        sector: &str,
+    ) -> Result<(), String> {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
@@ -459,7 +498,7 @@ impl JournalState {
         if ticker.is_empty() {
             return Err(MSG_HOLDING_INVALID_TICKER.to_string());
         }
-        if !crate::config::is_supported_currency(currency) {
+        if currency.is_some_and(|c| !crate::config::is_supported_currency(c)) {
             return Err(MSG_HOLDING_INVALID_CURRENCY.to_string());
         }
         let (quantity, purchase_price) = validate_holding_amounts(quantity, purchase_price)?;
@@ -475,7 +514,10 @@ impl JournalState {
                 .into_iter()
                 .find(|h| h.id == id);
             if let Some(current) = current {
-                let currency_changed = current.currency.as_deref().is_some_and(|c| c != currency);
+                let currency_changed = current
+                    .currency
+                    .as_deref()
+                    .is_some_and(|c| Some(c) != currency);
                 if current.quantity != quantity
                     || current.purchase_price != purchase_price
                     || currency_changed
@@ -490,7 +532,7 @@ impl JournalState {
         let sector = (!sector.is_empty()).then_some(sector);
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal
-            .update_holding(id, ticker, &quantity, &purchase_price, currency, sector)
+            .update_holding_with_currency(id, ticker, &quantity, &purchase_price, currency, sector)
             .map_err(watch_error)
     }
 

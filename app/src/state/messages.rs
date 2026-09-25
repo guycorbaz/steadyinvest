@@ -123,6 +123,11 @@ pub const MSG_HOLDING_NO_STUDY: &str = "Aucune étude enregistrée pour ce symbo
 /// never stated as « aucune étude » (a study may well exist); nothing is written.
 pub const MSG_HOLDING_STUDY_UNAVAILABLE: &str =
     "Les études du dossier ne peuvent pas être lues ; la position n'a pas été enregistrée.";
+/// G1 E review: the study chosen in the position dialog was deleted before « Enregistrer » and
+/// no other study of the same symbol AND currency remains — named as such, never « aucune étude
+/// pour ce symbole » (one may exist in another currency).
+pub const MSG_HOLDING_STUDY_DELETED: &str =
+    "L'étude choisie a été supprimée entre-temps ; la position n'a pas été enregistrée.";
 /// G1 review (Guy's decision 4, 2026-09-25): « Modifier » never changes a holding's currency — a
 /// NEW symbol must have a study in the position's own currency; a study in another currency is
 /// named. Template: `{t}` the symbol, `{s}` the study's currency, `{p}` the position's.
@@ -690,6 +695,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_WATCH_DUPLICATE,
     MSG_HOLDING_NO_STUDY,
     MSG_HOLDING_STUDY_UNAVAILABLE,
+    MSG_HOLDING_STUDY_DELETED,
     MSG_HOLDING_STUDY_OTHER_CURRENCY,
     MSG_HOLDING_NOT_FOUND,
     MSG_TRANSACTION_NOT_FOUND,

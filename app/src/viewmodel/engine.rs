@@ -469,7 +469,7 @@ pub fn pe_computed(outputs: &SsgOutputs, format: NumberFormat) -> PeComputed {
 /// appreciation). Issue #213: each candidate (a)–(d) carries its value ("" when unknown) AND a
 /// reason KEY for the absence — the words live in Slint (posture-gated), the key names the
 /// missing input: "est_low_eps" | "low_pe" | "low_prices" | "severe_low" | "dividend" | "yield" |
-/// "est_low_eps_nonpositive" | "low_pe_nonpositive" | "overflow" | "". The G1 review made the (a)
+/// "overflow" | "". The G1 review made the (a)
 /// and (d) reasons exact: each is read from the INPUTS (`judgment`), so an overflowing product is
 /// « calcul hors limites » — never misattributed to a present input.
 pub fn risk_computed(
@@ -514,8 +514,9 @@ pub fn risk_computed(
 }
 
 /// Why candidate (a) — avg low P/E × est. low EPS — is absent (G1 review): the missing input
-/// first (the est-low EPS is the usual gap, a pure judgment), then a nonpositive factor (core's
-/// positivity guard), and only when both are present and positive the checked product overflowed.
+/// first (the est-low EPS is the usual gap, a pure judgment), and only when both are present the
+/// checked product overflowed. (Core computes (a) for any sign — a positivity rule would be a
+/// method change, left to the owner; no figure changes here.)
 fn low_a_reason(
     present: bool,
     est_low_eps: Option<Decimal>,
@@ -525,8 +526,6 @@ fn low_a_reason(
         (true, _, _) => "",
         (false, None, _) => "est_low_eps",
         (false, Some(_), None) => "low_pe",
-        (false, Some(eps), Some(_)) if eps <= Decimal::ZERO => "est_low_eps_nonpositive",
-        (false, Some(_), Some(pe)) if pe <= Decimal::ZERO => "low_pe_nonpositive",
         (false, Some(_), Some(_)) => "overflow",
     }
 }
@@ -1188,21 +1187,13 @@ mod tests {
     }
 
     /// G1 review (#213): the (a)/(d) absence reasons are read from the inputs — an overflow is
-    /// never blamed on a present input, a nonpositive factor is named.
+    /// never blamed on a present input.
     #[test]
     fn low_candidate_reasons_name_the_real_cause() {
         let d = |s: &str| Decimal::from_str_exact(s).unwrap();
         assert_eq!(low_a_reason(true, Some(d("2")), Some(d("10"))), "");
         assert_eq!(low_a_reason(false, None, Some(d("10"))), "est_low_eps");
         assert_eq!(low_a_reason(false, Some(d("2")), None), "low_pe");
-        assert_eq!(
-            low_a_reason(false, Some(d("-2")), Some(d("10"))),
-            "est_low_eps_nonpositive"
-        );
-        assert_eq!(
-            low_a_reason(false, Some(d("2")), Some(d("0"))),
-            "low_pe_nonpositive"
-        );
         assert_eq!(low_a_reason(false, Some(d("2")), Some(d("10"))), "overflow");
         assert_eq!(low_d_reason(true, Some(d("4")), Some(d("2"))), "");
         assert_eq!(low_d_reason(false, None, Some(d("2"))), "yield");

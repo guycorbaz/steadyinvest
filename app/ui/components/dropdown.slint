@@ -21,8 +21,14 @@ export component Dropdown inherits Rectangle {
     // a parallel list resolves the pick by index (identity), never by re-matching the label.
     callback picked(int);
 
-    // The index of the current value when it was picked here (-1: none yet, or set from outside).
+    // The index of the current value (-1: none). Kept in step with `value` however it was set —
+    // a pick here, or a prefill from outside (G1 E review: ↑/↓ on a prefilled « Modifier » must
+    // move from the shown value) — by the hidden trackers below; `effective-current` re-checks it
+    // against `value`, so a value absent from the options counts as none.
     property <int> current: -1;
+    property <int> effective-current:
+        root.current >= 0 && root.current < root.options.length && root.options[root.current] == root.value
+            ? root.current : -1;
 
     height: Tokens.row-height + Tokens.space-4;
     border-radius: Tokens.radius;
@@ -32,8 +38,19 @@ export component Dropdown inherits Rectangle {
     opacity: root.enabled ? 1.0 : 0.5;
     forward-focus: fs;
 
-    changed value => {
-        if (root.value == "") { root.current = -1; }
+    // One invisible tracker per option: the one matching `value` records its index (on creation
+    // and whenever the match changes — a prefill, a new option list).
+    for option[index] in root.options: Rectangle {
+        width: 0;
+        height: 0;
+        visible: false;
+        property <bool> hit: option == root.value;
+        init => {
+            if (self.hit) { root.current = index; }
+        }
+        changed hit => {
+            if (self.hit) { root.current = index; }
+        }
     }
 
     function open() {
@@ -52,16 +69,22 @@ export component Dropdown inherits Rectangle {
     fs := FocusScope {
         enabled: root.enabled;
         key-pressed(event) => {
+            // Esc with the list open closes ONLY the list (G1 E review) — accepted here, it never
+            // reaches the modal's Esc (which would cancel the whole form).
+            if (event.text == Key.Escape && popup.is-open) {
+                popup.close();
+                return accept;
+            }
             if (event.text == Key.Return || event.text == " ") {
                 root.open();
                 return accept;
             }
             if (event.text == Key.DownArrow) {
-                root.pick(root.current < 0 ? 0 : min(root.current + 1, root.options.length - 1));
+                root.pick(root.effective-current < 0 ? 0 : min(root.effective-current + 1, root.options.length - 1));
                 return accept;
             }
             if (event.text == Key.UpArrow) {
-                root.pick(root.current < 0 ? root.options.length - 1 : max(root.current - 1, 0));
+                root.pick(root.effective-current < 0 ? root.options.length - 1 : max(root.effective-current - 1, 0));
                 return accept;
             }
             if (event.text == Key.Home) {

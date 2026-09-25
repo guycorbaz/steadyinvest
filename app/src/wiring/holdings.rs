@@ -779,18 +779,23 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
-        ui.global::<Holdings>()
-            .on_add_holding(move |study_id, quantity, price, sector| {
+        ui.global::<Holdings>().on_add_holding(
+            move |study_id, ticker, currency, quantity, price, sector| {
                 let ui = ui_weak.unwrap();
                 // Issue #218 + G1 decision 3: the position is added for the CHOSEN study (its id —
-                // identity) and takes that study's ticker and currency.
+                // identity) and takes that study's ticker and currency; the shown pair is the fallback
+                // when that study was deleted meanwhile (G1 E review).
                 let Some(study_id) = parse_or_refuse(&ui, &study_id, state::MSG_HOLDING_NO_STUDY)
                 else {
                     return false;
                 };
-                let result = journal_state
-                    .borrow_mut()
-                    .add_holding_for_study(study_id, &quantity, &price, &sector);
+                let result = journal_state.borrow_mut().add_holding_for_study(
+                    study_id,
+                    (&ticker, &currency),
+                    &quantity,
+                    &price,
+                    &sector,
+                );
                 let written = result.is_ok();
                 let format = config.borrow().number_format;
                 retain_held_freshness(&holding_freshness, &journal_state.borrow());
@@ -804,7 +809,8 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                 );
                 // Report whether the holding was written so the UI keeps the user's input on refusal.
                 written
-            });
+            },
+        );
     }
 
     // ── Story 6.1 (FR37): multiple-portfolio intents — select / add / rename / delete. The active

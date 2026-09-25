@@ -404,7 +404,7 @@ export struct RiskComputed {
     forecast-low: string,
     // Issue #213: the four forecast-low candidates (a)–(d), each with its value ("" when unknown)
     // and a reason KEY for the absence ("" | "est_low_eps" | "low_pe" | "low_prices" |
-    // "severe_low" | "dividend" | "yield" | "est_low_eps_nonpositive" | "low_pe_nonpositive" |
+    // "severe_low" | "dividend" | "yield" |
     // "overflow") — the screen turns the key into words.
     low-a: string,
     low-a-why: string,
@@ -867,7 +867,7 @@ export global Prefs {
     in-out property <string> withholding-rate-pct;
     // ── Story 6.7 (FR45) — concentration threshold + the diversify-by-size table, mirrored from
     //    the validated AppConfig accessors (always effective values, defaults when unset). The
-    //    commits are validated in Rust; a refusal names itself in `risk-settings-status` and
+    //    commits are validated in Rust; a refusal names itself in a modal notice and
     //    writes nothing (the table commits whole or not at all). ──
     in-out property <string> concentration-threshold-pct;
     in-out property <string> size-small-max;
@@ -875,7 +875,6 @@ export global Prefs {
     in-out property <string> size-target-small-pct;
     in-out property <string> size-target-medium-pct;
     in-out property <string> size-target-large-pct;
-    in-out property <string> risk-settings-status;
     // ── Story 6.9 (FR26) — the per-field-type FALLBACK providers, mirrored from the validated
     //    config accessors (wire strings; "" = no fallback). The PRIMARY stays `provider` above.
     //    The fundamentals row never offers Twelve Data (declared capability: no fundamentals). ──
@@ -1364,9 +1363,10 @@ export global Holdings {
     // Empty when every holding is stop-protected.
     in-out property <[string]> unstopped-exposure;
     // Issue #218 + G1 decision 3: a position is added for a chosen STUDY (its id) and takes that
-    // study's ticker and currency (no currency argument).
-    // study id, quantity, purchase-price, sector ("" = non renseigné) → written?
-    callback add-holding(string, string, string, string) -> bool;
+    // study's ticker and currency (the currency is never picked).
+    // study id, its ticker + currency as shown (the fallback when that study was deleted
+    // meanwhile), quantity, purchase-price, sector ("" = non renseigné) → written?
+    callback add-holding(string, string, string, string, string, string) -> bool;
     // G1 decision 4: the edit never changes the holding's currency.
     // id, ticker, quantity, purchase-price, sector → written?
     callback edit-holding(string, string, string, string, string) -> bool;

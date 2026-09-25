@@ -198,7 +198,6 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                         .unwrap_or_default()
                         .into(),
                 );
-                ui.global::<Prefs>().set_risk_settings_status("".into());
                 true
             });
     }
@@ -226,7 +225,6 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 ui.global::<Prefs>().set_withholding_rate_pct(
                     config.borrow().withholding_rate_pct_or_default().into(),
                 );
-                ui.global::<Prefs>().set_risk_settings_status("".into());
                 true
             });
     }
@@ -255,7 +253,6 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 };
                 config.borrow_mut().concentration_threshold_pct = stored;
                 persist(path.as_ref(), &config.borrow());
-                ui.global::<Prefs>().set_risk_settings_status("".into());
                 mirror_risk_settings(&ui, &config.borrow());
                 let format = config.borrow().number_format;
                 refresh_holdings(
@@ -347,7 +344,6 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     cfg.size_target_large_pct = t_large;
                 }
                 persist(path.as_ref(), &config.borrow());
-                ui.global::<Prefs>().set_risk_settings_status("".into());
                 mirror_risk_settings(&ui, &config.borrow());
                 let format = config.borrow().number_format;
                 refresh_holdings(
