@@ -964,6 +964,26 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             );
         });
     }
+    // G1 final review (Guy's decision): the « Retirer » guard BEFORE the confirm — a position with
+    // transactions is a refusal naming the cause, never a confirm the write then refuses.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Holdings>()
+            .on_request_remove_holding(move |id| {
+                let ui = ui_weak.unwrap();
+                let Some(id) = parse_or_refuse(&ui, &id, state::MSG_HOLDING_NOT_FOUND) else {
+                    return false;
+                };
+                match journal_state.borrow().holding_remove_guard(id) {
+                    Ok(()) => true,
+                    Err(message) => {
+                        crate::wiring::dialog::refuse(&ui, &message);
+                        false
+                    }
+                }
+            });
+    }
     // ── G1 review (Guy's decision 3, #95, staleness): the position dialog's choices, read FRESH
     //    when it opens — one per study (ticker, currency), the id carried; a read failure is
     //    « indisponible », never an empty-looking « aucune étude ». ──

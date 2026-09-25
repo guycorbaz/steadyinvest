@@ -378,10 +378,18 @@ pub fn created_at_date(ts: &Timestamp) -> String {
 }
 
 /// Map a persistence error from a watchlist write to a neutral notice (Story 4.1): a newer-schema
-/// journal reads as read-only, anything else as the generic save-failure (cause appended).
+/// journal reads as read-only, a holding still referenced by transactions names that cause (G1
+/// final review — matched on the TYPED variant, never on its text), anything else as the generic
+/// save-failure. The persistence error's own (English) text is LOGGED, never appended to the French
+/// refusal (G1 final review: a raw `transaction rows still reference…` under « L'enregistrement a
+/// échoué. » was no cause the user could read).
 fn watch_error(error: PersistError) -> String {
     match error {
         PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
-        other => format!("{MSG_SAVE_FAILED} {other}"),
+        PersistError::HoldingHasTransactions => MSG_HOLDING_HAS_TRANSACTIONS.to_string(),
+        other => {
+            tracing::warn!("journal write failed: {other}");
+            MSG_SAVE_FAILED.to_string()
+        }
     }
 }

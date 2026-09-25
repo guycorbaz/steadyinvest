@@ -594,10 +594,15 @@ export component PortfolioScreen inherits Rectangle {
                             ActionButton {
                                 label: @tr("Retirer");
                                 enabled: !Holdings.read-only;
+                                // G1 final review: a position with transactions is refused
+                                // up front (Rust names the cause); only one without reaches
+                                // the confirm.
                                 clicked => {
-                                    Dialog.confirm(@tr("Retirer la position {} ?", row.ticker),
-                                        @tr("La position et son registre de transactions sont retirés du portefeuille ; cette suppression est définitive."),
-                                        @tr("Retirer"), "remove-holding", row.id);
+                                    if (Holdings.request-remove-holding(row.id)) {
+                                        Dialog.confirm(@tr("Retirer la position {} ?", row.ticker),
+                                            @tr("La position, sans transaction enregistrée, est retirée du portefeuille ; cette suppression est définitive."),
+                                            @tr("Retirer"), "remove-holding", row.id);
+                                    }
                                 }
                             }
                         }

@@ -1439,6 +1439,9 @@ export global Holdings {
     // id, ticker, quantity, purchase-price, sector → written?
     callback edit-holding(string, string, string, string, string) -> bool;
     callback remove-holding(string); // id
+    // G1 final review (Guy's decision): the « Retirer » guard BEFORE the confirm — a position with
+    // ledger transactions is refused by Rust, naming the cause; true = the confirm may be asked.
+    callback request-remove-holding(string) -> bool; // id
     // Story 4.4 (FR40): user-initiated price refresh for every linked holding (off the UI thread).
     callback refresh-prices();
     callback cancel-refresh();                     // issue #100: drain the in-flight refresh batch

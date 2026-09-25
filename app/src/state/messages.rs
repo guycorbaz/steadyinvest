@@ -143,6 +143,12 @@ pub const MSG_HOLDING_STUDY_OTHER_CURRENCY: &str = "L'étude de {t} est en {s} e
 /// refusal that names itself instead of a form that silently stays open.
 pub const MSG_HOLDING_NOT_FOUND: &str =
     "La position visée est introuvable ; rien n'a été enregistré.";
+/// G1 final review (Guy's decision): « Retirer » on a position with ledger transactions is
+/// refused UP FRONT, naming the cause — never a confirm promising a removal the write refuses.
+pub const MSG_HOLDING_HAS_TRANSACTIONS: &str = "Cette position a des transactions enregistrées : elle ne peut être retirée qu'une fois ses transactions supprimées ; elle n'a pas été retirée.";
+/// The same guard when the transactions could not be read — the cause named, never a guess.
+pub const MSG_HOLDING_LEDGER_UNREADABLE: &str =
+    "Les transactions de cette position n'ont pas pu être lues ; elle n'a pas été retirée.";
 /// G1 review: same, for a ledger row.
 pub const MSG_TRANSACTION_NOT_FOUND: &str =
     "La transaction visée est introuvable ; rien n'a été enregistré.";
@@ -818,6 +824,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDING_STUDY_DELETED,
     MSG_HOLDING_STUDY_OTHER_CURRENCY,
     MSG_HOLDING_NOT_FOUND,
+    MSG_HOLDING_HAS_TRANSACTIONS,
+    MSG_HOLDING_LEDGER_UNREADABLE,
     MSG_TRANSACTION_NOT_FOUND,
     MSG_PORTFOLIO_NOT_FOUND,
     MSG_REVIEW_EXPORTED,

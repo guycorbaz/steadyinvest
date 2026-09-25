@@ -12,12 +12,13 @@ use uuid::Uuid;
 use crate::viewmodel::format::NumberFormat;
 
 use super::{
-    JournalState, MSG_HOLDING_AMOUNT_OUT_OF_RANGE, MSG_HOLDING_INVALID_CURRENCY,
-    MSG_HOLDING_INVALID_NUMBER, MSG_HOLDING_INVALID_STOP, MSG_HOLDING_INVALID_TICKER,
-    MSG_HOLDING_NO_STUDY, MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_DELETED,
-    MSG_HOLDING_STUDY_UNAVAILABLE, MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME,
-    MSG_PORTFOLIO_LAST, MSG_PORTFOLIO_NOT_FOUND, MSG_READ_ONLY_WRITE,
-    holding_study_other_currency_message, portfolio_has_holdings_message, read_typed, watch_error,
+    JournalState, MSG_HOLDING_AMOUNT_OUT_OF_RANGE, MSG_HOLDING_HAS_TRANSACTIONS,
+    MSG_HOLDING_INVALID_CURRENCY, MSG_HOLDING_INVALID_NUMBER, MSG_HOLDING_INVALID_STOP,
+    MSG_HOLDING_INVALID_TICKER, MSG_HOLDING_LEDGER_UNREADABLE, MSG_HOLDING_NO_STUDY,
+    MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_DELETED, MSG_HOLDING_STUDY_UNAVAILABLE,
+    MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
+    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_ONLY_WRITE, holding_study_other_currency_message,
+    portfolio_has_holdings_message, read_typed, watch_error,
 };
 
 /// One study a position can be added for (G1 review, Guy's decision 3) — the #81 link key
@@ -543,7 +544,31 @@ impl JournalState {
             .map_err(watch_error)
     }
 
-    /// Remove a holding (FR36). Guarded; an absent id is a neutral no-op.
+    /// The « Retirer » guard, checked BEFORE the confirm is raised (G1 final review, Guy's
+    /// decision): a position with ledger transactions is REFUSED up front, the refusal naming the
+    /// cause — its transactions must be deleted first — never a confirm promising a removal the
+    /// write then refuses. The check is the persistence guard's own typed count (never a match on
+    /// an error's text); a failed read names itself. `Ok(())` means the confirm may be asked;
+    /// [`Self::delete_holding`] re-checks inside its transaction (the persistence guard stays the
+    /// authority).
+    pub fn holding_remove_guard(&self, id: Uuid) -> Result<(), String> {
+        if self.read_only {
+            return Err(MSG_READ_ONLY_WRITE.to_string());
+        }
+        let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
+        match journal.holding_has_transactions(id) {
+            Ok(false) => Ok(()),
+            Ok(true) => Err(MSG_HOLDING_HAS_TRANSACTIONS.to_string()),
+            Err(error) => {
+                tracing::warn!("holding_has_transactions failed: {error}");
+                Err(MSG_HOLDING_LEDGER_UNREADABLE.to_string())
+            }
+        }
+    }
+
+    /// Remove a holding (FR36). Guarded; an absent id is a neutral no-op. A position that still
+    /// has transactions is refused by name ([`MSG_HOLDING_HAS_TRANSACTIONS`], via the typed
+    /// persistence error — see [`super::watch_error`]).
     pub fn delete_holding(&mut self, id: Uuid) -> Result<(), String> {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());

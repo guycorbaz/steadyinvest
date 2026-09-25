@@ -4121,6 +4121,35 @@ fn edit_and_delete_holding_round_trip_and_survive_reopen() {
 }
 
 #[test]
+fn retirer_refuses_up_front_a_position_with_transactions_naming_the_cause() {
+    // G1 final review (Guy's decision): « Retirer » never confirms a removal the write refuses —
+    // a position with ledger transactions is refused BEFORE the confirm, in French, by cause; the
+    // write path's own refusal is the same French sentence (typed, never the English error text).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x433);
+    state.add_holding("NESN", "10", "95.40", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "248.10", "CHF", "").unwrap();
+    let nesn = state.list_holdings()[0].id;
+    let rog = state.list_holdings()[1].id;
+    state
+        .record_buy_for(nesn, "2026-07-01", "3", "100", "0", "", "CHF")
+        .unwrap();
+    assert_eq!(
+        state.holding_remove_guard(nesn),
+        Err(MSG_HOLDING_HAS_TRANSACTIONS.to_string())
+    );
+    assert_eq!(
+        state.delete_holding(nesn),
+        Err(MSG_HOLDING_HAS_TRANSACTIONS.to_string()),
+        "the write's second guard names the same cause"
+    );
+    // A position without transactions reaches the confirm, and is removed.
+    assert_eq!(state.holding_remove_guard(rog), Ok(()));
+    state.delete_holding(rog).unwrap();
+    assert_eq!(state.list_holdings().len(), 1);
+}
+
+#[test]
 fn undo_redo_steps_back_and_forward_and_a_new_edit_clears_redo() {
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x1D, "2026-06-14T09:00:00Z");
