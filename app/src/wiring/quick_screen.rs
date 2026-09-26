@@ -478,7 +478,8 @@ pub(crate) fn on_fetched(
         (Landing::Keep, Err(message)) => {
             tracing::info!(ticker = %outcome.ticker, "quick screen failure kept for the list");
             let ticker = outcome.ticker.to_uppercase();
-            let message = message.to_string();
+            // A French notice (`provider_failure_notice`), owned — never an error's Display.
+            let message = message.to_owned();
             update_kept(
                 ui,
                 kept,

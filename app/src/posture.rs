@@ -965,15 +965,25 @@ mod tests {
         assert!(contains_word("mais Il Faut le noter", "il faut"));
     }
 
-    // ── No raw error Display in a user-visible string (2026-09-26) ──
+    // ── No raw error Display in a user-visible string (2026-09-26, strengthened by G3 L8) ──
     //
     // A persistence / SQLite / file / serde / provider error's `Display` is English third-party
     // text: it goes to the LOG, never into a String the app may show (a banner, a dialog, a
     // notice, a status line, a PDF). The rails name what failed in French (`state::save_error`,
-    // `read_failure`, `open_error`, `io_save_error`, `provider_failure_notice`). This scan
-    // walks the app's Rust sources — outside logging macros, panics/asserts and test modules —
-    // for the shapes that carry such a Display into a String: `{error}` / `{e}` / `{err}` in a
-    // format string, `error.to_string()` / `e.to_string()` / `err.to_string()`.
+    // `read_failure`, `open_error`, `io_save_error`, `provider_failure_notice`). This scan walks
+    // the app's Rust sources — outside comments, logging / stderr / panic / assert macros and test
+    // modules, string literals honoured when matching brackets — for every shape that turns an
+    // error into a String:
+    // - the ERROR BINDINGS: `error` / `e` / `err`, plus every name bound by `Err(x)`,
+    //   `map_err(|x|`, `unwrap_or_else(|x|`, `or_else(|x|` in the file;
+    // - such a binding in a format string (`{x}`, `{x:?}`), as a `format!` / `write!` argument
+    //   (a multi-line call included), or `x.to_string()`; and `ToString::to_string` anywhere.
+    // A binding that holds a French message (`Err(message)` of a rail already in French) is
+    // handed on as-is — never re-formatted — so it does not match.
+    //
+    // The other crates hand the app TYPED errors only (no public `Result<_, String>`), so their
+    // English can only become text in the app — where this scan looks
+    // (`sibling_crates_hand_the_app_typed_errors_only`).
 
     /// Stderr-only sites, allowed by name with their reason: `(file, snippet)`.
     const ERROR_DISPLAY_ALLOW: &[(&str, &str)] = &[
@@ -982,7 +992,7 @@ mod tests {
         ("config.rs", "invalid ({error}); defaults in effect"),
     ];
 
-    fn rust_sources() -> Vec<PathBuf> {
+    fn rust_sources(crate_dir: &str) -> Vec<PathBuf> {
         fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
             for entry in std::fs::read_dir(dir).expect("src/ readable") {
                 let path = entry.expect("dir entry").path();
@@ -994,54 +1004,140 @@ mod tests {
             }
         }
         let mut files = Vec::new();
-        walk(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-            &mut files,
-        );
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(crate_dir)
+            .join("src");
+        walk(&root, &mut files);
         files.sort();
         files
     }
 
-    /// `source` without `//` comments, without the bodies of the macros that never reach the
-    /// user (logging, stderr, panics, asserts), and without `#[cfg(test)] mod …` modules.
-    fn user_reachable_code(source: &str) -> String {
-        let uncommented: String = source
-            .lines()
-            .map(|line| match line.find("//") {
-                // Keep a `//` that sits inside a string literal (an odd count of quotes before it).
-                Some(i) if line[..i].matches('"').count() % 2 == 0 => &line[..i],
-                _ => line,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mut code = uncommented;
-        // Drop a balanced `(...)` / `{...}` group opening at byte `open`.
-        fn drop_group(code: &mut String, start: usize, open: usize) {
-            let bytes = code.as_bytes();
-            let (o, c) = if bytes[open] == b'(' {
-                (b'(', b')')
-            } else {
-                (b'{', b'}')
-            };
-            let mut depth = 0usize;
-            let mut end = open;
-            for (i, &b) in bytes.iter().enumerate().skip(open) {
-                if b == o {
-                    depth += 1;
-                } else if b == c {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = i;
-                        break;
+    /// `(start, end)` byte spans of the string and char literals of `code` (plain, escaped and
+    /// raw `r#"…"#` strings; a `'a` lifetime is not a literal).
+    fn literal_spans(code: &str) -> Vec<(usize, usize)> {
+        let b = code.as_bytes();
+        let mut spans = Vec::new();
+        let mut i = 0;
+        while i < b.len() {
+            match b[i] {
+                b'r' if i + 1 < b.len()
+                    && (b[i + 1] == b'"' || b[i + 1] == b'#')
+                    && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) =>
+                {
+                    let mut j = i + 1;
+                    let mut hashes = 0;
+                    while j < b.len() && b[j] == b'#' {
+                        hashes += 1;
+                        j += 1;
+                    }
+                    if j >= b.len() || b[j] != b'"' {
+                        i += 1;
+                        continue;
+                    }
+                    let close: Vec<u8> = std::iter::once(b'"')
+                        .chain(std::iter::repeat_n(b'#', hashes))
+                        .collect();
+                    let end = b[j + 1..]
+                        .windows(close.len())
+                        .position(|w| w == close.as_slice())
+                        .map_or(b.len() - 1, |p| j + 1 + p + close.len() - 1);
+                    spans.push((i, end));
+                    i = end + 1;
+                }
+                b'"' => {
+                    let mut j = i + 1;
+                    while j < b.len() && b[j] != b'"' {
+                        j += if b[j] == b'\\' { 2 } else { 1 };
+                    }
+                    spans.push((i, j.min(b.len() - 1)));
+                    i = j + 1;
+                }
+                b'\'' => {
+                    // A char literal: 'x', '\n', '\'' — else a lifetime / label.
+                    if i + 2 < b.len() && b[i + 1] == b'\\' {
+                        let end = code[i + 2..].find('\'').map_or(i + 2, |p| i + 2 + p);
+                        spans.push((i, end));
+                        i = end + 1;
+                    } else if let Some(c) = code[i + 1..].chars().next()
+                        && code[i + 1 + c.len_utf8()..].starts_with('\'')
+                    {
+                        let end = i + 1 + c.len_utf8();
+                        spans.push((i, end));
+                        i = end + 1;
+                    } else {
+                        i += 1;
                     }
                 }
+                _ => i += 1,
             }
-            code.replace_range(start..=end, "");
+        }
+        spans
+    }
+
+    /// Per byte of `code`: inside a literal?
+    fn literal_mask(code: &str) -> Vec<bool> {
+        let mut mask = vec![false; code.len()];
+        for (s, e) in literal_spans(code) {
+            for m in &mut mask[s..=e.min(code.len() - 1)] {
+                *m = true;
+            }
+        }
+        mask
+    }
+
+    /// The byte index of the bracket closing the one at `open`, literals skipped (`mask` from
+    /// [`literal_mask`]); the end of `code` when unbalanced.
+    fn group_end(code: &str, mask: &[bool], open: usize) -> usize {
+        let b = code.as_bytes();
+        let (o, c) = match b[open] {
+            b'(' => (b'(', b')'),
+            b'{' => (b'{', b'}'),
+            _ => (b'[', b']'),
+        };
+        let mut depth = 1usize;
+        for (i, &ch) in b.iter().enumerate().skip(open + 1) {
+            if mask[i] {
+                continue;
+            }
+            if ch == o {
+                depth += 1;
+            } else if ch == c {
+                depth -= 1;
+                if depth == 0 {
+                    return i;
+                }
+            }
+        }
+        b.len() - 1
+    }
+
+    /// `source` without comments (literals honoured), without `#[cfg(test)] mod …` modules, and
+    /// without the bodies of the macros that never reach the user (logging, stderr, panics,
+    /// asserts).
+    fn user_reachable_code(source: &str) -> String {
+        let mask = literal_mask(source);
+        let b = source.as_bytes();
+        let mut code = String::with_capacity(source.len());
+        let mut i = 0;
+        while i < b.len() {
+            if !mask[i] && source[i..].starts_with("//") {
+                i = source[i..].find('\n').map_or(b.len(), |p| i + p);
+                continue;
+            }
+            if !mask[i] && source[i..].starts_with("/*") {
+                i = source[i..].find("*/").map_or(b.len(), |p| i + p + 2);
+                continue;
+            }
+            let ch = source[i..].chars().next().expect("char");
+            code.push(ch);
+            i += ch.len_utf8();
         }
         for marker in ["#[cfg(test)]\nmod ", "#[cfg(test)]\n    mod "] {
             while let Some(start) = code.find(marker) {
                 let open = start + code[start..].find('{').expect("test module body");
-                drop_group(&mut code, start, open);
+                let end = group_end(&code, &literal_mask(&code), open);
+                code.replace_range(start..=end, "");
             }
         }
         for mac in [
@@ -1058,30 +1154,143 @@ mod tests {
             "assert_ne!(",
             "debug_assert!(",
         ] {
-            while let Some(start) = code.find(mac) {
-                drop_group(&mut code, start, start + mac.len() - 1);
+            let mut from = 0;
+            while let Some(p) = code[from..].find(mac) {
+                let start = from + p;
+                let mask = literal_mask(&code);
+                if mask[start] {
+                    from = start + mac.len();
+                    continue;
+                }
+                let end = group_end(&code, &mask, start + mac.len() - 1);
+                code.replace_range(start..=end, "");
+                from = start;
             }
         }
         code
     }
 
-    /// Every error-Display shape in `code`, as the offending line.
+    fn is_ident_byte(c: u8) -> bool {
+        c.is_ascii_alphanumeric() || c == b'_'
+    }
+
+    /// The identifier starting at `at`, if any.
+    fn ident_at(code: &str, at: usize) -> Option<&str> {
+        let b = code.as_bytes();
+        let end = (at..b.len())
+            .find(|&i| !is_ident_byte(b[i]))
+            .unwrap_or(b.len());
+        (end > at).then(|| &code[at..end])
+    }
+
+    /// The error bindings of `code`: `error` / `e` / `err`, and every name bound by `Err(x)`,
+    /// `map_err(|x|`, `unwrap_or_else(|x|`, `or_else(|x|`.
+    fn error_bindings(code: &str) -> std::collections::BTreeSet<String> {
+        let mut names: std::collections::BTreeSet<String> = ["error", "e", "err"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        for opener in ["Err(", "map_err(|", "unwrap_or_else(|", "or_else(|"] {
+            for (p, _) in code.match_indices(opener) {
+                if opener == "Err(" && p > 0 && is_ident_byte(code.as_bytes()[p - 1]) {
+                    continue; // `IoErr(`, `MyErr(`
+                }
+                let Some(name) = ident_at(code, p + opener.len()) else {
+                    continue;
+                };
+                // `Err(x)` BINDS only as a pattern (`Err(x) =>`, `let Err(x) =`, `Err(x) |`);
+                // `Err(x)` followed by `,` / `;` / `)` builds a value — no binding.
+                let after = p + opener.len() + name.len();
+                let is_pattern = opener != "Err(" || {
+                    let rest = code[after..].trim_start();
+                    rest.starts_with(')') && {
+                        let rest = rest[1..].trim_start();
+                        rest.starts_with("=>")
+                            || rest.starts_with('|')
+                            || (rest.starts_with('=') && !rest.starts_with("=="))
+                    }
+                };
+                if is_pattern
+                    && !name.starts_with('_')
+                    && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+                {
+                    names.insert(name.to_string());
+                }
+            }
+        }
+        names
+    }
+
+    /// Every error-Display shape in `code` (see the section comment), as short site excerpts.
     fn error_display_sites(code: &str) -> Vec<String> {
-        const HOLES: &[&str] = &["{error}", "{e}", "{err}", "{error:?}", "{e:?}", "{err:?}"];
-        const TO_STRING: &[&str] = &["error.to_string()", "e.to_string()", "err.to_string()"];
+        let bindings = error_bindings(code);
+        let mask = literal_mask(code);
+        let excerpt = |at: usize| -> String {
+            let start = code[..at].rfind('\n').map_or(0, |p| p + 1);
+            let end = code[at..].find('\n').map_or(code.len(), |p| at + p);
+            code[start..end].trim().to_string()
+        };
         let mut sites = Vec::new();
-        for line in code.lines() {
-            let hole = HOLES.iter().any(|h| line.contains(h));
-            let to_string = TO_STRING.iter().any(|t| {
-                line.match_indices(t).any(|(i, _)| {
-                    !line[..i]
-                        .chars()
-                        .next_back()
-                        .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
-                })
-            });
-            if hole || to_string {
-                sites.push(line.trim().to_string());
+        if let Some(p) = code.find("ToString::to_string") {
+            sites.push(excerpt(p));
+        }
+        for name in &bindings {
+            for hole in [
+                format!("{{{name}}}"),
+                format!("{{{name}:?}}"),
+                format!("{{{name}:#?}}"),
+            ] {
+                for (p, _) in code.match_indices(&hole) {
+                    if mask[p] {
+                        sites.push(excerpt(p));
+                    }
+                }
+            }
+            let call = format!("{name}.to_string()");
+            for (p, _) in code.match_indices(&call) {
+                let bounded = p == 0 || {
+                    let c = code.as_bytes()[p - 1];
+                    !(is_ident_byte(c) || c == b'.')
+                };
+                if bounded && !mask[p] {
+                    sites.push(excerpt(p));
+                }
+            }
+        }
+        // A binding passed as a `format!` / `write!` ARGUMENT (multi-line calls included).
+        for mac in ["format!(", "write!(", "writeln!("] {
+            for (p, _) in code.match_indices(mac) {
+                if mask[p] {
+                    continue;
+                }
+                let open = p + mac.len() - 1;
+                let end = group_end(code, &mask, open);
+                let inner = &code[open + 1..end];
+                let inner_mask = literal_mask(inner);
+                let mut depth = 0i32;
+                let mut arg_start = 0;
+                let mut args = Vec::new();
+                for (i, ch) in inner.char_indices() {
+                    if inner_mask[i] {
+                        continue;
+                    }
+                    match ch {
+                        '(' | '[' | '{' => depth += 1,
+                        ')' | ']' | '}' => depth -= 1,
+                        ',' if depth == 0 => {
+                            args.push(&inner[arg_start..i]);
+                            arg_start = i + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                args.push(&inner[arg_start..]);
+                for arg in args.iter().skip(1) {
+                    let arg = arg.trim().trim_start_matches('&');
+                    if bindings.contains(arg) {
+                        sites.push(excerpt(p));
+                    }
+                }
             }
         }
         sites
@@ -1090,7 +1299,7 @@ mod tests {
     #[test]
     fn no_error_display_reaches_a_user_string() {
         let mut offenders = Vec::new();
-        let files = rust_sources();
+        let files = rust_sources("app");
         assert!(
             files.len() >= 40,
             "found only {} .rs files — scan broken?",
@@ -1120,17 +1329,70 @@ mod tests {
     }
 
     #[test]
+    fn sibling_crates_hand_the_app_typed_errors_only() {
+        // An English String built from an error inside another crate would bypass the app scan:
+        // no public API of theirs returns a stringly error.
+        let mut offenders = Vec::new();
+        for krate in ["persistence", "ingestion", "report", "core", "contract"] {
+            for file in rust_sources(krate) {
+                let source = std::fs::read_to_string(&file).expect("source readable");
+                let code = user_reachable_code(&source);
+                // Every public signature, however it wraps over lines.
+                for (p, _) in code.match_indices("pub fn ") {
+                    let end = code[p..].find(['{', ';']).map_or(code.len(), |e| p + e);
+                    let signature: String = code[p..end]
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if signature.contains("Result<") && signature.contains(", String>") {
+                        offenders.push(format!("{}: {signature}", file.display()));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "a sibling crate returns a stringly error: {offenders:#?}"
+        );
+    }
+
+    #[test]
     fn the_error_display_scan_sees_through_logging_and_tests_only() {
-        let leak = r#"let m = format!("{MSG_SAVE_FAILED} {error}");"#;
-        assert_eq!(error_display_sites(&user_reachable_code(leak)).len(), 1);
-        let leak = "journal.list().map_err(|e| e.to_string())?;";
-        assert_eq!(error_display_sites(&user_reachable_code(leak)).len(), 1);
-        let logged = "tracing::warn!(\n    \"read failed: {error}\"\n);";
-        assert!(error_display_sites(&user_reachable_code(logged)).is_empty());
-        let in_test = "#[cfg(test)]\nmod tests {\n    fn f() { let s = err.to_string(); }\n}\n";
-        assert!(error_display_sites(&user_reachable_code(in_test)).is_empty());
-        // A field or a longer name ending in `e` is not an error variable.
-        let not_error = "let k = base.to_string(); let v = self.e.to_string();";
-        assert!(error_display_sites(&user_reachable_code(not_error)).is_empty());
+        let sites = |s: &str| error_display_sites(&user_reachable_code(s));
+        // The classic shapes.
+        assert_eq!(
+            sites(r#"let m = format!("{MSG_SAVE_FAILED} {error}");"#).len(),
+            1
+        );
+        assert_eq!(
+            sites("journal.list().map_err(|e| e.to_string())?;").len(),
+            1
+        );
+        assert_eq!(sites("x.map_err(ToString::to_string)?;").len(), 1);
+        // Any binding name, from `Err(..)`, `map_err(|..|`, `unwrap_or_else(|..|`.
+        assert_eq!(
+            sites("match r { Err(why) => show(&why.to_string()), _ => {} }").len(),
+            1
+        );
+        assert_eq!(sites("r.map_err(|failure| failure.to_string())").len(), 1);
+        assert_eq!(sites("r.unwrap_or_else(|x| format!(\"{x:?}\"))").len(), 1);
+        // A multi-line `format!` argument.
+        assert_eq!(
+            sites("let s = format!(\n    \"{} {}\",\n    MSG,\n    error\n);").len(),
+            1
+        );
+        // Logged, in a test module, or in a comment: fine.
+        assert!(sites("tracing::warn!(\n    \"read failed: {error}\"\n);").is_empty());
+        assert!(sites("tracing::warn!(\"a ) in a literal {}\", error);").is_empty());
+        assert!(
+            sites("#[cfg(test)]\nmod tests {\n    fn f() { let s = err.to_string(); }\n}\n")
+                .is_empty()
+        );
+        assert!(sites("// format!(\"{error}\")\nlet a = 1;").is_empty());
+        // A French message handed on, a field or a longer name ending in `e`: not an error Display.
+        assert!(sites("match r { Err(message) => refuse(&ui, &message), _ => {} }").is_empty());
+        // `Err(x.to_string())` BUILDS an error from a French message: no binding.
+        assert!(sites("return Err(invalid.to_string());").is_empty());
+        assert!(sites("let k = base.to_string(); let v = self.e.to_string();").is_empty());
     }
 }
