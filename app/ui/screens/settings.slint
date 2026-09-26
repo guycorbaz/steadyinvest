@@ -910,7 +910,12 @@ export component SettingsScreen inherits Rectangle {
                 }
                 GlossaryRow {
                     term: @tr("BPA");
-                    definition: @tr("Bénéfice par action.");
+                    definition: @tr("Bénéfice par action : le bénéfice net publié de l'exercice, dilué (part des actionnaires ordinaires ÷ nombre moyen d'actions diluées), ramené aux actions d'aujourd'hui — jamais un bénéfice « ajusté ».");
+                }
+                // ssg-1.2.0 (spec §0): the years of a study are the company's fiscal years.
+                GlossaryRow {
+                    term: @tr("Année d'une étude");
+                    definition: @tr("L'exercice de la société, désigné par l'année où il se termine : un exercice clos fin janvier 2024 est « 2024 ». Ses cours haut et bas sont ceux de cet exercice, pas de l'année civile.");
                 }
                 GlossaryRow {
                     term: @tr("Marge de sécurité");
