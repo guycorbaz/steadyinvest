@@ -130,8 +130,12 @@ fn window_pe_extremes(per_year: &[YearValuation]) -> (Option<Decimal>, Option<De
 /// Row 27: « N : flag · flag » when flags are raised; « 0 » only when every rule was checked
 /// (`core::ssg::quality_flags_assessable`, next to the rules themselves); not assessable →
 /// `""` (« — »), never a zero standing for an absence.
+///
+/// Owner decision (Guy, 2026-09-26): the flags are listed and counted as [`state::shown_quality_flags`]
+/// states them — one high-P/E flag, the highest threshold reached (the review does the same).
 fn flags_row(outputs: &SsgOutputs, judgment: &JudgmentInputs) -> String {
-    if outputs.quality_flags.is_empty() {
+    let flags = state::shown_quality_flags(&outputs.quality_flags);
+    if flags.is_empty() {
         if quality_flags_assessable(outputs, judgment) {
             "0".to_string()
         } else {
@@ -140,9 +144,8 @@ fn flags_row(outputs: &SsgOutputs, judgment: &JudgmentInputs) -> String {
     } else {
         format!(
             "{} : {}",
-            outputs.quality_flags.len(),
-            outputs
-                .quality_flags
+            flags.len(),
+            flags
                 .iter()
                 .map(|k| state::quality_flag_label(*k))
                 .collect::<Vec<_>>()
@@ -547,6 +550,16 @@ mod tests {
         // A raised flag is a fact whatever else is unknown.
         o.quality_flags.push(QualityFlagKey::RoeLow);
         assert!(flags_row(&o, &unjudged).starts_with("1 : "));
+        // One high-P/E fact over both thresholds: listed once, counted once (owner decision,
+        // 2026-09-26).
+        o.quality_flags = vec![
+            QualityFlagKey::ProjectedHighPeAggressive,
+            QualityFlagKey::ProjectedHighPeImplausible,
+        ];
+        assert_eq!(
+            flags_row(&o, &judged),
+            format!("1 : {}", state::MSG_FLAG_HIGH_PE_IMPLAUSIBLE)
+        );
     }
 
     #[test]
