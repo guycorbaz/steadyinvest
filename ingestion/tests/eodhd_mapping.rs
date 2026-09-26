@@ -9,6 +9,11 @@
 //! own `SplitsDividends` block carries only `LastSplitFactor` / `LastSplitDate` (the live shape),
 //! which the mapper does not read. The `/eod` fixture is RAW like the live series: the bars before
 //! the split trade around 20–30, the post-split November bar around 14–17 (half the scale).
+//!
+//! ssg-1.2.0: `*-JANFY.json` is an NVDA-shaped January fiscal year end (real FY2023–FY2025 net
+//! income and diluted share counts, a 10:1 split inside FY2025, invented bar prices) and
+//! `*-JUNFY.json` a June one. Their shape follows EODHD's documentation (fundamentals glossary:
+//! `netIncomeApplicableToCommonShares`, `commonStockSharesOutstanding`); a real fetch confirms it.
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -73,7 +78,10 @@ fn maps_eodhd_fundamentals_and_prices_to_raw_financials() {
     // (a raw, mixed-base max would read 30), the low the rebased February 13 (below November's 14).
     let y24 = year(&raw, 2024);
     assert_eq!(y24.sales.as_ref().unwrap().value, dec("1100"));
-    assert!(y24.eps.is_none(), "a null epsActual maps to None, not 0");
+    // ssg-1.2.0: the reported diluted EPS (net income 180 ÷ 100 shares) — present although the
+    // adjusted `epsActual` is null: that figure is no longer read at all.
+    assert_eq!(y24.eps.as_ref().unwrap().value, dec("1.8"));
+    assert_eq!(y24.fiscal_year_end_month, Some(12));
     assert_eq!(
         y24.high_price.as_ref().unwrap().value,
         dec("17"),
@@ -88,16 +96,14 @@ fn maps_eodhd_fundamentals_and_prices_to_raw_financials() {
 
 /// The per-share FUNDAMENTALS across the same 2:1 split — what the mapper does today, pinned.
 ///
-/// - EPS: `Earnings.Annual.epsActual` is served already restated into today's shares (verified on
-///   NVDA in #217: EPS 2017 = 0.064 after the 4:1 and 10:1 splits) — taken as served, never
-///   divided again.
-/// - Dividend per share and book value per share are DERIVED here from totals over the balance
-///   sheet's `commonStockSharesOutstanding`, and are also taken as computed, un-rebased. That is
-///   right ONLY IF EODHD restates the balance-sheet share counts of pre-split years into today's
-///   shares — an ASSUMPTION #217 made, not yet verified. It is to be confirmed by ONE real
-///   NVDA.US fetch with the owner present (G1 review, G5): if the pre-2021 share counts come back
-///   in pre-split units, these two figures are overstated ×40 for those years and this test must
-///   change with the fix.
+/// EPS (ssg-1.2.0: the reported diluted EPS = net income ÷ `commonStockSharesOutstanding`),
+/// dividend per share and book value per share are all DERIVED here from totals over the balance
+/// sheet's `commonStockSharesOutstanding`, and taken as computed, un-rebased. That is right ONLY
+/// IF EODHD restates the balance-sheet share counts of pre-split years into today's shares — an
+/// ASSUMPTION #217 made, not yet verified. It is to be confirmed by ONE real NVDA.US fetch with
+/// the owner present (G1 review, G5): if the pre-2021 share counts come back in pre-split units,
+/// these three figures are overstated ×40 for those years and this test must change with the fix.
+/// (The adjusted `epsActual` 1.62 of the fixture is never read.)
 #[test]
 fn per_share_fundamentals_across_a_split_are_taken_as_served_pinned_on_the_share_count_assumption()
 {
@@ -112,8 +118,8 @@ fn per_share_fundamentals_across_a_split_are_taken_as_served_pinned_on_the_share
     let y23 = year(&raw, 2023);
     assert_eq!(
         y23.eps.as_ref().unwrap().value,
-        dec("1.50"),
-        "EPS as served (restated) — not ÷2"
+        dec("1.5"),
+        "150 ÷ 100 — not ÷2, not the adjusted 1.62"
     );
     // ASSUMPTION (G5): the 2023 share count 100 is already in post-split units.
     assert_eq!(
@@ -214,7 +220,7 @@ fn missing_currency_is_a_parse_error_not_a_panic() {
 fn the_mapped_raw_normalizes_through_core() {
     // The mapped raw is accepted by core::normalize (no structural error), and — because the
     // mapper hands on NO splits — normalize rebases nothing a second time: the canonical 2023
-    // high is the mapper's already-rebased 12.5 (not 6.25) and the EPS the served 1.50 (not 0.75).
+    // high is the mapper's already-rebased 12.5 (not 6.25) and the EPS the derived 1.5 (not 0.75).
     let raw = map_eodhd(
         &json(FUNDAMENTALS),
         &json(EOD),
@@ -233,6 +239,145 @@ fn the_mapped_raw_normalizes_through_core() {
         "sales is never split-adjusted"
     );
     assert_eq!(y23.high_price, Some(dec("12.5")), "no double rebase");
-    assert_eq!(y23.eps, Some(dec("1.50")), "no double rebase");
+    assert_eq!(y23.eps, Some(dec("1.5")), "no double rebase");
     assert_eq!(y23.book_value_per_share, Some(dec("5")));
+}
+
+// ── ssg-1.2.0: fiscal-year prices and reported diluted EPS ─────────────────────────────────────
+
+const FUNDAMENTALS_JAN: &str = include_str!("fixtures/eodhd-fundamentals-JANFY.json");
+const EOD_JAN: &str = include_str!("fixtures/eodhd-eod-JANFY.json");
+const SPLITS_JAN: &str = include_str!("fixtures/eodhd-splits-JANFY.json");
+const FUNDAMENTALS_JUN: &str = include_str!("fixtures/eodhd-fundamentals-JUNFY.json");
+const EOD_JUN: &str = include_str!("fixtures/eodhd-eod-JUNFY.json");
+
+fn high_low(raw: &steadyinvest_core::normalize::RawFinancials, y: i32) -> (Decimal, Decimal) {
+    let r = year(raw, y);
+    (
+        r.high_price.as_ref().expect("a high").value,
+        r.low_price.as_ref().expect("a low").value,
+    )
+}
+
+/// A January fiscal year end (NVDA-shaped: the statements are keyed 2023-01-29, 2024-01-28, …),
+/// with a 10:1 split on 2024-06-10 INSIDE fiscal 2025. Every expected value is hand-derived from
+/// the fixture: the pre-split bars are ÷ 10, then reduced into the FISCAL periods.
+#[test]
+fn a_january_fiscal_year_pairs_its_eps_with_its_own_fiscal_year_prices() {
+    let raw = map_eodhd(
+        &json(FUNDAMENTALS_JAN),
+        &json(EOD_JAN),
+        &json(SPLITS_JAN),
+        day(),
+        "JANFY.US",
+    )
+    .expect("maps");
+    // FY2023 = (2022-01-29 → 2023-01-29]: 2022-06-15 (19 / 15) and 2023-01-20 (18 / 16).
+    assert_eq!(high_low(&raw, 2023), (dec("19"), dec("15")));
+    // FY2024 = (2023-01-29 → 2024-01-28]: 2023-03-01 (25 / 23), 2023-12-15 (50 / 48) and the
+    // CALENDAR-2024 bar 2024-01-25 (62 / 60). The calendar reduction read 150 / 60 here — the
+    // prices of Feb–Dec 2024 beside the EPS of Feb 2023 – Jan 2024.
+    assert_eq!(high_low(&raw, 2024), (dec("62"), dec("23")));
+    // FY2025 = (2024-01-28 → 2025-01-26], the split inside: 2024-03-01 pre-split (90 / 85),
+    // 2024-11-20 (150 / 140) and 2025-01-24 (148 / 135), post-split and untouched.
+    assert_eq!(high_low(&raw, 2025), (dec("150"), dec("85")));
+    // FY2026 = (2025-01-26 → 2026-01-25].
+    assert_eq!(high_low(&raw, 2026), (dec("190"), dec("120")));
+
+    // The reported diluted EPS = net income applicable to common ÷ the served share count,
+    // 4 dp — never the adjusted `epsActual` (0.333 / 0.516 / 2.99 / 4.6 in the fixture).
+    let eps = |y: i32| year(&raw, y).eps.as_ref().map(|a| a.value);
+    assert_eq!(
+        eps(2023),
+        Some(dec("0.1742")),
+        "4 368 000 000 ÷ 25 070 000 000"
+    );
+    assert_eq!(
+        eps(2024),
+        Some(dec("1.1933")),
+        "29 760 000 000 ÷ 24 940 000 000"
+    );
+    assert_eq!(
+        eps(2025),
+        Some(dec("2.9382")),
+        "72 880 000 000 ÷ 24 804 000 000"
+    );
+    assert_eq!(eps(2026), Some(dec("4.4898")));
+    for y in 2023..=2026 {
+        assert_eq!(year(&raw, y).fiscal_year_end_month, Some(1), "{y}");
+    }
+    assert!(
+        raw.splits.is_empty(),
+        "nothing left for normalize to rebase"
+    );
+}
+
+/// The fiscal year in progress (on the fetch day 2026-09-25: FY2027, 2026-01-26 → 2027-01-25)
+/// takes the bars after the last reported end, labelled « 2027 » like the statements would label
+/// it; it has prices and no statement — the row the refresh drops as the year in progress (#109).
+#[test]
+fn the_bars_after_the_last_reported_end_form_the_fiscal_year_in_progress() {
+    let raw = map_eodhd(
+        &json(FUNDAMENTALS_JAN),
+        &json(EOD_JAN),
+        &json(SPLITS_JAN),
+        day(),
+        "JANFY.US",
+    )
+    .expect("maps");
+    assert_eq!(high_low(&raw, 2027), (dec("180"), dec("160")));
+    let in_progress = year(&raw, 2027);
+    assert!(in_progress.sales.is_none() && in_progress.eps.is_none());
+    assert_eq!(in_progress.fiscal_year_end_month, None);
+    // No calendar year « 2022 » row either: the 2022-06-15 bar belongs to FY2023.
+    assert_eq!(
+        raw.years.iter().map(|y| y.year).collect::<Vec<_>>(),
+        vec![2023, 2024, 2025, 2026, 2027]
+    );
+}
+
+/// A June fiscal year end: the bar ON the year end belongs to that year, the next trading day to
+/// the next one; the reported EPS replaces the adjusted one (2.80 / 3.30 in the fixture).
+#[test]
+fn a_june_fiscal_year_reduces_july_to_june() {
+    let raw = map_eodhd(
+        &json(FUNDAMENTALS_JUN),
+        &json(EOD_JUN),
+        &serde_json::json!([]),
+        day(),
+        "JUNFY.US",
+    )
+    .expect("maps");
+    // FY2023 = (2022-06-30 → 2023-06-30]: 2022-08-01 (42 / 38), 2023-06-30 (47 / 44).
+    assert_eq!(high_low(&raw, 2023), (dec("47"), dec("38")));
+    // FY2024 = (2023-06-30 → 2024-06-30]: 55 / 49, 62 / 58, 59 / 56 — calendar 2023 read 62 / 44.
+    assert_eq!(high_low(&raw, 2024), (dec("62"), dec("49")));
+    // FY2025, in progress.
+    assert_eq!(high_low(&raw, 2025), (dec("70"), dec("63")));
+    assert!(year(&raw, 2025).sales.is_none());
+    let eps = |y: i32| year(&raw, y).eps.as_ref().map(|a| a.value);
+    assert_eq!(eps(2023), Some(dec("2.5")), "400 ÷ 160");
+    assert_eq!(eps(2024), Some(dec("3")), "480 ÷ 160");
+    assert_eq!(year(&raw, 2024).fiscal_year_end_month, Some(6));
+}
+
+/// A December fiscal year end reduces exactly as the calendar years did (the regression anchor):
+/// the DEMO fixture's prices are those pinned before ssg-1.2.0, and every year is the calendar
+/// year.
+#[test]
+fn a_december_fiscal_year_keeps_the_calendar_prices() {
+    let raw = map_eodhd(
+        &json(FUNDAMENTALS),
+        &json(EOD),
+        &json(SPLITS),
+        day(),
+        "DEMO",
+    )
+    .expect("maps");
+    assert_eq!(high_low(&raw, 2023), (dec("12.5"), dec("9")));
+    assert_eq!(high_low(&raw, 2024), (dec("17"), dec("13")));
+    assert_eq!(
+        raw.years.iter().map(|y| y.year).collect::<Vec<_>>(),
+        vec![2023, 2024]
+    );
 }

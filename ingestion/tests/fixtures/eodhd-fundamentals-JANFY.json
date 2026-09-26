@@ -1,0 +1,93 @@
+{
+  "General": {
+    "Code": "JANFY",
+    "CurrencyCode": "USD",
+    "FiscalYearEnd": "January"
+  },
+  "Highlights": {
+    "EarningsShare": 3.51,
+    "DilutedEpsTTM": 3.51
+  },
+  "Financials": {
+    "Income_Statement": {
+      "yearly": {
+        "2023-01-29": {
+          "date": "2023-01-29",
+          "totalRevenue": "26974000000.00",
+          "incomeBeforeTax": "4181000000.00",
+          "netIncome": "4368000000.00",
+          "netIncomeApplicableToCommonShares": "4368000000.00",
+          "preferredStockAndOtherAdjustments": null
+        },
+        "2024-01-28": {
+          "date": "2024-01-28",
+          "totalRevenue": "60922000000.00",
+          "incomeBeforeTax": "33818000000.00",
+          "netIncome": "29760000000.00",
+          "netIncomeApplicableToCommonShares": "29760000000.00",
+          "preferredStockAndOtherAdjustments": null
+        },
+        "2025-01-26": {
+          "date": "2025-01-26",
+          "totalRevenue": "130497000000.00",
+          "incomeBeforeTax": "84026000000.00",
+          "netIncome": "72880000000.00",
+          "netIncomeApplicableToCommonShares": "72880000000.00",
+          "preferredStockAndOtherAdjustments": null
+        },
+        "2026-01-25": {
+          "date": "2026-01-25",
+          "totalRevenue": "200000000000.00",
+          "incomeBeforeTax": "130000000000.00",
+          "netIncome": "110000000000.00",
+          "netIncomeApplicableToCommonShares": "110000000000.00",
+          "preferredStockAndOtherAdjustments": null
+        }
+      }
+    },
+    "Balance_Sheet": {
+      "yearly": {
+        "2023-01-29": {
+          "date": "2023-01-29",
+          "totalStockholderEquity": "22101000000.00",
+          "commonStockSharesOutstanding": "25070000000"
+        },
+        "2024-01-28": {
+          "date": "2024-01-28",
+          "totalStockholderEquity": "42978000000.00",
+          "commonStockSharesOutstanding": "24940000000"
+        },
+        "2025-01-26": {
+          "date": "2025-01-26",
+          "totalStockholderEquity": "79327000000.00",
+          "commonStockSharesOutstanding": "24804000000"
+        },
+        "2026-01-25": {
+          "date": "2026-01-25",
+          "totalStockholderEquity": "120000000000.00",
+          "commonStockSharesOutstanding": "24500000000"
+        }
+      }
+    },
+    "Cash_Flow": {
+      "yearly": {
+        "2023-01-29": { "date": "2023-01-29", "dividendsPaid": "-398000000.00" },
+        "2024-01-28": { "date": "2024-01-28", "dividendsPaid": "-395000000.00" },
+        "2025-01-26": { "date": "2025-01-26", "dividendsPaid": "-834000000.00" },
+        "2026-01-25": { "date": "2026-01-25", "dividendsPaid": "-980000000.00" }
+      }
+    }
+  },
+  "Earnings": {
+    "Annual": {
+      "2023-01-31": { "date": "2023-01-31", "epsActual": 0.333 },
+      "2024-01-31": { "date": "2024-01-31", "epsActual": 0.516 },
+      "2025-01-31": { "date": "2025-01-31", "epsActual": 2.99 },
+      "2026-01-31": { "date": "2026-01-31", "epsActual": 4.6 }
+    }
+  },
+  "SplitsDividends": {
+    "LastSplitFactor": "10.000000/1.000000",
+    "LastSplitDate": "2024-06-10"
+  }
+}

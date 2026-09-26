@@ -1,0 +1,14 @@
+[
+  { "date": "2022-06-15", "open": "170", "high": "190", "low": "150", "close": "160", "adjusted_close": "16", "volume": 1000 },
+  { "date": "2023-01-20", "open": "170", "high": "180", "low": "160", "close": "175", "adjusted_close": "17.5", "volume": 1000 },
+  { "date": "2023-03-01", "open": "240", "high": "250", "low": "230", "close": "245", "adjusted_close": "24.5", "volume": 1000 },
+  { "date": "2023-12-15", "open": "490", "high": "500", "low": "480", "close": "495", "adjusted_close": "49.5", "volume": 1000 },
+  { "date": "2024-01-25", "open": "610", "high": "620", "low": "600", "close": "615", "adjusted_close": "61.5", "volume": 1000 },
+  { "date": "2024-03-01", "open": "880", "high": "900", "low": "850", "close": "890", "adjusted_close": "89", "volume": 1000 },
+  { "date": "2024-11-20", "open": "145", "high": "150", "low": "140", "close": "146", "adjusted_close": "146", "volume": 1000 },
+  { "date": "2025-01-24", "open": "140", "high": "148", "low": "135", "close": "142", "adjusted_close": "142", "volume": 1000 },
+  { "date": "2025-06-10", "open": "130", "high": "145", "low": "120", "close": "140", "adjusted_close": "140", "volume": 1000 },
+  { "date": "2026-01-20", "open": "180", "high": "190", "low": "170", "close": "185", "adjusted_close": "185", "volume": 1000 },
+  { "date": "2026-02-02", "open": "175", "high": "180", "low": "170", "close": "178", "adjusted_close": "178", "volume": 1000 },
+  { "date": "2026-09-24", "open": "170", "high": "175", "low": "160", "close": "172", "adjusted_close": "172", "volume": 1000 }
+]

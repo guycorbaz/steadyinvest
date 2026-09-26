@@ -1,7 +1,8 @@
 //! EODHD adapter (https://eodhd.com) — CH/EU+US coverage. Story 3.1, first adapter.
 //!
 //! Three endpoints feed one [`RawFinancials`]:
-//! - `/fundamentals/{ticker}` → currency, per-year income-statement / balance-sheet / earnings;
+//! - `/fundamentals/{ticker}` → currency, per-fiscal-year income statement / balance sheet / cash
+//!   flow (the fiscal-year end dates, the figures, and the reported diluted EPS computed from them);
 //! - `/eod/{ticker}` (daily OHLC) → each fiscal year's high/low, reduced from the daily bars;
 //! - `/splits/{ticker}` → the split history that rebases those raw bars (issue #217).
 //!
@@ -19,8 +20,8 @@ use serde_json::Value;
 use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear};
 
 use crate::adapters::common::{
-    DatedSplit, build_client, cap_detail, dec, get_json, rebase_price, reduce_high_low_adjusted,
-    year_of_date_key,
+    DatedSplit, build_client, cap_detail, dec, fiscal_year_end_month, get_json, rebase_price,
+    reduce_high_low_fiscal, year_of_date_key,
 };
 use crate::error::ProviderError;
 use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
@@ -282,12 +283,17 @@ pub fn fx_pair_symbol(base: &str, quote: &str) -> String {
 /// PURE: EODHD `/fundamentals` + `/eod` + `/splits` JSON → [`RawFinancials`]. No I/O. Missing
 /// fields stay `None` (never coerced to 0). The caller passes this straight to `core::normalize`.
 ///
-/// Issue #217 — share splits: EODHD RESTATES its per-share fundamentals (`epsActual`, the balance-
-/// sheet shares behind the derived dividend and book value per share) into today's shares, but
-/// serves the daily price bars RAW. So the split history adjusts the price bars here, and the
-/// returned `splits` stay EMPTY: `normalize` must not rebase the already-restated per-share figures a
-/// second time. `fetch_day` (the user's local calendar day, [`fetch_day_at`]) bounds the split
-/// history: a split dated after it is refused.
+/// ssg-1.2.0 — the NAIC's figures: every year is the company's FISCAL year, labelled by the
+/// calendar year its end falls in; its high and low prices are those of that fiscal year (see
+/// [`crate::adapters::common::FiscalCalendar`]), and its EPS is the REPORTED diluted EPS
+/// ([`reported_diluted_eps`]), never EODHD's adjusted `epsActual`.
+///
+/// Issue #217 — share splits: EODHD serves the daily price bars RAW, and its balance-sheet share
+/// counts (behind the derived EPS, dividend and book value per share) are taken as restated into
+/// today's shares (the G5 assumption). So the split history adjusts the price bars here, and the
+/// returned `splits` stay EMPTY: `normalize` must not rebase the per-share figures a second time.
+/// `fetch_day` (the user's local calendar day, [`fetch_day_at`]) bounds the split history: a
+/// split dated after it is refused.
 pub fn map_eodhd(
     fundamentals: &Value,
     prices: &Value,
@@ -306,22 +312,27 @@ pub fn map_eodhd(
     let income = obj(fundamentals.pointer("/Financials/Income_Statement/yearly"));
     let balance = obj(fundamentals.pointer("/Financials/Balance_Sheet/yearly"));
     let cash_flow = obj(fundamentals.pointer("/Financials/Cash_Flow/yearly"));
-    let earnings = obj(fundamentals.pointer("/Earnings/Annual"));
 
-    // Per-year high/low reduced from the daily EOD bars (root array, `"date"`-keyed), each bar
-    // first rebased into today's shares by the splits dated after it (issue #217). An unreadable
-    // split history fails the whole mapping, named (G1 H) — never « no splits ».
-    let split_history = map_split_history(splits, fetch_day).map_err(split_history_failure)?;
-    let (highs, lows) = reduce_high_low_adjusted(Some(prices), "date", &split_history);
-
-    // Union of every fiscal year mentioned by any section, ascending.
-    let mut years_set: BTreeMap<i32, ()> = BTreeMap::new();
-    for key in income
+    // ssg-1.2.0 — the fiscal calendar: every fiscal-year end date the yearly statements report.
+    // `Earnings.Annual` is no longer read at all: its `epsActual` is the ADJUSTED (non-GAAP) EPS.
+    let fiscal_ends: Vec<NaiveDate> = income
         .keys()
         .chain(balance.keys())
         .chain(cash_flow.keys())
-        .chain(earnings.keys())
-    {
+        .filter_map(|key| NaiveDate::parse_from_str(key.get(0..10)?, "%Y-%m-%d").ok())
+        .collect();
+
+    // Per-FISCAL-year high/low reduced from the daily EOD bars (root array, `"date"`-keyed), each
+    // bar first rebased into today's shares by the splits dated after it (issue #217). ssg-1.2.0:
+    // a bar goes to the fiscal year whose period holds it, not to its calendar year — NVDA's
+    // « 2024 » (the year ended 2024-01-28) pairs its EPS with the prices of Feb 2023 → Jan 2024.
+    // An unreadable split history fails the whole mapping, named (G1 H) — never « no splits ».
+    let split_history = map_split_history(splits, fetch_day).map_err(split_history_failure)?;
+    let (highs, lows) = reduce_high_low_fiscal(Some(prices), "date", &split_history, &fiscal_ends);
+
+    // Union of every fiscal year mentioned by any statement or by the prices, ascending.
+    let mut years_set: BTreeMap<i32, ()> = BTreeMap::new();
+    for key in income.keys().chain(balance.keys()).chain(cash_flow.keys()) {
         if let Some(y) = year_of_date_key(key) {
             years_set.insert(y, ());
         }
@@ -343,13 +354,20 @@ pub fn map_eodhd(
             let inc = year_row(income, y);
             let bal = year_row(balance, y);
             let cash = year_row(cash_flow, y);
-            let earn = year_row(earnings, y);
             RawYear {
                 year: y,
                 period_months: None,
-                fiscal_year_end_month: None,
+                // The month the year's reported fiscal end falls in (the latest one of the label
+                // year, as the statements keep it) — `None` for a year no statement reports (the
+                // year in progress, a price-only year).
+                fiscal_year_end_month: fiscal_ends
+                    .iter()
+                    .filter(|end| end.year() == y)
+                    .max()
+                    .map(|end| fiscal_year_end_month(*end)),
                 sales: amount(field_dec(inc, "totalRevenue")),
-                eps: amount(field_dec(earn, "epsActual")),
+                // ssg-1.2.0: the REPORTED diluted EPS, never `Earnings.Annual.epsActual`.
+                eps: amount(reported_diluted_eps(income, balance, y)),
                 high_price: amount(highs.get(&y).copied()),
                 low_price: amount(lows.get(&y).copied()),
                 // Issue #112: per-share dividend for the fiscal year — the cash-flow `dividendsPaid`
@@ -476,6 +494,56 @@ fn parse_split_part(s: &str) -> Option<Decimal> {
         .filter(|d| d.is_sign_positive() && !d.is_zero())
 }
 
+/// PURE (ssg-1.2.0): the REPORTED diluted EPS of fiscal year `y` — the NAIC figure (GAAP / IFRS,
+/// as published), never the analysts' « adjusted » one.
+///
+/// EODHD serves no per-share earnings in its yearly statements, and its `Earnings.Annual.epsActual`
+/// is « the actual non-GAAP EPS reported by the company » (EODHD fundamentals glossary): NVDA
+/// FY2023 0.333 (= 3.34 ÷ 10) against 0.174 reported diluted. So the reported diluted EPS is
+/// COMPUTED here, from ONE fiscal year's statements — the income-statement and balance-sheet rows
+/// of the SAME fiscal end date (two different dates would mix two periods: the EPS is then absent):
+///
+/// - numerator: the net income applicable to common shares — `netIncomeApplicableToCommonShares`
+///   (the glossary's spelling; `incomeNetApplicableToCommonShares`, the spelling of EODHD's
+///   announcement of the field, is read as the same figure). Without it, `netIncome` (EODHD: after
+///   minority interest) IS that figure when no preferred-dividend adjustment is reported
+///   (`preferredStockAndOtherAdjustments` absent or zero); with a non-zero adjustment and no
+///   applicable-to-common figure the EPS is absent — never the whole net income passed off as
+///   the common shareholders' share;
+/// - denominator: the balance sheet's `commonStockSharesOutstanding`, which the glossary defines
+///   as « the weighted average diluted number … used for EPS calculations ».
+///
+/// Split scale: the share count is taken as served, like the dividend and book value per share
+/// derived from it (#217) — that EODHD restates pre-split share counts into today's shares is the
+/// assumption the one real NVDA.US fetch (G5) confirms. Rounded to 4 dp like every derived
+/// per-share figure (#119). Absent — never the adjusted `epsActual` in its place — when an input
+/// is missing or the share count is not positive.
+fn reported_diluted_eps(
+    income: &serde_json::Map<String, Value>,
+    balance: &serde_json::Map<String, Value>,
+    y: i32,
+) -> Option<Decimal> {
+    let (inc_date, inc) = year_entry(income, y)?;
+    let (bal_date, bal) = year_entry(balance, y)?;
+    if inc_date != bal_date {
+        return None;
+    }
+    let inc = Some(inc);
+    let to_common = field_dec(inc, "netIncomeApplicableToCommonShares")
+        .or_else(|| field_dec(inc, "incomeNetApplicableToCommonShares"))
+        .or_else(|| {
+            field_dec(inc, "preferredStockAndOtherAdjustments")
+                .is_none_or(|p| p.is_zero())
+                .then(|| field_dec(inc, "netIncome"))
+                .flatten()
+        })?;
+    let shares = field_dec(Some(bal), "commonStockSharesOutstanding")?;
+    if shares <= Decimal::ZERO {
+        return None;
+    }
+    to_common.checked_div(shares).map(|d| d.round_dp(4))
+}
+
 /// `totalStockholderEquity / commonStockSharesOutstanding` when both are present and shares ≠ 0.
 fn book_value_per_share(year: Option<&Value>) -> Option<Decimal> {
     let equity = field_dec(year, "totalStockholderEquity")?;
@@ -515,6 +583,11 @@ fn obj(v: Option<&Value>) -> &serde_json::Map<String, Value> {
 
 /// The row of a `{date: {...}}` yearly map whose date key falls in fiscal year `y`.
 fn year_row(map: &serde_json::Map<String, Value>, y: i32) -> Option<&Value> {
+    year_entry(map, y).map(|(_, v)| v)
+}
+
+/// [`year_row`] with its date key.
+fn year_entry(map: &serde_json::Map<String, Value>, y: i32) -> Option<(&String, &Value)> {
     // #37: when two keys fall in the same fiscal year (a fiscal-year-end change or a restated
     // period), pick the row with the **latest** date key — the most recent / restated figures win.
     // `YYYY-MM-DD` keys sort lexicographically = chronologically, so the `max` key is the latest date
@@ -522,7 +595,6 @@ fn year_row(map: &serde_json::Map<String, Value>, y: i32) -> Option<&Value> {
     map.iter()
         .filter(|(k, _)| year_of_date_key(k) == Some(y))
         .max_by(|(a, _), (b, _)| a.cmp(b))
-        .map(|(_, v)| v)
 }
 
 /// A named field of an optional row, parsed as a `Decimal` (number or numeric string).
@@ -621,6 +693,71 @@ mod tests {
         );
     }
 
+    /// ssg-1.2.0: the EPS is the REPORTED diluted one, from one fiscal end date's statements —
+    /// the applicable-to-common net income wins; plain net income only without a preferred
+    /// adjustment; absent (never the adjusted `epsActual`) when an input is missing, the share
+    /// count is not positive, or the two statements' dates differ.
+    #[test]
+    fn the_eps_is_the_reported_diluted_one_or_absent_never_the_adjusted_one() {
+        let fundamentals = json!({
+            "General": { "CurrencyCode": "USD" },
+            "Earnings": { "Annual": {
+                "2019-12-31": { "epsActual": "9.99" },
+                "2020-12-31": { "epsActual": "9.99" },
+                "2021-12-31": { "epsActual": "9.99" },
+                "2022-12-31": { "epsActual": "9.99" },
+                "2023-12-31": { "epsActual": "9.99" },
+                "2024-12-31": { "epsActual": "9.99" },
+                "2025-12-31": { "epsActual": "9.99" },
+            } },
+            "Financials": {
+                "Income_Statement": { "yearly": {
+                    // applicable-to-common wins over net income
+                    "2019-12-31": { "netIncome": "120", "netIncomeApplicableToCommonShares": "100",
+                                    "preferredStockAndOtherAdjustments": "20" },
+                    // the announcement's spelling is the same figure
+                    "2020-12-31": { "netIncome": "120", "incomeNetApplicableToCommonShares": "90",
+                                    "preferredStockAndOtherAdjustments": "30" },
+                    // no applicable figure, zero adjustment → net income IS the common share
+                    "2021-12-31": { "netIncome": "-50", "preferredStockAndOtherAdjustments": "0" },
+                    // no applicable figure, a real preferred adjustment → absent
+                    "2022-12-31": { "netIncome": "120", "preferredStockAndOtherAdjustments": "20" },
+                    // no share count → absent
+                    "2023-12-31": { "netIncome": "120" },
+                    // a zero share count → absent
+                    "2024-12-31": { "netIncome": "120" },
+                    // the balance sheet reports another date in the year → absent
+                    "2025-12-31": { "netIncome": "120" },
+                } },
+                "Balance_Sheet": { "yearly": {
+                    "2019-12-31": { "commonStockSharesOutstanding": "40" },
+                    "2020-12-31": { "commonStockSharesOutstanding": "40" },
+                    "2021-12-31": { "commonStockSharesOutstanding": "40" },
+                    "2022-12-31": { "commonStockSharesOutstanding": "40" },
+                    "2024-12-31": { "commonStockSharesOutstanding": "0" },
+                    "2025-09-30": { "commonStockSharesOutstanding": "40" },
+                } },
+            }
+        });
+        let fin = map_eodhd(&fundamentals, &json!([]), &json!([]), day(), "X.US").expect("maps");
+        let eps = |year: i32| {
+            fin.years
+                .iter()
+                .find(|y| y.year == year)
+                .and_then(|y| y.eps.as_ref())
+                .map(|a| a.value)
+        };
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        assert_eq!(eps(2019), Some(d("2.5")), "100 ÷ 40");
+        assert_eq!(eps(2020), Some(d("2.25")), "90 ÷ 40");
+        assert_eq!(eps(2021), Some(d("-1.25")), "a loss stays a loss");
+        for year in [2022, 2023, 2024, 2025] {
+            assert_eq!(eps(year), None, "{year}: absent, never the adjusted 9.99");
+        }
+        // The fiscal-year-end month comes from the reported date.
+        assert_eq!(fin.years[0].fiscal_year_end_month, Some(12));
+    }
+
     #[test]
     fn fx_pair_symbol_is_the_concatenated_forex_form() {
         // Story 6.5: `fetch_fx_rate` = `fetch_latest_price` with this symbol — the only new logic.
@@ -654,7 +791,15 @@ mod tests {
             "Earnings": { "Annual": {
                 "2020-01-26": { "epsActual": "0.1453" },
                 "2025-01-26": { "epsActual": "2.992" }
-            }}
+            }},
+            "Financials": {
+                "Income_Statement": { "yearly": {
+                    "2020-01-26": { "netIncome": "2796000000" }
+                } },
+                "Balance_Sheet": { "yearly": {
+                    "2020-01-26": { "commonStockSharesOutstanding": "24720000000" }
+                } }
+            }
         });
         let prices = json!([
             { "date": "2020-01-15", "high": "589.07", "low": "180.68", "close": "500" },
@@ -677,8 +822,10 @@ mod tests {
             Some(d("4.517")),
             "180.68 ÷ 40"
         );
-        // The EPS is taken as served (already restated) — never divided again.
-        assert_eq!(y2020.eps.as_ref().map(|a| a.value), Some(d("0.1453")));
+        // ssg-1.2.0: the EPS is the reported diluted one (net income ÷ the served, restated share
+        // count: 2 796 000 000 ÷ 24 720 000 000 = 0.11310…), never divided again by the splits —
+        // and never the adjusted `epsActual` 0.1453.
+        assert_eq!(y2020.eps.as_ref().map(|a| a.value), Some(d("0.1131")));
         let y2025 = fin.years.iter().find(|y| y.year == 2025).expect("2025");
         assert_eq!(
             y2025.high_price.as_ref().map(|a| a.value),

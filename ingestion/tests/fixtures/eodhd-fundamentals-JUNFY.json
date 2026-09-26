@@ -1,0 +1,45 @@
+{
+  "General": {
+    "Code": "JUNFY",
+    "CurrencyCode": "USD",
+    "FiscalYearEnd": "June"
+  },
+  "Financials": {
+    "Income_Statement": {
+      "yearly": {
+        "2023-06-30": {
+          "date": "2023-06-30",
+          "totalRevenue": "2000",
+          "incomeBeforeTax": "500",
+          "netIncome": "400"
+        },
+        "2024-06-30": {
+          "date": "2024-06-30",
+          "totalRevenue": "2400",
+          "incomeBeforeTax": "620",
+          "netIncome": "480"
+        }
+      }
+    },
+    "Balance_Sheet": {
+      "yearly": {
+        "2023-06-30": {
+          "date": "2023-06-30",
+          "totalStockholderEquity": "1500",
+          "commonStockSharesOutstanding": "160"
+        },
+        "2024-06-30": {
+          "date": "2024-06-30",
+          "totalStockholderEquity": "1700",
+          "commonStockSharesOutstanding": "160"
+        }
+      }
+    }
+  },
+  "Earnings": {
+    "Annual": {
+      "2023-06-30": { "date": "2023-06-30", "epsActual": "2.80" },
+      "2024-06-30": { "date": "2024-06-30", "epsActual": "3.30" }
+    }
+  }
+}
