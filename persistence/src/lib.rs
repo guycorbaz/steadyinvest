@@ -34,7 +34,7 @@ pub use export::{
 };
 pub use fx::FxRateItem;
 pub use holdings::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
-pub use journal::{Journal, JournalMode, clear_lock, lock_is_stale};
+pub use journal::{Journal, JournalMode, ReadOnlyCause, clear_lock, lock_is_stale};
 pub use restore::{BackupInfo, inspect_backup, restore_journal_file};
 pub use studies::{JudgmentSnapshotSummary, StudySummary};
 pub use transactions::{KIND_BUY, KIND_DIVIDEND, KIND_SELL, LedgerEntry, TransactionItem};

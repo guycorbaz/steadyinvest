@@ -10,6 +10,10 @@
 //! file mutation that belongs to the read-write path only. Story 5.5 added the sync-path
 //! `journal_mode=DELETE` switching ([`JournalMode`]) and the single-instance lock sidecar
 //! ([`lock_is_stale`] / [`clear_lock`]) implemented in this module.
+//!
+//! **Write protection** (2026-09-26 on-screen defect): a file or directory the OS will not let us
+//! write opens read-only with its named [`ReadOnlyCause`] — detected at open, never discovered by
+//! the first write's SQLite error.
 
 use crate::error::{Error, Result};
 use crate::migrations;
@@ -39,6 +43,19 @@ impl JournalMode {
     }
 }
 
+/// Why an open journal is read-only — each cause is named apart, so the refusal of a write says
+/// the RIGHT reason (a newer schema is not a protected file).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadOnlyCause {
+    /// The file was written by a newer schema than this build knows (NFR-R3).
+    NewerSchema { file_user_version: i64 },
+    /// The OS refuses to write the file itself (`chmod 444`, a read-only medium).
+    FileWriteProtected,
+    /// The file is writable but its directory is not: SQLite cannot create the `-wal`/`-journal`
+    /// sidecar a write needs, so the first write would fail.
+    DirectoryWriteProtected,
+}
+
 /// An open journal: one SQLite connection plus the journal's identity. Single connection per
 /// `Journal` is enough for this headless story (the mutex-guarded write connection + WAL
 /// concurrent readers is app-era machinery).
@@ -46,9 +63,10 @@ impl JournalMode {
 pub struct Journal {
     pub(crate) conn: Connection,
     id: Uuid,
-    /// `Some(file_user_version)` when the file is newer than this build's latest migration:
-    /// the journal is read-only (NFR-R3) and write methods fail with the cause-named error.
-    newer_file_version: Option<i64>,
+    /// `Some(cause)` when the journal is read-only — a file newer than this build's latest
+    /// migration (NFR-R3), or a file/directory protected against writing — and write methods fail
+    /// with the cause-named error.
+    read_only: Option<ReadOnlyCause>,
     /// The single-instance lock guard (Story 5.5, ADD6). Dropping the `Journal` (close / switch /
     /// exit) drops this, releasing the lock. Declared **after** `conn` so the connection closes first.
     _lock: JournalLock,
@@ -115,7 +133,11 @@ fn lock_owner_is_live(pid: u32, start_time: u64) -> bool {
 /// sidecar (crashed/PID-reused owner) → also [`Error::LockHeld`] but [`lock_is_stale`] reports it
 /// reclaimable. A lock-file IO failure on a **read-only** location is non-fatal: the open proceeds
 /// without a lock (a journal that cannot be locked also cannot be double-written — the read-only case).
-fn acquire_lock(path: &Path) -> Result<JournalLock> {
+///
+/// The sidecar's creation doubles as the **directory write probe**: the second value is `false` when
+/// the OS refused to create a file beside the journal (permission denied / read-only file system),
+/// which is exactly the refusal SQLite would meet creating its `-wal`/`-journal` at the first write.
+fn acquire_lock(path: &Path) -> Result<(JournalLock, bool)> {
     let lock_path = lock_path_for(path);
     match std::fs::OpenOptions::new()
         .write(true)
@@ -126,20 +148,27 @@ fn acquire_lock(path: &Path) -> Result<JournalLock> {
             let pid = std::process::id();
             let start = process_start_time(pid).unwrap_or(0);
             let _ = write!(file, "{pid} {start}");
-            Ok(JournalLock {
-                path: lock_path,
-                owns: true,
-            })
+            Ok((
+                JournalLock {
+                    path: lock_path,
+                    owns: true,
+                },
+                true,
+            ))
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let us = (std::process::id(), process_start_time(std::process::id()));
             match read_lock(&lock_path) {
                 // The SAME process instance (pid + start-time) re-opening — allowed (non-owning guard;
                 // SQLite coordinates intra-process connections). A reused PID has a different start-time.
-                Some((pid, start)) if us.1 == Some(start) && us.0 == pid => Ok(JournalLock {
-                    path: lock_path,
-                    owns: false,
-                }),
+                // The sidecar was created there, so the directory took a new file.
+                Some((pid, start)) if us.1 == Some(start) && us.0 == pid => Ok((
+                    JournalLock {
+                        path: lock_path,
+                        owns: false,
+                    },
+                    true,
+                )),
                 // A genuinely live other instance → refused.
                 Some((pid, start)) if lock_owner_is_live(pid, start) => {
                     Err(Error::LockHeld { pid })
@@ -151,11 +180,19 @@ fn acquire_lock(path: &Path) -> Result<JournalLock> {
             }
         }
         // A read-only directory / media cannot hold a lock — proceed lock-less (a read-only journal
-        // cannot be double-written, so single-instance write-protection is moot). Best-effort.
-        Err(_) => Ok(JournalLock {
-            path: lock_path,
-            owns: false,
-        }),
+        // cannot be double-written, so single-instance write-protection is moot). Best-effort. Only
+        // the OS's write refusals mark the directory protected; any other failure keeps the
+        // lock-less read-write open (SQLite then reports what it meets).
+        Err(e) => Ok((
+            JournalLock {
+                path: lock_path,
+                owns: false,
+            },
+            !matches!(
+                e.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+            ),
+        )),
     }
 }
 
@@ -242,7 +279,7 @@ impl Journal {
     ) -> Result<Self> {
         // Acquire the lock BEFORE opening — a second instance is refused before touching the file. A
         // failure anywhere below drops this guard, releasing the lock.
-        let lock = acquire_lock(path)?;
+        let (lock, _) = acquire_lock(path)?;
         let mut conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -268,7 +305,7 @@ impl Journal {
         Ok(Journal {
             conn,
             id: journal_id,
-            newer_file_version: None,
+            read_only: None,
             _lock: lock,
         })
     }
@@ -279,7 +316,8 @@ impl Journal {
     /// `user_version` is **newer** than the latest known migration, the journal opens
     /// **read-only** (NFR-R3): the handle is re-opened with `SQLITE_OPEN_READ_ONLY`, only
     /// connection-local pragmas apply, no migration runs, and write methods return the
-    /// cause-named error while reads keep working.
+    /// cause-named error while reads keep working. A file or directory **protected against
+    /// writing** opens read-only the same way, with its own cause ([`ReadOnlyCause`]).
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_mode(path, JournalMode::Wal)
     }
@@ -290,12 +328,29 @@ impl Journal {
         let path = path.as_ref();
         // Lock before touching the file — a second instance is refused up front. Any error below drops
         // this guard, releasing the lock.
-        let lock = acquire_lock(path)?;
+        let (lock, directory_writable) = acquire_lock(path)?;
         // No CREATE flag: opening a missing file is an error, never a silent empty journal.
         let mut conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+
+        // Write-protection probe, BEFORE the first read: SQLite's own detection (a READ_WRITE open
+        // of a file the OS will not let it write falls back to read-only and says so) for the file,
+        // the lock sidecar's creation for the directory. Checked before any read because the first
+        // read of a WAL file creates `-wal`/`-shm` beside it — with the protected file's own
+        // `r--r--r--` mode, strays left behind after close (seen on screen 2026-09-26).
+        let protection = if conn.is_readonly(rusqlite::MAIN_DB)? {
+            Some(ReadOnlyCause::FileWriteProtected)
+        } else if !directory_writable {
+            Some(ReadOnlyCause::DirectoryWriteProtected)
+        } else {
+            None
+        };
+        if let Some(cause) = protection {
+            drop(conn);
+            return Self::open_write_protected(path, cause, lock);
+        }
 
         // Version check BEFORE any pragma that mutates the file (journal_mode=WAL writes).
         let file_version = migrations::user_version(&conn)?;
@@ -311,7 +366,9 @@ impl Journal {
             return Ok(Journal {
                 conn,
                 id,
-                newer_file_version: Some(file_version),
+                read_only: Some(ReadOnlyCause::NewerSchema {
+                    file_user_version: file_version,
+                }),
                 _lock: lock,
             });
         }
@@ -326,7 +383,64 @@ impl Journal {
         Ok(Journal {
             conn,
             id,
-            newer_file_version: None,
+            read_only: None,
+            _lock: lock,
+        })
+    }
+
+    /// The read-only open of a journal the OS will not let us write (`cause` is file or directory
+    /// protection). The handle is `mode=ro`; when no `-wal`/`-journal` sidecar holds content it is
+    /// also `immutable=1`, so SQLite reads the file as it stands and creates NO `-wal`/`-shm` beside
+    /// it (a protected directory could not take them anyway, and a protected file would leave them
+    /// behind with its own `r--r--r--` mode). Immutability is sound here because nothing can change
+    /// a file that cannot be written; a sidecar WITH content (committed pages not yet checkpointed,
+    /// a hot rollback journal) must be read, so that case keeps the plain read-only open.
+    ///
+    /// A file newer than this build keeps the newer-schema cause (the more lasting reason: lifting
+    /// the protection would not make it writable); a file OLDER than this build is refused
+    /// ([`Error::WriteProtectedOutdated`]) — its migrations cannot run, and this build's queries
+    /// would misread an unmigrated file.
+    fn open_write_protected(path: &Path, cause: ReadOnlyCause, lock: JournalLock) -> Result<Self> {
+        let sidecar_has_content = ["-wal", "-journal"].iter().any(|suffix| {
+            let mut sidecar = path.as_os_str().to_os_string();
+            sidecar.push(suffix);
+            std::fs::metadata(&sidecar).is_ok_and(|m| m.len() > 0)
+        });
+        let uri = format!(
+            "file:{}?mode=ro{}",
+            uri_path(path),
+            if sidecar_has_content {
+                ""
+            } else {
+                "&immutable=1"
+            }
+        );
+        let conn = Connection::open_with_flags(
+            uri,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_URI
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        apply_connection_local_pragmas(&conn)?;
+        let file_version = migrations::user_version(&conn)?;
+        let latest = migrations::latest_version(migrations::REGISTRY);
+        let cause = match file_version.cmp(&i64::from(latest)) {
+            std::cmp::Ordering::Greater => ReadOnlyCause::NewerSchema {
+                file_user_version: file_version,
+            },
+            std::cmp::Ordering::Less => {
+                return Err(Error::WriteProtectedOutdated {
+                    file_user_version: file_version,
+                    supported: latest,
+                });
+            }
+            std::cmp::Ordering::Equal => cause,
+        };
+        let id = read_journal_id(&conn)?;
+        Ok(Journal {
+            conn,
+            id,
+            read_only: Some(cause),
             _lock: lock,
         })
     }
@@ -354,9 +468,14 @@ impl Journal {
         })
     }
 
-    /// True when the file was written by a newer schema and is therefore opened read-only.
+    /// True when the journal is opened read-only (a newer schema, or write protection).
     pub fn is_read_only(&self) -> bool {
-        self.newer_file_version.is_some()
+        self.read_only.is_some()
+    }
+
+    /// Why the journal is read-only, or `None` when it is writable.
+    pub fn read_only_cause(&self) -> Option<ReadOnlyCause> {
+        self.read_only
     }
 
     /// Checkpoint the WAL into the main database file and truncate it (`PRAGMA
@@ -378,14 +497,38 @@ impl Journal {
     /// API-level write gate (defense in depth on top of `SQLITE_OPEN_READ_ONLY`): every mutating
     /// method calls this first.
     pub(crate) fn check_writable(&self) -> Result<()> {
-        match self.newer_file_version {
-            Some(file_user_version) => Err(Error::NewerJournalSchema {
-                file_user_version,
-                supported: migrations::latest_version(migrations::REGISTRY),
-            }),
+        match self.read_only {
+            Some(ReadOnlyCause::NewerSchema { file_user_version }) => {
+                Err(Error::NewerJournalSchema {
+                    file_user_version,
+                    supported: migrations::latest_version(migrations::REGISTRY),
+                })
+            }
+            Some(ReadOnlyCause::FileWriteProtected) => {
+                Err(Error::WriteProtected { directory: false })
+            }
+            Some(ReadOnlyCause::DirectoryWriteProtected) => {
+                Err(Error::WriteProtected { directory: true })
+            }
             None => Ok(()),
         }
     }
+}
+
+/// A filesystem path as the path part of an SQLite `file:` URI: every byte outside the unreserved
+/// set (and `/`) percent-encoded, so a `?`, `#`, `%` or space in a user-chosen folder name cannot be
+/// read as URI syntax and open a different file.
+fn uri_path(path: &Path) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for &byte in path.as_os_str().as_encoded_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
 }
 
 /// Pragmas that only affect this connection — safe on a read-only handle.

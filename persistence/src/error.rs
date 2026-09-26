@@ -43,6 +43,28 @@ pub enum Error {
         supported: u32,
     },
 
+    /// The journal file (or the directory holding it) is protected against writing at the OS level
+    /// — a `chmod 444` file, a read-only directory or medium. The journal is opened read-only and
+    /// write methods return this variant; `directory` names WHICH is protected (the file wins when
+    /// both are), so the refusal never names the wrong cause.
+    #[error(
+        "the journal {} is protected against writing; it is opened read-only",
+        if *.directory { "directory" } else { "file" }
+    )]
+    WriteProtected { directory: bool },
+
+    /// A write-protected journal file whose schema is OLDER than this build: the pending migrations
+    /// cannot run on a file that cannot be written, and reading an unmigrated file with this build's
+    /// queries would misread it — so the open is refused and the file stays untouched.
+    #[error(
+        "this journal is protected against writing and its schema (file user_version \
+         {file_user_version}) is older than this build's ({supported}); it was not opened"
+    )]
+    WriteProtectedOutdated {
+        file_user_version: i64,
+        supported: u32,
+    },
+
     /// A single row carries a `schema_version` newer than the contract this build was built with.
     /// The read fails loudly — never a silent partial parse.
     #[error(
@@ -113,6 +135,23 @@ pub enum Error {
     /// backup could not be copied beside the journal. The live journal is unchanged.
     #[error("the backup file could not be staged: {detail}; the journal is unchanged")]
     Restore { detail: String },
+}
+
+impl Error {
+    /// Whether this failure is the OS refusing a write — the API gate of a write-protected journal,
+    /// or SQLite reporting a read-only database / a denied permission at write time (a file whose
+    /// protection changed after it was opened). The app names this cause in French instead of
+    /// surfacing SQLite's own English text (2026-09-26 on-screen defect).
+    pub fn is_write_protected(&self) -> bool {
+        match self {
+            Error::WriteProtected { .. } => true,
+            Error::Sqlite(rusqlite::Error::SqliteFailure(code, _)) => matches!(
+                code.code,
+                rusqlite::ErrorCode::ReadOnly | rusqlite::ErrorCode::PermissionDenied
+            ),
+            _ => false,
+        }
+    }
 }
 
 impl From<steadyinvest_contract::ImportError> for Error {
@@ -214,6 +253,12 @@ mod tests {
                 file_user_version: 9,
                 supported: 1,
             },
+            Error::WriteProtected { directory: false },
+            Error::WriteProtected { directory: true },
+            Error::WriteProtectedOutdated {
+                file_user_version: 3,
+                supported: 9,
+            },
             Error::NewerRowSchema {
                 row_schema_version: 9,
                 supported: 1,
@@ -258,6 +303,8 @@ mod tests {
                 | Error::CorruptPayload { .. }
                 | Error::CorruptJournalMeta { .. }
                 | Error::NewerJournalSchema { .. }
+                | Error::WriteProtected { .. }
+                | Error::WriteProtectedOutdated { .. }
                 | Error::NewerRowSchema { .. }
                 | Error::JournalIdentityMismatch { .. }
                 | Error::Migration { .. }
@@ -270,7 +317,12 @@ mod tests {
                 | Error::Restore { .. } => {}
             }
         }
-        assert_eq!(sample_errors().len(), 15, "one sample per variant");
+        // 17 variants; `WriteProtected` is sampled for both of its causes (file, directory).
+        assert_eq!(
+            sample_errors().len(),
+            18,
+            "one sample per variant (+1 cause)"
+        );
     }
 
     #[test]
@@ -284,6 +336,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn write_protection_is_recognised_from_the_gate_and_from_sqlite() {
+        let sqlite = |code| {
+            Error::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some("attempt to write a readonly database".to_string()),
+            ))
+        };
+        assert!(Error::WriteProtected { directory: true }.is_write_protected());
+        assert!(sqlite(rusqlite::ffi::SQLITE_READONLY).is_write_protected());
+        assert!(sqlite(rusqlite::ffi::SQLITE_PERM).is_write_protected());
+        assert!(!sqlite(rusqlite::ffi::SQLITE_BUSY).is_write_protected());
+        assert!(!Error::HoldingHasTransactions.is_write_protected());
     }
 
     #[test]
