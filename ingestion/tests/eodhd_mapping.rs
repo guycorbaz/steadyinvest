@@ -13,7 +13,9 @@
 //! ssg-1.2.0: `*-JANFY.json` is an NVDA-shaped January fiscal year end (real FY2023–FY2025 net
 //! income and diluted share counts, a 10:1 split inside FY2025, invented bar prices) and
 //! `*-JUNFY.json` a June one. Their shape follows EODHD's documentation (fundamentals glossary:
-//! `netIncomeApplicableToCommonShares`, `commonStockSharesOutstanding`); a real fetch confirms it.
+//! `netIncomeApplicableToCommonShares`, `commonStockSharesOutstanding`). The real NVDA.US fetch of
+//! 2026-09-26 confirmed the share counts are served in today's shares; that the balance sheet's
+//! count is the DILUTED WEIGHTED-AVERAGE one rests on EODHD's glossary alone (spec §0, open point).
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -99,10 +101,10 @@ fn maps_eodhd_fundamentals_and_prices_to_raw_financials() {
 /// EPS (ssg-1.2.0: the reported diluted EPS = net income ÷ `commonStockSharesOutstanding`),
 /// dividend per share and book value per share are all DERIVED here from totals over the balance
 /// sheet's `commonStockSharesOutstanding`, and taken as computed, un-rebased. That is right ONLY
-/// IF EODHD restates the balance-sheet share counts of pre-split years into today's shares — an
-/// ASSUMPTION #217 made, not yet verified. It is to be confirmed by ONE real NVDA.US fetch with
-/// the owner present (G1 review, G5): if the pre-2021 share counts come back in pre-split units,
-/// these three figures are overstated ×40 for those years and this test must change with the fix.
+/// IF EODHD restates the balance-sheet share counts of pre-split years into today's shares — the
+/// assumption #217 made, CONFIRMED by the real NVDA.US fetch of 2026-09-26 with the owner present
+/// (G1 H, G5: the 2017–2020 counts came back ≈ 24–25 bn, today's shares). Should EODHD ever serve
+/// pre-split units, these three figures would be overstated by the split ratio for those years.
 /// (The adjusted `epsActual` 1.62 of the fixture is never read.)
 #[test]
 fn per_share_fundamentals_across_a_split_are_taken_as_served_pinned_on_the_share_count_assumption()
@@ -121,7 +123,7 @@ fn per_share_fundamentals_across_a_split_are_taken_as_served_pinned_on_the_share
         dec("1.5"),
         "150 ÷ 100 — not ÷2, not the adjusted 1.62"
     );
-    // ASSUMPTION (G5): the 2023 share count 100 is already in post-split units.
+    // #217, confirmed at G5: the 2023 share count 100 is already in post-split units.
     assert_eq!(
         y23.dividend_per_share.as_ref().unwrap().value,
         dec("1"),

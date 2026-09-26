@@ -34,7 +34,12 @@ provider mapping (or a manual entry) feeds the method the figures the method is 
 [Tutorial p6, p13–14; SSG Handbook]
 
 - **A year is the company's fiscal year**, labelled by the calendar year in which it ENDS (a fiscal
-  year ended 28 January 2024 is « 2024 »). Every yearly figure of that label — `sales`, `eps`,
+  year ended 28 January 2024 is « 2024 »), with one exception: a 52/53-week year that ends in the
+  **first seven days of January** is labelled by the PREVIOUS year (a « Saturday nearest
+  31 December » year ended 2 January 2021 is « 2020 », as the company names it). Without the
+  exception such a company would show two ends in one calendar year and lose a fiscal year, and
+  the gap between two labels would no longer be the gap between the years (§1 growth). *(Owner's
+  decision, G3 review of ssg-1.2.0, 2026-09-26.)* Every yearly figure of that label — `sales`, `eps`,
   `high_price`, `low_price`, dividend, pre-tax profit, book value — covers that same fiscal year.
 - **`high_price` / `low_price`** are the highest and lowest daily prices of that fiscal year: from
   the day after the previous fiscal-year end through the fiscal-year end, in today's shares (every
@@ -47,12 +52,33 @@ provider mapping (or a manual entry) feeds the method the figures the method is 
   reported figure is not available the year's EPS is **absent**, never replaced by an adjusted one.
 - The **fiscal year in progress** (not yet reported) is not a history year: it has no annual
   statements, and a study's history holds complete fiscal years only.
+- A fiscal year that is **not 12 months long** (a stub or transition year after a change of year
+  end) keeps its real period: its prices cover that period, never a period cut or padded to
+  12 months, and its length is reported so that the §3 `fiscal_period_misalignment` flag names it.
 
-Provider mappings *(ssg-1.2.0)*: the EODHD adapter reduces the daily bars into the fiscal years of
-the statement dates, and computes the reported diluted EPS from one fiscal year's statements
-(`netIncomeApplicableToCommonShares` ÷ `commonStockSharesOutstanding`), because EODHD's
-`Earnings.Annual.epsActual` is its non-GAAP EPS. Twelve Data serves no statement and no fiscal
-calendar: its price-only years are calendar years and never enter a study's history.
+Provider mappings *(ssg-1.2.0)*:
+
+- **EODHD — prices.** The daily bars are reduced into the fiscal years of the **income statement's**
+  yearly dates (the statement of the year's sales and EPS; a date served only by the balance sheet
+  or the cash flow is no fiscal-year end). Between two reported ends more than 18 months apart
+  (a missing statement), one-year periods are filled in; a shorter gap is one reported period.
+  A response without any yearly income statement falls back to calendar years: there is no fiscal
+  calendar to follow, and such a response has no sales, so its rows never enter a study.
+- **EODHD — EPS.** The reported diluted EPS is computed from one fiscal year's statements of the
+  SAME date: `netIncomeApplicableToCommonShares` ÷ the balance sheet's
+  `commonStockSharesOutstanding`, because EODHD's `Earnings.Annual.epsActual` is its non-GAAP EPS.
+  When the applicable-to-common figure is not served, `netIncome` stands for it unless a non-zero
+  `preferredStockAndOtherAdjustments` is reported (then the EPS is absent). An ABSENT adjustment is
+  read as none: an exception to « absent, never zero » accepted by the owner (G3, 2026-09-26),
+  to be reviewed once a real fetch shows how often EODHD serves neither figure.
+- **EODHD — open points** *(owner's decisions, G3, 2026-09-26; to be settled on a real fetch)*:
+  - `commonStockSharesOutstanding` is the diluted weighted-average count according to EODHD's
+    glossary only; that it is not the period-end count is not yet verified.
+  - The trailing-twelve-months EPS of the current P/E (§1 relative value) is EODHD's
+    `Highlights.EarningsShare`; whether it is the reported or an adjusted figure is not yet
+    verified. If adjusted, the current P/E would be set against a history of reported EPS.
+- **Twelve Data** serves no statement and no fiscal calendar: its price-only years are calendar
+  years and never enter a study's history.
 
 ## 1. SSG output set (FR4)
 

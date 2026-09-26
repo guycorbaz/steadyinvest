@@ -739,8 +739,10 @@ mod tests {
         // protected file, a protected directory, beside the newer schema: 1002 + 4 = 1006,
         // measured. The second G3 review names a side file (-wal / -shm) this account cannot
         // write, in both bands: 1006 + 2 = 1008, measured.
+        // ssg-1.2.0: the glossary's « Année d'une étude » term and definition (the BPA and the
+        // year definitions are reworded in place): 1008 + 2 = 1010, measured.
         assert!(
-            total >= 1008,
+            total >= 1010,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

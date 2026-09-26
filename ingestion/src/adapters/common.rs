@@ -200,20 +200,19 @@ pub(crate) fn reduce_high_low_adjusted(
 
 /// [`reduce_high_low_adjusted`] reduced into the company's FISCAL years instead of calendar years
 /// (ssg-1.2.0, the NAIC rule: the high and low prices of a year are those of the company's fiscal
-/// year, the same period its sales and EPS cover). `fiscal_ends` are the fiscal-year end dates the
-/// statements report (any order, duplicates allowed); each bar goes to the fiscal year whose period
+/// year, the same period its sales and EPS cover). Each bar goes to the fiscal year whose period
 /// holds it — see [`FiscalCalendar`]. The split rebasing is per bar, exactly as before (#217, G1 H).
 ///
-/// No readable fiscal end at all (a response without yearly statements) → the calendar years, the
-/// pre-1.2.0 reduction: there is no fiscal calendar to follow, and a December year end is then the
-/// only defensible reading.
+/// No calendar (a response without yearly statements) → the calendar years, the pre-1.2.0
+/// reduction: there is no fiscal calendar to follow, and a December year end is then the only
+/// defensible reading (spec §0).
 pub(crate) fn reduce_high_low_fiscal(
     bars: Option<&Value>,
     date_field: &str,
     splits: &[DatedSplit],
-    fiscal_ends: &[NaiveDate],
+    calendar: Option<&FiscalCalendar>,
 ) -> (BTreeMap<i32, Decimal>, BTreeMap<i32, Decimal>) {
-    let Some(calendar) = FiscalCalendar::new(fiscal_ends, bar_date_span(bars, date_field)) else {
+    let Some(calendar) = calendar else {
         return reduce_high_low_adjusted(bars, date_field, splits);
     };
     reduce_high_low_by(bars, date_field, splits, |date| {
@@ -227,7 +226,10 @@ fn bar_day(date: &str) -> Option<NaiveDate> {
 }
 
 /// The earliest and latest readable bar days, `None` without any.
-fn bar_date_span(bars: Option<&Value>, date_field: &str) -> Option<(NaiveDate, NaiveDate)> {
+pub(crate) fn bar_date_span(
+    bars: Option<&Value>,
+    date_field: &str,
+) -> Option<(NaiveDate, NaiveDate)> {
     let days = bars?.as_array()?.iter().filter_map(|bar| {
         bar.get(date_field)
             .and_then(Value::as_str)
@@ -241,13 +243,15 @@ fn bar_date_span(bars: Option<&Value>, date_field: &str) -> Option<(NaiveDate, N
 
 /// A company's fiscal calendar, read off the fiscal-year end dates its statements report.
 ///
-/// A fiscal year is labelled by the calendar year its END falls in (the statements' own key: NVDA's
-/// year ended 2024-01-28 is « 2024 »), and its period runs from the day after the previous fiscal
+/// A fiscal year is labelled as [`fiscal_label`] names it (the calendar year its END falls in — NVDA's
+/// year ended 2024-01-28 is « 2024 » — except a 52/53-week year ending in the first week of January,
+/// which is the previous year's), and its period runs from the day after the previous fiscal
 /// year end through its own end: `(previous end, end]`. The boundaries:
 /// - the reported ends, as served;
-/// - a GAP of more than a year and a month between two reported ends (a missing statement) is
+/// - a GAP of more than a year and a half between two reported ends (a missing statement) is
 ///   filled with ends one year apart from the earlier one, so a year's high/low never spans two
-///   years;
+///   years; a shorter gap is ONE reported period, however long (a 14-month transition year keeps
+///   its 14 months, and [`FiscalCalendar::period_months`] says so — never a fictitious boundary);
 /// - before the earliest reported end, ends one year apart going back (the earliest reported year
 ///   is thus `(end − 1 year, end]`, and the bars before it keep a one-year period each);
 /// - after the latest reported end, ends one year apart going forward — the fiscal year in progress,
@@ -255,10 +259,15 @@ fn bar_date_span(bars: Option<&Value>, date_field: &str) -> Option<(NaiveDate, N
 ///   row carries prices and no sales, and the refresh drops it as it dropped the calendar year in
 ///   progress before (issue #109).
 ///
-/// Two boundaries in the same calendar year (a fiscal-year-end change, a 52/53-week year ending in
-/// the first days of January) would be two periods under one label: only the LATER one is that
-/// year's — the same row the statements keep (#37, the latest date key wins) — and the bars of the
-/// earlier period are left out, never merged into a period longer than the year.
+/// Two boundaries under the same label (a fiscal-year-end change with a short stub year) would be
+/// two periods under one label: only the LATER one is that year's — the same row the statements
+/// keep (#37, the latest date key wins) — and the bars of the earlier period are left out, never
+/// merged into a period longer than the year. The later period's length is then not 12 months,
+/// and [`FiscalCalendar::period_months`] reports it (the §3 `fiscal_period_misalignment` flag).
+///
+/// The ends are the INCOME STATEMENT's only (the statement that carries the year's sales and
+/// EPS): a date served by the balance sheet or the cash flow alone would otherwise cut a phantom
+/// boundary into a fiscal year and leave it a few days of prices.
 ///
 /// For a December year end every boundary is a 31 December and every fiscal year is the calendar
 /// year: the reduction is exactly the calendar one.
@@ -281,12 +290,13 @@ impl FiscalCalendar {
         let (&first, &last) = (ends.first()?, ends.last()?);
         let mut all: Vec<NaiveDate> = Vec::with_capacity(ends.len() + 8);
         // Gaps: from each reported end, one year at a time while the next reported end is more than
-        // a year and a month away (a 52/53-week year moves its end by a few days, never a month).
+        // a year and a half away (a missing statement leaves ~24 months; a transition year of up
+        // to 18 months is one reported period, never cut).
         for pair in ends.windows(2) {
             let mut cursor = pair[0];
             all.push(cursor);
             while let Some(next) = cursor.checked_add_months(year) {
-                let slack = next.checked_add_months(chrono::Months::new(1));
+                let slack = next.checked_add_months(chrono::Months::new(6));
                 if slack.is_none_or(|s| s >= pair[1]) {
                     break;
                 }
@@ -322,20 +332,56 @@ impl FiscalCalendar {
             .iter()
             .enumerate()
             .map(|(i, end)| {
-                let later_same_year = all.get(i + 1).is_some_and(|next| next.year() == end.year());
+                let later_same_year = all
+                    .get(i + 1)
+                    .is_some_and(|next| fiscal_label(*next) == fiscal_label(*end));
                 (*end, !later_same_year)
             })
             .collect();
         Some(FiscalCalendar { boundaries })
     }
 
-    /// The fiscal year (its label) whose period holds `day`: the year of the first boundary on or
+    /// The fiscal year (its label) whose period holds `day`: the label of the first boundary on or
     /// after it — `None` past the last boundary, or in an earlier period of a doubled label year.
     pub(crate) fn fiscal_year_of(&self, day: NaiveDate) -> Option<i32> {
         let i = self.boundaries.partition_point(|(end, _)| *end < day);
         let (end, is_the_years) = self.boundaries.get(i)?;
-        is_the_years.then_some(end.year())
+        is_the_years.then_some(fiscal_label(*end))
     }
+
+    /// The length in whole months of the period ending at `end` (a boundary of this calendar):
+    /// from the previous boundary, rounded — a 52- or 53-week year is 12, a six-month stub 6, a
+    /// 14-month transition year 14. `None` when `end` is not a boundary or has none before it.
+    pub(crate) fn period_months(&self, end: NaiveDate) -> Option<u32> {
+        let i = self
+            .boundaries
+            .binary_search_by(|(b, _)| b.cmp(&end))
+            .ok()?;
+        let (prev, _) = self.boundaries.get(i.checked_sub(1)?)?;
+        let days = (end - *prev).num_days();
+        u32::try_from((days * 12 + 182) / 365).ok()
+    }
+}
+
+/// The label of a fiscal year ended on `end` (ssg-1.2.0, spec §0): the calendar year its end falls
+/// in — except a 52/53-week year ending in the FIRST WEEK of January, which is the previous year's
+/// (a « Saturday nearest 31 December » year ended 2021-01-02 is the company's fiscal 2020). The
+/// same first-week rule as [`fiscal_year_end_month`], so a label and its month never disagree.
+pub(crate) fn fiscal_label(end: NaiveDate) -> i32 {
+    if end.month() == 1 && end.day() <= 7 {
+        end.year() - 1
+    } else {
+        end.year()
+    }
+}
+
+/// The fiscal-year label of a statement's date key: [`fiscal_label`] of the date, or the leading
+/// year of a key that is not a plain date ([`year_of_date_key`], the pre-1.2.0 rule).
+pub(crate) fn fiscal_label_of_key(key: &str) -> Option<i32> {
+    key.get(0..10)
+        .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .map(fiscal_label)
+        .or_else(|| year_of_date_key(key))
 }
 
 /// The fiscal-year-end MONTH of a reported fiscal end date, read as the company names it: a
@@ -596,6 +642,16 @@ mod tests {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }
 
+    /// The fiscal reduction over the calendar of `ends` spanning the bars, as `map_eodhd` builds it.
+    fn fiscal_reduce(
+        bars: &Value,
+        splits: &[DatedSplit],
+        ends: &[NaiveDate],
+    ) -> (BTreeMap<i32, Decimal>, BTreeMap<i32, Decimal>) {
+        let calendar = FiscalCalendar::new(ends, bar_date_span(Some(bars), "date"));
+        reduce_high_low_fiscal(Some(bars), "date", splits, calendar.as_ref())
+    }
+
     /// ssg-1.2.0: a December year end reduces EXACTLY as the calendar years did — every boundary is
     /// a 31 December, including the projected ones before the first and after the last statement.
     #[test]
@@ -615,12 +671,12 @@ mod tests {
         }];
         let ends = [ymd("2023-12-31"), ymd("2024-12-31"), ymd("2023-12-31")];
         assert_eq!(
-            reduce_high_low_fiscal(Some(&bars), "date", &splits, &ends),
+            fiscal_reduce(&bars, &splits, &ends),
             reduce_high_low_adjusted(Some(&bars), "date", &splits)
         );
         // No fiscal end known at all → the calendar years, the pre-1.2.0 reduction.
         assert_eq!(
-            reduce_high_low_fiscal(Some(&bars), "date", &splits, &[]),
+            reduce_high_low_fiscal(Some(&bars), "date", &splits, None),
             reduce_high_low_adjusted(Some(&bars), "date", &splits)
         );
     }
@@ -672,7 +728,7 @@ mod tests {
             { "date": "2022-01-15", "high": "40", "low": "39" },
             { "date": "2022-07-01", "high": "50", "low": "45" },
         ]);
-        let (h, l) = reduce_high_low_fiscal(Some(&bars), "date", &[], &ends);
+        let (h, l) = fiscal_reduce(&bars, &[], &ends);
         let d = |s: &str| Decimal::from_str_exact(s).unwrap();
         assert_eq!((h[&2019], l[&2019]), (d("10"), d("9")));
         assert_eq!((h[&2020], l[&2020]), (d("21"), d("18")), "the missing year");
@@ -685,26 +741,95 @@ mod tests {
         assert_eq!((h[&2023], l[&2023]), (d("50"), d("45")), "in progress");
     }
 
-    /// Two boundaries in one label year (a 52/53-week year ending 2022-01-01, then 2022-12-31):
-    /// only the later period is « 2022 » — as the statements keep the later row (#37) — and the
-    /// bars of the earlier one are left out, never merged into a 24-month « year ».
+    /// G3 (D1): a « Saturday nearest 31 December » company — FY2020 ended 2021-01-02, FY2021 ended
+    /// 2022-01-01, FY2022 ended 2022-12-31. Each end is its own label (2020, 2021, 2022): no fiscal
+    /// year is lost to a doubled calendar year, and each period is 12 months.
     #[test]
-    fn two_fiscal_ends_in_one_label_year_keep_the_later_period_only() {
+    fn a_52_53_week_calendar_labels_a_first_week_of_january_end_as_the_previous_year() {
         let ends = [ymd("2021-01-02"), ymd("2022-01-01"), ymd("2022-12-31")];
         let bars = json!([
             { "date": "2020-12-31", "high": "5", "low": "4" },
             { "date": "2021-06-01", "high": "99", "low": "1" },
             { "date": "2022-06-01", "high": "7", "low": "6" },
         ]);
-        let (h, l) = reduce_high_low_fiscal(Some(&bars), "date", &[], &ends);
-        assert_eq!(h[&2021], Decimal::from(5));
+        let (h, l) = fiscal_reduce(&bars, &[], &ends);
+        assert_eq!((h[&2020], l[&2020]), (Decimal::from(5), Decimal::from(4)));
+        assert_eq!((h[&2021], l[&2021]), (Decimal::from(99), Decimal::from(1)));
+        assert_eq!((h[&2022], l[&2022]), (Decimal::from(7), Decimal::from(6)));
+        let cal = FiscalCalendar::new(&ends, bar_date_span(Some(&bars), "date")).unwrap();
         assert_eq!(
-            h[&2022],
+            cal.period_months(ymd("2022-01-01")),
+            Some(12),
+            "a 52-week year"
+        );
+        assert_eq!(
+            cal.period_months(ymd("2022-12-31")),
+            Some(12),
+            "a 52-week year"
+        );
+        assert_eq!(
+            cal.period_months(ymd("2021-01-02")),
+            None,
+            "no period before the first end: the bars start inside it"
+        );
+        assert_eq!(fiscal_label(ymd("2021-01-02")), 2020);
+        assert_eq!(
+            fiscal_label(ymd("2024-01-28")),
+            2024,
+            "NVDA: late January is its own year"
+        );
+        assert_eq!(fiscal_label_of_key("2022-01-01"), Some(2021));
+        assert_eq!(fiscal_label_of_key("2022-12-31"), Some(2022));
+    }
+
+    /// A fiscal-year-end change with a six-month stub (June → December): two ends in 2021. Only the
+    /// later period is « 2021 » — as the statements keep the later row (#37) — and it says it is
+    /// 6 months long; the bars of the earlier period are left out, never merged into an 18-month
+    /// « year ».
+    #[test]
+    fn a_stub_year_keeps_the_later_period_and_names_its_length() {
+        let ends = [
+            ymd("2020-06-30"),
+            ymd("2021-06-30"),
+            ymd("2021-12-31"),
+            ymd("2022-12-31"),
+        ];
+        let bars = json!([
+            { "date": "2020-12-01", "high": "99", "low": "1" },
+            { "date": "2021-09-01", "high": "7", "low": "6" },
+            { "date": "2022-06-01", "high": "8", "low": "5" },
+        ]);
+        let (h, l) = fiscal_reduce(&bars, &[], &ends);
+        assert_eq!(
+            h[&2021],
             Decimal::from(7),
             "not the 99 of the dropped period"
         );
-        assert_eq!(l[&2022], Decimal::from(6));
+        assert_eq!(l[&2021], Decimal::from(6));
+        assert_eq!(h[&2022], Decimal::from(8));
         assert_eq!(h.len(), 2);
+        let cal = FiscalCalendar::new(&ends, bar_date_span(Some(&bars), "date")).unwrap();
+        assert_eq!(cal.period_months(ymd("2021-12-31")), Some(6));
+        assert_eq!(cal.period_months(ymd("2022-12-31")), Some(12));
+    }
+
+    /// G3: a 14-month transition year (2020-12-31 → 2022-02-28) is ONE reported period — no
+    /// fictitious boundary is cut into it — and it says it is 14 months long.
+    #[test]
+    fn a_long_transition_year_is_one_period_and_names_its_length() {
+        let ends = [ymd("2020-12-31"), ymd("2022-02-28")];
+        let bars = json!([
+            { "date": "2021-03-01", "high": "10", "low": "9" },
+            { "date": "2022-02-01", "high": "20", "low": "3" },
+        ]);
+        let (h, l) = fiscal_reduce(&bars, &[], &ends);
+        assert_eq!((h[&2022], l[&2022]), (Decimal::from(20), Decimal::from(3)));
+        assert!(
+            !h.contains_key(&2021),
+            "no price-only 2021 cut out of the transition year"
+        );
+        let cal = FiscalCalendar::new(&ends, bar_date_span(Some(&bars), "date")).unwrap();
+        assert_eq!(cal.period_months(ymd("2022-02-28")), Some(14));
     }
 
     /// A 52/53-week year ending in the first week of the next month keeps the month it closes.
