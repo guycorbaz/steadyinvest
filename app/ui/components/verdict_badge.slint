@@ -188,9 +188,10 @@ export component VerdictBar inherits Rectangle {
         + (root.v.low-confidence ? measure-reason.preferred-width + Tokens.space-16 : 0px)
         + Tokens.space-16 + root.facts-width
         + Tokens.space-16 + root.trace-width;
-    // The facts' own width: the measured row less the spacing before its trailing filler (which
-    // takes no width of its own) — G3 L7: counting it wrapped 16 px too early.
-    property <length> facts-width: measure-facts.preferred-width - Tokens.space-16;
+    // The facts' width AS PLACED: their whole preferred width — the layout spaces the trailing
+    // filler too, even at zero width (second G3 L1 reverted the first review's « − 16 px », which
+    // left a 16 px band where one row was chosen and the facts elided).
+    property <length> facts-width: measure-facts.preferred-width;
     property <bool> one-row: root.width >= root.one-row-width;
 
     // The bar's own width constraints never depend on the row choice (same binding-loop reason).
