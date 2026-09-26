@@ -82,7 +82,8 @@ export global Tokens {
     // one of two narrow columns, each split in a top and a bottom half — leading: the ?/✓ review
     // mark (top) and the lock (bottom); trailing: the △ warning (top) and the ◦ stale dot (bottom).
     // A column is `mark-col` wide, inset `mark-inset` from the cell edge and from the value, glyphs
-    // at `mark-font` (= the figure floor). The arithmetic, IBM Plex Sans advances (digit 0.6 em,
+    // at `mark-font` — 14 px, the size the marker confusability gate is specified at (UX-DR15; Guy
+    // 2026-09-26: 13 px → 14 px), one pixel over the figure floor. The arithmetic, IBM Plex Sans advances (digit 0.6 em,
     // comma 0.272 em, the emitted NBSP 0.236 em): « 1 234,56 » is 90.4 px at the 22 px body size,
     // 53.4 px at the 13 px floor, so it needs a room of 55.4 px (`CellFit.fits`' 2 px slack).
     //   one column  = 1 + 12 + 1 = 14 px;  bare trail = 8 px (`space-8`), bare lead = 8 px;
@@ -94,7 +95,7 @@ export global Tokens {
     out property <length> grid-col-min: 88px;
     out property <length> mark-col: 12px;
     out property <length> mark-inset: 1px;
-    out property <length> mark-font: 13px;
+    out property <length> mark-font: 14px;
     out property <int> weight-regular: 400;
     out property <int> weight-medium: 500;
     out property <int> weight-semibold: 600;
