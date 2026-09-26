@@ -195,7 +195,7 @@ pub(crate) fn reduce_high_low_adjusted(
     date_field: &str,
     splits: &[DatedSplit],
 ) -> (BTreeMap<i32, Decimal>, BTreeMap<i32, Decimal>) {
-    reduce_high_low_by(bars, date_field, splits, |date| year_of_date_key(date))
+    reduce_high_low_by(bars, date_field, splits, year_of_date_key)
 }
 
 /// [`reduce_high_low_adjusted`] reduced into the company's FISCAL years instead of calendar years
