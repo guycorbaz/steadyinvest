@@ -86,8 +86,10 @@ Provider mappings *(ssg-1.2.0)*:
     sum of its last four reported quarters (the adjusted sum is 7.01); AAPL, JPM and NESN (half-
     yearly) within 1.2 % of the reported sum.
   - EODHD dates a statement at the END OF THE MONTH its fiscal year closes in (NVDA: 2026-01-31
-    for a year closed on 25 January), so the bars of those last few days go to the next fiscal
-    year. Accepted: at most six trading days, a yearly high or low, no EPS moved.
+    for a year closed on 25 January), so the bars between the real end and the month end are
+    counted in the fiscal year that CLOSES, not in the next one. Accepted: at most six trading
+    days, a yearly high or low, no EPS moved. The user is told in the glossary (« Cours haut et
+    bas (EODHD) »), with the remedy: check against the annual report, correct the cell.
 - **Twelve Data** serves no statement and no fiscal calendar: its price-only years are calendar
   years and never enter a study's history.
 
