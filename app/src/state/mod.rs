@@ -132,6 +132,10 @@ pub struct JournalState {
     /// on every Réglages change: the rails read every user-typed amount through
     /// [`crate::viewmodel::format::parse_decimal`] under it (« 10,5 » under the comma format).
     number_format: NumberFormat,
+    /// G3 M4: the configured dossier refused AT STARTUP for a named cause (locked by another
+    /// instance, protected and too old to be updated…) while the default one stands in — main
+    /// keeps app-config pointing at it, so the user's dossier is never forgotten.
+    kept_configured: Option<PathBuf>,
 }
 
 /// The result of opening/creating/switching a journal (Story 5.5) — the identity + version the caller
@@ -184,7 +188,18 @@ impl JournalState {
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
-        let (state, notice) = Self::open_or_create_inner(configured, clock, idgen);
+        Self::open_or_create_with_default(configured, default_journal_path(), clock, idgen)
+    }
+
+    /// [`Self::open_or_create`] with the default journal's location given — the tests pass a
+    /// temporary one, so the startup fallback is exercised without touching the OS data dir.
+    pub(crate) fn open_or_create_with_default(
+        configured: Option<&Path>,
+        default: Option<PathBuf>,
+        clock: Box<dyn Clock>,
+        idgen: Box<dyn IdGen>,
+    ) -> (Self, Option<String>) {
+        let (state, notice) = Self::open_or_create_inner(configured, default, clock, idgen);
         // G1 P review (L-f): a `-prerestore` beside the open dossier (a restore whose rollback
         // failed) is named at startup — it may be the only copy of an original.
         let leftover = state
@@ -202,6 +217,7 @@ impl JournalState {
 
     fn open_or_create_inner(
         configured: Option<&Path>,
+        default: Option<PathBuf>,
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
@@ -231,31 +247,48 @@ impl JournalState {
                             pending_import: None,
                             active_portfolio_id: None,
                             number_format: NumberFormat::default(),
+                            kept_configured: None,
                         },
                         read_only.map(|cause| read_only_notice(cause).to_string()),
                     );
                 }
                 Err(error) => {
-                    // The configured pick is corrupt/foreign/damaged — never write our schema
-                    // into it (open already refused without writing). Fall back to the default
-                    // journal so the app stays usable, and surface the cause.
-                    tracing::warn!("configured journal {} unreadable: {error}", path.display());
-                    let (state, _) = Self::open_or_create_default(clock, idgen);
-                    return (state, Some(MSG_CONFIGURED_UNREADABLE.to_string()));
+                    // Never write our schema into a refused pick (open already refused without
+                    // writing). The default journal keeps the app usable. G3 M4: a refusal with a
+                    // NAMED cause (another instance holds it, it is protected and too old to be
+                    // updated, the disk is full…) says so — never « illisible » — and the
+                    // configured path is KEPT (`kept_configured`): the dossier is not forgotten.
+                    // Only a damaged / foreign file (or an unnamed failure) keeps the Story-2.2
+                    // behaviour: « illisible », the default dossier replaces it.
+                    tracing::warn!("configured journal {} not opened: {error}", path.display());
+                    let named = persist_cause(&error)
+                        .filter(|_| error.kind() != steadyinvest_persistence::ErrorKind::Corrupt);
+                    let (mut state, _) = Self::open_or_create_default(default, clock, idgen);
+                    return match named {
+                        Some(cause) => {
+                            state.kept_configured = Some(path.to_path_buf());
+                            (
+                                state,
+                                Some(MSG_CONFIGURED_REFUSED.replace("{cause}", cause)),
+                            )
+                        }
+                        None => (state, Some(MSG_CONFIGURED_UNREADABLE.to_string())),
+                    };
                 }
             }
         }
         // 2) No usable configured path → the default journal.
-        Self::open_or_create_default(clock, idgen)
+        Self::open_or_create_default(default, clock, idgen)
     }
 
     /// Open the default journal if its file already exists, else create it (parent dirs included),
     /// stamping identity + creation time from the injected sources.
     fn open_or_create_default(
+        default: Option<PathBuf>,
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
-        let Some(path) = default_journal_path() else {
+        let Some(path) = default else {
             return (
                 Self {
                     journal: None,
@@ -268,6 +301,7 @@ impl JournalState {
                     pending_import: None,
                     active_portfolio_id: None,
                     number_format: NumberFormat::default(),
+                    kept_configured: None,
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
             );
@@ -299,6 +333,7 @@ impl JournalState {
                         pending_import: None,
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
+                        kept_configured: None,
                     },
                     read_only.map(|cause| read_only_notice(cause).to_string()),
                 )
@@ -317,11 +352,18 @@ impl JournalState {
                         pending_import: None,
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
+                        kept_configured: None,
                     },
                     Some(open_error(error)),
                 )
             }
         }
+    }
+
+    /// The configured dossier refused at startup for a named cause, which app-config must keep
+    /// pointing at (G3 M4) — `None` otherwise.
+    pub fn kept_configured_path(&self) -> Option<&Path> {
+        self.kept_configured.as_deref()
     }
 
     /// The resolved on-disk path of the open journal, for persisting into app-config.
@@ -484,6 +526,9 @@ pub(crate) fn persist_cause(error: &PersistError) -> Option<&'static str> {
         K::Missing => Some(MSG_CAUSE_MISSING),
         K::NewerData => Some(MSG_CAUSE_NEWER_DATA),
         K::Migration => Some(MSG_CAUSE_MIGRATION),
+        K::ProtectedOutdated { directory: false } => Some(MSG_CAUSE_OUTDATED_FILE),
+        K::ProtectedOutdated { directory: true } => Some(MSG_CAUSE_OUTDATED_DIR),
+        K::Replaced => Some(MSG_CAUSE_REPLACED),
         K::Other => None,
     }
 }
@@ -520,13 +565,12 @@ pub(crate) fn read_failure(subject: &'static str, error: PersistError) -> String
 }
 
 /// A dossier that could not be opened, named in French with its cause (2026-09-26: the open
-/// notice appended the persistence Display). The lock held by another instance and the
-/// protected-and-outdated file keep their own messages (their callers match them first).
+/// notice appended the persistence Display). The lock held by another instance keeps its own
+/// message (the reclaim offer matches it).
 pub(crate) fn open_error(error: PersistError) -> String {
     tracing::warn!("journal open failed: {error}");
     match error {
         PersistError::LockHeld { .. } => MSG_JOURNAL_LOCKED.to_string(),
-        PersistError::WriteProtectedOutdated { .. } => MSG_OPEN_PROTECTED_OUTDATED.to_string(),
         other => with_cause(
             MSG_JOURNAL_OPEN_FAILED,
             MSG_JOURNAL_OPEN_FAILED_CAUSE,

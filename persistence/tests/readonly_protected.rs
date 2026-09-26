@@ -163,41 +163,44 @@ fn protected_directory_opens_read_only_with_its_own_cause() {
     assert_eq!(names, vec!["journal.db".to_string()], "nothing created");
 }
 
-#[test]
-fn protected_file_with_uncheckpointed_wal_still_reads_the_committed_rows() {
+/// A journal at `dir/name` whose second study is committed into a NON-EMPTY `-wal` not yet
+/// checkpointed, with NO `-shm` beside it (a crash / sync snapshot shape): the writer's files are
+/// copied aside while it is still open. `None` if the platform checkpointed anyway.
+fn journal_with_uncheckpointed_wal(dir: &Path, name: &str) -> Option<PathBuf> {
     let src = TempDir::new().expect("tempdir");
     let path = journal_with_one_study(src.path(), "src.db");
-    // Freeze a mid-life state: a second study committed into the -wal, not yet checkpointed, then
-    // the three files copied aside while the writer is still open (a crash / sync snapshot shape).
-    let copy_dir = TempDir::new().expect("tempdir");
-    let copy = copy_dir.path().join("ro.db");
+    let copy = dir.join(name);
     {
         let mut journal = Journal::open(&path).expect("reopen");
-        let conn = Connection::open(&path).expect("raw");
-        conn.pragma_update(None, "wal_autocheckpoint", 0)
-            .expect("no autocheckpoint");
         journal
             .put_study(&minimal_study(2, JID))
             .expect("second study");
-        for suffix in ["", "-wal", "-shm"] {
+        for suffix in ["", "-wal"] {
             let mut from = path.as_os_str().to_os_string();
             from.push(suffix);
             let mut to = copy.as_os_str().to_os_string();
             to.push(suffix);
-            if Path::new(&from).exists() {
-                std::fs::copy(&from, &to).expect("copy");
-            }
+            std::fs::copy(&from, &to).expect("copy");
         }
     }
     let mut wal = copy.as_os_str().to_os_string();
     wal.push("-wal");
-    if std::fs::metadata(&wal).map_or(true, |m| m.len() == 0) {
-        return; // the WAL got checkpointed on this platform — the shape did not arise
-    }
+    std::fs::metadata(&wal)
+        .is_ok_and(|m| m.len() > 0)
+        .then_some(copy)
+}
+
+#[test]
+fn protected_file_with_uncheckpointed_wal_is_read_whole_and_left_untouched() {
+    let dir = TempDir::new().expect("tempdir");
+    let Some(copy) = journal_with_uncheckpointed_wal(dir.path(), "ro.db") else {
+        return;
+    };
     set_mode(&copy, 0o444);
     if !write_refused(&copy) {
         return;
     }
+    let before = names_in(dir.path());
     let journal = Journal::open(&copy).expect("opens read-only");
     assert_eq!(
         journal.read_only_cause(),
@@ -209,7 +212,167 @@ fn protected_file_with_uncheckpointed_wal_still_reads_the_committed_rows() {
         "the committed row still in the -wal is read, never ignored"
     );
     drop(journal);
+    // G3 M1: no `-shm` (read-only, the file's mode) created beside the protected file — read
+    // through a private copy. Once the protection is lifted, the dossier writes normally.
+    assert_eq!(names_in(dir.path()), before, "nothing created beside it");
     set_mode(&copy, 0o644);
+    let mut journal = Journal::open(&copy).expect("writable again");
+    assert_eq!(journal.read_only_cause(), None);
+    journal
+        .put_study(&minimal_study(3, JID))
+        .expect("the first write after lifting the protection succeeds");
+}
+
+#[test]
+fn protected_directory_with_uncheckpointed_wal_is_read_whole() {
+    // G3 M2: SQLite cannot create the `-shm` a WAL read needs in a protected directory; the
+    // journal is read through a private copy, never refused as « missing ».
+    let root = TempDir::new().expect("tempdir");
+    let dir = root.path().join("locked");
+    std::fs::create_dir(&dir).expect("mkdir");
+    let Some(path) = journal_with_uncheckpointed_wal(&dir, "journal.db") else {
+        return;
+    };
+    set_mode(&dir, 0o555);
+    if !dir_refuses_new_files(&dir) {
+        set_mode(&dir, 0o755);
+        return;
+    }
+    let result =
+        Journal::open(&path).map(|j| (j.read_only_cause(), j.list_studies().map(|l| l.len())));
+    let names = names_in(&dir);
+    set_mode(&dir, 0o755);
+    let (cause, count) = result.expect("opens read-only");
+    assert_eq!(cause, Some(ReadOnlyCause::DirectoryWriteProtected));
+    assert_eq!(count.expect("list works"), 2);
+    assert_eq!(
+        names,
+        vec!["journal.db".to_string(), "journal.db-wal".to_string()]
+    );
+}
+
+#[test]
+fn a_backup_of_a_protected_dossier_keeps_the_commits_still_in_its_wal() {
+    // G3 M3: `VACUUM INTO` reads through the connection — the `-wal` commits included.
+    let dir = TempDir::new().expect("tempdir");
+    let Some(copy) = journal_with_uncheckpointed_wal(dir.path(), "ro.db") else {
+        return;
+    };
+    set_mode(&copy, 0o444);
+    if !write_refused(&copy) {
+        return;
+    }
+    let journal = Journal::open(&copy).expect("opens read-only");
+    let out = TempDir::new().expect("tempdir");
+    let backup = out.path().join("backup.db");
+    journal
+        .backup_to(&backup)
+        .expect("a read-only dossier is backed up");
+    drop(journal);
+    set_mode(&copy, 0o644);
+    let restored = Journal::open(&backup).expect("the backup is a journal");
+    assert_eq!(restored.id(), JID);
+    assert_eq!(
+        restored.list_studies().expect("list").len(),
+        2,
+        "WAL commits kept"
+    );
+}
+
+#[test]
+fn a_stray_read_only_sidecar_is_repaired_before_the_first_write() {
+    // G3 M1 (the repair half): a `r--r--r--` `-shm` / `-wal` left by an earlier read-only read
+    // of a protected file breaks the first write once the file is writable again.
+    let dir = TempDir::new().expect("tempdir");
+    let path = journal_with_one_study(dir.path(), "j.db");
+    set_mode(&path, 0o444);
+    if !write_refused(&path) {
+        return;
+    }
+    {
+        // What an older build (or any SQLite reader) did: a plain read-only open, sidecars
+        // created with the file's own mode.
+        let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("raw ro");
+        let _: i64 = conn
+            .query_row("SELECT count(*) FROM studies", [], |r| r.get(0))
+            .expect("reads");
+    }
+    let mut shm = path.as_os_str().to_os_string();
+    shm.push("-shm");
+    if !Path::new(&shm).exists() || !write_refused(Path::new(&shm)) {
+        set_mode(&path, 0o644);
+        return; // this SQLite left no read-only sidecar — nothing to repair
+    }
+    set_mode(&path, 0o644);
+    let mut journal = Journal::open(&path).expect("opens");
+    assert_eq!(journal.read_only_cause(), None);
+    journal
+        .put_study(&minimal_study(2, JID))
+        .expect("the first write succeeds — the stray sidecar was repaired");
+}
+
+#[test]
+fn creating_a_dossier_in_a_protected_directory_names_the_directory() {
+    // G3 L2.
+    let root = TempDir::new().expect("tempdir");
+    let dir = root.path().join("locked");
+    std::fs::create_dir(&dir).expect("mkdir");
+    set_mode(&dir, 0o555);
+    if !dir_refuses_new_files(&dir) {
+        set_mode(&dir, 0o755);
+        return;
+    }
+    let result = Journal::create(dir.join("new.db"), JID, &ts("2026-09-26T00:00:00Z"));
+    set_mode(&dir, 0o755);
+    assert!(
+        matches!(result, Err(Error::WriteProtected { directory: true })),
+        "got {result:?}"
+    );
+}
+
+#[test]
+fn a_protected_directory_older_than_this_build_names_the_directory() {
+    // G3 M5.
+    let root = TempDir::new().expect("tempdir");
+    let dir = root.path().join("locked");
+    std::fs::create_dir(&dir).expect("mkdir");
+    let path = journal_with_one_study(&dir, "old.db");
+    let conn = Connection::open(&path).expect("raw open");
+    conn.pragma_update(None, "user_version", 1)
+        .expect("user_version lowers");
+    drop(conn);
+    set_mode(&dir, 0o555);
+    if !dir_refuses_new_files(&dir) {
+        set_mode(&dir, 0o755);
+        return;
+    }
+    let result = Journal::open(&path).map(|_| ());
+    set_mode(&dir, 0o755);
+    assert!(
+        matches!(
+            result,
+            Err(Error::WriteProtectedOutdated {
+                directory: true,
+                ..
+            })
+        ),
+        "got {result:?}"
+    );
+}
+
+#[test]
+fn a_symlinked_dossier_keeps_its_lock_beside_the_target() {
+    // G3 L3: the lock, the probes and the sidecars all sit beside the resolved file.
+    let target_dir = TempDir::new().expect("tempdir");
+    let link_dir = TempDir::new().expect("tempdir");
+    let target = journal_with_one_study(target_dir.path(), "real.db");
+    let link = link_dir.path().join("link.db");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+    let journal = Journal::open(&link).expect("opens through the link");
+    assert!(names_in(target_dir.path()).contains(&"real.db-lock".to_string()));
+    assert_eq!(names_in(link_dir.path()), vec!["link.db".to_string()]);
+    drop(journal);
 }
 
 #[test]

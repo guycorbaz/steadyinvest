@@ -376,6 +376,7 @@ mod tests {
             Error::WriteProtectedOutdated {
                 file_user_version: 1,
                 supported: 9,
+                directory: true,
             }
             .to_string(),
             Error::NewerRowSchema {
@@ -860,7 +861,7 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            212,
+            215,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -899,7 +900,11 @@ mod tests {
             // the user (same defect, closed everywhere): the save / open / read templates with a
             // cause (MSG_SAVE_FAILED_CAUSE, MSG_JOURNAL_OPEN_FAILED_CAUSE, MSG_READ_SUBJECT_FAILED,
             // MSG_READ_SUBJECT_FAILED_CAUSE), the seven cause kinds (MSG_CAUSE_*) and the eight
-            // read subjects (MSG_SUBJECT_*): 193 + 19 = 212, measured.
+            // read subjects (MSG_SUBJECT_*): 193 + 19 = 212, measured. The G3 review names the
+            // protected-and-outdated cause by what is protected (MSG_CAUSE_OUTDATED_FILE /
+            // _DIR, replacing MSG_OPEN_PROTECTED_OUTDATED), a file replaced while open
+            // (MSG_CAUSE_REPLACED) and a configured dossier refused by name at startup
+            // (MSG_CONFIGURED_REFUSED): 212 - 1 + 4 = 215, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }

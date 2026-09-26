@@ -60,14 +60,18 @@ pub(crate) fn sync_mode_for(path: &Path) -> JournalMode {
 }
 
 impl JournalState {
-    /// Create a raw `.db` backup of the live journal (Story 5.4, FR61) — checkpoint the WAL so the copy
-    /// is self-contained, then copy the file to a `backups/` folder **beside the journal** (Story 5.5 —
-    /// so backups follow a user-selected location; falls back to the OS data dir if the journal has no
-    /// parent). Returns the written path (the caller surfaces it). Guarded: no journal → a neutral notice.
+    /// Create a `.db` backup of the live journal (Story 5.4, FR61) in a `backups/` folder **beside
+    /// the journal** (Story 5.5 — so backups follow a user-selected location; falls back to the OS
+    /// data dir if the journal has no parent). Returns the written path (the caller surfaces it).
+    /// Guarded: no journal → a neutral notice.
+    ///
+    /// G3 M3: the backup is written by SQLite from the OPEN connection (`VACUUM INTO`), never a
+    /// file copy of the `.db` — so it holds exactly what the dossier shows, the commits still in a
+    /// `-wal` included, even on a read-only (protected) dossier whose `-wal` cannot be checkpointed
+    /// (a copy there silently dropped them). One self-contained file, no sidecar.
     pub fn create_backup(&self) -> Result<PathBuf, String> {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         let live = self.path.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-        journal.checkpoint().map_err(super::save_error)?;
         let version = journal.logical_version().map_err(super::read_error)?;
         let dir = Self::backups_dir_for(live).ok_or(MSG_NO_DATA_DIR.to_string())?;
         std::fs::create_dir_all(&dir).map_err(super::io_save_error)?;
@@ -76,7 +80,7 @@ impl JournalState {
         // timestamp is filesystem-safe (no `:`).
         let stamp = self.clock.now().0.replace(':', "");
         let dest = dir.join(format!("journal-{}-v{version}-{stamp}.db", journal.id()));
-        std::fs::copy(live, &dest).map_err(super::io_save_error)?;
+        journal.backup_to(&dest).map_err(super::save_error)?;
         Ok(dest)
     }
 
@@ -174,7 +178,11 @@ impl JournalState {
         let prev = self.path.clone();
         self.close_current();
         match self.adopt_open(path, sync_mode_for(path)) {
-            Ok(outcome) => Ok(outcome),
+            Ok(outcome) => {
+                // The user chose a dossier: the startup stand-in (G3 M4) is over.
+                self.kept_configured = None;
+                Ok(outcome)
+            }
             Err(notice) => {
                 self.restore_previous(prev);
                 Err(notice)
@@ -215,6 +223,8 @@ impl JournalState {
                 self.path = Some(path);
                 self.reset_undo();
                 self.pending_restore = None;
+                // The user chose a dossier: the startup stand-in (G3 M4) is over.
+                self.kept_configured = None;
                 Ok(outcome)
             }
             Err(PersistError::JournalExists(_)) => {

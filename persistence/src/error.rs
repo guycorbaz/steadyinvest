@@ -53,16 +53,20 @@ pub enum Error {
     )]
     WriteProtected { directory: bool },
 
-    /// A write-protected journal file whose schema is OLDER than this build: the pending migrations
+    /// A write-protected journal whose schema is OLDER than this build: the pending migrations
     /// cannot run on a file that cannot be written, and reading an unmigrated file with this build's
-    /// queries would misread it — so the open is refused and the file stays untouched.
+    /// queries would misread it — so the open is refused and the file stays untouched. `directory`
+    /// names WHICH is protected (G3 M5: a writable file in a protected directory is not a
+    /// protected file).
     #[error(
-        "this journal is protected against writing and its schema (file user_version \
-         {file_user_version}) is older than this build's ({supported}); it was not opened"
+        "this journal's {} is protected against writing and its schema (file user_version \
+         {file_user_version}) is older than this build's ({supported}); it was not opened",
+        if *.directory { "directory" } else { "file" }
     )]
     WriteProtectedOutdated {
         file_user_version: i64,
         supported: u32,
+        directory: bool,
     },
 
     /// A single row carries a `schema_version` newer than the contract this build was built with.
@@ -135,6 +139,11 @@ pub enum Error {
     /// backup could not be copied beside the journal. The live journal is unchanged.
     #[error("the backup file could not be staged: {detail}; the journal is unchanged")]
     Restore { detail: String },
+
+    /// A protected journal is read through a private copy (its unconsolidated writes cannot be
+    /// read in place without creating files beside it); that copy could not be prepared.
+    #[error("the private read copy of the protected journal could not be prepared: {detail}")]
+    ReadCopy { detail: String },
 }
 
 /// The KIND of a failure, for a caller that names causes in its own language (the app speaks
@@ -155,6 +164,12 @@ pub enum ErrorKind {
     Missing,
     /// A newer version of the app wrote the file or a row.
     NewerData,
+    /// The journal is protected against writing and older than this build (its schema update
+    /// cannot be written); `directory` names which is protected.
+    ProtectedOutdated { directory: bool },
+    /// The database file was replaced or moved while open (SQLite READONLY_DBMOVED — a sync
+    /// tool swapping the file, G3 L1): its writes are refused until it is reopened.
+    Replaced,
     /// A schema update of the file failed.
     Migration,
     /// No named cause.
@@ -167,6 +182,15 @@ impl Error {
         use rusqlite::ErrorCode as C;
         match self {
             Error::WriteProtected { .. } => ErrorKind::WriteProtected,
+            Error::WriteProtectedOutdated { directory, .. } => ErrorKind::ProtectedOutdated {
+                directory: *directory,
+            },
+            // Before the READONLY family: a moved/replaced file is not a protected one.
+            Error::Sqlite(rusqlite::Error::SqliteFailure(code, _))
+                if code.extended_code == rusqlite::ffi::SQLITE_READONLY_DBMOVED =>
+            {
+                ErrorKind::Replaced
+            }
             Error::Sqlite(rusqlite::Error::SqliteFailure(code, _)) => match code.code {
                 C::ReadOnly | C::PermissionDenied => ErrorKind::WriteProtected,
                 C::DatabaseBusy | C::DatabaseLocked => ErrorKind::Locked,
@@ -296,6 +320,12 @@ mod tests {
             Error::WriteProtectedOutdated {
                 file_user_version: 3,
                 supported: 9,
+                directory: false,
+            },
+            Error::WriteProtectedOutdated {
+                file_user_version: 3,
+                supported: 9,
+                directory: true,
             },
             Error::NewerRowSchema {
                 row_schema_version: 9,
@@ -327,6 +357,9 @@ mod tests {
             Error::Restore {
                 detail: "the copy failed".to_string(),
             },
+            Error::ReadCopy {
+                detail: "a file could not be copied".to_string(),
+            },
         ]
     }
 
@@ -352,14 +385,16 @@ mod tests {
                 | Error::LockHeld { .. }
                 | Error::Lock { .. }
                 | Error::HoldingHasTransactions
-                | Error::Restore { .. } => {}
+                | Error::Restore { .. }
+                | Error::ReadCopy { .. } => {}
             }
         }
-        // 17 variants; `WriteProtected` is sampled for both of its causes (file, directory).
+        // 18 variants; `WriteProtected` and `WriteProtectedOutdated` are sampled for both of
+        // their causes (file, directory).
         assert_eq!(
             sample_errors().len(),
-            18,
-            "one sample per variant (+1 cause)"
+            20,
+            "one sample per variant (+2 causes)"
         );
     }
 
@@ -425,6 +460,24 @@ mod tests {
             ErrorKind::NewerData
         );
         assert_eq!(Error::HoldingHasTransactions.kind(), ErrorKind::Other);
+        let moved = Error::Sqlite(rusqlite::Error::SqliteFailure(
+            ffi::Error::new(ffi::SQLITE_READONLY_DBMOVED),
+            None,
+        ));
+        assert_eq!(moved.kind(), ErrorKind::Replaced);
+        assert!(
+            !moved.is_write_protected(),
+            "a replaced file is not a protected one"
+        );
+        assert_eq!(
+            Error::WriteProtectedOutdated {
+                file_user_version: 1,
+                supported: 9,
+                directory: true
+            }
+            .kind(),
+            ErrorKind::ProtectedOutdated { directory: true }
+        );
     }
 
     #[test]

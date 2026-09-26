@@ -39,9 +39,6 @@ pub const MSG_STARTUP_FILE_PROTECTED: &str =
     "Le fichier du dossier est protégé contre l'écriture ; il est ouvert en lecture seule.";
 /// Open/startup: the dossier's directory is protected against writing, so it is open read-only.
 pub const MSG_STARTUP_DIR_PROTECTED: &str = "Le répertoire du dossier est protégé contre l'écriture ; le dossier est ouvert en lecture seule.";
-/// An open refused: the file is protected against writing AND older than this version, so the
-/// schema update it needs cannot be written (reading it unmigrated would misread it).
-pub const MSG_OPEN_PROTECTED_OUTDATED: &str = "Le fichier du dossier est protégé contre l'écriture et son schéma est antérieur à cette version ; sans mise à niveau possible, il n'a pas été ouvert.";
 /// A write the OS refused at the moment it happened (the protection changed after the open, or a
 /// protected backups folder) — named in French, the OS / SQLite cause logged, never shown.
 pub const MSG_WRITE_REFUSED_BY_SYSTEM: &str = "Le système a refusé l'écriture (emplacement protégé contre l'écriture) ; rien n'a été enregistré.";
@@ -74,6 +71,17 @@ pub const MSG_CAUSE_MISSING: &str = "le fichier est introuvable ou inaccessible"
 pub const MSG_CAUSE_NEWER_DATA: &str = "des données ont été écrites par une version plus récente";
 /// Cause: the schema update of the file failed.
 pub const MSG_CAUSE_MIGRATION: &str = "la mise à niveau de son schéma a échoué";
+/// Cause (G3 M5): the file is protected AND older than this version — its schema update cannot
+/// be written (reading it unmigrated would misread it). The directory has its own wording.
+pub const MSG_CAUSE_OUTDATED_FILE: &str = "son fichier est protégé contre l'écriture et son schéma, antérieur à cette version, ne peut pas être mis à niveau";
+pub const MSG_CAUSE_OUTDATED_DIR: &str = "son répertoire est protégé contre l'écriture et son schéma, antérieur à cette version, ne peut pas être mis à niveau";
+/// Cause (G3 L1): the file was replaced / moved while open (a sync tool) — SQLite refuses its
+/// writes until it is opened again.
+pub const MSG_CAUSE_REPLACED: &str =
+    "le fichier du dossier a été remplacé pendant son ouverture ; rouvrez-le";
+/// Startup (G3 M4): the configured dossier was refused for a named cause; the default one is used
+/// for this session and app-config keeps the configured one.
+pub const MSG_CONFIGURED_REFUSED: &str = "Le dossier configuré n'a pas pu être ouvert : {cause} ; le dossier par défaut est utilisé pour cette séance, le dossier configuré reste retenu.";
 /// Subjects of a failed read.
 pub const MSG_SUBJECT_STUDIES: &str = "la liste des études";
 pub const MSG_SUBJECT_STUDY: &str = "l'étude";
@@ -976,7 +984,6 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_READ_ONLY_DIR_WRITE,
     MSG_STARTUP_FILE_PROTECTED,
     MSG_STARTUP_DIR_PROTECTED,
-    MSG_OPEN_PROTECTED_OUTDATED,
     MSG_WRITE_REFUSED_BY_SYSTEM,
     MSG_SAVE_FAILED_CAUSE,
     MSG_JOURNAL_OPEN_FAILED_CAUSE,
@@ -989,6 +996,10 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CAUSE_MISSING,
     MSG_CAUSE_NEWER_DATA,
     MSG_CAUSE_MIGRATION,
+    MSG_CAUSE_OUTDATED_FILE,
+    MSG_CAUSE_OUTDATED_DIR,
+    MSG_CAUSE_REPLACED,
+    MSG_CONFIGURED_REFUSED,
     MSG_SUBJECT_STUDIES,
     MSG_SUBJECT_STUDY,
     MSG_SUBJECT_HISTORY,

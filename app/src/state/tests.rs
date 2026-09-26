@@ -8035,7 +8035,7 @@ fn a_protected_dossier_older_than_this_build_is_refused_by_name() {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
     assert_eq!(
         state.open_journal(&path),
-        Err(MSG_OPEN_PROTECTED_OUTDATED.to_string())
+        Err(MSG_JOURNAL_OPEN_FAILED_CAUSE.replace("{cause}", MSG_CAUSE_OUTDATED_FILE))
     );
     assert!(!state.is_read_only(), "the previous dossier stays open");
 }
@@ -8148,4 +8148,74 @@ fn opening_a_non_journal_file_is_refused_in_french() {
         !refused.contains("sqlite") && !refused.contains("journal_meta"),
         "{refused}"
     );
+}
+
+// ── G3 M4 — a configured dossier refused by name at startup is kept, never forgotten ──
+
+#[cfg(unix)]
+#[test]
+fn a_protected_outdated_configured_dossier_is_named_at_startup_and_kept() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new().unwrap();
+    let Some((path, _)) = protected_dossier(&dir) else {
+        return;
+    };
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .pragma_update(None, "user_version", 1)
+        .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let stand_in = dir.path().join("default").join("journal.db");
+    let (clock, idgen) = fixed(0x449, "2026-09-26T10:00:00Z");
+    let (state, notice) = JournalState::open_or_create_with_default(
+        Some(&path),
+        Some(stand_in.clone()),
+        clock,
+        idgen,
+    );
+    assert_eq!(
+        notice.as_deref(),
+        Some(
+            MSG_CONFIGURED_REFUSED
+                .replace("{cause}", MSG_CAUSE_OUTDATED_FILE)
+                .as_str()
+        ),
+        "named — never « illisible »"
+    );
+    assert_eq!(
+        state.path(),
+        Some(stand_in.as_path()),
+        "the default stands in"
+    );
+    assert_eq!(
+        state.kept_configured_path(),
+        Some(path.as_path()),
+        "app-config keeps the configured dossier"
+    );
+}
+
+#[test]
+fn a_damaged_configured_dossier_keeps_the_illisible_fallback() {
+    let dir = TempDir::new().unwrap();
+    let garbage = dir.path().join("damaged.db");
+    std::fs::write(&garbage, b"not a sqlite file at all, only text").unwrap();
+    let stand_in = dir.path().join("default").join("journal.db");
+    let (clock, idgen) = fixed(0x44A, "2026-09-26T10:00:00Z");
+    let (state, notice) =
+        JournalState::open_or_create_with_default(Some(&garbage), Some(stand_in), clock, idgen);
+    assert_eq!(notice.as_deref(), Some(MSG_CONFIGURED_UNREADABLE));
+    assert_eq!(state.kept_configured_path(), None);
+}
+
+#[test]
+fn a_backup_holds_what_the_dossier_shows() {
+    // G3 M3: written by SQLite from the open connection — a self-contained journal.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x44B);
+    state.create_study("NESN", "CHF").unwrap();
+    let backup = state.create_backup().expect("backup written");
+    let copy = Journal::open(&backup).expect("the backup is a journal");
+    assert_eq!(copy.list_studies().unwrap().len(), 1);
+    assert_eq!(copy.id(), state.journal_id().unwrap());
 }

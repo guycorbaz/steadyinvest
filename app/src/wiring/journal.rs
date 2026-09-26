@@ -415,9 +415,15 @@ pub(crate) fn record_current_pointer(
 ) {
     let st = journal_state.borrow();
     if let (Some(path), Some(jid)) = (st.path().map(|p| p.to_path_buf()), st.journal_id()) {
-        config
-            .borrow_mut()
-            .record_recent(&path, &jid.to_string(), st.logical_version_or_zero());
+        {
+            let mut cfg = config.borrow_mut();
+            cfg.record_recent(&path, &jid.to_string(), st.logical_version_or_zero());
+            // G3 M4: while the startup stand-in is open, app-config keeps pointing at the
+            // configured dossier that was refused by name.
+            if let Some(kept) = st.kept_configured_path() {
+                cfg.journal_path = Some(kept.to_path_buf());
+            }
+        }
         persist(config_path.as_ref(), &config.borrow());
     }
 }
