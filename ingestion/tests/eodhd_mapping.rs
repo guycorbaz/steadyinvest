@@ -15,7 +15,8 @@
 //! `*-JUNFY.json` a June one. Their shape follows EODHD's documentation (fundamentals glossary:
 //! `netIncomeApplicableToCommonShares`, `commonStockSharesOutstanding`). The real NVDA.US fetch of
 //! 2026-09-26 confirmed the share counts are served in today's shares; that the balance sheet's
-//! count is the DILUTED WEIGHTED-AVERAGE one rests on EODHD's glossary alone (spec §0, open point).
+//! count is the DILUTED WEIGHTED-AVERAGE one was verified on the real fetch of 2026-09-27 (spec §0;
+//! `*-AAPL-real.json` / `*-JPM-real.json` pin it).
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -382,4 +383,58 @@ fn a_december_fiscal_year_keeps_the_calendar_prices() {
         raw.years.iter().map(|y| y.year).collect::<Vec<_>>(),
         vec![2023, 2024]
     );
+}
+
+/// D4 (G3 of ssg-1.2.0), settled on the real fetch of 2026-09-27 with the owner: the balance
+/// sheet's `commonStockSharesOutstanding` IS the diluted weighted-average count, so the computed
+/// EPS is the reported diluted EPS. `*-AAPL-real.json` / `*-JPM-real.json` are trimmed extracts of
+/// that fetch (only the fields the EPS reads). Apple buys back heavily: a period-end count would
+/// overstate its EPS by ~1.5 % (2023: 6.22 against 6.13). JPMorgan has preferred shares: the
+/// applicable-to-common income is served and wins over net income. Expected values: the diluted
+/// EPS of the companies' annual reports, within 0.5 %.
+/// A company's ticker, its trimmed real fundamentals, and its published diluted EPS by year.
+type PublishedCase = (&'static str, &'static str, [(i32, &'static str); 4]);
+
+#[test]
+fn the_computed_eps_is_the_published_diluted_eps_on_real_extracts() {
+    let cases: [PublishedCase; 2] = [
+        (
+            "AAPL",
+            include_str!("fixtures/eodhd-fundamentals-AAPL-real.json"),
+            [
+                (2021, "5.61"),
+                (2022, "6.11"),
+                (2023, "6.13"),
+                (2024, "6.08"),
+            ],
+        ),
+        (
+            "JPM",
+            include_str!("fixtures/eodhd-fundamentals-JPM-real.json"),
+            [
+                (2021, "15.36"),
+                (2022, "12.09"),
+                (2023, "16.23"),
+                (2024, "19.75"),
+            ],
+        ),
+    ];
+    for (ticker, fundamentals, published) in cases {
+        let raw = map_eodhd(
+            &json(fundamentals),
+            &serde_json::json!([]),
+            &serde_json::json!([]),
+            day(),
+            ticker,
+        )
+        .expect("maps");
+        for (y, reported) in published {
+            let eps = year(&raw, y).eps.as_ref().expect("eps present").value;
+            let gap = ((eps - dec(reported)) / dec(reported)).abs();
+            assert!(
+                gap < dec("0.005"),
+                "{ticker} {y}: computed {eps} against published {reported}"
+            );
+        }
+    }
 }

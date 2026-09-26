@@ -528,7 +528,8 @@ fn parse_split_part(s: &str) -> Option<Decimal> {
 /// Split scale: the share count is taken as served, like the dividend and book value per share
 /// derived from it (#217) — that EODHD restates pre-split share counts into today's shares was
 /// confirmed by the real NVDA.US fetch of 2026-09-26 (G5). That the count is the diluted
-/// WEIGHTED-AVERAGE one (and not the period-end count) rests on the glossary alone — spec §0.
+/// WEIGHTED-AVERAGE one (not the period-end count) was verified on the real fetch of 2026-09-27
+/// (four companies within 0.3 % of their published diluted EPS — spec §0).
 /// Rounded to 4 dp like every derived per-share figure (#119). Absent — never the adjusted `epsActual` in its place — when an input
 /// is missing or the share count is not positive.
 fn reported_diluted_eps(

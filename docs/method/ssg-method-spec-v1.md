@@ -71,14 +71,23 @@ Provider mappings *(ssg-1.2.0)*:
   `commonStockSharesOutstanding`, because EODHD's `Earnings.Annual.epsActual` is its non-GAAP EPS.
   When the applicable-to-common figure is not served, `netIncome` stands for it unless a non-zero
   `preferredStockAndOtherAdjustments` is reported (then the EPS is absent). An ABSENT adjustment is
-  read as none: an exception to « absent, never zero » accepted by the owner (G3, 2026-09-26),
-  to be reviewed once a real fetch shows how often EODHD serves neither figure.
-- **EODHD — open points** *(owner's decisions, G3, 2026-09-26; to be settled on a real fetch)*:
-  - `commonStockSharesOutstanding` is the diluted weighted-average count according to EODHD's
-    glossary only; that it is not the period-end count is not yet verified.
-  - The trailing-twelve-months EPS of the current P/E (§1 relative value) is EODHD's
-    `Highlights.EarningsShare`; whether it is the reported or an adjusted figure is not yet
-    verified. If adjusted, the current P/E would be set against a history of reported EPS.
+  read as none: an exception to « absent, never zero » accepted by the owner (G3, 2026-09-26). On
+  the real fetch of 2026-09-27 every year of the four companies checked served the
+  applicable-to-common figure, so the exception was not exercised.
+- **EODHD — verified on a real fetch** (2026-09-27, with the owner: NVDA.US, AAPL.US, NESN.SW,
+  JPM.US; fiscal years 2020–2025):
+  - `commonStockSharesOutstanding` is the **diluted weighted-average** count: the computed EPS
+    matches the published diluted EPS within 0.3 % for all four (AAPL 2023 6.134 / 6.13, JPM 2023
+    16.228 / 16.23, NESN 2023 4.233 / 4.24, NVDA FY2023 0.1742 / 0.174). The period-end
+    count (`outstandingShares`) would overstate Apple's EPS by ~1.5 %. EODHD's `epsActual`, by
+    contrast, strays far from the reported figure (NVDA FY2023 0.333; NESN 2021 8.20 against 6.06).
+  - The trailing-twelve-months EPS of the current P/E (§1 relative value),
+    `Highlights.EarningsShare` (= `DilutedEpsTTM`), is the **reported** figure: NVDA 7.91 = the
+    sum of its last four reported quarters (the adjusted sum is 7.01); AAPL, JPM and NESN (half-
+    yearly) within 1.2 % of the reported sum.
+  - EODHD dates a statement at the END OF THE MONTH its fiscal year closes in (NVDA: 2026-01-31
+    for a year closed on 25 January), so the bars of those last few days go to the next fiscal
+    year. Accepted: at most six trading days, a yearly high or low, no EPS moved.
 - **Twelve Data** serves no statement and no fiscal calendar: its price-only years are calendar
   years and never enter a study's history.
 
