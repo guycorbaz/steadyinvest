@@ -233,6 +233,12 @@ pub fn symbol_query(ticker: &str) -> String {
 /// `meta.currency`; per-year `high_price`/`low_price` reduced from the daily bars; financial fields
 /// stay `None` (manual entry — the free tier serves no fundamentals); no splits. The caller passes
 /// this to `core::normalize`.
+///
+/// ssg-1.2.0 — the years here are CALENDAR years, not the company's fiscal years: this response
+/// carries no statement, hence no fiscal-year end date to follow (EODHD's mapping reduces into
+/// fiscal years, [`crate::adapters::common::reduce_high_low_fiscal`]). The calendar reading is
+/// right for a December year end only. These rows carry no sales, so the study refresh drops them
+/// (issue #109) and they never reach a study's grid; no EPS is served, reported or adjusted.
 pub fn map_twelvedata(series: &Value, ticker: &str) -> Result<RawFinancials, ProviderError> {
     // Require the currency (like EODHD's `General.CurrencyCode`): defaulting a missing currency to USD
     // would silently mislabel a CHF/EUR equity's prices (and suppress `core::normalize`'s
