@@ -1,7 +1,9 @@
 // Comparaison de sociétés (Story 7.1): up to five studies side by side, the comparison form's
 // thirty rows in four groups. It compares, never ranks (FR13): no « best », no colour — ink and
 // words only; an absent figure is « — », a study that could not be read is « indisponible », a
-// picked study that no longer exists is « introuvable ».
+// picked study that no longer exists is « introuvable ». Owner decision (Guy, 2026-09-26): rows
+// 2, 4, 12, 14 show the JUDGED value the calculations use, with its « * » explained under the
+// group; rows 20–23 (the conclusions) are in bold — as in the PDF.
 
 import { Tokens } from "../tokens.slint";
 import { Comparison, ComparisonHeader } from "../state.slint";
@@ -26,11 +28,14 @@ component Cell inherits Text {
 component CmpRow inherits HorizontalLayout {
     in property <int> number;
     in property <string> label;
+    // Rows 20–23: label and figures in bold (owner decision, 2026-09-26 — the PDF's too).
+    in property <bool> strong: false;
     spacing: Tokens.space-8;
     min-height: Tokens.row-height * 0.8;
     Text {
         text: @tr("({}) {}", root.number, root.label);
-        color: Tokens.text-mid;
+        color: root.strong ? Tokens.text-high : Tokens.text-mid;
+        font-weight: root.strong ? Tokens.weight-semibold : Tokens.weight-regular;
         font-size: Tokens.font-caption;
         vertical-alignment: center;
         width: 380px;
@@ -45,16 +50,18 @@ component CmpRow inherits HorizontalLayout {
             : Comparison.cells[(root.number - 1) * Comparison.column-count + i] != ""
                 ? Comparison.cells[(root.number - 1) * Comparison.column-count + i]
                 : "—";
+        font-weight: root.strong ? Tokens.weight-semibold : Tokens.weight-regular;
         horizontal-stretch: 1;
     }
     // Row 20 names the band of rows 17–19 in THEIR words — the same nouns as the PDF (G1, #237),
-    // not the label-set words (`Labels.zone-*`), which the report never carries.
+    // not the label-set words (`Labels.zone-*`), which the report never carries — in lower case
+    // like the other worded cells (owner decision, 2026-09-26).
     pure function zone-words(key: string) -> string {
-        if (key == "buy") { return @tr("Zone basse"); }
-        if (key == "neutral") { return @tr("Zone médiane"); }
-        if (key == "sell") { return @tr("Zone haute"); }
-        if (key == "below") { return @tr("Sous la bande"); }
-        if (key == "above") { return @tr("Au-dessus de la bande"); }
+        if (key == "buy") { return @tr("zone basse"); }
+        if (key == "neutral") { return @tr("zone médiane"); }
+        if (key == "sell") { return @tr("zone haute"); }
+        if (key == "below") { return @tr("sous la bande"); }
+        if (key == "above") { return @tr("au-dessus de la bande"); }
         return "—";
     }
     pure function state-words(c: ComparisonHeader) -> string {
@@ -63,6 +70,15 @@ component CmpRow inherits HorizontalLayout {
         if (c.state == "withheld") { return c.low-confidence ? @tr("en attente · confiance réduite") : @tr("en attente"); }
         return "—";
     }
+}
+
+// The judged-value sigil explained, under each group that carries one (the PDF's note, word for
+// word — report `JUDGED_NOTE`).
+component JudgedNote inherits Text {
+    text: @tr("* valeur jugée par l'analyste (les calculs l'utilisent)");
+    color: Tokens.text-mid;
+    font-size: Tokens.font-caption;
+    wrap: word-wrap;
 }
 
 export component ComparisonScreen inherits Rectangle {
@@ -160,6 +176,7 @@ export component ComparisonScreen inherits Rectangle {
                 CmpRow { number: 2; label: @tr("Croissance estimée des ventes"); }
                 CmpRow { number: 3; label: @tr("Croissance historique du BPA"); }
                 CmpRow { number: 4; label: @tr("Croissance estimée du BPA"); }
+                JudgedNote { }
             }
             if Comparison.columns.length > 0: PanelCard {
                 title: @tr("Gestion (section 2)");
@@ -185,18 +202,19 @@ export component ComparisonScreen inherits Rectangle {
                 CmpRow { number: 9; label: @tr("Fourchette de cours sur 5 ans"); }
                 CmpRow { number: 10; label: @tr("Cours actuel"); }
                 CmpRow { number: 11; label: @tr("PER le plus haut"); }
-                CmpRow { number: 12; label: @tr("PER haut moyen"); }
+                CmpRow { number: 12; label: @tr("PER haut moyen jugé"); }
                 CmpRow { number: 13; label: @tr("PER moyen"); }
-                CmpRow { number: 14; label: @tr("PER bas moyen"); }
+                CmpRow { number: 14; label: @tr("PER bas moyen jugé"); }
                 CmpRow { number: 15; label: @tr("PER le plus bas"); }
                 CmpRow { number: 16; label: @tr("PER actuel"); }
                 CmpRow { number: 17; label: @tr("Zone basse"); }
                 CmpRow { number: 18; label: @tr("Zone médiane"); }
                 CmpRow { number: 19; label: @tr("Zone haute"); }
-                CmpRow { number: 20; label: @tr("Position du cours actuel"); }
-                CmpRow { number: 21; label: @tr("Ratio hausse / baisse"); }
-                CmpRow { number: 22; label: @tr("Rendement présent"); }
-                CmpRow { number: 23; label: @tr("Rendement annuel total estimé"); }
+                CmpRow { number: 20; label: @tr("Position du cours actuel"); strong: true; }
+                CmpRow { number: 21; label: @tr("Ratio hausse / baisse"); strong: true; }
+                CmpRow { number: 22; label: @tr("Rendement présent"); strong: true; }
+                CmpRow { number: 23; label: @tr("Rendement annuel total estimé"); strong: true; }
+                JudgedNote { }
             }
             if Comparison.columns.length > 0: PanelCard {
                 title: @tr("Autres");

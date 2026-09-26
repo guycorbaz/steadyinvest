@@ -1342,6 +1342,15 @@ pub(crate) struct Doc {
     grid_started: bool,
     // The font size of the grid being drawn (body, or caption for a wide table).
     grid_font: f32,
+    // Body rows drawn in Helvetica-Bold (the comparison's rows 20–23 — owner decision,
+    // 2026-09-26); header rows, replayed or not, keep their regular face.
+    grid_bold: bool,
+    // A small-print note printed under each closed portion of the current grid that drew a row
+    // needing it (the comparison's judged-value note: every page carrying a « * » explains it).
+    grid_note: Option<String>,
+    grid_note_due: bool,
+    // Where the last note printed by `close_grid_box` ends (the cursor moves past it at the end).
+    grid_note_bottom: Option<f32>,
     /// The vertical extents of the current grid's full-width note rows ([`Doc::grid_note_row`]):
     /// the interior column rules are interrupted there, so they never cross the note's words.
     grid_spans: Vec<(f32, f32)>,
@@ -1371,6 +1380,10 @@ impl Doc {
             grid_header: Vec::new(),
             grid_started: false,
             grid_font: FONT,
+            grid_bold: false,
+            grid_note: None,
+            grid_note_due: false,
+            grid_note_bottom: None,
             grid_spans: Vec::new(),
             page_w,
             page_h,
@@ -1710,7 +1723,7 @@ impl Doc {
 
     /// The height one grid row will take at `font` — measured before a table is drawn (G1 final,
     /// L10: the §3 block is reserved whole).
-    fn grid_rows_height(&mut self, cells: &[&str], edges: &[f32], font: f32) -> f32 {
+    pub(crate) fn grid_rows_height(&mut self, cells: &[&str], edges: &[f32], font: f32) -> f32 {
         let saved = self.grid_font;
         self.grid_font = font;
         let h = self.grid_row_height(cells, edges);
@@ -1735,13 +1748,22 @@ impl Doc {
             let size = *size;
             for (k, line) in cell_lines.iter().enumerate() {
                 let y = top + k as f32 * step;
+                let face = if self.grid_bold && !head {
+                    text_bold
+                } else {
+                    text
+                };
                 let Some(right) = edges.get(i + 1) else {
-                    text(&mut self.cur, edges[i] + CELL_PAD, y, size, line);
+                    face(&mut self.cur, edges[i] + CELL_PAD, y, size, line);
                     continue;
                 };
-                let w = text_width(line, size);
+                let w = if self.grid_bold && !head {
+                    text_width_bold(line, size)
+                } else {
+                    text_width(line, size)
+                };
                 let x = cell_x(numeric.contains(&i), edges[i], *right, w);
-                text(&mut self.cur, x, y, size, line);
+                face(&mut self.cur, x, y, size, line);
             }
         }
         self.y = top + (rows - 1) as f32 * step + (LINE_H - self.grid_font);
@@ -1756,6 +1778,34 @@ impl Doc {
         }
     }
 
+    /// Owner decision (Guy, 2026-09-26) — the next body rows in bold (`true`) or regular. The
+    /// measures stay the regular face's: the bold rows are short (a label, a ratio, a percent,
+    /// digits the same width in both faces).
+    pub(crate) fn set_grid_bold(&mut self, bold: bool) {
+        self.grid_bold = bold;
+    }
+
+    /// The note the current grid prints under a closed portion (on its page) once a row asked
+    /// for it with [`Doc::grid_note_due`] — the note follows its sigil across a page break.
+    pub(crate) fn set_grid_note(&mut self, note: &str) {
+        self.grid_note = Some(note.to_string());
+        self.grid_note_due = false;
+    }
+
+    /// The row just drawn carries what the grid's note explains.
+    pub(crate) fn grid_note_due(&mut self) {
+        self.grid_note_due = self.grid_note.is_some();
+    }
+
+    /// Keep the next `need` points of an open grid's rows on one page: when they do not fit
+    /// under the cursor, the box closes here and the rows start the next page under the replayed
+    /// header (a sub-block such as the comparison's rows 17–23 never leaves its last row alone).
+    pub(crate) fn grid_keep_rows(&mut self, need: f32, edges: &[f32]) {
+        if self.grid_started {
+            self.grid_break_before(need, edges);
+        }
+    }
+
     /// Issue #104 — start a boxed grid table. Reserve only the header + first row together (the
     /// section heading already reserved a few rows), and record the table top so [`grid_end`] can
     /// draw the outer box + column rules. Issue #74: a grid may SPAN page breaks — a body row that
@@ -1766,6 +1816,8 @@ impl Doc {
         self.grid_header.clear();
         self.grid_started = false;
         self.grid_spans.clear();
+        self.grid_note = None;
+        self.grid_note_due = false;
     }
 
     /// Draw the grid's outer box from [`grid_top`] to the current cursor + a vertical rule at each
@@ -1790,6 +1842,20 @@ impl Doc {
             if bottom > from {
                 vline(&mut self.cur, *e, from, bottom, 0.4);
             }
+        }
+        // The grid's note, under this portion when one of its rows asked for it.
+        if self.grid_note_due
+            && let Some(note) = self.grid_note.clone()
+        {
+            let (x, size, line_h) = ProseKind::Small.metrics();
+            let mut y = bottom;
+            for chunk in wrap_to_width(&note, self.right() - x, size) {
+                y += size + 1.0;
+                text(&mut self.cur, x, y, size, &chunk);
+                y += line_h - size - 1.0;
+            }
+            self.grid_note_due = false;
+            self.grid_note_bottom = Some(y);
         }
     }
 
@@ -1828,10 +1894,15 @@ impl Doc {
         if !self.grid_started {
             self.grid_break_before(0.0, edges);
         }
+        self.grid_note_bottom = None;
         self.close_grid_box(edges);
         self.grid_header.clear();
         self.grid_started = false;
         self.y += 2.0;
+        if let Some(y) = self.grid_note_bottom.take() {
+            self.y = self.y.max(y);
+        }
+        self.grid_note = None;
     }
 
     /// Issue #105 / #207 — the §1 semi-log growth chart, filling the rest of page 1 like the printed
@@ -2444,6 +2515,52 @@ fn glyph_width(c: char) -> u16 {
     }
 }
 
+/// Helvetica-Bold advance widths for ASCII 32..=126, in 1/1000 em (Adobe's standard-14 AFM) —
+/// a bold figure right-aligned by its REAL width ends on its column's padded edge (the
+/// comparison's rows 20–23, owner decision 2026-09-26).
+#[rustfmt::skip]
+const HELVETICA_BOLD_ASCII: [u16; 95] = [
+    278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, // ' '…'/'
+    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, // '0'…'9'
+    333, 333, 584, 584, 584, 611, 975, // ':'…'@'
+    722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, // 'A'…'M'
+    722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, // 'N'…'Z'
+    333, 278, 333, 584, 556, 333, // '['…'`'
+    556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, // 'a'…'m'
+    611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, // 'n'…'z'
+    389, 280, 389, 584, // '{'…'~'
+];
+
+/// One glyph's Helvetica-Bold width: the ASCII table, the French accented letters by their base
+/// letter (the AFM gives them the base's width), the rest as in the regular face.
+fn glyph_width_bold(c: char) -> u16 {
+    if let b @ 0x20..=0x7E = c as u32 {
+        return HELVETICA_BOLD_ASCII[b as usize - 32];
+    }
+    let base = match c {
+        'à' | 'â' | 'ä' => 'a',
+        'é' | 'è' | 'ê' | 'ë' => 'e',
+        'î' | 'ï' => 'i',
+        'ô' | 'ö' => 'o',
+        'ù' | 'û' | 'ü' => 'u',
+        'ç' => 'c',
+        'À' | 'Â' => 'A',
+        'É' | 'È' | 'Ê' => 'E',
+        'Ç' => 'C',
+        _ => return glyph_width(c),
+    };
+    HELVETICA_BOLD_ASCII[base as usize - 32]
+}
+
+/// The rendered width of `s` in Helvetica-Bold at `size` points.
+pub(crate) fn text_width_bold(s: &str, size: f32) -> f32 {
+    s.chars()
+        .map(|c| f32::from(glyph_width_bold(c)))
+        .sum::<f32>()
+        * size
+        / 1000.0
+}
+
 /// The rendered width of `s` in Helvetica at `size` points.
 pub(crate) fn text_width(s: &str, size: f32) -> f32 {
     s.chars().map(|c| f32::from(glyph_width(c))).sum::<f32>() * size / 1000.0
@@ -2916,6 +3033,12 @@ fn compact_num(v: f64, k: i32, nf: NumberStyle) -> String {
 
 /// Encode a UTF-8 string as WinAnsi (Latin-1 for 0xA0–0xFF, plus WinAnsi's own 0x80–0x9F range).
 /// Characters outside the encoding fall back to '?', never panic.
+/// [`winansi`] for the sibling modules' byte-level tests.
+#[cfg(test)]
+pub(crate) fn winansi_for_tests(s: &str) -> Vec<u8> {
+    winansi(s)
+}
+
 fn winansi(s: &str) -> Vec<u8> {
     s.chars()
         .filter(|c| *c != JUDGED_ON && *c != JUDGED_OFF)
