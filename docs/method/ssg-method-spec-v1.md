@@ -1,6 +1,6 @@
 # steadyinvest — SSG Method Specification (v1)
 
-**`method_version`: `ssg-1.1.0`**
+**`method_version`: `ssg-1.2.0`**
 **Status:** authoritative oracle for the calculation engine (`steadyinvest-core`) and its golden tests.
 **Independent project — not affiliated with NAIC / BetterInvesting.** This document specifies the
 *method* (formulas, ratios, thresholds — which are not protectable). It uses **neutral labels** and
@@ -23,8 +23,75 @@ scope here). All money/ratio math is **exact decimal** (`rust_decimal`), never `
 |---|---|
 | `ssg-1.0.0` | Initial normative spec. |
 | `ssg-1.1.0` | **Additive, zero behavioral change.** Absorbed as normative text the interpretations recorded while implementing Stories 1.7–1.9 (issues #12, #13, #15) — every rule marked *(absorbed at ssg-1.1.0)* below was already the engine's behavior under `ssg-1.0.0`. |
+| `ssg-1.2.0` | **Additive: the historical inputs are defined (§0).** A year is the company's fiscal year; its high/low prices are the fiscal year's (not the calendar year's); its EPS is the reported diluted EPS (never an adjusted, non-GAAP one). The engine's formulas, thresholds and scales are unchanged; the provider mapping follows §0 from this version (found on a real NVDA.US fetch, 2026-09-26: calendar-year prices beside January-fiscal-year EPS, and EODHD's non-GAAP `epsActual`), so a study fetched under `ssg-1.2.0` can show other figures than the same study fetched before. A stored study keeps its figures until the user fetches again. |
 
 ---
+
+## 0. Historical inputs — what a year's figures are *(added at ssg-1.2.0)*
+
+The engine takes the yearly figures as given; this section fixes what they must BE, so that a
+provider mapping (or a manual entry) feeds the method the figures the method is defined on.
+[Tutorial p6, p13–14; SSG Handbook]
+
+- **A year is the company's fiscal year**, labelled by the calendar year in which it ENDS (a fiscal
+  year ended 28 January 2024 is « 2024 »), with one exception: a 52/53-week year that ends in the
+  **first seven days of January** is labelled by the PREVIOUS year (a « Saturday nearest
+  31 December » year ended 2 January 2021 is « 2020 », as the company names it). Without the
+  exception such a company would show two ends in one calendar year and lose a fiscal year, and
+  the gap between two labels would no longer be the gap between the years (§1 growth). *(Owner's
+  decision, G3 review of ssg-1.2.0, 2026-09-26.)* Every yearly figure of that label — `sales`, `eps`,
+  `high_price`, `low_price`, dividend, pre-tax profit, book value — covers that same fiscal year.
+- **`high_price` / `low_price`** are the highest and lowest daily prices of that fiscal year: from
+  the day after the previous fiscal-year end through the fiscal-year end, in today's shares (every
+  price before a split restated by that split). Not the calendar year's: for a company whose year
+  does not end in December, a calendar-year high/low beside the fiscal-year EPS skews the high
+  and low P/E of §3.
+- **`eps`** is the **reported diluted EPS** of the fiscal year (as published under GAAP / IFRS: net
+  income attributable to the common shares ÷ the diluted weighted-average share count), restated
+  into today's shares — never an « adjusted », « operating » or other non-GAAP figure. When the
+  reported figure is not available the year's EPS is **absent**, never replaced by an adjusted one.
+- The **fiscal year in progress** (not yet reported) is not a history year: it has no annual
+  statements, and a study's history holds complete fiscal years only.
+- A fiscal year that is **not 12 months long** (a stub or transition year after a change of year
+  end) keeps its real period: its prices cover that period, never a period cut or padded to
+  12 months, and its length is reported so that the §3 `fiscal_period_misalignment` flag names it.
+
+Provider mappings *(ssg-1.2.0)*:
+
+- **EODHD — prices.** The daily bars are reduced into the fiscal years of the **income statement's**
+  yearly dates (the statement of the year's sales and EPS; a date served only by the balance sheet
+  or the cash flow is no fiscal-year end). Between two reported ends more than 18 months apart
+  (560 days, with room for a 52/53-week year's drift: a missing statement), one-year periods are
+  filled in; a shorter gap is one reported period. Two reported ends within 14 days of each other
+  are one end served twice: the later one stands.
+  A response without any yearly income statement falls back to calendar years: there is no fiscal
+  calendar to follow, and such a response has no sales, so its rows never enter a study.
+- **EODHD — EPS.** The reported diluted EPS is computed from one fiscal year's statements of the
+  SAME date: `netIncomeApplicableToCommonShares` ÷ the balance sheet's
+  `commonStockSharesOutstanding`, because EODHD's `Earnings.Annual.epsActual` is its non-GAAP EPS.
+  When the applicable-to-common figure is not served, `netIncome` stands for it unless a non-zero
+  `preferredStockAndOtherAdjustments` is reported (then the EPS is absent). An ABSENT adjustment is
+  read as none: an exception to « absent, never zero » accepted by the owner (G3, 2026-09-26). On
+  the real fetch of 2026-09-27 every year of the four companies checked served the
+  applicable-to-common figure, so the exception was not exercised.
+- **EODHD — verified on a real fetch** (2026-09-27, with the owner: NVDA.US, AAPL.US, NESN.SW,
+  JPM.US; fiscal years 2020–2025):
+  - `commonStockSharesOutstanding` is the **diluted weighted-average** count: the computed EPS
+    matches the published diluted EPS within 0.3 % for all four (AAPL 2023 6.134 / 6.13, JPM 2023
+    16.228 / 16.23, NESN 2023 4.233 / 4.24, NVDA FY2023 0.1742 / 0.174). The period-end
+    count (`outstandingShares`) would overstate Apple's EPS by ~1.5 %. EODHD's `epsActual`, by
+    contrast, strays far from the reported figure (NVDA FY2023 0.333; NESN 2021 8.20 against 6.06).
+  - The trailing-twelve-months EPS of the current P/E (§1 relative value),
+    `Highlights.EarningsShare` (= `DilutedEpsTTM`), is the **reported** figure: NVDA 7.91 = the
+    sum of its last four reported quarters (the adjusted sum is 7.01); AAPL, JPM and NESN (half-
+    yearly) within 1.2 % of the reported sum.
+  - EODHD dates a statement at the END OF THE MONTH its fiscal year closes in (NVDA: 2026-01-31
+    for a year closed on 25 January), so the bars between the real end and the month end are
+    counted in the fiscal year that CLOSES, not in the next one. Accepted: at most six trading
+    days, a yearly high or low, no EPS moved. The user is told in the glossary (« Cours haut et
+    bas (EODHD) »), with the remedy: check against the annual report, correct the cell.
+- **Twelve Data** serves no statement and no fiscal calendar: its price-only years are calendar
+  years and never enter a study's history.
 
 ## 1. SSG output set (FR4)
 
@@ -320,6 +387,9 @@ division-by-zero panic.
 
 ## Change control
 Any edit to a formula, threshold, the banned-verb list, the tolerance, the rounding mode, or a display
-scale **must** bump `METHOD_VERSION` (next: `ssg-1.2.0` for additive, `ssg-2.0.0` for breaking). The
+scale **must** bump `METHOD_VERSION` (next: `ssg-1.3.0` for additive, `ssg-2.0.0` for breaking). The
 `core` change-detection test will fail until the version is bumped and the snapshot regenerated, and
-every golden fixture's `meta.method_version` must be re-validated by hand (§7).
+every golden fixture's `meta.method_version` must be re-validated by hand (§7). A change to what a
+historical input IS (§0) — which period a figure covers, which EPS is used — bumps it too, although
+no `core` constant moves (the precedent is `ssg-1.2.0`): the figures a study shows change, and that
+must never happen silently.

@@ -910,7 +910,18 @@ export component SettingsScreen inherits Rectangle {
                 }
                 GlossaryRow {
                     term: @tr("BPA");
-                    definition: @tr("Bénéfice par action.");
+                    definition: @tr("Bénéfice par action : le bénéfice net publié de l'exercice, dilué (part des actionnaires ordinaires ÷ nombre moyen d'actions diluées), ramené aux actions d'aujourd'hui — jamais un bénéfice « ajusté ».");
+                }
+                // ssg-1.2.0 (spec §0): the years of a study are the company's fiscal years.
+                GlossaryRow {
+                    term: @tr("Année d'une étude");
+                    definition: @tr("L'exercice de la société, désigné par l'année où il se termine : un exercice clos fin janvier 2024 est « 2024 », mais un exercice clos dans les sept premiers jours de janvier compte pour l'année précédente. Ses cours haut et bas sont ceux de cet exercice, pas de l'année civile.");
+                }
+                // ssg-1.2.0 (spec §0, real fetch 2026-09-27): EODHD dates a fiscal year at the end of
+                // its closing month — told to the user, who can check and correct a cell.
+                GlossaryRow {
+                    term: @tr("Cours haut et bas (EODHD)");
+                    definition: @tr("EODHD date la clôture d'un exercice au dernier jour du mois : un exercice clos le 25 janvier est daté du 31. Les cours des jours entre la clôture réelle et la fin du mois (six jours de bourse au plus) sont donc comptés dans l'exercice qui se termine au lieu du suivant. Si un plus haut ou un plus bas vous semble décalé, comparez-le au rapport annuel et corrigez la valeur dans la grille.");
                 }
                 GlossaryRow {
                     term: @tr("Marge de sécurité");

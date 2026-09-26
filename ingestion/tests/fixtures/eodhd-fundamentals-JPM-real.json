@@ -1,0 +1,50 @@
+{
+ "General": {
+  "CurrencyCode": "USD"
+ },
+ "Highlights": {
+  "EarningsShare": 23.33
+ },
+ "Financials": {
+  "Income_Statement": {
+   "yearly": {
+    "2021-12-31": {
+     "totalRevenue": "127238000000.00",
+     "netIncome": "48334000000.00",
+     "netIncomeApplicableToCommonShares": "46503000000.00"
+    },
+    "2022-12-31": {
+     "totalRevenue": "153824000000.00",
+     "netIncome": "37676000000.00",
+     "netIncomeApplicableToCommonShares": "35892000000.00"
+    },
+    "2023-12-31": {
+     "totalRevenue": "236273000000.00",
+     "netIncome": "49552000000.00",
+     "netIncomeApplicableToCommonShares": "47760000000.00"
+    },
+    "2024-12-31": {
+     "totalRevenue": "270789000000.00",
+     "netIncome": "58471000000.00",
+     "netIncomeApplicableToCommonShares": "56868000000.00"
+    }
+   }
+  },
+  "Balance_Sheet": {
+   "yearly": {
+    "2021-12-31": {
+     "commonStockSharesOutstanding": "3026600000.00"
+    },
+    "2022-12-31": {
+     "commonStockSharesOutstanding": "2970000000.00"
+    },
+    "2023-12-31": {
+     "commonStockSharesOutstanding": "2943100000.00"
+    },
+    "2024-12-31": {
+     "commonStockSharesOutstanding": "2879000000.00"
+    }
+   }
+  }
+ }
+}

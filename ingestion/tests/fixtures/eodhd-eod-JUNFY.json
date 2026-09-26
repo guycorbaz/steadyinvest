@@ -1,0 +1,8 @@
+[
+  { "date": "2022-08-01", "open": "40", "high": "42", "low": "38", "close": "41", "adjusted_close": "41", "volume": 100 },
+  { "date": "2023-06-30", "open": "45", "high": "47", "low": "44", "close": "46", "adjusted_close": "46", "volume": 100 },
+  { "date": "2023-07-03", "open": "50", "high": "55", "low": "49", "close": "54", "adjusted_close": "54", "volume": 100 },
+  { "date": "2023-12-29", "open": "60", "high": "62", "low": "58", "close": "61", "adjusted_close": "61", "volume": 100 },
+  { "date": "2024-06-28", "open": "57", "high": "59", "low": "56", "close": "58", "adjusted_close": "58", "volume": 100 },
+  { "date": "2024-07-15", "open": "65", "high": "70", "low": "63", "close": "68", "adjusted_close": "68", "volume": 100 }
+]
