@@ -46,7 +46,10 @@ component ShareBlock inherits VerticalLayout {
                         ? @tr("{} — {} % (cible {} %)", root.label-of(r.label), r.share, r.target)
                         : @tr("{} — {} %", root.label-of(r.label), r.share)))
                 : (r.amount != ""
-                    ? @tr("{} — {}", root.label-of(r.label), r.amount)
+                    // The amount stands, the share is blocked (its denominator's pair named).
+                    ? (r.missing != ""
+                        ? @tr("{} — {} (part indisponible : taux manquant {})", root.label-of(r.label), r.amount, r.missing)
+                        : @tr("{} — {}", root.label-of(r.label), r.amount))
                     : (r.missing != ""
                         ? @tr("{} — indisponible : taux manquant {}", root.label-of(r.label), r.missing)
                         : (root.with-target && r.target != ""
@@ -179,7 +182,11 @@ export component ReviewScreen inherits Rectangle {
                 if Review.global-missing != "" && Review.global-unavailable: StatusBand { icon: "⊘"; text: @tr("Total global indisponible : taux manquant {}, et au moins une banque indisponible.", Review.global-missing); }
                 if Review.global-missing == "" && Review.global-unavailable: StatusBand { icon: "⊘"; text: @tr("Total global indisponible."); }
                 ShareBlock { rows: Review.bank-rows; with-target: false; kind: "bank"; }
-                if Review.global-invested != "": FactLine { text: @tr("Total global : {}", Review.global-invested); }
+                if Review.global-invested != "": FactLine {
+                    text: Review.global-share != ""
+                        ? @tr("Total global : {} ({} %)", Review.global-invested, Review.global-share)
+                        : @tr("Total global : {}", Review.global-invested);
+                }
             }
             if !Review.unavailable: PanelCard {
                 title: @tr("Concentration par titre");
@@ -337,7 +344,10 @@ export component ReviewScreen inherits Rectangle {
 
             if !Review.unavailable: PanelCard {
                 title: @tr("En chiffres");
-                FactLine { text: @tr("{} positions · {} avec une étude · {} critères validés · {} provisoires · {} en attente · {} non calculables", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld, Review.count-not-computable); }
+                // Owner decision (Guy, 2026-09-26): each count of positions says what it counts —
+                // « 0 critères validés » read as a count of criteria; it counts the positions
+                // whose study meets every criterion and is up to date (the verdict « complet »).
+                FactLine { text: @tr("{} positions · {} avec une étude · {} dont l'étude remplit tous les critères et est à jour · {} dont l'étude est provisoire · {} dont l'étude attend une donnée requise · {} dont l'étude n'est pas calculable", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld, Review.count-not-computable); }
                 // Positions, as their rows show them (G3 review); the due count counts STUDIES —
                 // on its own line, never read as positions.
                 FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached); }

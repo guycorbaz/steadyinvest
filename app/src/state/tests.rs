@@ -6426,6 +6426,10 @@ fn size_classification_joins_the_study_converts_sales_and_fills_the_mix() {
         Some(Decimal::from_str_exact("6.25").unwrap()),
         "AAPL — 100 / 1600"
     );
+    // The class amounts, the shares' numerators (the review's « Montant », 2026-09-26).
+    assert_eq!(view.medium.invested, Some(Decimal::from(1500)));
+    assert_eq!(view.small.invested, Some(Decimal::from(100)));
+    assert_eq!(view.large.invested, Some(Decimal::ZERO));
     assert_eq!(
         view.large.share_pct,
         Some(Decimal::ZERO),
@@ -7546,6 +7550,16 @@ fn sector_exposure_shares_over_the_whole_total_with_a_visible_unlabeled_bucket()
         "600 / 1000 — the denominator is the WHOLE invested capital, unsectored included"
     );
     assert_eq!(exposure.share_for("Healthcare").0, Some(Decimal::from(30)));
+    // The review's « Montant » (owner decision, 2026-09-26): each sector's own amount.
+    let amount = |name: Option<&str>| {
+        exposure
+            .rows
+            .iter()
+            .find(|r| r.sector.as_deref() == name)
+            .and_then(|r| r.amount)
+    };
+    assert_eq!(amount(Some("Consumer Defensive")), Some(Decimal::from(600)));
+    assert_eq!(amount(None), Some(Decimal::from(100)));
     assert_eq!(
         exposure.unlabeled_share(),
         Some(Decimal::from(10)),

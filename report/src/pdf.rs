@@ -1353,7 +1353,7 @@ pub(crate) struct Doc {
     grid_note_bottom: Option<f32>,
     /// The vertical extents of the current grid's full-width note rows ([`Doc::grid_note_row`]):
     /// the interior column rules are interrupted there, so they never cross the note's words.
-    grid_spans: Vec<(f32, f32)>,
+    grid_spans: Vec<(f32, f32, f32)>,
     // The page size (points). Portrait A4 by default; `landscape()` swaps them (Story 7.1 — the
     // five-column comparison). The text primitives flip y against PAGE_H, so a landscape page's
     // content stream starts with a translate that maps that flip onto its own height.
@@ -1828,19 +1828,34 @@ impl Doc {
         let left = edges[0];
         let right = edges[edges.len() - 1];
         stroke_rect(&mut self.cur, left, top, right - left, bottom - top, 0.6);
-        // The interior rules run from the top down, skipping every note row's extent.
+        // The interior rules run from the top down. Owner decision (Guy, 2026-09-26 — the
+        // review's positions table): a rule LEFT of a note row's text (the symbol column's) runs
+        // the full height of each block, note lines included; a rule the note's words would
+        // cross stops on a hairline drawn over the note, and each block closes on a full-width
+        // hairline — clean T-junctions, never a rule broken in mid-air, and nothing (no stub of
+        // a rule) under the closing border.
         let mut spans = std::mem::take(&mut self.grid_spans);
         spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        const MIN_RULE: f32 = 2.0; // a shorter segment is a stub, not a rule
         for e in &edges[1..edges.len() - 1] {
             let mut from = top;
-            for (s_top, s_bottom) in &spans {
-                if *s_top > from {
+            for (s_top, s_bottom, note_left) in &spans {
+                if *e <= *note_left + 0.5 {
+                    continue; // the note starts right of this rule: it runs on through it
+                }
+                if *s_top - from >= MIN_RULE {
                     vline(&mut self.cur, *e, from, *s_top, 0.4);
                 }
                 from = from.max(*s_bottom);
             }
-            if bottom > from {
+            if bottom - from >= MIN_RULE {
                 vline(&mut self.cur, *e, from, bottom, 0.4);
+            }
+        }
+        for (s_top, s_bottom, note_left) in &spans {
+            hline(&mut self.cur, *note_left, right, *s_top, 0.3);
+            if bottom - *s_bottom >= MIN_RULE {
+                hline(&mut self.cur, left, right, *s_bottom, 0.3);
             }
         }
         // The grid's note, under this portion when one of its rows asked for it.
@@ -1860,8 +1875,9 @@ impl Doc {
     }
 
     /// A body row followed by its small-print note, spanning from `note_left` to the table's
-    /// right edge and wrapped there; the interior column rules stop above the note and resume
-    /// below (the review's « Signaux · Données » line under each position). G1 D: the row and
+    /// right edge and wrapped there; the interior column rules it would cross stop on a hairline
+    /// above the note, the rule left of it runs on (the review's « Signaux · Données » line under
+    /// each position — see [`Doc::close_grid_box`]). G1 D: the row and
     /// its note are ONE block — a page break never falls between them (the note would read as
     /// the next position's, or as nobody's).
     pub(crate) fn grid_row_num_with_note(
@@ -1884,7 +1900,7 @@ impl Doc {
         self.grid_font = SMALL;
         let from = self.y;
         self.draw_grid_cells_aligned(&["", note], &outer, false, usize::MAX..usize::MAX);
-        self.grid_spans.push((from, self.y));
+        self.grid_spans.push((from, self.y, note_left));
         self.grid_font = FONT;
     }
 

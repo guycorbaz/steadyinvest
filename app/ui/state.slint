@@ -1174,6 +1174,8 @@ export global Review {
     in-out property <[ReviewShareRow]> currency-rows;
     in-out property <[ReviewShareRow]> bank-rows;
     in-out property <string> global-invested;
+    // The global total's share (« 100 »), `""` when the total is absent or not positive.
+    in-out property <string> global-share;
     in-out property <string> global-missing;
     in-out property <bool> global-unavailable;          // a non-pair cause absents the global (alone, or beside global-missing)
     in-out property <[ReviewShareRow]> concentration-rows;

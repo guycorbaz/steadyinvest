@@ -23,6 +23,10 @@ use crate::viewmodel::engine;
 pub struct CurrencyShare {
     pub currency: String,
     pub share_pct: Option<Decimal>,
+    /// The bucket's invested capital converted to the reference currency (the share's
+    /// numerator) — absent with its pair named. The review's « Montant » (owner decision, Guy
+    /// 2026-09-26).
+    pub amount: Option<Decimal>,
     pub missing_pair: Option<String>,
 }
 
@@ -55,6 +59,9 @@ impl CurrencyExposure {
 pub struct SectorShare {
     pub sector: Option<String>,
     pub share_pct: Option<Decimal>,
+    /// The sector's invested capital in the reference currency (the share's numerator) — absent
+    /// with its pair(s) named. The review's « Montant » (owner decision, Guy 2026-09-26).
+    pub amount: Option<Decimal>,
     /// EVERY `BASE → reference` pair its holdings needed but the store lacks (a sector held in
     /// two unconvertible currencies names both — G1 review), deduplicated, in holding order.
     pub missing_pairs: Vec<String>,
@@ -218,6 +225,7 @@ impl JournalState {
             .map(|(currency, amount, missing_pair)| CurrencyShare {
                 currency,
                 share_pct: amount.zip(global).and_then(|(a, g)| share_pct(a, g)),
+                amount,
                 missing_pair,
             })
             .collect();
@@ -307,6 +315,7 @@ impl JournalState {
             .map(|(sector, (amount, missing_pairs))| SectorShare {
                 sector,
                 share_pct: amount.zip(global).and_then(|(a, g)| share_pct(a, g)),
+                amount,
                 missing_pairs,
             })
             .collect();

@@ -61,6 +61,10 @@ pub struct UnclassifiedRow {
 /// member security's converted figure is (never a partial class sum) or the denominator is.
 pub struct SizeMixSlot {
     pub share_pct: Option<Decimal>,
+    /// The class's invested capital in the reference currency (the share's numerator) — absent
+    /// when a member's converted figure is. The review's « Montant » (owner decision, Guy
+    /// 2026-09-26): the amount stands even when the share's denominator is absent.
+    pub invested: Option<Decimal>,
 }
 
 /// The journal-wide FR45 view: per-security concentration rows (largest share first), the size
@@ -91,9 +95,18 @@ impl JournalDiversification {
         JournalDiversification {
             rows: Vec::new(),
             global_invested: None,
-            small: SizeMixSlot { share_pct: None },
-            medium: SizeMixSlot { share_pct: None },
-            large: SizeMixSlot { share_pct: None },
+            small: SizeMixSlot {
+                share_pct: None,
+                invested: None,
+            },
+            medium: SizeMixSlot {
+                share_pct: None,
+                invested: None,
+            },
+            large: SizeMixSlot {
+                share_pct: None,
+                invested: None,
+            },
             unclassified: Vec::new(),
             missing_pairs: Vec::new(),
             rates_used: Vec::new(),
@@ -346,6 +359,7 @@ impl JournalState {
             share_pct: invested
                 .zip(global_invested)
                 .and_then(|(v, g)| share_pct(v, g)),
+            invested,
         };
         JournalDiversification {
             rows,

@@ -717,8 +717,12 @@ mod tests {
         // integ/g1-final2: 953 + L 11 + M 22 + K 10 = 996, measured.
         // G1 P: a watched study that was deleted is worded as an absence, and the reinvestable
         // dividends say « indisponible » on a failed read: 996 + 2 = 998, measured.
+        // fix/reports-naic (Guy's decisions, 2026-09-26): the comparison's judged-value note
+        // (« * valeur jugée par l'analyste … »), the review share row whose amount stands while
+        // its share is blocked, and « Total global : … (100 %) »: 998 + 3 = 1001, measured (row
+        // 20's words, rows 12 / 14's labels and the counts line are reworded in place).
         assert!(
-            total >= 998,
+            total >= 1001,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
