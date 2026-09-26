@@ -227,6 +227,8 @@ pub(crate) fn clear_comparison(ui: &MainWindow) {
     c.set_columns(ModelRc::new(VecModel::from(Vec::<ComparisonHeader>::new())));
     c.set_cells(ModelRc::new(VecModel::from(Vec::<SharedString>::new())));
     c.set_column_count(0);
+    c.set_growth_judged(false);
+    c.set_price_judged(false);
     c.set_currency_mix(false);
     c.set_notice(SharedString::new());
     sync_picker(&c);
@@ -340,6 +342,18 @@ pub(crate) fn push_comparison(
         }
     }
     c.set_cells(ModelRc::new(VecModel::from(cells)));
+    // The judged-value note shows iff a « * » does, per group (G3 review).
+    let starred = |rows: &[usize]| {
+        cols.iter().any(|col| {
+            rows.iter().any(|r| {
+                col.rows
+                    .get(*r)
+                    .is_some_and(|s| s.ends_with(steadyinvest_report::JUDGED_SIGIL))
+            })
+        })
+    };
+    c.set_growth_judged(starred(&[1, 3]));
+    c.set_price_judged(starred(&[11, 13]));
     // « Ouvrir l'étude » opens the id the column was BUILT from — no second lookup; a column with
     // no study to open (gone, unreadable) offers no button.
     let headers: Vec<ComparisonHeader> = keyed

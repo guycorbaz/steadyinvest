@@ -92,13 +92,15 @@ const ROWS: [&str; 30] = [
     "BPA total estimé sur 5 ans",
     "Fourchette de cours sur 5 ans",
     "Cours actuel",
-    "PER le plus haut",
+    // G3 review: rows 11, 13 and 15 name their source — the §3 history — beside the two judged
+    // rows (the comparison guide's « highest / average / lowest P/E » of the last five years).
+    "PER le plus haut sur 5 ans",
     // Rows 12 / 14 show the judged average P/E the zones are computed with (owner decision,
     // 2026-09-26) — named so, as the study's §4 names it.
     "PER haut moyen jugé",
-    "PER moyen",
+    "PER moyen historique (§3)",
     "PER bas moyen jugé",
-    "PER le plus bas",
+    "PER le plus bas sur 5 ans",
     "PER actuel",
     "Zone basse",
     "Zone médiane",
@@ -394,13 +396,17 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
             if row == *PRICE_TAIL.start() {
                 // Rows 17–23 stay together: they break to the next page as one block (with the
-                // replayed header) rather than leave their last row alone there.
+                // replayed header) rather than leave their last row alone there. Each measured
+                // in the face it is drawn in.
                 let tail: f32 = PRICE_TAIL
                     .clone()
                     .map(|r| {
                         let cells = row_cells(r);
                         let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
-                        doc.grid_rows_height(&refs, &edges, SMALL)
+                        doc.set_grid_bold(BOLD_ROWS.contains(&r));
+                        let h = doc.grid_rows_height(&refs, &edges, SMALL);
+                        doc.set_grid_bold(false);
+                        h
                     })
                     .sum();
                 doc.grid_keep_rows(tail, &edges);
@@ -701,10 +707,14 @@ mod tests {
         let p17 = page_of("(17) Zone basse").unwrap();
         let p23 = page_of("(23) Rendement annuel total estimé").unwrap();
         assert_eq!(p17, p23, "rows 17–23 share a page");
-        // …and when the block moves, several rows follow the replayed header.
-        if p17 > 0 {
-            assert!(page_of("(16) PER actuel").unwrap() < p17);
-        }
+        // The owner's case: the block does NOT fit under rows 8–16 — it moves whole, the break
+        // falls after row 16, and the next page holds all seven rows under the replayed header.
+        assert_eq!(p17, 1, "the block moved");
+        assert_eq!(page_of("(16) PER actuel"), Some(0));
+        assert!(
+            carries(&pages[1], "NESN.SW (CHF)"),
+            "the header is replayed"
+        );
     }
 
     #[test]

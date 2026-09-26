@@ -141,10 +141,19 @@ const JUDGED_INK: Ink = [0.0, 0.16, 0.52];
 // runs between two zero-width private-use markers the text primitives read and never print.
 /// The sigil after a judged value (the comparison's app-formatted cells carry it too).
 pub const JUDGED_SIGIL: &str = "*";
-/// The note that explains the sigil, printed on every page that carries one.
-pub const JUDGED_NOTE: &str = "* valeur jugée par l'analyste (les calculs l'utilisent)";
+/// The note that explains the sigil, printed wherever a « * » is shown — and only there (G3
+/// review: the note appears iff a sigil does). One text for the three surfaces: the study PDF,
+/// the comparison PDF and the comparison screen (its `JudgedNote`, tied to this by a parity
+/// test). It says only what holds for EVERY starred value: the analyst judged it (the estimated
+/// sales growth, starred too, feeds no calculation — « les calculs l'utilisent » was false there).
+pub const JUDGED_NOTE: &str = "* valeur jugée par l'analyste";
 const JUDGED_ON: char = '\u{E000}';
 const JUDGED_OFF: char = '\u{E001}';
+
+/// Whether a laid-out line shows a judged value (its « * »).
+fn carries_judged(s: &str) -> bool {
+    s.contains(JUDGED_ON)
+}
 
 /// A figure the analyst judged, as printed: the figure, its « * », in the judged colour — kept on
 /// one line (its inner spaces become no-break spaces, so « 46,6 %* » never splits). An absent
@@ -239,17 +248,21 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             nf.pct(outputs.growth.eps_cagr_pct)
         ),
     );
-    doc.two_columns(
-        &format!(
+    let estimated = [
+        format!(
             "(2) Croissance estimée des ventes : {}",
             judged(&nf.pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal())))
         ),
-        &format!(
+        format!(
             "(4) Croissance estimée du BPA : {}",
             judged(&nf.pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal())))
         ),
-    );
-    doc.small_line(JUDGED_NOTE);
+    ];
+    doc.two_columns(&estimated[0], &estimated[1]);
+    // The note iff a « * » is shown on the page (G3 review).
+    if estimated.iter().any(|s| carries_judged(s)) {
+        doc.small_line(JUDGED_NOTE);
+    }
     doc.new_page();
 
     // ── Page 2 — §2 Management: the years as COLUMNS (the form's layout), the 5-yr average and
@@ -434,7 +447,10 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             nf.money(current_price),
             nf.pct(outputs.returns.projected_appreciation_pct),
         ));
-        b.small_line(JUDGED_NOTE);
+        // The note iff a « * » is shown in the section (G3 review).
+        if b.lines.iter().any(|(_, s)| carries_judged(s)) {
+            b.small_line(JUDGED_NOTE);
+        }
         let bar_h = if r.zones.is_some() {
             ZONEBAR_H_RESERVE
         } else {
@@ -776,10 +792,13 @@ impl NumberStyle {
 
     /// A large absolute figure in millions (the annexe's sales / pre-tax profit): ÷ 10^6, at most
     /// two decimals, trailing zeros dropped (« 6 910 », « 12,35 ») — the em-dash when absent.
+    /// G3 review: a present non-zero figure is never printed « 0 » — below 0,005 M (a small
+    /// issuer, a loss of a few thousand) it keeps the digits that make it non-zero (« 0,004 »,
+    /// « −0,0035 »), sign included.
     fn millions(self, v: Option<steadyinvest_contract::Money>) -> String {
         match v.and_then(|m| m.as_decimal().checked_div(Decimal::from(1_000_000))) {
             None => EM_DASH.to_string(),
-            Some(d) => self.spell(round_for_display(d, DisplayField::Price).normalize()),
+            Some(d) => self.spell(millions_shown(d)),
         }
     }
 
@@ -802,6 +821,21 @@ impl NumberStyle {
     /// columns).
     fn pct_bare(self, v: Option<Decimal>) -> String {
         self.fmt_dec(v, DisplayField::Percent)
+    }
+}
+
+/// The millions figure as shown: two decimals; a non-zero figure those would round to zero
+/// keeps its own digits (to the cent of the absolute figure, 8 decimals, or exact below that).
+fn millions_shown(d: Decimal) -> Decimal {
+    let two = round_for_display(d, DisplayField::Price);
+    if !two.is_zero() || d.is_zero() {
+        return two.normalize();
+    }
+    let fine = d.round_dp(8);
+    if fine.is_zero() {
+        d.normalize()
+    } else {
+        fine.normalize()
     }
 }
 
@@ -1632,7 +1666,7 @@ impl Doc {
             });
             return;
         }
-        let height = self.grid_row_height(cells, edges);
+        let height = self.grid_row_height(cells, edges, head);
         self.grid_break_before(height, edges);
         self.draw_grid_cells_aligned(cells, edges, head, numeric);
     }
@@ -1672,7 +1706,7 @@ impl Doc {
         for row in &header {
             self.grid_font = row.font;
             let cells: Vec<&str> = row.cells.iter().map(String::as_str).collect();
-            h += self.grid_row_height(&cells, edges);
+            h += self.grid_row_height(&cells, edges, true);
         }
         self.grid_header = header;
         self.grid_font = font;
@@ -1694,12 +1728,19 @@ impl Doc {
 
     /// Each cell's lines and point size, laid out in its column by [`cell_layout`] (a cell never
     /// crosses a rule, and a figure is never cut).
-    fn grid_cell_lines(&self, cells: &[&str], edges: &[f32]) -> Vec<(Vec<String>, f32)> {
+    fn grid_cell_lines(
+        &self,
+        cells: &[&str],
+        edges: &[f32],
+        head: bool,
+    ) -> Vec<(Vec<String>, f32)> {
+        // A bold body row is laid out by the bold metrics (G3 review); a header row never is.
+        let bold = self.grid_bold && !head;
         cells
             .iter()
             .enumerate()
             .map(|(i, s)| match edges.get(i + 1) {
-                Some(right) => cell_layout(s, right - edges[i], self.grid_font),
+                Some(right) => cell_layout(s, right - edges[i], self.grid_font, bold),
                 None => (vec![s.to_string()], self.grid_font),
             })
             .collect()
@@ -1710,9 +1751,9 @@ impl Doc {
         self.grid_font + 2.5
     }
 
-    fn grid_row_height(&self, cells: &[&str], edges: &[f32]) -> f32 {
+    fn grid_row_height(&self, cells: &[&str], edges: &[f32], head: bool) -> f32 {
         let lines = self
-            .grid_cell_lines(cells, edges)
+            .grid_cell_lines(cells, edges, head)
             .iter()
             .map(|(l, _)| l.len())
             .max()
@@ -1726,7 +1767,7 @@ impl Doc {
     pub(crate) fn grid_rows_height(&mut self, cells: &[&str], edges: &[f32], font: f32) -> f32 {
         let saved = self.grid_font;
         self.grid_font = font;
-        let h = self.grid_row_height(cells, edges);
+        let h = self.grid_row_height(cells, edges, false);
         self.grid_font = saved;
         h
     }
@@ -1741,7 +1782,7 @@ impl Doc {
         numeric: std::ops::Range<usize>,
     ) {
         let step = self.grid_line_step();
-        let lines = self.grid_cell_lines(cells, edges);
+        let lines = self.grid_cell_lines(cells, edges, head);
         let rows = lines.iter().map(|(l, _)| l.len()).max().unwrap_or(1).max(1);
         let top = self.y + self.grid_font;
         for (i, (cell_lines, size)) in lines.iter().enumerate() {
@@ -1891,9 +1932,9 @@ impl Doc {
         let right = edges[edges.len() - 1];
         let outer = [edges[0], note_left, right];
         self.grid_font = FONT;
-        let row_h = self.grid_row_height(cells, edges);
+        let row_h = self.grid_row_height(cells, edges, false);
         self.grid_font = SMALL;
-        let note_h = self.grid_row_height(&["", note], &outer);
+        let note_h = self.grid_row_height(&["", note], &outer, false);
         self.grid_font = FONT;
         self.grid_break_before(row_h + note_h, edges);
         self.draw_grid_cells_aligned(cells, edges, false, numeric_from..usize::MAX);
@@ -2108,7 +2149,29 @@ impl Doc {
                 );
                 label_ys.push((rate, ey + 2.0));
             }
-            for (rate, y) in guide_label_rows(&label_ys, GUIDE_LABEL_SIZE + 1.0) {
+            // G3 review: spread around their natural heights and kept beside the frame; a
+            // label away from its guide's end (moved to make room, or a guide ending before
+            // the frame — its anchor year earlier than the last year) is tied to it by a faint
+            // dotted leader.
+            let rows = guide_label_rows(
+                &label_ys,
+                GUIDE_LABEL_SIZE + 1.0,
+                top + GUIDE_LABEL_SIZE,
+                top + chart_h,
+            );
+            for (rate, y) in rows {
+                let (ey_year, end) = guide_end(ly, lv, rate);
+                let (ex, ey) = (px(f64::from(ey_year)), py(end, lmin, lmax));
+                let mid = y - GUIDE_LABEL_SIZE / 3.0;
+                if (mid - ey).abs() > 1.0 || ex < x1 - 1.0 {
+                    polyline(
+                        &mut self.cur,
+                        &[(ex, ey), (x1, mid)],
+                        0.3,
+                        gray(GUIDE_GRAY),
+                        &[0.6, 1.2],
+                    );
+                }
                 text(
                     &mut self.cur,
                     x1 + 2.0,
@@ -2586,17 +2649,37 @@ pub(crate) fn text_width(s: &str, size: f32) -> f32 {
 /// not even the ellipsis fits (a zero or negative width), the result is empty — never wider than
 /// asked.
 pub(crate) fn fit(s: &str, width: f32, size: f32) -> String {
-    if text_width(s, size) <= width {
+    fit_in(s, width, size, false)
+}
+
+/// The width of `s` in the regular or the bold face (G3 review: a bold cell is laid out by the
+/// metrics it is drawn with).
+fn measure(s: &str, size: f32, bold: bool) -> f32 {
+    if bold {
+        text_width_bold(s, size)
+    } else {
+        text_width(s, size)
+    }
+}
+
+/// [`fit`] in the regular or the bold face.
+fn fit_in(s: &str, width: f32, size: f32, bold: bool) -> String {
+    if measure(s, size, bold) <= width {
         return s.to_string();
     }
-    let room = width - text_width("…", size);
+    let room = width - measure("…", size, bold);
     if room < 0.0 {
         return String::new();
     }
     let mut out = String::new();
     let mut used = 0.0;
     for c in s.chars() {
-        let w = f32::from(glyph_width(c)) * size / 1000.0;
+        let w = if bold {
+            f32::from(glyph_width_bold(c))
+        } else {
+            f32::from(glyph_width(c))
+        } * size
+            / 1000.0;
         if used + w > room {
             break;
         }
@@ -2611,7 +2694,7 @@ pub(crate) fn fit(s: &str, width: f32, size: f32) -> String {
 /// inside a line is kept (the « A   ·   B » separators); at a break it is dropped, so no line
 /// starts or ends with the spaces it was broken at. A width ≤ 0 holds nothing: one empty line.
 pub(crate) fn wrap_to_width(s: &str, width: f32, size: f32) -> Vec<String> {
-    wrap(s, width, size, false)
+    wrap(s, width, size, false, false)
 }
 
 /// Whether a word carries a figure (a digit) — such a word is never cut with « … » in a grid cell.
@@ -2623,7 +2706,7 @@ fn carries_figure(word: &str) -> bool {
 /// cell), a line is never cut down to nothing and a line carrying a figure or the absence mark
 /// « — » is never passed through [`fit`]: a figure wider than the line goes whole on its own line
 /// (never split into pieces that would read as two numbers), and an absence is never erased.
-fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
+fn wrap(s: &str, width: f32, size: f32, keep_figures: bool, bold: bool) -> Vec<String> {
     if !keep_figures && (width.is_nan() || width <= 0.0) {
         return vec![String::new()];
     }
@@ -2631,7 +2714,7 @@ fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
         let kept = if keep_figures && (carries_figure(line) || line == EM_DASH) {
             line.to_string()
         } else {
-            match fit(line, width, size) {
+            match fit_in(line, width, size, bold) {
                 // A grid cell never shows nothing where its text was.
                 cut if keep_figures && cut.is_empty() => line.to_string(),
                 cut => cut,
@@ -2659,7 +2742,7 @@ fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
             continue;
         }
         let candidate = format!("{line}{}{word}", " ".repeat(gap.max(1)));
-        if text_width(&candidate, size) <= width {
+        if measure(&candidate, size, bold) <= width {
             line = candidate;
         } else {
             push(&mut lines, &line);
@@ -2688,9 +2771,9 @@ const MIN_FIGURE_FONT: f32 = 6.0;
 /// digit (a label) may still end in « … »; a cell's text, and the absence mark « — », is never
 /// reduced to nothing. A column whose padding leaves no room falls back on the room between the
 /// rules; one with no room at all prints its text as is.
-fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
+fn cell_layout(s: &str, col_w: f32, size: f32, bold: bool) -> (Vec<String>, f32) {
     let rule_w = col_w - 2.0 * GRID_INSET;
-    if text_width(s, size) <= rule_w {
+    if measure(s, size, bold) <= rule_w {
         return (vec![s.to_string()], size);
     }
     let pad_w = col_w - 2.0 * CELL_PAD;
@@ -2702,11 +2785,11 @@ fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
     // whole, the unit kept on the number's line.
     let whole_figure = carries_figure(s) && !s.chars().any(char::is_alphabetic);
     let widest_figure = if whole_figure {
-        text_width(s, size)
+        measure(s, size, bold)
     } else {
         s.split(' ')
             .filter(|w| carries_figure(w))
-            .map(|w| text_width(w, size))
+            .map(|w| measure(w, size, bold))
             .fold(0.0_f32, f32::max)
     };
     let size = if widest_figure > room {
@@ -2720,7 +2803,7 @@ fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
     if whole_figure {
         return (vec![s.to_string()], size);
     }
-    (wrap(s, room, size, true), size)
+    (wrap(s, room, size, true, bold), size)
 }
 
 /// The x of a grid cell's text line `w` wide in the column `left..right`: a figure (`numeric`)
@@ -2995,20 +3078,68 @@ fn minor_ticks(lmin: f64, lmax: f64) -> Vec<f64> {
     out
 }
 
-/// The guide labels' baselines, from `(rate, wanted baseline)`: each at its guide's end height,
-/// pushed apart (upwards, the steeper guide's label above) so no two are closer than `gap` —
-/// two labels never print over each other.
-fn guide_label_rows(wanted: &[(u32, f32)], gap: f32) -> Vec<(u32, f32)> {
+/// The guide labels' baselines, from `(rate, wanted baseline)` (top-origin): each as near its
+/// guide's end height as the others allow — labels closer than `gap` form a cluster spread
+/// evenly AROUND the cluster's mean wanted height (up and down, G3 review), merged with a
+/// neighbour it then touches — the whole kept within `[lo, hi]` (never above the frame, never
+/// under it). In order: the steeper guide's label stays above.
+fn guide_label_rows(wanted: &[(u32, f32)], gap: f32, lo: f32, hi: f32) -> Vec<(u32, f32)> {
     let mut rows: Vec<(u32, f32)> = wanted.to_vec();
-    // Lowest on the page first (largest top-origin y): the flattest guide.
-    rows.sort_by(|a, b| b.1.total_cmp(&a.1));
-    for i in 1..rows.len() {
-        let floor = rows[i - 1].1 - gap;
-        if rows[i].1 > floor {
-            rows[i].1 = floor;
+    rows.sort_by(|a, b| a.1.total_cmp(&b.1)); // top of the page first
+    // Clusters of consecutive labels: (first index, count, top baseline).
+    let mut clusters: Vec<(usize, usize, f32)> = Vec::new();
+    for (i, (_, y)) in rows.iter().enumerate() {
+        clusters.push((i, 1, *y));
+        // Merge while the last cluster overlaps the one before it.
+        while clusters.len() > 1 {
+            let (s2, n2, _) = clusters[clusters.len() - 1];
+            let (s1, n1, t1) = clusters[clusters.len() - 2];
+            let t2 = cluster_top(&rows[s2..s2 + n2], gap);
+            if t1 + gap * n1 as f32 <= t2 {
+                let last = clusters.len() - 1;
+                clusters[last].2 = t2;
+                break;
+            }
+            clusters.pop();
+            clusters.pop();
+            let n = n1 + n2;
+            clusters.push((s1, n, cluster_top(&rows[s1..s1 + n], gap)));
+        }
+        if clusters.len() == 1 {
+            let (s, n, _) = clusters[0];
+            clusters[0].2 = cluster_top(&rows[s..s + n], gap);
         }
     }
-    rows
+    let mut out: Vec<(u32, f32)> = Vec::new();
+    for (s, n, t) in clusters {
+        for k in 0..n {
+            out.push((rows[s + k].0, t + gap * k as f32));
+        }
+    }
+    // Within the frame: push down from the top edge, then up from the bottom edge.
+    for i in 0..out.len() {
+        let floor = if i == 0 { lo } else { out[i - 1].1 + gap };
+        if out[i].1 < floor {
+            out[i].1 = floor;
+        }
+    }
+    for i in (0..out.len()).rev() {
+        let ceil = if i + 1 == out.len() {
+            hi
+        } else {
+            out[i + 1].1 - gap
+        };
+        if out[i].1 > ceil {
+            out[i].1 = ceil;
+        }
+    }
+    out
+}
+
+/// The top baseline of a cluster of labels spread `gap` apart around their mean wanted height.
+fn cluster_top(rows: &[(u32, f32)], gap: f32) -> f32 {
+    let mean = rows.iter().map(|r| r.1).sum::<f32>() / rows.len() as f32;
+    mean - gap * (rows.len() - 1) as f32 / 2.0
 }
 
 /// Nice `1 / 2 / 5 × 10^k` tick values (+ their compact labels) inside a log scale `[10^lmin, 10^lmax]`.
@@ -3524,6 +3655,33 @@ mod tests {
         out
     }
 
+    /// Every text object of a page stream with its text-matrix origin: `(x, y, text)` (PDF
+    /// coordinates), the text decoded as in [`shown_text`].
+    fn placed_text(stream: &[u8]) -> Vec<(f32, f32, String)> {
+        let text = String::from_utf8_lossy(stream);
+        let texts = shown_text(stream);
+        let mut out = Vec::new();
+        for (block, shown) in text.split("BT").skip(1).zip(texts) {
+            let Some(tm) = block.split(" Tm").next() else {
+                continue;
+            };
+            let nums: Vec<f32> = tm
+                .split_whitespace()
+                .rev()
+                .take(2)
+                .filter_map(|n| n.parse().ok())
+                .collect();
+            if nums.len() == 2 {
+                out.push((
+                    nums[1],
+                    nums[0],
+                    String::from_utf8_lossy(&shown).to_string(),
+                ));
+            }
+        }
+        out
+    }
+
     /// Whether one text object of [`shown_text`] carries `s`.
     fn shows(objects: &[Vec<u8>], s: &str) -> bool {
         let needle = winansi(s);
@@ -3548,12 +3706,21 @@ mod tests {
             contains(&pages[1], "0 0.16 0.52 rg"),
             "the judged colour is set"
         );
-        // No sigil on page 1 without a judged growth: still the note? The demo judges none —
-        // an absent judgment stays a plain « — ».
+        // The demo judges no growth: page 1 shows no « * », so no note there (the note appears
+        // iff a sigil does — G3 review); an absent judgment stays a plain « — ».
         assert!(shows(
             &shown_text(&pages[0]),
             "(2) Croissance estimée des ventes : —"
         ));
+        assert!(!contains(&pages[0], JUDGED_NOTE));
+        // No judged input in §4 either: no note on page 2.
+        let mut bare = demo_study();
+        bare.judgment.judged_avg_high_pe = None;
+        bare.judgment.judged_avg_low_pe = None;
+        bare.judgment.estimated_high_eps = None;
+        bare.judgment.estimated_low_eps = None;
+        let bytes = render_study_pdf(&bare, NumberStyle::Point).unwrap();
+        assert!(!contains(&page_streams(&bytes)[1], JUDGED_NOTE));
         let mut s = demo_study();
         s.judgment.projected_eps_growth_pct = Some(money_of("12.5"));
         let bytes = render_study_pdf(&s, NumberStyle::Comma).unwrap();
@@ -3611,7 +3778,7 @@ mod tests {
     fn a_grid_figure_is_never_cut_it_shrinks_whole_to_its_padded_room() {
         // The annexe sales of a JPY issuer: 14 digits in a 70 pt column at 9 pt.
         let col = 70.0;
-        let (lines, size) = cell_layout("31234567890123", col, FONT);
+        let (lines, size) = cell_layout("31234567890123", col, FONT, false);
         assert_eq!(lines, vec!["31234567890123".to_string()], "one line, whole");
         assert!((MIN_FIGURE_FONT..FONT).contains(&size));
         // Shrunk to the PADDED width: it ends on the column's normal right edge, like its
@@ -3622,22 +3789,22 @@ mod tests {
         let short = text_width("180", FONT);
         assert_eq!(cell_x(true, 0.0, col, short) + short, col - CELL_PAD);
         // A figure with its unit shrinks whole, the unit on the number's line.
-        let (lines, _) = cell_layout("1234,5 %", 25.0, SMALL);
+        let (lines, _) = cell_layout("1234,5 %", 25.0, SMALL, false);
         assert_eq!(lines, vec!["1234,5 %".to_string()]);
         // Past the smallest type the figure is printed whole at that size, on ONE line — never
         // split into pieces reading as two numbers — keeping its right edge (across the left rule).
         let long = "12345678901234567890";
-        let (lines, size) = cell_layout(long, 20.0, FONT);
+        let (lines, size) = cell_layout(long, 20.0, FONT, false);
         assert_eq!(size, MIN_FIGURE_FONT);
         assert_eq!(lines, vec![long.to_string()]);
         let w = text_width(long, size);
         assert!(w > 20.0);
         assert_eq!(cell_x(true, 0.0, 20.0, w) + w, 20.0 - CELL_PAD);
         // A figure among words is never split either.
-        let (lines, _) = cell_layout("soit 12345678901234567890 au total", 20.0, FONT);
+        let (lines, _) = cell_layout("soit 12345678901234567890 au total", 20.0, FONT, false);
         assert!(lines.contains(&long.to_string()), "{lines:?}");
         // A label without a digit may still end in « … ».
-        let (lines, _) = cell_layout("Supercalifragilistique", 40.0, FONT);
+        let (lines, _) = cell_layout("Supercalifragilistique", 40.0, FONT, false);
         assert!(lines[0].ends_with('…'));
         // End to end: the study annexe prints the 14-digit figure whole, grouped in the reader's
         // format (G1 I) — the no-break space never breaks the figure.
@@ -3653,20 +3820,23 @@ mod tests {
     #[test]
     fn a_degenerate_column_never_erases_a_cells_text_or_absence() {
         // No room at all: the text as is — the absence mark « — » above all.
-        assert_eq!(cell_layout(EM_DASH, 1.0, FONT).0, vec![EM_DASH.to_string()]);
         assert_eq!(
-            cell_layout(EM_DASH, -4.0, FONT).0,
+            cell_layout(EM_DASH, 1.0, FONT, false).0,
+            vec![EM_DASH.to_string()]
+        );
+        assert_eq!(
+            cell_layout(EM_DASH, -4.0, FONT, false).0,
             vec![EM_DASH.to_string()]
         );
         // The padding leaves no room (8 pt column): the room between the rules is used, and
         // neither a figure nor a word comes out empty.
-        let (lines, _) = cell_layout("12 abc", 8.0, FONT);
+        let (lines, _) = cell_layout("12 abc", 8.0, FONT, false);
         assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
         assert!(lines.contains(&"12".to_string()));
         // A word narrower than nothing but « … » is kept rather than blanked.
-        let (lines, _) = cell_layout("en hausse", 12.0, SMALL);
+        let (lines, _) = cell_layout("en hausse", 12.0, SMALL, false);
         assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
-        let (lines, _) = cell_layout("— · —", 6.0, FONT);
+        let (lines, _) = cell_layout("— · —", 6.0, FONT, false);
         assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
     }
 
@@ -3993,10 +4163,27 @@ mod tests {
         let years: Vec<i32> = axis_years(2021, 2025).collect();
         assert_eq!(years.first(), Some(&2021));
         assert_eq!(years.last(), Some(&(2025 + h)));
+        // Every year of the axis is labelled once, on one baseline, left to right, one year's
+        // width apart — the forecast years included.
         let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
-        let page1 = &page_streams(&bytes)[0];
-        for y in 2021..=2025 + h {
-            assert!(contains(page1, &y.to_string()), "the axis labels {y}");
+        let placed = placed_text(&page_streams(&bytes)[0]);
+        let labels: Vec<(f32, f32)> = (2021..=2025 + h)
+            .map(|y| {
+                let at: Vec<&(f32, f32, String)> =
+                    placed.iter().filter(|p| p.2 == y.to_string()).collect();
+                assert_eq!(at.len(), 1, "the year {y} is labelled once");
+                (at[0].0, at[0].1)
+            })
+            .collect();
+        let baseline = labels[0].1;
+        let step = labels[1].0 - labels[0].0;
+        assert!(step > 10.0);
+        for w in labels.windows(2) {
+            assert!((w[0].1 - baseline).abs() < 0.01, "one baseline");
+            assert!(
+                ((w[1].0 - w[0].0) - step).abs() < 0.5,
+                "evenly spaced: {labels:?}"
+            );
         }
         let minor = minor_ticks(0.0, 2.0);
         assert_eq!(
@@ -4018,13 +4205,69 @@ mod tests {
     }
 
     #[test]
+    fn a_bold_cell_is_laid_out_by_the_bold_metrics() {
+        // G3 review: bold is wider — a text that just fits in the regular face wraps (or
+        // shrinks) in bold, and is never drawn across its rule.
+        let s = "Rendement annuel total";
+        let col = text_width(s, SMALL) + 2.0 * GRID_INSET + 0.5;
+        assert!(text_width_bold(s, SMALL) > text_width(s, SMALL));
+        assert_eq!(cell_layout(s, col, SMALL, false).0.len(), 1);
+        let (lines, _) = cell_layout(s, col, SMALL, true);
+        for l in &lines {
+            assert!(
+                text_width_bold(l, SMALL) <= col - 2.0 * CELL_PAD + 0.01,
+                "{l}"
+            );
+        }
+        assert!(lines.len() > 1);
+    }
+
+    #[test]
+    fn a_non_zero_million_figure_is_never_printed_zero() {
+        // G3 review: ± 4 000 is 0,004 M — never « 0 »; the sign stays; two decimals otherwise.
+        let m = |s: &str| NumberStyle::Comma.millions(Some(money_of(s)));
+        assert_eq!(m("4000"), "0,004");
+        assert_eq!(m("-3500"), "-0,0035");
+        assert_eq!(m("0.5"), "0,0000005");
+        assert_eq!(m("6910000000"), "6\u{00A0}910");
+        assert_eq!(m("12345678"), "12,35");
+        assert_eq!(m("0"), "0");
+        assert_eq!(NumberStyle::Comma.millions(None), EM_DASH);
+    }
+
+    #[test]
     fn the_guide_labels_never_print_over_each_other() {
         // Two guides ending 1 pt apart: their labels are pushed a line apart, the flatter below.
-        let rows = guide_label_rows(&[(5, 300.0), (10, 299.0), (15, 250.0)], 6.5);
-        let y = |rate| rows.iter().find(|r| r.0 == rate).unwrap().1;
-        assert_eq!(y(5), 300.0);
-        assert!(y(5) - y(10) >= 6.5 - 1e-3);
-        assert_eq!(y(15), 250.0, "a label with room keeps its height");
+        // Two guides ending 1 pt apart: spread around their mean (up AND down), in order.
+        let rows = guide_label_rows(&[(5, 300.0), (10, 299.0), (15, 250.0)], 6.5, 50.0, 700.0);
+        let y = |rows: &[(u32, f32)], rate| rows.iter().find(|r| r.0 == rate).unwrap().1;
+        assert!(y(&rows, 5) - y(&rows, 10) >= 6.5 - 1e-3);
+        assert!(
+            (y(&rows, 5) + y(&rows, 10)) / 2.0 - 299.5 < 1e-3,
+            "centred on their mean"
+        );
+        assert!(
+            y(&rows, 5) > 300.0 && y(&rows, 10) < 299.0,
+            "moved both ways"
+        );
+        assert_eq!(y(&rows, 15), 250.0, "a label with room keeps its height");
+        // Many decades: the steep guides crowd at the frame's top — every label stays inside
+        // [top, bottom], a gap apart, in the guides' order.
+        let top = 60.0;
+        let crowded: Vec<(u32, f32)> = GUIDE_RATES_PCT
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (*r, top - 30.0 + i as f32 * 0.5))
+            .collect();
+        let rows = guide_label_rows(&crowded, 6.5, top, 700.0);
+        for w in rows.windows(2) {
+            assert!(w[1].1 - w[0].1 >= 6.5 - 1e-3, "{rows:?}");
+        }
+        assert!(rows.iter().all(|r| r.1 >= top && r.1 <= 700.0), "{rows:?}");
+        // …and at the bottom edge too.
+        let low: Vec<(u32, f32)> = crowded.iter().map(|(r, y)| (*r, y + 700.0)).collect();
+        let rows = guide_label_rows(&low, 6.5, top, 700.0);
+        assert!(rows.iter().all(|r| r.1 <= 700.0 && r.1 >= top), "{rows:?}");
     }
 
     #[test]

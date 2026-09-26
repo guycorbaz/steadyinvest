@@ -1230,6 +1230,10 @@ export global Comparison {
     in-out property <[ComparisonHeader]> columns;
     in-out property <[string]> cells;
     in-out property <int> column-count;
+    // A « * » (judged value) is shown in the growth group (rows 2 / 4) / the price group (rows
+    // 12 / 14): its note is shown there, and only then (G3 review).
+    in-out property <bool> growth-judged;
+    in-out property <bool> price-judged;
     in-out property <bool> currency-mix;
     in-out property <string> date;
     in-out property <string> notice;

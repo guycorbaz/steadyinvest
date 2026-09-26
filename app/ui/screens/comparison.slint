@@ -72,10 +72,10 @@ component CmpRow inherits HorizontalLayout {
     }
 }
 
-// The judged-value sigil explained, under each group that carries one (the PDF's note, word for
-// word — report `JUDGED_NOTE`).
+// The judged-value sigil explained, under each group that shows one (the PDF's note, word for
+// word — report `JUDGED_NOTE`, tied by `the_screens_judged_note_is_the_reports`).
 component JudgedNote inherits Text {
-    text: @tr("* valeur jugée par l'analyste (les calculs l'utilisent)");
+    text: @tr("* valeur jugée par l'analyste");
     color: Tokens.text-mid;
     font-size: Tokens.font-caption;
     wrap: word-wrap;
@@ -176,7 +176,8 @@ export component ComparisonScreen inherits Rectangle {
                 CmpRow { number: 2; label: @tr("Croissance estimée des ventes"); }
                 CmpRow { number: 3; label: @tr("Croissance historique du BPA"); }
                 CmpRow { number: 4; label: @tr("Croissance estimée du BPA"); }
-                JudgedNote { }
+                // The note iff a « * » is shown in the group (G3 review — the PDF's rule).
+                if Comparison.growth-judged: JudgedNote { }
             }
             if Comparison.columns.length > 0: PanelCard {
                 title: @tr("Gestion (section 2)");
@@ -201,11 +202,13 @@ export component ComparisonScreen inherits Rectangle {
                 CmpRow { number: 8; label: @tr("BPA total estimé sur 5 ans"); }
                 CmpRow { number: 9; label: @tr("Fourchette de cours sur 5 ans"); }
                 CmpRow { number: 10; label: @tr("Cours actuel"); }
-                CmpRow { number: 11; label: @tr("PER le plus haut"); }
+                // G3 review: 11 / 13 / 15 name their source (the §3 history), beside the judged
+                // 12 / 14 — the PDF's words.
+                CmpRow { number: 11; label: @tr("PER le plus haut sur 5 ans"); }
                 CmpRow { number: 12; label: @tr("PER haut moyen jugé"); }
-                CmpRow { number: 13; label: @tr("PER moyen"); }
+                CmpRow { number: 13; label: @tr("PER moyen historique (§3)"); }
                 CmpRow { number: 14; label: @tr("PER bas moyen jugé"); }
-                CmpRow { number: 15; label: @tr("PER le plus bas"); }
+                CmpRow { number: 15; label: @tr("PER le plus bas sur 5 ans"); }
                 CmpRow { number: 16; label: @tr("PER actuel"); }
                 CmpRow { number: 17; label: @tr("Zone basse"); }
                 CmpRow { number: 18; label: @tr("Zone médiane"); }
@@ -214,7 +217,7 @@ export component ComparisonScreen inherits Rectangle {
                 CmpRow { number: 21; label: @tr("Ratio hausse / baisse"); strong: true; }
                 CmpRow { number: 22; label: @tr("Rendement présent"); strong: true; }
                 CmpRow { number: 23; label: @tr("Rendement annuel total estimé"); strong: true; }
-                JudgedNote { }
+                if Comparison.price-judged: JudgedNote { }
             }
             if Comparison.columns.length > 0: PanelCard {
                 title: @tr("Autres");

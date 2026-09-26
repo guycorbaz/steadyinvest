@@ -425,8 +425,26 @@ mod tests {
         let high = j.judged_avg_high_pe.unwrap().as_decimal();
         let est_high = o.growth.estimated_high_eps.unwrap();
         assert_eq!(o.risk_reward.forecast_high, Some(high * est_high));
-        assert!(col.rows[11].ends_with(steadyinvest_report::JUDGED_SIGIL));
-        assert!(col.rows[1].ends_with(steadyinvest_report::JUDGED_SIGIL) || col.rows[1].is_empty());
+        assert_eq!(
+            col.rows[11],
+            format!(
+                "{}{}",
+                fmt(Some(high), DisplayField::PeRatio, F),
+                steadyinvest_report::JUDGED_SIGIL
+            )
+        );
+        // Row 2: the judged sales growth, exactly — the worked example judges one.
+        let sales = j
+            .projected_sales_growth_pct
+            .expect("the demo judges the sales growth");
+        assert_eq!(
+            col.rows[1],
+            format!(
+                "{}{}",
+                fmt_pct(Some(sales.as_decimal()), F),
+                steadyinvest_report::JUDGED_SIGIL
+            )
+        );
         // No judgment: « — », never a sigil on an absence.
         study.judgment.judged_avg_high_pe = None;
         study.judgment.projected_sales_growth_pct = None;
@@ -434,6 +452,15 @@ mod tests {
         let col = comparison_column(&study, &frame, F);
         assert_eq!(col.rows[11], "");
         assert_eq!(col.rows[1], "");
+    }
+
+    #[test]
+    fn the_screens_judged_note_is_the_reports() {
+        // One text on the three surfaces (G3 review): the screen's `JudgedNote` literal is
+        // report `JUDGED_NOTE`, word for word.
+        let slint = include_str!("../../ui/screens/comparison.slint");
+        let literal = format!("@tr(\"{}\")", steadyinvest_report::JUDGED_NOTE);
+        assert!(slint.contains(&literal), "comparison.slint lacks {literal}");
     }
 
     #[test]
