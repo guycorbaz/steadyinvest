@@ -61,7 +61,9 @@ Provider mappings *(ssg-1.2.0)*:
 - **EODHD — prices.** The daily bars are reduced into the fiscal years of the **income statement's**
   yearly dates (the statement of the year's sales and EPS; a date served only by the balance sheet
   or the cash flow is no fiscal-year end). Between two reported ends more than 18 months apart
-  (a missing statement), one-year periods are filled in; a shorter gap is one reported period.
+  (560 days, with room for a 52/53-week year's drift: a missing statement), one-year periods are
+  filled in; a shorter gap is one reported period. Two reported ends within 14 days of each other
+  are one end served twice: the later one stands.
   A response without any yearly income statement falls back to calendar years: there is no fiscal
   calendar to follow, and such a response has no sales, so its rows never enter a study.
 - **EODHD — EPS.** The reported diluted EPS is computed from one fiscal year's statements of the

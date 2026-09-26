@@ -241,6 +241,13 @@ pub(crate) fn bar_date_span(
     })
 }
 
+/// The longest period two consecutive reported ends may span and still be ONE reported period:
+/// 18 months (the longest transition year, UK accounts), with room for a 52/53-week year's drift.
+const LONGEST_REPORTED_PERIOD_DAYS: i64 = 560;
+
+/// Two reported fiscal-year ends this close are one end served twice (see [`FiscalCalendar::new`]).
+const NEAR_DUPLICATE_END_DAYS: i64 = 14;
+
 /// A company's fiscal calendar, read off the fiscal-year end dates its statements report.
 ///
 /// A fiscal year is labelled as [`fiscal_label`] names it (the calendar year its END falls in — NVDA's
@@ -287,17 +294,32 @@ impl FiscalCalendar {
         let mut ends: Vec<NaiveDate> = fiscal_ends.to_vec();
         ends.sort();
         ends.dedup();
+        // Two reported ends within a fortnight are ONE fiscal-year end served twice (a restated
+        // row, a provider quirk on either side of New Year): the later one stands, and no period of
+        // a few days is cut between them — it would take the whole year's prices with it.
+        let mut kept: Vec<NaiveDate> = Vec::with_capacity(ends.len());
+        for end in ends {
+            if let Some(prev) = kept.last_mut()
+                && (end - *prev).num_days() <= NEAR_DUPLICATE_END_DAYS
+            {
+                *prev = end;
+            } else {
+                kept.push(end);
+            }
+        }
+        let ends = kept;
         let (&first, &last) = (ends.first()?, ends.last()?);
         let mut all: Vec<NaiveDate> = Vec::with_capacity(ends.len() + 8);
         // Gaps: from each reported end, one year at a time while the next reported end is more than
         // a year and a half away (a missing statement leaves ~24 months; a transition year of up
-        // to 18 months is one reported period, never cut).
+        // to 18 months is one reported period, never cut). Counted in DAYS, not calendar months:
+        // 2020-06-30 + 18 months is 2021-12-30 for chrono, which would cut the 18-month
+        // transition year ending 2021-12-31.
         for pair in ends.windows(2) {
             let mut cursor = pair[0];
             all.push(cursor);
             while let Some(next) = cursor.checked_add_months(year) {
-                let slack = next.checked_add_months(chrono::Months::new(6));
-                if slack.is_none_or(|s| s >= pair[1]) {
+                if (pair[1] - cursor).num_days() <= LONGEST_REPORTED_PERIOD_DAYS {
                     break;
                 }
                 all.push(next);
@@ -830,6 +852,42 @@ mod tests {
         );
         let cal = FiscalCalendar::new(&ends, bar_date_span(Some(&bars), "date")).unwrap();
         assert_eq!(cal.period_months(ymd("2022-02-28")), Some(14));
+    }
+
+    /// G3 re-review: an 18-month transition year from a 30-day month end (2020-06-30 → 2021-12-31)
+    /// is one period — chrono's month arithmetic (2021-12-30) no longer cuts it.
+    #[test]
+    fn an_eighteen_month_transition_from_a_thirty_day_month_is_one_period() {
+        let ends = [ymd("2019-06-30"), ymd("2020-06-30"), ymd("2021-12-31")];
+        let bars = json!([
+            { "date": "2020-09-01", "high": "30", "low": "2" },
+            { "date": "2021-09-01", "high": "7", "low": "6" },
+        ]);
+        let (h, l) = fiscal_reduce(&bars, &[], &ends);
+        assert_eq!((h[&2021], l[&2021]), (Decimal::from(30), Decimal::from(2)));
+        let cal = FiscalCalendar::new(&ends, bar_date_span(Some(&bars), "date")).unwrap();
+        assert_eq!(cal.period_months(ymd("2021-12-31")), Some(18));
+    }
+
+    /// G3 re-review: one December year end served twice across New Year (2023-12-31 and
+    /// 2024-01-02, both « 2023 ») is one end: « 2023 » keeps its whole year of prices, 12 months.
+    #[test]
+    fn a_year_end_served_twice_across_new_year_is_one_end() {
+        let ends = [
+            ymd("2022-12-31"),
+            ymd("2023-12-31"),
+            ymd("2024-01-02"),
+            ymd("2024-12-31"),
+        ];
+        let bars = json!([
+            { "date": "2023-06-01", "high": "50", "low": "2" },
+            { "date": "2024-06-01", "high": "7", "low": "6" },
+        ]);
+        let (h, l) = fiscal_reduce(&bars, &[], &ends);
+        assert_eq!((h[&2023], l[&2023]), (Decimal::from(50), Decimal::from(2)));
+        assert_eq!((h[&2024], l[&2024]), (Decimal::from(7), Decimal::from(6)));
+        let cal = FiscalCalendar::new(&ends, bar_date_span(Some(&bars), "date")).unwrap();
+        assert_eq!(cal.period_months(ymd("2024-01-02")), Some(12));
     }
 
     /// A 52/53-week year ending in the first week of the next month keeps the month it closes.
