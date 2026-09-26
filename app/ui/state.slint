@@ -559,7 +559,8 @@ export global Studies {
     // soft-lock notice, an edit/undo/drag failure…). Written only through Rust's `study_notice`
     // (the F4 slot rule lives there); emptied whenever a study or the demo opens. Empty = hidden.
     in-out property <string> study-notice;
-    // True when the open journal is read-only (newer-schema file) — creation is refused.
+    // True when the open journal is read-only (a newer-schema file, or a file / directory
+    // protected against writing) — creation is refused.
     in-out property <bool> read-only;
 
     // ── Reopened study → the faithful §1–§5 form (Story 2.3, replaces the 2.2 minimal restore) ──
