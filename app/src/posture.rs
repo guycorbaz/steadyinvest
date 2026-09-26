@@ -732,9 +732,12 @@ mod tests {
         // 20's words, rows 12 / 14's labels and the counts line are reworded in place). Its G3
         // review keeps the target on the blocked-share row (« … · cible {} % »): 1001 + 1 =
         // 1002, measured (the judged note, rows 11 / 13 / 15, the counts line and the
-        // unclassified bands are reworded in place).
+        // unclassified bands are reworded in place). The 2026-09-26 on-screen defect names the
+        // cause of a read-only dossier in its two bands (the dialog, « Portefeuilles ») — a
+        // protected file, a protected directory, beside the newer schema: 1002 + 4 = 1006,
+        // measured.
         assert!(
-            total >= 1002,
+            total >= 1006,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

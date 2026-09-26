@@ -331,9 +331,15 @@ export component ModalDialog inherits Rectangle {
                 }
                 // G1 review (Guy's decision 5): on a read-only dossier the write is blocked — the
                 // dialog names the reason instead of a mute greyed verb.
+                // The reason is the cause in force (2026-09-26): a protected file or directory is
+                // not a newer version — keyed by `read-only-cause`, never assumed.
                 if Dialog.kind != "notice" && Holdings.read-only: StatusBand {
                     icon: "⊘";
-                    text: @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; rien ne peut y être enregistré.");
+                    text: Holdings.read-only-cause == "file"
+                        ? @tr("Dossier en lecture seule : son fichier est protégé contre l'écriture ; rien ne peut y être enregistré.")
+                        : Holdings.read-only-cause == "directory"
+                        ? @tr("Dossier en lecture seule : son répertoire est protégé contre l'écriture ; rien ne peut y être enregistré.")
+                        : @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; rien ne peut y être enregistré.");
                 }
                 if Dialog.kind == "form" && Dialog.context != "": Text {
                     text: Dialog.context;
