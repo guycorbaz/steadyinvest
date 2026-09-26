@@ -720,9 +720,12 @@ mod tests {
         // fix/reports-naic (Guy's decisions, 2026-09-26): the comparison's judged-value note
         // (« * valeur jugée par l'analyste … »), the review share row whose amount stands while
         // its share is blocked, and « Total global : … (100 %) »: 998 + 3 = 1001, measured (row
-        // 20's words, rows 12 / 14's labels and the counts line are reworded in place).
+        // 20's words, rows 12 / 14's labels and the counts line are reworded in place). Its G3
+        // review keeps the target on the blocked-share row (« … · cible {} % »): 1001 + 1 =
+        // 1002, measured (the judged note, rows 11 / 13 / 15, the counts line and the
+        // unclassified bands are reworded in place).
         assert!(
-            total >= 1001,
+            total >= 1002,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

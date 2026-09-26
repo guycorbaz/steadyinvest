@@ -6486,6 +6486,25 @@ fn an_unclassifiable_security_lands_in_the_honest_bucket_with_its_reason() {
             }
         ),
     }
+    // G3 review: each keeps its amount and share — the size block adds up to the total.
+    let total: Decimal = view
+        .unclassified
+        .iter()
+        .map(|u| u.invested.unwrap())
+        .chain([&view.small, &view.medium, &view.large].map(|c| c.invested.unwrap()))
+        .sum();
+    assert_eq!(Some(total), view.global_invested);
+    let nostudy = view
+        .unclassified
+        .iter()
+        .find(|u| u.ticker == "NOSTUDY")
+        .unwrap();
+    assert_eq!(nostudy.invested, Some(Decimal::from(100)));
+    assert_eq!(
+        nostudy.share_pct,
+        steadyinvest_core::risk::share_pct(Decimal::from(100), Decimal::from(300)),
+        "the concentration rows' own share"
+    );
     // No class received them — never a default class (0 % of a present total).
     assert_eq!(view.small.share_pct, Some(Decimal::ZERO));
     assert_eq!(view.medium.share_pct, Some(Decimal::ZERO));

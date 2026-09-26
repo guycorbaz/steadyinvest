@@ -55,6 +55,11 @@ pub enum UnclassifiedReason {
 pub struct UnclassifiedRow {
     pub ticker: String,
     pub reason: UnclassifiedReason,
+    /// The security's invested capital in the reference currency, and its share of the total —
+    /// known even when its SIZE is not (G3 review: the size block's rows add up to the total,
+    /// the « non classé » ones included). Absent as in the concentration rows.
+    pub invested: Option<Decimal>,
+    pub share_pct: Option<Decimal>,
 }
 
 /// One size class's slice of the mix: its share of the global invested capital. Absent when any
@@ -256,6 +261,11 @@ impl JournalState {
                 Err(_) => {
                     unclassified.push(UnclassifiedRow {
                         ticker: ticker.clone(),
+                        invested: acc.invested,
+                        share_pct: acc
+                            .invested
+                            .zip(global_invested)
+                            .and_then(|(v, g)| share_pct(v, g)),
                         reason: UnclassifiedReason::StudyUnavailable,
                     });
                     continue;
@@ -264,6 +274,11 @@ impl JournalState {
             let Some(study) = study else {
                 unclassified.push(UnclassifiedRow {
                     ticker: ticker.clone(),
+                    invested: acc.invested,
+                    share_pct: acc
+                        .invested
+                        .zip(global_invested)
+                        .and_then(|(v, g)| share_pct(v, g)),
                     reason: UnclassifiedReason::NoStudy,
                 });
                 continue;
@@ -283,6 +298,11 @@ impl JournalState {
             else {
                 unclassified.push(UnclassifiedRow {
                     ticker: ticker.clone(),
+                    invested: acc.invested,
+                    share_pct: acc
+                        .invested
+                        .zip(global_invested)
+                        .and_then(|(v, g)| share_pct(v, g)),
                     reason: UnclassifiedReason::NoSales,
                 });
                 continue;
@@ -300,6 +320,11 @@ impl JournalState {
                         // « non classé » row, never blamed for the absent shares.
                         unclassified.push(UnclassifiedRow {
                             ticker: ticker.clone(),
+                            invested: acc.invested,
+                            share_pct: acc
+                                .invested
+                                .zip(global_invested)
+                                .and_then(|(v, g)| share_pct(v, g)),
                             reason: UnclassifiedReason::MissingRate(
                                 missing.into_iter().next().unwrap_or_default(),
                             ),
@@ -314,6 +339,11 @@ impl JournalState {
                 // d'affaires indisponible » would be factually wrong here).
                 unclassified.push(UnclassifiedRow {
                     ticker: ticker.clone(),
+                    invested: acc.invested,
+                    share_pct: acc
+                        .invested
+                        .zip(global_invested)
+                        .and_then(|(v, g)| share_pct(v, g)),
                     reason: UnclassifiedReason::Unconvertible,
                 });
                 continue;

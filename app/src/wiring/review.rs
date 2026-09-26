@@ -340,9 +340,17 @@ pub(crate) fn push_review(
                 state::UnclassifiedReason::Unconvertible => ("unconvertible", String::new()),
                 state::UnclassifiedReason::MissingRate(pair) => ("missing_rate", pair.clone()),
             };
+            // G3 review: its amount and share stand (the size rows add up to the total).
             ReviewShareRow {
                 reason: reason.into(),
-                ..share_row(u.ticker.clone(), None, None, String::new(), missing, false)
+                ..share_row(
+                    u.ticker.clone(),
+                    u.invested,
+                    u.share_pct,
+                    String::new(),
+                    missing,
+                    false,
+                )
             }
         })
         .collect();
@@ -952,6 +960,25 @@ mod tests {
         let a = "EUR → CHF".to_string();
         let b = "USD → CHF".to_string();
         assert_eq!(union_pairs([&b, &a, &b]), vec![a.clone(), b.clone()]);
+    }
+
+    #[test]
+    fn the_verdict_counts_state_the_data_never_the_criteria() {
+        // G3 review: `count-full` counts core's integrity state (every load-bearing input
+        // validated and fresh, no reduced confidence) — never « remplit tous les critères ».
+        let slint = include_str!("../../ui/screens/review.slint");
+        let line = slint
+            .lines()
+            .find(|l| l.contains("{} positions · {} avec une étude"))
+            .expect("the counts line");
+        assert!(
+            line.contains("a toutes ses données validées et à jour"),
+            "{line}"
+        );
+        assert!(
+            !line.contains("remplit") && !line.contains("critère"),
+            "{line}"
+        );
     }
 
     #[test]
