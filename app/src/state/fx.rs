@@ -38,10 +38,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_fx_rates().map_err(|error| {
-            tracing::warn!("list_fx_rates failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_fx_rates()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_FX, error))
     }
 
     /// The FOREIGN currencies in use (Story 6.5, AC3): the effective currencies of the ACTIVE

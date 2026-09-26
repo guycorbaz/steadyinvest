@@ -31,10 +31,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_studies().map_err(|error| {
-            tracing::warn!("list_studies failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_studies()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_STUDIES, error))
     }
 
     /// Archive a study (Story 2.12, FR54): flip `status` to `"archived"` so it leaves the default
@@ -165,10 +164,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_judgment_snapshots(study_id).map_err(|error| {
-            tracing::warn!("list_judgment_snapshots({study_id}) failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_judgment_snapshots(study_id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HISTORY, error))
     }
 
     /// One FR51 snapshot's full state (issue #34, PR 2) — same tri-state contract as
@@ -177,10 +175,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(None);
         };
-        journal.get_judgment_snapshot(id).map_err(|error| {
-            tracing::warn!("get_judgment_snapshot({id}) failed: {error}");
-            error.to_string()
-        })
+        journal
+            .get_judgment_snapshot(id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HISTORY, error))
     }
 
     /// Fallible reopen (issue #95): `Ok(Some)` found, `Ok(None)` truly absent (also when no
@@ -190,9 +187,8 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(None);
         };
-        journal.get_study(id).map_err(|error| {
-            tracing::warn!("get_study({id}) failed: {error}");
-            error.to_string()
-        })
+        journal
+            .get_study(id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_STUDY, error))
     }
 }

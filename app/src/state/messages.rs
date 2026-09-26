@@ -45,6 +45,44 @@ pub const MSG_OPEN_PROTECTED_OUTDATED: &str = "Le fichier du dossier est protég
 /// A write the OS refused at the moment it happened (the protection changed after the open, or a
 /// protected backups folder) — named in French, the OS / SQLite cause logged, never shown.
 pub const MSG_WRITE_REFUSED_BY_SYSTEM: &str = "Le système a refusé l'écriture (emplacement protégé contre l'écriture) ; rien n'a été enregistré.";
+
+// ── No raw error text reaches the user (2026-09-26): a persistence / SQLite / file / provider
+//    error's Display is LOGGED, never shown. The user reads what failed ({what}) and, when a
+//    named cause applies, why ({cause}) — both registered here, selected from the TYPED error
+//    kind (`persistence::ErrorKind`, `std::io::ErrorKind`), never from its text. The posture
+//    test `no_error_display_reaches_a_user_string` keeps it so. ──
+
+/// A save failed for a named cause (`{cause}` is one of the `MSG_CAUSE_*` below).
+pub const MSG_SAVE_FAILED_CAUSE: &str = "L'enregistrement a échoué : {cause}.";
+/// A dossier could not be opened for a named cause.
+pub const MSG_JOURNAL_OPEN_FAILED_CAUSE: &str = "Le dossier n'a pas pu être ouvert : {cause}.";
+/// A read failed — `{what}` is one of the `MSG_SUBJECT_*` below.
+pub const MSG_READ_SUBJECT_FAILED: &str = "Lecture impossible : {what}.";
+/// A read failed for a named cause.
+pub const MSG_READ_SUBJECT_FAILED_CAUSE: &str = "Lecture impossible : {what} ; {cause}.";
+/// Cause: the journal is busy / locked by another access.
+pub const MSG_CAUSE_LOCKED: &str = "le dossier est verrouillé par un autre accès";
+/// Cause: the file is damaged or is not a journal.
+pub const MSG_CAUSE_CORRUPT: &str = "le fichier est endommagé ou n'est pas un dossier steadyinvest";
+/// Cause: the disk is full.
+pub const MSG_CAUSE_DISK_FULL: &str = "le disque est plein";
+/// Cause: the OS refuses the write.
+pub const MSG_CAUSE_PROTECTED: &str = "l'emplacement est protégé contre l'écriture";
+/// Cause: the file cannot be found or opened.
+pub const MSG_CAUSE_MISSING: &str = "le fichier est introuvable ou inaccessible";
+/// Cause: a newer version of the app wrote the data.
+pub const MSG_CAUSE_NEWER_DATA: &str = "des données ont été écrites par une version plus récente";
+/// Cause: the schema update of the file failed.
+pub const MSG_CAUSE_MIGRATION: &str = "la mise à niveau de son schéma a échoué";
+/// Subjects of a failed read.
+pub const MSG_SUBJECT_STUDIES: &str = "la liste des études";
+pub const MSG_SUBJECT_STUDY: &str = "l'étude";
+pub const MSG_SUBJECT_HISTORY: &str = "l'historique de l'étude";
+pub const MSG_SUBJECT_WATCHLIST: &str = "la liste de suivi";
+pub const MSG_SUBJECT_FX: &str = "les taux de change";
+pub const MSG_SUBJECT_PORTFOLIOS: &str = "les portefeuilles";
+pub const MSG_SUBJECT_HOLDINGS: &str = "les positions";
+pub const MSG_SUBJECT_TRANSACTIONS: &str = "les transactions";
 /// Startup: the configured journal file was unreadable, so the default journal is in use instead.
 pub const MSG_CONFIGURED_UNREADABLE: &str =
     "Le dossier configuré est illisible ; le dossier par défaut est utilisé.";
@@ -837,7 +875,9 @@ pub fn key_test_status(result: &Result<(), steadyinvest_ingestion::IngestionErro
         IngestionError::Provider(ProviderError::Forbidden { .. }) => MSG_KEY_FORBIDDEN,
         IngestionError::Provider(ProviderError::Quota { .. }) => MSG_KEY_OK_QUOTA,
         IngestionError::Provider(ProviderError::Network { .. }) => MSG_KEY_TEST_INCONCLUSIVE,
-        other => return MSG_PROVIDER_FAILED.replace("{cause}", &other.to_string()),
+        // Any other failure (no data for the symbol, an unreadable payload): its own cause-named
+        // notice — never the ingestion error's English Display (2026-09-26).
+        other => provider_failure_notice(other),
     };
     verdict.to_string()
 }
@@ -938,6 +978,25 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_STARTUP_DIR_PROTECTED,
     MSG_OPEN_PROTECTED_OUTDATED,
     MSG_WRITE_REFUSED_BY_SYSTEM,
+    MSG_SAVE_FAILED_CAUSE,
+    MSG_JOURNAL_OPEN_FAILED_CAUSE,
+    MSG_READ_SUBJECT_FAILED,
+    MSG_READ_SUBJECT_FAILED_CAUSE,
+    MSG_CAUSE_LOCKED,
+    MSG_CAUSE_CORRUPT,
+    MSG_CAUSE_DISK_FULL,
+    MSG_CAUSE_PROTECTED,
+    MSG_CAUSE_MISSING,
+    MSG_CAUSE_NEWER_DATA,
+    MSG_CAUSE_MIGRATION,
+    MSG_SUBJECT_STUDIES,
+    MSG_SUBJECT_STUDY,
+    MSG_SUBJECT_HISTORY,
+    MSG_SUBJECT_WATCHLIST,
+    MSG_SUBJECT_FX,
+    MSG_SUBJECT_PORTFOLIOS,
+    MSG_SUBJECT_HOLDINGS,
+    MSG_SUBJECT_TRANSACTIONS,
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,

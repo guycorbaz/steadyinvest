@@ -343,10 +343,11 @@ mod tests {
     }
 
     /// Representative `persistence::Error` instances. Covers every variant whose own prose the app
-    /// could surface in a banner. Since 2026-09-26 no save-failure path interpolates it any more
-    /// (`state::save_error` names the cause in French and LOGS the Display — SQLite's « attempt to
-    /// write a readonly database » had reached the refusal dialog); the open-failure notice still
-    /// appends it, so the scan stays. `Sqlite(rusqlite::Error)` cannot be constructed here
+    /// could surface in a banner. Since 2026-09-26 no user-visible string carries it any more
+    /// (the rails name the failure in French and LOG the Display — SQLite's « attempt to write a
+    /// readonly database » had reached the refusal dialog; `no_error_display_reaches_a_user_string`
+    /// keeps it so); the scan stays as defence in depth, the log being read by people too.
+    /// `Sqlite(rusqlite::Error)` cannot be constructed here
     /// (`app` has no `rusqlite` dep), so its static own-prefix is scanned as a literal instead; the
     /// variable tail is third-party `rusqlite` text, outside our signal.
     fn sample_persistence_error_messages() -> Vec<String> {
@@ -859,7 +860,7 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            193,
+            212,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -894,7 +895,11 @@ mod tests {
             // cause (MSG_READ_ONLY_FILE_WRITE, MSG_READ_ONLY_DIR_WRITE), the state lines
             // (MSG_STARTUP_FILE_PROTECTED, MSG_STARTUP_DIR_PROTECTED), the unmigratable open
             // (MSG_OPEN_PROTECTED_OUTDATED) and a write the OS refused on the spot
-            // (MSG_WRITE_REFUSED_BY_SYSTEM): 187 + 6 = 193, measured.
+            // (MSG_WRITE_REFUSED_BY_SYSTEM): 187 + 6 = 193, measured. No raw error Display reaches
+            // the user (same defect, closed everywhere): the save / open / read templates with a
+            // cause (MSG_SAVE_FAILED_CAUSE, MSG_JOURNAL_OPEN_FAILED_CAUSE, MSG_READ_SUBJECT_FAILED,
+            // MSG_READ_SUBJECT_FAILED_CAUSE), the seven cause kinds (MSG_CAUSE_*) and the eight
+            // read subjects (MSG_SUBJECT_*): 193 + 19 = 212, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }
@@ -953,5 +958,174 @@ mod tests {
         assert!(contains_word("zone-hold", "hold"));
         // Multi-word phrases match case-insensitively too.
         assert!(contains_word("mais Il Faut le noter", "il faut"));
+    }
+
+    // ── No raw error Display in a user-visible string (2026-09-26) ──
+    //
+    // A persistence / SQLite / file / serde / provider error's `Display` is English third-party
+    // text: it goes to the LOG, never into a String the app may show (a banner, a dialog, a
+    // notice, a status line, a PDF). The rails name what failed in French (`state::save_error`,
+    // `read_failure`, `open_error`, `io_save_error`, `provider_failure_notice`). This scan
+    // walks the app's Rust sources — outside logging macros, panics/asserts and test modules —
+    // for the shapes that carry such a Display into a String: `{error}` / `{e}` / `{err}` in a
+    // format string, `error.to_string()` / `e.to_string()` / `err.to_string()`.
+
+    /// Stderr-only sites, allowed by name with their reason: `(file, snippet)`.
+    const ERROR_DISPLAY_ALLOW: &[(&str, &str)] = &[
+        // `config::load`'s warning reaches stderr only (`main.rs` `eprintln!`), never the UI.
+        ("config.rs", "unreadable ({error}); defaults in effect"),
+        ("config.rs", "invalid ({error}); defaults in effect"),
+    ];
+
+    fn rust_sources() -> Vec<PathBuf> {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("src/ readable") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        files.sort();
+        files
+    }
+
+    /// `source` without `//` comments, without the bodies of the macros that never reach the
+    /// user (logging, stderr, panics, asserts), and without `#[cfg(test)] mod …` modules.
+    fn user_reachable_code(source: &str) -> String {
+        let uncommented: String = source
+            .lines()
+            .map(|line| match line.find("//") {
+                // Keep a `//` that sits inside a string literal (an odd count of quotes before it).
+                Some(i) if line[..i].matches('"').count() % 2 == 0 => &line[..i],
+                _ => line,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut code = uncommented;
+        // Drop a balanced `(...)` / `{...}` group opening at byte `open`.
+        fn drop_group(code: &mut String, start: usize, open: usize) {
+            let bytes = code.as_bytes();
+            let (o, c) = if bytes[open] == b'(' {
+                (b'(', b')')
+            } else {
+                (b'{', b'}')
+            };
+            let mut depth = 0usize;
+            let mut end = open;
+            for (i, &b) in bytes.iter().enumerate().skip(open) {
+                if b == o {
+                    depth += 1;
+                } else if b == c {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+            }
+            code.replace_range(start..=end, "");
+        }
+        for marker in ["#[cfg(test)]\nmod ", "#[cfg(test)]\n    mod "] {
+            while let Some(start) = code.find(marker) {
+                let open = start + code[start..].find('{').expect("test module body");
+                drop_group(&mut code, start, open);
+            }
+        }
+        for mac in [
+            "tracing::trace!(",
+            "tracing::debug!(",
+            "tracing::info!(",
+            "tracing::warn!(",
+            "tracing::error!(",
+            "eprintln!(",
+            "panic!(",
+            "unreachable!(",
+            "assert!(",
+            "assert_eq!(",
+            "assert_ne!(",
+            "debug_assert!(",
+        ] {
+            while let Some(start) = code.find(mac) {
+                drop_group(&mut code, start, start + mac.len() - 1);
+            }
+        }
+        code
+    }
+
+    /// Every error-Display shape in `code`, as the offending line.
+    fn error_display_sites(code: &str) -> Vec<String> {
+        const HOLES: &[&str] = &["{error}", "{e}", "{err}", "{error:?}", "{e:?}", "{err:?}"];
+        const TO_STRING: &[&str] = &["error.to_string()", "e.to_string()", "err.to_string()"];
+        let mut sites = Vec::new();
+        for line in code.lines() {
+            let hole = HOLES.iter().any(|h| line.contains(h));
+            let to_string = TO_STRING.iter().any(|t| {
+                line.match_indices(t).any(|(i, _)| {
+                    !line[..i]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
+                })
+            });
+            if hole || to_string {
+                sites.push(line.trim().to_string());
+            }
+        }
+        sites
+    }
+
+    #[test]
+    fn no_error_display_reaches_a_user_string() {
+        let mut offenders = Vec::new();
+        let files = rust_sources();
+        assert!(
+            files.len() >= 40,
+            "found only {} .rs files — scan broken?",
+            files.len()
+        );
+        for file in files {
+            let name = file.file_name().unwrap().to_string_lossy().into_owned();
+            // The gate itself, and the test-only rail suite.
+            if name == "posture.rs" || file.ends_with("state/tests.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&file).expect("source readable");
+            for site in error_display_sites(&user_reachable_code(&source)) {
+                let allowed = ERROR_DISPLAY_ALLOW
+                    .iter()
+                    .any(|(f, snippet)| *f == name && site.contains(snippet));
+                if !allowed {
+                    offenders.push(format!("{}: {site}", file.display()));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "an error's Display can reach a user-visible string — name it in French (a MSG_*), \
+             log the detail: {offenders:#?}"
+        );
+    }
+
+    #[test]
+    fn the_error_display_scan_sees_through_logging_and_tests_only() {
+        let leak = r#"let m = format!("{MSG_SAVE_FAILED} {error}");"#;
+        assert_eq!(error_display_sites(&user_reachable_code(leak)).len(), 1);
+        let leak = "journal.list().map_err(|e| e.to_string())?;";
+        assert_eq!(error_display_sites(&user_reachable_code(leak)).len(), 1);
+        let logged = "tracing::warn!(\n    \"read failed: {error}\"\n);";
+        assert!(error_display_sites(&user_reachable_code(logged)).is_empty());
+        let in_test = "#[cfg(test)]\nmod tests {\n    fn f() { let s = err.to_string(); }\n}\n";
+        assert!(error_display_sites(&user_reachable_code(in_test)).is_empty());
+        // A field or a longer name ending in `e` is not an error variable.
+        let not_error = "let k = base.to_string(); let v = self.e.to_string();";
+        assert!(error_display_sites(&user_reachable_code(not_error)).is_empty());
     }
 }

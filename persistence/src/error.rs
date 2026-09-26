@@ -137,20 +137,58 @@ pub enum Error {
     Restore { detail: String },
 }
 
+/// The KIND of a failure, for a caller that names causes in its own language (the app speaks
+/// French and never shows this crate's — or SQLite's — English Display, 2026-09-26). A typed
+/// classification, never a match on message text; `Other` when no named cause applies (the
+/// technical detail then lives in the log only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// The OS refuses the write: a protected file / directory / medium.
+    WriteProtected,
+    /// The journal is busy or locked by another access (SQLite BUSY/LOCKED, the instance lock).
+    Locked,
+    /// The file is damaged or is not a journal (SQLite CORRUPT/NOTADB, unparseable rows or meta).
+    Corrupt,
+    /// The disk is full (SQLite FULL).
+    DiskFull,
+    /// The file cannot be found or opened (SQLite CANTOPEN).
+    Missing,
+    /// A newer version of the app wrote the file or a row.
+    NewerData,
+    /// A schema update of the file failed.
+    Migration,
+    /// No named cause.
+    Other,
+}
+
 impl Error {
+    /// This failure's [`ErrorKind`].
+    pub fn kind(&self) -> ErrorKind {
+        use rusqlite::ErrorCode as C;
+        match self {
+            Error::WriteProtected { .. } => ErrorKind::WriteProtected,
+            Error::Sqlite(rusqlite::Error::SqliteFailure(code, _)) => match code.code {
+                C::ReadOnly | C::PermissionDenied => ErrorKind::WriteProtected,
+                C::DatabaseBusy | C::DatabaseLocked => ErrorKind::Locked,
+                C::DatabaseCorrupt | C::NotADatabase => ErrorKind::Corrupt,
+                C::DiskFull => ErrorKind::DiskFull,
+                C::CannotOpen => ErrorKind::Missing,
+                _ => ErrorKind::Other,
+            },
+            Error::LockHeld { .. } => ErrorKind::Locked,
+            Error::CorruptPayload { .. } | Error::CorruptJournalMeta { .. } => ErrorKind::Corrupt,
+            Error::NewerJournalSchema { .. } | Error::NewerRowSchema { .. } => ErrorKind::NewerData,
+            Error::Migration { .. } => ErrorKind::Migration,
+            _ => ErrorKind::Other,
+        }
+    }
+
     /// Whether this failure is the OS refusing a write — the API gate of a write-protected journal,
     /// or SQLite reporting a read-only database / a denied permission at write time (a file whose
     /// protection changed after it was opened). The app names this cause in French instead of
     /// surfacing SQLite's own English text (2026-09-26 on-screen defect).
     pub fn is_write_protected(&self) -> bool {
-        match self {
-            Error::WriteProtected { .. } => true,
-            Error::Sqlite(rusqlite::Error::SqliteFailure(code, _)) => matches!(
-                code.code,
-                rusqlite::ErrorCode::ReadOnly | rusqlite::ErrorCode::PermissionDenied
-            ),
-            _ => false,
-        }
+        self.kind() == ErrorKind::WriteProtected
     }
 }
 
@@ -351,6 +389,42 @@ mod tests {
         assert!(sqlite(rusqlite::ffi::SQLITE_PERM).is_write_protected());
         assert!(!sqlite(rusqlite::ffi::SQLITE_BUSY).is_write_protected());
         assert!(!Error::HoldingHasTransactions.is_write_protected());
+    }
+
+    #[test]
+    fn every_failure_has_a_typed_kind() {
+        let sqlite = |code| {
+            Error::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                None,
+            ))
+        };
+        use rusqlite::ffi;
+        assert_eq!(sqlite(ffi::SQLITE_BUSY).kind(), ErrorKind::Locked);
+        assert_eq!(sqlite(ffi::SQLITE_LOCKED).kind(), ErrorKind::Locked);
+        assert_eq!(sqlite(ffi::SQLITE_CORRUPT).kind(), ErrorKind::Corrupt);
+        assert_eq!(sqlite(ffi::SQLITE_NOTADB).kind(), ErrorKind::Corrupt);
+        assert_eq!(sqlite(ffi::SQLITE_FULL).kind(), ErrorKind::DiskFull);
+        assert_eq!(sqlite(ffi::SQLITE_CANTOPEN).kind(), ErrorKind::Missing);
+        assert_eq!(
+            sqlite(ffi::SQLITE_READONLY).kind(),
+            ErrorKind::WriteProtected
+        );
+        assert_eq!(sqlite(ffi::SQLITE_ERROR).kind(), ErrorKind::Other);
+        assert_eq!(Error::LockHeld { pid: 1 }.kind(), ErrorKind::Locked);
+        assert_eq!(
+            Error::CorruptPayload { detail: "x".into() }.kind(),
+            ErrorKind::Corrupt
+        );
+        assert_eq!(
+            Error::NewerRowSchema {
+                row_schema_version: 9,
+                supported: 1
+            }
+            .kind(),
+            ErrorKind::NewerData
+        );
+        assert_eq!(Error::HoldingHasTransactions.kind(), ErrorKind::Other);
     }
 
     #[test]

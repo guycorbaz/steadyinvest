@@ -551,10 +551,12 @@ impl JournalState {
         medium_max: Decimal,
     ) -> Result<PortfolioReviewFacts, String> {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-        let portfolios = journal.list_portfolios().map_err(|e| e.to_string())?;
+        let portfolios = journal
+            .list_portfolios()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_PORTFOLIOS, error))?;
         let holdings: Vec<_> = journal
             .list_all_holdings()
-            .map_err(|e| e.to_string())?
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HOLDINGS, error))?
             .into_iter()
             .filter(|h| h.sold_at.is_none())
             .collect();

@@ -49,10 +49,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_portfolios().map_err(|error| {
-            tracing::warn!("list_portfolios failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_portfolios()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_PORTFOLIOS, error))
     }
 
     /// The **active** portfolio (Story 6.1): the user-selected one when it still exists, else the
@@ -206,10 +205,9 @@ impl JournalState {
         let Some(portfolio) = self.try_active_portfolio()? else {
             return Ok(Vec::new());
         };
-        journal.list_holdings(portfolio.id).map_err(|error| {
-            tracing::warn!("list_holdings failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_holdings(portfolio.id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HOLDINGS, error))
     }
 
     /// The active portfolio's **sold (retired) positions** (issue #84, the « Positions vendues »
@@ -234,10 +232,7 @@ impl JournalState {
         };
         let mut sold: Vec<HoldingItem> = journal
             .list_all_holdings()
-            .map_err(|error| {
-                tracing::warn!("sold_holdings failed: {error}");
-                error.to_string()
-            })?
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HOLDINGS, error))?
             .into_iter()
             .filter(|h| h.portfolio_id == portfolio.id && h.sold_at.is_some())
             .collect();
@@ -685,7 +680,7 @@ impl JournalState {
         };
         let mut tickers: Vec<String> = journal
             .list_all_holdings()
-            .map_err(|error| error.to_string())?
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HOLDINGS, error))?
             .into_iter()
             .filter(|h| {
                 h.sold_at.is_none() && h.currency.is_none() && h.trailing_stop_level.is_some()

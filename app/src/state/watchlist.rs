@@ -25,10 +25,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_watch_items().map_err(|error| {
-            tracing::warn!("list_watch_items failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_watch_items()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_WATCHLIST, error))
     }
 
     /// The most-recent saved study whose ticker matches `ticker` **case-insensitively** (Story 4.1

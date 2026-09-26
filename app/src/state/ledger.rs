@@ -292,10 +292,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_transactions(holding_id).map_err(|error| {
-            tracing::warn!("list_transactions failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_transactions(holding_id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_TRANSACTIONS, error))
     }
 
     /// The holding's ledger rows for a WRITE rail (2026-07-02 review, HIGH): a failed read is a
@@ -693,10 +692,9 @@ impl JournalState {
         let Some(portfolio) = self.try_active_portfolio()? else {
             return Ok(Vec::new());
         };
-        let holdings = journal.list_all_holdings().map_err(|error| {
-            tracing::warn!("reinvestable cash: list_all_holdings failed: {error}");
-            error.to_string()
-        })?;
+        let holdings = journal
+            .list_all_holdings()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HOLDINGS, error))?;
         let mut by_ccy: BTreeMap<String, Decimal> = BTreeMap::new();
         for holding in holdings.iter().filter(|h| h.portfolio_id == portfolio.id) {
             for row in self.try_holding_ledger(holding.id)? {

@@ -1964,10 +1964,9 @@ fn key_test_status_is_a_key_verdict_even_through_a_split_history_failure() {
     let parse = status(ProviderError::Parse {
         detail: "shape".into(),
     });
-    assert!(
-        parse.starts_with(&MSG_PROVIDER_FAILED.replace("{cause}", "")),
-        "{parse}"
-    );
+    // 2026-09-26: an unreadable payload is named by its own notice — never the ingestion
+    // error's English Display after « La récupération n'a pas abouti : ».
+    assert_eq!(parse, MSG_NORMALIZE_FAILED);
 }
 
 #[test]
@@ -8058,11 +8057,21 @@ fn a_save_failure_never_carries_sqlite_english() {
         save_error(sqlite(rusqlite::ffi::SQLITE_PERM)),
         MSG_WRITE_REFUSED_BY_SYSTEM
     );
-    // Any other cause: the bare catch-all, the English text logged only.
+    // A named cause kind rides along; no named cause → the bare catch-all. The English text is
+    // logged only.
     assert_eq!(
         save_error(sqlite(rusqlite::ffi::SQLITE_BUSY)),
+        MSG_SAVE_FAILED_CAUSE.replace("{cause}", MSG_CAUSE_LOCKED)
+    );
+    assert_eq!(
+        save_error(sqlite(rusqlite::ffi::SQLITE_FULL)),
+        MSG_SAVE_FAILED_CAUSE.replace("{cause}", MSG_CAUSE_DISK_FULL)
+    );
+    assert_eq!(
+        save_error(sqlite(rusqlite::ffi::SQLITE_ERROR)),
         MSG_SAVE_FAILED
     );
+    assert!(!save_error(sqlite(rusqlite::ffi::SQLITE_CORRUPT)).contains("sqlite"));
     // The read-only gates by cause.
     assert_eq!(
         save_error(PersistError::WriteProtected { directory: false }),
@@ -8087,5 +8096,56 @@ fn a_save_failure_never_carries_sqlite_english() {
     assert_eq!(
         io_save_error(std::io::Error::other("disk on fire")),
         MSG_SAVE_FAILED
+    );
+}
+
+#[test]
+fn read_and_open_failures_name_what_and_why_in_french() {
+    let sqlite = |code| {
+        PersistError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            Some("database disk image is malformed".to_string()),
+        ))
+    };
+    assert_eq!(
+        read_failure(MSG_SUBJECT_STUDIES, sqlite(rusqlite::ffi::SQLITE_CORRUPT)),
+        "Lecture impossible : la liste des études ; le fichier est endommagé ou n'est pas un \
+         dossier steadyinvest."
+    );
+    assert_eq!(
+        read_failure(MSG_SUBJECT_FX, sqlite(rusqlite::ffi::SQLITE_ERROR)),
+        "Lecture impossible : les taux de change."
+    );
+    assert_eq!(
+        open_error(PersistError::CorruptJournalMeta {
+            detail: "the journal_meta table is absent".into()
+        }),
+        MSG_JOURNAL_OPEN_FAILED_CAUSE.replace("{cause}", MSG_CAUSE_CORRUPT)
+    );
+    assert_eq!(
+        open_error(PersistError::LockHeld { pid: 7 }),
+        MSG_JOURNAL_LOCKED
+    );
+    assert_eq!(
+        open_error(sqlite(rusqlite::ffi::SQLITE_ERROR)),
+        MSG_JOURNAL_OPEN_FAILED
+    );
+}
+
+#[test]
+fn opening_a_non_journal_file_is_refused_in_french() {
+    // The on-screen shape: a file that is not a dossier picked in « Ouvrir un dossier… ».
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x448);
+    let garbage = dir.path().join("pas-un-dossier.db");
+    std::fs::write(&garbage, b"definitely not a sqlite journal, just text").unwrap();
+    let refused = state.open_journal(&garbage).unwrap_err();
+    assert!(
+        refused.starts_with(MSG_JOURNAL_OPEN_FAILED.trim_end_matches('.')),
+        "{refused}"
+    );
+    assert!(
+        !refused.contains("sqlite") && !refused.contains("journal_meta"),
+        "{refused}"
     );
 }

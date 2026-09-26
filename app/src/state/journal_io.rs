@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::{
     JournalState, MSG_JOURNAL_LOCKED, MSG_JOURNAL_OPEN_FAILED, MSG_NO_DATA_DIR, MSG_NO_JOURNAL,
-    MSG_OPEN_PROTECTED_OUTDATED, OpenOutcome,
+    OpenOutcome,
 };
 
 /// Whether `path` (a journal file or its directory) lives in a **detected sync folder** (Story 5.5,
@@ -116,9 +116,7 @@ impl JournalState {
     fn adopt_open(&mut self, path: &Path, mode: JournalMode) -> Result<OpenOutcome, String> {
         match Journal::open_with_mode(path, mode) {
             Ok(journal) => {
-                let logical_version = journal
-                    .logical_version()
-                    .map_err(|error| format!("{MSG_JOURNAL_OPEN_FAILED} {error}"))?;
+                let logical_version = journal.logical_version().map_err(super::open_error)?;
                 let outcome = OpenOutcome {
                     journal_id: journal.id(),
                     logical_version,
@@ -132,13 +130,9 @@ impl JournalState {
                 self.pending_restore = None;
                 Ok(outcome)
             }
-            Err(PersistError::LockHeld { .. }) => Err(MSG_JOURNAL_LOCKED.to_string()),
-            // A protected file older than this build: its migrations cannot be written — named,
-            // never SQLite's or our English text (2026-09-26 on-screen defect).
-            Err(PersistError::WriteProtectedOutdated { .. }) => {
-                Err(MSG_OPEN_PROTECTED_OUTDATED.to_string())
-            }
-            Err(error) => Err(format!("{MSG_JOURNAL_OPEN_FAILED} {error}")),
+            // Named in French by `open_error` — the instance lock, the protected-and-outdated file,
+            // else the cause kind; never the persistence Display (2026-09-26).
+            Err(error) => Err(super::open_error(error)),
         }
     }
 
@@ -233,7 +227,7 @@ impl JournalState {
             }
             Err(error) => {
                 self.restore_previous(prev);
-                Err(format!("{MSG_JOURNAL_OPEN_FAILED} {error}"))
+                Err(super::open_error(error))
             }
         }
     }

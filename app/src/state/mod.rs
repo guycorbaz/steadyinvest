@@ -318,7 +318,7 @@ impl JournalState {
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
                     },
-                    Some(save_error(error)),
+                    Some(open_error(error)),
                 )
             }
         }
@@ -463,21 +463,88 @@ pub(crate) fn save_error(error: PersistError) -> String {
         }
         other => {
             tracing::warn!("journal write failed: {other}");
-            MSG_SAVE_FAILED.to_string()
+            with_cause(
+                MSG_SAVE_FAILED,
+                MSG_SAVE_FAILED_CAUSE,
+                persist_cause(&other),
+            )
         }
     }
 }
 
+/// The French cause of a persistence failure, from its TYPED kind — `None` when no named cause
+/// applies (the message then says only what failed; the detail is in the log).
+pub(crate) fn persist_cause(error: &PersistError) -> Option<&'static str> {
+    use steadyinvest_persistence::ErrorKind as K;
+    match error.kind() {
+        K::WriteProtected => Some(MSG_CAUSE_PROTECTED),
+        K::Locked => Some(MSG_CAUSE_LOCKED),
+        K::Corrupt => Some(MSG_CAUSE_CORRUPT),
+        K::DiskFull => Some(MSG_CAUSE_DISK_FULL),
+        K::Missing => Some(MSG_CAUSE_MISSING),
+        K::NewerData => Some(MSG_CAUSE_NEWER_DATA),
+        K::Migration => Some(MSG_CAUSE_MIGRATION),
+        K::Other => None,
+    }
+}
+
+/// The French cause of a file-system failure, from its `io::ErrorKind`.
+fn io_cause(error: &std::io::Error) -> Option<&'static str> {
+    use std::io::ErrorKind as K;
+    match error.kind() {
+        K::PermissionDenied | K::ReadOnlyFilesystem => Some(MSG_CAUSE_PROTECTED),
+        K::StorageFull => Some(MSG_CAUSE_DISK_FULL),
+        K::NotFound => Some(MSG_CAUSE_MISSING),
+        _ => None,
+    }
+}
+
+/// `plain` when no cause is named, else `template` with its `{cause}` filled.
+fn with_cause(plain: &str, template: &str, cause: Option<&str>) -> String {
+    match cause {
+        Some(cause) => template.replace("{cause}", cause),
+        None => plain.to_string(),
+    }
+}
+
+/// A failed READ of `subject` (one of the `MSG_SUBJECT_*`), named in French with its cause when
+/// one applies — the persistence text logged only (2026-09-26: the read rails returned the
+/// English Display, which their callers could put in a refusal or a notice).
+pub(crate) fn read_failure(subject: &'static str, error: PersistError) -> String {
+    tracing::warn!("journal read failed ({subject}): {error}");
+    let message = match persist_cause(&error) {
+        Some(cause) => MSG_READ_SUBJECT_FAILED_CAUSE.replace("{cause}", cause),
+        None => MSG_READ_SUBJECT_FAILED.to_string(),
+    };
+    message.replace("{what}", subject)
+}
+
+/// A dossier that could not be opened, named in French with its cause (2026-09-26: the open
+/// notice appended the persistence Display). The lock held by another instance and the
+/// protected-and-outdated file keep their own messages (their callers match them first).
+pub(crate) fn open_error(error: PersistError) -> String {
+    tracing::warn!("journal open failed: {error}");
+    match error {
+        PersistError::LockHeld { .. } => MSG_JOURNAL_LOCKED.to_string(),
+        PersistError::WriteProtectedOutdated { .. } => MSG_OPEN_PROTECTED_OUTDATED.to_string(),
+        other => with_cause(
+            MSG_JOURNAL_OPEN_FAILED,
+            MSG_JOURNAL_OPEN_FAILED_CAUSE,
+            persist_cause(&other),
+        ),
+    }
+}
+
 /// Map a file-system error from a WRITE beside the dossier (a backup copy) to its French refusal:
-/// the OS's write refusals (permission, read-only file system) are named, anything else is the
-/// plain save failure. The OS text is logged, never shown.
+/// the OS's write refusals (permission, read-only file system) are named, a full disk or a
+/// missing folder too, anything else is the plain save failure. The OS text is logged, never shown.
 pub(crate) fn io_save_error(error: std::io::Error) -> String {
     tracing::warn!("file write failed: {error}");
     match error.kind() {
         std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
             MSG_WRITE_REFUSED_BY_SYSTEM.to_string()
         }
-        _ => MSG_SAVE_FAILED.to_string(),
+        _ => with_cause(MSG_SAVE_FAILED, MSG_SAVE_FAILED_CAUSE, io_cause(&error)),
     }
 }
 

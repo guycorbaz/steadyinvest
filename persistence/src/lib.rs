@@ -27,7 +27,7 @@ mod transactions;
 mod util;
 mod watchlist;
 
-pub use error::{Error, Result};
+pub use error::{Error, ErrorKind, Result};
 pub use export::{
     ImportSummary, JournalExport, JournalSnapshot, JudgmentSnapshotRecord, StudyRecord,
     inspect_journal_envelope,
