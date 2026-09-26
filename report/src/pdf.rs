@@ -1105,7 +1105,9 @@ pub(crate) const EM_DASH: &str = "—";
 // `trend` / verdict / option const, all covered by the neutrality test). Add new strings here when
 // you add them to the layout — the test scans them against `core::method::BANNED_VERBS_{FR,EN}` and
 // asserts no NAIC wordmark, the same shared catalogs the app gate uses.
-const VERDICT_FULL: &str = "Tous les critères validés et à jour";
+// Owner decision (Guy, 2026-09-26): the full state names the DATA (every gate validated and fresh),
+// never the method's criteria (U/D, relative value, zone…), which it does not assess.
+const VERDICT_FULL: &str = "Toutes les données validées et à jour";
 const VERDICT_PROVISIONAL: &str = "Provisoire — données à revérifier ou confiance réduite";
 const VERDICT_WITHHELD: &str = "En attente — au moins une donnée requise manque";
 const CREATED_ON: &str = "Créée le";

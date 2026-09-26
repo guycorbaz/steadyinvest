@@ -65,7 +65,7 @@ component CmpRow inherits HorizontalLayout {
         return "—";
     }
     pure function state-words(c: ComparisonHeader) -> string {
-        if (c.state == "full") { return c.low-confidence ? @tr("critères validés · confiance réduite") : @tr("critères validés"); }
+        if (c.state == "full") { return c.low-confidence ? @tr("données validées · confiance réduite") : @tr("données validées"); }
         if (c.state == "provisional") { return c.low-confidence ? @tr("provisoire · confiance réduite") : @tr("provisoire"); }
         if (c.state == "withheld") { return c.low-confidence ? @tr("en attente · confiance réduite") : @tr("en attente"); }
         return "—";
