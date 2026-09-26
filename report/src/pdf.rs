@@ -8,8 +8,10 @@
 //! - **Neutral labels only** (no NAIC marks/logos or verbatim instructional text — open-source
 //!   constraint); the zone nouns mirror the app's neutral set ("Zone basse/médiane/haute").
 //! - **All sections expanded** (a PDF has no collapsibles).
-//! - **Greyscale only** (NFR-U3): nothing reads by colour — text + position + line weight, never hue.
-//!   The renderer emits only black/grey strokes and black text.
+//! - **Black-and-white first** (NFR-U3): nothing reads by colour ALONE — text + position + line
+//!   weight + the « * » of a judged value carry every fact. Owner decision (Guy, 2026-09-26): the
+//!   greyscale-only rule is lifted — a few sober hues ([`Ink`]: the §1 series, the judged values)
+//!   are a second channel, never the only one.
 //! - **`None` → the faithful em-dash**, never `0` (the project's most-repeated rail).
 //! - **Deterministic bytes**: no timestamp / file-id / random — the same study renders identically
 //!   (so a fixture's bytes are testable).
@@ -65,6 +67,8 @@ const MIN_SERIES_DECADES: f64 = 0.6; // a flat series still gets this much span 
 const YEAR_PAD: f64 = 0.5; // room (in years) at each end of the §1 x axis — no bar on the frame
 // Issue #207: the growth guide lines of the printed form — compound rates from the last EPS point.
 const GUIDE_RATES_PCT: [u32; 6] = [5, 10, 15, 20, 25, 30];
+const GUIDE_LABEL_SIZE: f32 = 5.5; // the guides' rate labels, in the right margin
+const AXIS_LABEL_SIZE: f32 = 6.5; // the year labels under the plot
 // The form's quarterly box, under the plot (owner decision 7): size and the space around it.
 const QUARTER_BOX_W: f32 = 200.0;
 const QUARTER_BOX_H: f32 = 4.0 * (SMALL + 3.0) + 8.0;
@@ -73,12 +77,14 @@ const QUARTER_BOX_GAP: f32 = 4.0;
 // ── grid tables (issue #104 — visible SSG grid) ──
 const CELL_PAD: f32 = 5.0; // left/right padding of text inside a grid cell
 const GRID_INSET: f32 = 1.5; // the least clearance a cell's text keeps from its rules
-// Column boundaries (left … right) for the annexe table (year + seven figures).
+// Column boundaries (left … right) for the annexe table (year + seven figures). The sales and
+// pre-tax columns hold millions (owner decision, 2026-09-26): « Bén. av. impôt (M) » takes the
+// room the shorter figures gave back, so its header stays on one line.
 pub(crate) const COLS8: [f32; 9] = [
     MARGIN,
     MARGIN + 42.0,
-    MARGIN + 112.0,
-    MARGIN + 182.0,
+    MARGIN + 106.0,
+    MARGIN + 196.0,
     MARGIN + 240.0,
     MARGIN + 300.0,
     MARGIN + 360.0,
@@ -99,9 +105,68 @@ const COLS9: [f32; 10] = [
     PAGE_W - MARGIN,
 ];
 const RULE_GRAY: f32 = 0.35; // the default rule/grid grey (restored after a chart)
-const GRID_GRAY: f32 = 0.75; // faint decade gridlines
+const GRID_GRAY: f32 = 0.75; // the labelled 1 / 2 / 5 × 10^k gridlines
 const GUIDE_GRAY: f32 = 0.82; // the growth guide lines (lighter than the grid)
-const SERIES_GRAY: f32 = 0.0; // series strokes (black; told apart by weight + dash, never hue)
+// Owner decision (Guy, 2026-09-26): the log paper's minor lines — 3, 4, 6 … 9 × 10^k and one
+// vertical per year, forecast years included — lighter than the curves AND than the labelled
+// gridlines, so the curves and the labelled scale still read first.
+const MINOR_GRID_GRAY: f32 = 0.9;
+const MINOR_GRID_W: f32 = 0.25;
+
+/// A stroke or fill colour, `[r, g, b]` in 0…1.
+///
+/// Owner decision (Guy, 2026-09-26): the PDFs may use colour, as a SECOND channel only — every
+/// fact still reads in a black-and-white print (weight, dash, position, words, the « * » of a
+/// judged value); the colour only makes the same fact quicker to find on screen or in a colour
+/// print. Hence `gray` for everything that was grey before, and a few sober hues below.
+pub(crate) type Ink = [f32; 3];
+
+pub(crate) const fn gray(g: f32) -> Ink {
+    [g, g, g]
+}
+
+// The §1 series, told apart as on the printed form's coloured plot — and still by weight in a
+// black-and-white print (EPS thick, sales thin, prices as bars).
+const EPS_INK: Ink = [0.08, 0.28, 0.66]; // blue, the thick line
+const SALES_INK: Ink = [0.05, 0.45, 0.22]; // green, the thin line
+const PRICE_INK: Ink = gray(0.0); // black bars
+/// A value the analyst judged (and the calculations use): a dark blue, beside the « * » that
+/// carries the fact in black and white.
+const JUDGED_INK: Ink = [0.0, 0.16, 0.52];
+
+// ── judged values (owner decision, Guy 2026-09-26) ──
+// NAIC's rule: the calculations use the analyst's JUDGED values, and a judged value is marked as
+// judged wherever it is printed — the « * » sigil (WinAnsi, survives a black-and-white print),
+// explained by [`JUDGED_NOTE`], and in colour ([`JUDGED_INK`]) as a second channel. The colour
+// runs between two zero-width private-use markers the text primitives read and never print.
+/// The sigil after a judged value (the comparison's app-formatted cells carry it too).
+pub const JUDGED_SIGIL: &str = "*";
+/// The note that explains the sigil, printed wherever a « * » is shown — and only there (G3
+/// review: the note appears iff a sigil does). One text for the three surfaces: the study PDF,
+/// the comparison PDF and the comparison screen (its `JudgedNote`, tied to this by a parity
+/// test). It says only what holds for EVERY starred value: the analyst judged it (the estimated
+/// sales growth, starred too, feeds no calculation — « les calculs l'utilisent » was false there).
+pub const JUDGED_NOTE: &str = "* valeur jugée par l'analyste";
+const JUDGED_ON: char = '\u{E000}';
+const JUDGED_OFF: char = '\u{E001}';
+
+/// Whether a laid-out line shows a judged value (its « * »).
+fn carries_judged(s: &str) -> bool {
+    s.contains(JUDGED_ON)
+}
+
+/// A figure the analyst judged, as printed: the figure, its « * », in the judged colour — kept on
+/// one line (its inner spaces become no-break spaces, so « 46,6 %* » never splits). An absent
+/// judgment stays the plain em-dash (nothing was judged, nothing to mark).
+pub(crate) fn judged(figure: &str) -> String {
+    if figure == EM_DASH || figure.is_empty() {
+        return figure.to_string();
+    }
+    format!(
+        "{JUDGED_ON}{}{JUDGED_SIGIL}{JUDGED_OFF}",
+        figure.replace(' ', "\u{00A0}")
+    )
+}
 
 /// Render a study to a faithful, neutral, greyscale PDF (FR52). Read-only: it computes nothing the
 /// engine does not already compute, writes no journal, and needs no provider.
@@ -183,16 +248,21 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             nf.pct(outputs.growth.eps_cagr_pct)
         ),
     );
-    doc.two_columns(
-        &format!(
+    let estimated = [
+        format!(
             "(2) Croissance estimée des ventes : {}",
-            nf.pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal()))
+            judged(&nf.pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal())))
         ),
-        &format!(
+        format!(
             "(4) Croissance estimée du BPA : {}",
-            nf.pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal()))
+            judged(&nf.pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal())))
         ),
-    );
+    ];
+    doc.two_columns(&estimated[0], &estimated[1]);
+    // The note iff a « * » is shown on the page (G3 review).
+    if estimated.iter().any(|s| carries_judged(s)) {
+        doc.small_line(JUDGED_NOTE);
+    }
     doc.new_page();
 
     // ── Page 2 — §2 Management: the years as COLUMNS (the form's layout), the 5-yr average and
@@ -281,17 +351,27 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         let c = &r.low_candidates;
         let est_high = outputs.growth.estimated_high_eps;
         let est_low = outputs.growth.estimated_low_eps;
+        // Owner decision (Guy, 2026-09-26): each judged input the calculation uses is marked
+        // judged. The estimated high EPS is the analyst's own figure when entered; derived from
+        // the judged EPS growth otherwise (a result, printed unmarked). The low EPS is
+        // direct-only (core: `estimated_low_eps`), so it is always the analyst's.
+        let est_high_text = nf.fmt_dec(est_high, DisplayField::PerShare);
+        let est_high_text = if judgment.estimated_high_eps.is_some() {
+            judged(&est_high_text)
+        } else {
+            est_high_text
+        };
         b.line(&format!(
-            "A · Prix haut à 5 ans : PER haut moyen {} × BPA estimé haut {} = {}",
-            nf.num(judgment.judged_avg_high_pe.map(|m| m.as_decimal())),
-            nf.fmt_dec(est_high, DisplayField::PerShare),
+            "A · Prix haut à 5 ans : PER haut moyen jugé {} × BPA estimé haut {} = {}",
+            judged(&nf.num(judgment.judged_avg_high_pe.map(|m| m.as_decimal()))),
+            est_high_text,
             nf.money(r.forecast_high),
         ));
         b.line("B · Prix bas à 5 ans, les quatre candidats :");
         b.indent_line(&format!(
-            "(a) PER bas moyen {} × BPA estimé bas {} = {}",
-            nf.num(judgment.judged_avg_low_pe.map(|m| m.as_decimal())),
-            nf.fmt_dec(est_low, DisplayField::PerShare),
+            "(a) PER bas moyen jugé {} × BPA estimé bas {} = {}",
+            judged(&nf.num(judgment.judged_avg_low_pe.map(|m| m.as_decimal()))),
+            judged(&nf.fmt_dec(est_low, DisplayField::PerShare)),
             nf.money(c.avg_low_pe_times_eps),
         ));
         b.indent_line(&format!(
@@ -300,7 +380,8 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         ));
         b.indent_line(&format!(
             "(c) Plus bas sévère récent = {}",
-            nf.money(c.recent_severe_low),
+            // The analyst's pick of the recent severe low (core: « adopting it is a judgment »).
+            judged(&nf.money(c.recent_severe_low)),
         ));
         b.indent_line(&format!(
             "(d) Prix soutenu par le dividende : dividende {} ÷ rendement haut moyen {} = {}",
@@ -366,6 +447,10 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             nf.money(current_price),
             nf.pct(outputs.returns.projected_appreciation_pct),
         ));
+        // The note iff a « * » is shown in the section (G3 review).
+        if b.lines.iter().any(|(_, s)| carries_judged(s)) {
+            b.small_line(JUDGED_NOTE);
+        }
         let bar_h = if r.zones.is_some() {
             ZONEBAR_H_RESERVE
         } else {
@@ -442,8 +527,8 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
     doc.grid_row_num(
         &[
             "Année",
-            "Ventes",
-            "Bén. av. impôt",
+            ANNEX_SALES,
+            ANNEX_PRETAX,
             "BPA",
             "Cours haut",
             "Cours bas",
@@ -457,11 +542,11 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
     for y in &study.years {
         let cells = [
             y.year.to_string(),
-            nf.cell(y.sales.value, DisplayField::LargeMonetary),
-            nf.cell(
-                y.pre_tax_profit.as_ref().and_then(|c| c.value),
-                DisplayField::LargeMonetary,
-            ),
+            // Owner decision (Guy, 2026-09-26): sales and pre-tax profit in MILLIONS, the unit in
+            // the header — as the study screen enters them (issue #117) and as the NAIC form
+            // tabulates them — never a ten-digit figure shrunk to fit its column.
+            nf.millions(y.sales.value),
+            nf.millions(y.pre_tax_profit.as_ref().and_then(|c| c.value)),
             nf.cell(y.eps.value, DisplayField::PerShare),
             nf.cell(y.high_price.value, DisplayField::Price),
             nf.cell(y.low_price.value, DisplayField::Price),
@@ -705,6 +790,18 @@ impl NumberStyle {
         self.fmt_dec(v.map(|m| m.as_decimal()), field)
     }
 
+    /// A large absolute figure in millions (the annexe's sales / pre-tax profit): ÷ 10^6, at most
+    /// two decimals, trailing zeros dropped (« 6 910 », « 12,35 ») — the em-dash when absent.
+    /// G3 review: a present non-zero figure is never printed « 0 » — below 0,005 M (a small
+    /// issuer, a loss of a few thousand) it keeps the digits that make it non-zero (« 0,004 »,
+    /// « −0,0035 »), sign included.
+    fn millions(self, v: Option<steadyinvest_contract::Money>) -> String {
+        match v.and_then(|m| m.as_decimal().checked_div(Decimal::from(1_000_000))) {
+            None => EM_DASH.to_string(),
+            Some(d) => self.spell(millions_shown(d)),
+        }
+    }
+
     pub(crate) fn money(self, v: Option<Decimal>) -> String {
         self.fmt_dec(v, DisplayField::Price)
     }
@@ -724,6 +821,21 @@ impl NumberStyle {
     /// columns).
     fn pct_bare(self, v: Option<Decimal>) -> String {
         self.fmt_dec(v, DisplayField::Percent)
+    }
+}
+
+/// The millions figure as shown: two decimals; a non-zero figure those would round to zero
+/// keeps its own digits (to the cent of the absolute figure, 8 decimals, or exact below that).
+fn millions_shown(d: Decimal) -> Decimal {
+    let two = round_for_display(d, DisplayField::Price);
+    if !two.is_zero() || d.is_zero() {
+        return two.normalize();
+    }
+    let fine = d.round_dp(8);
+    if fine.is_zero() {
+        d.normalize()
+    } else {
+        fine.normalize()
     }
 }
 
@@ -1016,9 +1128,12 @@ const OPTION_A: &str = "PER bas × BPA bas";
 const OPTION_B: &str = "prix bas moyen 5 ans";
 const OPTION_C: &str = "plus bas sévère récent";
 const OPTION_D: &str = "soutenu par le dividende";
+// The annexe's two large columns, in millions (owner decision, 2026-09-26).
+const ANNEX_SALES: &str = "Ventes (M)";
+const ANNEX_PRETAX: &str = "Bén. av. impôt (M)";
 
 // ── issue #105 / #207 — the embedded charts' neutral labels (greyscale legend + zone bands) ──
-const CHART_LEGEND: &str = "BPA (trait épais)   ·   Ventes (trait fin)   ·   Cours haut–bas (barres)   ·   projection (pointillés)   ·   guides de croissance 5–30 % (gris clair)";
+const CHART_LEGEND: &str = "BPA (trait épais, bleu)   ·   Ventes (trait fin, vert)   ·   Cours haut–bas (barres)   ·   projection du BPA (pointillés)   ·   guides de croissance 5–30 % (gris clair, taux en marge droite)";
 const CHART_SCALE: &str =
     "Échelle logarithmique, propre à chaque série (l'axe gradué est celui du BPA)";
 const GUIDES_FROM: &str = "les guides partent du BPA positif de";
@@ -1111,10 +1226,10 @@ const REPORT_USER_FACING: &[&str] = &[
     "plus haut de l'année en cours :",
     "plus bas de l'année en cours :",
     // §4.
-    "A · Prix haut à 5 ans : PER haut moyen",
+    "A · Prix haut à 5 ans : PER haut moyen jugé",
     "× BPA estimé haut",
     "B · Prix bas à 5 ans, les quatre candidats :",
-    "(a) PER bas moyen",
+    "(a) PER bas moyen jugé",
     "× BPA estimé bas",
     "(b) Prix bas moyen des 5 dernières années =",
     "(c) Plus bas sévère récent =",
@@ -1150,8 +1265,9 @@ const REPORT_USER_FACING: &[&str] = &[
     "Position :",
     "Confiance réduite : moins d'années exploitables que le seuil de la méthode.",
     // Annexe columns.
-    "Ventes",
-    "Bén. av. impôt",
+    ANNEX_SALES,
+    ANNEX_PRETAX,
+    JUDGED_NOTE,
     "BPA",
     "Cours haut",
     "Cours bas",
@@ -1260,9 +1376,18 @@ pub(crate) struct Doc {
     grid_started: bool,
     // The font size of the grid being drawn (body, or caption for a wide table).
     grid_font: f32,
+    // Body rows drawn in Helvetica-Bold (the comparison's rows 20–23 — owner decision,
+    // 2026-09-26); header rows, replayed or not, keep their regular face.
+    grid_bold: bool,
+    // A small-print note printed under each closed portion of the current grid that drew a row
+    // needing it (the comparison's judged-value note: every page carrying a « * » explains it).
+    grid_note: Option<String>,
+    grid_note_due: bool,
+    // Where the last note printed by `close_grid_box` ends (the cursor moves past it at the end).
+    grid_note_bottom: Option<f32>,
     /// The vertical extents of the current grid's full-width note rows ([`Doc::grid_note_row`]):
     /// the interior column rules are interrupted there, so they never cross the note's words.
-    grid_spans: Vec<(f32, f32)>,
+    grid_spans: Vec<(f32, f32, f32)>,
     // The page size (points). Portrait A4 by default; `landscape()` swaps them (Story 7.1 — the
     // five-column comparison). The text primitives flip y against PAGE_H, so a landscape page's
     // content stream starts with a translate that maps that flip onto its own height.
@@ -1289,6 +1414,10 @@ impl Doc {
             grid_header: Vec::new(),
             grid_started: false,
             grid_font: FONT,
+            grid_bold: false,
+            grid_note: None,
+            grid_note_due: false,
+            grid_note_bottom: None,
             grid_spans: Vec::new(),
             page_w,
             page_h,
@@ -1537,7 +1666,7 @@ impl Doc {
             });
             return;
         }
-        let height = self.grid_row_height(cells, edges);
+        let height = self.grid_row_height(cells, edges, head);
         self.grid_break_before(height, edges);
         self.draw_grid_cells_aligned(cells, edges, head, numeric);
     }
@@ -1577,7 +1706,7 @@ impl Doc {
         for row in &header {
             self.grid_font = row.font;
             let cells: Vec<&str> = row.cells.iter().map(String::as_str).collect();
-            h += self.grid_row_height(&cells, edges);
+            h += self.grid_row_height(&cells, edges, true);
         }
         self.grid_header = header;
         self.grid_font = font;
@@ -1599,12 +1728,19 @@ impl Doc {
 
     /// Each cell's lines and point size, laid out in its column by [`cell_layout`] (a cell never
     /// crosses a rule, and a figure is never cut).
-    fn grid_cell_lines(&self, cells: &[&str], edges: &[f32]) -> Vec<(Vec<String>, f32)> {
+    fn grid_cell_lines(
+        &self,
+        cells: &[&str],
+        edges: &[f32],
+        head: bool,
+    ) -> Vec<(Vec<String>, f32)> {
+        // A bold body row is laid out by the bold metrics (G3 review); a header row never is.
+        let bold = self.grid_bold && !head;
         cells
             .iter()
             .enumerate()
             .map(|(i, s)| match edges.get(i + 1) {
-                Some(right) => cell_layout(s, right - edges[i], self.grid_font),
+                Some(right) => cell_layout(s, right - edges[i], self.grid_font, bold),
                 None => (vec![s.to_string()], self.grid_font),
             })
             .collect()
@@ -1615,9 +1751,9 @@ impl Doc {
         self.grid_font + 2.5
     }
 
-    fn grid_row_height(&self, cells: &[&str], edges: &[f32]) -> f32 {
+    fn grid_row_height(&self, cells: &[&str], edges: &[f32], head: bool) -> f32 {
         let lines = self
-            .grid_cell_lines(cells, edges)
+            .grid_cell_lines(cells, edges, head)
             .iter()
             .map(|(l, _)| l.len())
             .max()
@@ -1628,10 +1764,10 @@ impl Doc {
 
     /// The height one grid row will take at `font` — measured before a table is drawn (G1 final,
     /// L10: the §3 block is reserved whole).
-    fn grid_rows_height(&mut self, cells: &[&str], edges: &[f32], font: f32) -> f32 {
+    pub(crate) fn grid_rows_height(&mut self, cells: &[&str], edges: &[f32], font: f32) -> f32 {
         let saved = self.grid_font;
         self.grid_font = font;
-        let h = self.grid_row_height(cells, edges);
+        let h = self.grid_row_height(cells, edges, false);
         self.grid_font = saved;
         h
     }
@@ -1646,20 +1782,29 @@ impl Doc {
         numeric: std::ops::Range<usize>,
     ) {
         let step = self.grid_line_step();
-        let lines = self.grid_cell_lines(cells, edges);
+        let lines = self.grid_cell_lines(cells, edges, head);
         let rows = lines.iter().map(|(l, _)| l.len()).max().unwrap_or(1).max(1);
         let top = self.y + self.grid_font;
         for (i, (cell_lines, size)) in lines.iter().enumerate() {
             let size = *size;
             for (k, line) in cell_lines.iter().enumerate() {
                 let y = top + k as f32 * step;
+                let face = if self.grid_bold && !head {
+                    text_bold
+                } else {
+                    text
+                };
                 let Some(right) = edges.get(i + 1) else {
-                    text(&mut self.cur, edges[i] + CELL_PAD, y, size, line);
+                    face(&mut self.cur, edges[i] + CELL_PAD, y, size, line);
                     continue;
                 };
-                let w = text_width(line, size);
+                let w = if self.grid_bold && !head {
+                    text_width_bold(line, size)
+                } else {
+                    text_width(line, size)
+                };
                 let x = cell_x(numeric.contains(&i), edges[i], *right, w);
-                text(&mut self.cur, x, y, size, line);
+                face(&mut self.cur, x, y, size, line);
             }
         }
         self.y = top + (rows - 1) as f32 * step + (LINE_H - self.grid_font);
@@ -1674,6 +1819,34 @@ impl Doc {
         }
     }
 
+    /// Owner decision (Guy, 2026-09-26) — the next body rows in bold (`true`) or regular. The
+    /// measures stay the regular face's: the bold rows are short (a label, a ratio, a percent,
+    /// digits the same width in both faces).
+    pub(crate) fn set_grid_bold(&mut self, bold: bool) {
+        self.grid_bold = bold;
+    }
+
+    /// The note the current grid prints under a closed portion (on its page) once a row asked
+    /// for it with [`Doc::grid_note_due`] — the note follows its sigil across a page break.
+    pub(crate) fn set_grid_note(&mut self, note: &str) {
+        self.grid_note = Some(note.to_string());
+        self.grid_note_due = false;
+    }
+
+    /// The row just drawn carries what the grid's note explains.
+    pub(crate) fn grid_note_due(&mut self) {
+        self.grid_note_due = self.grid_note.is_some();
+    }
+
+    /// Keep the next `need` points of an open grid's rows on one page: when they do not fit
+    /// under the cursor, the box closes here and the rows start the next page under the replayed
+    /// header (a sub-block such as the comparison's rows 17–23 never leaves its last row alone).
+    pub(crate) fn grid_keep_rows(&mut self, need: f32, edges: &[f32]) {
+        if self.grid_started {
+            self.grid_break_before(need, edges);
+        }
+    }
+
     /// Issue #104 — start a boxed grid table. Reserve only the header + first row together (the
     /// section heading already reserved a few rows), and record the table top so [`grid_end`] can
     /// draw the outer box + column rules. Issue #74: a grid may SPAN page breaks — a body row that
@@ -1684,6 +1857,8 @@ impl Doc {
         self.grid_header.clear();
         self.grid_started = false;
         self.grid_spans.clear();
+        self.grid_note = None;
+        self.grid_note_due = false;
     }
 
     /// Draw the grid's outer box from [`grid_top`] to the current cursor + a vertical rule at each
@@ -1694,26 +1869,56 @@ impl Doc {
         let left = edges[0];
         let right = edges[edges.len() - 1];
         stroke_rect(&mut self.cur, left, top, right - left, bottom - top, 0.6);
-        // The interior rules run from the top down, skipping every note row's extent.
+        // The interior rules run from the top down. Owner decision (Guy, 2026-09-26 — the
+        // review's positions table): a rule LEFT of a note row's text (the symbol column's) runs
+        // the full height of each block, note lines included; a rule the note's words would
+        // cross stops on a hairline drawn over the note, and each block closes on a full-width
+        // hairline — clean T-junctions, never a rule broken in mid-air, and nothing (no stub of
+        // a rule) under the closing border.
         let mut spans = std::mem::take(&mut self.grid_spans);
         spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        const MIN_RULE: f32 = 2.0; // a shorter segment is a stub, not a rule
         for e in &edges[1..edges.len() - 1] {
             let mut from = top;
-            for (s_top, s_bottom) in &spans {
-                if *s_top > from {
+            for (s_top, s_bottom, note_left) in &spans {
+                if *e <= *note_left + 0.5 {
+                    continue; // the note starts right of this rule: it runs on through it
+                }
+                if *s_top - from >= MIN_RULE {
                     vline(&mut self.cur, *e, from, *s_top, 0.4);
                 }
                 from = from.max(*s_bottom);
             }
-            if bottom > from {
+            if bottom - from >= MIN_RULE {
                 vline(&mut self.cur, *e, from, bottom, 0.4);
             }
+        }
+        for (s_top, s_bottom, note_left) in &spans {
+            hline(&mut self.cur, *note_left, right, *s_top, 0.3);
+            if bottom - *s_bottom >= MIN_RULE {
+                hline(&mut self.cur, left, right, *s_bottom, 0.3);
+            }
+        }
+        // The grid's note, under this portion when one of its rows asked for it.
+        if self.grid_note_due
+            && let Some(note) = self.grid_note.clone()
+        {
+            let (x, size, line_h) = ProseKind::Small.metrics();
+            let mut y = bottom;
+            for chunk in wrap_to_width(&note, self.right() - x, size) {
+                y += size + 1.0;
+                text(&mut self.cur, x, y, size, &chunk);
+                y += line_h - size - 1.0;
+            }
+            self.grid_note_due = false;
+            self.grid_note_bottom = Some(y);
         }
     }
 
     /// A body row followed by its small-print note, spanning from `note_left` to the table's
-    /// right edge and wrapped there; the interior column rules stop above the note and resume
-    /// below (the review's « Signaux · Données » line under each position). G1 D: the row and
+    /// right edge and wrapped there; the interior column rules it would cross stop on a hairline
+    /// above the note, the rule left of it runs on (the review's « Signaux · Données » line under
+    /// each position — see [`Doc::close_grid_box`]). G1 D: the row and
     /// its note are ONE block — a page break never falls between them (the note would read as
     /// the next position's, or as nobody's).
     pub(crate) fn grid_row_num_with_note(
@@ -1727,16 +1932,16 @@ impl Doc {
         let right = edges[edges.len() - 1];
         let outer = [edges[0], note_left, right];
         self.grid_font = FONT;
-        let row_h = self.grid_row_height(cells, edges);
+        let row_h = self.grid_row_height(cells, edges, false);
         self.grid_font = SMALL;
-        let note_h = self.grid_row_height(&["", note], &outer);
+        let note_h = self.grid_row_height(&["", note], &outer, false);
         self.grid_font = FONT;
         self.grid_break_before(row_h + note_h, edges);
         self.draw_grid_cells_aligned(cells, edges, false, numeric_from..usize::MAX);
         self.grid_font = SMALL;
         let from = self.y;
         self.draw_grid_cells_aligned(&["", note], &outer, false, usize::MAX..usize::MAX);
-        self.grid_spans.push((from, self.y));
+        self.grid_spans.push((from, self.y, note_left));
         self.grid_font = FONT;
     }
 
@@ -1746,19 +1951,25 @@ impl Doc {
         if !self.grid_started {
             self.grid_break_before(0.0, edges);
         }
+        self.grid_note_bottom = None;
         self.close_grid_box(edges);
         self.grid_header.clear();
         self.grid_started = false;
         self.y += 2.0;
+        if let Some(y) = self.grid_note_bottom.take() {
+            self.y = self.y.max(y);
+        }
+        self.grid_note = None;
     }
 
     /// Issue #105 / #207 — the §1 semi-log growth chart, filling the rest of page 1 like the printed
     /// form. Sales / EPS / Price on log scales (each series its own — issue #25; the EPS scale is the
     /// labelled one), the yearly high–low PRICE as vertical bars, the est-high / est-low EPS
     /// projection over the forecast horizon, and the form's growth GUIDE lines (5–30 % compound
-    /// from the last positive EPS point, light grey, labelled at their end). Greyscale-safe:
-    /// weight + dash + shade, NEVER colour. Nothing is drawn when there is no plottable data (the
-    /// annexe already carries the em-dashes).
+    /// from the last positive EPS point, light grey, labelled in the right margin). Readable in
+    /// black and white: weight + dash + shade; the series' hues (owner decision, 2026-09-26) are a
+    /// second channel only. Nothing is drawn when there is no plottable data (the annexe already
+    /// carries the em-dashes).
     ///
     /// G1 F: the x axis is by YEAR (a gap year keeps its place, the years after it do not slide
     /// left); the guides and the projection run from their anchor year over exactly the horizon, so
@@ -1828,7 +2039,8 @@ impl Doc {
         );
 
         // What goes under the plot: the year labels, the legend and the scale note (measured with
-        // their wrapped lines), the quarterly box, then the caller's gap and four growth lines.
+        // their wrapped lines), the quarterly box, then the caller's gap, four growth lines and
+        // the judged-value note.
         let small_h = |s: &str| {
             let (x, size, line_h) = ProseKind::Small.metrics();
             wrap_to_width(s, self.right() - x, size).len() as f32 * line_h
@@ -1840,7 +2052,10 @@ impl Doc {
             + QUARTER_BOX_H
             + QUARTER_BOX_GAP
             + 2.0
-            + 2.0 * LINE_H;
+            + 2.0 * LINE_H
+            // …and the judged-value note under the two (2) / (4) lines (owner decision,
+            // 2026-09-26: the sigil is explained on the page that carries it).
+            + small_h(JUDGED_NOTE);
         // Break first, THEN measure: after a page break the plot fills the new page too.
         self.ensure(CHART_MIN_H + reserved_below);
         let chart_h = (self.page_h - self.y - BOTTOM - reserved_below).max(CHART_MIN_H);
@@ -1873,28 +2088,95 @@ impl Doc {
         let eps_b = series_log_bounds(&eps_scale_vals);
 
         stroke_rect(&mut self.cur, x0, top, plot_w, chart_h, 0.6);
-        // Gridlines + labels on the EPS scale (nice 1/2/5×10^k).
+        let axis_years = axis_years(first_year, last_year);
+        // Owner decision (Guy, 2026-09-26), NAIC semi-log paper: a light vertical for EVERY year
+        // of the axis — the five forecast years included, the plot runs over them — and the
+        // minor decade lines (3, 4, 6 … 9 × 10^k), both lighter than the labelled gridlines and
+        // than the curves; drawn first, so everything else lies over them.
+        for year in axis_years.clone() {
+            let x = px(f64::from(year));
+            polyline(
+                &mut self.cur,
+                &[(x, top), (x, top + chart_h)],
+                MINOR_GRID_W,
+                gray(MINOR_GRID_GRAY),
+                &[],
+            );
+        }
+        if let Some((lmin, lmax)) = eps_b {
+            for v in minor_ticks(lmin, lmax) {
+                let gy = py(v, lmin, lmax);
+                polyline(
+                    &mut self.cur,
+                    &[(x0, gy), (x1, gy)],
+                    MINOR_GRID_W,
+                    gray(MINOR_GRID_GRAY),
+                    &[],
+                );
+            }
+        }
+        // Gridlines + labels on the EPS scale (nice 1/2/5×10^k) — the only labelled ones.
         if let Some((lmin, lmax)) = eps_b {
             for (v, lbl) in nice_ticks(lmin, lmax, nf) {
                 let gy = py(v, lmin, lmax);
-                polyline(&mut self.cur, &[(x0, gy), (x1, gy)], 0.3, GRID_GRAY, &[]);
+                polyline(
+                    &mut self.cur,
+                    &[(x0, gy), (x1, gy)],
+                    0.3,
+                    gray(GRID_GRAY),
+                    &[],
+                );
                 text(&mut self.cur, MARGIN, gy + 2.5, 7.0, &lbl);
             }
         }
         // Issue #207 — the growth guide lines: from the last positive EPS point, each rate
-        // compounded over the horizon and ending at the anchor year + the horizon, light grey,
-        // labelled at their end (the printed form's fan).
+        // compounded over the horizon and ending at the anchor year + the horizon, light grey.
+        // Owner decision (Guy, 2026-09-26): their rate labels sit in the right margin, just
+        // outside the frame at the height each guide ends — the dotted projection runs INSIDE
+        // the frame, so it can never cross a label (it used to run through « 20 % »).
         if let (Some((lmin, lmax)), Some((ly, lv))) = (eps_b, anchor) {
             let (ox, oy) = (px(f64::from(ly)), py(lv, lmin, lmax));
+            let mut label_ys: Vec<(u32, f32)> = Vec::new();
             for rate in GUIDE_RATES_PCT {
                 let (ey_year, end) = guide_end(ly, lv, rate);
                 let (ex, ey) = (px(f64::from(ey_year)), py(end, lmin, lmax));
-                polyline(&mut self.cur, &[(ox, oy), (ex, ey)], 0.4, GUIDE_GRAY, &[]);
+                polyline(
+                    &mut self.cur,
+                    &[(ox, oy), (ex, ey)],
+                    0.4,
+                    gray(GUIDE_GRAY),
+                    &[],
+                );
+                label_ys.push((rate, ey + 2.0));
+            }
+            // G3 review: spread around their natural heights and kept beside the frame; a
+            // label away from its guide's end (moved to make room, or a guide ending before
+            // the frame — its anchor year earlier than the last year) is tied to it by a faint
+            // dotted leader.
+            let rows = guide_label_rows(
+                &label_ys,
+                GUIDE_LABEL_SIZE + 1.0,
+                top + GUIDE_LABEL_SIZE,
+                top + chart_h,
+            );
+            for (rate, y) in rows {
+                let (ey_year, end) = guide_end(ly, lv, rate);
+                let (ex, ey) = (px(f64::from(ey_year)), py(end, lmin, lmax));
+                let mid = y - GUIDE_LABEL_SIZE / 3.0;
+                if (mid - ey).abs() > 1.0 || ex < x1 - 1.0 {
+                    polyline(
+                        &mut self.cur,
+                        &[(ex, ey), (x1, mid)],
+                        0.3,
+                        gray(GUIDE_GRAY),
+                        &[0.6, 1.2],
+                    );
+                }
                 text(
                     &mut self.cur,
-                    ex.min(x1) - 19.0,
-                    ey - 2.0,
-                    5.5,
+                    x1 + 2.0,
+                    y,
+                    GUIDE_LABEL_SIZE,
                     &format!("{rate} %"),
                 );
             }
@@ -1906,7 +2188,7 @@ impl Doc {
             years.sort_unstable();
             years.dedup();
             let cap = |cur: &mut Content, x: f32, y: f32| {
-                polyline(cur, &[(x - 2.0, y), (x + 2.0, y)], 0.8, SERIES_GRAY, &[]);
+                polyline(cur, &[(x - 2.0, y), (x + 2.0, y)], 0.8, PRICE_INK, &[]);
             };
             for year in years {
                 let x = px(f64::from(year));
@@ -1919,17 +2201,22 @@ impl Doc {
                     .find(|p| p.0 == year)
                     .map(|p| py(p.1, lmin, lmax));
                 if let (Some(yh), Some(yl)) = (hi, lo) {
-                    polyline(&mut self.cur, &[(x, yh), (x, yl)], 0.8, SERIES_GRAY, &[]);
+                    polyline(&mut self.cur, &[(x, yh), (x, yl)], 0.8, PRICE_INK, &[]);
                 }
                 for y in hi.into_iter().chain(lo) {
                     cap(&mut self.cur, x, y);
                 }
             }
         }
-        // The Sales (thin) and EPS (thick) lines, each on its own scale (greyscale: weight). G1
-        // final (M2 / L5): each line is drawn run by run — it breaks at a missing year and at a
-        // value the log scale cannot hold, and a lone point shows as a dot.
-        let draw = |cur: &mut Content, runs: &[Vec<(i32, f64)>], b: Option<(f64, f64)>, w: f32| {
+        // The Sales (thin) and EPS (thick) lines, each on its own scale — told apart by weight in
+        // black and white, and by hue in colour (owner decision, 2026-09-26). G1 final (M2 / L5):
+        // each line is drawn run by run — it breaks at a missing year and at a value the log
+        // scale cannot hold, and a lone point shows as a dot.
+        let draw = |cur: &mut Content,
+                    runs: &[Vec<(i32, f64)>],
+                    b: Option<(f64, f64)>,
+                    w: f32,
+                    ink: Ink| {
             let Some((lmin, lmax)) = b else {
                 return;
             };
@@ -1941,9 +2228,9 @@ impl Doc {
                 match p.as_slice() {
                     [(x, y)] => {
                         let r = w + 0.6;
-                        fill_rect(cur, x - r, y - r, 2.0 * r, 2.0 * r, SERIES_GRAY);
+                        fill_rect_ink(cur, x - r, y - r, 2.0 * r, 2.0 * r, ink);
                     }
-                    _ => polyline(cur, &p, w, SERIES_GRAY, &[]),
+                    _ => polyline(cur, &p, w, ink, &[]),
                 }
             }
         };
@@ -1955,10 +2242,17 @@ impl Doc {
                     .collect::<Vec<_>>(),
             )
         };
-        draw(&mut self.cur, &runs_of(&|cy| cy.sales), sales_b, 0.8);
-        draw(&mut self.cur, &runs_of(&|cy| cy.eps), eps_b, 1.6);
-        // Projection to est-high / est-low (dotted, EPS scale): from the latest usable year's EPS
-        // (the estimates' base) to that year + the horizon — or not drawn (see `base_year`).
+        draw(
+            &mut self.cur,
+            &runs_of(&|cy| cy.sales),
+            sales_b,
+            0.8,
+            SALES_INK,
+        );
+        draw(&mut self.cur, &runs_of(&|cy| cy.eps), eps_b, 1.6, EPS_INK);
+        // Projection to est-high / est-low (dotted, EPS scale, the EPS line's hue): from the latest
+        // usable year's EPS (the estimates' base) to that year + the horizon — or not drawn (see
+        // `base_year`).
         if let (Some((lmin, lmax)), Some((by, bv))) = (eps_b, projection_start) {
             let (ox, oy) = (px(f64::from(by)), py(bv, lmin, lmax));
             let ex = px(f64::from(by + horizon));
@@ -1968,20 +2262,28 @@ impl Doc {
                         &mut self.cur,
                         &[(ox, oy), (ex, py(v, lmin, lmax))],
                         w,
-                        SERIES_GRAY,
+                        EPS_INK,
                         &[1.5, 2.0],
                     );
                 }
             }
         }
-        // Issue #104 — year labels along the x-axis (each historical year under its own place).
-        for cy in series {
+        // Issue #104 / owner decision (Guy, 2026-09-26) — a label under EVERY year of the axis,
+        // the forecast years included (the axis used to stop at the last historical year while
+        // the plot ran five years further); thinned only when the years are too close to hold
+        // one label each.
+        let year_step = px(f64::from(first_year) + 1.0) - px(f64::from(first_year));
+        let every = label_stride(year_step, AXIS_LABEL_SIZE);
+        for (i, year) in axis_years.enumerate() {
+            if i % every != 0 {
+                continue;
+            }
             text_centered(
                 &mut self.cur,
-                px(f64::from(cy.year)),
+                px(f64::from(year)),
                 top + chart_h + 9.0,
-                6.5,
-                &cy.year.to_string(),
+                AXIS_LABEL_SIZE,
+                &year.to_string(),
             );
         }
         self.y = top + chart_h + 13.0;
@@ -2088,7 +2390,7 @@ impl Doc {
                     &mut self.cur,
                     &[(mx, top - 4.0), (mx, top + ZONEBAR_H + 2.0)],
                     1.3,
-                    0.0,
+                    gray(0.0),
                     &[],
                 );
                 // Kept inside the margins: a price near an edge never runs its caption off.
@@ -2192,21 +2494,46 @@ fn fresh_content(page_h: f32) -> Content {
 /// Place `s` at top-origin `(x, top_y)` in Helvetica `size`, encoded as WinAnsi so French accents
 /// render. PDF's origin is bottom-left, so the y is flipped here.
 pub(crate) fn text(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
-    content.begin_text();
-    content.set_font(Name(b"F0"), size);
-    content.set_text_matrix([1.0, 0.0, 0.0, 1.0, x, PAGE_H - top_y]);
-    let bytes = winansi(s);
-    content.show(Str(&bytes));
-    content.end_text();
+    text_in(content, b"F0", x, top_y, size, s);
 }
 
-/// [`text`] in Helvetica-Bold (the headings).
+/// [`text`] in Helvetica-Bold (the headings, the comparison's return rows).
 pub(crate) fn text_bold(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
+    text_in(content, b"F1", x, top_y, size, s);
+}
+
+/// One text object in `font`. A judged run ([`judged`]) switches the fill to [`JUDGED_INK`] and
+/// back to black inside the same object — the markers themselves are never printed — and the
+/// fill is black again after it whatever the markers (a run cut by a wrap stays contained).
+fn text_in(content: &mut Content, font: &[u8], x: f32, top_y: f32, size: f32, s: &str) {
     content.begin_text();
-    content.set_font(Name(b"F1"), size);
+    content.set_font(Name(font), size);
     content.set_text_matrix([1.0, 0.0, 0.0, 1.0, x, PAGE_H - top_y]);
-    let bytes = winansi(s);
-    content.show(Str(&bytes));
+    if !s.contains([JUDGED_ON, JUDGED_OFF]) {
+        content.show(Str(&winansi(s)));
+    } else {
+        let mut run = String::new();
+        for c in s.chars() {
+            if c == JUDGED_ON || c == JUDGED_OFF {
+                if !run.is_empty() {
+                    content.show(Str(&winansi(&run)));
+                    run.clear();
+                }
+                if c == JUDGED_ON {
+                    let [r, g, b] = JUDGED_INK;
+                    content.set_fill_rgb(r, g, b);
+                } else {
+                    content.set_fill_gray(0.0);
+                }
+            } else {
+                run.push(c);
+            }
+        }
+        if !run.is_empty() {
+            content.show(Str(&winansi(&run)));
+        }
+        content.set_fill_gray(0.0);
+    }
     content.end_text();
 }
 
@@ -2257,11 +2584,60 @@ const HELVETICA_HIGH: [u16; 128] = [
 /// One glyph's Helvetica width (1/1000 em), read off the byte [`winansi_byte`] writes for it — so
 /// the measure is always the width of what is printed (anything unencodable prints as '?').
 fn glyph_width(c: char) -> u16 {
+    if c == JUDGED_ON || c == JUDGED_OFF {
+        return 0; // the judged-colour markers take no room: they are never printed
+    }
     match winansi_byte(c) {
         b @ 0x20..=0x7E => HELVETICA_ASCII[usize::from(b) - 32],
         b @ 0x80..=0xFF => HELVETICA_HIGH[usize::from(b) - 0x80],
         _ => 0, // the C0 controls (and DEL) have no glyph
     }
+}
+
+/// Helvetica-Bold advance widths for ASCII 32..=126, in 1/1000 em (Adobe's standard-14 AFM) —
+/// a bold figure right-aligned by its REAL width ends on its column's padded edge (the
+/// comparison's rows 20–23, owner decision 2026-09-26).
+#[rustfmt::skip]
+const HELVETICA_BOLD_ASCII: [u16; 95] = [
+    278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, // ' '…'/'
+    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, // '0'…'9'
+    333, 333, 584, 584, 584, 611, 975, // ':'…'@'
+    722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, // 'A'…'M'
+    722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, // 'N'…'Z'
+    333, 278, 333, 584, 556, 333, // '['…'`'
+    556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, // 'a'…'m'
+    611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, // 'n'…'z'
+    389, 280, 389, 584, // '{'…'~'
+];
+
+/// One glyph's Helvetica-Bold width: the ASCII table, the French accented letters by their base
+/// letter (the AFM gives them the base's width), the rest as in the regular face.
+fn glyph_width_bold(c: char) -> u16 {
+    if let b @ 0x20..=0x7E = c as u32 {
+        return HELVETICA_BOLD_ASCII[b as usize - 32];
+    }
+    let base = match c {
+        'à' | 'â' | 'ä' => 'a',
+        'é' | 'è' | 'ê' | 'ë' => 'e',
+        'î' | 'ï' => 'i',
+        'ô' | 'ö' => 'o',
+        'ù' | 'û' | 'ü' => 'u',
+        'ç' => 'c',
+        'À' | 'Â' => 'A',
+        'É' | 'È' | 'Ê' => 'E',
+        'Ç' => 'C',
+        _ => return glyph_width(c),
+    };
+    HELVETICA_BOLD_ASCII[base as usize - 32]
+}
+
+/// The rendered width of `s` in Helvetica-Bold at `size` points.
+pub(crate) fn text_width_bold(s: &str, size: f32) -> f32 {
+    s.chars()
+        .map(|c| f32::from(glyph_width_bold(c)))
+        .sum::<f32>()
+        * size
+        / 1000.0
 }
 
 /// The rendered width of `s` in Helvetica at `size` points.
@@ -2273,17 +2649,37 @@ pub(crate) fn text_width(s: &str, size: f32) -> f32 {
 /// not even the ellipsis fits (a zero or negative width), the result is empty — never wider than
 /// asked.
 pub(crate) fn fit(s: &str, width: f32, size: f32) -> String {
-    if text_width(s, size) <= width {
+    fit_in(s, width, size, false)
+}
+
+/// The width of `s` in the regular or the bold face (G3 review: a bold cell is laid out by the
+/// metrics it is drawn with).
+fn measure(s: &str, size: f32, bold: bool) -> f32 {
+    if bold {
+        text_width_bold(s, size)
+    } else {
+        text_width(s, size)
+    }
+}
+
+/// [`fit`] in the regular or the bold face.
+fn fit_in(s: &str, width: f32, size: f32, bold: bool) -> String {
+    if measure(s, size, bold) <= width {
         return s.to_string();
     }
-    let room = width - text_width("…", size);
+    let room = width - measure("…", size, bold);
     if room < 0.0 {
         return String::new();
     }
     let mut out = String::new();
     let mut used = 0.0;
     for c in s.chars() {
-        let w = f32::from(glyph_width(c)) * size / 1000.0;
+        let w = if bold {
+            f32::from(glyph_width_bold(c))
+        } else {
+            f32::from(glyph_width(c))
+        } * size
+            / 1000.0;
         if used + w > room {
             break;
         }
@@ -2298,7 +2694,7 @@ pub(crate) fn fit(s: &str, width: f32, size: f32) -> String {
 /// inside a line is kept (the « A   ·   B » separators); at a break it is dropped, so no line
 /// starts or ends with the spaces it was broken at. A width ≤ 0 holds nothing: one empty line.
 pub(crate) fn wrap_to_width(s: &str, width: f32, size: f32) -> Vec<String> {
-    wrap(s, width, size, false)
+    wrap(s, width, size, false, false)
 }
 
 /// Whether a word carries a figure (a digit) — such a word is never cut with « … » in a grid cell.
@@ -2310,7 +2706,7 @@ fn carries_figure(word: &str) -> bool {
 /// cell), a line is never cut down to nothing and a line carrying a figure or the absence mark
 /// « — » is never passed through [`fit`]: a figure wider than the line goes whole on its own line
 /// (never split into pieces that would read as two numbers), and an absence is never erased.
-fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
+fn wrap(s: &str, width: f32, size: f32, keep_figures: bool, bold: bool) -> Vec<String> {
     if !keep_figures && (width.is_nan() || width <= 0.0) {
         return vec![String::new()];
     }
@@ -2318,7 +2714,7 @@ fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
         let kept = if keep_figures && (carries_figure(line) || line == EM_DASH) {
             line.to_string()
         } else {
-            match fit(line, width, size) {
+            match fit_in(line, width, size, bold) {
                 // A grid cell never shows nothing where its text was.
                 cut if keep_figures && cut.is_empty() => line.to_string(),
                 cut => cut,
@@ -2346,7 +2742,7 @@ fn wrap(s: &str, width: f32, size: f32, keep_figures: bool) -> Vec<String> {
             continue;
         }
         let candidate = format!("{line}{}{word}", " ".repeat(gap.max(1)));
-        if text_width(&candidate, size) <= width {
+        if measure(&candidate, size, bold) <= width {
             line = candidate;
         } else {
             push(&mut lines, &line);
@@ -2375,9 +2771,9 @@ const MIN_FIGURE_FONT: f32 = 6.0;
 /// digit (a label) may still end in « … »; a cell's text, and the absence mark « — », is never
 /// reduced to nothing. A column whose padding leaves no room falls back on the room between the
 /// rules; one with no room at all prints its text as is.
-fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
+fn cell_layout(s: &str, col_w: f32, size: f32, bold: bool) -> (Vec<String>, f32) {
     let rule_w = col_w - 2.0 * GRID_INSET;
-    if text_width(s, size) <= rule_w {
+    if measure(s, size, bold) <= rule_w {
         return (vec![s.to_string()], size);
     }
     let pad_w = col_w - 2.0 * CELL_PAD;
@@ -2389,11 +2785,11 @@ fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
     // whole, the unit kept on the number's line.
     let whole_figure = carries_figure(s) && !s.chars().any(char::is_alphabetic);
     let widest_figure = if whole_figure {
-        text_width(s, size)
+        measure(s, size, bold)
     } else {
         s.split(' ')
             .filter(|w| carries_figure(w))
-            .map(|w| text_width(w, size))
+            .map(|w| measure(w, size, bold))
             .fold(0.0_f32, f32::max)
     };
     let size = if widest_figure > room {
@@ -2407,7 +2803,7 @@ fn cell_layout(s: &str, col_w: f32, size: f32) -> (Vec<String>, f32) {
     if whole_figure {
         return (vec![s.to_string()], size);
     }
-    (wrap(s, room, size, true), size)
+    (wrap(s, room, size, true, bold), size)
 }
 
 /// The x of a grid cell's text line `w` wide in the column `left..right`: a figure (`numeric`)
@@ -2449,14 +2845,19 @@ pub(crate) fn vline(content: &mut Content, x: f32, top_y1: f32, top_y2: f32, wid
 
 // ── vector-graphics primitives for the embedded charts (issue #105), all in top-origin coords ──
 
-/// A polyline through top-origin `pts` in grey `gray`, weight `width`; `dash` (on, off) lengths make
+/// A polyline through top-origin `pts` in `ink`, weight `width`; `dash` (on, off) lengths make
 /// it dashed (empty = solid). Fewer than two points draws nothing (a lone point has no line). The
 /// stroke grey is restored to [`RULE_GRAY`] after, so later rules keep the default weight/tone.
-fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, gray: f32, dash: &[f32]) {
+fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, ink: Ink, dash: &[f32]) {
     if pts.len() < 2 {
         return;
     }
-    content.set_stroke_gray(gray);
+    let [r, g, b] = ink;
+    if r == g && g == b {
+        content.set_stroke_gray(g);
+    } else {
+        content.set_stroke_rgb(r, g, b);
+    }
     content.set_line_width(width);
     if !dash.is_empty() {
         content.set_dash_pattern(dash.iter().copied(), 0.0);
@@ -2481,7 +2882,13 @@ fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, gray: f32, da
 /// in the margin so it never reads as a position ON the bar.
 fn edge_arrow(content: &mut Content, edge_x: f32, y: f32, dir: f32) {
     let tip = edge_x + dir * 14.0;
-    polyline(content, &[(edge_x + dir * 2.0, y), (tip, y)], 1.3, 0.0, &[]);
+    polyline(
+        content,
+        &[(edge_x + dir * 2.0, y), (tip, y)],
+        1.3,
+        gray(0.0),
+        &[],
+    );
     polyline(
         content,
         &[
@@ -2490,7 +2897,7 @@ fn edge_arrow(content: &mut Content, edge_x: f32, y: f32, dir: f32) {
             (tip - dir * 4.0, y + 3.5),
         ],
         1.3,
-        0.0,
+        gray(0.0),
         &[],
     );
 }
@@ -2506,6 +2913,15 @@ pub(crate) fn stroke_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: 
 /// (text) after — the greyscale zone fills are the only non-black fill in the document.
 pub(crate) fn fill_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, gray: f32) {
     content.set_fill_gray(gray);
+    content.rect(x, PAGE_H - top_y - h, w, h);
+    content.fill_nonzero();
+    content.set_fill_gray(0.0);
+}
+
+/// [`fill_rect`] in any [`Ink`] (a chart's lone point takes its series' hue).
+fn fill_rect_ink(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, ink: Ink) {
+    let [r, g, b] = ink;
+    content.set_fill_rgb(r, g, b);
     content.rect(x, PAGE_H - top_y - h, w, h);
     content.fill_nonzero();
     content.set_fill_gray(0.0);
@@ -2629,6 +3045,103 @@ fn chart_scale_note(
     format!("{}.", parts.join(" ; "))
 }
 
+/// Owner decision (Guy, 2026-09-26) — the §1 x axis's years: every year from the first
+/// historical one to the last one + the forecast horizon (the plot runs over the forecast years,
+/// so the axis does too).
+fn axis_years(first_year: i32, last_year: i32) -> std::ops::RangeInclusive<i32> {
+    first_year..=last_year + FORECAST_HORIZON_YEARS as i32
+}
+
+/// Every how many years a year label is printed: 1 while a label (« 2031 » at `size`, plus a
+/// little air) fits in one year's width `step`, else the smallest stride that fits.
+fn label_stride(step: f32, size: f32) -> usize {
+    let need = text_width("0000", size) + 3.0;
+    if step <= 0.0 {
+        return 1;
+    }
+    (need / step).ceil().max(1.0) as usize
+}
+
+/// Owner decision (Guy, 2026-09-26) — the semi-log paper's minor lines inside `[10^lmin,
+/// 10^lmax]`: `m × 10^k` for m = 3, 4, 6, 7, 8, 9 (1, 2 and 5 are the labelled [`nice_ticks`]).
+fn minor_ticks(lmin: f64, lmax: f64) -> Vec<f64> {
+    let (min, max) = (10f64.powf(lmin), 10f64.powf(lmax));
+    let mut out = Vec::new();
+    for k in (lmin.floor() as i32)..=(lmax.ceil() as i32) {
+        for m in [3.0, 4.0, 6.0, 7.0, 8.0, 9.0] {
+            let v = m * 10f64.powi(k);
+            if v >= min && v <= max {
+                out.push(v);
+            }
+        }
+    }
+    out
+}
+
+/// The guide labels' baselines, from `(rate, wanted baseline)` (top-origin): each as near its
+/// guide's end height as the others allow — labels closer than `gap` form a cluster spread
+/// evenly AROUND the cluster's mean wanted height (up and down, G3 review), merged with a
+/// neighbour it then touches — the whole kept within `[lo, hi]` (never above the frame, never
+/// under it). In order: the steeper guide's label stays above.
+fn guide_label_rows(wanted: &[(u32, f32)], gap: f32, lo: f32, hi: f32) -> Vec<(u32, f32)> {
+    let mut rows: Vec<(u32, f32)> = wanted.to_vec();
+    rows.sort_by(|a, b| a.1.total_cmp(&b.1)); // top of the page first
+    // Clusters of consecutive labels: (first index, count, top baseline).
+    let mut clusters: Vec<(usize, usize, f32)> = Vec::new();
+    for (i, (_, y)) in rows.iter().enumerate() {
+        clusters.push((i, 1, *y));
+        // Merge while the last cluster overlaps the one before it.
+        while clusters.len() > 1 {
+            let (s2, n2, _) = clusters[clusters.len() - 1];
+            let (s1, n1, t1) = clusters[clusters.len() - 2];
+            let t2 = cluster_top(&rows[s2..s2 + n2], gap);
+            if t1 + gap * n1 as f32 <= t2 {
+                let last = clusters.len() - 1;
+                clusters[last].2 = t2;
+                break;
+            }
+            clusters.pop();
+            clusters.pop();
+            let n = n1 + n2;
+            clusters.push((s1, n, cluster_top(&rows[s1..s1 + n], gap)));
+        }
+        if clusters.len() == 1 {
+            let (s, n, _) = clusters[0];
+            clusters[0].2 = cluster_top(&rows[s..s + n], gap);
+        }
+    }
+    let mut out: Vec<(u32, f32)> = Vec::new();
+    for (s, n, t) in clusters {
+        for k in 0..n {
+            out.push((rows[s + k].0, t + gap * k as f32));
+        }
+    }
+    // Within the frame: push down from the top edge, then up from the bottom edge.
+    for i in 0..out.len() {
+        let floor = if i == 0 { lo } else { out[i - 1].1 + gap };
+        if out[i].1 < floor {
+            out[i].1 = floor;
+        }
+    }
+    for i in (0..out.len()).rev() {
+        let ceil = if i + 1 == out.len() {
+            hi
+        } else {
+            out[i + 1].1 - gap
+        };
+        if out[i].1 > ceil {
+            out[i].1 = ceil;
+        }
+    }
+    out
+}
+
+/// The top baseline of a cluster of labels spread `gap` apart around their mean wanted height.
+fn cluster_top(rows: &[(u32, f32)], gap: f32) -> f32 {
+    let mean = rows.iter().map(|r| r.1).sum::<f32>() / rows.len() as f32;
+    mean - gap * (rows.len() - 1) as f32 / 2.0
+}
+
 /// Nice `1 / 2 / 5 × 10^k` tick values (+ their compact labels) inside a log scale `[10^lmin, 10^lmax]`.
 fn nice_ticks(lmin: f64, lmax: f64, nf: NumberStyle) -> Vec<(f64, String)> {
     let (min, max) = (10f64.powf(lmin), 10f64.powf(lmax));
@@ -2667,8 +3180,17 @@ fn compact_num(v: f64, k: i32, nf: NumberStyle) -> String {
 
 /// Encode a UTF-8 string as WinAnsi (Latin-1 for 0xA0–0xFF, plus WinAnsi's own 0x80–0x9F range).
 /// Characters outside the encoding fall back to '?', never panic.
+/// [`winansi`] for the sibling modules' byte-level tests.
+#[cfg(test)]
+pub(crate) fn winansi_for_tests(s: &str) -> Vec<u8> {
+    winansi(s)
+}
+
 fn winansi(s: &str) -> Vec<u8> {
-    s.chars().map(winansi_byte).collect()
+    s.chars()
+        .filter(|c| *c != JUDGED_ON && *c != JUDGED_OFF)
+        .map(winansi_byte)
+        .collect()
 }
 
 /// One character's WinAnsi byte. G1 F: the 0x80–0x9F range is WinAnsi's own (œ Œ “ ” ‘ ’ • ‰ ™
@@ -3076,6 +3598,150 @@ mod tests {
             .sum()
     }
 
+    /// The text each text object shows, decoded back to WinAnsi bytes, one entry per object —
+    /// a line whose judged runs are shown in several strings (their colour switched between
+    /// them) reads here as the one line it is on the page.
+    fn shown_text(bytes: &[u8]) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        let mut cur: Option<Vec<u8>> = None;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'B' if bytes[i..].starts_with(b"BT\n") || bytes[i..].starts_with(b"BT ") => {
+                    cur = Some(Vec::new());
+                    i += 2;
+                }
+                b'E' if bytes[i..].starts_with(b"ET") && cur.is_some() => {
+                    out.extend(cur.take());
+                    i += 2;
+                }
+                b'(' if cur.is_some() => {
+                    i += 1;
+                    let mut depth = 0;
+                    while i < bytes.len() {
+                        match bytes[i] {
+                            b'\\' => {
+                                i += 1;
+                                cur.as_mut().unwrap().push(bytes[i]);
+                            }
+                            b'(' => {
+                                depth += 1;
+                                cur.as_mut().unwrap().push(b'(');
+                            }
+                            b')' if depth == 0 => break,
+                            b')' => {
+                                depth -= 1;
+                                cur.as_mut().unwrap().push(b')');
+                            }
+                            b => cur.as_mut().unwrap().push(b),
+                        }
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                b'<' if cur.is_some() && bytes.get(i + 1) != Some(&b'<') => {
+                    let end = i + bytes[i..].iter().position(|b| *b == b'>').unwrap();
+                    let hex = std::str::from_utf8(&bytes[i + 1..end]).unwrap();
+                    for k in (0..hex.len()).step_by(2) {
+                        cur.as_mut()
+                            .unwrap()
+                            .push(u8::from_str_radix(&hex[k..k + 2], 16).unwrap());
+                    }
+                    i = end + 1;
+                }
+                _ => i += 1,
+            }
+        }
+        out
+    }
+
+    /// Every text object of a page stream with its text-matrix origin: `(x, y, text)` (PDF
+    /// coordinates), the text decoded as in [`shown_text`].
+    fn placed_text(stream: &[u8]) -> Vec<(f32, f32, String)> {
+        let text = String::from_utf8_lossy(stream);
+        let texts = shown_text(stream);
+        let mut out = Vec::new();
+        for (block, shown) in text.split("BT").skip(1).zip(texts) {
+            let Some(tm) = block.split(" Tm").next() else {
+                continue;
+            };
+            let nums: Vec<f32> = tm
+                .split_whitespace()
+                .rev()
+                .take(2)
+                .filter_map(|n| n.parse().ok())
+                .collect();
+            if nums.len() == 2 {
+                out.push((
+                    nums[1],
+                    nums[0],
+                    String::from_utf8_lossy(&shown).to_string(),
+                ));
+            }
+        }
+        out
+    }
+
+    /// Whether one text object of [`shown_text`] carries `s`.
+    fn shows(objects: &[Vec<u8>], s: &str) -> bool {
+        let needle = winansi(s);
+        objects
+            .iter()
+            .any(|o| o.windows(needle.len()).any(|w| w == needle.as_slice()))
+    }
+
+    #[test]
+    fn a_judged_value_is_marked_and_coloured_and_its_note_printed() {
+        // Owner decision (Guy, 2026-09-26): « PER haut moyen jugé 18* », the note on each page
+        // that carries a sigil, the judged colour switched on and back to black.
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let pages = page_streams(&bytes);
+        let p2 = shown_text(&pages[1]);
+        assert!(shows(
+            &p2,
+            "PER haut moyen jugé 18* × BPA estimé haut 9* = 162"
+        ));
+        assert!(contains(&pages[1], JUDGED_NOTE));
+        assert!(
+            contains(&pages[1], "0 0.16 0.52 rg"),
+            "the judged colour is set"
+        );
+        // The demo judges no growth: page 1 shows no « * », so no note there (the note appears
+        // iff a sigil does — G3 review); an absent judgment stays a plain « — ».
+        assert!(shows(
+            &shown_text(&pages[0]),
+            "(2) Croissance estimée des ventes : —"
+        ));
+        assert!(!contains(&pages[0], JUDGED_NOTE));
+        // No judged input in §4 either: no note on page 2.
+        let mut bare = demo_study();
+        bare.judgment.judged_avg_high_pe = None;
+        bare.judgment.judged_avg_low_pe = None;
+        bare.judgment.estimated_high_eps = None;
+        bare.judgment.estimated_low_eps = None;
+        let bytes = render_study_pdf(&bare, NumberStyle::Point).unwrap();
+        assert!(!contains(&page_streams(&bytes)[1], JUDGED_NOTE));
+        let mut s = demo_study();
+        s.judgment.projected_eps_growth_pct = Some(money_of("12.5"));
+        let bytes = render_study_pdf(&s, NumberStyle::Comma).unwrap();
+        let p1 = page_streams(&bytes)[0].clone();
+        assert!(shows(
+            &shown_text(&p1),
+            "(4) Croissance estimée du BPA : 12,5\u{00A0}%*"
+        ));
+        assert!(contains(&p1, JUDGED_NOTE));
+        assert_eq!(page_streams(&bytes).len(), 3, "the note fits page 1");
+        // A derived high EPS (no direct entry) is a result: printed unmarked.
+        s.judgment.estimated_high_eps = None;
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        let p2 = shown_text(&page_streams(&bytes)[1]);
+        assert!(shows(&p2, "× BPA estimé haut 9.01 ="), "derived, unmarked");
+        // The markers take no room and never print.
+        assert_eq!(text_width(&judged("18"), FONT), text_width("18*", FONT));
+        assert_eq!(winansi(&judged("1 2")), winansi("1\u{00A0}2*"));
+        assert_eq!(judged(EM_DASH), EM_DASH);
+    }
+
     /// The content streams, one per page, in page order (the only streams in the file).
     fn page_streams(bytes: &[u8]) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
@@ -3112,7 +3778,7 @@ mod tests {
     fn a_grid_figure_is_never_cut_it_shrinks_whole_to_its_padded_room() {
         // The annexe sales of a JPY issuer: 14 digits in a 70 pt column at 9 pt.
         let col = 70.0;
-        let (lines, size) = cell_layout("31234567890123", col, FONT);
+        let (lines, size) = cell_layout("31234567890123", col, FONT, false);
         assert_eq!(lines, vec!["31234567890123".to_string()], "one line, whole");
         assert!((MIN_FIGURE_FONT..FONT).contains(&size));
         // Shrunk to the PADDED width: it ends on the column's normal right edge, like its
@@ -3123,53 +3789,54 @@ mod tests {
         let short = text_width("180", FONT);
         assert_eq!(cell_x(true, 0.0, col, short) + short, col - CELL_PAD);
         // A figure with its unit shrinks whole, the unit on the number's line.
-        let (lines, _) = cell_layout("1234,5 %", 25.0, SMALL);
+        let (lines, _) = cell_layout("1234,5 %", 25.0, SMALL, false);
         assert_eq!(lines, vec!["1234,5 %".to_string()]);
         // Past the smallest type the figure is printed whole at that size, on ONE line — never
         // split into pieces reading as two numbers — keeping its right edge (across the left rule).
         let long = "12345678901234567890";
-        let (lines, size) = cell_layout(long, 20.0, FONT);
+        let (lines, size) = cell_layout(long, 20.0, FONT, false);
         assert_eq!(size, MIN_FIGURE_FONT);
         assert_eq!(lines, vec![long.to_string()]);
         let w = text_width(long, size);
         assert!(w > 20.0);
         assert_eq!(cell_x(true, 0.0, 20.0, w) + w, 20.0 - CELL_PAD);
         // A figure among words is never split either.
-        let (lines, _) = cell_layout("soit 12345678901234567890 au total", 20.0, FONT);
+        let (lines, _) = cell_layout("soit 12345678901234567890 au total", 20.0, FONT, false);
         assert!(lines.contains(&long.to_string()), "{lines:?}");
         // A label without a digit may still end in « … ».
-        let (lines, _) = cell_layout("Supercalifragilistique", 40.0, FONT);
+        let (lines, _) = cell_layout("Supercalifragilistique", 40.0, FONT, false);
         assert!(lines[0].ends_with('…'));
         // End to end: the study annexe prints the 14-digit figure whole, grouped in the reader's
         // format (G1 I) — the no-break space never breaks the figure.
         let mut s = demo_study();
+        // Owner decision (2026-09-26): the annexe states sales in millions — 31 234 567,89 M.
         s.years[0].sales = cell("31234567890123");
         let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
-        assert!(contains(&bytes, "31,234,567,890,123"));
+        assert!(contains(&bytes, "31,234,567.89"));
         let bytes = render_study_pdf(&s, NumberStyle::Comma).unwrap();
-        assert!(contains(
-            &bytes,
-            "31\u{00A0}234\u{00A0}567\u{00A0}890\u{00A0}123"
-        ));
+        assert!(contains(&bytes, "31\u{00A0}234\u{00A0}567,89"));
     }
 
     #[test]
     fn a_degenerate_column_never_erases_a_cells_text_or_absence() {
         // No room at all: the text as is — the absence mark « — » above all.
-        assert_eq!(cell_layout(EM_DASH, 1.0, FONT).0, vec![EM_DASH.to_string()]);
         assert_eq!(
-            cell_layout(EM_DASH, -4.0, FONT).0,
+            cell_layout(EM_DASH, 1.0, FONT, false).0,
+            vec![EM_DASH.to_string()]
+        );
+        assert_eq!(
+            cell_layout(EM_DASH, -4.0, FONT, false).0,
             vec![EM_DASH.to_string()]
         );
         // The padding leaves no room (8 pt column): the room between the rules is used, and
         // neither a figure nor a word comes out empty.
-        let (lines, _) = cell_layout("12 abc", 8.0, FONT);
+        let (lines, _) = cell_layout("12 abc", 8.0, FONT, false);
         assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
         assert!(lines.contains(&"12".to_string()));
         // A word narrower than nothing but « … » is kept rather than blanked.
-        let (lines, _) = cell_layout("en hausse", 12.0, SMALL);
+        let (lines, _) = cell_layout("en hausse", 12.0, SMALL, false);
         assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
-        let (lines, _) = cell_layout("— · —", 6.0, FONT);
+        let (lines, _) = cell_layout("— · —", 6.0, FONT, false);
         assert!(lines.iter().all(|l| !l.is_empty()), "{lines:?}");
     }
 
@@ -3405,8 +4072,9 @@ mod tests {
             let bytes = render_study_pdf(&demo_study(), nf).unwrap();
             // G1 final (L6): the yield keeps its decimal place, as on the screen (« 4,0 % »).
             let yield_4 = nf.spell(rust_decimal::Decimal::new(40, 1));
+            let bytes = shown_text(&bytes);
             for line in [
-                "(a) PER bas moyen 10 × BPA estimé bas 4 = 40".to_string(),
+                "(a) PER bas moyen jugé 10* × BPA estimé bas 4* = 40".to_string(),
                 "(b) Prix bas moyen des 5 dernières années = 50".to_string(),
                 "(c) Plus bas sévère récent = —".to_string(),
                 format!(
@@ -3414,21 +4082,21 @@ mod tests {
                 ),
                 "Prix bas retenu (PER bas × BPA bas) = 40".to_string(),
             ] {
-                assert!(contains(&bytes, &line), "missing under {nf:?}: {line}");
+                assert!(shows(&bytes, &line), "missing under {nf:?}: {line}");
             }
         }
         // A fractional candidate is spelled per format (G1 I review).
         let mut s = demo_study();
         s.judgment.judged_avg_low_pe = Some(money_of("10.5"));
-        let comma = render_study_pdf(&s, NumberStyle::Comma).unwrap();
-        let point = render_study_pdf(&s, NumberStyle::Point).unwrap();
-        assert!(contains(
+        let comma = shown_text(&render_study_pdf(&s, NumberStyle::Comma).unwrap());
+        let point = shown_text(&render_study_pdf(&s, NumberStyle::Point).unwrap());
+        assert!(shows(
             &comma,
-            "(a) PER bas moyen 10,5 × BPA estimé bas 4 = 42"
+            "(a) PER bas moyen jugé 10,5* × BPA estimé bas 4* = 42"
         ));
-        assert!(contains(
+        assert!(shows(
             &point,
-            "(a) PER bas moyen 10.5 × BPA estimé bas 4 = 42"
+            "(a) PER bas moyen jugé 10.5* × BPA estimé bas 4* = 42"
         ));
     }
 
@@ -3488,6 +4156,121 @@ mod tests {
     }
 
     #[test]
+    fn the_axis_runs_over_the_forecast_years_with_the_log_papers_minor_lines() {
+        // Owner decision (Guy, 2026-09-26): a year (and its vertical) for every year of the plot,
+        // the five forecast years included; the minor lines are 3–4, 6–9 × 10^k only.
+        let h = FORECAST_HORIZON_YEARS as i32;
+        let years: Vec<i32> = axis_years(2021, 2025).collect();
+        assert_eq!(years.first(), Some(&2021));
+        assert_eq!(years.last(), Some(&(2025 + h)));
+        // Every year of the axis is labelled once, on one baseline, left to right, one year's
+        // width apart — the forecast years included.
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let placed = placed_text(&page_streams(&bytes)[0]);
+        let labels: Vec<(f32, f32)> = (2021..=2025 + h)
+            .map(|y| {
+                let at: Vec<&(f32, f32, String)> =
+                    placed.iter().filter(|p| p.2 == y.to_string()).collect();
+                assert_eq!(at.len(), 1, "the year {y} is labelled once");
+                (at[0].0, at[0].1)
+            })
+            .collect();
+        let baseline = labels[0].1;
+        let step = labels[1].0 - labels[0].0;
+        assert!(step > 10.0);
+        for w in labels.windows(2) {
+            assert!((w[0].1 - baseline).abs() < 0.01, "one baseline");
+            assert!(
+                ((w[1].0 - w[0].0) - step).abs() < 0.5,
+                "evenly spaced: {labels:?}"
+            );
+        }
+        let minor = minor_ticks(0.0, 2.0);
+        assert_eq!(
+            minor,
+            vec![
+                3.0, 4.0, 6.0, 7.0, 8.0, 9.0, 30.0, 40.0, 60.0, 70.0, 80.0, 90.0
+            ]
+        );
+        for v in minor {
+            let m = v / 10f64.powf(v.log10().floor());
+            assert!(
+                ![1.0, 2.0, 5.0].contains(&m.round()),
+                "{v} is a labelled line"
+            );
+        }
+        // Too many years for one label each: the labels thin out, the verticals do not.
+        assert_eq!(label_stride(40.0, AXIS_LABEL_SIZE), 1);
+        assert!(label_stride(8.0, AXIS_LABEL_SIZE) >= 2);
+    }
+
+    #[test]
+    fn a_bold_cell_is_laid_out_by_the_bold_metrics() {
+        // G3 review: bold is wider — a text that just fits in the regular face wraps (or
+        // shrinks) in bold, and is never drawn across its rule.
+        let s = "Rendement annuel total";
+        let col = text_width(s, SMALL) + 2.0 * GRID_INSET + 0.5;
+        assert!(text_width_bold(s, SMALL) > text_width(s, SMALL));
+        assert_eq!(cell_layout(s, col, SMALL, false).0.len(), 1);
+        let (lines, _) = cell_layout(s, col, SMALL, true);
+        for l in &lines {
+            assert!(
+                text_width_bold(l, SMALL) <= col - 2.0 * CELL_PAD + 0.01,
+                "{l}"
+            );
+        }
+        assert!(lines.len() > 1);
+    }
+
+    #[test]
+    fn a_non_zero_million_figure_is_never_printed_zero() {
+        // G3 review: ± 4 000 is 0,004 M — never « 0 »; the sign stays; two decimals otherwise.
+        let m = |s: &str| NumberStyle::Comma.millions(Some(money_of(s)));
+        assert_eq!(m("4000"), "0,004");
+        assert_eq!(m("-3500"), "-0,0035");
+        assert_eq!(m("0.5"), "0,0000005");
+        assert_eq!(m("6910000000"), "6\u{00A0}910");
+        assert_eq!(m("12345678"), "12,35");
+        assert_eq!(m("0"), "0");
+        assert_eq!(NumberStyle::Comma.millions(None), EM_DASH);
+    }
+
+    #[test]
+    fn the_guide_labels_never_print_over_each_other() {
+        // Two guides ending 1 pt apart: their labels are pushed a line apart, the flatter below.
+        // Two guides ending 1 pt apart: spread around their mean (up AND down), in order.
+        let rows = guide_label_rows(&[(5, 300.0), (10, 299.0), (15, 250.0)], 6.5, 50.0, 700.0);
+        let y = |rows: &[(u32, f32)], rate| rows.iter().find(|r| r.0 == rate).unwrap().1;
+        assert!(y(&rows, 5) - y(&rows, 10) >= 6.5 - 1e-3);
+        assert!(
+            (y(&rows, 5) + y(&rows, 10)) / 2.0 - 299.5 < 1e-3,
+            "centred on their mean"
+        );
+        assert!(
+            y(&rows, 5) > 300.0 && y(&rows, 10) < 299.0,
+            "moved both ways"
+        );
+        assert_eq!(y(&rows, 15), 250.0, "a label with room keeps its height");
+        // Many decades: the steep guides crowd at the frame's top — every label stays inside
+        // [top, bottom], a gap apart, in the guides' order.
+        let top = 60.0;
+        let crowded: Vec<(u32, f32)> = GUIDE_RATES_PCT
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (*r, top - 30.0 + i as f32 * 0.5))
+            .collect();
+        let rows = guide_label_rows(&crowded, 6.5, top, 700.0);
+        for w in rows.windows(2) {
+            assert!(w[1].1 - w[0].1 >= 6.5 - 1e-3, "{rows:?}");
+        }
+        assert!(rows.iter().all(|r| r.1 >= top && r.1 <= 700.0), "{rows:?}");
+        // …and at the bottom edge too.
+        let low: Vec<(u32, f32)> = crowded.iter().map(|(r, y)| (*r, y + 700.0)).collect();
+        let rows = guide_label_rows(&low, 6.5, top, 700.0);
+        assert!(rows.iter().all(|r| r.1 <= 700.0 && r.1 >= top), "{rows:?}");
+    }
+
+    #[test]
     fn the_chart_fills_the_page_it_lands_on() {
         // A break before the plot measures its height on the NEW page, not the old remainder.
         let frame = crate::form::build_frame(&demo_study()).unwrap();
@@ -3495,9 +4278,9 @@ mod tests {
         doc.y = PAGE_H - BOTTOM - 120.0;
         doc.growth_chart(&frame, NumberStyle::Comma);
         assert_eq!(doc.page_index(), 1, "the plot moved to a new page");
-        // What is left under it is the caller's gap + the four growth lines.
+        // What is left under it is the caller's gap + the four growth lines + the judged note.
         assert!(
-            doc.y >= PAGE_H - BOTTOM - 2.0 - 2.0 * LINE_H - 1.0,
+            doc.y >= PAGE_H - BOTTOM - 2.0 - 2.0 * LINE_H - (LINE_H - 2.0) - 1.0,
             "the plot fills the new page, y = {}",
             doc.y
         );

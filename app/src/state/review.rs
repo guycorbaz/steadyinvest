@@ -525,7 +525,10 @@ impl JournalState {
                         current_price: price,
                         upside_downside: outputs.risk_reward.upside_downside,
                         relative_value_pct: outputs.valuation.relative_value_pct,
-                        quality_flags: outputs.quality_flags.clone(),
+                        // As listed and counted (owner decision, 2026-09-26): one high-P/E flag,
+                        // the highest threshold reached — the row, « Signaux (n) », the counts
+                        // and the other-studies band all read this one list.
+                        quality_flags: super::shown_quality_flags(&outputs.quality_flags),
                         last_saved,
                         due_for_review,
                     }),

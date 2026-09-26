@@ -210,8 +210,26 @@ pub const MSG_FLAG_EPS_LAGS_SALES: &str = "BPA en retard sur les ventes";
 pub const MSG_FLAG_HIGH_PE_AGGRESSIVE: &str = "PER haut jugé au-dessus de 20";
 pub const MSG_FLAG_HIGH_PE_IMPLAUSIBLE: &str = "PER haut jugé au-dessus de 25";
 pub const MSG_FLAG_UD_BELOW_TARGET: &str = "ratio hausse / baisse sous 3";
-pub const MSG_FLAG_UD_EXTREME: &str = "ratio hausse / baisse au-dessus de 20";
+// The threshold is core's `ud_extreme()` (15) — the label said « 20 » (found by the comparison's
+// hand check, 2026-09-26); `flag_labels_name_cores_thresholds` now ties every figure to core.
+pub const MSG_FLAG_UD_EXTREME: &str = "ratio hausse / baisse au-dessus de 15";
 pub const MSG_FLAG_RELATIVE_VALUE_HIGH: &str = "valeur relative à 100 % ou plus";
+
+/// Owner decision (Guy, 2026-09-26) — the flags as the screens and PDFs LIST and COUNT them: the
+/// engine raises « PER haut jugé au-dessus de 20 » and « … de 25 » as two rows for one fact (a
+/// judged high P/E of 78 is over both); only the highest threshold reached is shown, and counted
+/// once. Presentation only — core keeps both keys (its catalog and the method are unchanged).
+pub fn shown_quality_flags(
+    flags: &[steadyinvest_core::ssg::QualityFlagKey],
+) -> Vec<steadyinvest_core::ssg::QualityFlagKey> {
+    use steadyinvest_core::ssg::QualityFlagKey as K;
+    let above_25 = flags.contains(&K::ProjectedHighPeImplausible);
+    flags
+        .iter()
+        .copied()
+        .filter(|k| !(above_25 && *k == K::ProjectedHighPeAggressive))
+        .collect()
+}
 
 /// The neutral wording of one engine quality flag (Story 7.2).
 pub fn quality_flag_label(key: steadyinvest_core::ssg::QualityFlagKey) -> &'static str {
@@ -1077,3 +1095,49 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SPLITS_QUOTA,
     MSG_KEY_OK_NO_SPLITS,
 ];
+
+#[cfg(test)]
+mod flag_tests {
+    use super::*;
+    use steadyinvest_core::method;
+    use steadyinvest_core::ssg::QualityFlagKey as K;
+
+    #[test]
+    fn one_high_pe_fact_is_listed_and_counted_once() {
+        // 78 is over 20 AND over 25: one flag, the highest threshold (owner decision, 2026-09-26).
+        let both = [
+            K::PtpTrendDeclining,
+            K::ProjectedHighPeAggressive,
+            K::ProjectedHighPeImplausible,
+        ];
+        assert_eq!(
+            shown_quality_flags(&both),
+            vec![K::PtpTrendDeclining, K::ProjectedHighPeImplausible]
+        );
+        // 24 is over 20 only: it stays.
+        let one = [K::ProjectedHighPeAggressive, K::UdBelowTarget];
+        assert_eq!(shown_quality_flags(&one), one.to_vec());
+        assert!(shown_quality_flags(&[]).is_empty());
+    }
+
+    #[test]
+    fn flag_labels_name_cores_thresholds() {
+        // A figure in a flag's words is core's threshold, never a second copy that can drift.
+        let n = |d: rust_decimal::Decimal| d.normalize().to_string();
+        for (key, threshold) in [
+            (K::RoeLow, method::roe_low_pct()),
+            (K::ProjectedHighPeAggressive, method::high_pe_aggressive()),
+            (K::ProjectedHighPeImplausible, method::high_pe_implausible()),
+            (K::UdBelowTarget, method::ud_target()),
+            (K::UdExtreme, method::ud_extreme()),
+            (K::RelativeValueHigh, method::relative_value_ceiling_pct()),
+        ] {
+            let label = quality_flag_label(key);
+            assert!(
+                label.split(' ').any(|w| w == n(threshold)),
+                "{key:?}: « {label} » does not name {}",
+                n(threshold)
+            );
+        }
+    }
+}

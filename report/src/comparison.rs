@@ -1,9 +1,16 @@
-//! Story 7.1 (FR53) — the company comparison as a neutral, greyscale, A4-LANDSCAPE PDF: up to
-//! five studies as columns, the comparison form's thirty rows in four groups. The `app` formats
-//! the figures (its one float→string boundary) and passes keys for the two worded rows (the
-//! zone, the study state); this module owns every label (its neutral inventory, tested).
+//! Story 7.1 (FR53) — the company comparison as a neutral, A4-LANDSCAPE PDF that reads in black
+//! and white (colour only as a second channel — owner decision, Guy 2026-09-26): up to five
+//! studies as columns, the comparison form's thirty rows in four groups. The `app` formats the
+//! figures (its one float→string boundary) and passes keys for the two worded rows (the zone,
+//! the study state); this module owns every label (its neutral inventory, tested).
+//!
+//! Owner decision (Guy, 2026-09-26), the NAIC Stock Comparison Guide's semantics: a row that
+//! corresponds to a judged input (2, 4, 12, 14) shows the JUDGED value the calculation used, as
+//! the app marked it (a trailing [`JUDGED_SIGIL`]); the sigil is explained under the group.
 
-use crate::pdf::{Doc, EM_DASH, MARGIN, SMALL, fit, wrap_to_width};
+use crate::pdf::{
+    Doc, EM_DASH, JUDGED_NOTE, JUDGED_SIGIL, MARGIN, SMALL, fit, judged, wrap_to_width,
+};
 
 /// One study's column: the header facts and the thirty rows (index 0 = the form's row 1).
 /// Rows 20 and 28 are keys carried in `zone` / `state` instead; their string slot stays `""`.
@@ -85,11 +92,15 @@ const ROWS: [&str; 30] = [
     "BPA total estimé sur 5 ans",
     "Fourchette de cours sur 5 ans",
     "Cours actuel",
-    "PER le plus haut",
-    "PER haut moyen",
-    "PER moyen",
-    "PER bas moyen",
-    "PER le plus bas",
+    // G3 review: rows 11, 13 and 15 name their source — the §3 history — beside the two judged
+    // rows (the comparison guide's « highest / average / lowest P/E » of the last five years).
+    "PER le plus haut sur 5 ans",
+    // Rows 12 / 14 show the judged average P/E the zones are computed with (owner decision,
+    // 2026-09-26) — named so, as the study's §4 names it.
+    "PER haut moyen jugé",
+    "PER moyen historique (§3)",
+    "PER bas moyen jugé",
+    "PER le plus bas sur 5 ans",
     "PER actuel",
     "Zone basse",
     "Zone médiane",
@@ -106,12 +117,20 @@ const ROWS: [&str; 30] = [
     "Date des données",
     "Place de cotation",
 ];
-// Row 20 names the band of rows 17–19 in their own words — the screen says the same (G1, #237).
-const ZONE_BUY: &str = ROWS[16];
-const ZONE_NEUTRAL: &str = ROWS[17];
-const ZONE_SELL: &str = ROWS[18];
-const ZONE_BELOW: &str = "Sous la bande";
-const ZONE_ABOVE: &str = "Au-dessus de la bande";
+// Row 20 names the band of rows 17–19 in their own words — the screen says the same (G1, #237) —
+// in lower case like every other worded cell (owner decision, 2026-09-26: « zone médiane »,
+// « sous la bande », as « provisoire » or « critères validés » in row 28).
+const ZONE_BUY: &str = "zone basse";
+const ZONE_NEUTRAL: &str = "zone médiane";
+const ZONE_SELL: &str = "zone haute";
+const ZONE_BELOW: &str = "sous la bande";
+const ZONE_ABOVE: &str = "au-dessus de la bande";
+// Owner decision (Guy, 2026-09-26): rows 20–23 — where the current price sits, the ratio, the
+// yields — are the comparison's conclusions, printed in bold (label and figures).
+const BOLD_ROWS: std::ops::RangeInclusive<usize> = 20..=23;
+// The Cours group breaks, when it must, between the P/E history (rows 8–16, sections 3) and the
+// zones and returns (rows 17–23, sections 4–5) — never with row 23 alone on the next page.
+const PRICE_TAIL: std::ops::RangeInclusive<usize> = 17..=23;
 const STATE_FULL: &str = "critères validés";
 const STATE_PROVISIONAL: &str = "provisoire";
 const STATE_WITHHELD: &str = "en attente";
@@ -156,6 +175,7 @@ const COMPARISON_USER_FACING: &[&str] = &[
     ROE_AVG_N,
     ROE_AVG_ONE,
     ROE_AVG,
+    JUDGED_NOTE,
 ];
 
 /// The label of row `n` (1-based): the fixed inventory, but rows 5 / 6 say the years averaged.
@@ -260,6 +280,15 @@ fn cell(c: &ComparisonColumn, n: usize) -> String {
     }
 }
 
+/// A cell as printed: a judged figure (the app's trailing [`JUDGED_SIGIL`]) takes the judged
+/// colour beside its sigil; any other cell is printed as is.
+fn printed(cell: &str) -> String {
+    match cell.strip_suffix(JUDGED_SIGIL) {
+        Some(figure) if !figure.is_empty() => judged(figure),
+        _ => cell.to_string(),
+    }
+}
+
 /// The trend rows (5, 6) arrive as « 47,6 % · ↑ hausse »: the word carries the fact, the arrow
 /// has no glyph in the PDF's WinAnsi font, so it is dropped here (never rendered as « ? »).
 fn strip_arrows(s: &str) -> String {
@@ -299,7 +328,8 @@ fn second_header_line(c: &ComparisonColumn) -> String {
     }
 }
 
-/// Render the comparison (FR53): A4 landscape, deterministic, greyscale, neutral labels.
+/// Render the comparison (FR53): A4 landscape, deterministic, black-and-white-safe, neutral
+/// labels.
 pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     let mut doc = Doc::landscape();
     doc.title(TITLE);
@@ -345,6 +375,11 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
         (G_PRICE, 8..=23),
         (G_OTHER, 24..=30),
     ];
+    let row_cells = |row: usize| -> Vec<String> {
+        let mut cells = vec![format!("({row}) {}", row_label(cols, row))];
+        cells.extend(cols.iter().map(|c| printed(&cell(c, row))));
+        cells
+    };
     for (title, range) in groups {
         doc.section(title);
         doc.grid_begin(range.end() - range.start() + 3);
@@ -352,11 +387,36 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
         if any_name {
             doc.grid_row_small(&name_refs, &edges, true, 1);
         }
+        // The judged-value note follows its sigils: printed under each page's portion of the
+        // grid that holds a judged cell (a group split by a page break explains it on both).
+        doc.set_grid_note(JUDGED_NOTE);
         for row in range {
-            let mut cells = vec![format!("({row}) {}", row_label(cols, row))];
-            cells.extend(cols.iter().map(|c| cell(c, row)));
+            let marked = cols.iter().any(|c| cell(c, row).ends_with(JUDGED_SIGIL));
+            let cells = row_cells(row);
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
+            if row == *PRICE_TAIL.start() {
+                // Rows 17–23 stay together: they break to the next page as one block (with the
+                // replayed header) rather than leave their last row alone there. Each measured
+                // in the face it is drawn in.
+                let tail: f32 = PRICE_TAIL
+                    .clone()
+                    .map(|r| {
+                        let cells = row_cells(r);
+                        let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
+                        doc.set_grid_bold(BOLD_ROWS.contains(&r));
+                        let h = doc.grid_rows_height(&refs, &edges, SMALL);
+                        doc.set_grid_bold(false);
+                        h
+                    })
+                    .sum();
+                doc.grid_keep_rows(tail, &edges);
+            }
+            doc.set_grid_bold(BOLD_ROWS.contains(&row));
             doc.grid_row_small(&refs, &edges, false, 1);
+            doc.set_grid_bold(false);
+            if marked {
+                doc.grid_note_due();
+            }
         }
         doc.grid_end(&edges);
         doc.gap(2.0);
@@ -455,11 +515,17 @@ mod tests {
 
     #[test]
     fn row_20_uses_the_band_rows_own_nouns() {
-        // The screen words row 20 with the same nouns (comparison.slint `zone-words`).
+        // The screen words row 20 with the same nouns (comparison.slint `zone-words`), in lower
+        // case like the other worded cells (owner decision, 2026-09-26).
         let mut c = column("X", false);
         for (key, row) in [("buy", 17), ("neutral", 18), ("sell", 19)] {
             c.zone = key.into();
-            assert_eq!(cell(&c, 20), ROWS[row - 1]);
+            assert_eq!(cell(&c, 20), ROWS[row - 1].to_lowercase());
+        }
+        for key in ["below", "above"] {
+            c.zone = key.into();
+            let word = cell(&c, 20);
+            assert_eq!(word, word.to_lowercase(), "{word}");
         }
         c.zone = String::new();
         assert_eq!(cell(&c, 20), EM_DASH);
@@ -567,6 +633,88 @@ mod tests {
         assert_eq!(row_label(&[a], 5), PTP_AVG_ONE);
         assert_eq!(row_label(&[], 5), PTP_AVG);
         assert_eq!(row_label(&[], 7), ROWS[6]);
+    }
+
+    /// The PDF's pages, as raw content streams, in order.
+    fn pages(bytes: &[u8]) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut rest = bytes;
+        while let Some(end) = rest.windows(9).position(|w| w == b"endstream") {
+            out.push(rest[..end].to_vec());
+            rest = &rest[end + 9..];
+        }
+        out
+    }
+
+    fn carries(hay: &[u8], s: &str) -> bool {
+        let hex: Vec<u8> = crate::pdf::winansi_for_tests(s)
+            .iter()
+            .flat_map(|b| format!("{b:02X}").into_bytes())
+            .collect();
+        let raw = crate::pdf::winansi_for_tests(s);
+        hay.windows(raw.len()).any(|w| w == raw.as_slice())
+            || hay.windows(hex.len()).any(|w| w == hex.as_slice())
+    }
+
+    #[test]
+    fn judged_rows_are_marked_their_note_printed_and_the_return_rows_bold() {
+        // Owner decision (Guy, 2026-09-26): rows 12 / 14 are the judged P/E, named « jugé »; a
+        // judged cell keeps its sigil, takes the judged colour, and the group states the note;
+        // rows 20–23 are bold.
+        assert_eq!(ROWS[11], "PER haut moyen jugé");
+        assert_eq!(ROWS[13], "PER bas moyen jugé");
+        let mut a = column("A", false);
+        a.rows[11] = "78,0*".into();
+        assert_eq!(cell(&a, 12), "78,0*");
+        assert_eq!(printed(&cell(&a, 12)), judged("78,0"));
+        assert_eq!(printed("—"), "—");
+        let bytes = render_comparison(&Comparison {
+            date: "2026-09-26".into(),
+            currency_mix: false,
+            columns: vec![a, column("B", false)],
+        });
+        assert!(carries(&bytes, JUDGED_NOTE));
+        assert!(carries(&bytes, "78,0*"));
+        // Bold: the return rows' labels are shown in F1 (Helvetica-Bold).
+        let text = String::from_utf8_lossy(&bytes);
+        let bold_label = text
+            .split("/F1 ")
+            .skip(1)
+            .any(|chunk| chunk.contains("(20) Position du cours actuel"));
+        assert!(bold_label, "row 20 in bold");
+        let regular_label = text.split("/F0 ").skip(1).any(|chunk| {
+            chunk
+                .split("ET")
+                .next()
+                .unwrap_or("")
+                .contains("(19) Zone haute")
+        });
+        assert!(regular_label, "row 19 in the regular face");
+    }
+
+    #[test]
+    fn the_price_group_never_leaves_its_last_row_alone_on_the_next_page() {
+        // Three columns with two-line headers — the owner's case: rows 17–23 move together.
+        let mut cols = vec![column("NESN.SW", false), column("NVDA.US", false)];
+        cols.push(column("SCHN.SW", false));
+        let bytes = render_comparison(&Comparison {
+            date: "2026-09-26".into(),
+            currency_mix: false,
+            columns: cols,
+        });
+        let pages = pages(&bytes);
+        let page_of = |s: &str| pages.iter().position(|p| carries(p, s));
+        let p17 = page_of("(17) Zone basse").unwrap();
+        let p23 = page_of("(23) Rendement annuel total estimé").unwrap();
+        assert_eq!(p17, p23, "rows 17–23 share a page");
+        // The owner's case: the block does NOT fit under rows 8–16 — it moves whole, the break
+        // falls after row 16, and the next page holds all seven rows under the replayed header.
+        assert_eq!(p17, 1, "the block moved");
+        assert_eq!(page_of("(16) PER actuel"), Some(0));
+        assert!(
+            carries(&pages[1], "NESN.SW (CHF)"),
+            "the header is replayed"
+        );
     }
 
     #[test]

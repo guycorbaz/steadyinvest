@@ -1075,11 +1075,11 @@ export component StudyScreen inherits Rectangle {
                 open: Studies.folds[3];
                 toggled(v) => { Studies.toggle-fold(3, v); }
 
-                CalcRow { label: @tr("A · Prix haut"); formula: @tr("PER haut moy. × BPA est. haut"); result: Studies.risk-computed.forecast-high; }
+                CalcRow { label: @tr("A · Prix haut"); formula: @tr("PER haut moy. jugé × BPA est. haut"); result: Studies.risk-computed.forecast-high; }
                 // Issue #213: the four candidates side by side (the NAIC form's B(a)–B(d)), each
                 // with its value or the NAMED missing input — never a bare dash — so the option
                 // choice below is made by comparing them.
-                CalcRow { label: @tr("B(a) · PER bas moy. × BPA est. bas"); formula: ""; result: Studies.risk-computed.low-a != "" ? Studies.risk-computed.low-a : root.low-why(Studies.risk-computed.low-a-why); }
+                CalcRow { label: @tr("B(a) · PER bas moy. jugé × BPA est. bas"); formula: ""; result: Studies.risk-computed.low-a != "" ? Studies.risk-computed.low-a : root.low-why(Studies.risk-computed.low-a-why); }
                 CalcRow { label: @tr("B(b) · Prix bas moyen 5 ans"); formula: ""; result: Studies.risk-computed.low-b != "" ? Studies.risk-computed.low-b : root.low-why(Studies.risk-computed.low-b-why); }
                 CalcRow { label: @tr("B(c) · Plus bas sévère récent"); formula: ""; result: Studies.risk-computed.low-c != "" ? Studies.risk-computed.low-c : root.low-why(Studies.risk-computed.low-c-why); }
                 CalcRow { label: @tr("B(d) · Soutenu par dividende"); formula: ""; result: Studies.risk-computed.low-d != "" ? Studies.risk-computed.low-d : root.low-why(Studies.risk-computed.low-d-why); }

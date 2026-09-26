@@ -123,6 +123,8 @@ pub struct PortfolioReview {
     pub currencies_unavailable: bool,
     pub bank_lines: Vec<ShareLine>,
     pub global_invested: String,
+    /// The global total's share, bare (« 100 »), `""` when the total is absent or not positive.
+    pub global_share: String,
     /// The pair(s) that absent the global total, `""` when none.
     pub global_missing: String,
     /// The global total is absent for a reason that is NOT a nameable pair (a failed bank read,
@@ -191,6 +193,8 @@ const REASON_NO_SALES: &str = "non classé : chiffre d'affaires indisponible";
 const REASON_MISSING_RATE: &str = "non classé : taux manquant";
 const REASON_UNCONVERTIBLE: &str = "non classé : conversion impossible";
 const MISSING_RATE: &str = "taux manquant";
+// G3 review: the note says WHAT the pair blocks — the share (the amount stands) or the figure.
+const SHARE_UNAVAILABLE: &str = "part indisponible :";
 const P_TICKER: &str = "Titre";
 const P_BANKS: &str = "Banques";
 const P_INVESTED: &str = "Investi";
@@ -243,10 +247,16 @@ const DUE_NONE: &str = "Aucune étude à revoir.";
 const DUE_DATE_UNKNOWN: &str = "inconnue (historique indisponible)";
 const K_POSITIONS: &str = "positions";
 const K_LINKED: &str = "avec une étude";
-const K_FULL: &str = "critères validés";
-const K_PROVISIONAL: &str = "provisoires";
-const K_WITHHELD: &str = "en attente";
-const K_NOT_COMPUTABLE: &str = "non calculables";
+// Owner decision (Guy, 2026-09-26): « 0 critères validés » read as a count of criteria. Each
+// count of positions says what it counts — the INTEGRITY state of the position's study (core
+// `derive_verdict`: every load-bearing input validated and fresh, no reduced confidence), never
+// the method's criteria (U/D ≥ 3, relative value, zone — `VerdictFacts`), which it does not
+// count (G3 review: « remplit tous les critères » was a misattribution).
+const K_FULL: &str = "dont l'étude a toutes ses données validées et à jour";
+const K_PROVISIONAL: &str =
+    "dont l'étude est provisoire (données à revérifier ou confiance réduite)";
+const K_WITHHELD: &str = "dont l'étude attend une donnée requise";
+const K_NOT_COMPUTABLE: &str = "dont l'étude n'est pas calculable";
 const K_FLAGGED: &str = "avec au moins un signal";
 const K_HIGH_ZONE: &str = "dans la zone haute ou au-dessus";
 const K_STOP_BREACHED: &str = "sous leur seuil suiveur";
@@ -304,6 +314,7 @@ const REVIEW_USER_FACING: &[&str] = &[
     REASON_MISSING_RATE,
     REASON_UNCONVERTIBLE,
     MISSING_RATE,
+    SHARE_UNAVAILABLE,
     P_TICKER,
     P_BANKS,
     P_INVESTED,
@@ -447,7 +458,16 @@ fn note_label(line: &ShareLine, murmur: &str) -> String {
     if !line.reason.is_empty() {
         parts.push(reason_label(line));
     } else if !line.missing.is_empty() {
-        parts.push(format!("{MISSING_RATE} {}", line.missing));
+        // The screen's words (review.slint `ShareBlock`): an amount standing beside a blocked
+        // share says the SHARE is unavailable; with no figure at all, the row is.
+        if !line.amount.is_empty() && line.share.is_empty() {
+            parts.push(format!(
+                "{SHARE_UNAVAILABLE} {MISSING_RATE} {}",
+                line.missing
+            ));
+        } else {
+            parts.push(format!("{UNAVAILABLE} : {MISSING_RATE} {}", line.missing));
+        }
     } else if line.amount.is_empty() && line.share.is_empty() {
         parts.push(UNAVAILABLE.to_string());
     }
@@ -610,9 +630,11 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
     );
     let mut bank_lines = review.bank_lines.clone();
     if !review.global_invested.is_empty() {
+        // Owner decision (Guy, 2026-09-26): the total's share is 100 % (never « — »).
         bank_lines.push(ShareLine {
             label: GLOBAL_TOTAL.to_string(),
             amount: review.global_invested.clone(),
+            share: review.global_share.clone(),
             ..ShareLine::default()
         });
     }
@@ -1057,6 +1079,31 @@ mod tests {
         );
         assert!(!carries(&bytes, "% %"), "never a doubled unit");
         assert_eq!(pct_or_dash(""), EM_DASH, "an absent share stays the dash");
+    }
+
+    #[test]
+    fn the_global_total_is_100_percent_and_the_counts_say_what_they_count() {
+        // Owner decisions (Guy, 2026-09-26): « Total global » states its 100 %; the verdict
+        // counts are worded as counts of positions, never « 0 critères validés ».
+        let mut r = sample();
+        r.global_invested = "3 550 CHF".into();
+        r.global_share = "100".into();
+        r.counts = vec![("full".into(), "0".into())];
+        let bytes = render_portfolio_review(&r);
+        assert!(carries(&bytes, "100 %"));
+        assert!(carries(&bytes, "a toutes ses donn"));
+        assert_ne!(
+            K_FULL, STUDY_FULL,
+            "a count of positions, not the study state"
+        );
+        // G3 review: the counts state the studies' data state, never a claim about the
+        // method's criteria.
+        for label in [K_FULL, K_PROVISIONAL, K_WITHHELD, K_NOT_COMPUTABLE] {
+            assert!(
+                !label.contains("remplit") && !label.contains("critère"),
+                "{label}"
+            );
+        }
     }
 
     #[test]

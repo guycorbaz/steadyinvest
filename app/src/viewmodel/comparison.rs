@@ -3,6 +3,13 @@
 //! min / max / × over engine outputs (rows 8, 9, 11, 15) — pure, tested here; the rest is a
 //! straight read. The two worded rows (20 zone, 28 state) cross as keys; the report and the
 //! screen word them in their own inventories.
+//!
+//! Owner decision (Guy, 2026-09-26), the NAIC Stock Comparison Guide's semantics: the rows that
+//! correspond to a judged input — (2) / (4) the estimated growths, (12) / (14) the average high
+//! / low P/E — show the JUDGED value the calculations use (rows 17–19 are computed from them),
+//! marked with the report's sigil (« 78,0* »); the screen and the PDF explain it under the
+//! group. Row 12 used to show the §3 historical average (NVDA 93,5) beside zones computed with
+//! the judged 77,97.
 
 use rust_decimal::Decimal;
 use steadyinvest_contract::{Source, Study};
@@ -123,8 +130,12 @@ fn window_pe_extremes(per_year: &[YearValuation]) -> (Option<Decimal>, Option<De
 /// Row 27: « N : flag · flag » when flags are raised; « 0 » only when every rule was checked
 /// (`core::ssg::quality_flags_assessable`, next to the rules themselves); not assessable →
 /// `""` (« — »), never a zero standing for an absence.
+///
+/// Owner decision (Guy, 2026-09-26): the flags are listed and counted as [`state::shown_quality_flags`]
+/// states them — one high-P/E flag, the highest threshold reached (the review does the same).
 fn flags_row(outputs: &SsgOutputs, judgment: &JudgmentInputs) -> String {
-    if outputs.quality_flags.is_empty() {
+    let flags = state::shown_quality_flags(&outputs.quality_flags);
+    if flags.is_empty() {
         if quality_flags_assessable(outputs, judgment) {
             "0".to_string()
         } else {
@@ -133,14 +144,23 @@ fn flags_row(outputs: &SsgOutputs, judgment: &JudgmentInputs) -> String {
     } else {
         format!(
             "{} : {}",
-            outputs.quality_flags.len(),
-            outputs
-                .quality_flags
+            flags.len(),
+            flags
                 .iter()
                 .map(|k| state::quality_flag_label(*k))
                 .collect::<Vec<_>>()
                 .join(" · ")
         )
+    }
+}
+
+/// A judged figure as the comparison shows it: the figure and the report's sigil; an absent
+/// judgment stays `""` (« — »: nothing was judged, nothing to mark).
+fn judged_cell(figure: String) -> String {
+    if figure.is_empty() || figure == EMPTY_SLOT {
+        String::new()
+    } else {
+        format!("{figure}{}", steadyinvest_report::JUDGED_SIGIL)
     }
 }
 
@@ -207,9 +227,9 @@ pub fn comparison_column(
     let empty_if_dash = |s: String| if s == EMPTY_SLOT { String::new() } else { s };
     let rows = vec![
         empty_if_dash(fmt_pct(g.sales_cagr_pct, format)), // 1
-        empty_if_dash(fmt_pct(money(j.projected_sales_growth_pct), format)), // 2
+        judged_cell(fmt_pct(money(j.projected_sales_growth_pct), format)), // 2
         empty_if_dash(fmt_pct(g.eps_cagr_pct, format)),   // 3
-        empty_if_dash(fmt_pct(money(j.projected_eps_growth_pct), format)), // 4
+        judged_cell(fmt_pct(money(j.projected_eps_growth_pct), format)), // 4
         with_trend(m.avg_ptp_pct, m.ptp_trend),           // 5
         with_trend(m.avg_roe_pct, m.roe_trend),           // 6
         String::new(),                                    // 7 not carried
@@ -217,9 +237,17 @@ pub fn comparison_column(
         range(range_lo, range_hi, DisplayField::Price, format), // 9
         empty_if_dash(fmt(current, DisplayField::Price, format)), // 10
         empty_if_dash(fmt(pe_max, DisplayField::PeRatio, format)), // 11
-        empty_if_dash(fmt(v.avg_high_pe, DisplayField::PeRatio, format)), // 12
+        judged_cell(fmt(
+            money(j.judged_avg_high_pe),
+            DisplayField::PeRatio,
+            format,
+        )), // 12
         empty_if_dash(fmt(v.avg_pe, DisplayField::PeRatio, format)), // 13
-        empty_if_dash(fmt(v.avg_low_pe, DisplayField::PeRatio, format)), // 14
+        judged_cell(fmt(
+            money(j.judged_avg_low_pe),
+            DisplayField::PeRatio,
+            format,
+        )), // 14
         empty_if_dash(fmt(pe_min, DisplayField::PeRatio, format)), // 15
         empty_if_dash(fmt(v.current_pe, DisplayField::PeRatio, format)), // 16
         zone(z_low, z_buy_top),                           // 17
@@ -352,9 +380,18 @@ mod tests {
             );
         }
         let pe = pe_computed(o, F);
-        assert_eq!(col.rows[11], dash_free(pe.avg_high_pe.to_string()));
+        // Rows 12 / 14 are the JUDGED average P/E the zones use, marked (owner decision,
+        // 2026-09-26); row 13 stays §3's average P/E (the relative value's denominator).
+        let judged = |v: Option<steadyinvest_contract::Money>| {
+            format!(
+                "{}{}",
+                fmt(v.map(|m| m.as_decimal()), DisplayField::PeRatio, F),
+                steadyinvest_report::JUDGED_SIGIL
+            )
+        };
+        assert_eq!(col.rows[11], judged(study.judgment.judged_avg_high_pe));
         assert_eq!(col.rows[12], dash_free(pe.avg_pe.to_string()));
-        assert_eq!(col.rows[13], dash_free(pe.avg_low_pe.to_string()));
+        assert_eq!(col.rows[13], judged(study.judgment.judged_avg_low_pe));
         assert_eq!(col.rows[15], dash_free(pe.current_pe.to_string()));
         let risk = risk_computed(o, &study.judgment, F);
         assert_eq!(col.rows[20], dash_free(risk.ud_ratio.to_string()));
@@ -369,6 +406,61 @@ mod tests {
         for i in [6, 19, 23, 24, 27] {
             assert!(col.rows[i].is_empty(), "row {} carries no string", i + 1);
         }
+    }
+
+    #[test]
+    fn the_judged_rows_show_the_values_the_zones_are_computed_with() {
+        // Rows 12 / 14 × the estimated EPS are rows 19's top and 17's bottom — the judged P/E,
+        // never §3's historical averages (owner decision, 2026-09-26).
+        let mut study = demo_study().unwrap();
+        let frame = build_frame(&study).unwrap();
+        let o = frame.snapshot.outputs();
+        let j = &study.judgment;
+        assert_ne!(
+            j.judged_avg_high_pe.map(|m| m.as_decimal()),
+            o.valuation.avg_high_pe,
+            "the worked example tells the two apart"
+        );
+        let col = comparison_column(&study, &frame, F);
+        let high = j.judged_avg_high_pe.unwrap().as_decimal();
+        let est_high = o.growth.estimated_high_eps.unwrap();
+        assert_eq!(o.risk_reward.forecast_high, Some(high * est_high));
+        assert_eq!(
+            col.rows[11],
+            format!(
+                "{}{}",
+                fmt(Some(high), DisplayField::PeRatio, F),
+                steadyinvest_report::JUDGED_SIGIL
+            )
+        );
+        // Row 2: the judged sales growth, exactly — the worked example judges one.
+        let sales = j
+            .projected_sales_growth_pct
+            .expect("the demo judges the sales growth");
+        assert_eq!(
+            col.rows[1],
+            format!(
+                "{}{}",
+                fmt_pct(Some(sales.as_decimal()), F),
+                steadyinvest_report::JUDGED_SIGIL
+            )
+        );
+        // No judgment: « — », never a sigil on an absence.
+        study.judgment.judged_avg_high_pe = None;
+        study.judgment.projected_sales_growth_pct = None;
+        let frame = build_frame(&study).unwrap();
+        let col = comparison_column(&study, &frame, F);
+        assert_eq!(col.rows[11], "");
+        assert_eq!(col.rows[1], "");
+    }
+
+    #[test]
+    fn the_screens_judged_note_is_the_reports() {
+        // One text on the three surfaces (G3 review): the screen's `JudgedNote` literal is
+        // report `JUDGED_NOTE`, word for word.
+        let slint = include_str!("../../ui/screens/comparison.slint");
+        let literal = format!("@tr(\"{}\")", steadyinvest_report::JUDGED_NOTE);
+        assert!(slint.contains(&literal), "comparison.slint lacks {literal}");
     }
 
     #[test]
@@ -485,6 +577,16 @@ mod tests {
         // A raised flag is a fact whatever else is unknown.
         o.quality_flags.push(QualityFlagKey::RoeLow);
         assert!(flags_row(&o, &unjudged).starts_with("1 : "));
+        // One high-P/E fact over both thresholds: listed once, counted once (owner decision,
+        // 2026-09-26).
+        o.quality_flags = vec![
+            QualityFlagKey::ProjectedHighPeAggressive,
+            QualityFlagKey::ProjectedHighPeImplausible,
+        ];
+        assert_eq!(
+            flags_row(&o, &judged),
+            format!("1 : {}", state::MSG_FLAG_HIGH_PE_IMPLAUSIBLE)
+        );
     }
 
     #[test]

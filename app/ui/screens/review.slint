@@ -46,7 +46,13 @@ component ShareBlock inherits VerticalLayout {
                         ? @tr("{} — {} % (cible {} %)", root.label-of(r.label), r.share, r.target)
                         : @tr("{} — {} %", root.label-of(r.label), r.share)))
                 : (r.amount != ""
-                    ? @tr("{} — {}", root.label-of(r.label), r.amount)
+                    // The amount stands, the share is blocked (its denominator's pair named).
+                    // G3 review: the PDF's words, the target kept.
+                    ? (r.missing != ""
+                        ? (root.with-target && r.target != ""
+                            ? @tr("{} — {} (part indisponible : taux manquant {} · cible {} %)", root.label-of(r.label), r.amount, r.missing, r.target)
+                            : @tr("{} — {} (part indisponible : taux manquant {})", root.label-of(r.label), r.amount, r.missing))
+                        : @tr("{} — {}", root.label-of(r.label), r.amount))
                     : (r.missing != ""
                         ? @tr("{} — indisponible : taux manquant {}", root.label-of(r.label), r.missing)
                         : (root.with-target && r.target != ""
@@ -55,11 +61,13 @@ component ShareBlock inherits VerticalLayout {
         }
         if r.reason != "": StatusBand {
             icon: "◦";
-            text: r.reason == "no_study" ? @tr("{} — non classé (aucune étude)", r.label)
-                : r.reason == "study_unavailable" ? @tr("{} — non classé (étude indisponible)", r.label)
-                : r.reason == "no_sales" ? @tr("{} — non classé (chiffre d'affaires indisponible)", r.label)
-                : r.reason == "missing_rate" ? @tr("{} — non classé (taux manquant {})", r.label, r.missing)
-                : @tr("{} — non classé (conversion impossible)", r.label);
+            // G3 review: an unclassified security keeps its amount (and share) — the size rows
+            // add up to the total.
+            text: r.reason == "no_study" ? @tr("{} — non classé (aucune étude)", root.with-amount(r))
+                : r.reason == "study_unavailable" ? @tr("{} — non classé (étude indisponible)", root.with-amount(r))
+                : r.reason == "no_sales" ? @tr("{} — non classé (chiffre d'affaires indisponible)", root.with-amount(r))
+                : r.reason == "missing_rate" ? @tr("{} — non classé (taux manquant {})", root.with-amount(r), r.missing)
+                : @tr("{} — non classé (conversion impossible)", root.with-amount(r));
         }
         // Decision 6 (G1 review): concentration murmurs from the core band (as Portefeuille); a
         // sector only AT or OVER the threshold; a currency never (Rust never flags it).
@@ -69,6 +77,10 @@ component ShareBlock inherits VerticalLayout {
                 ? @tr("{} — seuil {} % atteint ou dépassé", root.label-of(r.label), Review.threshold)
                 : @tr("{} — seuil {} % approché ou atteint", root.label-of(r.label), Review.threshold);
         }
+    }
+    // An unclassified row's label with its figures (data, not prose): « NVDA.US · 1 540 CHF · 43,4 % ».
+    pure function with-amount(r: ReviewShareRow) -> string {
+        return r.label + (r.amount != "" ? " · " + r.amount : "") + (r.share != "" ? " · " + r.share + " %" : "");
     }
     pure function label-of(key: string) -> string {
         if (root.kind == "size" && key == "small") { return @tr("Petite"); }
@@ -179,7 +191,11 @@ export component ReviewScreen inherits Rectangle {
                 if Review.global-missing != "" && Review.global-unavailable: StatusBand { icon: "⊘"; text: @tr("Total global indisponible : taux manquant {}, et au moins une banque indisponible.", Review.global-missing); }
                 if Review.global-missing == "" && Review.global-unavailable: StatusBand { icon: "⊘"; text: @tr("Total global indisponible."); }
                 ShareBlock { rows: Review.bank-rows; with-target: false; kind: "bank"; }
-                if Review.global-invested != "": FactLine { text: @tr("Total global : {}", Review.global-invested); }
+                if Review.global-invested != "": FactLine {
+                    text: Review.global-share != ""
+                        ? @tr("Total global : {} ({} %)", Review.global-invested, Review.global-share)
+                        : @tr("Total global : {}", Review.global-invested);
+                }
             }
             if !Review.unavailable: PanelCard {
                 title: @tr("Concentration par titre");
@@ -337,7 +353,12 @@ export component ReviewScreen inherits Rectangle {
 
             if !Review.unavailable: PanelCard {
                 title: @tr("En chiffres");
-                FactLine { text: @tr("{} positions · {} avec une étude · {} critères validés · {} provisoires · {} en attente · {} non calculables", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld, Review.count-not-computable); }
+                // Owner decision (Guy, 2026-09-26): each count of positions says what it counts —
+                // « 0 critères validés » read as a count of criteria. It counts the positions whose
+                // study has every load-bearing input validated and fresh, without reduced
+                // confidence (core `derive_verdict` — a data state, NOT the method's criteria;
+                // G3 review). The PDF's words (report `K_*`).
+                FactLine { text: @tr("{} positions · {} avec une étude · {} dont l'étude a toutes ses données validées et à jour · {} dont l'étude est provisoire (données à revérifier ou confiance réduite) · {} dont l'étude attend une donnée requise · {} dont l'étude n'est pas calculable", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld, Review.count-not-computable); }
                 // Positions, as their rows show them (G3 review); the due count counts STUDIES —
                 // on its own line, never read as positions.
                 FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached); }

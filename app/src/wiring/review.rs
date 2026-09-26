@@ -298,11 +298,14 @@ pub(crate) fn push_review(
     };
     let (t_small, t_medium, t_large) = config.size_targets_or_default();
     let d = &f.diversification;
-    // The size shares' denominator is the 6.7 global: an absent share names ITS pairs.
-    let size_row = |key: &str, share: Option<Decimal>, target: &str| {
+    // The size shares' denominator is the 6.7 global: an absent share names ITS pairs. Owner
+    // decision (Guy, 2026-09-26): the « Montant » is the class's invested capital in the
+    // reference currency, as the bank and concentration blocks state theirs.
+    let size_row = |key: &str, slot: &state::SizeMixSlot, target: &str| {
+        let share = slot.share_pct;
         share_row(
             key.into(),
-            None,
+            slot.invested,
             share,
             config_pct(target, format),
             blocking_pairs(share.is_some(), &[], &d.missing_pairs),
@@ -320,9 +323,9 @@ pub(crate) fn push_review(
         Vec::new()
     } else {
         vec![
-            size_row("small", d.small.share_pct, &t_small),
-            size_row("medium", d.medium.share_pct, &t_medium),
-            size_row("large", d.large.share_pct, &t_large),
+            size_row("small", &d.small, &t_small),
+            size_row("medium", &d.medium, &t_medium),
+            size_row("large", &d.large, &t_large),
         ]
     };
     review.set_size_rows(rows_model(size_rows));
@@ -337,9 +340,17 @@ pub(crate) fn push_review(
                 state::UnclassifiedReason::Unconvertible => ("unconvertible", String::new()),
                 state::UnclassifiedReason::MissingRate(pair) => ("missing_rate", pair.clone()),
             };
+            // G3 review: its amount and share stand (the size rows add up to the total).
             ReviewShareRow {
                 reason: reason.into(),
-                ..share_row(u.ticker.clone(), None, None, String::new(), missing, false)
+                ..share_row(
+                    u.ticker.clone(),
+                    u.invested,
+                    u.share_pct,
+                    String::new(),
+                    missing,
+                    false,
+                )
             }
         })
         .collect();
@@ -357,7 +368,7 @@ pub(crate) fn push_review(
                     let own = &r.missing_pairs;
                     share_row(
                         r.sector.clone().unwrap_or_default(),
-                        None,
+                        r.amount,
                         r.share_pct,
                         String::new(),
                         blocking_pairs(r.share_pct.is_some(), own, &global),
@@ -385,7 +396,7 @@ pub(crate) fn push_review(
                     // CHF by construction — not a concentration fact).
                     share_row(
                         r.currency.clone(),
-                        None,
+                        r.amount,
                         r.share_pct,
                         String::new(),
                         blocking_pairs(r.share_pct.is_some(), &own, &global),
@@ -427,6 +438,14 @@ pub(crate) fn push_review(
         .collect();
     review.set_bank_rows(rows_model(bank_rows));
     review.set_global_invested(amount(global_total, &reference, format));
+    // Owner decision (Guy, 2026-09-26): the global total is 100 % of itself — stated when the
+    // total is known and positive (a zero or absent total has no share to state).
+    review.set_global_share(pct(
+        global_total
+            .filter(|g| *g > Decimal::ZERO)
+            .map(|_| Decimal::ONE_HUNDRED),
+        format,
+    ));
     // Every cause of an absent total: its pairs, and — alone or beside them — a non-pair cause
     // (a failed bank read, an overflow), stated plainly.
     let (global_missing, global_other) = global_absence(
@@ -680,6 +699,7 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
         currencies_unavailable: r.get_currencies_unavailable(),
         bank_lines: shares(r.get_bank_rows()),
         global_invested: r.get_global_invested().to_string(),
+        global_share: r.get_global_share().to_string(),
         global_missing: r.get_global_missing().to_string(),
         global_unavailable: r.get_global_unavailable(),
         concentration: shares(r.get_concentration_rows()),
@@ -940,6 +960,25 @@ mod tests {
         let a = "EUR → CHF".to_string();
         let b = "USD → CHF".to_string();
         assert_eq!(union_pairs([&b, &a, &b]), vec![a.clone(), b.clone()]);
+    }
+
+    #[test]
+    fn the_verdict_counts_state_the_data_never_the_criteria() {
+        // G3 review: `count-full` counts core's integrity state (every load-bearing input
+        // validated and fresh, no reduced confidence) — never « remplit tous les critères ».
+        let slint = include_str!("../../ui/screens/review.slint");
+        let line = slint
+            .lines()
+            .find(|l| l.contains("{} positions · {} avec une étude"))
+            .expect("the counts line");
+        assert!(
+            line.contains("a toutes ses données validées et à jour"),
+            "{line}"
+        );
+        assert!(
+            !line.contains("remplit") && !line.contains("critère"),
+            "{line}"
+        );
     }
 
     #[test]
