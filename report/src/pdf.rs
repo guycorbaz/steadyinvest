@@ -77,12 +77,14 @@ const QUARTER_BOX_GAP: f32 = 4.0;
 // ── grid tables (issue #104 — visible SSG grid) ──
 const CELL_PAD: f32 = 5.0; // left/right padding of text inside a grid cell
 const GRID_INSET: f32 = 1.5; // the least clearance a cell's text keeps from its rules
-// Column boundaries (left … right) for the annexe table (year + seven figures).
+// Column boundaries (left … right) for the annexe table (year + seven figures). The sales and
+// pre-tax columns hold millions (owner decision, 2026-09-26): « Bén. av. impôt (M) » takes the
+// room the shorter figures gave back, so its header stays on one line.
 pub(crate) const COLS8: [f32; 9] = [
     MARGIN,
     MARGIN + 42.0,
-    MARGIN + 112.0,
-    MARGIN + 182.0,
+    MARGIN + 106.0,
+    MARGIN + 196.0,
     MARGIN + 240.0,
     MARGIN + 300.0,
     MARGIN + 360.0,
@@ -128,6 +130,34 @@ pub(crate) const fn gray(g: f32) -> Ink {
 const EPS_INK: Ink = [0.08, 0.28, 0.66]; // blue, the thick line
 const SALES_INK: Ink = [0.05, 0.45, 0.22]; // green, the thin line
 const PRICE_INK: Ink = gray(0.0); // black bars
+/// A value the analyst judged (and the calculations use): a dark blue, beside the « * » that
+/// carries the fact in black and white.
+const JUDGED_INK: Ink = [0.0, 0.16, 0.52];
+
+// ── judged values (owner decision, Guy 2026-09-26) ──
+// NAIC's rule: the calculations use the analyst's JUDGED values, and a judged value is marked as
+// judged wherever it is printed — the « * » sigil (WinAnsi, survives a black-and-white print),
+// explained by [`JUDGED_NOTE`], and in colour ([`JUDGED_INK`]) as a second channel. The colour
+// runs between two zero-width private-use markers the text primitives read and never print.
+/// The sigil after a judged value (the comparison's app-formatted cells carry it too).
+pub const JUDGED_SIGIL: &str = "*";
+/// The note that explains the sigil, printed on every page that carries one.
+pub const JUDGED_NOTE: &str = "* valeur jugée par l'analyste (les calculs l'utilisent)";
+const JUDGED_ON: char = '\u{E000}';
+const JUDGED_OFF: char = '\u{E001}';
+
+/// A figure the analyst judged, as printed: the figure, its « * », in the judged colour — kept on
+/// one line (its inner spaces become no-break spaces, so « 46,6 %* » never splits). An absent
+/// judgment stays the plain em-dash (nothing was judged, nothing to mark).
+pub(crate) fn judged(figure: &str) -> String {
+    if figure == EM_DASH || figure.is_empty() {
+        return figure.to_string();
+    }
+    format!(
+        "{JUDGED_ON}{}{JUDGED_SIGIL}{JUDGED_OFF}",
+        figure.replace(' ', "\u{00A0}")
+    )
+}
 
 /// Render a study to a faithful, neutral, greyscale PDF (FR52). Read-only: it computes nothing the
 /// engine does not already compute, writes no journal, and needs no provider.
@@ -212,13 +242,14 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
     doc.two_columns(
         &format!(
             "(2) Croissance estimée des ventes : {}",
-            nf.pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal()))
+            judged(&nf.pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal())))
         ),
         &format!(
             "(4) Croissance estimée du BPA : {}",
-            nf.pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal()))
+            judged(&nf.pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal())))
         ),
     );
+    doc.small_line(JUDGED_NOTE);
     doc.new_page();
 
     // ── Page 2 — §2 Management: the years as COLUMNS (the form's layout), the 5-yr average and
@@ -307,17 +338,27 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         let c = &r.low_candidates;
         let est_high = outputs.growth.estimated_high_eps;
         let est_low = outputs.growth.estimated_low_eps;
+        // Owner decision (Guy, 2026-09-26): each judged input the calculation uses is marked
+        // judged. The estimated high EPS is the analyst's own figure when entered; derived from
+        // the judged EPS growth otherwise (a result, printed unmarked). The low EPS is
+        // direct-only (core: `estimated_low_eps`), so it is always the analyst's.
+        let est_high_text = nf.fmt_dec(est_high, DisplayField::PerShare);
+        let est_high_text = if judgment.estimated_high_eps.is_some() {
+            judged(&est_high_text)
+        } else {
+            est_high_text
+        };
         b.line(&format!(
-            "A · Prix haut à 5 ans : PER haut moyen {} × BPA estimé haut {} = {}",
-            nf.num(judgment.judged_avg_high_pe.map(|m| m.as_decimal())),
-            nf.fmt_dec(est_high, DisplayField::PerShare),
+            "A · Prix haut à 5 ans : PER haut moyen jugé {} × BPA estimé haut {} = {}",
+            judged(&nf.num(judgment.judged_avg_high_pe.map(|m| m.as_decimal()))),
+            est_high_text,
             nf.money(r.forecast_high),
         ));
         b.line("B · Prix bas à 5 ans, les quatre candidats :");
         b.indent_line(&format!(
-            "(a) PER bas moyen {} × BPA estimé bas {} = {}",
-            nf.num(judgment.judged_avg_low_pe.map(|m| m.as_decimal())),
-            nf.fmt_dec(est_low, DisplayField::PerShare),
+            "(a) PER bas moyen jugé {} × BPA estimé bas {} = {}",
+            judged(&nf.num(judgment.judged_avg_low_pe.map(|m| m.as_decimal()))),
+            judged(&nf.fmt_dec(est_low, DisplayField::PerShare)),
             nf.money(c.avg_low_pe_times_eps),
         ));
         b.indent_line(&format!(
@@ -326,7 +367,8 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         ));
         b.indent_line(&format!(
             "(c) Plus bas sévère récent = {}",
-            nf.money(c.recent_severe_low),
+            // The analyst's pick of the recent severe low (core: « adopting it is a judgment »).
+            judged(&nf.money(c.recent_severe_low)),
         ));
         b.indent_line(&format!(
             "(d) Prix soutenu par le dividende : dividende {} ÷ rendement haut moyen {} = {}",
@@ -392,6 +434,7 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             nf.money(current_price),
             nf.pct(outputs.returns.projected_appreciation_pct),
         ));
+        b.small_line(JUDGED_NOTE);
         let bar_h = if r.zones.is_some() {
             ZONEBAR_H_RESERVE
         } else {
@@ -468,8 +511,8 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
     doc.grid_row_num(
         &[
             "Année",
-            "Ventes",
-            "Bén. av. impôt",
+            ANNEX_SALES,
+            ANNEX_PRETAX,
             "BPA",
             "Cours haut",
             "Cours bas",
@@ -483,11 +526,11 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
     for y in &study.years {
         let cells = [
             y.year.to_string(),
-            nf.cell(y.sales.value, DisplayField::LargeMonetary),
-            nf.cell(
-                y.pre_tax_profit.as_ref().and_then(|c| c.value),
-                DisplayField::LargeMonetary,
-            ),
+            // Owner decision (Guy, 2026-09-26): sales and pre-tax profit in MILLIONS, the unit in
+            // the header — as the study screen enters them (issue #117) and as the NAIC form
+            // tabulates them — never a ten-digit figure shrunk to fit its column.
+            nf.millions(y.sales.value),
+            nf.millions(y.pre_tax_profit.as_ref().and_then(|c| c.value)),
             nf.cell(y.eps.value, DisplayField::PerShare),
             nf.cell(y.high_price.value, DisplayField::Price),
             nf.cell(y.low_price.value, DisplayField::Price),
@@ -729,6 +772,15 @@ impl NumberStyle {
 
     fn cell(self, v: Option<steadyinvest_contract::Money>, field: DisplayField) -> String {
         self.fmt_dec(v.map(|m| m.as_decimal()), field)
+    }
+
+    /// A large absolute figure in millions (the annexe's sales / pre-tax profit): ÷ 10^6, at most
+    /// two decimals, trailing zeros dropped (« 6 910 », « 12,35 ») — the em-dash when absent.
+    fn millions(self, v: Option<steadyinvest_contract::Money>) -> String {
+        match v.and_then(|m| m.as_decimal().checked_div(Decimal::from(1_000_000))) {
+            None => EM_DASH.to_string(),
+            Some(d) => self.spell(round_for_display(d, DisplayField::Price).normalize()),
+        }
     }
 
     pub(crate) fn money(self, v: Option<Decimal>) -> String {
@@ -1042,6 +1094,9 @@ const OPTION_A: &str = "PER bas × BPA bas";
 const OPTION_B: &str = "prix bas moyen 5 ans";
 const OPTION_C: &str = "plus bas sévère récent";
 const OPTION_D: &str = "soutenu par le dividende";
+// The annexe's two large columns, in millions (owner decision, 2026-09-26).
+const ANNEX_SALES: &str = "Ventes (M)";
+const ANNEX_PRETAX: &str = "Bén. av. impôt (M)";
 
 // ── issue #105 / #207 — the embedded charts' neutral labels (greyscale legend + zone bands) ──
 const CHART_LEGEND: &str = "BPA (trait épais, bleu)   ·   Ventes (trait fin, vert)   ·   Cours haut–bas (barres)   ·   projection du BPA (pointillés)   ·   guides de croissance 5–30 % (gris clair, taux en marge droite)";
@@ -1137,10 +1192,10 @@ const REPORT_USER_FACING: &[&str] = &[
     "plus haut de l'année en cours :",
     "plus bas de l'année en cours :",
     // §4.
-    "A · Prix haut à 5 ans : PER haut moyen",
+    "A · Prix haut à 5 ans : PER haut moyen jugé",
     "× BPA estimé haut",
     "B · Prix bas à 5 ans, les quatre candidats :",
-    "(a) PER bas moyen",
+    "(a) PER bas moyen jugé",
     "× BPA estimé bas",
     "(b) Prix bas moyen des 5 dernières années =",
     "(c) Plus bas sévère récent =",
@@ -1176,8 +1231,9 @@ const REPORT_USER_FACING: &[&str] = &[
     "Position :",
     "Confiance réduite : moins d'années exploitables que le seuil de la méthode.",
     // Annexe columns.
-    "Ventes",
-    "Bén. av. impôt",
+    ANNEX_SALES,
+    ANNEX_PRETAX,
+    JUDGED_NOTE,
     "BPA",
     "Cours haut",
     "Cours bas",
@@ -1855,7 +1911,8 @@ impl Doc {
         );
 
         // What goes under the plot: the year labels, the legend and the scale note (measured with
-        // their wrapped lines), the quarterly box, then the caller's gap and four growth lines.
+        // their wrapped lines), the quarterly box, then the caller's gap, four growth lines and
+        // the judged-value note.
         let small_h = |s: &str| {
             let (x, size, line_h) = ProseKind::Small.metrics();
             wrap_to_width(s, self.right() - x, size).len() as f32 * line_h
@@ -1867,7 +1924,10 @@ impl Doc {
             + QUARTER_BOX_H
             + QUARTER_BOX_GAP
             + 2.0
-            + 2.0 * LINE_H;
+            + 2.0 * LINE_H
+            // …and the judged-value note under the two (2) / (4) lines (owner decision,
+            // 2026-09-26: the sigil is explained on the page that carries it).
+            + small_h(JUDGED_NOTE);
         // Break first, THEN measure: after a page break the plot fills the new page too.
         self.ensure(CHART_MIN_H + reserved_below);
         let chart_h = (self.page_h - self.y - BOTTOM - reserved_below).max(CHART_MIN_H);
@@ -2284,21 +2344,46 @@ fn fresh_content(page_h: f32) -> Content {
 /// Place `s` at top-origin `(x, top_y)` in Helvetica `size`, encoded as WinAnsi so French accents
 /// render. PDF's origin is bottom-left, so the y is flipped here.
 pub(crate) fn text(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
-    content.begin_text();
-    content.set_font(Name(b"F0"), size);
-    content.set_text_matrix([1.0, 0.0, 0.0, 1.0, x, PAGE_H - top_y]);
-    let bytes = winansi(s);
-    content.show(Str(&bytes));
-    content.end_text();
+    text_in(content, b"F0", x, top_y, size, s);
 }
 
-/// [`text`] in Helvetica-Bold (the headings).
+/// [`text`] in Helvetica-Bold (the headings, the comparison's return rows).
 pub(crate) fn text_bold(content: &mut Content, x: f32, top_y: f32, size: f32, s: &str) {
+    text_in(content, b"F1", x, top_y, size, s);
+}
+
+/// One text object in `font`. A judged run ([`judged`]) switches the fill to [`JUDGED_INK`] and
+/// back to black inside the same object — the markers themselves are never printed — and the
+/// fill is black again after it whatever the markers (a run cut by a wrap stays contained).
+fn text_in(content: &mut Content, font: &[u8], x: f32, top_y: f32, size: f32, s: &str) {
     content.begin_text();
-    content.set_font(Name(b"F1"), size);
+    content.set_font(Name(font), size);
     content.set_text_matrix([1.0, 0.0, 0.0, 1.0, x, PAGE_H - top_y]);
-    let bytes = winansi(s);
-    content.show(Str(&bytes));
+    if !s.contains([JUDGED_ON, JUDGED_OFF]) {
+        content.show(Str(&winansi(s)));
+    } else {
+        let mut run = String::new();
+        for c in s.chars() {
+            if c == JUDGED_ON || c == JUDGED_OFF {
+                if !run.is_empty() {
+                    content.show(Str(&winansi(&run)));
+                    run.clear();
+                }
+                if c == JUDGED_ON {
+                    let [r, g, b] = JUDGED_INK;
+                    content.set_fill_rgb(r, g, b);
+                } else {
+                    content.set_fill_gray(0.0);
+                }
+            } else {
+                run.push(c);
+            }
+        }
+        if !run.is_empty() {
+            content.show(Str(&winansi(&run)));
+        }
+        content.set_fill_gray(0.0);
+    }
     content.end_text();
 }
 
@@ -2349,6 +2434,9 @@ const HELVETICA_HIGH: [u16; 128] = [
 /// One glyph's Helvetica width (1/1000 em), read off the byte [`winansi_byte`] writes for it — so
 /// the measure is always the width of what is printed (anything unencodable prints as '?').
 fn glyph_width(c: char) -> u16 {
+    if c == JUDGED_ON || c == JUDGED_OFF {
+        return 0; // the judged-colour markers take no room: they are never printed
+    }
     match winansi_byte(c) {
         b @ 0x20..=0x7E => HELVETICA_ASCII[usize::from(b) - 32],
         b @ 0x80..=0xFF => HELVETICA_HIGH[usize::from(b) - 0x80],
@@ -2829,7 +2917,10 @@ fn compact_num(v: f64, k: i32, nf: NumberStyle) -> String {
 /// Encode a UTF-8 string as WinAnsi (Latin-1 for 0xA0–0xFF, plus WinAnsi's own 0x80–0x9F range).
 /// Characters outside the encoding fall back to '?', never panic.
 fn winansi(s: &str) -> Vec<u8> {
-    s.chars().map(winansi_byte).collect()
+    s.chars()
+        .filter(|c| *c != JUDGED_ON && *c != JUDGED_OFF)
+        .map(winansi_byte)
+        .collect()
 }
 
 /// One character's WinAnsi byte. G1 F: the 0x80–0x9F range is WinAnsi's own (œ Œ “ ” ‘ ’ • ‰ ™
@@ -3237,6 +3328,114 @@ mod tests {
             .sum()
     }
 
+    /// The text each text object shows, decoded back to WinAnsi bytes, one entry per object —
+    /// a line whose judged runs are shown in several strings (their colour switched between
+    /// them) reads here as the one line it is on the page.
+    fn shown_text(bytes: &[u8]) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        let mut cur: Option<Vec<u8>> = None;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'B' if bytes[i..].starts_with(b"BT\n") || bytes[i..].starts_with(b"BT ") => {
+                    cur = Some(Vec::new());
+                    i += 2;
+                }
+                b'E' if bytes[i..].starts_with(b"ET") && cur.is_some() => {
+                    out.extend(cur.take());
+                    i += 2;
+                }
+                b'(' if cur.is_some() => {
+                    i += 1;
+                    let mut depth = 0;
+                    while i < bytes.len() {
+                        match bytes[i] {
+                            b'\\' => {
+                                i += 1;
+                                cur.as_mut().unwrap().push(bytes[i]);
+                            }
+                            b'(' => {
+                                depth += 1;
+                                cur.as_mut().unwrap().push(b'(');
+                            }
+                            b')' if depth == 0 => break,
+                            b')' => {
+                                depth -= 1;
+                                cur.as_mut().unwrap().push(b')');
+                            }
+                            b => cur.as_mut().unwrap().push(b),
+                        }
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                b'<' if cur.is_some() && bytes.get(i + 1) != Some(&b'<') => {
+                    let end = i + bytes[i..].iter().position(|b| *b == b'>').unwrap();
+                    let hex = std::str::from_utf8(&bytes[i + 1..end]).unwrap();
+                    for k in (0..hex.len()).step_by(2) {
+                        cur.as_mut()
+                            .unwrap()
+                            .push(u8::from_str_radix(&hex[k..k + 2], 16).unwrap());
+                    }
+                    i = end + 1;
+                }
+                _ => i += 1,
+            }
+        }
+        out
+    }
+
+    /// Whether one text object of [`shown_text`] carries `s`.
+    fn shows(objects: &[Vec<u8>], s: &str) -> bool {
+        let needle = winansi(s);
+        objects
+            .iter()
+            .any(|o| o.windows(needle.len()).any(|w| w == needle.as_slice()))
+    }
+
+    #[test]
+    fn a_judged_value_is_marked_and_coloured_and_its_note_printed() {
+        // Owner decision (Guy, 2026-09-26): « PER haut moyen jugé 18* », the note on each page
+        // that carries a sigil, the judged colour switched on and back to black.
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let pages = page_streams(&bytes);
+        let p2 = shown_text(&pages[1]);
+        assert!(shows(
+            &p2,
+            "PER haut moyen jugé 18* × BPA estimé haut 9* = 162"
+        ));
+        assert!(contains(&pages[1], JUDGED_NOTE));
+        assert!(
+            contains(&pages[1], "0 0.16 0.52 rg"),
+            "the judged colour is set"
+        );
+        // No sigil on page 1 without a judged growth: still the note? The demo judges none —
+        // an absent judgment stays a plain « — ».
+        assert!(shows(
+            &shown_text(&pages[0]),
+            "(2) Croissance estimée des ventes : —"
+        ));
+        let mut s = demo_study();
+        s.judgment.projected_eps_growth_pct = Some(money_of("12.5"));
+        let bytes = render_study_pdf(&s, NumberStyle::Comma).unwrap();
+        let p1 = page_streams(&bytes)[0].clone();
+        assert!(shows(
+            &shown_text(&p1),
+            "(4) Croissance estimée du BPA : 12,5\u{00A0}%*"
+        ));
+        assert!(contains(&p1, JUDGED_NOTE));
+        assert_eq!(page_streams(&bytes).len(), 3, "the note fits page 1");
+        // A derived high EPS (no direct entry) is a result: printed unmarked.
+        s.judgment.estimated_high_eps = None;
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        let p2 = shown_text(&page_streams(&bytes)[1]);
+        assert!(shows(&p2, "× BPA estimé haut 9.01 ="), "derived, unmarked");
+        // The markers take no room and never print.
+        assert_eq!(text_width(&judged("18"), FONT), text_width("18*", FONT));
+        assert_eq!(winansi(&judged("1 2")), winansi("1\u{00A0}2*"));
+        assert_eq!(judged(EM_DASH), EM_DASH);
+    }
+
     /// The content streams, one per page, in page order (the only streams in the file).
     fn page_streams(bytes: &[u8]) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
@@ -3304,14 +3503,12 @@ mod tests {
         // End to end: the study annexe prints the 14-digit figure whole, grouped in the reader's
         // format (G1 I) — the no-break space never breaks the figure.
         let mut s = demo_study();
+        // Owner decision (2026-09-26): the annexe states sales in millions — 31 234 567,89 M.
         s.years[0].sales = cell("31234567890123");
         let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
-        assert!(contains(&bytes, "31,234,567,890,123"));
+        assert!(contains(&bytes, "31,234,567.89"));
         let bytes = render_study_pdf(&s, NumberStyle::Comma).unwrap();
-        assert!(contains(
-            &bytes,
-            "31\u{00A0}234\u{00A0}567\u{00A0}890\u{00A0}123"
-        ));
+        assert!(contains(&bytes, "31\u{00A0}234\u{00A0}567,89"));
     }
 
     #[test]
@@ -3566,8 +3763,9 @@ mod tests {
             let bytes = render_study_pdf(&demo_study(), nf).unwrap();
             // G1 final (L6): the yield keeps its decimal place, as on the screen (« 4,0 % »).
             let yield_4 = nf.spell(rust_decimal::Decimal::new(40, 1));
+            let bytes = shown_text(&bytes);
             for line in [
-                "(a) PER bas moyen 10 × BPA estimé bas 4 = 40".to_string(),
+                "(a) PER bas moyen jugé 10* × BPA estimé bas 4* = 40".to_string(),
                 "(b) Prix bas moyen des 5 dernières années = 50".to_string(),
                 "(c) Plus bas sévère récent = —".to_string(),
                 format!(
@@ -3575,21 +3773,21 @@ mod tests {
                 ),
                 "Prix bas retenu (PER bas × BPA bas) = 40".to_string(),
             ] {
-                assert!(contains(&bytes, &line), "missing under {nf:?}: {line}");
+                assert!(shows(&bytes, &line), "missing under {nf:?}: {line}");
             }
         }
         // A fractional candidate is spelled per format (G1 I review).
         let mut s = demo_study();
         s.judgment.judged_avg_low_pe = Some(money_of("10.5"));
-        let comma = render_study_pdf(&s, NumberStyle::Comma).unwrap();
-        let point = render_study_pdf(&s, NumberStyle::Point).unwrap();
-        assert!(contains(
+        let comma = shown_text(&render_study_pdf(&s, NumberStyle::Comma).unwrap());
+        let point = shown_text(&render_study_pdf(&s, NumberStyle::Point).unwrap());
+        assert!(shows(
             &comma,
-            "(a) PER bas moyen 10,5 × BPA estimé bas 4 = 42"
+            "(a) PER bas moyen jugé 10,5* × BPA estimé bas 4* = 42"
         ));
-        assert!(contains(
+        assert!(shows(
             &point,
-            "(a) PER bas moyen 10.5 × BPA estimé bas 4 = 42"
+            "(a) PER bas moyen jugé 10.5* × BPA estimé bas 4* = 42"
         ));
     }
 
@@ -3698,9 +3896,9 @@ mod tests {
         doc.y = PAGE_H - BOTTOM - 120.0;
         doc.growth_chart(&frame, NumberStyle::Comma);
         assert_eq!(doc.page_index(), 1, "the plot moved to a new page");
-        // What is left under it is the caller's gap + the four growth lines.
+        // What is left under it is the caller's gap + the four growth lines + the judged note.
         assert!(
-            doc.y >= PAGE_H - BOTTOM - 2.0 - 2.0 * LINE_H - 1.0,
+            doc.y >= PAGE_H - BOTTOM - 2.0 - 2.0 * LINE_H - (LINE_H - 2.0) - 1.0,
             "the plot fills the new page, y = {}",
             doc.y
         );
