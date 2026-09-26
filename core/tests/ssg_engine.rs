@@ -202,6 +202,11 @@ fn worked_example_section_2_management() {
     }
     assert_eq!(m.avg_ptp_pct, Some(d("10")), "(12+11+10+9+8)/5");
     assert_eq!(m.avg_roe_pct, Some(d("20")));
+    assert_eq!(
+        (m.ptp_avg_years, m.roe_avg_years),
+        (5, 5),
+        "the averages run over five years"
+    );
     assert_eq!(m.latest_ptp_pct, Some(d("8")));
     assert_eq!(m.latest_roe_pct, Some(d("20")));
     assert_eq!(
@@ -639,6 +644,10 @@ fn s9_per_year_nonpositive_denominators_are_excluded_from_averages() {
         Some(d("20")),
         "2023 excluded from the ROE average"
     );
+    assert_eq!(
+        out.management.roe_avg_years, 4,
+        "the ROE average says it runs over four years, not five (G1, #237)"
+    );
 
     let finding = |context: &'static str| CalcFinding {
         key: PlausibilityKey::NegativeOrZeroDenominator,
@@ -929,6 +938,10 @@ fn low_confidence_still_computes_on_available_data() {
         "averages still run on 3 years"
     );
     assert_eq!(out.management.avg_roe_pct, Some(d("20")));
+    assert_eq!(
+        out.management.roe_avg_years, 3,
+        "three years averaged, never « 5 ans »"
+    );
     assert_close(
         out.growth.sales_cagr_pct,
         "10",

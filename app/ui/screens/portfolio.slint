@@ -33,19 +33,26 @@ export component PortfolioScreen inherits Rectangle {
     property <bool> sold-open: false;
 
     // ── The dialog openers (the @tr titles/sentences live HERE, posture-gated like every string). ──
+    // The position dialogs read their choices FRESH on open (G1 review — never a list pushed at
+    // the last register render, which a study created or deleted since would leave stale).
     function open-add-holding() {
         Dialog.form("holding-add", @tr("Ajouter une position"),
-            @tr("Une position se crée pour un symbole qui a déjà une étude ; elle en prend la devise, et l'étude lui donne sa zone et son prix actuel."),
+            @tr("Une position se crée pour une étude existante ; elle en prend le symbole et la devise, et l'étude lui donne sa zone et son prix actuel."),
             "", "");
+        Holdings.load-position-choices("");
     }
     function open-edit-holding(row: HoldingRow) {
+        // G1 decision 4: the sentence states the edit's real rules — the currency never changes;
+        // a ledger-backed position keeps its quantity and price (the ledger corrects them).
         Dialog.form("holding-edit", @tr("Modifier la position {}", row.ticker),
-            @tr("Une position adossée à un registre de transactions garde sa quantité, son prix et sa devise ; seuls le symbole et le secteur sont modifiables ici."),
+            @tr("La devise d'une position ne change pas. Un autre symbole doit avoir une étude dans cette devise ; une position adossée à un registre de transactions garde sa quantité et son prix, que le registre corrige."),
             row.id, "");
         Dialog.draft-ticker = row.ticker;
         Dialog.draft-quantity = row.quantity;
         Dialog.draft-price = row.purchase-price;
         Dialog.draft-sector = row.sector;
+        Dialog.draft-currency = row.currency;
+        Holdings.load-position-choices(row.ticker);
     }
     function open-buy(id: string, ticker: string, currency: string) {
         Dialog.form("buy", @tr("Achat de {}", ticker),
@@ -102,6 +109,17 @@ export component PortfolioScreen inherits Rectangle {
                 title: @tr("Portefeuilles");
                 subtitle: @tr("Un portefeuille par banque ou compte ; devise de référence : {} (modifiable dans Réglages).", Holdings.reference-currency);
 
+                // G1 review (spec §5.1): the read-only state is a band, not only greyed buttons.
+                if Holdings.read-only: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; les positions se consultent mais ne se modifient pas.");
+                }
+
+                // G1 final review (M5): a failed read is « indisponible », never a silent selector.
+                if Holdings.portfolios-unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Portefeuilles indisponibles : la liste des portefeuilles n'a pas pu être lue.");
+                }
                 if Holdings.portfolios.length > 1: Flickable {
                     height: Tokens.row-height + Tokens.space-8;
                     viewport-width: chips.preferred-width;
@@ -132,17 +150,19 @@ export component PortfolioScreen inherits Rectangle {
                         label: @tr("Renommer…");
                         enabled: !Holdings.read-only && Holdings.active-portfolio-id != "";
                         clicked => {
-                            Dialog.form("portfolio-rename", @tr("Renommer le portefeuille"), "", Holdings.active-portfolio-id, "");
+                            // Prefilled with the current name (spec §5.1).
+                            Dialog.form("portfolio-rename", @tr("Renommer le portefeuille"),
+                                @tr("Le nouveau nom remplace l'ancien ; les positions et leur historique ne changent pas."),
+                                Holdings.active-portfolio-id, "");
+                            Dialog.draft-name = Holdings.active-portfolio-name;
                         }
                     }
                     ActionButton {
                         label: @tr("Supprimer le portefeuille");
                         enabled: !Holdings.read-only && Holdings.active-portfolio-id != "";
-                        clicked => {
-                            Dialog.confirm(@tr("Supprimer ce portefeuille ?"),
-                                @tr("Un portefeuille qui contient un historique de positions n'est pas supprimé ; le dernier portefeuille non plus."),
-                                @tr("Supprimer"), "delete-portfolio", Holdings.active-portfolio-id);
-                        }
+                        // G1 review (spec §5.1): Rust checks the guards FIRST — a portfolio holding
+                        // positions is a refusal naming the count; only an empty one is confirmed.
+                        clicked => { Holdings.request-delete-portfolio(Holdings.active-portfolio-id); }
                     }
                 }
             }
@@ -165,37 +185,53 @@ export component PortfolioScreen inherits Rectangle {
                 if Holdings.candidate-rows.length == 0 && !Holdings.candidates-unavailable: CaptionLine {
                     text: @tr("La liste de suivi est vide.");
                 }
-                for candidate in Holdings.candidate-rows: HorizontalLayout {
-                    spacing: Tokens.space-8;
-                    FactLine {
-                        text: candidate.data == "no-study"
-                            ? @tr("{} — aucune étude", candidate.ticker)
-                            // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
-                            : candidate.data == "study-unavailable"
-                            ? @tr("{} — étude indisponible", candidate.ticker)
-                            // Issue #48: a price BELOW the recorded band is its own neutral fact.
-                            : candidate.below-band
-                            ? @tr("{} — sous la bande de prévision", candidate.ticker)
-                            : candidate.data == "insufficient"
-                                ? @tr("{} — données insuffisantes", candidate.ticker)
-                                : candidate.in-buy-zone
-                                    ? @tr("{} — dans la zone d'achat", candidate.ticker)
-                                    : candidate.distance != ""
-                                        ? @tr("{} — à {} % au-dessus de la zone d'achat", candidate.ticker, candidate.distance)
-                                        // A known zone without a statable distance (degenerate
-                                        // band bottom) — the zone noun IS the fact. The key
-                                        // comparisons stay OUTSIDE @tr (the register precedent).
-                                        : candidate.zone == "neutral"
-                                            ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-hold)
-                                            : candidate.zone == "sell"
-                                                ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-sell)
-                                                : @tr("{} — zone : {}", candidate.ticker, Labels.zone-buy);
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    if candidate.ud != "": FactLine {
-                        text: @tr("H/B {}", candidate.ud);
-                        vertical-alignment: center;
+                // G1 final check (on screen): the facts wrap on their own lines UNDER the candidate
+                // line — side by side, each wrapping Text took a sliver of width and the row grew
+                // to hundreds of pixels of one-word lines.
+                for candidate in Holdings.candidate-rows: VerticalLayout {
+                    spacing: Tokens.space-4;
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        FactLine {
+                            text: candidate.data == "no-study"
+                                ? @tr("{} — aucune étude", candidate.ticker)
+                                // Issue #95: a FAILED study read is « indisponible », never « aucune étude ».
+                                : candidate.data == "study-unavailable"
+                                ? @tr("{} — étude indisponible", candidate.ticker)
+                                // Issue #48: a price BELOW the recorded band is its own neutral fact.
+                                : candidate.below-band
+                                ? @tr("{} — sous la bande de prévision", candidate.ticker)
+                                : candidate.data == "insufficient"
+                                    ? @tr("{} — données insuffisantes", candidate.ticker)
+                                    : candidate.in-buy-zone
+                                        ? @tr("{} — dans la zone d'achat", candidate.ticker)
+                                        : candidate.distance != ""
+                                            ? @tr("{} — à {} % au-dessus de la zone d'achat", candidate.ticker, candidate.distance)
+                                            // A known zone without a statable distance (degenerate
+                                            // band bottom) — the zone noun IS the fact. The key
+                                            // comparisons stay OUTSIDE @tr (the register precedent).
+                                            : candidate.zone == "neutral"
+                                                ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-hold)
+                                                : candidate.zone == "sell"
+                                                    ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-sell)
+                                                    : @tr("{} — zone : {}", candidate.ticker, Labels.zone-buy);
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        if candidate.ud != "": FactLine {
+                            text: @tr("H/B {}", candidate.ud);
+                            vertical-alignment: center;
+                        }
+                        if candidate.study-id != "": ActionButton {
+                            label: @tr("Ouvrir l'étude");
+                            enabled: true;
+                            clicked => { Holdings.open-candidate-study(candidate.study-id); }
+                        }
+                        if candidate.study-id == "": ActionButton {
+                            label: @tr("Études");
+                            enabled: true;
+                            clicked => { Holdings.go-to-studies(); }
+                        }
                     }
                     if candidate.held-share != "": CaptionLine {
                         text: candidate.held-flagged
@@ -241,16 +277,6 @@ export component PortfolioScreen inherits Rectangle {
                         text: @tr("devise {} : exposition indisponible", candidate.currency);
                         vertical-alignment: center;
                     }
-                    if candidate.study-id != "": ActionButton {
-                        label: @tr("Ouvrir l'étude");
-                        enabled: true;
-                        clicked => { Holdings.open-candidate-study(candidate.study-id); }
-                    }
-                    if candidate.study-id == "": ActionButton {
-                        label: @tr("Études");
-                        enabled: true;
-                        clicked => { Holdings.go-to-studies(); }
-                    }
                 }
                 // Issue #98 (FR48): the sector blind spot, stated once at panel level — the
                 // « non renseigné » bucket keeps the denominator whole (2026-07-09 decision).
@@ -293,8 +319,13 @@ export component PortfolioScreen inherits Rectangle {
             // Story 6.4 (FR41): the NET reinvestable dividend cash, per currency — the study keeps the
             // gross (method fidelity); this is what is actually available to reinvest after the
             // withholding at source. No mixed-currency total (FX is Story 6.5). A neutral fact.
-            if Holdings.reinvestable-cash.length > 0: PanelCard {
+            // G1 P: a failed read shows the panel with its « indisponible » band.
+            if Holdings.reinvestable-cash-unavailable || Holdings.reinvestable-cash.length > 0: PanelCard {
                 title: @tr("Dividendes nets perçus (réinvestissables)");
+                if Holdings.reinvestable-cash-unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Dividendes nets indisponibles : ils n'ont pas pu être lus.");
+                }
                 for cash in Holdings.reinvestable-cash: FactLine {
                     text: @tr("{} {}", cash.amount, cash.currency);
                 }
@@ -378,11 +409,14 @@ export component PortfolioScreen inherits Rectangle {
                 if Holdings.size-mix-rows.length > 0: CaptionLine {
                     text: @tr("Répartition par taille (chiffre d'affaires) :");
                 }
-                // The walk's « rien ne s'affiche » : every class at 0 % because NOTHING is
-                // classified — the reason bands below explain it, this band says it first.
-                if Holdings.size-mix-rows.length > 0 && Holdings.size-unclassified-rows.length == Holdings.concentration-rows.length: StatusBand {
+                // The walk's « rien ne s'affiche » : every class empty because NOTHING is
+                // classified — the reason bands below explain it, this band says it first. G1
+                // review: keyed by ticker identity in Rust (`size-none-classified`), never by
+                // comparing two list lengths; the words no longer assert a 0 % the lines may not
+                // show (a share can be « indisponible »).
+                if Holdings.size-mix-rows.length > 0 && Holdings.size-none-classified: StatusBand {
                     icon: "◦";
-                    text: @tr("Aucune position n'a pu être classée par taille ; les parts ci-dessous sont à 0 % pour cette raison.");
+                    text: @tr("Aucune position n'a pu être classée par taille ; les classes ci-dessous ne contiennent donc aucune position.");
                 }
                 for unclassified in Holdings.size-unclassified-rows: StatusBand {
                     icon: "◦";
@@ -447,8 +481,13 @@ export component PortfolioScreen inherits Rectangle {
                     text: Holdings.notice;
                 }
 
+                // ── G1 final review (M5): a failed read is « indisponible », never the empty state ──
+                if Holdings.holdings-unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Positions indisponibles : le registre du portefeuille n'a pas pu être lu.");
+                }
                 // ── Empty state ──
-                if Holdings.holding-count == 0: Text {
+                if !Holdings.holdings-unavailable && Holdings.holding-count == 0: Text {
                     text: @tr("Aucune position pour le moment ; « Ajouter une position… » en crée une.");
                     color: Tokens.text-mid;
                     font-size: Tokens.font-body;
@@ -465,28 +504,41 @@ export component PortfolioScreen inherits Rectangle {
                         padding: Tokens.space-12;
                         spacing: Tokens.space-8;
 
-                        // The facts line + the row actions.
+                        // The facts line (on-screen check, 2026-09-25: at 1600 px a row showing a
+                        // sector broke « Quantité » mid-word and clipped its buttons). The short
+                        // facts never wrap and never shrink below their text; the sector, the study
+                        // facts and the stop facts wrap by whole words above a floor; the row
+                        // ACTIONS have their own line below, so nothing squeezes them.
                         HorizontalLayout {
-                            spacing: Tokens.space-12;
+                            spacing: Tokens.space-16;
                             Text {
                                 text: row.ticker;
                                 color: Tokens.text-high;
                                 font-size: Tokens.font-body;
                                 font-weight: Tokens.weight-semibold;
                                 vertical-alignment: center;
+                                min-width: self.preferred-width;
                             }
                             CaptionLine {
                                 text: @tr("Quantité : {}", row.quantity);
                                 vertical-alignment: center;
+                                wrap: no-wrap;
+                                min-width: self.preferred-width;
                             }
                             CaptionLine {
                                 text: @tr("Prix d'achat : {} {}", row.purchase-price-text, row.currency);
                                 vertical-alignment: center;
+                                wrap: no-wrap;
+                                min-width: self.preferred-width;
                             }
                             // Issue #98 (FR48): the sector fact, when known (a caption — neutral ink).
+                            // Wraps by words; the floor keeps a long sector name from being cut
+                            // inside a word.
                             if row.sector != "": CaptionLine {
                                 text: @tr("Secteur : {}", row.sector);
                                 vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                min-width: 160px;
                             }
                             // ── Story 4.4 (FR40): the matched study's zone + present price + freshness.
                             // The zone marker is NEUTRAL ink + a glyph — never a buy/hold/sell hue. ──
@@ -495,7 +547,7 @@ export component PortfolioScreen inherits Rectangle {
                                 horizontal-stretch: 1;
                                 // A floor: without it the open ledger's wider toggle squeezed this
                                 // column to one glyph per line (walk finding, 2026-09-24).
-                                min-width: 170px;
+                                min-width: 190px;
                                 if row.linked: CaptionLine {
                                     text: row.zone == "buy" ? @tr("◆ {}", Labels.zone-buy)
                                         : row.zone == "neutral" ? @tr("◆ {}", Labels.zone-hold)
@@ -520,6 +572,7 @@ export component PortfolioScreen inherits Rectangle {
                             VerticalLayout {
                                 alignment: center;
                                 horizontal-stretch: 1;
+                                min-width: row.has-stop ? 160px : 0px;
                                 if row.has-stop: CaptionLine {
                                     text: @tr("Stop {}% : {} {}", row.stop-pct, row.stop-level, row.currency);
                                 }
@@ -529,7 +582,17 @@ export component PortfolioScreen inherits Rectangle {
                                 if row.has-stop && !row.stop-breached && row.stop-distance != "": CaptionLine {
                                     text: @tr("à {} {} au-dessus", row.stop-distance, row.currency);
                                 }
+                                if row.has-stop && row.stop-uncompared-study != "": CaptionLine {
+                                    text: @tr("non comparé au prix : le lot n'a pas de devise renseignée et l'étude est en {}", row.stop-uncompared-study);
+                                }
                             }
+                        }
+
+                        // The row actions — their own line, right-aligned, each button at least
+                        // as wide as its label.
+                        HorizontalLayout {
+                            alignment: end;
+                            spacing: Tokens.space-8;
                             ActionButton {
                                 label: row.has-stop ? @tr("Seuil…") : @tr("Définir un seuil…");
                                 enabled: !Holdings.read-only;
@@ -555,10 +618,15 @@ export component PortfolioScreen inherits Rectangle {
                             ActionButton {
                                 label: @tr("Retirer");
                                 enabled: !Holdings.read-only;
+                                // G1 final review: a position with transactions is refused
+                                // up front (Rust names the cause); only one without reaches
+                                // the confirm.
                                 clicked => {
-                                    Dialog.confirm(@tr("Retirer la position {} ?", row.ticker),
-                                        @tr("La position et son registre de transactions sont retirés du portefeuille ; cette suppression est définitive."),
-                                        @tr("Retirer"), "remove-holding", row.id);
+                                    if (Holdings.request-remove-holding(row.id)) {
+                                        Dialog.confirm(@tr("Retirer la position {} ?", row.ticker),
+                                            @tr("La position, sans transaction enregistrée, est retirée du portefeuille ; cette suppression est définitive."),
+                                            @tr("Retirer"), "remove-holding", row.id);
+                                    }
                                 }
                             }
                         }
@@ -638,7 +706,11 @@ export component PortfolioScreen inherits Rectangle {
                                     clicked => { root.open-dividend(row.id, row.ticker, row.currency); }
                                 }
                             }
-                            if Holdings.ledger-rows.length == 0: CaptionLine {
+                            // G1 final review (M5): a failed read is never « aucune transaction ».
+                            if Holdings.ledger-unavailable: CaptionLine {
+                                text: @tr("Transactions indisponibles : le registre de cette position n'a pas pu être lu.");
+                            }
+                            if !Holdings.ledger-unavailable && Holdings.ledger-rows.length == 0: CaptionLine {
                                 text: @tr("Aucune transaction enregistrée pour cette position.");
                             }
                             for lrow in Holdings.ledger-rows: HorizontalLayout {
@@ -678,9 +750,14 @@ export component PortfolioScreen inherits Rectangle {
                                     label: @tr("Modifier…");
                                     enabled: !Holdings.read-only;
                                     clicked => {
+                                        // G1 review: a dividend row opens with the dividend's
+                                        // labels (`txn-kind`), never the buy/sell « Frais ».
                                         Dialog.form("txn-edit", @tr("Modifier la transaction du {}", lrow.date),
-                                            @tr("Le type et la devise de la transaction ne changent pas ; la position est recalculée depuis son registre."),
+                                            lrow.kind == "dividend"
+                                                ? @tr("Le type et la devise du dividende ne changent pas ; son net est recalculé.")
+                                                : @tr("Le type et la devise de la transaction ne changent pas ; la position est recalculée depuis son registre."),
                                             lrow.id, @tr("Montants en {}", lrow.currency));
+                                        Dialog.txn-kind = lrow.kind;
                                         Dialog.draft-date = lrow.date;
                                         Dialog.draft-quantity = lrow.quantity;
                                         Dialog.draft-price = lrow.unit-price;
@@ -708,7 +785,16 @@ export component PortfolioScreen inherits Rectangle {
             // by default. Each row states the neutral facts (ticker, sold day, currency) and opens its
             // ledger READ-ONLY through the same `ledger-holding-id` mechanism as the register; the one
             // write offered is a re-buy (the record-buy rail), which re-opens the position. ──
-            if Holdings.sold-rows.length > 0: PanelCard {
+            // G1 final review (M5): a failed read shows the section with its « indisponible »
+            // band — never a section that silently vanishes.
+            if Holdings.sold-unavailable: PanelCard {
+                title: @tr("Positions vendues");
+                StatusBand {
+                    icon: "⊘";
+                    text: @tr("Positions vendues indisponibles : elles n'ont pas pu être lues.");
+                }
+            }
+            if !Holdings.sold-unavailable && Holdings.sold-rows.length > 0: PanelCard {
                 title: @tr("Positions vendues ({})", Holdings.sold-rows.length);
 
                 HorizontalLayout {
@@ -758,7 +844,10 @@ export component PortfolioScreen inherits Rectangle {
                             }
                             if Holdings.ledger-holding-id == srow.id: VerticalLayout {
                                 spacing: Tokens.space-8;
-                                if Holdings.ledger-rows.length == 0: CaptionLine {
+                                if Holdings.ledger-unavailable: CaptionLine {
+                                    text: @tr("Transactions indisponibles : le registre de cette position n'a pas pu être lu.");
+                                }
+                                if !Holdings.ledger-unavailable && Holdings.ledger-rows.length == 0: CaptionLine {
                                     text: @tr("Aucune transaction enregistrée pour cette position.");
                                 }
                                 // Read-only history (the product decision: lecture + ré-achat only —

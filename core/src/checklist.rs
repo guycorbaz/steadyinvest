@@ -4,20 +4,24 @@
 //! PURE: `Decimal` in, `Option<Decimal>` out — an absent figure is `None`, never 0; the roots go
 //! through [`crate::ssg::growth::endpoints_cagr_pct`] (the same exact-root helper as §1).
 //!
+//! A ladder reads a six-year window: (1)–(2) the recent year and the one before, (5)–(6) the
+//! fifth and sixth years back counting the recent one as the first (`recent − 4`, `recent − 5`).
 //! The form's conversion table (« 27 % increase ↔ 5 % compounded », « 271 % ↔ 30 % ») is
-//! `(1 + r)^5 = 1 + increase` — five years between the two two-year averages, even though the
-//! averages' midpoints sit four years apart. Fidelity to the form wins (NFR-U3); the span is
+//! `(1 + r)^5 = 1 + increase` — five years for the six-year window, even though the averages'
+//! midpoints sit four years apart. Fidelity to the form wins (NFR-U3, spec Q2); the span is
 //! reported so the screen can state it.
 
 use rust_decimal::Decimal;
 
 use crate::normalize::CanonicalYear;
+use crate::rounding::{DisplayField, round_for_display};
 use crate::ssg::endpoints_cagr_pct;
 
-/// The form's span between the recent and the old two-year averages (its conversion table).
+/// The form's exponent for its six-year window (its conversion table).
 pub const FORM_SPAN_YEARS: u32 = 5;
-/// Fewer usable years than this and a ladder is « indisponible » (spec §6).
-pub const MIN_LADDER_YEARS: usize = 3;
+// A ladder is « indisponible » when its six-year window (ending at the most recent consecutive
+// pair) holds no second, disjoint consecutive pair — a matter of WHICH years, not of how many
+// (`ladder_pairs`; G1 final review: the old « fewer than four years » constant misstated it).
 /// « voisin » band around the five-year average P/E, in percent of it.
 pub const PE_SIMILAR_BAND_PCT: u32 = 10;
 
@@ -33,7 +37,7 @@ pub struct Ladder {
     /// (3) (1) + (2); (4) ÷ 2.
     pub recent_total: Option<Decimal>,
     pub recent_avg: Option<Decimal>,
-    /// (5) the figure `span` years before (1), and its year.
+    /// (5) the figure of the `span`-th year counting (1) as the first, and its year.
     pub old: Option<Decimal>,
     pub old_year: Option<i32>,
     /// (6) the year before (5), and its year.
@@ -47,10 +51,15 @@ pub struct Ladder {
     pub increase_pct: Option<Decimal>,
     /// The compound annual rate over `span_years`, in percent.
     pub compound_rate_pct: Option<Decimal>,
-    /// The years between (1) and (5): the form's five when the series allows, else the real span.
+    /// The exponent: the window's length minus one — the form's five for its six years, fewer when
+    /// the series only allows a shorter window.
     pub span_years: u32,
-    /// `true` when the series had fewer than [`MIN_LADDER_YEARS`] figures: every line is `None`.
+    /// `true` when the series holds no two non-overlapping consecutive pairs inside the six-year
+    /// window: every line is `None`.
     pub unavailable: bool,
+    /// `true` when the series holds no figure at all (then also `unavailable`) — the absence of
+    /// the series, told apart from a short window (G1 final review).
+    pub absent: bool,
 }
 
 /// One row of the §3 price record.
@@ -60,7 +69,7 @@ pub struct PriceRow {
     pub high: Option<Decimal>,
     pub low: Option<Decimal>,
     pub eps: Option<Decimal>,
-    /// (A ÷ C), (B ÷ C) — `None` on a missing or non-positive EPS.
+    /// (A ÷ C), (B ÷ C) — `None` on a missing or non-positive price or EPS.
     pub pe_high: Option<Decimal>,
     pub pe_low: Option<Decimal>,
 }
@@ -79,13 +88,25 @@ pub enum RateComparison {
     EpsFaster,
     SalesFaster,
     Same,
+    /// The two ladders do not read the same years (a gap in one series): their rates are not
+    /// compared — said, never decided over two different periods.
+    DifferentYears,
 }
 
 /// The §3 price record and its facts.
+///
+/// Absence honesty (G1 review): the P/E totals and averages cover the SAME rows — those with both
+/// a high and a low P/E — and `pe_years` states how many; a « cinq ans » wording is the layout's
+/// only when `five_year_record` holds and the figure covers all five rows. A count over no row is
+/// `None`, never `0`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PriceRecord {
     /// The last five years with a price, oldest first.
     pub rows: Vec<PriceRow>,
+    /// `true` when `rows` are the form's five consecutive years.
+    pub five_year_record: bool,
+    /// The rows the P/E totals and averages cover (both P/Es present).
+    pub pe_years: u32,
     pub pe_high_total: Option<Decimal>,
     pub pe_low_total: Option<Decimal>,
     pub pe_high_avg: Option<Decimal>,
@@ -95,12 +116,15 @@ pub struct PriceRecord {
     pub present_price: Option<Decimal>,
     pub present_eps: Option<Decimal>,
     pub present_pe: Option<Decimal>,
-    /// The high of the oldest row (« the high price five years ago ») and the present price's
-    /// distance from it, in percent (positive = higher).
+    /// The high of the oldest row (« the high price five years ago » on a full record), its
+    /// year, and the present price's distance from it, in percent (positive = higher).
     pub high_five_years_ago: Option<Decimal>,
+    pub high_year: Option<i32>,
     pub price_vs_high_pct: Option<Decimal>,
-    /// « This stock has sold as high as the current price in N of the last 5 years ».
+    /// « This stock has sold as high as the current price in N of the last 5 years »: N over the
+    /// `high_years` rows whose high is known; `None` without a present price or any known high.
     pub years_sold_as_high: Option<u32>,
+    pub high_years: u32,
     pub pe_position: Option<PePosition>,
 }
 
@@ -117,30 +141,41 @@ fn two() -> Decimal {
     Decimal::from(2)
 }
 
+/// The two pairs of a ladder, by YEAR (never by position in the series — a gap must not pair
+/// two years that are not consecutive): the most recent consecutive pair `(r, r − 1)`, and the
+/// old pair `(o, o − 1)` — the form's `o = r − 4` when present, else the oldest consecutive pair
+/// still inside the six-year window and disjoint from the recent pair (`r − 4 < o ≤ r − 2`).
+/// `None` when either pair is missing. Returns `(r, o)`.
+fn ladder_pairs(points: &[(i32, Decimal)]) -> Option<(i32, i32)> {
+    let has = |y: i32| points.iter().any(|(py, _)| *py == y);
+    let recent = points.iter().rev().map(|(y, _)| *y).find(|y| has(y - 1))?;
+    let window = FORM_SPAN_YEARS as i32 - 1; // r − 4: the form's (5)
+    (recent - window..=recent - 2)
+        .find(|o| has(*o) && has(o - 1))
+        .map(|o| (recent, o))
+}
+
 /// Build one ladder from `(year, figure)` pairs (ascending, figures present).
 fn ladder(points: &[(i32, Decimal)]) -> Ladder {
-    if points.len() < MIN_LADDER_YEARS {
+    let Some((recent_year, old_year)) = ladder_pairs(points) else {
         return Ladder {
             unavailable: true,
+            absent: points.is_empty(),
             ..Ladder::default()
         };
-    }
-    let n = points.len();
-    let (recent_year, recent) = points[n - 1];
-    let (recent_prior_year, recent_prior) = points[n - 2];
-    // The form's old pair: `span` and `span + 1` years before the recent year; when the series
-    // lacks them, the oldest consecutive pair it has, and the real span.
-    let by_year = |y: i32| points.iter().find(|(py, _)| *py == y).map(|(_, v)| *v);
-    let form_old = recent_year - FORM_SPAN_YEARS as i32;
-    let (old_year, old, old_prior_year, old_prior, span) =
-        match (by_year(form_old), by_year(form_old - 1)) {
-            (Some(o), Some(op)) => (form_old, o, form_old - 1, op, FORM_SPAN_YEARS),
-            _ => {
-                let (oy, o) = points[1];
-                let (opy, op) = points[0];
-                (oy, o, opy, op, (recent_year - oy).max(1) as u32)
-            }
-        };
+    };
+    let at = |y: i32| {
+        points
+            .iter()
+            .find(|(py, _)| *py == y)
+            .map(|(_, v)| *v)
+            .expect("ladder_pairs checked the year")
+    };
+    let (recent_prior_year, old_prior_year) = (recent_year - 1, old_year - 1);
+    let (recent, recent_prior) = (at(recent_year), at(recent_prior_year));
+    let (old, old_prior) = (at(old_year), at(old_prior_year));
+    // The window runs from (6) to (1): its length minus one is the exponent — the form's five.
+    let span = (recent_year - old_prior_year) as u32;
     let recent_total = recent.checked_add(recent_prior);
     let recent_avg = recent_total.and_then(|t| t.checked_div(two()));
     let old_total = old.checked_add(old_prior);
@@ -149,8 +184,10 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
         (Some(r), Some(o)) => r.checked_sub(o),
         _ => None,
     };
+    // A non-positive old average has no meaningful « hausse en pour cent »: dividing by it would
+    // invert the sign (a recovery from −1 to +1 read as −200 %) — absent, never wrong (G1 review).
     let increase_pct = match (increase, old_avg) {
-        (Some(i), Some(o)) if o != Decimal::ZERO => i
+        (Some(i), Some(o)) if o > Decimal::ZERO => i
             .checked_div(o)
             .and_then(|q| q.checked_mul(Decimal::ONE_HUNDRED)),
         _ => None,
@@ -177,24 +214,50 @@ fn ladder(points: &[(i32, Decimal)]) -> Ladder {
         compound_rate_pct,
         span_years: span,
         unavailable: false,
+        absent: false,
     }
 }
 
+/// A P/E needs a positive price AND a positive EPS: a zero or negative price is a data fault, not
+/// a « PER de 0 » — absent, never wrong (G1 D review). Every P/E, and so every P/E average, is
+/// then positive when present.
 fn pe(price: Option<Decimal>, eps: Option<Decimal>) -> Option<Decimal> {
     match (price, eps) {
-        (Some(p), Some(e)) if e > Decimal::ZERO => p.checked_div(e),
+        (Some(p), Some(e)) if p > Decimal::ZERO && e > Decimal::ZERO => p.checked_div(e),
         _ => None,
     }
 }
 
-fn sum(values: impl Iterator<Item = Option<Decimal>>) -> (Option<Decimal>, u32) {
-    let mut total: Option<Decimal> = None;
-    let mut count = 0u32;
-    for v in values.flatten() {
-        total = Some(total.unwrap_or(Decimal::ZERO).checked_add(v).unwrap_or(v));
-        count += 1;
+/// The sum of every value; `None` for no value or on an overflow — never the values that fit
+/// passed off as the total (G1 review: an overflow used to restart the sum at the last value).
+fn total(values: impl Iterator<Item = Decimal>) -> Option<Decimal> {
+    let mut acc: Option<Decimal> = None;
+    for v in values {
+        acc = Some(match acc {
+            None => v,
+            Some(a) => a.checked_add(v)?,
+        });
     }
-    (total, count)
+    acc
+}
+
+/// Where `now` stands against `avg` ± `PE_SIMILAR_BAND_PCT` %. Checked arithmetic (G1 final
+/// review): an overflow is an absent position, never a panic; a non-positive average has none.
+fn position_against(now: Decimal, avg: Decimal) -> Option<PePosition> {
+    if avg <= Decimal::ZERO {
+        return None;
+    }
+    let band = avg
+        .checked_mul(Decimal::from(PE_SIMILAR_BAND_PCT))?
+        .checked_div(Decimal::ONE_HUNDRED)?;
+    let (top, bottom) = (avg.checked_add(band)?, avg.checked_sub(band)?);
+    Some(if now > top {
+        PePosition::Higher
+    } else if now < bottom {
+        PePosition::Lower
+    } else {
+        PePosition::Similar
+    })
 }
 
 fn price_record(
@@ -218,17 +281,27 @@ fn price_record(
             pe_low: pe(y.low_price, y.eps),
         })
         .collect();
-    let (pe_high_total, n_high) = sum(rows.iter().map(|r| r.pe_high));
-    let (pe_low_total, n_low) = sum(rows.iter().map(|r| r.pe_low));
-    let avg = |t: Option<Decimal>, n: u32| t.and_then(|t| t.checked_div(Decimal::from(n)));
-    let pe_high_avg = avg(pe_high_total, n_high);
-    let pe_low_avg = avg(pe_low_total, n_low);
+    let five_year_record =
+        rows.len() == 5 && rows.last().map(|r| r.year) == rows.first().map(|r| r.year + 4);
+    // The high and low P/E columns are summed over the SAME rows (both P/Es present), so the two
+    // averages — and their average — describe one set of years, whose count is stated.
+    let pe_pairs: Vec<(Decimal, Decimal)> = rows
+        .iter()
+        .filter_map(|r| Some((r.pe_high?, r.pe_low?)))
+        .collect();
+    let pe_years = pe_pairs.len() as u32;
+    let pe_high_total = total(pe_pairs.iter().map(|(h, _)| *h));
+    let pe_low_total = total(pe_pairs.iter().map(|(_, l)| *l));
+    let avg = |t: Option<Decimal>| t.and_then(|t| t.checked_div(Decimal::from(pe_years)));
+    let pe_high_avg = avg(pe_high_total);
+    let pe_low_avg = avg(pe_low_total);
     let pe_avg_of_avgs = match (pe_high_avg, pe_low_avg) {
         (Some(h), Some(l)) => h.checked_add(l).and_then(|s| s.checked_div(two())),
         _ => None,
     };
     let present_pe = pe(present_price, present_eps);
     let high_five_years_ago = rows.first().and_then(|r| r.high);
+    let high_year = rows.first().filter(|r| r.high.is_some()).map(|r| r.year);
     let price_vs_high_pct = match (present_price, high_five_years_ago) {
         (Some(p), Some(h)) if h > Decimal::ZERO => p
             .checked_sub(h)
@@ -236,26 +309,20 @@ fn price_record(
             .and_then(|q| q.checked_mul(Decimal::ONE_HUNDRED)),
         _ => None,
     };
-    let years_sold_as_high = present_price.map(|p| {
+    let high_years = rows.iter().filter(|r| r.high.is_some()).count() as u32;
+    let years_sold_as_high = present_price.filter(|_| high_years > 0).map(|p| {
         rows.iter()
             .filter(|r| r.high.is_some_and(|h| h >= p))
             .count() as u32
     });
     let pe_position = match (present_pe, pe_avg_of_avgs) {
-        (Some(now), Some(avg)) if avg > Decimal::ZERO => {
-            let band = avg * Decimal::from(PE_SIMILAR_BAND_PCT) / Decimal::ONE_HUNDRED;
-            Some(if now > avg + band {
-                PePosition::Higher
-            } else if now < avg - band {
-                PePosition::Lower
-            } else {
-                PePosition::Similar
-            })
-        }
+        (Some(now), Some(avg)) => position_against(now, avg),
         _ => None,
     };
     PriceRecord {
         rows,
+        five_year_record,
+        pe_years,
         pe_high_total,
         pe_low_total,
         pe_high_avg,
@@ -265,10 +332,44 @@ fn price_record(
         present_eps,
         present_pe,
         high_five_years_ago,
+        high_year,
         price_vs_high_pct,
         years_sold_as_high,
+        high_years,
         pe_position,
     }
+}
+
+/// The years a ladder reads: (1), (2), (5), (6).
+fn ladder_years(l: &Ladder) -> [Option<i32>; 4] {
+    [
+        l.recent_year,
+        l.recent_prior_year,
+        l.old_year,
+        l.old_prior_year,
+    ]
+}
+
+/// « Le BPA a augmenté plus / moins vite que les ventes » — decided on the rates AS SHOWN (rounded
+/// for display: « 5,0 % » against « 5,0 % » is « même rythme », whatever the digits beyond) and
+/// only over the SAME years: two ladders over different periods are `DifferentYears`, never
+/// compared (G1 final review). `None` when either rate is absent.
+fn compare_rates(eps: &Ladder, sales: &Ladder) -> Option<RateComparison> {
+    let shown = |r: Decimal| round_for_display(r, DisplayField::Percent);
+    let (e, s) = (
+        shown(eps.compound_rate_pct?),
+        shown(sales.compound_rate_pct?),
+    );
+    if ladder_years(eps) != ladder_years(sales) {
+        return Some(RateComparison::DifferentYears);
+    }
+    Some(if e > s {
+        RateComparison::EpsFaster
+    } else if e < s {
+        RateComparison::SalesFaster
+    } else {
+        RateComparison::Same
+    })
 }
 
 /// The examination of a canonical series (ascending years). `present_eps` is the TTM figure when
@@ -288,12 +389,7 @@ pub fn quick_screen(
         .collect();
     let sales = ladder(&sales_points);
     let eps = ladder(&eps_points);
-    let eps_vs_sales = match (eps.compound_rate_pct, sales.compound_rate_pct) {
-        (Some(e), Some(s)) if e > s => Some(RateComparison::EpsFaster),
-        (Some(e), Some(s)) if e < s => Some(RateComparison::SalesFaster),
-        (Some(_), Some(_)) => Some(RateComparison::Same),
-        _ => None,
-    };
+    let eps_vs_sales = compare_rates(&eps, &sales);
     QuickScreenOutputs {
         sales,
         eps,
@@ -342,12 +438,12 @@ mod tests {
 
     #[test]
     fn a_six_year_ladder_follows_the_form() {
-        // Sales 100, 110, …, 200 over 2020–2026 (seven years): recent pair 2026/2025, old pair
-        // 2021/2020 (five and six years before 2026), span 5.
-        let years: Vec<CanonicalYear> = (0..7)
+        // Sales 100, 110, …, 150 over 2021–2026 (six years, spec §7 AC1): recent pair 2026/2025,
+        // old pair 2022/2021 (the fifth and sixth years, counting 2026 as the first), span 5.
+        let years: Vec<CanonicalYear> = (0..6)
             .map(|i| {
                 let s = 100 + 10 * i;
-                year(2020 + i, &s.to_string(), "1", "10", "5")
+                year(2021 + i, &s.to_string(), "1", "10", "5")
             })
             .collect();
         let out = quick_screen(&years, Some(d("12")), Some(d("1")));
@@ -356,14 +452,14 @@ mod tests {
             (l.recent_year, l.recent_prior_year),
             (Some(2026), Some(2025))
         );
-        assert_eq!((l.old_year, l.old_prior_year), (Some(2021), Some(2020)));
-        assert_eq!(l.recent_avg, Some(d("155")));
+        assert_eq!((l.old_year, l.old_prior_year), (Some(2022), Some(2021)));
+        assert_eq!(l.recent_avg, Some(d("145")));
         assert_eq!(l.old_avg, Some(d("105")));
-        assert_eq!(l.increase, Some(d("50")));
-        assert_eq!(l.increase_pct.map(|p| p.round_dp(2)), Some(d("47.62")));
+        assert_eq!(l.increase, Some(d("40")));
+        assert_eq!(l.increase_pct.map(|p| p.round_dp(2)), Some(d("38.10")));
         assert_eq!(l.span_years, 5);
-        // (155/105)^(1/5) − 1 = 8.1 %
-        assert_eq!(l.compound_rate_pct.map(|p| p.round_dp(1)), Some(d("8.1")));
+        // (145/105)^(1/5) − 1 = 6.7 %
+        assert_eq!(l.compound_rate_pct.map(|p| p.round_dp(1)), Some(d("6.7")));
         // EPS flat → 0 % → sales grew faster.
         assert_eq!(
             out.eps.compound_rate_pct.map(|p| p.round_dp(1)),
@@ -380,10 +476,42 @@ mod tests {
         let l = quick_screen(&years, None, None).sales;
         assert!(!l.unavailable);
         assert_eq!((l.old_year, l.old_prior_year), (Some(2024), Some(2023)));
-        assert_eq!(l.span_years, 2, "2026 − 2024");
+        assert_eq!(l.span_years, 3, "a four-year window: 2026 − 2023");
+        // Three years: the middle one would serve both pairs (G1 review) — unavailable.
+        let three: Vec<CanonicalYear> = years[1..].to_vec();
+        assert!(quick_screen(&three, None, None).sales.unavailable);
+        assert_eq!(
+            quick_screen(&three, None, None).sales.compound_rate_pct,
+            None
+        );
         let two: Vec<CanonicalYear> = years[..2].to_vec();
         assert!(quick_screen(&two, None, None).sales.unavailable);
-        assert_eq!(quick_screen(&two, None, None).sales.compound_rate_pct, None);
+    }
+
+    #[test]
+    fn the_pairs_are_keyed_by_year_inside_the_six_year_window() {
+        // Twelve years with 2021 missing: the form's old pair (2022/2021) is broken, so the
+        // oldest consecutive pair inside the window is taken (2023/2022, span 4) — never a pair
+        // from before the window, never two years across the gap.
+        let years: Vec<CanonicalYear> = (2015..=2026)
+            .filter(|y| *y != 2021)
+            .map(|y| year(y, "100", "1", "10", "5"))
+            .collect();
+        let l = quick_screen(&years, None, None).sales;
+        assert_eq!((l.old_year, l.old_prior_year), (Some(2023), Some(2022)));
+        assert_eq!(l.span_years, 4);
+        // The latest year without its predecessor: the recent pair is the latest CONSECUTIVE one.
+        let years: Vec<CanonicalYear> = [2019, 2020, 2021, 2022, 2023, 2024, 2026]
+            .into_iter()
+            .map(|y| year(y, "100", "1", "10", "5"))
+            .collect();
+        let l = quick_screen(&years, None, None).sales;
+        assert_eq!(
+            (l.recent_year, l.recent_prior_year),
+            (Some(2024), Some(2023))
+        );
+        assert_eq!((l.old_year, l.old_prior_year), (Some(2020), Some(2019)));
+        assert_eq!(l.span_years, 5);
     }
 
     #[test]
@@ -419,5 +547,194 @@ mod tests {
         assert_eq!(out.price.rows[4].pe_high, None);
         assert_eq!(out.price.present_pe, None);
         assert_eq!(out.price.pe_position, None);
+        // A zero price yields no P/E either — never a « PER de 0 » averaged in.
+        let mut zero = years.clone();
+        zero[5].low_price = Some(d("0"));
+        let out = quick_screen(&zero, Some(d("0")), Some(d("5")));
+        assert_eq!(out.price.rows[4].pe_low, None);
+        assert_eq!(out.price.present_pe, None);
+        assert_eq!(out.price.pe_years, 4);
+    }
+
+    /// Six years whose two-year averages are `old` (2021–2022) and `recent` (2025–2026).
+    #[test]
+    fn eps_versus_sales_is_decided_on_the_shown_rates_over_the_same_years() {
+        let l = |rate: &str, recent: i32| Ladder {
+            recent_year: Some(recent),
+            recent_prior_year: Some(recent - 1),
+            old_year: Some(recent - 4),
+            old_prior_year: Some(recent - 5),
+            compound_rate_pct: Some(d(rate)),
+            span_years: 5,
+            ..Ladder::default()
+        };
+        // 5,04 % and 5,01 % both read « 5,0 % »: the same pace, as the reader sees it.
+        assert_eq!(
+            compare_rates(&l("5.04", 2025), &l("5.01", 2025)),
+            Some(RateComparison::Same)
+        );
+        assert_eq!(
+            compare_rates(&l("5.06", 2025), &l("5.01", 2025)),
+            Some(RateComparison::EpsFaster)
+        );
+        assert_eq!(
+            compare_rates(&l("4.9", 2025), &l("5.0", 2025)),
+            Some(RateComparison::SalesFaster)
+        );
+        // Two different periods are never compared — and said so.
+        assert_eq!(
+            compare_rates(&l("9", 2025), &l("5", 2024)),
+            Some(RateComparison::DifferentYears)
+        );
+        let mut absent = l("5", 2025);
+        absent.compound_rate_pct = None;
+        assert_eq!(compare_rates(&absent, &l("5", 2025)), None);
+    }
+
+    #[test]
+    fn an_absent_series_is_told_apart_from_a_short_window() {
+        assert!(ladder(&[]).absent && ladder(&[]).unavailable);
+        let short = ladder(&[(2024, d("1")), (2025, d("2"))]);
+        assert!(short.unavailable && !short.absent);
+    }
+
+    #[test]
+    fn the_pe_band_never_overflows_into_a_panic() {
+        assert_eq!(position_against(d("30"), d("20")), Some(PePosition::Higher));
+        assert_eq!(
+            position_against(d("21"), d("20")),
+            Some(PePosition::Similar)
+        );
+        assert_eq!(position_against(d("10"), d("20")), Some(PePosition::Lower));
+        assert_eq!(position_against(Decimal::ONE, Decimal::MAX), None);
+        assert_eq!(position_against(Decimal::ONE, Decimal::ZERO), None);
+    }
+
+    fn six_years_with_averages(old: &str, recent: &str) -> Vec<CanonicalYear> {
+        [
+            (2021, old),
+            (2022, old),
+            (2023, "1"),
+            (2024, "1"),
+            (2025, recent),
+            (2026, recent),
+        ]
+        .into_iter()
+        .map(|(y, s)| year(y, s, s, "10", "5"))
+        .collect()
+    }
+
+    /// Spec §6: the form's conversion table reproduced END TO END — six years through
+    /// `quick_screen`, the real ladder, the real rate (not the root helper alone).
+    #[test]
+    fn quick_screen_reproduces_the_forms_conversion_table() {
+        let rate = |recent: &str| {
+            let out = quick_screen(&six_years_with_averages("100", recent), None, None);
+            assert_eq!(out.sales.span_years, FORM_SPAN_YEARS);
+            out.sales.compound_rate_pct.unwrap()
+        };
+        // The table's own precision (whole percents): 27 % → 5 %, 271 % → 30 %.
+        assert_eq!(rate("127").round_dp(0), d("5"));
+        assert_eq!(rate("371").round_dp(0), d("30"));
+        // The screen's precision (one decimal): 27,6 % → 5,0 %, 271,3 % → 30,0 %.
+        assert_eq!(rate("127.6").round_dp(1), d("5.0"));
+        assert_eq!(rate("371.3").round_dp(1), d("30.0"));
+        let out = quick_screen(&six_years_with_averages("100", "127"), None, None);
+        assert_eq!(out.sales.increase_pct, Some(d("27")));
+    }
+
+    #[test]
+    fn a_non_positive_old_average_has_no_percentage_increase() {
+        // EPS −1 → +1: a recovery, never « −200 % » (G1 review).
+        let l = quick_screen(&six_years_with_averages("-1", "1"), None, None).eps;
+        assert_eq!(l.increase, Some(d("2")));
+        assert_eq!(l.increase_pct, None);
+        assert_eq!(l.compound_rate_pct, None);
+        let l = quick_screen(&six_years_with_averages("0", "1"), None, None).eps;
+        assert_eq!(l.increase_pct, None);
+    }
+
+    #[test]
+    fn the_pe_figures_cover_the_same_rows_and_say_how_many() {
+        let mut years = vec![
+            year(2022, "1", "2", "50", "30"),  // 25 / 15
+            year(2023, "1", "4", "80", "40"),  // 20 / 10
+            year(2024, "1", "4", "100", "60"), // 25 / 15
+            year(2025, "1", "5", "100", "50"), // 20 / 10
+            year(2026, "1", "5", "120", "60"), // 24 / 12
+        ];
+        let p = quick_screen(&years, Some(d("110")), Some(d("5"))).price;
+        assert!(p.five_year_record);
+        assert_eq!(p.pe_years, 5);
+        assert_eq!(p.high_year, Some(2022));
+        assert_eq!(p.high_years, 5);
+        // 2024 loses its low price: its high P/E must not enter the high total alone.
+        years[2].low_price = None;
+        let p = quick_screen(&years, Some(d("110")), Some(d("5"))).price;
+        assert_eq!(p.pe_years, 4);
+        assert_eq!(p.pe_high_total, Some(d("89")));
+        assert_eq!(p.pe_low_total, Some(d("47")));
+        assert_eq!(p.pe_high_avg, Some(d("22.25")));
+        assert_eq!(p.pe_low_avg, Some(d("11.75")));
+        // A non-positive EPS everywhere: no P/E row → every P/E figure absent, count 0.
+        for y in &mut years {
+            y.eps = Some(d("-1"));
+        }
+        let p = quick_screen(&years, Some(d("110")), None).price;
+        assert_eq!(p.pe_years, 0);
+        assert_eq!(
+            (p.pe_high_total, p.pe_high_avg, p.pe_avg_of_avgs),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn an_overflowing_pe_total_is_absent_never_the_last_value() {
+        let big = Decimal::MAX.to_string();
+        let years = vec![
+            year(2025, "1", "1", &big, "1"),
+            year(2026, "1", "1", &big, "1"),
+        ];
+        let p = quick_screen(&years, None, None).price;
+        assert_eq!(p.pe_years, 2);
+        assert_eq!(p.pe_high_total, None);
+        assert_eq!(p.pe_high_avg, None);
+        assert_eq!(p.pe_avg_of_avgs, None);
+        assert_eq!(p.pe_low_total, Some(d("2")));
+    }
+
+    #[test]
+    fn a_short_record_claims_no_five_years_and_no_high_counts_as_absent() {
+        let years = vec![
+            year(2024, "1", "2", "50", "30"),
+            year(2025, "1", "4", "80", "40"),
+            year(2026, "1", "4", "100", "60"),
+        ];
+        let p = quick_screen(&years, Some(d("90")), Some(d("4"))).price;
+        assert!(!p.five_year_record);
+        assert_eq!(p.high_year, Some(2024));
+        assert_eq!((p.years_sold_as_high, p.high_years), (Some(1), 3));
+        // Five rows that are not consecutive are not the form's five years either.
+        let gap: Vec<CanonicalYear> = [2019, 2022, 2023, 2024, 2026]
+            .into_iter()
+            .map(|y| year(y, "1", "1", "10", "5"))
+            .collect();
+        assert!(!quick_screen(&gap, None, None).price.five_year_record);
+        // Rows without a high: « sold as high in 0 of … » would be a lie — absent.
+        let mut no_high = years.clone();
+        for y in &mut no_high {
+            y.high_price = None;
+        }
+        let p = quick_screen(&no_high, Some(d("90")), None).price;
+        assert_eq!(p.years_sold_as_high, None);
+        assert_eq!(p.high_years, 0);
+        assert_eq!(p.high_year, None);
+        // No price rows at all: absent, never 0.
+        assert_eq!(
+            quick_screen(&[], Some(d("90")), None)
+                .price
+                .years_sold_as_high,
+            None
+        );
     }
 }

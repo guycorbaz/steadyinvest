@@ -614,6 +614,28 @@ fn request_restore_flags_an_older_same_journal_backup_as_stale() {
 }
 
 #[test]
+fn a_read_only_journal_refuses_restore_and_import_up_front() {
+    // G1 G (on-screen check): the rails refuse BEFORE any picker — the wiring asks
+    // `refuse_if_read_only` first; `request_restore` holds the same rule.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x544);
+    assert_eq!(state.refuse_if_read_only(), Ok(()));
+    make_backup(&dir, "foreign.db", 0xBEEF, true); // a backup that would otherwise park
+    state.read_only = true;
+    assert_eq!(state.refuse_if_read_only(), Err(MSG_READ_ONLY_WRITE));
+    assert_eq!(
+        state
+            .request_restore(dir.path().join("foreign.db").to_str().unwrap())
+            .map(|_| ()),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+    assert!(
+        !state.has_pending_restore(),
+        "no restore is parked on a read-only journal (no confirm can open)"
+    );
+}
+
+#[test]
 fn request_restore_refuses_a_non_journal_file_and_parks_nothing() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x542);
@@ -658,6 +680,202 @@ fn confirm_restore_swaps_the_live_journal_then_cancel_clears() {
         "the backup's study is now live"
     );
     assert!(!state.has_pending_restore(), "pending cleared");
+}
+
+#[test]
+fn confirm_restore_is_refused_on_a_read_only_dossier() {
+    // G1 review (Guy's decision 5): the block lives in Rust too — a parked restore over a
+    // read-only (newer-schema) dossier is refused, drops the parked file, and touches nothing.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x546); // live id 0xC0FFEE, empty
+    make_backup(&dir, "src.db", 0xBEEF, true);
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    state.read_only = true;
+    assert_eq!(
+        state.confirm_restore(),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+    assert!(
+        !state.has_pending_restore(),
+        "the parked restore is dropped"
+    );
+    assert_eq!(
+        state.journal_id(),
+        Some(Uuid::from_u128(0xC0FFEE)),
+        "the live journal was not overwritten"
+    );
+}
+
+#[test]
+fn a_restore_never_replaces_nor_deletes_an_earlier_prerestore_copy() {
+    // G1 P (G3 M1): a `-prerestore` left beside the dossier (an earlier failed rollback) may be
+    // the ONLY copy of an original — the restore is refused, the file named, and it is kept
+    // byte for byte; the live dossier is untouched and still open.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x547); // live id 0xC0FFEE
+    let study = state.create_study("NESN", "CHF").unwrap();
+    make_backup(&dir, "src.db", 0xBEEF, true);
+    let earlier = dir.path().join("journal.db-prerestore");
+    // Appearing AFTER the request was parked: the apply refuses.
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    std::fs::write(&earlier, b"the only copy of an earlier original").unwrap();
+    assert_eq!(
+        state.confirm_restore(),
+        Err(restore_snapshot_exists_message(&earlier))
+    );
+    assert!(
+        restore_snapshot_exists_message(&earlier).contains("déplacez ou renommez"),
+        "G1 P review (M2): the way out is named"
+    );
+    // Already there: named BEFORE any confirm (G1 P review M2).
+    assert_eq!(
+        state
+            .request_restore(dir.path().join("src.db").to_str().unwrap())
+            .map(|_| ()),
+        Err(restore_snapshot_exists_message(&earlier))
+    );
+    assert!(!state.has_pending_restore(), "no confirm parked");
+    assert_eq!(
+        std::fs::read(&earlier).unwrap(),
+        b"the only copy of an earlier original",
+        "never overwritten, never deleted"
+    );
+    assert_eq!(state.journal_id(), Some(Uuid::from_u128(0xC0FFEE)));
+    assert!(state.get_study(study).is_some(), "nothing was lost");
+}
+
+#[test]
+fn the_snapshot_is_never_written_over_an_existing_file_nor_removed() {
+    // G1 P review (L-a / L-g): create_new refuses an existing file, reports it did NOT create it
+    // (so it is never removed), and the file is intact.
+    let dir = TempDir::new().unwrap();
+    let live = dir.path().join("live.db");
+    let snapshot = dir.path().join("live.db-prerestore");
+    std::fs::write(&live, b"live").unwrap();
+    std::fs::write(&snapshot, b"earlier").unwrap();
+    let failure = super::restore::write_snapshot(&live, &snapshot).unwrap_err();
+    assert!(!failure.created);
+    assert_eq!(failure.error.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read(&snapshot).unwrap(), b"earlier");
+    // A fresh one is written with the dossier's permissions (L-b).
+    std::fs::remove_file(&snapshot).unwrap();
+    super::restore::write_snapshot(&live, &snapshot).unwrap();
+    assert_eq!(std::fs::read(&snapshot).unwrap(), b"live");
+    assert_eq!(
+        std::fs::metadata(&snapshot).unwrap().permissions(),
+        std::fs::metadata(&live).unwrap().permissions()
+    );
+}
+
+#[test]
+fn a_leftover_prerestore_is_named_at_startup() {
+    // G1 P review (L-f): the kept copy of a failed rollback is named at the next start.
+    let dir = TempDir::new().unwrap();
+    drop(watch_state(&dir, 0x54A));
+    let snapshot = dir.path().join("journal.db-prerestore");
+    std::fs::write(&snapshot, b"original").unwrap();
+    let (clock, idgen) = fixed(0x54B, "2026-06-14T09:00:00Z");
+    let (_state, notice) =
+        JournalState::open_or_create(Some(&dir.path().join("journal.db")), clock, idgen);
+    assert_eq!(notice, Some(prerestore_found_message(&snapshot)));
+}
+
+#[test]
+fn a_second_restore_works_once_the_first_left_no_snapshot() {
+    // G1 P (G3 M1): a successful restore removes its own snapshot, so the next one is not
+    // refused by the leftover guard.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x548);
+    make_backup(&dir, "src.db", 0xBEEF, true);
+    make_backup(&dir, "src2.db", 0xBEEF, true);
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    state.confirm_restore().unwrap();
+    assert!(!dir.path().join("journal.db-prerestore").exists());
+    state
+        .request_restore(dir.path().join("src2.db").to_str().unwrap())
+        .unwrap();
+    state.confirm_restore().unwrap();
+    assert_eq!(state.journal_id(), Some(Uuid::from_u128(0xBEEF)));
+}
+
+#[test]
+fn a_failed_rollback_says_the_dossier_was_replaced_and_keeps_the_named_snapshot() {
+    // G1 P (G3 M1): the restored file will not open AND the return to the original fails — the
+    // refusal says the dossier WAS replaced and names the snapshot, which stays on disk.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x549);
+    let live = dir.path().join("journal.db");
+    let snapshot = dir.path().join("journal.db-prerestore");
+    std::fs::copy(&live, &snapshot).unwrap();
+    state.journal = None;
+    let result = state.open_swapped(
+        &live,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "rollback failed".to_string(),
+            })
+        },
+    );
+    assert_eq!(result, Err(restore_rollback_failed_message(&snapshot)));
+    assert!(
+        result.unwrap_err().contains("a été remplacé"),
+        "the dossier WAS replaced"
+    );
+    assert!(snapshot.exists(), "the only copy of the original is kept");
+    // A rollback that succeeds removes the snapshot and says the plain failure.
+    state.journal = None;
+    let result = state.open_swapped(
+        &live,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| Ok(()),
+    );
+    assert_eq!(result, Err(MSG_RESTORE_FAILED.to_string()));
+    assert!(!snapshot.exists());
+    assert!(
+        state.journal_id().is_some(),
+        "the live dossier is open again"
+    );
+    // G1 P review (L-g): the rollback fails AND the dossier will not reopen — the refusal names
+    // the kept copy, and no path is left reading as an open dossier.
+    std::fs::write(&snapshot, b"original").unwrap();
+    let garbage = dir.path().join("not-a-journal.db");
+    std::fs::write(&garbage, b"garbage").unwrap();
+    state.journal = None;
+    let result = state.open_swapped(
+        &garbage,
+        &snapshot,
+        |_| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "will not open".to_string(),
+            })
+        },
+        |_, _| {
+            Err(steadyinvest_persistence::Error::Restore {
+                detail: "rollback failed".to_string(),
+            })
+        },
+    );
+    assert_eq!(result, Err(restore_rollback_failed_message(&snapshot)));
+    assert!(state.journal_id().is_none());
+    assert!(state.path().is_none(), "no path without an open dossier");
+    assert!(snapshot.exists());
 }
 
 #[test]
@@ -733,10 +951,15 @@ fn open_and_create_journal_switch_between_journals() {
         !outcome.sync_warning,
         "a plain temp dir is not a sync folder"
     );
+    assert!(!outcome.unchanged, "a created journal is a dossier change");
 
     // Open journal A back → its study is there (a clean switch round-trip).
     let path_a = dir.path().join("journal.db");
-    state.open_journal(&path_a).unwrap();
+    let back = state.open_journal(&path_a).unwrap();
+    assert!(
+        !back.unchanged,
+        "opening another journal is a dossier change"
+    );
     assert!(
         state.get_study(id_in_a).is_some(),
         "switched back to journal A"
@@ -773,6 +996,36 @@ fn open_journal_failure_leaves_the_previous_journal_open() {
         1,
         "the previous journal stayed open after a refused switch"
     );
+}
+
+#[test]
+fn a_refused_switch_that_cannot_reopen_the_previous_journal_leaves_none_open() {
+    // G1 final review L10: the previous journal vanished while open (unlinked), then a switch is
+    // refused — it cannot be reopened either. No journal is open, and no path says otherwise.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x553);
+    std::fs::remove_file(dir.path().join("journal.db")).unwrap();
+    let sub = dir.path().join("locked");
+    std::fs::create_dir_all(&sub).unwrap();
+    let locked = sub.join("j.db");
+    drop(
+        Journal::create(
+            &locked,
+            Uuid::from_u128(0xBEEF),
+            &Timestamp("2026-06-20T00:00:00Z".to_string()),
+        )
+        .unwrap(),
+    );
+    let mut lock = locked.as_os_str().to_os_string();
+    lock.push("-lock");
+    std::fs::write(&lock, "1").unwrap();
+
+    assert_eq!(
+        state.open_journal(&locked),
+        Err(MSG_JOURNAL_LOCKED.to_string())
+    );
+    assert_eq!(state.journal_id(), None, "no journal is open");
+    assert_eq!(state.path(), None, "and no stale path reads as one");
 }
 
 #[test]
@@ -940,6 +1193,11 @@ fn reopening_the_currently_open_journal_is_a_no_op() {
     let path = dir.path().join("journal.db");
     let outcome = state.open_journal(&path).unwrap();
     assert_eq!(outcome.journal_id, Uuid::from_u128(0xC0FFEE));
+    // G1 G review: the outcome says so — the wiring keeps the dossier's session.
+    assert!(
+        outcome.unchanged,
+        "re-selecting the open journal is unchanged"
+    );
     assert!(
         state.get_study(id).is_some(),
         "the journal stayed open, study intact"
@@ -1605,6 +1863,106 @@ fn provider_failure_notice_maps_each_cause() {
         steadyinvest_core::normalize::NormalizeError::DuplicateYear { year: 2020 },
     );
     assert_eq!(provider_failure_notice(&normalize), MSG_NORMALIZE_FAILED);
+    // G1 H (#237): the split history's failure is named as such, whatever its cause — the plan
+    // (403) and the usage limit (429) keep their own split wording, never the fundamentals' notice.
+    let splits = |cause: ProviderError| {
+        p(ProviderError::SplitHistory {
+            cause: Box::new(cause),
+        })
+    };
+    assert_eq!(
+        splits(ProviderError::Forbidden {
+            detail: "plan".into()
+        }),
+        MSG_SPLITS_FORBIDDEN
+    );
+    assert_eq!(
+        splits(ProviderError::Quota {
+            retry_after_secs: None
+        }),
+        MSG_SPLITS_QUOTA
+    );
+    for other in [
+        ProviderError::Parse {
+            detail: "error object".into(),
+        },
+        ProviderError::Network {
+            detail: "reset".into(),
+        },
+        ProviderError::TickerNotFound {
+            ticker: "NVDA.US".into(),
+        },
+    ] {
+        assert_eq!(splits(other), MSG_SPLITS_UNAVAILABLE);
+    }
+}
+
+/// G1 H review: the key test's verdict is about the KEY. A failure of EODHD's `/splits` (reached
+/// only after the key served `/fundamentals` and `/eod`) is classified on its root cause — the
+/// #42 verdicts hold through the wrap; a plan without `/splits` or an unreadable body reads « valid
+/// key, split history inaccessible », never the fetch's split notice. The direct causes keep their
+/// verdicts, and an unclassified failure keeps the named MSG_PROVIDER_FAILED form.
+#[test]
+fn key_test_status_is_a_key_verdict_even_through_a_split_history_failure() {
+    use steadyinvest_ingestion::{IngestionError, ProviderError};
+    let status = |e: ProviderError| key_test_status(&Err(IngestionError::Provider(e)));
+    let splits = |cause: ProviderError| ProviderError::SplitHistory {
+        cause: Box::new(cause),
+    };
+    assert_eq!(key_test_status(&Ok(())), MSG_KEY_OK);
+    assert_eq!(
+        status(splits(ProviderError::Quota {
+            retry_after_secs: Some(5)
+        })),
+        MSG_KEY_OK_QUOTA
+    );
+    assert_eq!(
+        status(splits(ProviderError::Network {
+            detail: "reset".into()
+        })),
+        MSG_KEY_TEST_INCONCLUSIVE
+    );
+    assert_eq!(
+        status(splits(ProviderError::InvalidOrAbsentKey)),
+        MSG_KEY_INVALID
+    );
+    for other in [
+        ProviderError::Forbidden {
+            detail: "plan".into(),
+        },
+        ProviderError::Parse {
+            detail: "error object".into(),
+        },
+    ] {
+        assert_eq!(status(splits(other)), MSG_KEY_OK_NO_SPLITS);
+    }
+    // The direct (non-split) causes keep their #42 / 3.2 verdicts.
+    assert_eq!(status(ProviderError::InvalidOrAbsentKey), MSG_KEY_INVALID);
+    assert_eq!(
+        status(ProviderError::Forbidden {
+            detail: "plan".into()
+        }),
+        MSG_KEY_FORBIDDEN
+    );
+    assert_eq!(
+        status(ProviderError::Quota {
+            retry_after_secs: None
+        }),
+        MSG_KEY_OK_QUOTA
+    );
+    assert_eq!(
+        status(ProviderError::Network {
+            detail: "dns".into()
+        }),
+        MSG_KEY_TEST_INCONCLUSIVE
+    );
+    let parse = status(ProviderError::Parse {
+        detail: "shape".into(),
+    });
+    assert!(
+        parse.starts_with(&MSG_PROVIDER_FAILED.replace("{cause}", "")),
+        "{parse}"
+    );
 }
 
 #[test]
@@ -2319,33 +2677,242 @@ fn apply_holding_price_sets_current_price_only_and_moves_the_zone() {
 #[test]
 fn a_linked_holding_requires_a_study_and_takes_its_currency() {
     let dir = TempDir::new().unwrap();
-    let mut state = undo_state(&dir, 0x218, "2026-09-23T10:00:00Z");
-    // No study → refused with the named cause; nothing written.
+    let mut state = watch_state(&dir, 0x218);
+    // The chosen study is gone and no study of its pair remains → named as deleted.
     assert_eq!(
-        state.add_holding_linked("NVDA.US", "10", "200", ""),
-        Err(MSG_HOLDING_NO_STUDY.to_string())
+        state.add_holding_for_study(Uuid::from_u128(0xDEAD), ("NVDA.US", "USD"), "10", "200", ""),
+        Err(MSG_HOLDING_STUDY_DELETED.to_string())
     );
     assert!(state.list_holdings().is_empty());
-    // A USD study → the position is USD whatever the reference currency, hence linked.
-    state.create_study("NVDA.US", "USD").unwrap();
+    // A USD study → the position is USD whatever the reference currency, hence linked; the
+    // ticker is stored uppercased, as the choice's label shows it.
+    let nvda = state.create_study("nvda.us", "USD").unwrap();
     state
-        .add_holding_linked("nvda.us", "10", "200", "")
+        .add_holding_for_study(nvda, ("NVDA.US", "USD"), "10", "200", "")
         .unwrap();
     let holdings = state.list_holdings();
     assert_eq!(holdings.len(), 1);
+    assert_eq!(holdings[0].security_ticker, "NVDA.US");
     assert_eq!(holdings[0].currency.as_deref(), Some("USD"));
-    // An edit re-resolves the currency from the (possibly new) ticker's study.
-    let id = holdings[0].id;
+    // Read-only: refused before any lookup.
+    state.read_only = true;
     assert_eq!(
-        state.update_holding_linked(id, "ROG.SW", "10", "200", ""),
-        Err(MSG_HOLDING_NO_STUDY.to_string()),
-        "a ticker without a study is refused on edit too"
+        state.add_holding_for_study(nvda, ("NVDA.US", "USD"), "1", "1", ""),
+        Err(MSG_READ_ONLY_WRITE.to_string())
     );
-    state.create_study("ROG.SW", "CHF").unwrap();
+}
+
+#[test]
+fn a_deleted_chosen_study_falls_back_to_the_newest_study_of_its_pair() {
+    // G1 E review: the chosen id was deleted before « Enregistrer », but another study of the
+    // same (ticker, currency) remains → the position is added against it, never refused with
+    // « aucune étude pour ce symbole ».
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x2D7);
+    let keep = state.create_study("NVDA.US", "USD").unwrap();
+    let chosen = state.create_study("NVDA.US", "USD").unwrap();
+    state.create_study("NVDA.US", "CHF").unwrap();
+    state.delete_study(chosen).unwrap();
     state
-        .update_holding_linked(id, "ROG.SW", "10", "200", "")
+        .add_holding_for_study(chosen, ("NVDA.US", "USD"), "3", "100", "")
+        .unwrap();
+    assert_eq!(state.list_holdings()[0].currency.as_deref(), Some("USD"));
+    // The pair has no study left → named as deleted (a CHF study of the ticker does not count).
+    state.delete_study(keep).unwrap();
+    assert_eq!(
+        state.add_holding_for_study(keep, ("NVDA.US", "USD"), "3", "100", ""),
+        Err(MSG_HOLDING_STUDY_DELETED.to_string())
+    );
+}
+
+#[test]
+fn study_choices_are_one_per_ticker_and_currency_and_carry_the_newest_id() {
+    // G1 review, decision 3: several studies per ticker (#81) no longer collapse to « the latest
+    // study » — each (ticker, currency) pair is its own choice, flagged ambiguous so its label
+    // names the currency; a same-pair duplicate keeps the NEWEST study's id.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x2D3);
+    assert!(state.try_study_choices().unwrap().is_empty());
+    let _old_usd = state.create_study("NVDA.US", "USD").unwrap();
+    let chf = state.create_study("nvda.us", "chf").unwrap();
+    let new_usd = state.create_study("NVDA.US", "USD").unwrap();
+    let nesn = state.create_study("NESN.SW", "CHF").unwrap();
+    let choices = state.try_study_choices().unwrap();
+    let keys: Vec<(&str, &str, bool)> = choices
+        .iter()
+        .map(|c| (c.ticker.as_str(), c.currency.as_str(), c.ambiguous))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            ("NESN.SW", "CHF", false),
+            ("NVDA.US", "CHF", true),
+            ("NVDA.US", "USD", true),
+        ]
+    );
+    assert_eq!(choices[0].id, nesn);
+    assert_eq!(choices[1].id, chf);
+    assert_eq!(choices[2].id, new_usd, "the newest study of the pair");
+    // The CHF choice is addable although a newer USD study of the same ticker exists.
+    state
+        .add_holding_for_study(chf, ("NVDA.US", "CHF"), "5", "100", "")
         .unwrap();
     assert_eq!(state.list_holdings()[0].currency.as_deref(), Some("CHF"));
+}
+
+#[test]
+fn editing_a_holding_never_changes_its_currency() {
+    // G1 review, decision 4: same ticker → always editable (sector, amounts), with or without a
+    // study; a new ticker needs a study in the holding's OWN currency, else a named refusal.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x2D4);
+    // A legacy CHF position without any study: still editable (sector + amounts).
+    state
+        .add_holding("NVDA.US", "10", "100", "CHF", "")
+        .unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .update_holding_keeping_currency(id, "NVDA.US", "12", "100", "Technology", "CHF")
+        .unwrap();
+    let h = state.list_holdings()[0].clone();
+    assert_eq!(
+        (
+            h.quantity.as_str(),
+            h.sector.as_deref(),
+            h.currency.as_deref()
+        ),
+        ("12", Some("Technology"), Some("CHF"))
+    );
+    // A USD study of that ticker does not re-denominate a same-ticker edit.
+    state.create_study("NVDA.US", "USD").unwrap();
+    state
+        .update_holding_keeping_currency(id, "nvda.us", "12", "100", "Tech", "CHF")
+        .unwrap();
+    assert_eq!(state.list_holdings()[0].currency.as_deref(), Some("CHF"));
+    // A new ticker whose only study is in USD → the named refusal; nothing written.
+    state.create_study("AAPL.US", "USD").unwrap();
+    assert_eq!(
+        state.update_holding_keeping_currency(id, "AAPL.US", "12", "100", "", "CHF"),
+        Err(holding_study_other_currency_message(
+            "AAPL.US", "USD", "CHF"
+        ))
+    );
+    // A new ticker without any study → the no-study refusal.
+    assert_eq!(
+        state.update_holding_keeping_currency(id, "ROG.SW", "12", "100", "", "CHF"),
+        Err(MSG_HOLDING_NO_STUDY.to_string())
+    );
+    assert_eq!(state.list_holdings()[0].security_ticker, "nvda.us");
+    // A new ticker WITH a study in CHF → applied, still CHF.
+    state.create_study("ROG.SW", "CHF").unwrap();
+    state
+        .update_holding_keeping_currency(id, "ROG.SW", "12", "100", "", "CHF")
+        .unwrap();
+    let h = state.list_holdings()[0].clone();
+    assert_eq!(
+        (h.security_ticker.as_str(), h.currency.as_deref()),
+        ("ROG.SW", Some("CHF"))
+    );
+    // A ledger-backed holding: a sector-only edit applies (the currency is no longer forced).
+    state
+        .record_buy_for(id, "2026-07-01", "3", "110", "0", "", "CHF")
+        .unwrap();
+    let h = state.list_holdings()[0].clone();
+    state
+        .update_holding_keeping_currency(
+            id,
+            "ROG.SW",
+            &h.quantity,
+            &h.purchase_price,
+            "Pharma",
+            "CHF",
+        )
+        .expect("a sector-only edit on a ledger-backed row applies");
+    assert_eq!(state.list_holdings()[0].sector.as_deref(), Some("Pharma"));
+    // An unknown id is named.
+    assert_eq!(
+        state.update_holding_keeping_currency(Uuid::from_u128(1), "X", "1", "1", "", "CHF"),
+        Err(MSG_HOLDING_NOT_FOUND.to_string())
+    );
+}
+
+#[test]
+fn editing_a_legacy_null_currency_holding_keeps_it_null_and_links_by_ticker() {
+    // G1 E review: « Modifier » never freezes a pre-6.2 NULL currency to the reference; such a
+    // row follows the register's own link rule (#81: no currency → ticker-only match).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x2D6);
+    state
+        .add_holding("NVDA.US", "10", "100", "CHF", "")
+        .unwrap();
+    let id = state.list_holdings()[0].id;
+    // Make it a legacy row (stored currency NULL), as a pre-6.2 journal holds it.
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .update_holding_with_currency(id, "NVDA.US", "10", "100", None, None)
+        .unwrap();
+    assert_eq!(state.list_holdings()[0].currency, None);
+    state.create_study("NVDA.US", "USD").unwrap();
+    assert!(
+        state
+            .try_matched_study_in_currency("NVDA.US", None)
+            .unwrap()
+            .is_some(),
+        "linked (ticker-only) before the edit"
+    );
+    // A sector-only edit keeps NULL — and so keeps its link.
+    state
+        .update_holding_keeping_currency(id, "NVDA.US", "10", "100", "Tech", "CHF")
+        .unwrap();
+    let h = state.list_holdings()[0].clone();
+    assert_eq!(
+        (h.currency.as_deref(), h.sector.as_deref()),
+        (None, Some("Tech"))
+    );
+    // A new ticker without any study → refused; with a study in ANY currency → applied, NULL kept.
+    assert_eq!(
+        state.update_holding_keeping_currency(id, "ROG.SW", "10", "100", "", "CHF"),
+        Err(MSG_HOLDING_NO_STUDY.to_string())
+    );
+    state.create_study("AAPL.US", "USD").unwrap();
+    state
+        .update_holding_keeping_currency(id, "AAPL.US", "10", "100", "", "CHF")
+        .unwrap();
+    let h = state.list_holdings()[0].clone();
+    assert_eq!(
+        (h.security_ticker.as_str(), h.currency.as_deref()),
+        ("AAPL.US", None)
+    );
+}
+
+#[test]
+fn deleting_a_portfolio_with_positions_is_refused_before_the_confirm_with_its_count() {
+    // G1 review (spec §5.1): the guard is a refusal that names the count — checked BEFORE the
+    // confirm is raised; an empty non-last portfolio passes the guard.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x2D5);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "200", "CHF", "").unwrap();
+    let default_id = state.active_portfolio().unwrap().id;
+    assert_eq!(
+        state.portfolio_delete_guard(default_id),
+        Err(portfolio_has_holdings_message(2))
+    );
+    assert!(portfolio_has_holdings_message(2).contains(" 2 "));
+    let bank2 = state.add_portfolio("PostFinance").unwrap();
+    assert_eq!(state.portfolio_delete_guard(bank2), Ok(()));
+    assert_eq!(
+        state.portfolio_delete_guard(Uuid::from_u128(0xFEED)),
+        Err(MSG_PORTFOLIO_NOT_FOUND.to_string())
+    );
+    state.delete_portfolio(bank2).unwrap();
+    state.read_only = true;
+    assert_eq!(
+        state.portfolio_delete_guard(default_id),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
 }
 
 // ── Story 7.2 — the portfolio health review (composed read) ──
@@ -2386,14 +2953,20 @@ fn portfolio_review_composes_positions_studies_and_counts() {
         _ => unreachable!(),
     };
     assert_eq!(linked.verdict, "withheld");
-    assert_eq!(linked.last_saved, review.today, "created today");
+    assert_eq!(
+        linked.last_saved.as_deref(),
+        Some(review.today.as_str()),
+        "created today"
+    );
     assert!(
         !linked.due_for_review,
         "created today is not older than the cadence"
     );
     assert_eq!(review.counts.withheld, 1);
     assert_eq!(review.due.len(), 1);
-    assert_eq!(review.due[0].reason, "withheld");
+    // Every reason: an empty study is « en attente » AND of reduced confidence (the first
+    // reason used to hide the second).
+    assert_eq!(review.due[0].reasons, vec!["withheld", "low_confidence"]);
     // The other-currency cause: a USD study for ROG does not link a CHF position, but is named.
     state.create_study("ROG", "USD").unwrap();
     let review = state
@@ -2412,6 +2985,469 @@ fn portfolio_review_composes_positions_studies_and_counts() {
     );
 }
 
+/// A journal state at a caller-chosen clock with a SEQUENTIAL id source (the review tests reopen
+/// the same file a year later — the 12-month path).
+fn review_state_at(dir: &TempDir, seed: u128, ts: &str) -> JournalState {
+    let path = dir.path().join("journal.db");
+    if !path.exists() {
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xC0FFEE),
+                &Timestamp("2024-01-01T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+    }
+    let clock: Box<dyn Clock> = Box::new(FixedClock(Timestamp(ts.to_string())));
+    let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
+    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    state
+}
+
+fn review_of(state: &JournalState) -> PortfolioReviewFacts {
+    state
+        .portfolio_review(
+            "CHF",
+            Decimal::from(1_000_000_000),
+            Decimal::from(10_000_000_000u64),
+        )
+        .expect("a readable dossier reviews")
+}
+
+#[test]
+fn portfolio_review_lists_a_study_older_than_twelve_months_with_every_reason() {
+    let dir = TempDir::new().unwrap();
+    {
+        let mut then = review_state_at(&dir, 0x7200, "2025-01-10T09:00:00Z");
+        then.create_study("NESN", "CHF").unwrap();
+        then.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    }
+    // Reopened a year and a half later: the last effective save (the creation — no FR51
+    // snapshot yet) is older than the cadence.
+    let now = review_state_at(&dir, 0x7300, "2026-06-27T15:00:00Z");
+    let review = review_of(&now);
+    let ReviewStudy::Linked(f) = &review.positions[0].study else {
+        panic!("the CHF study links the CHF position");
+    };
+    assert_eq!(f.last_saved.as_deref(), Some("2025-01-10"));
+    assert!(f.due_for_review);
+    assert_eq!(review.due.len(), 1);
+    // Every reason, not only the first: older than 12 months AND « en attente » AND of reduced
+    // confidence (an empty study).
+    assert_eq!(
+        review.due[0].reasons,
+        vec!["age", "withheld", "low_confidence"]
+    );
+    assert_eq!(review.due[0].last_saved.as_deref(), Some("2025-01-10"));
+    // A study created yesterday is not listed for its age.
+    let dir2 = TempDir::new().unwrap();
+    {
+        let mut then = review_state_at(&dir2, 0x7200, "2026-06-26T09:00:00Z");
+        then.create_study("NESN", "CHF").unwrap();
+        then.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    }
+    let review = review_of(&review_state_at(&dir2, 0x7300, "2026-06-27T15:00:00Z"));
+    assert_eq!(
+        review.due[0].reasons,
+        vec!["withheld", "low_confidence"],
+        "saved yesterday: no age reason"
+    );
+}
+
+#[test]
+fn portfolio_review_names_a_missing_pair_on_the_figures_it_blocks() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7400);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("AAPL", "5", "200", "USD", "").unwrap();
+    let review = review_of(&state);
+    let aapl = review
+        .positions
+        .iter()
+        .find(|p| p.ticker == "AAPL")
+        .unwrap();
+    assert_eq!(aapl.invested, None, "absent, never a partial figure");
+    assert_eq!(aapl.missing_pairs, vec!["USD → CHF".to_string()]);
+    let nesn = review
+        .positions
+        .iter()
+        .find(|p| p.ticker == "NESN")
+        .unwrap();
+    assert_eq!(nesn.invested, Some(Decimal::from(1000)), "the others stay");
+    assert_eq!(
+        nesn.share_pct, None,
+        "a share against an absent total is absent"
+    );
+    assert!(review.consolidation.global.is_none());
+    assert_eq!(
+        review.consolidation.missing_pairs,
+        vec!["USD → CHF".to_string()]
+    );
+    assert_eq!(
+        review.diversification.missing_pairs,
+        vec!["USD → CHF".to_string()]
+    );
+}
+
+#[test]
+fn portfolio_review_aggregates_two_banks_and_reads_every_lots_stop() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7500);
+    let study = state.create_study("NESN", "CHF").unwrap();
+    state
+        .set_judgment_field(study, "current_price", Some(und_money(70)))
+        .unwrap();
+    // Bank one: a lot WITHOUT a stop.
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    // Bank two: a lot with a 10 % stop, seeded from the present price 70 → level 63.
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "5", "80", "CHF", "").unwrap();
+    let lot = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.portfolio_id == second)
+        .unwrap();
+    state
+        .set_holding_trailing_stop(lot.id, "10", "CHF")
+        .unwrap();
+    let review = review_of(&state);
+    assert_eq!(
+        review.counts.positions, 1,
+        "one row per ticker, across banks"
+    );
+    let row = &review.positions[0];
+    assert_eq!(row.banks.len(), 2);
+    assert!(row.banks.contains(&"Swissquote".to_string()));
+    assert_eq!(row.stops.len(), 1, "only the lot that carries a stop");
+    assert_eq!(row.stops[0].level, Decimal::from(63));
+    assert_eq!(row.stops[0].bank, "Swissquote");
+    assert!(row.mixed.is_none(), "both lots link the same study");
+    assert!(!row.stop_breached, "70 is above 63");
+    // The price falls through the second bank's stop: the breach is read on THAT lot.
+    state
+        .set_judgment_field(study, "current_price", Some(und_money(60)))
+        .unwrap();
+    let review = review_of(&state);
+    assert!(review.positions[0].stop_breached);
+    assert!(review.positions[0].stops[0].breached);
+    assert_eq!(review.positions[0].trigger, "stop");
+    assert_eq!(review.counts.stop_breached, 1);
+}
+
+#[test]
+fn a_study_the_engine_cannot_compute_still_reads_the_stop_counts_and_is_due() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7600);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    state
+        .apply_provider_refresh(id, &fetched_for(&[2020, 2021, 2022, 2023, 2024]))
+        .unwrap();
+    state
+        .set_judgment_field(id, "current_price", Some(und_money(70)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let lot = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(lot, "10", "CHF").unwrap(); // level 63
+    state
+        .set_judgment_field(id, "current_price", Some(und_money(60)))
+        .unwrap();
+    // A duplicated year: the study still READS, but no longer normalizes.
+    let mut study = state.get_study(id).unwrap();
+    let dup = study.years[0].clone();
+    study.years.push(dup);
+    state.journal.as_mut().unwrap().put_study(&study).unwrap();
+    assert!(engine::build_snapshot(&state.get_study(id).unwrap()).is_err());
+
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    let ReviewStudy::NotComputable(f) = &row.study else {
+        panic!("a normalize failure is its own state, got {:?}", row.study);
+    };
+    assert_eq!(f.current_price, Some(Decimal::from(60)));
+    assert!(
+        row.stop_breached,
+        "the register reads this breach — so does the review"
+    );
+    assert_eq!(row.trigger, "stop");
+    assert_eq!(review.counts.linked, 1, "still a study");
+    assert_eq!(review.counts.not_computable, 1);
+    assert_eq!(review.due.len(), 1);
+    assert_eq!(review.due[0].reasons, vec!["not_computable"]);
+}
+
+#[test]
+fn lots_in_two_currencies_read_each_stop_against_their_own_study() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7700);
+    let chf = state.create_study("NESN", "CHF").unwrap();
+    let usd = state.create_study("NESN", "USD").unwrap();
+    state
+        .set_judgment_field(chf, "current_price", Some(und_money(70)))
+        .unwrap();
+    state
+        .set_judgment_field(usd, "current_price", Some(und_money(100)))
+        .unwrap();
+    // Each lot's stop is set in its own bank (the active portfolio's register): CHF 63, USD 90.
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let lot = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(lot, "10", "CHF").unwrap();
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "1", "90", "USD", "").unwrap();
+    let lot = state.list_holdings()[0].id;
+    state.set_holding_trailing_stop(lot, "10", "CHF").unwrap();
+    state
+        .set_judgment_field(chf, "current_price", Some(und_money(60)))
+        .unwrap();
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    // Stated: the lots do not share one study.
+    let mixed = row.mixed.as_ref().expect("two studies");
+    assert_eq!(mixed.currencies.len(), 2);
+    assert!(mixed.currencies.contains(&"CHF".to_string()));
+    assert!(mixed.currencies.contains(&"USD".to_string()));
+    let by = |c: &str| {
+        row.stops
+            .iter()
+            .find(|s| s.currency.as_deref() == Some(c))
+            .unwrap()
+    };
+    assert_eq!(by("CHF").level, Decimal::from(63));
+    assert!(by("CHF").breached, "60 CHF reached the CHF stop");
+    assert_eq!(by("USD").level, Decimal::from(90));
+    assert!(!by("USD").breached, "the USD lot reads the USD study's 100");
+    assert!(row.stop_breached);
+}
+
+#[test]
+fn a_legacy_lot_links_by_the_reference_currency_never_ticker_only() {
+    // D5 + G1 P review H1: two studies — USD the NEWEST, CHF older. A legacy (NULL-currency) lot
+    // is presumed in the reference currency (CHF): it links the CHF study, exactly as a declared
+    // CHF lot of the same ticker in another bank does — never the newest study of any currency.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7800);
+    let chf = state.create_study("NESN", "CHF").unwrap();
+    state
+        .set_judgment_field(chf, "current_price", Some(und_money(150)))
+        .unwrap();
+    let usd = state.create_study("NESN", "USD").unwrap(); // the newest
+    state
+        .set_judgment_field(usd, "current_price", Some(und_money(10)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let legacy = state.list_holdings()[0].id;
+    make_legacy(&mut state, legacy);
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "5", "100", "CHF", "").unwrap();
+    let declared = state.list_holdings()[0].id;
+
+    // The review's link — THE resolution the register shares.
+    let legacy_link = state.lot_link("NESN", None, "CHF", None);
+    let declared_link = state.lot_link("NESN", Some("CHF"), "CHF", None);
+    assert_eq!(
+        legacy_link.identity,
+        Some(chf),
+        "never the newest USD study"
+    );
+    assert_eq!(declared_link.identity, Some(chf));
+    assert!(super::review::mixed_links(&[&legacy_link, &declared_link], 0).is_none());
+
+    // Seed: from the CHF study's 150 (20 % → 120), nothing to state.
+    state.set_active_portfolio(state.list_portfolios()[0].id);
+    assert_eq!(
+        state.set_holding_trailing_stop(legacy, "20", "CHF"),
+        Ok(None)
+    );
+    let level = |state: &JournalState, id: Uuid| {
+        state
+            .journal
+            .as_ref()
+            .unwrap()
+            .list_all_holdings()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.id == id)
+            .unwrap()
+            .trailing_stop_level
+    };
+    assert_eq!(level(&state, legacy).as_deref(), Some("120"));
+    // Ratchet: only by the lot's own link — the USD study's 500 moves nothing…
+    state
+        .ratchet_trailing_stops_for_study(usd, Decimal::from(500), "CHF")
+        .unwrap();
+    assert_eq!(level(&state, legacy).as_deref(), Some("120"));
+    // …the CHF study's 200 does (20 % → 160).
+    state
+        .ratchet_trailing_stops_for_study(chf, Decimal::from(200), "CHF")
+        .unwrap();
+    assert_eq!(level(&state, legacy).as_deref(), Some("160"));
+    let _ = declared;
+
+    // The review compares the legacy lot's stop with the CHF price (150 < 160: breached).
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    assert_eq!(row.stops.len(), 1);
+    assert_eq!(row.stops[0].uncompared, None);
+    assert!(row.stops[0].breached, "150 CHF is below the 160 CHF stop");
+
+    // The trigger sale is priced at the CHF study's 150, never the USD 10.
+    assert_eq!(
+        state.sell_holding(legacy, "", "", "CHF"),
+        Ok(MSG_HOLDING_SOLD)
+    );
+    let sale = state
+        .holding_ledger(legacy)
+        .into_iter()
+        .find(|t| t.kind.as_deref() == Some("sell"))
+        .unwrap();
+    assert_eq!(sale.unit_price, "150");
+}
+
+#[test]
+fn a_reference_change_names_the_legacy_lots_whose_stop_it_does_not_convert() {
+    // G1 P review (M3, the lead's conservative decision): the lots named; nothing converted.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7802);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "200", "CHF", "").unwrap();
+    let nesn = state.list_holdings()[0].id;
+    let rog = state.list_holdings()[1].id;
+    make_legacy(&mut state, nesn);
+    make_legacy(&mut state, rog);
+    state.set_holding_trailing_stop(nesn, "20", "CHF").unwrap();
+    // ROG is legacy but carries no stop: not named.
+    assert_eq!(
+        state.legacy_tickers_with_stop(),
+        Ok(vec!["NESN".to_string()])
+    );
+    let message = legacy_stops_reference_changed_message(&["NESN".to_string()], "CHF");
+    assert!(message.contains("(NESN)") && message.contains("fixé en CHF"));
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "never converted"
+    );
+}
+
+#[test]
+fn a_legacy_lot_with_only_another_currency_study_links_none_and_says_so() {
+    // D5 + G1 P review H1/H2/L-c: the only study is in USD — the legacy lot (presumed CHF) links
+    // NONE (no USD price on its row, never labelled CHF), its stop is not compared (the USD
+    // study named), its seed comes from the cost basis — stated — and the trigger sale refuses.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7801);
+    let usd = state.create_study("NESN", "USD").unwrap();
+    state
+        .set_judgment_field(usd, "current_price", Some(und_money(200)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    make_legacy(&mut state, id);
+    assert_eq!(
+        state
+            .try_lot_study("NESN", None, "CHF")
+            .map(|s| s.map(|s| s.id)),
+        Ok(None)
+    );
+    assert_eq!(
+        state.other_currency_hint("NESN", None).as_deref(),
+        Some("USD")
+    );
+    assert_eq!(
+        state.set_holding_trailing_stop(id, "20", "CHF"),
+        Ok(Some(MSG_STOP_SEEDED_FROM_COST)),
+        "the cost-basis seed is stated"
+    );
+    let review = review_of(&state);
+    let stop = &review.positions[0].stops[0];
+    assert!(!stop.breached);
+    assert_eq!(
+        stop.uncompared,
+        Some(super::review::StopUncompared::NoCurrency {
+            study_currency: "USD".to_string()
+        })
+    );
+    assert_eq!(
+        state.sell_holding(id, "", "", "CHF"),
+        Err(sell_study_other_currency_message("USD", "CHF"))
+    );
+}
+
+#[test]
+fn a_rows_study_is_the_newest_linked_one_and_every_lots_study_is_due() {
+    // G1 final review: the CHF lot comes first, but the row shows the NEWEST linked study (the
+    // USD one) — by identity, never by lot position; the due list reads both studies.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x7900);
+    let chf = state.create_study("NESN", "CHF").unwrap();
+    let usd = state.create_study("NESN", "USD").unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let second = state.add_portfolio("Swissquote").unwrap();
+    state.set_active_portfolio(second);
+    state.add_holding("NESN", "1", "90", "USD", "").unwrap();
+    let review = review_of(&state);
+    let row = &review.positions[0];
+    let ReviewStudy::Linked(f) = &row.study else {
+        panic!("a linked study, got {:?}", row.study);
+    };
+    assert_eq!(f.study_id, usd, "the newest study, not the first lot's");
+    assert_eq!(f.currency, "USD", "the price's unit is the study's");
+    assert_eq!(
+        row.currency, "USD",
+        "the row states the shown study's currency"
+    );
+    // Both empty studies are « en attente » — both are listed, each named by its currency.
+    let due: Vec<(&str, Uuid)> = review
+        .due
+        .iter()
+        .map(|d| (d.ticker.as_str(), d.study_id))
+        .collect();
+    assert_eq!(due, vec![("NESN (USD)", usd), ("NESN (CHF)", chf)]);
+    assert_eq!(review.counts.due, 2);
+    assert_eq!(review.counts.linked, 1, "one position with a study");
+}
+
+#[test]
+fn three_lots_chf_usd_chf_show_the_most_recently_created_study_not_the_largest_id() {
+    // G3 review: studies created on DIFFERENT days, the newer one carrying the SMALLER id — the
+    // row follows creation recency (the listing order), never the id, never the lot order.
+    let dir = TempDir::new().unwrap();
+    let chf = {
+        let mut then = review_state_at(&dir, 0x7B00, "2026-01-10T09:00:00Z");
+        then.create_study("NESN", "CHF").unwrap()
+    };
+    let mut now = review_state_at(&dir, 0x7A00, "2026-06-10T09:00:00Z");
+    let usd = now.create_study("NESN", "USD").unwrap();
+    assert!(usd < chf, "the newer study has the smaller id");
+    now.set_judgment_field(chf, "current_price", Some(und_money(70)))
+        .unwrap();
+    now.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let second = now.add_portfolio("Swissquote").unwrap();
+    now.set_active_portfolio(second);
+    now.add_holding("NESN", "1", "90", "USD", "").unwrap();
+    let third = now.add_portfolio("PostFinance").unwrap();
+    now.set_active_portfolio(third);
+    now.add_holding("NESN", "2", "80", "CHF", "").unwrap();
+    let review = review_of(&now);
+    assert_eq!(review.positions.len(), 1, "three lots, one row");
+    let row = &review.positions[0];
+    let ReviewStudy::Linked(f) = &row.study else {
+        panic!("a linked study, got {:?}", row.study);
+    };
+    assert_eq!(f.study_id, usd, "the most recently created study");
+    let mixed = row.mixed.as_ref().expect("two studies");
+    assert_eq!(
+        mixed.currencies,
+        vec!["CHF", "USD"],
+        "each study once, lot order"
+    );
+    assert!(!mixed.no_study && !mixed.unreadable);
+    assert_eq!(row.banks.len(), 3);
+}
+
 // ── Story 4.5 — trailing stop per holding (validate, seed, ratchet) ──
 
 #[test]
@@ -2424,7 +3460,7 @@ fn set_holding_trailing_stop_validates_seeds_from_purchase_price_and_clears() {
     // Out-of-range / non-numeric pct → refused, nothing written.
     for bad in ["0", "100", "150", "-5", "abc", "1.2.3"] {
         assert_eq!(
-            state.set_holding_trailing_stop(id, bad),
+            state.set_holding_trailing_stop(id, bad, "CHF"),
             Err(MSG_HOLDING_INVALID_STOP.to_string()),
             "pct {bad:?} is refused"
         );
@@ -2432,7 +3468,7 @@ fn set_holding_trailing_stop_validates_seeds_from_purchase_price_and_clears() {
     assert!(state.list_holdings()[0].trailing_stop_pct.is_none());
 
     // No linked study → the level seeds from the purchase price 100: 100 × (1 − 0.15) = 85.
-    state.set_holding_trailing_stop(id, "15").unwrap();
+    state.set_holding_trailing_stop(id, "15", "CHF").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert_eq!(h.trailing_stop_pct.as_deref(), Some("15"));
     assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
@@ -2440,13 +3476,13 @@ fn set_holding_trailing_stop_validates_seeds_from_purchase_price_and_clears() {
     // Review fix: an EXPLICIT re-set seeds FRESH (the user's pct wins) — a looser 50% LOWERS the
     // level to 100 × (1 − 0.50) = 50, even though 50 < the prior 85 (ratchet-up-only governs only
     // the automatic refresh path, not an explicit re-parametrisation).
-    state.set_holding_trailing_stop(id, "50").unwrap();
+    state.set_holding_trailing_stop(id, "50", "CHF").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert_eq!(h.trailing_stop_pct.as_deref(), Some("50"));
     assert_eq!(h.trailing_stop_level.as_deref(), Some("50"));
 
     // An empty pct clears the stop (both fields → None).
-    state.set_holding_trailing_stop(id, "").unwrap();
+    state.set_holding_trailing_stop(id, "", "CHF").unwrap();
     let h = state.list_holdings().into_iter().next().unwrap();
     assert!(h.trailing_stop_pct.is_none() && h.trailing_stop_level.is_none());
 }
@@ -2460,7 +3496,7 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
     // Seed a 20% stop → level 80 (from purchase 100, no current_price yet).
-    state.set_holding_trailing_stop(id, "20").unwrap();
+    state.set_holding_trailing_stop(id, "20", "CHF").unwrap();
     assert_eq!(
         state.list_holdings()[0].trailing_stop_level.as_deref(),
         Some("80")
@@ -2468,7 +3504,7 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
 
     // A refresh to 150 ratchets the level up: 150 × 0.80 = 120.
     state
-        .ratchet_trailing_stops_for_study(study, Decimal::from(150))
+        .ratchet_trailing_stops_for_study(study, Decimal::from(150), "CHF")
         .unwrap();
     assert_eq!(
         state.list_holdings()[0].trailing_stop_level.as_deref(),
@@ -2477,13 +3513,99 @@ fn ratchet_trailing_stops_moves_up_only_on_a_price_refresh() {
 
     // A refresh to a LOWER 90 leaves the level at 120 (ratchet-up only).
     state
-        .ratchet_trailing_stops_for_study(study, Decimal::from(90))
+        .ratchet_trailing_stops_for_study(study, Decimal::from(90), "CHF")
         .unwrap();
     assert_eq!(
         state.list_holdings()[0].trailing_stop_level.as_deref(),
         Some("120"),
         "a falling price never lowers the stop"
     );
+}
+
+/// A holding made pre-6.2 legacy: its declared currency cleared (NULL).
+fn make_legacy(state: &mut JournalState, id: Uuid) {
+    let h = state
+        .list_holdings()
+        .into_iter()
+        .find(|h| h.id == id)
+        .unwrap();
+    state
+        .journal
+        .as_mut()
+        .unwrap()
+        .update_holding_with_currency(
+            id,
+            &h.security_ticker,
+            &h.quantity,
+            &h.purchase_price,
+            None,
+            None,
+        )
+        .unwrap();
+}
+
+#[test]
+fn d5_a_legacy_lot_is_compared_and_ratcheted_against_a_reference_currency_study() {
+    // D5 (Guy, 2026-09-25): a lot without a declared currency is PRESUMED in the reference
+    // currency — a CHF study's price (reference CHF) seeds, ratchets and prices its trigger sale.
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x58, "2026-06-28T10:00:00Z");
+    let study = state.create_study("NESN", "CHF").unwrap();
+    state
+        .set_judgment_field(study, "current_price", Some(und_money(150)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    make_legacy(&mut state, id);
+    state.set_holding_trailing_stop(id, "20", "CHF").unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("120"),
+        "seeded from the CHF study's 150"
+    );
+    state
+        .ratchet_trailing_stops_for_study(study, Decimal::from(200), "CHF")
+        .unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("160"),
+        "ratcheted by the reference-currency study"
+    );
+}
+
+#[test]
+fn d5_a_legacy_lot_is_never_compared_against_a_study_in_another_currency() {
+    // D5: the same lot linked (ticker-only) to a USD study — no seed, no ratchet, no trigger
+    // sale at the USD price: the cost basis seeds, and the sale is refused naming both facts.
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x57, "2026-06-28T10:00:00Z");
+    let study = state.create_study("NESN", "USD").unwrap();
+    state
+        .set_judgment_field(study, "current_price", Some(und_money(200)))
+        .unwrap();
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    make_legacy(&mut state, id);
+    assert!(state.list_holdings()[0].currency.is_none());
+    state.set_holding_trailing_stop(id, "20", "CHF").unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "seeded from the cost basis, never the USD 200"
+    );
+    state
+        .ratchet_trailing_stops_for_study(study, Decimal::from(500), "CHF")
+        .unwrap();
+    assert_eq!(
+        state.list_holdings()[0].trailing_stop_level.as_deref(),
+        Some("80"),
+        "a USD study's price never ratchets a lot presumed in CHF"
+    );
+    assert_eq!(
+        state.sell_holding(id, "", "", "CHF"),
+        Err(sell_study_other_currency_message("USD", "CHF"))
+    );
+    assert!(state.holding_ledger(id).is_empty(), "nothing sold");
 }
 
 // ── Story 4.6 — simple capital-at-risk (the portfolio downside figure) ──
@@ -2498,7 +3620,9 @@ fn portfolio_capital_at_risk_sums_below_cost_stops_and_invested() {
     state.add_holding("ROG", "20", "50", "CHF", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // NESN: a 15% stop with no study → level 85 (below cost 100) → (100−85)×10 = 150.
-    state.set_holding_trailing_stop(ids[0], "15").unwrap();
+    state
+        .set_holding_trailing_stop(ids[0], "15", "CHF")
+        .unwrap();
     // ROG: no stop → contributes 0 to capital-at-risk (but to invested).
 
     // Both holdings are CHF → a single bucket; the figures match the pre-6.2 single sum.
@@ -2528,8 +3652,12 @@ fn capital_at_risk_groups_by_currency_without_a_cross_currency_total() {
     state.add_holding("AAPL", "20", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // A 15% stop on each → EUR level 85 (CaR (100−85)×10 = 150); USD level 42.5 (CaR (50−42.5)×20 = 150).
-    state.set_holding_trailing_stop(ids[0], "15").unwrap();
-    state.set_holding_trailing_stop(ids[1], "15").unwrap();
+    state
+        .set_holding_trailing_stop(ids[0], "15", "CHF")
+        .unwrap();
+    state
+        .set_holding_trailing_stop(ids[1], "15", "CHF")
+        .unwrap();
 
     let buckets = state.portfolio_capital_at_risk_by_currency("CHF");
     assert_eq!(
@@ -2617,7 +3745,7 @@ fn deleting_a_portfolio_is_guarded_and_reselects() {
     // The default has a holding → deleting it is refused (FK never orphaned).
     assert_eq!(
         state.delete_portfolio(default_id),
-        Err(MSG_PORTFOLIO_HAS_HOLDINGS.to_string())
+        Err(portfolio_has_holdings_message(1))
     );
     // The empty active portfolio deletes; the active selection falls back to the first.
     state.delete_portfolio(bank2).unwrap();
@@ -2630,7 +3758,7 @@ fn deleting_a_portfolio_is_guarded_and_reselects() {
     // Now only the holding-bearing default remains → it can't be deleted either.
     assert_eq!(
         state.delete_portfolio(default_id),
-        Err(MSG_PORTFOLIO_HAS_HOLDINGS.to_string())
+        Err(portfolio_has_holdings_message(1))
     );
 }
 
@@ -2644,7 +3772,9 @@ fn sell_holding_records_the_sell_and_drops_it_from_the_register() {
     state.add_holding("ROG", "20", "50", "CHF", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
     // NESN gets a 15% stop (no study) → level 85, below cost 100 → CaR 150 before the sell.
-    state.set_holding_trailing_stop(ids[0], "15").unwrap();
+    state
+        .set_holding_trailing_stop(ids[0], "15", "CHF")
+        .unwrap();
     assert_eq!(
         state.portfolio_capital_at_risk_by_currency("CHF")[0].1,
         Decimal::from(150)
@@ -2922,15 +4052,70 @@ fn a_bad_date_or_amount_on_a_buy_is_refused_neutrally() {
         state.record_buy_for(id, "02/07/2026", "1", "1", "", "", "CHF"),
         Err(MSG_LEDGER_INVALID_DATE.to_string())
     );
+    // G1 final review (M4): each refusal names ITS field — never the register's « quantité et
+    // prix d'achat… aucune position ».
     assert_eq!(
         state.record_buy_for(id, "", "0", "1", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string())
     );
     assert_eq!(
         state.record_buy_for(id, "", "1", "-1", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string())
+        Err(MSG_LEDGER_INVALID_PRICE.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "1", "1", "-2", "", "CHF"),
+        Err(MSG_LEDGER_INVALID_FEES.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "1", "1", "frais", "", "CHF"),
+        Err(MSG_LEDGER_INVALID_FEES.to_string())
+    );
+    // G1 final review (M2, Guy's decision): the ledger sale's quantity is REQUIRED — an empty one
+    // names itself, never sells the whole position.
+    assert_eq!(
+        state.record_sell_for(id, "", "  ", "100", "", "", "CHF"),
+        Err(MSG_LEDGER_QUANTITY_EMPTY.to_string())
+    );
+    assert_eq!(
+        state.record_buy_for(id, "", "", "1", "", "", "CHF"),
+        Err(MSG_LEDGER_QUANTITY_EMPTY.to_string())
     );
     assert!(state.holding_ledger(id).is_empty(), "nothing materialized");
+    assert_eq!(state.list_holdings()[0].quantity, "10", "nothing was sold");
+}
+
+#[test]
+fn a_dividends_refusals_name_the_dividend_field_at_fault() {
+    // G1 final review (M4): gross, withholding and shares are named as such — on the record rail
+    // AND on the ledger's edit of a dividend row.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x637);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    assert_eq!(
+        state.record_dividend_for(id, "", "10", "-3", "", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_GROSS.to_string())
+    );
+    assert_eq!(
+        state.record_dividend_for(id, "", "10", "3", "-1", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_WITHHOLDING.to_string())
+    );
+    assert_eq!(
+        state.record_dividend_for(id, "", "0", "3", "", "", "CHF", "35"),
+        Err(MSG_DIVIDEND_INVALID_QUANTITY.to_string())
+    );
+    state
+        .record_dividend_for(id, "2026-07-01", "10", "3", "1", "", "CHF", "35")
+        .unwrap();
+    let row = state.holding_ledger(id)[0].id;
+    assert_eq!(
+        state.update_transaction_for(id, row, "2026-07-01", "10", "3", "-1", "", "CHF"),
+        Err(MSG_DIVIDEND_INVALID_WITHHOLDING.to_string())
+    );
+    assert_eq!(
+        state.update_transaction_for(id, row, "2026-07-01", "10", "x", "1", "", "CHF"),
+        Err(MSG_DIVIDEND_INVALID_GROSS.to_string())
+    );
 }
 
 // ── Story 6.4 — dividends: gross study, net reinvestable (FR41) ──
@@ -3039,7 +4224,9 @@ fn reinvestable_cash_groups_per_currency_and_counts_sold_holdings() {
         "the USD holding is retired"
     );
 
-    let cash = state.portfolio_reinvestable_cash_by_currency("CHF");
+    let cash = state
+        .portfolio_reinvestable_cash_by_currency("CHF")
+        .unwrap();
     assert_eq!(
         cash,
         vec![
@@ -3196,7 +4383,9 @@ fn one_invalid_dividend_row_does_not_erase_its_currency_bucket() {
         )
         .unwrap();
 
-    let cash = state.portfolio_reinvestable_cash_by_currency("CHF");
+    let cash = state
+        .portfolio_reinvestable_cash_by_currency("CHF")
+        .unwrap();
     assert_eq!(
         cash,
         vec![("CHF".to_string(), Decimal::from_str_exact("19.5").unwrap())],
@@ -3274,6 +4463,37 @@ fn a_ledger_backed_holding_refuses_direct_quantity_price_currency_edits() {
         )
         .expect("a ticker-only edit is fine");
     assert_eq!(state.list_holdings()[0].security_ticker, "NESN.SW");
+}
+
+#[test]
+fn a_ledger_backed_guard_compares_numbers_not_spellings() {
+    // G1 final review (L10): « 20,0 » typed over the stored « 20 » is the SAME quantity — the
+    // sector edit applies, and the ledger's own spelling of the aggregate stays stored.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x63D);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Comma);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "2026-07-01", "10", "110", "0", "", "CHF")
+        .expect("the buy records");
+    let stored = state.list_holdings()[0].clone();
+    assert_eq!(stored.quantity, "20");
+    state
+        .update_holding_keeping_currency(id, "NESN", "20,0", "105,00", "Santé", "CHF")
+        .expect("same numbers, another spelling: not a ledger change");
+    let after = state.list_holdings()[0].clone();
+    assert_eq!(after.sector.as_deref(), Some("Santé"));
+    assert_eq!(
+        after.quantity, stored.quantity,
+        "the ledger's spelling stays"
+    );
+    assert_eq!(after.purchase_price, stored.purchase_price);
+    assert_eq!(
+        state.update_holding_keeping_currency(id, "NESN", "20,5", "105", "", "CHF"),
+        Err(MSG_LEDGER_BACKED.to_string()),
+        "a different number is still refused"
+    );
 }
 
 #[test]
@@ -3484,6 +4704,35 @@ fn edit_and_delete_holding_round_trip_and_survive_reopen() {
     assert_eq!(rows[0].security_ticker, "NESN.SW");
     assert_eq!(rows[0].quantity, "12");
     assert_eq!(rows[0].purchase_price, "96.00");
+}
+
+#[test]
+fn retirer_refuses_up_front_a_position_with_transactions_naming_the_cause() {
+    // G1 final review (Guy's decision): « Retirer » never confirms a removal the write refuses —
+    // a position with ledger transactions is refused BEFORE the confirm, in French, by cause; the
+    // write path's own refusal is the same French sentence (typed, never the English error text).
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x433);
+    state.add_holding("NESN", "10", "95.40", "CHF", "").unwrap();
+    state.add_holding("ROG", "5", "248.10", "CHF", "").unwrap();
+    let nesn = state.list_holdings()[0].id;
+    let rog = state.list_holdings()[1].id;
+    state
+        .record_buy_for(nesn, "2026-07-01", "3", "100", "0", "", "CHF")
+        .unwrap();
+    assert_eq!(
+        state.holding_remove_guard(nesn),
+        Err(MSG_HOLDING_HAS_TRANSACTIONS.to_string())
+    );
+    assert_eq!(
+        state.delete_holding(nesn),
+        Err(MSG_HOLDING_HAS_TRANSACTIONS.to_string()),
+        "the write's second guard names the same cause"
+    );
+    // A position without transactions reaches the confirm, and is removed.
+    assert_eq!(state.holding_remove_guard(rog), Ok(()));
+    state.delete_holding(rog).unwrap();
+    assert_eq!(state.list_holdings().len(), 1);
 }
 
 #[test]
@@ -4837,13 +6086,19 @@ fn the_consolidation_converts_per_bank_and_globally_with_exact_rates() {
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
-    state.set_holding_trailing_stop(ids[0], "15").unwrap();
-    state.set_holding_trailing_stop(ids[1], "20").unwrap();
+    state
+        .set_holding_trailing_stop(ids[0], "15", "CHF")
+        .unwrap();
+    state
+        .set_holding_trailing_stop(ids[1], "20", "CHF")
+        .unwrap();
     // Bank 2: EUR 10@20 stop 15 → CaR 50.
     let bank2 = state.add_portfolio("PostFinance").unwrap();
     state.add_holding("ASML", "10", "20", "EUR", "").unwrap();
     let eur_id = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(eur_id, "25").unwrap();
+    state
+        .set_holding_trailing_stop(eur_id, "25", "CHF")
+        .unwrap();
     let _ = bank2;
     // Rates: USD→CHF 0.5 (CaR 40 → 20), EUR→CHF 2 (CaR 50 → 100).
     state
@@ -4887,7 +6142,9 @@ fn a_missing_pair_absents_the_bank_and_the_global_by_name() {
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
     let ids: Vec<_> = state.list_holdings().iter().map(|h| h.id).collect();
-    state.set_holding_trailing_stop(ids[1], "20").unwrap();
+    state
+        .set_holding_trailing_stop(ids[1], "20", "CHF")
+        .unwrap();
     // NO USD→CHF rate stored.
     let view = state.journal_capital_at_risk_consolidation("CHF");
     assert!(
@@ -4916,7 +6173,7 @@ fn reference_buckets_convert_at_identity_and_sold_holdings_stay_excluded() {
     let mut state = watch_state(&dir, 0x662);
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(id, "15").unwrap();
+    state.set_holding_trailing_stop(id, "15", "CHF").unwrap();
     // A sold USD holding: no rate stored for USD, but a sold position carries no risk — it must
     // neither require the pair nor block the global.
     state.add_holding("AAPL", "4", "50", "USD", "").unwrap();
@@ -4990,7 +6247,7 @@ fn a_checked_overflow_absents_the_bank_plainly_never_a_wrong_figure() {
         "USD",
     );
     let id = state.list_holdings()[0].id;
-    state.set_holding_trailing_stop(id, "15").unwrap();
+    state.set_holding_trailing_stop(id, "15", "CHF").unwrap();
     state
         .upsert_manual_fx_rate("USD", "2", "2026-06-27", "CHF")
         .unwrap();
@@ -5021,7 +6278,7 @@ fn unstopped_exposure_counts_holdings_without_a_stop_per_currency() {
         .find(|h| h.security_ticker == "ABBN")
         .unwrap()
         .id;
-    state.set_holding_trailing_stop(abbn, "15").unwrap();
+    state.set_holding_trailing_stop(abbn, "15", "CHF").unwrap();
     // CHF: only NESN is un-stopped now (ABBN protected) → 1 position, 1000; USD: AAPL → 1, 300.
     assert_eq!(
         state.portfolio_unstopped_exposure_by_currency("CHF"),
@@ -5047,7 +6304,7 @@ fn unstopped_exposure_counts_holdings_without_a_stop_per_currency() {
             .find(|h| h.security_ticker == t)
             .unwrap()
             .id;
-        state.set_holding_trailing_stop(id, "10").unwrap();
+        state.set_holding_trailing_stop(id, "10", "CHF").unwrap();
     }
     assert!(
         state
@@ -5579,6 +6836,140 @@ fn try_get_study_distinguishes_a_read_failure_from_a_true_absence() {
     );
 }
 
+/// Make every row of `table` unreadable behind the journal's back (G1 final review, M5): an id
+/// that is no UUID fails the typed read — the vehicle of a real IO/corruption failure.
+fn make_table_unreadable(dir: &TempDir, table: &str) {
+    let conn = rusqlite::Connection::open(dir.path().join("journal.db")).unwrap();
+    // The referencing rows keep their old ids — the point is an unreadable table, not a
+    // consistent one.
+    conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+    conn.execute(
+        &format!("UPDATE {table} SET id = 'not-a-uuid-' || rowid"),
+        [],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_write_rails_failed_read_is_named_as_a_read_never_as_a_save_or_an_absence() {
+    // G1 P (G3 L3/L4, item 4): a missing position is « introuvable »; a failed READ before a
+    // write is « n'a pas pu être lu » — never « L'enregistrement a échoué », never an empty list
+    // that creates a second default portfolio or lets a duplicate through; the reinvestable-cash
+    // read says it failed.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x95A);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    state.add_watch_item("ROG", None).unwrap();
+    assert_eq!(
+        state.sell_holding(Uuid::from_u128(0xDEAD), "", "", "CHF"),
+        Err(MSG_HOLDING_NOT_FOUND.to_string())
+    );
+    assert_eq!(
+        state.record_sell_for(Uuid::from_u128(0xDEAD), "", "1", "1", "", "", "CHF"),
+        Err(MSG_HOLDING_NOT_FOUND.to_string())
+    );
+    make_table_unreadable(&dir, "watchlist_items");
+    assert_eq!(
+        state.add_watch_item("ROG", None),
+        Err(MSG_READ_FAILED.to_string()),
+        "the duplicate check sees the failed read"
+    );
+    let nesn = state.list_holdings()[0].id;
+    make_table_unreadable(&dir, "holdings");
+    assert_eq!(
+        state.update_holding_keeping_currency(nesn, "NESN", "10", "100", "x", "CHF"),
+        Err(MSG_READ_FAILED.to_string()),
+        "a failed read is no save failure"
+    );
+    make_table_unreadable(&dir, "portfolios");
+    assert_eq!(
+        state.add_holding("ROG", "1", "1", "CHF", ""),
+        Err(MSG_READ_FAILED.to_string()),
+        "never a second default portfolio on a failed read"
+    );
+    let portfolios: i64 = rusqlite::Connection::open(dir.path().join("journal.db"))
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM portfolios", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(portfolios, 1, "no default portfolio was created");
+    assert!(
+        state
+            .portfolio_reinvestable_cash_by_currency("CHF")
+            .is_err()
+    );
+}
+
+#[test]
+fn a_failed_register_read_is_an_error_never_an_empty_register() {
+    // G1 final review (M5): each surface's read tells a FAILURE from a true absence, so the
+    // screen can say « indisponible » instead of « aucune position / aucun taux / … ».
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x959);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "2026-07-01", "1", "100", "0", "", "CHF")
+        .unwrap();
+    state.add_watch_item("ROG", None).unwrap();
+    state
+        .upsert_manual_fx_rate("EUR", "0,95", "", "CHF")
+        .unwrap();
+    // A true state first: everything reads.
+    assert_eq!(state.try_list_holdings().map(|h| h.len()), Ok(1));
+    assert_eq!(state.try_sold_holdings().map(|h| h.len()), Ok(0));
+    assert_eq!(state.try_holding_ledger(id).map(|t| t.len()), Ok(2));
+    assert_eq!(state.try_list_watch_items().map(|w| w.len()), Ok(1));
+    assert_eq!(state.try_list_fx_rates().map(|r| r.len()), Ok(1));
+
+    make_table_unreadable(&dir, "transactions");
+    assert!(
+        state.try_holding_ledger(id).is_err(),
+        "never « aucune transaction »"
+    );
+    make_table_unreadable(&dir, "watchlist_items");
+    assert!(
+        state.try_list_watch_items().is_err(),
+        "never « aucune valeur suivie »"
+    );
+    make_table_unreadable(&dir, "fx_rates");
+    assert!(state.try_list_fx_rates().is_err(), "never « aucun taux »");
+    make_table_unreadable(&dir, "holdings");
+    assert!(
+        state.try_list_holdings().is_err(),
+        "never « aucune position »"
+    );
+    assert!(state.try_sold_holdings().is_err());
+    make_table_unreadable(&dir, "portfolios");
+    assert!(state.try_list_portfolios().is_err());
+    assert!(
+        state.try_list_holdings().is_err(),
+        "an unreadable portfolio list is no « no portfolio yet »"
+    );
+}
+
+#[test]
+fn an_unreadable_study_refuses_the_trigger_sale_and_the_stop_never_the_cost_basis() {
+    // G1 final review (L7): the cost basis stands in only for a TRUE absence — a linked study
+    // that cannot be read refuses the trigger sale and the stop by name; nothing is written.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x958);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let holding = state.list_holdings()[0].id;
+    let study = state.create_study("NESN", "CHF").unwrap();
+    make_study_unreadable(&mut state, study);
+    assert_eq!(
+        state.sell_holding(holding, "", "", "CHF"),
+        Err(MSG_SELL_STUDY_UNAVAILABLE.to_string())
+    );
+    assert_eq!(
+        state.set_holding_trailing_stop(holding, "10", "CHF"),
+        Err(MSG_STOP_STUDY_UNAVAILABLE.to_string())
+    );
+    let h = &state.list_holdings()[0];
+    assert!(state.holding_ledger(holding).is_empty(), "no sale recorded");
+    assert!(h.trailing_stop_pct.is_none(), "no stop seeded");
+}
+
 #[test]
 fn an_unreadable_study_is_unclassified_as_unavailable_never_no_study() {
     let dir = TempDir::new().unwrap();
@@ -5734,7 +7125,7 @@ fn a_rebuy_is_still_guarded_read_only_and_validated() {
     state.read_only = false;
     assert_eq!(
         state.record_buy_for(id, "", "0", "120", "", "", "CHF"),
-        Err(MSG_HOLDING_INVALID_NUMBER.to_string()),
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string()),
         "the ledger validations apply to a re-buy unchanged"
     );
     assert!(
@@ -6191,6 +7582,34 @@ fn a_missing_rate_absents_the_sector_shares_and_names_the_pair() {
 }
 
 #[test]
+fn a_sector_held_in_two_unconvertible_currencies_names_both_pairs() {
+    // G1 review: the sector row kept only its first missing pair.
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x986);
+    state
+        .add_holding("SAP", "1", "100", "EUR", "Technology")
+        .unwrap();
+    state
+        .add_holding("AAPL", "1", "100", "USD", "Technology")
+        .unwrap();
+    state
+        .add_holding("MSFT", "1", "100", "USD", "Technology")
+        .unwrap();
+    let exposure = state.journal_sector_exposure("CHF").unwrap();
+    let row = exposure
+        .rows
+        .iter()
+        .find(|r| r.sector.as_deref() == Some("Technology"))
+        .unwrap();
+    let mut pairs = row.missing_pairs.clone();
+    pairs.sort();
+    assert_eq!(pairs, vec!["EUR → CHF", "USD → CHF"], "each pair once");
+    let (_, joined) = exposure.share_for("Technology");
+    let joined = joined.unwrap();
+    assert!(joined.contains("EUR → CHF") && joined.contains("USD → CHF"));
+}
+
+#[test]
 fn a_candidates_sector_facts_ride_the_same_ticker_holding_label() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x986);
@@ -6221,4 +7640,271 @@ fn a_candidates_sector_facts_ride_the_same_ticker_holding_label() {
         "no labeled holding → an honest None (« secteur : non renseigné » in the UI)"
     );
     assert_eq!(unlabeled.sector_share_pct, None);
+}
+
+// ── G1 review of 7.1 (#237) — one unreadable study never hides the comparison's picker ──
+
+#[test]
+fn an_unreadable_study_stays_pickable_and_compares_as_unavailable() {
+    use crate::wiring::comparison::{Pick, comparison_columns};
+    use crate::wiring::studies::study_choices;
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x71C);
+    let chf = state.create_study("NESN.SW", "CHF").unwrap();
+    let usd = state.create_study("NESN.SW", "USD").unwrap();
+    make_study_unreadable(&mut state, usd);
+
+    let choices = study_choices(&state).expect("the LISTING read — one bad row is not a failure");
+    assert_eq!(
+        choices.len(),
+        2,
+        "the unreadable study EXISTS: it stays listed"
+    );
+    let label = |id: Uuid| choices.iter().find(|c| c.id == id).unwrap().label.clone();
+    assert_eq!(label(chf), "NESN.SW · CHF");
+    assert_eq!(
+        label(usd),
+        "NESN.SW · 2026-06-27",
+        "currency-less: the date tells it apart"
+    );
+
+    let pick = |id: Uuid, label: String| Pick {
+        id: id.to_string(),
+        label,
+        ordinal: None,
+    };
+    let cols = comparison_columns(
+        &state,
+        &[
+            pick(chf, label(chf)),
+            pick(usd, label(usd)),
+            pick(Uuid::from_u128(0xDEAD), "ROG.SW (introuvable)".into()),
+        ],
+        crate::viewmodel::format::NumberFormat::Comma,
+    );
+    assert_eq!(cols[0].0, Some(chf));
+    assert!(!cols[0].1.unavailable);
+    assert_eq!(cols[1].0, None, "nothing to open");
+    assert!(
+        cols[1].1.unavailable && !cols[1].1.missing,
+        "« indisponible »"
+    );
+    assert_eq!(cols[1].1.ticker, "NESN.SW · 2026-06-27");
+    assert!(
+        cols[2].1.missing,
+        "a gone study is « introuvable », not a read failure"
+    );
+    assert_eq!(
+        cols[2].1.ticker, "ROG.SW",
+        "the header states the absence itself"
+    );
+}
+
+// ── G1 I (#237) — every typed amount reads under the user's number format ──
+
+#[test]
+fn the_rails_read_typed_amounts_under_the_comma_format() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x1901);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Comma);
+    // The on-screen finding: « 10,5 » as a purchase price was refused as not a number.
+    state
+        .add_holding("NESN", "1\u{202F}000", "10,5", "CHF", "")
+        .expect("« 10,5 » reads as 10.5 under the comma format");
+    let h = state.list_holdings().into_iter().next().unwrap();
+    assert_eq!(h.quantity, "1000");
+    assert_eq!(h.purchase_price, "10.5");
+    let id = h.id;
+    // The other mark, where it cannot be a thousands point, is read too.
+    state.set_holding_trailing_stop(id, "12.5", "CHF").unwrap();
+    let h = state.list_holdings().into_iter().next().unwrap();
+    assert_eq!(h.trailing_stop_pct.as_deref(), Some("12.5"));
+    // A possible thousands point is ambiguous: refused BY NAME, never read as 1.234 nor 1234.
+    assert_eq!(
+        state.record_buy_for(id, "2026-07-01", "1.234", "10", "", "", "CHF"),
+        Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+    );
+    // A text that is no number keeps the rail's own refusal.
+    assert_eq!(
+        state.record_buy_for(id, "2026-07-01", "deux", "10", "", "", "CHF"),
+        Err(MSG_LEDGER_INVALID_QUANTITY.to_string())
+    );
+    assert_eq!(
+        state.set_holding_trailing_stop(id, "12.500", "CHF"),
+        Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+    );
+    state
+        .record_buy_for(id, "2026-07-01", "2", "11,25", "1,5", "", "CHF")
+        .expect("the buy records");
+    state
+        .record_dividend_for(id, "2026-07-02", "10", "3", "10,5", "", "CHF", "35")
+        .expect("the withholding « 10,5 » records");
+    let rows = state.holding_ledger(id);
+    let buy = rows.iter().find(|r| r.unit_price == "11.25").unwrap();
+    assert_eq!(buy.fees, "1.5");
+    let dividend = rows
+        .iter()
+        .find(|r| r.kind.as_deref() == Some("dividend"))
+        .unwrap();
+    assert_eq!(dividend.fees, "10.5");
+    // The whole-position default of the dividend is the STORED quantity (canonical), whatever
+    // the format — a stored 1002 is never re-read as a typed text.
+    state
+        .record_dividend_for(id, "2026-07-03", "", "1", "0", "", "CHF", "35")
+        .unwrap();
+    assert!(
+        state
+            .holding_ledger(id)
+            .iter()
+            .any(|r| r.kind.as_deref() == Some("dividend") && r.quantity == "1002")
+    );
+    // A manual FX rate in the user's spelling.
+    state
+        .upsert_manual_fx_rate("EUR", "0,9345", "2026-06-26", "CHF")
+        .unwrap();
+    assert_eq!(state.list_fx_rates()[0].rate, "0.9345");
+}
+
+#[test]
+fn the_rails_read_typed_amounts_under_the_point_format() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x1902);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Point);
+    // Under the point format the comma groups: « 1,234 » is 1234, never 1.234.
+    state
+        .add_holding("NESN", "1,234", "10.5", "CHF", "")
+        .unwrap();
+    let h = state.list_holdings().into_iter().next().unwrap();
+    assert_eq!(h.quantity, "1234");
+    assert_eq!(h.purchase_price, "10.5");
+    // A comma is never a decimal mark under the point format: « 0,5 » is ambiguous, refused by
+    // name, nothing sold; « 0.5 » sells.
+    assert_eq!(
+        state.sell_holding(h.id, "0,5", "", "CHF"),
+        Err(MSG_NUMBER_AMBIGUOUS_POINT.to_string())
+    );
+    assert_eq!(
+        state.add_holding("NOVN", "10", "0,925", "CHF", ""),
+        Err(MSG_NUMBER_AMBIGUOUS_POINT.to_string()),
+        "« 0,925 » is never read 925"
+    );
+    state.sell_holding(h.id, "0.5", "", "CHF").unwrap();
+    let h = state.list_holdings().into_iter().next().unwrap();
+    assert_eq!(h.quantity, "1233.5");
+}
+
+#[test]
+fn a_provider_fx_rate_is_never_read_as_typed_text() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x1903);
+    state.set_number_format(crate::viewmodel::format::NumberFormat::Comma);
+    // 1.085 typed under the comma format is ambiguous; FETCHED, it is a Decimal and records.
+    assert_eq!(
+        state.upsert_manual_fx_rate("USD", "1.085", "2026-06-26", "CHF"),
+        Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+    );
+    assert_eq!(
+        state.upsert_manual_fx_rate("USD", "un", "2026-06-26", "CHF"),
+        Err(MSG_FX_INVALID_RATE.to_string())
+    );
+    state
+        .apply_fx_fetch(
+            "USD",
+            "CHF",
+            Decimal::new(1085, 3),
+            Some("2026-06-26"),
+            "eodhd",
+        )
+        .unwrap();
+    assert_eq!(state.list_fx_rates()[0].rate, "1.085");
+}
+
+#[test]
+fn a_refused_pasted_line_keeps_its_cell_and_names_its_year() {
+    // G1 I review: a non-number or an ambiguous line is never turned into an empty hole.
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x1904, "2026-06-27T10:00:00Z");
+    let id = state.create_study("NESN", "CHF").unwrap();
+    state
+        .edit_cell(id, 0, entry::FIELD_HIGH, Some(und_money(100)))
+        .unwrap();
+    state
+        .edit_cell(id, 1, entry::FIELD_HIGH, Some(und_money(110)))
+        .unwrap();
+    let years: Vec<i32> = state
+        .get_study(id)
+        .unwrap()
+        .years
+        .iter()
+        .map(|y| y.year)
+        .collect();
+    let outcome = state
+        .paste_column(
+            id,
+            0,
+            entry::FIELD_HIGH,
+            &[PastedLine::Keep, PastedLine::Set(Some(und_money(120)))],
+        )
+        .unwrap();
+    assert_eq!(
+        outcome,
+        PasteOutcome {
+            filled: 2,
+            kept_years: vec![years[0]],
+        }
+    );
+    let study = state.get_study(id).unwrap();
+    let high = |i: usize| {
+        entry::get_cell(&study.years[i], entry::FIELD_HIGH)
+            .and_then(|c| c.value)
+            .map(|m| m.as_decimal())
+    };
+    assert_eq!(
+        high(0),
+        Some(Decimal::new(100, 0)),
+        "the kept cell is unchanged"
+    );
+    assert_eq!(high(1), Some(Decimal::new(120, 0)));
+    assert_eq!(
+        paste_lines_kept_message(&[2019, 2021]),
+        "Lignes non collées, nombre ambigu ou illisible : 2019, 2021 ; ces cellules sont inchangées."
+    );
+}
+
+#[test]
+fn a_paste_names_every_kind_of_unwritten_line_together() {
+    // G1 I re-review: refused lines AND surplus lines are both named — one never hides the other.
+    let kept = paste_lines_kept_message(&[2019]);
+    assert_eq!(paste_outcome_message(&[], 3, 3), None);
+    assert_eq!(paste_outcome_message(&[2019], 3, 3), Some(kept.clone()));
+    assert_eq!(
+        paste_outcome_message(&[], 2, 3),
+        Some(MSG_PASTE_CLIPPED.to_string())
+    );
+    assert_eq!(
+        paste_outcome_message(&[2019], 2, 3),
+        Some(format!("{kept} {MSG_PASTE_CLIPPED}"))
+    );
+}
+
+#[test]
+fn a_typed_study_entry_is_blank_a_value_or_a_named_refusal() {
+    use crate::viewmodel::format::NumberFormat;
+    assert_eq!(typed_entry("  ", NumberFormat::Comma), Ok(None));
+    assert_eq!(
+        typed_entry("12,5", NumberFormat::Comma),
+        Ok(Some(Money::from(Decimal::new(125, 1))))
+    );
+    assert_eq!(
+        typed_entry("abc", NumberFormat::Comma),
+        Err(MSG_VALUE_NOT_A_NUMBER.to_string())
+    );
+    assert_eq!(
+        typed_entry("12,5", NumberFormat::Point),
+        Err(MSG_NUMBER_AMBIGUOUS_POINT.to_string())
+    );
+    assert_eq!(
+        typed_entry("1.085", NumberFormat::Comma),
+        Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+    );
 }

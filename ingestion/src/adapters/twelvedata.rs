@@ -20,6 +20,7 @@ use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear};
 use crate::adapters::common::{self, build_client, cap_detail, dec, reduce_high_low};
 use crate::error::ProviderError;
 use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
+use crate::ticker::venue_mic;
 
 const DEFAULT_BASE_URL: &str = "https://api.twelvedata.com";
 
@@ -205,38 +206,6 @@ pub fn fx_pair_symbol(base: &str, quote: &str) -> String {
     format!("{base}/{quote}")
 }
 
-/// PURE: the pinned EODHD-venue-suffix → ISO 10383 **MIC** table (issue #70). Only venues whose
-/// EODHD code and MIC are both unambiguous are listed — a MIC strictly filters the listing venue on
-/// Twelve Data, so a correct entry can never fetch another exchange's price, and an *absent* entry
-/// falls back to the verbatim-symbol rail (neutral no-data notice, never a venue guess). Extending
-/// the table is a one-line, test-pinned change.
-fn venue_mic(suffix: &str) -> Option<&'static str> {
-    // EODHD `TICKER.<code>` → operating MIC (ISO 10383).
-    Some(match suffix.to_ascii_uppercase().as_str() {
-        "SW" => "XSWX",    // SIX Swiss Exchange
-        "PA" => "XPAR",    // Euronext Paris
-        "L" => "XLON",     // London Stock Exchange
-        "XETRA" => "XETR", // Deutsche Börse Xetra
-        "F" => "XFRA",     // Börse Frankfurt (floor)
-        "AS" => "XAMS",    // Euronext Amsterdam
-        "BR" => "XBRU",    // Euronext Brussels
-        "LS" => "XLIS",    // Euronext Lisbon
-        "IR" => "XDUB",    // Euronext Dublin
-        "MC" => "XMAD",    // Bolsa de Madrid
-        "MI" => "XMIL",    // Borsa Italiana (Milan)
-        "VI" => "XWBO",    // Wiener Börse
-        "ST" => "XSTO",    // Nasdaq Stockholm
-        "OL" => "XOSL",    // Oslo Børs
-        "CO" => "XCSE",    // Nasdaq Copenhagen
-        "HE" => "XHEL",    // Nasdaq Helsinki
-        "TO" => "XTSE",    // Toronto Stock Exchange
-        "V" => "XTSX",     // TSX Venture
-        "HK" => "XHKG",    // Hong Kong Stock Exchange
-        "AU" => "XASX",    // Australian Securities Exchange
-        _ => return None,
-    })
-}
-
 /// PURE: the Twelve Data equity **query fragment** for a stored canonical ticker (issue #70). The
 /// stored ticker follows EODHD's `TICKER.EXCHANGE` convention; Twelve Data expects the bare symbol
 /// plus, for a non-US listing, an explicit venue:
@@ -406,14 +375,6 @@ mod tests {
         assert_eq!(symbol_query("AAPL"), "symbol=AAPL"); // already bare — unchanged
         assert_eq!(symbol_query(".US"), "symbol=.US"); // degenerate: no base → verbatim, never ""
         assert_eq!(symbol_query("EUR/CHF"), "symbol=EUR/CHF"); // the FX pair path is untouched
-    }
-
-    #[test]
-    fn venue_mic_table_is_case_insensitive_and_absent_for_unknown() {
-        assert_eq!(venue_mic("SW"), Some("XSWX"));
-        assert_eq!(venue_mic("sw"), Some("XSWX"));
-        assert_eq!(venue_mic("XX"), None);
-        assert_eq!(venue_mic("US"), None); // `.US` is handled upstream (bare symbol, no MIC)
     }
 
     #[test]

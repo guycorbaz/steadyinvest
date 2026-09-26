@@ -12,15 +12,45 @@ pub struct ComparisonColumn {
     pub ticker: String,
     pub name: String,
     pub currency: String,
+    /// The decision date (the study's creation), `YYYY-MM-DD`.
     pub date: String,
     /// The study could not be read — every row reads « indisponible ».
     pub unavailable: bool,
+    /// The picked study no longer exists — every row reads « introuvable » (an absence, not a
+    /// read failure: misattribution is a lie). Comes with `unavailable` (no figures either).
+    pub missing: bool,
+    /// The study reads but its frame does not compute — every row reads « non calculable »; the
+    /// header keeps the study's facts. Comes with `unavailable` (no figures).
+    pub uncomputable: bool,
     pub rows: Vec<String>,
     /// `buy` | `neutral` | `sell` | `below` | `above` | `""`.
     pub zone: String,
     /// `full` | `provisional` | `withheld` | `""`.
     pub state: String,
     pub low_confidence: bool,
+    /// Rows 5 / 6: how many years this column's average actually runs over (`0` = no average
+    /// shown) — the row label says that number, never « 5 ans » over three (G1, #237).
+    pub ptp_avg_years: usize,
+    pub roe_avg_years: usize,
+}
+
+/// Rows 5 / 6 (`row` = 5 or 6): the number of years every SHOWN average of the row runs over —
+/// `Some(n)` when the columns agree (the label says « moyenne n ans »); `None` when no column
+/// shows one or they differ (the label says « moyenne » and each cell names its own years).
+pub fn average_years(columns: &[ComparisonColumn], row: usize) -> Option<usize> {
+    let mut shown = columns
+        .iter()
+        .filter(|c| !c.unavailable)
+        .map(|c| {
+            if row == 5 {
+                c.ptp_avg_years
+            } else {
+                c.roe_avg_years
+            }
+        })
+        .filter(|n| *n > 0);
+    let first = shown.next()?;
+    shown.all(|n| n == first).then_some(first)
 }
 
 /// The comparison, ready to lay out.
@@ -37,6 +67,8 @@ const TITLE: &str = "Comparaison de sociétés";
 const DATE: &str = "Date";
 const CURRENCY_MIX: &str = "Les études comparées ne sont pas toutes dans la même monnaie : les cours restent dans la monnaie de chaque étude, sans conversion.";
 const UNAVAILABLE: &str = "indisponible";
+const MISSING: &str = "introuvable";
+const UNCOMPUTABLE: &str = "non calculable";
 const G_GROWTH: &str = "Croissance (section 1)";
 const G_MANAGEMENT: &str = "Gestion (section 2)";
 const G_PRICE: &str = "Cours (sections 3 à 5)";
@@ -46,8 +78,9 @@ const ROWS: [&str; 30] = [
     "Croissance estimée des ventes",
     "Croissance historique du BPA",
     "Croissance estimée du BPA",
-    "Marge avant impôt, moyenne 5 ans · tendance",
-    "Rendement des capitaux propres, moyenne 5 ans · tendance",
+    // Rows 5 / 6 are worded by `row_label` (the years actually averaged).
+    PTP_AVG,
+    ROE_AVG,
     "Part du capital détenue par la direction",
     "BPA total estimé sur 5 ans",
     "Fourchette de cours sur 5 ans",
@@ -73,17 +106,26 @@ const ROWS: [&str; 30] = [
     "Date des données",
     "Place de cotation",
 ];
-const ZONE_BUY: &str = "zone basse";
-const ZONE_NEUTRAL: &str = "zone médiane";
-const ZONE_SELL: &str = "zone haute";
-const ZONE_BELOW: &str = "sous la bande";
-const ZONE_ABOVE: &str = "au-dessus de la bande";
+// Row 20 names the band of rows 17–19 in their own words — the screen says the same (G1, #237).
+const ZONE_BUY: &str = ROWS[16];
+const ZONE_NEUTRAL: &str = ROWS[17];
+const ZONE_SELL: &str = ROWS[18];
+const ZONE_BELOW: &str = "Sous la bande";
+const ZONE_ABOVE: &str = "Au-dessus de la bande";
 const STATE_FULL: &str = "critères validés";
 const STATE_PROVISIONAL: &str = "provisoire";
 const STATE_WITHHELD: &str = "en attente";
 const LOW_CONFIDENCE: &str = "confiance réduite";
 const EMPTY: &str = "Aucune étude sélectionnée.";
 const FLAGS_TITLE: &str = "Signaux de qualité (ligne 27)";
+// Rows 5 / 6 say the years their averages run over (G1, #237): `{n}` years, one year, or — when
+// the columns differ — no number in the label (each cell names its own).
+const PTP_AVG_N: &str = "Marge avant impôt, moyenne {n} ans · tendance";
+const PTP_AVG_ONE: &str = "Marge avant impôt, moyenne 1 an · tendance";
+const PTP_AVG: &str = "Marge avant impôt, moyenne · tendance";
+const ROE_AVG_N: &str = "Rendement des capitaux propres, moyenne {n} ans · tendance";
+const ROE_AVG_ONE: &str = "Rendement des capitaux propres, moyenne 1 an · tendance";
+const ROE_AVG: &str = "Rendement des capitaux propres, moyenne · tendance";
 
 #[cfg(test)]
 const COMPARISON_USER_FACING: &[&str] = &[
@@ -91,6 +133,8 @@ const COMPARISON_USER_FACING: &[&str] = &[
     DATE,
     CURRENCY_MIX,
     UNAVAILABLE,
+    MISSING,
+    UNCOMPUTABLE,
     G_GROWTH,
     G_MANAGEMENT,
     G_PRICE,
@@ -106,7 +150,27 @@ const COMPARISON_USER_FACING: &[&str] = &[
     LOW_CONFIDENCE,
     EMPTY,
     FLAGS_TITLE,
+    PTP_AVG_N,
+    PTP_AVG_ONE,
+    PTP_AVG,
+    ROE_AVG_N,
+    ROE_AVG_ONE,
+    ROE_AVG,
 ];
+
+/// The label of row `n` (1-based): the fixed inventory, but rows 5 / 6 say the years averaged.
+fn row_label(columns: &[ComparisonColumn], n: usize) -> String {
+    let (many, one, none) = match n {
+        5 => (PTP_AVG_N, PTP_AVG_ONE, PTP_AVG),
+        6 => (ROE_AVG_N, ROE_AVG_ONE, ROE_AVG),
+        _ => return ROWS[n - 1].to_string(),
+    };
+    match average_years(columns, n) {
+        Some(1) => one.to_string(),
+        Some(years) => many.replace("{n}", &years.to_string()),
+        None => none.to_string(),
+    }
+}
 
 fn zone_label(key: &str) -> &str {
     match key {
@@ -133,8 +197,9 @@ fn state_label(c: &ComparisonColumn) -> String {
     }
 }
 
-/// Row 27 arrives as « N : flag · flag » (or « 0 »): the count before the colon is the cell;
-/// the words after it are listed under the grids.
+/// Row 27 arrives as « N : flag · flag », « 0 » (every rule evaluated, none raised) or `""` (not
+/// assessable — the em-dash): the count before the colon is the cell; the words after it are
+/// listed under the grids.
 fn flag_count(row: &str) -> &str {
     row.split_once(" : ").map(|(n, _)| n).unwrap_or(row).trim()
 }
@@ -144,8 +209,35 @@ fn flag_words(c: &ComparisonColumn) -> Option<String> {
     Some(words.trim().to_string())
 }
 
+/// A column's identity as its header states it — « TICKER (CUR) · date » (the ticker carries the
+/// « · n » of two studies of one ticker, currency and day). Two columns of one ticker are two
+/// studies: the flag list names each by this, never by the bare ticker (G1, #237).
+fn column_identity(c: &ComparisonColumn) -> String {
+    let head = header_line(c);
+    if c.date.is_empty() {
+        head
+    } else {
+        format!("{head} · {}", c.date)
+    }
+}
+
+/// The flag list under the grids: one line per column with raised flags, in column order, each
+/// named by its own column's identity.
+fn flag_list(cols: &[ComparisonColumn]) -> Vec<String> {
+    cols.iter()
+        .filter(|c| !c.unavailable && !c.missing)
+        .filter_map(|c| flag_words(c).map(|w| format!("{} : {w}", column_identity(c))))
+        .collect()
+}
+
 /// The cell of row `n` (1-based) for a column: the figure, the worded key rows, or the absence.
 fn cell(c: &ComparisonColumn, n: usize) -> String {
+    if c.missing {
+        return MISSING.to_string();
+    }
+    if c.uncomputable {
+        return UNCOMPUTABLE.to_string();
+    }
     if c.unavailable {
         return UNAVAILABLE.to_string();
     }
@@ -174,6 +266,39 @@ fn strip_arrows(s: &str) -> String {
     s.replace("↑ ", "").replace("↓ ", "").replace("→ ", "")
 }
 
+/// The first header line: « TICKER (CUR) », or the bare ticker when there is no currency to name.
+fn header_line(c: &ComparisonColumn) -> String {
+    if c.currency.is_empty() {
+        c.ticker.clone()
+    } else {
+        format!("{} ({})", c.ticker, c.currency)
+    }
+}
+
+/// The second header line: « date · name », either alone when the other is absent; a column
+/// with no figures names its state (« date · non calculable » keeps the study's date).
+fn second_header_line(c: &ComparisonColumn) -> String {
+    if c.missing {
+        return MISSING.to_string();
+    }
+    if c.uncomputable {
+        return if c.date.is_empty() {
+            UNCOMPUTABLE.to_string()
+        } else {
+            format!("{} · {UNCOMPUTABLE}", c.date)
+        };
+    }
+    if c.unavailable {
+        return UNAVAILABLE.to_string();
+    }
+    match (c.date.is_empty(), c.name.is_empty()) {
+        (false, false) => format!("{} · {}", c.date, c.name),
+        (false, true) => c.date.clone(),
+        (true, false) => c.name.clone(),
+        (true, true) => String::new(),
+    }
+}
+
 /// Render the comparison (FR53): A4 landscape, deterministic, greyscale, neutral labels.
 pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     let mut doc = Doc::landscape();
@@ -196,22 +321,24 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     for i in 1..=n {
         edges.push(MARGIN + label_w + col_w * i as f32);
     }
-    // Two header rows: « TICKER (CUR) » then the company name, cut to its column at the real
+    // Two header rows: « TICKER (CUR) » then « decision date · company name » (G1 decision 9b:
+    // the date as on screen, first so an ellipsis never eats it), cut to its column at the real
     // Helvetica widths (an over-long name ends with an ellipsis, never spills into the
-    // neighbour's column; the grid wraps any other over-long cell inside its own).
+    // neighbour's column; the grid wraps any other over-long cell inside its own). A column
+    // with no study behind it names its state instead — never a dangling « () ».
     let name_w = col_w - 10.0;
     let header: Vec<String> = std::iter::once(String::new())
-        .chain(
-            cols.iter()
-                .map(|c| format!("{} ({})", c.ticker, c.currency)),
-        )
+        .chain(cols.iter().map(header_line))
         .collect();
     let header_refs: Vec<&str> = header.iter().map(String::as_str).collect();
     let names: Vec<String> = std::iter::once(String::new())
-        .chain(cols.iter().map(|c| fit(&c.name, name_w, SMALL)))
+        .chain(
+            cols.iter()
+                .map(|c| fit(&second_header_line(c), name_w, SMALL)),
+        )
         .collect();
     let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    let any_name = cols.iter().any(|c| !c.name.is_empty());
+    let any_name = names.iter().any(|n| !n.is_empty());
     let groups: [(&str, std::ops::RangeInclusive<usize>); 4] = [
         (G_GROWTH, 1..=4),
         (G_MANAGEMENT, 5..=7),
@@ -226,7 +353,7 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
             doc.grid_row_small(&name_refs, &edges, true, 1);
         }
         for row in range {
-            let mut cells = vec![format!("({row}) {}", ROWS[row - 1])];
+            let mut cells = vec![format!("({row}) {}", row_label(cols, row))];
             cells.extend(cols.iter().map(|c| cell(c, row)));
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
             doc.grid_row_small(&refs, &edges, false, 1);
@@ -236,16 +363,12 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     }
     // Row 27 in the grid carries the count only; the flags themselves are listed here, one
     // paragraph per study, wrapped to the page (a flag's words never spill past the margin).
-    let listed: Vec<(&str, String)> = cols
-        .iter()
-        .filter(|c| !c.unavailable)
-        .filter_map(|c| flag_words(c).map(|w| (c.ticker.as_str(), w)))
-        .collect();
+    let listed = flag_list(cols);
     if !listed.is_empty() {
         doc.section(FLAGS_TITLE);
         let width = doc.right() - MARGIN;
-        for (ticker, words) in listed {
-            for chunk in wrap_to_width(&format!("{ticker} : {words}"), width, SMALL) {
+        for line in listed {
+            for chunk in wrap_to_width(&line, width, SMALL) {
                 doc.small_line(&chunk);
             }
         }
@@ -268,6 +391,7 @@ mod tests {
             zone: "buy".into(),
             state: "provisional".into(),
             low_confidence: true,
+            ..ComparisonColumn::default()
         }
     }
 
@@ -321,9 +445,128 @@ mod tests {
         c.rows[26] = "0".into();
         assert_eq!(cell(&c, 27), "0");
         assert_eq!(flag_words(&c), None);
+        // Not assessable: the em-dash, never « 0 ».
+        c.rows[26] = String::new();
+        assert_eq!(cell(&c, 27), EM_DASH);
         let mut t = column("T", false);
         t.rows[4] = "47,6 % · ↑ hausse".into();
         assert_eq!(cell(&t, 5), "47,6 % · hausse");
+    }
+
+    #[test]
+    fn row_20_uses_the_band_rows_own_nouns() {
+        // The screen words row 20 with the same nouns (comparison.slint `zone-words`).
+        let mut c = column("X", false);
+        for (key, row) in [("buy", 17), ("neutral", 18), ("sell", 19)] {
+            c.zone = key.into();
+            assert_eq!(cell(&c, 20), ROWS[row - 1]);
+        }
+        c.zone = String::new();
+        assert_eq!(cell(&c, 20), EM_DASH);
+    }
+
+    #[test]
+    fn a_missing_study_is_not_worded_as_a_read_failure() {
+        let mut m = column("NESN.SW", false);
+        m.missing = true;
+        assert_eq!(cell(&m, 1), MISSING);
+        assert_eq!(cell(&m, 28), MISSING);
+        assert_ne!(MISSING, UNAVAILABLE);
+    }
+
+    #[test]
+    fn the_headers_carry_the_decision_date_and_never_dangle() {
+        let c = column("NESN.SW", false);
+        assert_eq!(header_line(&c), "NESN.SW (CHF)");
+        assert_eq!(second_header_line(&c), "2026-09-24 · Société");
+        let mut nameless = column("NESN.SW", false);
+        nameless.name = String::new();
+        assert_eq!(second_header_line(&nameless), "2026-09-24");
+        // An unavailable column carries no currency / date / name: no « () », no « · ».
+        let u = ComparisonColumn {
+            ticker: "ROG.SW".into(),
+            unavailable: true,
+            rows: vec![String::new(); 30],
+            ..ComparisonColumn::default()
+        };
+        assert_eq!(header_line(&u), "ROG.SW");
+        assert_eq!(second_header_line(&u), UNAVAILABLE);
+        let m = ComparisonColumn {
+            missing: true,
+            ..u.clone()
+        };
+        assert_eq!(second_header_line(&m), MISSING);
+        // A study that reads but does not compute keeps its facts and names its own state.
+        let mut x = column("NESN.SW", true);
+        x.uncomputable = true;
+        assert_eq!(header_line(&x), "NESN.SW (CHF)");
+        assert_eq!(second_header_line(&x), "2026-09-24 · non calculable");
+        assert_eq!(cell(&x, 1), UNCOMPUTABLE);
+        assert_ne!(UNCOMPUTABLE, UNAVAILABLE);
+    }
+
+    #[test]
+    fn two_columns_of_one_ticker_list_their_flags_apart() {
+        // Two studies of AAPL.US, in two currencies, then in one currency on two days.
+        let mut a = column("AAPL.US", false);
+        a.currency = "USD".into();
+        a.rows[26] = "1 : marge en baisse".into();
+        let mut b = column("AAPL.US", false);
+        b.rows[26] = "1 : ratio sous la cible".into();
+        let listed = flag_list(&[a.clone(), b.clone()]);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0], "AAPL.US (USD) · 2026-09-24 : marge en baisse");
+        assert_eq!(
+            listed[1],
+            "AAPL.US (CHF) · 2026-09-24 : ratio sous la cible"
+        );
+        b.currency = "USD".into();
+        b.date = "2026-09-25".into();
+        let listed = flag_list(&[a.clone(), b.clone()]);
+        assert_ne!(
+            listed[0].split(" : ").next(),
+            listed[1].split(" : ").next(),
+            "each line names its own column"
+        );
+        // Same ticker, currency and day: the header's « · n » tells them apart.
+        let (mut x, mut y) = (a.clone(), a);
+        x.ticker = "AAPL.US · 1".into();
+        y.ticker = "AAPL.US · 2".into();
+        let listed = flag_list(&[x, y]);
+        assert!(listed[0].starts_with("AAPL.US · 1 (USD)"));
+        assert!(listed[1].starts_with("AAPL.US · 2 (USD)"));
+    }
+
+    #[test]
+    fn rows_5_and_6_say_the_years_actually_averaged() {
+        let mut a = column("A", false);
+        let mut b = column("B", false);
+        (a.ptp_avg_years, a.roe_avg_years) = (5, 3);
+        (b.ptp_avg_years, b.roe_avg_years) = (5, 4);
+        let cols = [a.clone(), b.clone()];
+        assert_eq!(average_years(&cols, 5), Some(5));
+        assert_eq!(
+            row_label(&cols, 5),
+            "Marge avant impôt, moyenne 5 ans · tendance"
+        );
+        // The columns differ: no number in the label (each cell names its own years).
+        assert_eq!(average_years(&cols, 6), None);
+        assert_eq!(row_label(&cols, 6), ROE_AVG);
+        // Three years everywhere: « moyenne 3 ans », never « 5 ans ».
+        b.roe_avg_years = 3;
+        assert_eq!(
+            row_label(&[a.clone(), b.clone()], 6),
+            "Rendement des capitaux propres, moyenne 3 ans · tendance"
+        );
+        // A column with no average, or no figures, does not vote.
+        b.roe_avg_years = 0;
+        let mut u = column("U", true);
+        u.roe_avg_years = 1;
+        assert_eq!(average_years(&[a.clone(), b, u], 6), Some(3));
+        a.ptp_avg_years = 1;
+        assert_eq!(row_label(&[a], 5), PTP_AVG_ONE);
+        assert_eq!(row_label(&[], 5), PTP_AVG);
+        assert_eq!(row_label(&[], 7), ROWS[6]);
     }
 
     #[test]

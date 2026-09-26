@@ -69,6 +69,129 @@ pub(crate) fn render_journal_panel(ui: &MainWindow, state: &JournalState, config
     prefs.set_recent_journals(ModelRc::new(VecModel::from(rows)));
 }
 
+/// The session state that belongs to the OPEN dossier — what a dossier change must end (G1 G,
+/// checklist §7 « clears on journal switch »). Cloned handles out of [`Session`], plus the
+/// location status computed when the open dossier was opened (see [`status_after_refusal`]).
+#[derive(Clone)]
+pub(crate) struct DossierSession {
+    current_study: Rc<RefCell<Option<String>>>,
+    quick_screen: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
+    quick_screen_ready: Rc<crate::wiring::quick_screen::KeptSlot>,
+    quick_screen_request: Rc<std::cell::Cell<u64>>,
+    screening: Rc<RefCell<Option<crate::wiring::screening::ScreeningSession>>>,
+    /// The dossier generation (G1 final review M1) — bumped here, read by every provider job
+    /// that writes into the dossier (study fetch, holdings price refresh, FX refresh — G3 #2).
+    dossier_generation: Rc<std::cell::Cell<u64>>,
+    /// The holdings refresh batch counters and the shared worker cancel flag (G3 #2): a batch of
+    /// the previous dossier ends with it.
+    refresh_pending: Rc<RefCell<usize>>,
+    refresh_total: Rc<RefCell<usize>>,
+    fetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// `(path, status)` of the last SUCCESSFUL open/create/switch — the open dossier's own status
+    /// line, which a later refusal restores (never a string read back from the screen).
+    opened_status: Rc<RefCell<Option<(PathBuf, String)>>>,
+}
+
+impl DossierSession {
+    /// Built ONCE, in [`wire_journal`], and cloned into each rail (the `opened_status` cell is
+    /// created here and shared by those clones).
+    fn of(s: &Session) -> Self {
+        Self {
+            current_study: Rc::clone(&s.current_study),
+            quick_screen: Rc::clone(&s.quick_screen),
+            quick_screen_ready: Rc::clone(&s.quick_screen_ready),
+            quick_screen_request: Rc::clone(&s.quick_screen_request),
+            screening: Rc::clone(&s.screening),
+            dossier_generation: Rc::clone(&s.dossier_generation),
+            refresh_pending: Rc::clone(&s.refresh_pending),
+            refresh_total: Rc::clone(&s.refresh_total),
+            fetch_cancel: std::sync::Arc::clone(&s.fetch_cancel),
+            opened_status: Rc::new(RefCell::new(None)),
+        }
+    }
+}
+
+/// End the previous dossier's session — the ONE reset every dossier-changing path calls (open,
+/// create, recent, reclaim, restore, and a failed switch or restore that lost the dossier — G1
+/// final review L10 / G3 #1 / #10), so a future path cannot forget a piece. Call it BEFORE the
+/// re-render (the comparison's picker is then re-listed from the new dossier by
+/// `refresh_studies`).
+/// - the dossier generation moves on (G1 final review M1): a study fetch asked in the previous
+///   dossier and still in flight is dropped unwritten when it lands — a restore keeps the study
+///   ids, so only the generation tells the restored dossier from the one that asked; so are the
+///   holdings price refresh's and the FX refresh's results (G3 #2), whose batch ends here: its
+///   counters reset, its « refreshing » latches drop, the worker's cancel flag drains its queued
+///   jobs (a new batch lowers it again), and the study Fetch button is enabled again (G3 #11);
+/// - the open study editor closes, through the ONE close path `Studies.close-study` (a stale form
+///   must never save an old study id into the new dossier; its trace panel, scenario comparison,
+///   drag/hover flags and the demo flag go with it — G1 final review M3/L9);
+/// - the Études, Liste de suivi and Portefeuille notices go (an outcome of the previous dossier —
+///   « L'étude a été créée… », a startup notice — never reads as the new one's; the new dossier
+///   re-derives its own states); the open study's own slot (`study-notice`, G1 J) goes with it;
+/// - the replacement candidates panel empties;
+/// - the FX panel: the in-flight flag and the sticky notice reset (rates are dossier data);
+/// - the comparison: picks (ids + labels), table and notice empty, the screen closes;
+/// - the examen rapide: a fetch in flight is superseded, the session empties, the screen closes,
+///   its notice goes;
+/// - the criblage: the run stops (its queued rows drain, its late results are dropped), the slot
+///   empties, the card hides — the batch counter keeps counting (it outlives any run);
+/// - the Revue: its export notice goes (it named a file of the previous dossier's review).
+fn clear_dossier_session(ui: &MainWindow, session: &DossierSession) {
+    end_dossier_cells(session);
+    ui.global::<Studies>().invoke_close_study();
+    ui.global::<Studies>().set_fetching(false);
+    let holdings = ui.global::<crate::Holdings>();
+    holdings.set_refreshing(false);
+    holdings.set_refresh_progress(slint::SharedString::new());
+    ui.global::<crate::Fx>()
+        .set_refresh_progress(slint::SharedString::new());
+    ui.global::<Studies>()
+        .set_notice(slint::SharedString::new());
+    crate::wiring::study_notice::reset(ui);
+    ui.global::<crate::Watchlist>()
+        .set_notice(slint::SharedString::new());
+    ui.global::<crate::Holdings>()
+        .set_notice(slint::SharedString::new());
+    crate::wiring::replacement::clear_candidates(ui);
+    ui.global::<crate::Fx>().set_refreshing(false);
+    ui.global::<crate::Fx>()
+        .set_notice(slint::SharedString::new());
+    crate::wiring::comparison::clear_comparison(ui);
+    crate::wiring::comparison::close_screen(ui);
+    crate::wiring::quick_screen::clear_examination(
+        ui,
+        &session.quick_screen,
+        &session.quick_screen_ready,
+        &session.quick_screen_request,
+    );
+    crate::wiring::screening::close_screening(ui, &session.screening);
+    ui.global::<crate::Review>()
+        .set_notice(slint::SharedString::new());
+    // The legacy-stops notice names the previous dossier's lots — it goes with that dossier.
+    ui.global::<crate::Prefs>()
+        .set_reference_currency_notice(slint::SharedString::new());
+}
+
+/// PURE on the session cells (tested): what a dossier change ends outside the UI — the generation
+/// moves on, the open study's id goes (the close handler forgets it too — belt and braces), the
+/// holdings batch counters reset, and the worker's cancel flag rises so the previous dossier's
+/// queued price / FX jobs drain unfetched.
+fn end_dossier_cells(session: &DossierSession) {
+    bump_generation(&session.dossier_generation);
+    *session.current_study.borrow_mut() = None;
+    *session.refresh_pending.borrow_mut() = 0;
+    *session.refresh_total.borrow_mut() = 0;
+    session
+        .fetch_cancel
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Move the dossier generation on (G1 final review M1) — wrapping, never panicking: only
+/// (in)equality with a stamped generation is ever read.
+fn bump_generation(generation: &std::cell::Cell<u64>) {
+    generation.set(generation.get().wrapping_add(1));
+}
+
 /// Finish a journal open/create/switch (Story 5.5): on success, record the recent-journals pointer +
 /// persist app-config, surface the right neutral notice (stale / sync-warning / opened-or-created),
 /// close any open study editor, and re-render every surface + the location panel. On failure, surface
@@ -85,7 +208,7 @@ fn finish_journal_switch(
     config_path: &Option<PathBuf>,
     holding_freshness: &Rc<RefCell<HoldingFreshnessMap>>,
     holding_dismissed: &Rc<RefCell<std::collections::HashSet<String>>>,
-    current_study: &Rc<RefCell<Option<String>>>,
+    dossier: &DossierSession,
 ) {
     let prefs = ui.global::<Prefs>();
     match result {
@@ -115,58 +238,169 @@ fn finish_journal_switch(
             }
             persist(config_path.as_ref(), &config.borrow());
 
-            let status = if let Some(seen) = stale_seen {
-                state::journal_stale_message(seen, outcome.logical_version)
-            } else if outcome.sync_warning {
-                state::MSG_SYNC_FOLDER_WARNING.to_string()
-            } else if created {
-                state::MSG_JOURNAL_CREATED.to_string()
-            } else {
-                state::MSG_JOURNAL_OPENED.to_string()
-            };
-            prefs.set_journal_location_status(status.into());
-            prefs.set_journal_reclaim_path("".into());
-
-            // The whole journal changed — close any open study editor and re-render every surface.
-            *current_study.borrow_mut() = None;
-            ui.global::<Studies>().set_study_open(false);
-            let st = journal_state.borrow();
-            let format = config.borrow().number_format;
-            retain_held_freshness(holding_freshness, &st);
-            refresh_studies(ui, &st);
-            refresh_watchlist(ui, &st);
-            // Story 6.5 review: the FX panel follows the journal (rates are journal data); the
-            // in-flight flag and sticky notice reset with it.
-            crate::wiring::fx::push_fx_rates(ui, &st);
-            crate::wiring::replacement::clear_candidates(ui);
-            ui.global::<crate::Fx>().set_refreshing(false);
-            ui.global::<crate::Fx>()
-                .set_notice(slint::SharedString::new());
-            refresh_holdings(
-                ui,
-                &st,
-                &holding_freshness.borrow(),
-                &holding_dismissed.borrow(),
-                format,
+            let status = opened_status(
+                journal_state.borrow().is_read_only(),
+                stale_seen.map(|seen| (seen, outcome.logical_version)),
+                outcome.sync_warning,
+                created,
             );
-            render_journal_panel(ui, &st, &config.borrow());
+            prefs.set_journal_location_status(status.as_str().into());
+            prefs.set_journal_reclaim_path("".into());
+            *dossier.opened_status.borrow_mut() = Some((opened_path, status));
+
+            // The whole journal changed — end the previous dossier's session (study editor,
+            // comparison, examination, criblage, FX flag, notices) and re-render every surface.
+            // Re-selecting the dossier already open changed nothing (G1 G review): its session
+            // — an examination, a criblage, a comparison — stays.
+            if !outcome.unchanged {
+                clear_dossier_session(ui, dossier);
+            }
+            rerender_dossier(
+                ui,
+                journal_state,
+                config,
+                holding_freshness,
+                holding_dismissed,
+            );
         }
         Err(notice) => {
+            // G1 final review L10 / G3 #1: when the previous dossier could not be reacquired
+            // either, NO dossier is open — whichever the cause (the reclaim offer included), its
+            // session ends like on any dossier change and the surfaces re-render empty.
+            let lost = journal_state.borrow().journal_id().is_none();
+            if lost {
+                clear_dossier_session(ui, dossier);
+                *dossier.opened_status.borrow_mut() = None;
+            }
             // Offer reclaim ONLY when the failure was the lock AND that lock is genuinely stale (a
             // crashed run) — never for an unrelated open failure (corrupt / not-a-journal) that merely
-            // happens to sit beside a stale lock, and never for a live instance's lock.
-            let lock_failure = notice == state::MSG_JOURNAL_LOCKED;
-            if lock_failure && lock_is_stale(attempted) {
+            // happens to sit beside a stale lock, and never for a live instance's lock. The offer
+            // is the status line then, lost dossier or not (it says what can be done next).
+            let offer_reclaim = notice == state::MSG_JOURNAL_LOCKED && lock_is_stale(attempted);
+            if offer_reclaim {
                 prefs.set_journal_location_status(state::MSG_JOURNAL_LOCK_RECLAIMABLE.into());
                 prefs.set_journal_reclaim_path(attempted.display().to_string().into());
             } else {
-                // An open/create that did not happen is a refusal (acknowledged); the panel's
-                // status line keeps only STATES (stale, sync, reclaimable lock).
-                prefs.set_journal_location_status("".into());
+                // An open/create that did not happen is a refusal (acknowledged). The status
+                // line is the OPEN dossier's own (G1 G), recomputed from the journal actually
+                // open — never the string on screen, which may be a reclaim offer about an
+                // earlier attempt; with no dossier open, it says so (L10).
+                let st = journal_state.borrow();
+                let open = st.journal_id().and(st.path());
+                let status = status_after_refusal(
+                    open,
+                    open.is_some_and(state::is_sync_folder),
+                    st.is_read_only(),
+                    dossier.opened_status.borrow().as_ref(),
+                );
+                prefs.set_journal_location_status(status.into());
                 prefs.set_journal_reclaim_path("".into());
+            }
+            if lost {
+                rerender_dossier(
+                    ui,
+                    journal_state,
+                    config,
+                    holding_freshness,
+                    holding_dismissed,
+                );
+            }
+            if !offer_reclaim {
                 crate::wiring::dialog::refuse(ui, &notice);
             }
         }
+    }
+}
+
+/// Re-render every dossier surface from the journal now open (or from none): the studies list,
+/// the watchlist, the FX panel, the register (pruning freshness for tickers no longer held) and
+/// the location panel.
+fn rerender_dossier(
+    ui: &MainWindow,
+    journal_state: &Rc<RefCell<JournalState>>,
+    config: &Rc<RefCell<AppConfig>>,
+    holding_freshness: &Rc<RefCell<HoldingFreshnessMap>>,
+    holding_dismissed: &Rc<RefCell<std::collections::HashSet<String>>>,
+) {
+    let st = journal_state.borrow();
+    let format = config.borrow().number_format;
+    retain_held_freshness(holding_freshness, &st);
+    refresh_studies(ui, &st);
+    refresh_watchlist(ui, &st);
+    // Story 6.5 review: the FX panel follows the journal (rates are journal data).
+    crate::wiring::fx::push_fx_rates(ui, &st);
+    refresh_holdings(
+        ui,
+        &st,
+        &holding_freshness.borrow(),
+        &holding_dismissed.borrow(),
+        format,
+    );
+    render_journal_panel(ui, &st, &config.borrow());
+}
+
+/// PURE: the location status line of a dossier just opened/created. A read-only dossier (written by
+/// a newer schema) says so FIRST, in the startup wording (G1 G, on-screen check: it read only « Le
+/// dossier a été ouvert. »); then the stale-on-reopen flag (`(seen, here)`) or else the sync-folder
+/// warning; the plain « ouvert » / « créé » acknowledgement only when no state applies. The
+/// result is also what a later refusal restores ([`status_after_refusal`]).
+fn opened_status(
+    read_only: bool,
+    stale: Option<(u64, u64)>,
+    sync_warning: bool,
+    created: bool,
+) -> String {
+    dossier_states(read_only, stale, sync_warning).unwrap_or_else(|| {
+        if created {
+            state::MSG_JOURNAL_CREATED.to_string()
+        } else {
+            state::MSG_JOURNAL_OPENED.to_string()
+        }
+    })
+}
+
+/// PURE: the STATES of the open dossier, read-only first — `None` when none applies.
+fn dossier_states(
+    read_only: bool,
+    stale: Option<(u64, u64)>,
+    sync_warning: bool,
+) -> Option<String> {
+    let state_line = if let Some((seen, here)) = stale {
+        Some(state::journal_stale_message(seen, here))
+    } else if sync_warning {
+        Some(state::MSG_SYNC_FOLDER_WARNING.to_string())
+    } else {
+        None
+    };
+    match (read_only, state_line) {
+        (true, Some(line)) => Some(format!("{} {line}", state::MSG_STARTUP_READ_ONLY)),
+        (true, None) => Some(state::MSG_STARTUP_READ_ONLY.to_string()),
+        (false, line) => line,
+    }
+}
+
+/// PURE: the location status line after a refused open/create/switch (G1 G), from the journal
+/// actually open (`open`, and whether it sits in a sync folder) and the `(path, status)` recorded
+/// when a dossier was last opened:
+/// - no journal open (the previous one could not be reacquired) → says so (G1 final review L10:
+///   never a status that reads as a dossier being open);
+/// - the open journal is the one recorded → its own status (stale, sync folder, opened/created);
+/// - otherwise (the startup dossier: no switch recorded it) → its states recomputed — read-only,
+///   the sync-folder warning — else nothing.
+///
+/// A reclaimable-lock offer is never kept: it described an earlier attempt, not the open dossier.
+fn status_after_refusal(
+    open: Option<&std::path::Path>,
+    in_sync_folder: bool,
+    read_only: bool,
+    recorded: Option<&(PathBuf, String)>,
+) -> String {
+    let Some(open) = open else {
+        return state::MSG_NO_JOURNAL_OPEN.to_string();
+    };
+    match recorded {
+        Some((path, status)) if path == open => status.clone(),
+        _ => dossier_states(read_only, None, in_sync_folder).unwrap_or_default(),
     }
 }
 
@@ -210,9 +444,11 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         config_path,
         holding_freshness,
         holding_dismissed,
-        current_study,
         ..
     } = s;
+    // G1 G: every dossier-changing rail below ends the previous dossier's session through ONE
+    // helper, `clear_dossier_session`.
+    let dossier = DossierSession::of(s);
     // ── Story 5.3 (FR60) — export / import the WHOLE journal as a portable file. Scales the 5.2
     // envelope to every entity + the (journal_id, version, hash) identity tuple; import verifies and
     // applies atomically (never partially). Import is picker-fed (below) but stays path-based. The
@@ -257,20 +493,15 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 // modal confirm instead of silently snapping shared entities back.
                 Ok(json) => match journal_state.borrow_mut().request_import_journal(&json) {
                     Ok(state::ImportRequest::Applied(summary)) => {
-                        prefs.set_import_confirm("".into());
                         Ok(state::journal_imported_message(&summary))
                     }
                     Ok(state::ImportRequest::NeedsConfirm { source, current }) => {
                         let prompt = state::import_confirm_message(source, current);
-                        prefs.set_import_confirm(prompt.clone().into());
                         prefs.set_journal_status("".into());
                         crate::wiring::dialog::confirm(&ui, "confirm-import", &prompt);
                         return; // nothing applied yet — no re-render needed
                     }
-                    Err(message) => {
-                        prefs.set_import_confirm("".into());
-                        Err(message)
-                    }
+                    Err(message) => Err(message),
                 },
                 // An unreadable path is the malformed/unreadable case — a neutral refusal, no panic.
                 Err(_) => Err(state::MSG_IMPORT_MALFORMED.to_string()),
@@ -311,7 +542,6 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             let ui = ui_weak.unwrap();
             let result = journal_state.borrow_mut().confirm_import_journal();
             let prefs = ui.global::<Prefs>();
-            prefs.set_import_confirm("".into());
             match result {
                 Ok(summary) => {
                     prefs.set_journal_status(state::journal_imported_message(&summary).into())
@@ -339,21 +569,24 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         });
     }
     {
-        let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>().on_cancel_import(move || {
-            let ui = ui_weak.unwrap();
             journal_state.borrow_mut().cancel_import_journal();
-            ui.global::<Prefs>().set_import_confirm("".into());
         });
     }
 
     {
         // Native `rfd` open picker → the SAME path-based `import-journal` callback (one verify-and-
-        // apply code path, headless-tested). Cancel → no notice, nothing read.
+        // apply code path, headless-tested). Cancel → no notice, nothing read. A read-only dossier
+        // refuses at once, before the picker (G1 G, on-screen check).
         let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>().on_pick_and_import_journal(move || {
             let ui = ui_weak.unwrap();
+            if let Err(reason) = journal_state.borrow().refuse_if_read_only() {
+                crate::wiring::dialog::refuse(&ui, reason);
+                return;
+            }
             let mut dialog = rfd::FileDialog::new()
                 .set_title("Importer un dossier")
                 .add_filter("Dossier exporté (JSON)", &["json"]);
@@ -394,13 +627,11 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 // A confirmable restore is parked — reveal the confirm banner with the identity/warning.
                 Ok(assessment) => {
                     let prompt = state::restore_confirm_message(&assessment);
-                    prefs.set_restore_confirm(prompt.clone().into());
                     prefs.set_restore_status("".into());
                     crate::wiring::dialog::confirm(&ui, "confirm-restore", &prompt);
                 }
                 // A hard refusal — acknowledged in the dialog, nothing parked.
                 Err(message) => {
-                    prefs.set_restore_confirm("".into());
                     prefs.set_restore_status("".into());
                     crate::wiring::dialog::refuse(&ui, &message);
                 }
@@ -415,6 +646,12 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>().on_pick_and_restore_backup(move || {
             let ui = ui_weak.unwrap();
+            // A read-only dossier refuses at once — no picker, no confirm (G1 G, on-screen
+            // check); `request_restore` and the confirm's blocked verb stay as further guards.
+            if let Err(reason) = journal_state.borrow().refuse_if_read_only() {
+                crate::wiring::dialog::refuse(&ui, reason);
+                return;
+            }
             let mut dialog = rfd::FileDialog::new()
                 .set_title("Restaurer une sauvegarde")
                 .add_filter("Sauvegarde (.db)", &["db"]);
@@ -434,18 +671,25 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
-        let current_study = Rc::clone(current_study);
+        let dossier = dossier.clone();
         ui.global::<Prefs>().on_confirm_restore(move || {
             let ui = ui_weak.unwrap();
             let result = journal_state.borrow_mut().confirm_restore();
             let prefs = ui.global::<Prefs>();
-            prefs.set_restore_confirm("".into());
-            // A successful restore replaces the whole journal — close any open study editor first so a
-            // stale in-memory form can't be saved back into the restored journal (an old study_id would
-            // otherwise be written into the new journal).
-            if result.is_ok() {
-                *current_study.borrow_mut() = None;
-                ui.global::<Studies>().set_study_open(false);
+            // A successful restore replaces the whole journal — end the previous dossier's session
+            // first (the open study editor above all: a stale in-memory form can't be saved back
+            // into the restored journal with an old study_id; then the comparison, examination,
+            // criblage and notices — G1 G). G3 #10: a FAILED restore that could not reopen the live
+            // dossier either left none open — the same end, and the location status says so.
+            let lost = result.is_err() && journal_state.borrow().journal_id().is_none();
+            if result.is_ok() || lost {
+                clear_dossier_session(&ui, &dossier);
+            }
+            if lost {
+                *dossier.opened_status.borrow_mut() = None;
+                prefs.set_journal_location_status(state::MSG_NO_JOURNAL_OPEN.into());
+                prefs.set_journal_reclaim_path("".into());
+                render_journal_panel(&ui, &journal_state.borrow(), &config.borrow());
             }
             match result {
                 Ok(()) => prefs.set_restore_status(state::MSG_RESTORE_DONE.into()),
@@ -460,9 +704,10 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
             retain_held_freshness(&holding_freshness, &state);
             refresh_studies(&ui, &state);
             refresh_watchlist(&ui, &state);
-            // Story 6.5 review: imported/restored fx_rates must show without a restart.
+            // Story 6.5 review: imported/restored fx_rates must show without a restart. (The
+            // candidates panel is emptied by `clear_dossier_session` on success; a failed restore
+            // left the dossier — and its panel — as they were.)
             crate::wiring::fx::push_fx_rates(&ui, &state);
-            crate::wiring::replacement::clear_candidates(&ui);
             refresh_holdings(
                 &ui,
                 &state,
@@ -473,12 +718,9 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         });
     }
     {
-        let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         ui.global::<Prefs>().on_cancel_restore(move || {
-            let ui = ui_weak.unwrap();
             journal_state.borrow_mut().cancel_restore();
-            ui.global::<Prefs>().set_restore_confirm("".into());
         });
     }
 
@@ -493,7 +735,7 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         let config_path = config_path.clone();
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
-        let current_study = Rc::clone(current_study);
+        let dossier = dossier.clone();
         ui.global::<Prefs>().on_pick_and_open_journal(move || {
             let ui = ui_weak.unwrap();
             let Some(path) = rfd::FileDialog::new()
@@ -516,7 +758,7 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 &config_path,
                 &holding_freshness,
                 &holding_dismissed,
-                &current_study,
+                &dossier,
             );
         });
     }
@@ -527,7 +769,7 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         let config_path = config_path.clone();
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
-        let current_study = Rc::clone(current_study);
+        let dossier = dossier.clone();
         ui.global::<Prefs>().on_pick_and_create_journal(move || {
             let ui = ui_weak.unwrap();
             let Some(path) = rfd::FileDialog::new()
@@ -559,7 +801,7 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 &config_path,
                 &holding_freshness,
                 &holding_dismissed,
-                &current_study,
+                &dossier,
             );
         });
     }
@@ -570,7 +812,7 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         let config_path = config_path.clone();
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
-        let current_study = Rc::clone(current_study);
+        let dossier = dossier.clone();
         ui.global::<Prefs>().on_open_recent(move |path_str| {
             let ui = ui_weak.unwrap();
             let path = PathBuf::from(path_str.as_str());
@@ -586,7 +828,7 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 &config_path,
                 &holding_freshness,
                 &holding_dismissed,
-                &current_study,
+                &dossier,
             );
         });
     }
@@ -597,7 +839,7 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
         let config_path = config_path.clone();
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
-        let current_study = Rc::clone(current_study);
+        let dossier = dossier.clone();
         ui.global::<Prefs>().on_reclaim_and_open(move |path_str| {
             let ui = ui_weak.unwrap();
             let path = PathBuf::from(path_str.as_str());
@@ -613,8 +855,193 @@ pub(crate) fn wire_journal(ui: &MainWindow, s: &Session) {
                 &config_path,
                 &holding_freshness,
                 &holding_dismissed,
-                &current_study,
+                &dossier,
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cells() -> DossierSession {
+        DossierSession {
+            current_study: Rc::new(RefCell::new(Some("x".into()))),
+            quick_screen: Rc::new(RefCell::new(None)),
+            quick_screen_request: Rc::new(std::cell::Cell::new(0)),
+            quick_screen_ready: Rc::new(RefCell::new(None)),
+            screening: Rc::new(RefCell::new(None)),
+            dossier_generation: Rc::new(std::cell::Cell::new(7)),
+            refresh_pending: Rc::new(RefCell::new(3)),
+            refresh_total: Rc::new(RefCell::new(5)),
+            fetch_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            opened_status: Rc::new(RefCell::new(None)),
+        }
+    }
+
+    #[test]
+    fn a_dossier_change_ends_the_previous_dossiers_jobs() {
+        // G3 #2/#11: the generation moves on (every stamped job of the previous dossier is now
+        // stale), the open study is forgotten, the holdings batch resets and the queued price /
+        // FX jobs drain unfetched.
+        let d = cells();
+        end_dossier_cells(&d);
+        assert_eq!(d.dossier_generation.get(), 8);
+        assert!(d.current_study.borrow().is_none());
+        assert_eq!(*d.refresh_pending.borrow(), 0);
+        assert_eq!(*d.refresh_total.borrow(), 0);
+        assert!(d.fetch_cancel.load(std::sync::atomic::Ordering::Relaxed));
+        // A clone (every rail holds one) shares the cells: its change is seen by all.
+        let other = d.clone();
+        end_dossier_cells(&other);
+        assert_eq!(d.dossier_generation.get(), 9);
+    }
+
+    /// G3 #11 — every dossier-changing path ends the session through `clear_dossier_session` (the
+    /// one place the generation moves): a source scan of this file, so a new rail that forgets it
+    /// fails here. The open / create / recent / reclaim rails hand their result to
+    /// `finish_journal_switch`, whose success arm, and whose failure arm when the dossier was
+    /// lost, clear; the restore confirm clears on success and on a lost dossier.
+    #[test]
+    fn every_dossier_change_path_ends_the_session() {
+        let src = include_str!("journal.rs");
+        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        for rail in [
+            ".open_journal(&path)",
+            ".create_journal(&dir, &name)",
+            ".reclaim_and_open(&path)",
+        ] {
+            assert!(body.contains(rail), "{rail}");
+            for (at, _) in body.match_indices(rail) {
+                let after = &body[at..(at + 400).min(body.len())];
+                assert!(
+                    after.contains("finish_journal_switch("),
+                    "{rail} must hand its result to finish_journal_switch"
+                );
+            }
+        }
+        assert_eq!(
+            body.matches(".open_journal(&path)").count(),
+            2,
+            "pick-open + recent"
+        );
+        let finish = &body[body.find("fn finish_journal_switch(").unwrap()..];
+        let finish = &finish[..finish.find("fn rerender_dossier(").unwrap()];
+        assert_eq!(
+            finish.matches("clear_dossier_session(ui, dossier)").count(),
+            2
+        );
+        let restore = &body[body.find("on_confirm_restore(").unwrap()..];
+        let restore = &restore[..restore.find("on_cancel_restore(").unwrap()];
+        assert!(restore.contains("if result.is_ok() || lost {"));
+        assert!(restore.contains("clear_dossier_session(&ui, &dossier)"));
+        let clear = &body[body.find("fn clear_dossier_session(").unwrap()..];
+        let clear = &clear[..clear.find("fn end_dossier_cells(").unwrap()];
+        for step in [
+            "end_dossier_cells(session)",
+            "invoke_close_study()",
+            "set_fetching(false)",
+        ] {
+            assert!(clear.contains(step), "clear_dossier_session: {step}");
+        }
+    }
+
+    #[test]
+    fn every_dossier_change_moves_the_generation_on() {
+        // G1 final review M1: a stamped generation never equals the one after a change — even at
+        // the wrap.
+        let g = std::cell::Cell::new(4);
+        bump_generation(&g);
+        assert_eq!(g.get(), 5);
+        let top = std::cell::Cell::new(u64::MAX);
+        bump_generation(&top);
+        assert_ne!(top.get(), u64::MAX);
+    }
+
+    #[test]
+    fn a_refused_switch_states_the_open_dossiers_own_status() {
+        let a = PathBuf::from("/d/a.db");
+        let b = PathBuf::from("/d/b.db");
+        let stale = state::journal_stale_message(7, 5);
+        let recorded = (a.clone(), stale.clone());
+        // The open dossier is the one recorded: its own status stands (stale here) — whatever
+        // the screen showed (a reclaim offer about an earlier attempt included).
+        assert_eq!(
+            status_after_refusal(Some(&a), false, false, Some(&recorded)),
+            stale
+        );
+        // Another journal is open than the one recorded (the startup dossier): recomputed.
+        assert_eq!(
+            status_after_refusal(Some(&b), true, false, Some(&recorded)),
+            state::MSG_SYNC_FOLDER_WARNING
+        );
+        assert_eq!(status_after_refusal(Some(&b), false, false, None), "");
+        // …and a read-only startup dossier says so.
+        assert_eq!(
+            status_after_refusal(Some(&b), false, true, None),
+            state::MSG_STARTUP_READ_ONLY
+        );
+        // A read-only dossier opened by a switch: its recorded status already says so.
+        let ro = (a.clone(), opened_status(true, None, false, false));
+        assert_eq!(
+            status_after_refusal(Some(&a), false, true, Some(&ro)),
+            state::MSG_STARTUP_READ_ONLY
+        );
+        // No journal could be reacquired (G1 final review L10): the line says no dossier is
+        // open — never the recorded dossier's own status, never an empty line that leaves the
+        // previous « ouvert » standing in the reader's mind.
+        assert_eq!(
+            status_after_refusal(None, true, true, Some(&recorded)),
+            state::MSG_NO_JOURNAL_OPEN
+        );
+        assert_eq!(
+            status_after_refusal(None, false, false, None),
+            state::MSG_NO_JOURNAL_OPEN
+        );
+        // Never the reclaim offer.
+        for (open, sync) in [(Some(a.as_path()), false), (Some(b.as_path()), true)] {
+            assert_ne!(
+                status_after_refusal(open, sync, false, Some(&recorded)),
+                state::MSG_JOURNAL_LOCK_RECLAIMABLE
+            );
+        }
+    }
+
+    #[test]
+    fn an_opened_read_only_dossier_says_so_first() {
+        // The on-screen check: a newer-schema dossier opened through « Ouvrir un dossier… »
+        // read only « Le dossier a été ouvert. ».
+        assert_eq!(
+            opened_status(true, None, false, false),
+            state::MSG_STARTUP_READ_ONLY
+        );
+        assert_eq!(
+            opened_status(true, None, false, true),
+            state::MSG_STARTUP_READ_ONLY
+        );
+        // With another state: read-only first, the other kept.
+        let both = opened_status(true, None, true, false);
+        assert!(both.starts_with(state::MSG_STARTUP_READ_ONLY));
+        assert!(both.ends_with(state::MSG_SYNC_FOLDER_WARNING));
+        let stale = opened_status(true, Some((9, 4)), true, false);
+        assert!(stale.ends_with(&state::journal_stale_message(9, 4)));
+        // A writable dossier: unchanged behaviour.
+        assert_eq!(
+            opened_status(false, None, false, false),
+            state::MSG_JOURNAL_OPENED
+        );
+        assert_eq!(
+            opened_status(false, None, false, true),
+            state::MSG_JOURNAL_CREATED
+        );
+        assert_eq!(
+            opened_status(false, None, true, true),
+            state::MSG_SYNC_FOLDER_WARNING
+        );
+        assert_eq!(
+            opened_status(false, Some((9, 4)), true, false),
+            state::journal_stale_message(9, 4)
+        );
     }
 }

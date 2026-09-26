@@ -6,11 +6,12 @@
 
 use std::rc::Rc;
 
-use slint::{ComponentHandle, SharedString};
+use slint::ComponentHandle;
 use uuid::Uuid;
 
 use crate::wiring::Session;
 use crate::wiring::push::{push_form, push_live_preview};
+use crate::wiring::study_notice::{self, Source};
 use crate::{MainWindow, Studies};
 use crate::{state, viewmodel};
 
@@ -27,8 +28,10 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
     } = s;
     // ── Numeric judgment-input editing + the §4 selector + traceability (Story 2.6) ──
 
-    // Commit a numeric judgment field: parse locale-aware (None for blank/unparseable → cleared,
-    // never 0), persist to `Study.judgment`, then re-read + re-push (which recomputes the snapshot).
+    // Commit a numeric judgment field: read under the user's number format (blank → cleared, never
+    // 0), persist to `Study.judgment`, then re-read + re-push (which recomputes the snapshot). G1 I:
+    // a text that is no number, or an ambiguous one, is refused with its reason; every refusal goes
+    // to the refusal dialog and returns `false`, so the field re-shows its stored value.
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
@@ -36,26 +39,35 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_set_judgment(move |field, text| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Some(id_text) = current_study.borrow().clone() else {
-                return;
+                return false;
             };
             let Ok(id) = Uuid::parse_str(&id_text) else {
-                return;
+                return false;
             };
             let format = config.borrow().number_format;
-            let value = viewmodel::format::parse_amount(&text, format);
+            let value = match state::typed_entry(&text, format) {
+                Ok(value) => value,
+                Err(message) => {
+                    crate::wiring::dialog::refuse(&ui, &message);
+                    return false;
+                }
+            };
             let result = journal_state
                 .borrow_mut()
                 .set_judgment_field(id, field.as_str(), value);
             match result {
                 Ok(()) => {
-                    studies.set_notice(SharedString::new());
+                    study_notice::clear(&ui, Source::Edit);
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
+                    true
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => {
+                    crate::wiring::dialog::refuse(&ui, &message);
+                    false
+                }
             }
         });
     }
@@ -70,7 +82,6 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_set_rationale(move |text| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Some(id_text) = current_study.borrow().clone() else {
                 return;
             };
@@ -84,12 +95,12 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 .set_rationale(id, Some(text.to_string()));
             match result {
                 Ok(()) => {
-                    studies.set_notice(SharedString::new());
+                    study_notice::clear(&ui, Source::Edit);
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }
@@ -104,7 +115,6 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_set_company_name(move |text| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Some(id_text) = current_study.borrow().clone() else {
                 return;
             };
@@ -117,12 +127,12 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 .set_company_name(id, Some(text.to_string()));
             match result {
                 Ok(()) => {
-                    studies.set_notice(SharedString::new());
+                    study_notice::clear(&ui, Source::Edit);
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }
@@ -137,7 +147,6 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_extend_history(move || {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Some(id_text) = current_study.borrow().clone() else {
                 return;
             };
@@ -148,12 +157,12 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             let result = journal_state.borrow_mut().extend_history(id);
             match result {
                 Ok(()) => {
-                    studies.set_notice(SharedString::new());
+                    study_notice::clear(&ui, Source::Edit);
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }
@@ -220,7 +229,6 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let drag_moved = Rc::clone(drag_moved);
         ui.global::<Studies>().on_judgment_commit(move |field, y| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             *drag_study.borrow_mut() = None;
             let moved = std::mem::replace(&mut *drag_moved.borrow_mut(), false);
             let Some(id_text) = current_study.borrow().clone() else {
@@ -247,10 +255,10 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 .borrow_mut()
                 .set_judgment_field(id, field.as_str(), value);
             match result {
-                Ok(()) => studies.set_notice(SharedString::new()),
+                Ok(()) => study_notice::clear(&ui, Source::Edit),
                 // The write was refused — surface the notice AND reconcile the (un-saved) preview
                 // back to the saved study below, so no phantom line is left on screen (review P3).
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
             // Re-read + re-push from disk: on success this confirms the saved value; on failure it
             // reverts the live preview to what is actually persisted.
@@ -302,12 +310,12 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                         .set_judgment_field(id, field.as_str(), value);
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -360,7 +368,6 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_pe_judgment_commit(move |field, y| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 *drag_study.borrow_mut() = None;
                 let moved = std::mem::replace(&mut *drag_moved.borrow_mut(), false);
                 let Some(id_text) = current_study.borrow().clone() else {
@@ -384,8 +391,8 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                         .borrow_mut()
                         .set_judgment_field(id, field.as_str(), value);
                 match result {
-                    Ok(()) => studies.set_notice(SharedString::new()),
-                    Err(message) => studies.set_notice(message.into()),
+                    Ok(()) => study_notice::clear(&ui, Source::Edit),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
                 if let Some(study) = journal_state.borrow().get_study(id) {
                     push_form(&ui, &journal_state.borrow(), &study, format);
@@ -448,13 +455,16 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             let undone = journal_state.borrow_mut().undo(id);
             match undone {
                 Ok(true) => {
-                    studies.set_notice(SharedString::new());
+                    study_notice::clear(&ui, Source::Edit);
+                    // G1 J review: the fetch summary may describe what this undo reverted — it
+                    // goes (its outcome only; a fetch failure stays, F4).
+                    study_notice::clear_outcome(&ui, Source::Fetch);
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
                 Ok(false) => {} // nothing to undo
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }
@@ -482,13 +492,14 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             let redone = journal_state.borrow_mut().redo(id);
             match redone {
                 Ok(true) => {
-                    studies.set_notice(SharedString::new());
+                    study_notice::clear(&ui, Source::Edit);
+                    study_notice::clear_outcome(&ui, Source::Fetch); // G1 J review, as undo
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
                 Ok(false) => {}
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }

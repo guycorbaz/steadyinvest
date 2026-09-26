@@ -7,11 +7,15 @@
 //! compute. Absence honesty (#95): a read failure is `Err` (« indisponible »), never an empty
 //! section; a missing FX pair is named on the figure it blocks.
 
+use std::collections::BTreeMap;
+
 use rust_decimal::Decimal;
-use steadyinvest_core::ssg::{QualityFlagKey, UpsideDownside, Zone};
-use steadyinvest_core::verdict::Verdict;
+use steadyinvest_contract::Study;
+use steadyinvest_core::ssg::{QualityFlagKey, UpsideDownside};
 use steadyinvest_persistence::FxRateItem;
 use uuid::Uuid;
+
+use crate::viewmodel::engine;
 
 use super::fx::JournalConsolidation;
 use super::{
@@ -30,8 +34,26 @@ pub enum ReviewStudy {
     None { other_currency: Option<String> },
     /// The study read FAILED (#95) — « indisponible », never « aucune étude ».
     Unavailable,
+    /// The study was READ, but its data does not normalize (a structural input error — the
+    /// engine suspends its computation, `MSG_NORMALIZE_FAILED`): a different fact from a failed
+    /// read (G1 review). The study is still a study — counted, listed « à revoir », openable —
+    /// and its present price still reads the stop (the register does).
+    NotComputable(NotComputableFacts),
     /// A linked study and its snapshot facts.
     Linked(ReviewStudyFacts),
+}
+
+/// What is known of a study the engine cannot compute: its identity, its entered present price
+/// and its annual-review clock (none of these need the engine).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotComputableFacts {
+    pub study_id: Uuid,
+    /// The study's own currency (see [`ReviewStudyFacts::currency`]).
+    pub currency: String,
+    pub current_price: Option<Decimal>,
+    /// See [`ReviewStudyFacts::last_saved`].
+    pub last_saved: Option<String>,
+    pub due_for_review: bool,
 }
 
 /// The engine-snapshot facts of one linked study, as the engine states them (no formatting here).
@@ -39,6 +61,9 @@ pub enum ReviewStudy {
 pub struct ReviewStudyFacts {
     pub study_id: Uuid,
     pub company_name: Option<String>,
+    /// The study's own currency — the unit of `current_price` (never the position's: a legacy
+    /// lot links ticker-only and may carry no currency of its own — G1 final review).
+    pub currency: String,
     /// `"full"` | `"provisional"` | `"withheld"` (the verdict integrity state, Story 2.7).
     pub verdict: &'static str,
     pub low_confidence: bool,
@@ -50,10 +75,79 @@ pub struct ReviewStudyFacts {
     pub relative_value_pct: Option<Decimal>,
     pub quality_flags: Vec<QualityFlagKey>,
     /// The `YYYY-MM-DD` of the last effective save (the latest FR51 snapshot, else the study's
-    /// creation) — the annual-review clock.
-    pub last_saved: String,
-    /// `last_saved` is older than [`REVIEW_CADENCE_MONTHS`].
+    /// creation) — the annual-review clock. `None` when the FR51 history read FAILED: the date
+    /// is unknown, never replaced by the creation date (G1 review — a false « plus de 12 mois »).
+    pub last_saved: Option<String>,
+    /// `last_saved` is known and older than [`REVIEW_CADENCE_MONTHS`].
     pub due_for_review: bool,
+}
+
+/// One held lot's trailing stop, read against ITS OWN matched study (the register's rule).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopFact {
+    pub level: Decimal,
+    /// The stop's unit: the lot's EFFECTIVE currency — a legacy lot without a declared one is
+    /// presumed in the reference currency (D5, Guy 2026-09-25).
+    pub currency: Option<String>,
+    /// The bank (portfolio name) holding the lot.
+    pub bank: String,
+    /// The lot's study price reached the level. `false` when the price is unknown, is in
+    /// another currency than the stop, or the stop's currency is unknown (never a comparison
+    /// across currencies — nor across an unknown one).
+    pub breached: bool,
+    /// Why the stop could NOT be compared with a price, when that is a named fact (G3 review —
+    /// the row states it, never a silent « not breached »). `None` when it was compared, or when
+    /// there is simply no price to compare with.
+    pub uncompared: Option<StopUncompared>,
+}
+
+/// Why a lot's stop is not compared with a price.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopUncompared {
+    /// The lot declares no currency (presumed in the reference, D5) and its study is in
+    /// ANOTHER currency — named, so the row states both facts.
+    NoCurrency { study_currency: String },
+    /// The lot's study could not be read (#95).
+    StudyUnreadable,
+}
+
+/// The lots of one ticker do not all link to the same study (G1 final / G3 review): what the
+/// row's band states so that nothing the row does not show is hidden.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MixedLinks {
+    /// The currencies of the distinct READ studies, in lot order.
+    pub currencies: Vec<String>,
+    /// A lot has no study at all (« aucune étude »).
+    pub no_study: bool,
+    /// A lot's study could not be read (« indisponible ») — the row then cannot claim to show
+    /// the most recent study.
+    pub unreadable: bool,
+    /// The OTHER studies (not the row's) carrying signals: `(currency, signal count)`.
+    pub other_flagged: Vec<(String, usize)>,
+    /// The OTHER studies (not the row's) in the high zone or above it: their currencies.
+    pub other_high_zone: Vec<String>,
+}
+
+/// One lot's trigger, keyed by the HOLDING's identity — so a trigger the user dismissed on the
+/// register stays dismissed here (G1 final review).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LotTrigger {
+    pub holding_id: Uuid,
+    /// `"stop"` | `"sell"`.
+    pub kind: &'static str,
+}
+
+/// The neutral trigger across a position's lots — the stop takes priority, as per lot in the
+/// register — skipping every lot whose trigger is dismissed. `""` when none remains.
+pub fn position_trigger(lots: &[LotTrigger], dismissed: impl Fn(Uuid) -> bool) -> &'static str {
+    let shown = || lots.iter().filter(|t| !dismissed(t.holding_id));
+    if shown().any(|t| t.kind == "stop") {
+        "stop"
+    } else if shown().any(|t| t.kind == "sell") {
+        "sell"
+    } else {
+        ""
+    }
 }
 
 /// One held ticker, aggregated across banks.
@@ -62,40 +156,58 @@ pub struct ReviewPosition {
     pub ticker: String,
     /// The banks (portfolio names) holding it, in portfolio order.
     pub banks: Vec<String>,
-    /// The position's currency (the first bank's; every bank's row for a ticker shares the
-    /// study, hence the currency, since #218 — a legacy mix is shown as its first currency).
+    /// The currency the row states (G3 review): the shown study's own for a study (linked or
+    /// not computable); otherwise every lot's declared currency, distinct, in lot order, with
+    /// `"—"` for a lot that declares none (no lot silently dropped).
     pub currency: String,
     /// Invested in the reference currency (the 6.7 concentration row) — `None` when a pair is
     /// missing (named in `missing_pairs`) or the total could not form.
     pub invested: Option<Decimal>,
     pub share_pct: Option<Decimal>,
     pub missing_pairs: Vec<String>,
+    /// The study whose facts the row shows, chosen by IDENTITY (the discriminator rule, G1
+    /// final review — never the first lot's): see [`row_link`].
     pub study: ReviewStudy,
-    /// The trailing stop as a level in the position's currency, when set (the first bank's).
-    pub stop_level: Option<Decimal>,
+    /// `Some` when the lots do NOT all link to the same study (a legacy lot matched ticker-only
+    /// beside a declared one, lots in two currencies, a lot without / with an unreadable study).
+    pub mixed: Option<MixedLinks>,
+    /// Every lot's stop that carries one, in lot order (G1 review: never the first lot alone).
+    pub stops: Vec<StopFact>,
+    /// Any lot's stop is breached.
     pub stop_breached: bool,
-    /// `"stop"` | `"sell"` | `""` — the neutral trigger (core::risk), as the register shows it.
+    /// `"stop"` | `"sell"` | `""` — the neutral trigger (core::risk) across the lots, as the
+    /// register states it per lot (the stop takes priority), dismissed or not.
     pub trigger: &'static str,
+    /// Each lot's trigger with its holding's identity — a surface drops the dismissed ones
+    /// ([`position_trigger`]).
+    pub lot_triggers: Vec<LotTrigger>,
 }
 
-/// A study due for its review, with the reason: `"age"` (older than the cadence), `"withheld"`
-/// (a load-bearing input missing) or `"low_confidence"`.
+/// A study due for its review, with EVERY reason that applies (G1 review — the first reason hid
+/// the others), in the fixed order `"age"` (older than the cadence), `"age_unknown"` (the history
+/// read failed), `"withheld"` (a load-bearing input missing), `"low_confidence"`,
+/// `"not_computable"` (the data does not normalize).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DueStudy {
+    /// The ticker — followed by the study's currency (« NESN (USD) ») when the ticker's lots link
+    /// to different studies, so two due studies of one ticker are told apart.
     pub ticker: String,
     pub study_id: Uuid,
-    pub last_saved: String,
-    pub reason: &'static str,
+    /// `None` when the history read failed (the date is unknown — see [`ReviewStudyFacts`]).
+    pub last_saved: Option<String>,
+    pub reasons: Vec<&'static str>,
 }
 
 /// Counts only — a number is a fact; no judgement is derived from them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReviewCounts {
     pub positions: usize,
+    /// Positions with a study — computable or not.
     pub linked: usize,
     pub full: usize,
     pub provisional: usize,
     pub withheld: usize,
+    pub not_computable: usize,
     pub flagged: usize,
     pub high_zone: usize,
     pub stop_breached: usize,
@@ -120,6 +232,18 @@ pub struct PortfolioReviewFacts {
     pub rates_used: Vec<FxRateItem>,
 }
 
+/// One lot's resolved link: the study state, the study's currency and entered price, whether the
+/// price sits in the Sell zone, and the link's identity (to tell lots apart).
+#[derive(Clone)]
+pub(super) struct LotLink {
+    pub(super) study: ReviewStudy,
+    pub(super) study_currency: Option<String>,
+    pub(super) price: Option<Decimal>,
+    pub(super) in_sell_zone: bool,
+    /// `Some(study id)` for a study, `None` for no / an unreadable study.
+    pub(super) identity: Option<Uuid>,
+}
+
 /// `today` minus the review cadence, as a `YYYY-MM-DD` string comparable lexicographically
 /// (12 months = the same month-day one year earlier; a Feb-29 today compares as Feb-29, which
 /// only ever makes a Feb-28 save one day « younger » — immaterial for a yearly cadence).
@@ -130,27 +254,290 @@ fn review_threshold(today: &str) -> Option<String> {
     Some(format!("{:04}{rest}", year - years_back))
 }
 
-/// The present price's position against the §4 band: the zone inside it, the honest « below »
-/// / « above » outside it (the register's 2026-07-12 rule), `""` without a band or a price.
-fn zone_position(
-    r: &steadyinvest_core::ssg::RiskRewardOutputs,
-    price: Option<Decimal>,
-) -> &'static str {
-    if let Some(zone) = r.present_price_zone {
-        return match zone {
-            Zone::Buy => "buy",
-            Zone::Neutral => "neutral",
-            Zone::Sell => "sell",
-        };
+/// The last effective save's day: the latest FR51 snapshot, else the study's creation — or
+/// `None` when the history read FAILED (an unknown date, never the creation date passed off as
+/// the last save: that would state a false « plus de 12 mois »).
+fn last_saved_day<E>(history: Result<Vec<String>, E>, created_at: &str) -> Option<String> {
+    let latest = history.ok()?.into_iter().max();
+    Some(
+        latest
+            .as_deref()
+            .unwrap_or(created_at)
+            .chars()
+            .take(10)
+            .collect(),
+    )
+}
+
+/// Every reason a study is due for its review, in the fixed order age · age unknown · withheld
+/// · low confidence · not computable — all of them, never only the first (G1 review).
+/// `verdict` is `None` for a study the engine cannot compute.
+fn due_reasons(
+    last_saved: Option<&str>,
+    due_for_review: bool,
+    verdict: Option<&str>,
+    low_confidence: bool,
+) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+    if due_for_review {
+        reasons.push("age");
     }
-    match (r.zones.as_ref(), price) {
-        (Some(b), Some(p)) if p < b.forecast_low => "below",
-        (Some(b), Some(p)) if p > b.forecast_high => "above",
-        _ => "",
+    if last_saved.is_none() {
+        reasons.push("age_unknown");
+    }
+    if verdict == Some("withheld") {
+        reasons.push("withheld");
+    }
+    if low_confidence {
+        reasons.push("low_confidence");
+    }
+    if verdict.is_none() {
+        reasons.push("not_computable");
+    }
+    reasons
+}
+
+/// One lot's stop against its own study — the register's rule, [`super::stop_basis`] (D5, Guy
+/// 2026-09-25): breached only when the price is known AND in the stop's unit. A legacy lot with
+/// NO declared currency (`lot_currency` is `None`) is presumed in the reference currency: compared
+/// against a reference-currency study, NOT against a study in another currency — that cause is
+/// carried with the study's currency in [`StopFact::uncompared`]; a lot whose study could not be
+/// read (`study_unreadable`) is not compared either, its cause carried too (G3 review). `None`
+/// when the lot carries no (parsable) stop.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn lot_stop(
+    level: Option<&str>,
+    lot_currency: Option<&str>,
+    reference_currency: &str,
+    bank: &str,
+    study_currency: Option<&str>,
+    price: Option<Decimal>,
+    study_unreadable: bool,
+) -> Option<StopFact> {
+    let level = Decimal::from_str_exact(level?).ok()?;
+    let basis = study_currency.map(|c| super::stop_basis(lot_currency, reference_currency, c));
+    let uncompared = if study_unreadable {
+        Some(StopUncompared::StudyUnreadable)
+    } else if let Some(super::StopBasis::NoCurrencyOtherStudy(study_currency)) = &basis {
+        Some(StopUncompared::NoCurrency {
+            study_currency: study_currency.clone(),
+        })
+    } else {
+        None
+    };
+    let breached = uncompared.is_none()
+        && basis == Some(super::StopBasis::Comparable)
+        && price.is_some_and(|p| steadyinvest_core::risk::stop_breached(level, p));
+    Some(StopFact {
+        level,
+        currency: Some(lot_currency.unwrap_or(reference_currency).to_uppercase()),
+        bank: bank.to_string(),
+        breached,
+        uncompared,
+    })
+}
+
+/// Which of a position's lot links the row shows — by IDENTITY, never by lot position (the
+/// discriminator rule, G1 final review): among the links to a study, the NEWEST study
+/// (`study_order` = the studies oldest first, as listed; the ticker's own study — the one every
+/// ticker-only match resolves — is the newest); an unlisted identity ranks below, ties broken by
+/// id. Without any study, a failed read wins over « aucune étude » (a row never states an
+/// absence one of its lots could not establish). `links` is never empty (a position has a lot).
+pub(super) fn row_link(links: &[&LotLink], study_order: &[Uuid]) -> usize {
+    let rank = |id: Uuid| study_order.iter().position(|s| *s == id);
+    links
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| l.identity.map(|id| (i, id)))
+        .max_by(|(_, a), (_, b)| rank(*a).cmp(&rank(*b)).then_with(|| a.cmp(b)))
+        .map(|(i, _)| i)
+        .or_else(|| {
+            links
+                .iter()
+                .position(|l| matches!(l.study, ReviewStudy::Unavailable))
+        })
+        .unwrap_or(0)
+}
+
+/// One lot link's kind, to tell the lots apart: a study (by id), no study, or an unreadable one —
+/// never merged (G3 review: « aucune étude » and « indisponible » both used to read « — »).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LinkKey {
+    Study(Uuid),
+    NoStudy,
+    Unreadable,
+}
+
+fn link_key(l: &LotLink) -> LinkKey {
+    match (l.identity, &l.study) {
+        (Some(id), _) => LinkKey::Study(id),
+        (None, ReviewStudy::Unavailable) => LinkKey::Unreadable,
+        (None, _) => LinkKey::NoStudy,
+    }
+}
+
+/// The lots' distinct links, when there is more than one (`None` when every lot shares one):
+/// the read studies' currencies in lot order, whether a lot has no study / an unreadable one,
+/// and the signals / high zone of every study the row does NOT show (`shown` = the row's link),
+/// so the band hides nothing (G3 review).
+pub(super) fn mixed_links(links: &[&LotLink], shown: usize) -> Option<MixedLinks> {
+    let mut keys: Vec<LinkKey> = Vec::new();
+    let mut mixed = MixedLinks::default();
+    for l in links {
+        let key = link_key(l);
+        if keys.contains(&key) {
+            continue;
+        }
+        keys.push(key);
+        match key {
+            LinkKey::Study(_) => mixed
+                .currencies
+                .push(l.study_currency.clone().unwrap_or_default()),
+            LinkKey::NoStudy => mixed.no_study = true,
+            LinkKey::Unreadable => mixed.unreadable = true,
+        }
+        if key == link_key(links[shown]) {
+            continue;
+        }
+        if let ReviewStudy::Linked(f) = &l.study {
+            if !f.quality_flags.is_empty() {
+                mixed
+                    .other_flagged
+                    .push((f.currency.clone(), f.quality_flags.len()));
+            }
+            if is_high_zone(f.zone) {
+                mixed.other_high_zone.push(f.currency.clone());
+            }
+        }
+    }
+    (keys.len() > 1).then_some(mixed)
+}
+
+/// The high zone or above it — the « zone haute ou au-dessus » count.
+fn is_high_zone(zone: &str) -> bool {
+    zone == "sell" || zone == "above"
+}
+
+/// The currency a row states (G3 review): the shown study's own; without one, every lot's
+/// declared currency, distinct, in lot order — `"—"` for a lot declaring none, never dropped.
+fn row_currency(study: &ReviewStudy, lot_currencies: &[Option<String>]) -> String {
+    match study {
+        ReviewStudy::Linked(f) => f.currency.clone(),
+        ReviewStudy::NotComputable(f) => f.currency.clone(),
+        ReviewStudy::None { .. } | ReviewStudy::Unavailable => {
+            let mut all: Vec<String> = Vec::new();
+            for c in lot_currencies {
+                let label = c.clone().unwrap_or_else(|| "—".to_string());
+                if !all.contains(&label) {
+                    all.push(label);
+                }
+            }
+            all.join(" · ")
+        }
     }
 }
 
 impl JournalState {
+    /// The annual-review clock of a study already read: its last save (unknown on a failed
+    /// history read) and whether it is older than the cadence.
+    fn review_clock(&self, s: &Study, threshold: Option<&str>) -> (Option<String>, bool) {
+        let last_saved = last_saved_day(
+            self.try_list_study_history(s.id)
+                .map(|h| h.into_iter().map(|e| e.created_at.0).collect::<Vec<_>>()),
+            &s.created_at.0,
+        );
+        let due = match (threshold, last_saved.as_deref()) {
+            (Some(t), Some(saved)) => saved < t,
+            _ => false,
+        };
+        (last_saved, due)
+    }
+
+    /// One lot's link, matched EXACTLY as the register matches it — THE resolution,
+    /// [`Self::try_lot_study`] (#81 / #218 / D5, G1 P review H1: the lot's EFFECTIVE currency, a
+    /// legacy `None` lot's being the reference; ticker-only only as the « other currency » hint);
+    /// a read failure is its own state, a normalize failure too.
+    pub(super) fn lot_link(
+        &self,
+        ticker: &str,
+        currency: Option<&str>,
+        reference_currency: &str,
+        threshold: Option<&str>,
+    ) -> LotLink {
+        let unlinked = |study| LotLink {
+            study,
+            study_currency: None,
+            price: None,
+            in_sell_zone: false,
+            identity: None,
+        };
+        let s = match self.try_lot_study(ticker, currency, reference_currency) {
+            Err(_) => return unlinked(ReviewStudy::Unavailable),
+            Ok(None) => {
+                // The other-currency cause, read FALLIBLY (#95): a failed lookup is
+                // « indisponible », never a cause-less « aucune étude » that may be false.
+                let other = self
+                    .try_study_id_for_ticker(ticker)
+                    .and_then(|id| match id {
+                        Some(id) => self.try_get_study(id),
+                        None => Ok(None),
+                    });
+                return match other {
+                    Err(_) => unlinked(ReviewStudy::Unavailable),
+                    Ok(other) => unlinked(ReviewStudy::None {
+                        other_currency: other.map(|s| s.native_currency.to_uppercase()),
+                    }),
+                };
+            }
+            Ok(Some(s)) => s,
+        };
+        let price = s.judgment.current_price.map(|m| m.as_decimal());
+        let (last_saved, due_for_review) = self.review_clock(&s, threshold);
+        let study_currency = Some(s.native_currency.to_uppercase());
+        // The study is already read: its snapshot is built directly (THE engine call), so a
+        // normalize failure is its own state — never worded as a read failure.
+        match engine::build_snapshot(&s) {
+            Err(_) => LotLink {
+                study: ReviewStudy::NotComputable(NotComputableFacts {
+                    study_id: s.id,
+                    currency: s.native_currency.to_uppercase(),
+                    current_price: price,
+                    last_saved,
+                    due_for_review,
+                }),
+                study_currency,
+                price,
+                in_sell_zone: false,
+                identity: Some(s.id),
+            },
+            Ok(snapshot) => {
+                let outputs = snapshot.outputs();
+                // The zone / verdict keys of every other surface (viewmodel::engine).
+                let zone = engine::zone_position_key(&outputs.risk_reward, price);
+                LotLink {
+                    study: ReviewStudy::Linked(ReviewStudyFacts {
+                        study_id: s.id,
+                        company_name: s.company_name.clone(),
+                        currency: s.native_currency.to_uppercase(),
+                        verdict: engine::verdict_state(snapshot.verdict()),
+                        low_confidence: outputs.low_confidence,
+                        zone,
+                        current_price: price,
+                        upside_downside: outputs.risk_reward.upside_downside,
+                        relative_value_pct: outputs.valuation.relative_value_pct,
+                        quality_flags: outputs.quality_flags.clone(),
+                        last_saved,
+                        due_for_review,
+                    }),
+                    study_currency,
+                    price,
+                    in_sell_zone: zone == "sell",
+                    identity: Some(s.id),
+                }
+            }
+        }
+    }
+
     /// The portfolio health review (Story 7.2). `Err` on a read FAILURE of the holdings or the
     /// portfolios (the whole view is « indisponible » — no honest partial exists for a roll-up);
     /// a single study's read failure marks THAT row `Unavailable` and the rest stands.
@@ -191,6 +578,15 @@ impl JournalState {
             .collect();
         tickers.sort();
         tickers.dedup();
+        // One study resolution per (ticker, declared currency) — lots sharing both share it.
+        let mut link_cache: BTreeMap<(String, Option<String>), LotLink> = BTreeMap::new();
+        // The studies oldest first — the recency that picks a row's study by identity. A failed
+        // listing leaves it empty: the lots' own reads then fail too (« indisponible »), and a
+        // tie falls to the id — never to a lot's position.
+        let study_order: Vec<Uuid> = self
+            .try_list_studies()
+            .map(|all| all.into_iter().map(|s| s.id).collect())
+            .unwrap_or_default();
         let mut positions = Vec::new();
         let mut due = Vec::new();
         let mut counts = ReviewCounts::default();
@@ -200,7 +596,6 @@ impl JournalState {
                 .filter(|h| h.security_ticker.to_uppercase() == ticker)
                 .collect();
             let first = held[0];
-            let currency = super::effective_currency(first, reference_currency);
             let mut banks: Vec<String> = portfolios
                 .iter()
                 .filter(|p| held.iter().any(|h| h.portfolio_id == p.id))
@@ -214,108 +609,140 @@ impl JournalState {
                 Some(r) => (r.invested, r.share_pct, r.missing_pairs.clone()),
                 None => (None, None, Vec::new()),
             };
-            // The study in the position's currency (#81 / #218); a read failure is its own state.
-            let (study, current_price, in_sell_zone) =
-                match self.try_matched_study_in_currency(&ticker, Some(&currency)) {
-                    Err(_) => (ReviewStudy::Unavailable, None, false),
-                    Ok(None) => {
-                        let other = self
-                            .study_id_for_ticker(&ticker)
-                            .and_then(|id| self.get_study(id))
-                            .map(|s| s.native_currency.to_uppercase());
-                        (
-                            ReviewStudy::None {
-                                other_currency: other,
-                            },
-                            None,
-                            false,
+            // Each LOT's own link — the register's per-row rule (G1 review: never held[0] for
+            // every bank's lot).
+            let mut links: Vec<LotLink> = Vec::new();
+            for h in &held {
+                let declared = h.currency.as_deref().map(str::to_uppercase);
+                let link = link_cache
+                    .entry((ticker.clone(), declared.clone()))
+                    .or_insert_with(|| {
+                        self.lot_link(
+                            &ticker,
+                            declared.as_deref(),
+                            reference_currency,
+                            threshold.as_deref(),
                         )
-                    }
-                    Ok(Some(s)) => match self.snapshot_for(s.id) {
-                        Err(_) => (ReviewStudy::Unavailable, None, false),
-                        Ok(snapshot) => {
-                            let outputs = snapshot.outputs();
-                            let price = s.judgment.current_price.map(|m| m.as_decimal());
-                            let zone = zone_position(&outputs.risk_reward, price);
-                            let verdict = match snapshot.verdict() {
-                                Verdict::Full(_) => "full",
-                                Verdict::Provisional(_) => "provisional",
-                                Verdict::Withheld(_) => "withheld",
-                            };
-                            // The annual-review clock: the latest FR51 snapshot, else creation.
-                            let last_saved: String = self
-                                .try_list_study_history(s.id)
-                                .ok()
-                                .and_then(|h| h.into_iter().map(|e| e.created_at.0).max())
-                                .unwrap_or_else(|| s.created_at.0.clone())
-                                .chars()
-                                .take(10)
-                                .collect();
-                            let due_for_review = threshold
-                                .as_deref()
-                                .is_some_and(|t| last_saved.as_str() < t);
-                            let facts = ReviewStudyFacts {
-                                study_id: s.id,
-                                company_name: s.company_name.clone(),
-                                verdict,
-                                low_confidence: outputs.low_confidence,
-                                zone,
-                                current_price: price,
-                                upside_downside: outputs.risk_reward.upside_downside,
-                                relative_value_pct: outputs.valuation.relative_value_pct,
-                                quality_flags: outputs.quality_flags.clone(),
-                                last_saved,
-                                due_for_review,
-                            };
-                            (ReviewStudy::Linked(facts), price, zone == "sell")
-                        }
-                    },
+                    })
+                    .clone();
+                links.push(link);
+            }
+            let link_refs: Vec<&LotLink> = links.iter().collect();
+            // The row's study by IDENTITY (never the first lot's).
+            let shown = row_link(&link_refs, &study_order);
+            let mixed = mixed_links(&link_refs, shown);
+            // Every lot's stop against its own study, and each lot's trigger keyed by its
+            // holding (the stop takes priority, as per lot in the register). A legacy lot is
+            // presumed in the reference currency (D5): against a study in another currency its
+            // stop is not compared; an unreadable study's lot is not compared either — both
+            // stated (G3 review).
+            let mut stops = Vec::new();
+            let mut lot_triggers = Vec::new();
+            for (h, link) in held.iter().zip(&links) {
+                let declared = h.currency.as_deref().map(str::to_uppercase);
+                // D5 (G1 P review H1): a legacy lot that links no study is not compared against
+                // its same-ticker study in another currency — that hint's currency is named.
+                let hint = match (&link.study, declared.as_deref()) {
+                    (ReviewStudy::None { other_currency }, None) => other_currency.clone(),
+                    _ => None,
                 };
-            // The trailing stop (the first bank's row) and the neutral trigger (core::risk).
-            let stop_level = first
-                .trailing_stop_level
-                .as_deref()
-                .and_then(|s| Decimal::from_str_exact(s).ok());
-            let stop_breached = match (stop_level, current_price) {
-                (Some(level), Some(price)) => steadyinvest_core::risk::stop_breached(level, price),
-                _ => false,
-            };
-            let trigger = match steadyinvest_core::risk::trigger_state(stop_breached, in_sell_zone)
-            {
-                Some(steadyinvest_core::risk::TriggerKind::Stop) => "stop",
-                Some(steadyinvest_core::risk::TriggerKind::Sell) => "sell",
-                None => "",
-            };
-            // Counts + the due list.
+                let stop = lot_stop(
+                    h.trailing_stop_level.as_deref(),
+                    declared.as_deref(),
+                    reference_currency,
+                    &bank_name(h.portfolio_id),
+                    link.study_currency.as_deref().or(hint.as_deref()),
+                    link.price,
+                    matches!(link.study, ReviewStudy::Unavailable),
+                );
+                let breached = stop.as_ref().is_some_and(|s| s.breached);
+                let kind = match steadyinvest_core::risk::trigger_state(breached, link.in_sell_zone)
+                {
+                    Some(steadyinvest_core::risk::TriggerKind::Stop) => Some("stop"),
+                    Some(steadyinvest_core::risk::TriggerKind::Sell) => Some("sell"),
+                    None => None,
+                };
+                lot_triggers.extend(kind.map(|kind| LotTrigger {
+                    holding_id: h.id,
+                    kind,
+                }));
+                stops.extend(stop);
+            }
+            let trigger = position_trigger(&lot_triggers, |_| false);
+            let stop_breached = stops.iter().any(|s| s.breached);
+            let study = links[shown].study.clone();
+            let lot_currencies: Vec<Option<String>> = held
+                .iter()
+                .map(|h| h.currency.as_deref().map(str::to_uppercase))
+                .collect();
+            let currency = row_currency(&study, &lot_currencies);
+            // The position counts read what the row SHOWS (G3 review: a count the user cannot
+            // find on any row is not a fact of the screen) — the other studies' signals / high
+            // zone are named on the row's mixed-links band instead. The due list, a list of
+            // STUDIES, reads every lot's study.
             counts.positions += 1;
-            if let ReviewStudy::Linked(f) = &study {
-                counts.linked += 1;
-                match f.verdict {
-                    "full" => counts.full += 1,
-                    "provisional" => counts.provisional += 1,
-                    _ => counts.withheld += 1,
+            match &study {
+                ReviewStudy::Linked(f) => {
+                    counts.linked += 1;
+                    match f.verdict {
+                        "full" => counts.full += 1,
+                        "provisional" => counts.provisional += 1,
+                        _ => counts.withheld += 1,
+                    }
+                    if !f.quality_flags.is_empty() {
+                        counts.flagged += 1;
+                    }
+                    if is_high_zone(f.zone) {
+                        counts.high_zone += 1;
+                    }
                 }
-                if !f.quality_flags.is_empty() {
-                    counts.flagged += 1;
+                ReviewStudy::NotComputable(_) => {
+                    counts.linked += 1;
+                    counts.not_computable += 1;
                 }
-                if f.zone == "sell" || f.zone == "above" {
-                    counts.high_zone += 1;
+                ReviewStudy::None { .. } | ReviewStudy::Unavailable => {}
+            }
+            // The due list: every distinct study of the lots, the row's first, each once.
+            let mut seen: Vec<Uuid> = Vec::new();
+            let order = std::iter::once(&links[shown]).chain(links.iter());
+            for link in order {
+                let Some(id) = link.identity else { continue };
+                if seen.contains(&id) {
+                    continue;
                 }
-                let reason = if f.due_for_review {
-                    Some("age")
-                } else if f.verdict == "withheld" {
-                    Some("withheld")
-                } else if f.low_confidence {
-                    Some("low_confidence")
-                } else {
-                    None
+                seen.push(id);
+                let label = match (&link.study_currency, mixed.is_some()) {
+                    (Some(c), true) => format!("{ticker} ({c})"),
+                    _ => ticker.clone(),
                 };
-                if let Some(reason) = reason {
+                let entry = match &link.study {
+                    ReviewStudy::Linked(f) => Some((
+                        f.study_id,
+                        f.last_saved.clone(),
+                        due_reasons(
+                            f.last_saved.as_deref(),
+                            f.due_for_review,
+                            Some(f.verdict),
+                            f.low_confidence,
+                        ),
+                    )),
+                    // A study the engine cannot compute is still a study, and always « à
+                    // revoir » (its data must be repaired).
+                    ReviewStudy::NotComputable(f) => Some((
+                        f.study_id,
+                        f.last_saved.clone(),
+                        due_reasons(f.last_saved.as_deref(), f.due_for_review, None, false),
+                    )),
+                    ReviewStudy::None { .. } | ReviewStudy::Unavailable => None,
+                };
+                if let Some((study_id, last_saved, reasons)) = entry
+                    && !reasons.is_empty()
+                {
                     due.push(DueStudy {
-                        ticker: ticker.clone(),
-                        study_id: f.study_id,
-                        last_saved: f.last_saved.clone(),
-                        reason,
+                        ticker: label,
+                        study_id,
+                        last_saved,
+                        reasons,
                     });
                 }
             }
@@ -330,9 +757,11 @@ impl JournalState {
                 share_pct,
                 missing_pairs,
                 study,
-                stop_level,
+                mixed,
+                stops,
                 stop_breached,
                 trigger,
+                lot_triggers,
             });
         }
         counts.due = due.len();
@@ -381,6 +810,10 @@ impl JournalState {
 mod tests {
     use super::*;
 
+    fn d(s: &str) -> Decimal {
+        Decimal::from_str_exact(s).unwrap()
+    }
+
     #[test]
     fn the_review_threshold_is_the_same_day_one_year_earlier() {
         assert_eq!(
@@ -392,5 +825,254 @@ mod tests {
         // same day is not.
         assert!("2025-09-23" < "2025-09-24");
         assert!(("2025-09-24" >= "2025-09-24"));
+    }
+
+    #[test]
+    fn a_failed_history_read_leaves_the_last_save_unknown() {
+        // The latest snapshot wins; an empty history falls back to the creation; a FAILED read
+        // is unknown — never the creation date passed off as the last save.
+        let created = "2024-03-01T10:00:00Z";
+        assert_eq!(
+            last_saved_day::<()>(
+                Ok(vec![
+                    "2025-01-02T00:00:00Z".into(),
+                    "2026-02-03T00:00:00Z".into()
+                ]),
+                created
+            )
+            .as_deref(),
+            Some("2026-02-03")
+        );
+        assert_eq!(
+            last_saved_day::<()>(Ok(Vec::new()), created).as_deref(),
+            Some("2024-03-01")
+        );
+        assert_eq!(last_saved_day(Err("disk"), created), None);
+    }
+
+    #[test]
+    fn every_due_reason_is_kept_in_order() {
+        assert_eq!(
+            due_reasons(Some("2024-01-01"), true, Some("withheld"), true),
+            vec!["age", "withheld", "low_confidence"]
+        );
+        assert_eq!(
+            due_reasons(Some("2026-01-01"), false, Some("provisional"), true),
+            vec!["low_confidence"]
+        );
+        assert!(due_reasons(Some("2026-01-01"), false, Some("full"), false).is_empty());
+        // An unknown last save is its own reason; a study the engine cannot compute too.
+        assert_eq!(
+            due_reasons(None, false, Some("full"), false),
+            vec!["age_unknown"]
+        );
+        assert_eq!(
+            due_reasons(Some("2024-01-01"), true, None, false),
+            vec!["age", "not_computable"]
+        );
+    }
+
+    #[test]
+    fn a_lots_stop_is_read_against_its_own_study_in_its_own_currency() {
+        let chf = Some("CHF");
+        let stop = |study: &str, price: Option<Decimal>| {
+            lot_stop(Some("63"), chf, "CHF", "UBS", Some(study), price, false).unwrap()
+        };
+        let s = stop("CHF", Some(d("60")));
+        assert!(s.breached);
+        assert_eq!(s.uncompared, None);
+        assert_eq!((s.bank.as_str(), s.currency.as_deref()), ("UBS", chf));
+        assert!(!stop("CHF", Some(d("70"))).breached);
+        // A price in another currency is never compared with the stop.
+        assert!(!stop("USD", Some(d("10"))).breached);
+        // An unknown price breaches nothing; no stop is no fact.
+        assert!(!stop("CHF", None).breached);
+        assert_eq!(
+            lot_stop(None, chf, "CHF", "UBS", Some("CHF"), Some(d("1")), false),
+            None
+        );
+    }
+
+    #[test]
+    fn a_stop_that_cannot_be_compared_names_its_cause() {
+        // D5 (Guy, 2026-09-25): a lot without a declared currency is presumed in the reference
+        // currency — compared against a study in it…
+        let s = lot_stop(
+            Some("63"),
+            None,
+            "CHF",
+            "UBS",
+            Some("CHF"),
+            Some(d("60")),
+            false,
+        )
+        .unwrap();
+        assert_eq!(s.currency.as_deref(), Some("CHF"));
+        assert!(s.breached);
+        assert_eq!(s.uncompared, None);
+        // …never against a study in another currency: both facts named.
+        let s = lot_stop(
+            Some("63"),
+            None,
+            "CHF",
+            "UBS",
+            Some("USD"),
+            Some(d("1")),
+            false,
+        )
+        .unwrap();
+        assert!(!s.breached);
+        assert_eq!(
+            s.uncompared,
+            Some(StopUncompared::NoCurrency {
+                study_currency: "USD".to_string()
+            })
+        );
+        // G3 review: a lot whose study could not be read is not compared, and says so.
+        let s = lot_stop(Some("63"), Some("CHF"), "CHF", "UBS", None, None, true).unwrap();
+        assert!(!s.breached);
+        assert_eq!(s.uncompared, Some(StopUncompared::StudyUnreadable));
+    }
+
+    fn link(id: Option<u128>, study: ReviewStudy) -> LotLink {
+        LotLink {
+            study,
+            study_currency: None,
+            price: None,
+            in_sell_zone: false,
+            identity: id.map(Uuid::from_u128),
+        }
+    }
+
+    fn none() -> ReviewStudy {
+        ReviewStudy::None {
+            other_currency: None,
+        }
+    }
+
+    #[test]
+    fn a_rows_study_is_chosen_by_identity_never_by_lot_position() {
+        let old = link(Some(1), ReviewStudy::Unavailable);
+        let new = link(Some(2), ReviewStudy::Unavailable);
+        let order = [Uuid::from_u128(1), Uuid::from_u128(2)];
+        // The newest study wins, whichever lot links it — reordering the lots changes nothing.
+        assert_eq!(row_link(&[&old, &new], &order), 1);
+        assert_eq!(row_link(&[&new, &old], &order), 0);
+        // A lot without a study never hides a lot with one.
+        let bare = link(None, none());
+        assert_eq!(row_link(&[&bare, &old], &order), 1);
+        // Without any study, a failed read wins over « aucune étude ».
+        let failed = link(None, ReviewStudy::Unavailable);
+        assert_eq!(row_link(&[&bare, &failed], &order), 1);
+        assert_eq!(row_link(&[&failed, &bare], &order), 0);
+        // An unlisted identity ranks below a listed one.
+        let stray = link(Some(9), ReviewStudy::Unavailable);
+        assert_eq!(row_link(&[&stray, &old], &order), 1);
+    }
+
+    #[test]
+    fn an_identity_tie_falls_to_the_id_whatever_the_lot_order() {
+        // Two identities of equal rank (neither listed — a failed listing): the larger id wins,
+        // in either lot order — never the first lot.
+        let a = link(Some(3), none());
+        let b = link(Some(7), none());
+        assert_eq!(row_link(&[&a, &b], &[]), 1);
+        assert_eq!(row_link(&[&b, &a], &[]), 0);
+        // The same study twice is one identity: either index shows the same study.
+        let a2 = link(Some(3), none());
+        let shown = row_link(&[&a, &a2], &[]);
+        assert_eq!([&a, &a2][shown].identity, a.identity);
+    }
+
+    #[test]
+    fn a_dismissed_lots_trigger_is_not_shown_the_stop_first() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let lots = [
+            LotTrigger {
+                holding_id: a,
+                kind: "stop",
+            },
+            LotTrigger {
+                holding_id: b,
+                kind: "sell",
+            },
+        ];
+        assert_eq!(position_trigger(&lots, |_| false), "stop");
+        assert_eq!(position_trigger(&lots, |id| id == a), "sell");
+        assert_eq!(position_trigger(&lots, |_| true), "");
+        assert_eq!(position_trigger(&[], |_| false), "");
+    }
+
+    fn facts(id: u128, currency: &str, flags: usize, zone: &'static str) -> ReviewStudy {
+        ReviewStudy::Linked(ReviewStudyFacts {
+            study_id: Uuid::from_u128(id),
+            company_name: None,
+            currency: currency.into(),
+            verdict: "full",
+            low_confidence: false,
+            zone,
+            current_price: None,
+            upside_downside: UpsideDownside::Unknown,
+            relative_value_pct: None,
+            quality_flags: vec![QualityFlagKey::RoeTrendDeclining; flags],
+            last_saved: None,
+            due_for_review: false,
+        })
+    }
+
+    fn study_link(id: u128, currency: &str, flags: usize, zone: &'static str) -> LotLink {
+        LotLink {
+            study_currency: Some(currency.into()),
+            ..link(Some(id), facts(id, currency, flags, zone))
+        }
+    }
+
+    #[test]
+    fn distinct_links_are_stated_only_when_the_lots_disagree() {
+        let chf = study_link(1, "CHF", 0, "");
+        let usd = study_link(2, "USD", 0, "");
+        assert_eq!(mixed_links(&[&chf, &chf], 0), None, "one shared study");
+        let m = mixed_links(&[&chf, &usd, &chf], 1).unwrap();
+        assert_eq!(m.currencies, vec!["CHF", "USD"]);
+        assert!(!m.no_study && !m.unreadable);
+        // « aucune étude » and « indisponible » are two facts — never merged into one « — ».
+        let bare = link(None, none());
+        let failed = link(None, ReviewStudy::Unavailable);
+        let m = mixed_links(&[&chf, &bare, &failed], 0).unwrap();
+        assert_eq!(m.currencies, vec!["CHF"]);
+        assert!(m.no_study && m.unreadable);
+        // A lot without a study beside an unreadable one: still two facts.
+        let m = mixed_links(&[&bare, &failed], 1).unwrap();
+        assert!(m.no_study && m.unreadable && m.currencies.is_empty());
+    }
+
+    #[test]
+    fn the_other_studies_signals_and_high_zone_are_named_never_the_rows_own() {
+        let shown = study_link(2, "USD", 1, "above");
+        let other = study_link(1, "CHF", 2, "sell");
+        let m = mixed_links(&[&other, &shown], 1).unwrap();
+        assert_eq!(m.other_flagged, vec![("CHF".to_string(), 2)]);
+        assert_eq!(m.other_high_zone, vec!["CHF".to_string()]);
+        let quiet = study_link(1, "CHF", 0, "buy");
+        let m = mixed_links(&[&quiet, &shown], 1).unwrap();
+        assert!(m.other_flagged.is_empty() && m.other_high_zone.is_empty());
+    }
+
+    #[test]
+    fn a_rows_currency_is_its_studys_else_every_lots() {
+        assert_eq!(
+            row_currency(&facts(1, "USD", 0, ""), &[Some("CHF".into())]),
+            "USD"
+        );
+        // Without a study: every lot's currency, a lot declaring none kept as « — ».
+        let lots = [
+            Some("CHF".into()),
+            None,
+            Some("CHF".into()),
+            Some("EUR".into()),
+        ];
+        assert_eq!(row_currency(&none(), &lots), "CHF · — · EUR");
+        assert_eq!(row_currency(&ReviewStudy::Unavailable, &[None, None]), "—");
     }
 }

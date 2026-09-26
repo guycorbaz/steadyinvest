@@ -5,12 +5,12 @@
 //! d'usage) »; any other failure reads « indisponible » on its row only. « Ouvrir l'examen » opens
 //! the row's full examination (kept whole — no second fetch). Nothing is written.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, VecModel};
 use steadyinvest_ingestion::{FetchedFinancials, IngestionError};
 
 use crate::provider::ProviderChoice;
@@ -20,7 +20,7 @@ use crate::viewmodel::screening::{RowState, failed_state, screening_row_view};
 use crate::wiring::Session;
 use crate::wiring::fetch::resolve_chain;
 use crate::wiring::quick_screen::{
-    QuickScreenSession, session_from_fetch, session_from_study, show,
+    QuickScreenSession, has_analysis_years, session_from_fetch, session_from_study, show,
 };
 use crate::{MainWindow, ScreeningRow, Watchlist};
 
@@ -69,6 +69,9 @@ fn push(ui: &MainWindow, session: &ScreeningSession, format: NumberFormat) {
                 pe_position: v.pe_position.into(),
                 price_vs_high: v.price_vs_high.into(),
                 has_study: v.has_study,
+                years_gap: v.years_gap.into(),
+                sales_rate_gap: v.sales_rate_gap.into(),
+                eps_rate_gap: v.eps_rate_gap.into(),
             }
         })
         .collect();
@@ -86,69 +89,118 @@ fn push(ui: &MainWindow, session: &ScreeningSession, format: NumberFormat) {
     w.set_screening_quota(session.stop.load(Ordering::Relaxed));
 }
 
-/// A row's fetch result (called from the fetch outcome handler). A stale batch is ignored.
-#[allow(clippy::too_many_arguments)]
+/// Re-render the criblage card of the run of the moment — running or finished — in `format`
+/// (G1 final review, re-render completeness: a number-format change re-spells its rates).
+pub(crate) fn rerender_screening(
+    ui: &MainWindow,
+    slot: &RefCell<Option<ScreeningSession>>,
+    format: NumberFormat,
+) {
+    if let Some(session) = slot.borrow().as_ref() {
+        push(ui, session, format);
+    }
+}
+
+/// One row's fetch outcome: `quota` = this row latched the run's quota stop.
+pub(crate) struct RowOutcome {
+    pub(crate) result: Result<FetchedFinancials, IngestionError>,
+    pub(crate) effective: ProviderChoice,
+    pub(crate) quota: bool,
+}
+
+/// A row's fetch result (called from the fetch outcome handler): `None` = drained behind the
+/// quota stop. A stale batch is ignored, and so is a result for a row that is not waiting for one
+/// (G1 review: a studied row, or one already done, is never overwritten).
 pub(crate) fn on_fetched(
     ui: &MainWindow,
     format: NumberFormat,
     slot: &Rc<RefCell<Option<ScreeningSession>>>,
     batch: u64,
     index: usize,
-    result: Option<Result<FetchedFinancials, IngestionError>>,
-    effective: ProviderChoice,
+    outcome: Option<RowOutcome>,
 ) {
     let mut guard = slot.borrow_mut();
     let Some(session) = guard.as_mut().filter(|s| s.batch == batch) else {
         return;
     };
-    let Some(row) = session.rows.get_mut(index) else {
+    let Some(row) = session
+        .rows
+        .get_mut(index)
+        .filter(|r| matches!(r.state, RowState::Pending))
+    else {
         return;
     };
-    row.state = match result {
-        // Skipped behind the quota stop.
-        None => RowState::NotExamined,
-        Some(Ok(fetched)) if fetched.canonical.years.is_empty() => RowState::Unavailable,
-        Some(Ok(fetched)) => {
+    row.state = match outcome {
+        // Skipped behind the quota stop — or the row that latched it (whatever the chain's final
+        // error, the cause named is the usage limit, like the rows behind it).
+        None
+        | Some(RowOutcome {
+            result: Err(_),
+            quota: true,
+            ..
+        }) => RowState::NotExamined,
+        Some(RowOutcome {
+            result: Ok(fetched),
+            ..
+        }) if !has_analysis_years(&fetched) => RowState::Unavailable,
+        Some(RowOutcome {
+            result: Ok(fetched),
+            effective,
+            ..
+        }) => {
             // A watched ticker carries no currency: the examination names none (and offers no
             // « Créer l'étude » — Études' « Examiner un titre » asks for one).
             let mut s = session_from_fetch(&row.ticker, "", fetched, effective);
             s.from_watchlist = true;
             RowState::Examined(Box::new(s))
         }
-        Some(Err(error)) => failed_state(&error),
+        Some(RowOutcome {
+            result: Err(error), ..
+        }) => failed_state(&error),
     };
     push(ui, session, format);
 }
 
 /// Build the run's rows: a studied ticker (linked, else the newest same-ticker study) examined at
 /// once from its saved years; the others `Pending` — or `Unavailable` when no provider can fetch.
-fn plan(state: &JournalState, can_fetch: bool) -> Vec<ScreeningEntry> {
-    state
-        .list_watch_items()
+/// Issue #95: a watchlist that cannot be read is an `Err` (never « 0 valeur(s) »), and a row whose
+/// study lookup fails is `Unavailable` — never fetched as if it had no study (that spends quota).
+fn plan(state: &JournalState, can_fetch: bool) -> Result<Vec<ScreeningEntry>, &'static str> {
+    let items = state
+        .try_list_watch_items()
+        .map_err(|_| state::MSG_SCREENING_LIST_UNREADABLE)?;
+    Ok(items
         .into_iter()
         .map(|w| {
-            let study = w
-                .study_id
-                .or_else(|| state.study_id_for_ticker(&w.security_ticker))
-                .and_then(|id| state.get_study(id));
-            let state = match &study {
-                Some(study) => match session_from_study(study) {
-                    Ok(mut s) => {
-                        s.from_watchlist = true;
-                        RowState::Examined(Box::new(s))
-                    }
-                    Err(_) => RowState::Unavailable,
-                },
-                None if can_fetch => RowState::Pending,
-                None => RowState::Unavailable,
+            let study = match w.study_id {
+                Some(id) => Ok(Some(id)),
+                None => state.try_study_id_for_ticker(&w.security_ticker),
+            }
+            .and_then(|id| match id {
+                Some(id) => state.try_get_study(id),
+                None => Ok(None),
+            });
+            let (has_study, state) = match &study {
+                Ok(Some(study)) => (
+                    true,
+                    match session_from_study(study) {
+                        Ok(mut s) => {
+                            s.from_watchlist = true;
+                            RowState::Examined(Box::new(s))
+                        }
+                        Err(_) => RowState::Unavailable,
+                    },
+                ),
+                Ok(None) if can_fetch => (false, RowState::Pending),
+                Ok(None) | Err(_) => (false, RowState::Unavailable),
             };
             ScreeningEntry {
                 ticker: w.security_ticker.to_uppercase(),
-                has_study: study.is_some(),
+                has_study,
                 state,
             }
         })
-        .collect()
+        .collect())
 }
 
 pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
@@ -156,17 +208,21 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
         journal_state,
         config,
         quick_screen,
+        quick_screen_ready,
         screening,
         fetch_tx,
         ..
     } = s;
     {
-        // « Examiner la liste ».
+        // « Examiner la liste ». The batch number comes from a counter that outlives the run
+        // (G1 review): after « Fermer le criblage » empties the slot, the next run still gets a NEW
+        // number, so a late outcome of the closed run can never match it.
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         let config = Rc::clone(config);
         let slot = Rc::clone(screening);
         let fetch_tx = fetch_tx.clone();
+        let last_batch = Rc::new(Cell::new(0u64));
         ui.global::<Watchlist>().on_screen_list(move || {
             let ui = ui_weak.unwrap();
             let format = config.borrow().number_format;
@@ -179,16 +235,20 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
                     steadyinvest_ingestion::FieldKind::Fundamentals,
                 )
             };
-            let rows = plan(&journal_state.borrow(), !chain.is_empty());
+            let rows = match plan(&journal_state.borrow(), !chain.is_empty()) {
+                Ok(rows) => rows,
+                Err(message) => {
+                    crate::wiring::dialog::refuse(&ui, message);
+                    return;
+                }
+            };
             // A run in flight is superseded: its queued rows drain unfetched, its late results
             // are ignored (another batch number).
-            let batch = match slot.borrow().as_ref() {
-                Some(previous) => {
-                    previous.stop.store(true, Ordering::Relaxed);
-                    previous.batch + 1
-                }
-                None => 1,
-            };
+            if let Some(previous) = slot.borrow().as_ref() {
+                previous.stop.store(true, Ordering::Relaxed);
+            }
+            let batch = last_batch.get() + 1;
+            last_batch.set(batch);
             let stop = Arc::new(AtomicBool::new(false));
             let unfetchable = chain.is_empty()
                 && rows
@@ -241,6 +301,7 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
         let config = Rc::clone(config);
         let slot = Rc::clone(screening);
         let quick_screen = Rc::clone(quick_screen);
+        let kept = Rc::clone(quick_screen_ready);
         ui.global::<Watchlist>().on_open_screening(move |index| {
             let ui = ui_weak.unwrap();
             let session = slot
@@ -253,7 +314,16 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
                 });
             let Some(session) = session else { return };
             let format = config.borrow().number_format;
-            show(&ui, &journal_state.borrow(), format, &quick_screen, session);
+            // G1 final review: an « Examiner » fetch in flight is NOT cancelled in silence — its
+            // result is kept and named on the studies list (`quick_screen::lands_now`).
+            show(
+                &ui,
+                &journal_state.borrow(),
+                format,
+                &quick_screen,
+                &kept,
+                session,
+            );
             // The examination screen lives under Études.
             ui.set_current_screen(0);
         });
@@ -263,15 +333,61 @@ pub(crate) fn wire_screening(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let slot = Rc::clone(screening);
         ui.global::<Watchlist>().on_close_screening(move || {
-            let ui = ui_weak.unwrap();
-            if let Some(previous) = slot.borrow_mut().take() {
-                previous.stop.store(true, Ordering::Relaxed);
-            }
-            let w = ui.global::<Watchlist>();
-            w.set_screening_shown(false);
-            w.set_screening_running(false);
-            w.set_screening_rows(ModelRc::new(VecModel::from(Vec::<ScreeningRow>::new())));
-            w.set_notice(SharedString::new());
+            close_screening(&ui_weak.unwrap(), &slot);
         });
+    }
+}
+
+/// Stop the run of the moment (its queued rows drain unfetched, its late results find no
+/// session) and empty the slot. `true` when there was a run. The batch counter is NOT here: it
+/// outlives the run (it lives in `wire_screening`), so the next run still gets a new number.
+fn stop_run(slot: &RefCell<Option<ScreeningSession>>) -> bool {
+    match slot.borrow_mut().take() {
+        Some(previous) => {
+            previous.stop.store(true, Ordering::Relaxed);
+            true
+        }
+        None => false,
+    }
+}
+
+/// End the criblage: stop the run, empty the slot, hide the card — « Fermer le criblage », and
+/// the dossier-switch reset (G1 G: a run of the previous dossier never lands in the next one).
+pub(crate) fn close_screening(ui: &MainWindow, slot: &RefCell<Option<ScreeningSession>>) {
+    stop_run(slot);
+    let w = ui.global::<Watchlist>();
+    w.set_screening_shown(false);
+    w.set_screening_running(false);
+    w.set_screening_done(0);
+    w.set_screening_total(0);
+    w.set_screening_quota(false);
+    // The watchlist's notice slot is left alone (F4): nothing the criblage raised lives
+    // there — its refusals go through the dialog.
+    w.set_screening_rows(ModelRc::new(VecModel::from(Vec::<ScreeningRow>::new())));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stopping_a_run_latches_its_stop_flag_and_empties_the_slot() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let slot = RefCell::new(Some(ScreeningSession {
+            batch: 7,
+            rows: vec![ScreeningEntry {
+                ticker: "NESN.SW".into(),
+                has_study: false,
+                state: RowState::Pending,
+            }],
+            stop: Arc::clone(&stop),
+        }));
+        assert!(stop_run(&slot));
+        // The worker's queued rows see the latch and drain unfetched.
+        assert!(stop.load(Ordering::Relaxed));
+        // A late outcome of the stopped run finds no session to land in.
+        assert!(slot.borrow().is_none());
+        // Nothing to stop: a no-op, never a panic.
+        assert!(!stop_run(&slot));
     }
 }

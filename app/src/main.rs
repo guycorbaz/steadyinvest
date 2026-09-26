@@ -102,11 +102,13 @@ fn main() -> Result<(), slint::PlatformError> {
     // injected sources (ADD15). This is the first time the app opens the journal — Story 2.1
     // deliberately did not. Failure degrades to a usable journal-less state, never a crash.
     let configured = config.borrow().journal_path.clone();
-    let (journal_state, startup_notice) = JournalState::open_or_create(
+    let (mut journal_state, startup_notice) = JournalState::open_or_create(
         configured.as_deref(),
         Box::new(SystemClock),
         Box::new(UuidGen),
     );
+    // G1 I: the rails read typed amounts under the user's number format.
+    journal_state.set_number_format(config.borrow().number_format);
     // Persist the resolved path so the same journal reopens next launch (only when it changed).
     {
         let resolved = journal_state.path().map(Path::to_path_buf);
@@ -201,17 +203,10 @@ fn main() -> Result<(), slint::PlatformError> {
             .collect();
         ui.global::<Holdings>()
             .set_supported_currencies(ModelRc::new(VecModel::from(supported)));
-        // Story 4.5 (FR42): mirror the default trailing-stop % (validated; "" when none) so the
-        // set-stop control pre-fills it.
-        prefs.set_default_trailing_stop_pct(
-            cfg.default_trailing_stop_pct_or_none()
-                .unwrap_or_default()
-                .into(),
-        );
-        // Story 6.4 (FR41): mirror the default dividend withholding rate (always a value; 35 = CH).
-        prefs.set_withholding_rate_pct(cfg.withholding_rate_pct_or_default().into());
-        // Story 6.7 (FR45): mirror the concentration threshold + the diversify-by-size table
-        // (validated effective values) into Prefs + Holdings before the first render.
+        // Story 4.5 (FR42) / 6.4 (FR41) / 6.7 (FR45): mirror the default trailing-stop % ("" when
+        // none — the set-stop control pre-fills it), the default dividend withholding rate, the
+        // concentration threshold + the diversify-by-size table (validated effective values, in
+        // the user's number format — G1 I) into Prefs + Holdings before the first render.
         wiring::prefs::mirror_risk_settings(&ui, &cfg);
         // Story 6.9 (FR26): mirror the per-field-type fallback providers.
         wiring::prefs::mirror_fallback_prefs(&ui, &cfg);
@@ -242,7 +237,9 @@ fn main() -> Result<(), slint::PlatformError> {
             config.borrow().number_format,
         );
         if let Some(notice) = &startup_notice {
-            ui.global::<Studies>().set_notice(notice.clone().into());
+            // Through the list slot's F4 owner (G1 P): a standing state — a later gesture's
+            // outcome may replace it (G1 P review M4).
+            wiring::list_notice::standing(&ui, wiring::list_notice::Source::Startup, notice);
         }
         // Story 5.5: record the startup journal in the recent list (so it appears + its last-seen
         // pointer is set) and render the location panel.
@@ -282,13 +279,17 @@ fn main() -> Result<(), slint::PlatformError> {
         drag_moved: Rc::clone(&drag_moved),
         compare_study: Rc::clone(&compare_study),
         quick_screen: Rc::clone(&quick_screen),
+        quick_screen_ready: Rc::new(RefCell::new(None)),
+        quick_screen_request: Rc::new(std::cell::Cell::new(0)),
         screening: Rc::new(RefCell::new(None)),
         holding_freshness: Rc::clone(&holding_freshness),
         holding_dismissed: Rc::clone(&holding_dismissed),
         refresh_pending: Rc::clone(&refresh_pending),
         refresh_total: Rc::clone(&refresh_total),
         fetch_cancel,
+        dossier_generation: Rc::new(std::cell::Cell::new(0)),
     };
+    wiring::dialog::wire_dialog(&ui);
     wiring::fetch::wire_fetch(&ui, &session);
     wiring::studies::wire_studies(&ui, &session);
     wiring::overlays::wire_overlays(&ui, &session);

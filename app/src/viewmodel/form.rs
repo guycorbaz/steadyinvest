@@ -1,7 +1,7 @@
 //! Faithful-form view-model adapter (Story 2.3 read-only display → Story 2.4 editable entry): map a
 //! `contract::Study` into the Slint form structs the §1–§5 SSG layout renders. **Presentation only**
 //! — nothing here calculates (Cardinal Rule). The number-shaped work 2.4 adds is *parsing* on the way
-//! IN ([`crate::viewmodel::format::parse_amount`], in `state.rs`), never arithmetic here.
+//! IN ([`crate::viewmodel::format::read_number`], in `state.rs`), never arithmetic here.
 //!
 //! The load-bearing rails:
 //! - **money crosses as an already-formatted string**, via the 2.1 [`format_amount`] helper — never an

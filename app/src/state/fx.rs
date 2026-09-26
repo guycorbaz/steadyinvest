@@ -26,11 +26,22 @@ use uuid::Uuid;
 impl JournalState {
     /// The stored rates, deterministic order (pair, most-recent date first) — the Réglages panel
     /// read. `[]` without a journal or on a read failure (a display surface).
+    /// Test-only since the G1 final review: the panel reads [`Self::try_list_fx_rates`].
+    #[cfg(test)]
     pub fn list_fx_rates(&self) -> Vec<FxRateItem> {
-        self.journal
-            .as_ref()
-            .and_then(|j| j.list_fx_rates().ok())
-            .unwrap_or_default()
+        self.try_list_fx_rates().unwrap_or_default()
+    }
+
+    /// Fallible [`Self::list_fx_rates`] for the Réglages panel (G1 final review, M5): `Err` on a
+    /// read failure — « indisponible », never the empty-looking « aucun taux ».
+    pub fn try_list_fx_rates(&self) -> Result<Vec<FxRateItem>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        journal.list_fx_rates().map_err(|error| {
+            tracing::warn!("list_fx_rates failed: {error}");
+            error.to_string()
+        })
     }
 
     /// The FOREIGN currencies in use (Story 6.5, AC3): the effective currencies of the ACTIVE
@@ -66,7 +77,10 @@ impl JournalState {
         date_input: &str,
         reference_currency: &str,
     ) -> Result<(), String> {
-        self.upsert_fx_rate_from(base, rate_input, date_input, reference_currency, "manuel")
+        // The typed rate reads under the user's number format (G1 I); a provider rate below is
+        // already a `Decimal` and never goes through the typed-input reading.
+        let rate = self.read_typed(rate_input, MSG_FX_INVALID_RATE);
+        self.upsert_fx_rate_from(base, rate, date_input, reference_currency, "manuel")
     }
 
     /// Apply one PROVIDER-fetched rate (Story 6.5, AC3): `base → quote` at the fetched value,
@@ -82,13 +96,7 @@ impl JournalState {
         session_date: Option<&str>,
         source: &str,
     ) -> Result<(), String> {
-        self.upsert_fx_rate_from(
-            base,
-            &rate.normalize().to_string(),
-            session_date.unwrap_or(""),
-            quote,
-            source,
-        )
+        self.upsert_fx_rate_from(base, Ok(rate), session_date.unwrap_or(""), quote, source)
     }
 
     /// The shared validated upsert: normalize the inputs, mint id/stamp (ADD15), one persistence
@@ -96,7 +104,7 @@ impl JournalState {
     fn upsert_fx_rate_from(
         &mut self,
         base: &str,
-        rate_input: &str,
+        rate: Result<Decimal, String>,
         date_input: &str,
         quote: &str,
         source: &str,
@@ -112,8 +120,7 @@ impl JournalState {
         if !crate::config::is_supported_currency(&base) {
             return Err(MSG_FX_INVALID_CURRENCY.to_string());
         }
-        let rate = Decimal::from_str_exact(rate_input.trim())
-            .ok()
+        let rate = Some(rate?)
             .filter(|r| r.is_sign_positive() && !r.is_zero())
             .ok_or(MSG_FX_INVALID_RATE.to_string())?;
         let now = self.clock.now();

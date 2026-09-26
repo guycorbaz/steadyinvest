@@ -14,6 +14,7 @@ pub(crate) mod fx;
 pub(crate) mod holdings;
 pub(crate) mod journal;
 pub(crate) mod judgment;
+pub(crate) mod list_notice;
 pub(crate) mod overlays;
 pub(crate) mod prefs;
 pub(crate) mod push;
@@ -22,6 +23,7 @@ pub(crate) mod replacement;
 pub(crate) mod review;
 pub(crate) mod screening;
 pub(crate) mod studies;
+pub(crate) mod study_notice;
 pub(crate) mod watchlist;
 
 use std::cell::RefCell;
@@ -58,6 +60,14 @@ pub(crate) struct Session {
     /// the objective changes, to export) and, after a fetch, the financials « Créer l'étude »
     /// reuses. Session-only, never persisted.
     pub(crate) quick_screen: Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
+    /// Story 7.3 (G1 final review): an « Examiner » outcome (result or failure) that arrived while
+    /// the studies list was not what the reader had on screen — KEPT here (never lost, never laid
+    /// over an open study, comparison or examination) and named on the list's card; its lifecycle
+    /// is `quick_screen::kept_after`.
+    pub(crate) quick_screen_ready: Rc<crate::wiring::quick_screen::KeptSlot>,
+    /// Story 7.3 (G1 review): the identity of the latest examination request — a fetch result
+    /// whose id is not this one was superseded (a dossier change) and is dropped.
+    pub(crate) quick_screen_request: Rc<std::cell::Cell<u64>>,
     /// Story 7.3 (PR 2): the watchlist's criblage run of the moment (rows + batch + quota latch).
     /// Session-only, never persisted.
     pub(crate) screening: Rc<RefCell<Option<crate::wiring::screening::ScreeningSession>>>,
@@ -70,6 +80,12 @@ pub(crate) struct Session {
     /// Issue #100: the shared worker cancel flag — raised by a Cancel intent to drain the current
     /// batch, lowered when a new batch is enqueued.
     pub(crate) fetch_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// G1 final review (M1): the open dossier's GENERATION — bumped by every dossier change (open,
+    /// create, recent, reclaim, restore, a lost journal), through `journal::clear_dossier_session`.
+    /// A study fetch is stamped with it at enqueue; a result stamped with an older one belongs to
+    /// a dossier no longer open (a restore keeps the study ids, so the id alone cannot tell) and is
+    /// dropped unwritten.
+    pub(crate) dossier_generation: Rc<std::cell::Cell<u64>>,
 }
 
 /// Persist `config`, surfacing (not swallowing) a failure — a config that cannot be written is
@@ -80,6 +96,28 @@ pub(crate) fn persist(path: Option<&PathBuf>, config: &AppConfig) {
         let message = format!("app-config save to {} failed: {error}", path.display());
         tracing::warn!("{message}");
         eprintln!("steadyinvest: {message}");
+    }
+}
+
+/// Close the screens that sit over Études — the comparison and the examen rapide — through their
+/// own close paths, the reader having chosen another destination (G1 G): the nav rail's
+/// « Études », and every programmatic route to Études that is not the criblage's « Ouvrir
+/// l'examen » (Revue's « Ouvrir l'étude », the candidates panel's « Ouvrir l'étude » and « Aller
+/// aux études »). Without it, an examination left open hides the study just opened.
+pub(crate) fn close_studies_overlays(
+    ui: &crate::MainWindow,
+    state: &JournalState,
+    quick_screen: &Rc<RefCell<Option<crate::wiring::quick_screen::QuickScreenSession>>>,
+) {
+    use slint::ComponentHandle;
+    crate::wiring::comparison::close_screen(ui);
+    if ui.global::<crate::Studies>().get_screen_open() {
+        crate::wiring::quick_screen::close_screen(
+            ui,
+            state,
+            quick_screen,
+            crate::wiring::quick_screen::CloseVia::NavRail,
+        );
     }
 }
 
@@ -96,6 +134,7 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
         config,
         holding_freshness,
         holding_dismissed,
+        quick_screen,
         ..
     } = s;
     let ui_weak = ui.as_weak();
@@ -103,13 +142,20 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
     let config = std::rc::Rc::clone(config);
     let holding_freshness = std::rc::Rc::clone(holding_freshness);
     let holding_dismissed = std::rc::Rc::clone(holding_dismissed);
+    let quick_screen = std::rc::Rc::clone(quick_screen);
     ui.on_screen_activated(move |index| {
         let ui = ui_weak.unwrap();
         match index {
-            // Études: the list's per-row §5 potential / « à compléter » / zone re-derive from the
-            // CURRENT studies (2026-07-12: they were startup-only — finishing an analysis and
-            // coming back showed stale rows).
-            0 => crate::wiring::studies::refresh_studies(&ui, &journal_state.borrow()),
+            // Études: the rail is the « back to the list » gesture — the comparison and the
+            // examination close through their own close paths (G1 G: the rail no longer writes
+            // their flags behind Rust's back), then the list's per-row §5 potential /
+            // « à compléter » / zone re-derive from the CURRENT studies (2026-07-12: they were
+            // startup-only — finishing an analysis and coming back showed stale rows).
+            0 => {
+                let state = journal_state.borrow();
+                close_studies_overlays(&ui, &state, &quick_screen);
+                crate::wiring::studies::refresh_studies(&ui, &state);
+            }
             // Liste de suivi: the per-item buy-zone flags re-derive from the CURRENT studies.
             1 => crate::wiring::watchlist::refresh_watchlist(&ui, &journal_state.borrow()),
             // Portefeuille: zones/prices/triggers + the 6.7/6.8 blocks re-derive (this also
@@ -125,12 +171,18 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
                 );
             }
             // Revue (Story 7.2): the whole roll-up re-derives on arrival.
-            3 => crate::wiring::review::push_review(
-                &ui,
-                &journal_state.borrow(),
-                &holding_freshness.borrow(),
-                &config.borrow(),
-            ),
+            // The export outcome belongs to the visit it reported on: cleared on arrival, never by
+            // an async re-push (G3 review).
+            3 => {
+                crate::wiring::review::clear_notice(&ui);
+                crate::wiring::review::push_review(
+                    &ui,
+                    &journal_state.borrow(),
+                    &holding_freshness.borrow(),
+                    &holding_dismissed.borrow(),
+                    &config.borrow(),
+                );
+            }
             _ => {}
         }
     });

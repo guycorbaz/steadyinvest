@@ -98,3 +98,25 @@ Gates green: `cargo fmt --all --check`, `cargo clippy --all-targets --all-featur
 
 ### Change Log
 - 2026-06-30 — Story 5.6 implemented (faithful, neutral, greyscale study PDF via `pdf-writer`; the single `Study → snapshot` construction relocated to `report::form`, re-exported by `app`). 3-layer review: 4 patches, 1 defer (#74). 596 tests; all gates green. Status → done. **Closes Epic 5.**
+
+### Review Findings — G1 final review (area 5, 2026-09-25)
+
+The study PDF and its export wiring, reviewed on `integ/g1-final` (the earlier G1 findings of the
+study PDF, from PR #216, are recorded with 7.5 in the 7.3 record). Line numbers are those of
+`integ/g1-final`.
+
+- [x] [Review][Patch] §4 with the current price absent read « hors de la plage prévue » — **the price is said absent, the zone bar draws no marker; the place is read off the price and the bounds** [report/src/pdf.rs:474-478,840-847] — pre-existing
+- [x] [Review][Patch] Chart lines bridge missing years and non-plottable (≤ 0) EPS — **drawn run by run, broken at a gap or a value the log scale cannot hold** [report/src/pdf.rs:1608-1618,1767-1778]
+- [x] [Review][Patch] Study PDF export: a read / render failure reported as « L'enregistrement a échoué » — **unreadable / missing / data that do not prepare, each named (MSG_STUDY_PDF_UNRENDERABLE)** [app/src/wiring/studies.rs:481-491]
+- [x] [Review][Patch] Export success notice can overwrite a list-slot failure (F4); write failure not via `refuse` — **a typed list-slot helper (`wiring::list_notice`, source + kind, the `study_notice` pattern): export, import and archive / unarchive / delete outcomes replace an in-progress banner or another outcome, never a sibling's failure, nor a notice written outside the helper; write failures refused with MSG_EXPORT_WRITE_FAILED, the OS cause logged** [app/src/wiring/studies.rs:462,512-516,535,782] — fetch.rs's list-slot writes move onto the helper in their own branch
+- [x] [Review][Patch] An isolated point is not drawn; the first year's bar sits on the frame edge — **a lone point is a dot; half a year of room at each end of the axis (`year_domain`)**
+- [x] [Review][Patch] The PDF drops trailing zeros the screen keeps — **`round_for_display` spelled as is, no `normalize`; the `format_scaled` comment corrected (at most the field's scale, never padded)** [report/src/pdf.rs:666, app/src/viewmodel/format.rs:119]
+- [x] [Review][Patch] The header « Données » is elided and may lose « et saisie manuelle » — **the provider list on the first line, « et saisie manuelle » whole on the second** [report/src/pdf.rs:1314]
+- [x] [Review][Patch] The zone-bar marker is pinned on the edge when the price is out of range — **an arrow leaves the bar through that edge, the caption (same baseline as inside) says « sous / au-dessus de la plage »; the §4 line names below / above** [report/src/pdf.rs:1895-1911]
+- [x] [Review][Patch] §3 notes / summary lines can be orphaned on the next page — **§3 (`price_earnings_section`) reserved as one block when a page holds it; the notes move together otherwise** [report/src/pdf.rs:372-403]
+- [x] [Review][Patch] Header « Date » is the creation date — **labelled « Créée le », as the screen does; the comparison PDF carries the same creation date per study** [report/src/pdf.rs:141] — pre-existing
+- [x] [Review][Patch] A picked file name without `.pdf` is kept (« etude-NESN.SW » has an extension) — **`.pdf` appended unless the name ends in it (« etude. » → « etude.pdf », « .pdf » kept); a completed name that is already taken is refused (MSG_EXPORT_NAME_TAKEN), never overwritten in silence** [app/src/wiring/studies.rs:505-511]
+- [x] [Review][Defer] A non-WinAnsi company name prints « ??? » — deferred to the layout debt (G6)
+
+Fixed in PR N (G1, branch `fix/g1-n-study-pdf`, with its G3 review): the items checked above.
+Posture: USER_FACING_MESSAGES 158 → 161.

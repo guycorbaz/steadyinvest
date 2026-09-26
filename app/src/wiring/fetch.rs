@@ -14,8 +14,10 @@ use zeroize::Zeroizing;
 use crate::provider::ProviderChoice;
 use crate::wiring::Session;
 use crate::wiring::holdings::{HoldingFreshness, mark_holding_stale, refresh_holdings};
+use crate::wiring::list_notice;
 use crate::wiring::push::{display_timestamp, push_form};
 use crate::wiring::studies::refresh_studies;
+use crate::wiring::study_notice::{self, Source};
 use crate::{Fx, Holdings, MainWindow, Prefs, Studies};
 use crate::{fetch, keychain, state};
 
@@ -102,6 +104,37 @@ pub(crate) fn configured_fallback_missing_key(
     (fallback.requires_key() && !keychain::has_key(fallback).unwrap_or(false)).then_some(fallback)
 }
 
+/// Where a study fetch result goes (G1 final review M1/M5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StudyFetchRoute {
+    /// Asked in a dossier no longer open: dropped — nothing written, nothing said.
+    Stale,
+    /// The fetched study is not the one open (closed, another opened, the demo): applied by id,
+    /// said in the list's slot.
+    List,
+    /// The fetched study is open and on screen: applied, rendered, said in its own slot.
+    OpenShown,
+    /// The fetched study is open but hidden (another destination, the examination over it):
+    /// applied, rendered, said in its own slot AND in the list's.
+    OpenHidden,
+}
+
+/// PURE: route a study fetch result from the generation it was stamped with vs the open
+/// dossier's, whether its study is the open one, and whether the study screen is on screen.
+fn route_study_fetch(
+    stamped: u64,
+    current: u64,
+    is_open_study: bool,
+    on_screen: bool,
+) -> StudyFetchRoute {
+    match (stamped == current, is_open_study, on_screen) {
+        (false, _, _) => StudyFetchRoute::Stale,
+        (true, false, _) => StudyFetchRoute::List,
+        (true, true, true) => StudyFetchRoute::OpenShown,
+        (true, true, false) => StudyFetchRoute::OpenHidden,
+    }
+}
+
 /// Mirror the provider choice + keychain status into `Prefs` (Story 3.2). The key VALUE never
 /// crosses — only the boolean "configured" status (NFR-S1). A store failure shows as "not
 /// configured" plus a neutral notice (AC6).
@@ -183,7 +216,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         fetch_cancel,
         fetch_tx,
         quick_screen,
+        quick_screen_ready,
+        quick_screen_request,
         screening,
+        dossier_generation,
         ..
     } = s;
     {
@@ -191,7 +227,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         let current_study = Rc::clone(current_study);
         let config = Rc::clone(config);
+        let dossier_generation = Rc::clone(dossier_generation);
         let quick_screen = Rc::clone(quick_screen);
+        let quick_screen_ready = Rc::clone(quick_screen_ready);
+        let quick_screen_request = Rc::clone(quick_screen_request);
         let screening = Rc::clone(screening);
         let holding_freshness = Rc::clone(holding_freshness);
         let holding_dismissed = Rc::clone(holding_dismissed);
@@ -210,12 +249,62 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     studies.set_fetching(false);
                     // Re-render the open study (the stale murmur + degraded verdict show here) and
                     // refresh the dashboard — shared by the success, empty-payload, and failure arms.
-                    let render_open = || {
-                        let still_open = current_study
+                    // Keyed by IDENTITY (the discriminator rule): is the fetched study the one on
+                    // screen? The user may have closed it, or opened another, while it ran.
+                    // G1 J review: the id alone is not enough — the study must still be SHOWN (not
+                    // closed back to the list, not replaced by the read-only demo).
+                    let is_open_study = studies.get_study_open()
+                        && !studies.get_demo_active()
+                        && current_study
                             .borrow()
                             .as_deref()
                             .and_then(|s| Uuid::parse_str(s).ok())
                             == Some(outcome.study_id);
+                    // G1 final review M5: open is not on screen — the reader may be on another
+                    // destination, or the examination may sit over the study.
+                    let on_screen = ui.get_current_screen() == 0 && !studies.get_screen_open();
+                    let route = route_study_fetch(
+                        outcome.generation,
+                        dossier_generation.get(),
+                        is_open_study,
+                        on_screen,
+                    );
+                    // G1 final review M1: asked in a dossier no longer open (another dossier, or
+                    // the same study ids of a restored backup) — nothing is written, nothing is
+                    // said: any notice would read as the open dossier's, whose slots the change
+                    // emptied on purpose.
+                    if route == StudyFetchRoute::Stale {
+                        tracing::info!(study_id = %outcome.study_id, "study fetch result dropped: the dossier changed while it ran");
+                        return;
+                    }
+                    let still_open = route != StudyFetchRoute::List;
+                    // G1 J: the result goes to the OPEN study's slot when it is that study (the list's
+                    // slot was invisible there); otherwise to the list's slot, as before — never onto
+                    // another study's screen. `failed` picks the F4 treatment on the study slot.
+                    // G1 final review M5: a study open but HIDDEN gets its result in its own slot
+                    // (seen if the reader comes back to it) AND in the list's slot — every return to
+                    // Études by the rail closes the study onto the list, so the result is seen
+                    // either way, never left in a slot nobody will open. G3 #6: the list's slot is
+                    // taken under F4 (`list_notice`, the list slot's one owner), and a result said while its study
+                    // was not on screen is KEPT for that study — the next open of it (the Revue's,
+                    // the candidates panel's, the comparison's « Ouvrir l'étude » empty the slot)
+                    // shows it again.
+                    let say = |failed: bool, text: &str| {
+                        if route != StudyFetchRoute::OpenShown {
+                            if failed {
+                                list_notice::fail(&ui, list_notice::Source::Fetch, text);
+                            } else {
+                                list_notice::show(&ui, list_notice::Source::Fetch, text);
+                            }
+                            study_notice::hold_for(outcome.study_id, failed, text);
+                        }
+                        match (still_open, failed) {
+                            (false, _) => {}
+                            (true, true) => study_notice::fail(&ui, Source::Fetch, text),
+                            (true, false) => study_notice::outcome(&ui, Source::Fetch, text),
+                        }
+                    };
+                    let render_open = || {
                         if still_open
                             && let Some(study) = journal_state.borrow().get_study(outcome.study_id)
                         {
@@ -223,6 +312,14 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                         refresh_studies(&ui, &journal_state.borrow());
+                        // A study the review reads may have changed under it (G1 final review).
+                        crate::wiring::review::request_review_refresh(
+                            &ui,
+                            &journal_state,
+                            &holding_freshness,
+                            &holding_dismissed,
+                            &config,
+                        );
                     };
                     match outcome.result {
                         // Story 3.5 / #46: a transport-success that returned ZERO usable years is
@@ -230,7 +327,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         // provider data stale (never apply an empty refresh as if nothing changed).
                         Ok(fetched) if fetched.canonical.years.is_empty() => {
                             tracing::warn!(study_id = %outcome.study_id, "study fetch returned no usable years (no data)");
-                            studies.set_notice(state::MSG_PROVIDER_NO_DATA.into());
+                            say(true, state::MSG_PROVIDER_NO_DATA);
                             let _ = journal_state
                                 .borrow_mut()
                                 .mark_provider_stale(outcome.study_id);
@@ -253,10 +350,12 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                             state::provider_fallback_notice(effective)
                                         );
                                     }
-                                    studies.set_notice(notice.into());
+                                    // Render FIRST: a computing render takes down a stale normalize
+                                    // failure, so the outcome then finds the slot free (F4).
                                     render_open();
+                                    say(false, &notice);
                                 }
-                                Err(message) => studies.set_notice(message.into()),
+                                Err(message) => say(true, &message),
                             }
                         }
                         // Story 3.5 (FR23/FR24/NFR-R1): name the cause, RETAIN last-known values, and
@@ -283,7 +382,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                 notice.push(' ');
                                 notice.push_str(&state::fallback_no_key_notice(fallback));
                             }
-                            studies.set_notice(notice.into());
+                            say(true, &notice);
                             let _ = journal_state
                                 .borrow_mut()
                                 .mark_provider_stale(outcome.study_id);
@@ -292,51 +391,66 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                     }
                 }
                 fetch::WorkerOutcome::QuickScreen {
+                    request_id,
                     ticker,
+                    currency,
                     result,
-                    fell_back_to,
+                    effective,
                 } => {
                     // Story 7.3: the examination's fetch — session only, nothing written.
                     let format = config.borrow().number_format;
-                    // The member that served (Story 6.9): the fallback when one ran, else the primary.
-                    let effective = fell_back_to.unwrap_or(config.borrow().preferred_provider);
                     crate::wiring::quick_screen::on_fetched(
                         &ui,
                         &journal_state.borrow(),
                         format,
                         &quick_screen,
-                        ticker,
-                        result,
-                        effective,
+                        &quick_screen_ready,
+                        &quick_screen_request,
+                        crate::wiring::quick_screen::FetchedExamination {
+                            request_id,
+                            ticker,
+                            currency,
+                            result,
+                            effective,
+                        },
                     );
                 }
                 fetch::WorkerOutcome::Screening {
                     batch,
                     index,
                     result,
-                    fell_back_to,
+                    effective,
+                    quota,
                 } => {
                     // Story 7.3 (PR 2): one criblage row — session only, nothing written.
                     let format = config.borrow().number_format;
-                    let effective = fell_back_to.unwrap_or(config.borrow().preferred_provider);
                     crate::wiring::screening::on_fetched(
                         &ui,
                         format,
                         &screening,
                         batch,
                         index,
-                        Some(result),
-                        effective,
+                        Some(crate::wiring::screening::RowOutcome {
+                            result,
+                            effective,
+                            quota,
+                        }),
                     );
                 }
                 fetch::WorkerOutcome::ScreeningSkipped { batch, index } => {
                     let format = config.borrow().number_format;
-                    let effective = config.borrow().preferred_provider;
                     crate::wiring::screening::on_fetched(
-                        &ui, format, &screening, batch, index, None, effective,
+                        &ui, format, &screening, batch, index, None,
                     );
                 }
                 fetch::WorkerOutcome::HoldingFetch(outcome) => {
+                    // G1 final review (G3 #2): a price asked in a dossier no longer open (a restore
+                    // keeps the study ids) is dropped whole — no price written, no « périmé » mark,
+                    // no notice, and no batch counter moved: the dossier change reset the batch.
+                    if outcome.generation != dossier_generation.get() {
+                        tracing::info!(ticker = %outcome.ticker, "price refresh result dropped: the dossier changed while it ran");
+                        return;
+                    }
                     // Story 4.4 (FR40): a holdings price-refresh result → the holdings surface (NOT
                     // the study screen). Success fills `current_price` (the §4 zone recomputes) +
                     // stamps a fresh `as_of`; a failure / no-data flags the ticker `périmé`, keeping
@@ -370,7 +484,11 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                     // up against the fresh price (a falling price writes nothing).
                                     let _ = journal_state
                                         .borrow_mut()
-                                        .ratchet_trailing_stops_for_study(outcome.study_id, price);
+                                        .ratchet_trailing_stops_for_study(
+                                            outcome.study_id,
+                                            price,
+                                            &config.borrow().reference_currency_or_default(),
+                                        );
                                     let now = display_timestamp(&journal_state.borrow().now());
                                     holding_freshness.borrow_mut().insert(
                                         key,
@@ -437,24 +555,56 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         &holding_dismissed.borrow(),
                         format,
                     );
+                    // The review shown while the batch runs re-derives too (checklist §7 — the
+                    // price, the stop and the freshness it states just changed; G1 final review).
+                    crate::wiring::review::request_review_refresh(
+                        &ui,
+                        &journal_state,
+                        &holding_freshness,
+                        &holding_dismissed,
+                        &config,
+                    );
                     // One job resolved — advance the batch counter, clear the latch when fully drained.
                     advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
                 }
-                fetch::WorkerOutcome::HoldingSkipped => {
+                fetch::WorkerOutcome::HoldingSkipped { generation } => {
                     // Issue #100: a cancelled per-ticker job the worker drained without fetching — it
-                    // only advances the batch counter (no price applied, no re-render needed).
+                    // only advances the batch counter (no price applied, no re-render needed). G3
+                    // #2: a job of a previous dossier's batch never moves this dossier's counter.
+                    if generation != dossier_generation.get() {
+                        return;
+                    }
                     advance_holding_batch(&ui, &refresh_pending, &refresh_total, &fetch_cancel);
                 }
-                fetch::WorkerOutcome::FxProgress { done, total } => {
-                    // Issue #100: mid-batch FX progress — count up instead of a frozen banner.
+                fetch::WorkerOutcome::FxProgress {
+                    done,
+                    total,
+                    generation,
+                } => {
+                    // Issue #100: mid-batch FX progress — count up instead of a frozen banner. G3
+                    // #2: never a previous dossier's batch's count.
+                    if generation != dossier_generation.get() {
+                        return;
+                    }
                     ui.global::<Fx>()
                         .set_refresh_progress(format!("{done} / {total}").into());
                 }
                 fetch::WorkerOutcome::FxRates {
                     journal_id,
+                    generation,
                     results,
                     fell_back_to,
                 } => {
+                    // G1 final review (G3 #2): rates asked in a dossier no longer open are dropped
+                    // silently — a restore keeps the journal id, so the id check below cannot tell;
+                    // the FX panel's flag and notice were reset by the dossier change (a refresh of
+                    // the new dossier may be running: its flag is not this batch's to clear).
+                    if generation != dossier_generation.get() {
+                        tracing::info!(
+                            "fx refresh result dropped: the dossier changed while it ran"
+                        );
+                        return;
+                    }
                     // Story 6.5 (FR28) + review: the outcome only applies to the journal that
                     // ASKED (an in-flight journal switch must not write phantom rates into the
                     // new one). Story 6.9 (FR26): each pair's stamped source is its EFFECTIVE
@@ -523,6 +673,14 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         &holding_dismissed.borrow(),
                         format,
                     );
+                    // …and the review, when it is on display (G1 final review).
+                    crate::wiring::review::request_review_refresh(
+                        &ui,
+                        &journal_state,
+                        &holding_freshness,
+                        &holding_dismissed,
+                        &config,
+                    );
                 }
                 fetch::WorkerOutcome::TestKey(result) => {
                     // The key test (Story 3.2): a verdict, not study data. Surface it as the
@@ -532,30 +690,8 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         Err(error) => tracing::warn!(error = %error, "provider key test failed"),
                     }
                     let prefs = ui.global::<Prefs>();
-                    let status = match result {
-                        Ok(()) => state::MSG_KEY_OK.to_string(),
-                        Err(steadyinvest_ingestion::IngestionError::Provider(
-                            steadyinvest_ingestion::ProviderError::InvalidOrAbsentKey,
-                        )) => state::MSG_KEY_INVALID.to_string(),
-                        // 403: the key is valid but the plan/account is not authorized (e.g. EODHD
-                        // free tier excludes fundamentals) — say so honestly, not "key invalid".
-                        Err(steadyinvest_ingestion::IngestionError::Provider(
-                            steadyinvest_ingestion::ProviderError::Forbidden { .. },
-                        )) => state::MSG_KEY_FORBIDDEN.to_string(),
-                        // Issue #42: a quota reply PROVES the provider accepted the key (it ran the
-                        // request and hit the rate limit) — acceptance, never a rejected key.
-                        Err(steadyinvest_ingestion::IngestionError::Provider(
-                            steadyinvest_ingestion::ProviderError::Quota { .. },
-                        )) => state::MSG_KEY_OK_QUOTA.to_string(),
-                        // Issue #42: a network failure never reached the provider — the key is neither
-                        // confirmed nor refused (inconclusive), so it must not read as "clé invalide".
-                        Err(steadyinvest_ingestion::IngestionError::Provider(
-                            steadyinvest_ingestion::ProviderError::Network { .. },
-                        )) => state::MSG_KEY_TEST_INCONCLUSIVE.to_string(),
-                        Err(error) => {
-                            state::MSG_PROVIDER_FAILED.replace("{cause}", &error.to_string())
-                        }
-                    };
+                    // The verdict is the pure `state::key_test_status` (G1 H review: tested there).
+                    let status = state::key_test_status(&result);
                     prefs.set_provider_status(status.into());
                     // Issue #40: the test resolved — clear the in-flight flag so the panel's buttons
                     // re-enable (whatever the verdict).
@@ -569,6 +705,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         let current_study = Rc::clone(current_study);
         let config = Rc::clone(config);
+        let dossier_generation = Rc::clone(dossier_generation);
         let fetch_tx = fetch_tx.clone();
         ui.global::<Studies>().on_fetch_provider(move || {
             let ui = ui_weak.unwrap();
@@ -604,25 +741,29 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 return;
             }
             studies.set_fetching(true);
-            studies.set_notice(state::MSG_PROVIDER_FETCHING.into());
+            study_notice::progress(&ui, Source::Fetch, state::MSG_PROVIDER_FETCHING);
             let primary = config.borrow().preferred_provider;
             tracing::info!(ticker = %ticker, provider = primary.wire(), "study fetch requested");
             if fetch_tx
-                .send(fetch::WorkerJob::Fetch(fetch::FetchRequest {
-                    study_id,
-                    ticker,
-                    chain,
-                    primary,
-                }))
+                .send(fetch::WorkerJob::Fetch {
+                    request: fetch::FetchRequest {
+                        study_id,
+                        ticker,
+                        chain,
+                        primary,
+                    },
+                    // G1 final review M1: the dossier this fetch belongs to.
+                    generation: dossier_generation.get(),
+                })
                 .is_err()
             {
                 // The worker thread is gone (should never happen) — don't latch the in-progress
                 // state, which would disable the button for the rest of the session (review P1).
                 studies.set_fetching(false);
-                studies.set_notice(
-                    state::MSG_PROVIDER_FAILED
-                        .replace("{cause}", "le service de récupération est indisponible")
-                        .into(),
+                study_notice::fail(
+                    &ui,
+                    Source::Fetch,
+                    &state::MSG_PROVIDER_FAILED.replace("{cause}", state::MSG_FETCH_WORKER_GONE),
                 );
             }
         });
@@ -725,7 +866,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
             {
                 prefs.set_provider_status(
                     state::MSG_PROVIDER_FAILED
-                        .replace("{cause}", "le service de récupération est indisponible")
+                        .replace("{cause}", state::MSG_FETCH_WORKER_GONE)
                         .into(),
                 );
             } else {
@@ -740,7 +881,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_key_precedence;
+    use super::{StudyFetchRoute, resolve_key_precedence, route_study_fetch};
     use crate::keychain::KeychainError;
     use zeroize::Zeroizing;
 
@@ -779,5 +920,31 @@ mod tests {
             )),
             None
         );
+    }
+
+    #[test]
+    fn a_fetch_asked_in_another_dossier_is_dropped_whatever_the_screen() {
+        // G1 final review M1: open another dossier, create one, restore a backup — the generation
+        // moved on, so the result is stale even when the restored dossier shows the SAME study id
+        // open and on screen.
+        for (open, shown) in [(true, true), (true, false), (false, true), (false, false)] {
+            assert_eq!(route_study_fetch(3, 4, open, shown), StudyFetchRoute::Stale);
+        }
+    }
+
+    #[test]
+    fn a_result_for_a_hidden_open_study_is_said_where_the_reader_returns() {
+        // G1 final review M5: same dossier — the open study on screen gets its own slot; open but
+        // hidden gets both slots; not the open study → the list's slot.
+        assert_eq!(
+            route_study_fetch(4, 4, true, true),
+            StudyFetchRoute::OpenShown
+        );
+        assert_eq!(
+            route_study_fetch(4, 4, true, false),
+            StudyFetchRoute::OpenHidden
+        );
+        assert_eq!(route_study_fetch(4, 4, false, true), StudyFetchRoute::List);
+        assert_eq!(route_study_fetch(4, 4, false, false), StudyFetchRoute::List);
     }
 }

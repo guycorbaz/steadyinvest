@@ -18,12 +18,12 @@ import { AxisTick, GrowthChartState } from "state.slint";
 import { ScenarioOutcome, ScenarioCompareState } from "state.slint";
 import { Verify, FixtureLine } from "state.slint";
 import { Watchlist, WatchRow } from "state.slint";
-import { Holdings, HoldingRow, PortfolioRow, BankCarRow, ConcentrationLine, SizeMixLine, UnclassifiedLine, CandidateRow } from "state.slint";
+import { Holdings, HoldingRow, PortfolioRow, StudyChoiceRow, BankCarRow, ConcentrationLine, SizeMixLine, UnclassifiedLine, CandidateRow } from "state.slint";
 import { Fx, FxRateRow } from "state.slint";
 import { Confront, ConfrontState } from "state.slint";
 import { Dialog } from "state.slint";
 import { Review, ReviewShareRow, ReviewPositionRow, ReviewDueRow } from "state.slint";
-import { Comparison, ComparisonHeader } from "state.slint";
+import { Comparison, ComparisonHeader, StudyChoice } from "state.slint";
 import { QuickScreen, QuickPriceRow } from "state.slint";
 import { NavItem } from "components/nav_item.slint";
 import { ConfrontOverlay } from "components/confront_overlay.slint";
@@ -42,12 +42,12 @@ export { AxisTick, GrowthChartState }
 export { ScenarioOutcome, ScenarioCompareState }
 export { Verify, FixtureLine }
 export { Watchlist, WatchRow }
-export { Holdings, HoldingRow, PortfolioRow, BankCarRow, ConcentrationLine, SizeMixLine, UnclassifiedLine, CandidateRow }
+export { Holdings, HoldingRow, PortfolioRow, StudyChoiceRow, BankCarRow, ConcentrationLine, SizeMixLine, UnclassifiedLine, CandidateRow }
 export { Fx, FxRateRow }
 export { Confront, ConfrontState }
 export { Dialog }
 export { Review, ReviewShareRow, ReviewPositionRow, ReviewDueRow }
-export { Comparison, ComparisonHeader }
+export { Comparison, ComparisonHeader, StudyChoice }
 export { QuickScreen, QuickPriceRow }
 
 export component MainWindow inherits Window {
@@ -124,13 +124,14 @@ export component MainWindow inherits Window {
                             // study, comparison or examination) — the nav rail is the natural "back to the list" gesture.
                             // Also clear any in-flight drag flag (review P5) so closing the study
                             // mid-drag can never leave the form's scroll disabled.
-                            // The 7.5 walk: the comparison and the examen rapide screens close the
-                            // same way (they sit over the list on the same destination).
+                            // The 7.5 walk: the comparison and the examen rapide screens close too
+                            // (they sit over the list on the same destination) — in Rust, through
+                            // their own close paths, from `screen-activated(0)` below (G1 G: never
+                            // by writing their flags here behind the Rust handlers' back).
                             if (index == 0) {
                                 Studies.study-open = false;
-                                Studies.compare-open = false;
-                                Studies.screen-open = false;
                                 Studies.judgment-dragging = false;
+                                Studies.close-study(); // G1 J review: Rust forgets the open study
                             }
                             // Issue #94: let Rust refresh the destination's study-derived facts.
                             root.screen-activated(index);

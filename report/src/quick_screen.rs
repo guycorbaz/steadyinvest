@@ -16,6 +16,11 @@ pub struct QuickScreenLadder {
     pub rate: String,
     /// The span in years the rate was computed over (« 5 »); `""` when the ladder is unavailable.
     pub span_years: String,
+    /// Line (10) is absent because the old average (8) is zero or negative (G1 D review).
+    pub nonpositive_base: bool,
+    /// The rate is absent because an average, (4) or (8), is zero or negative — a compound rate
+    /// is not defined there (G1 final review: the « — » names its cause).
+    pub rate_nonpositive: bool,
     pub unavailable: bool,
 }
 
@@ -30,9 +35,13 @@ pub struct QuickScreenPriceRow {
     pub pe_low: String,
 }
 
-/// The examination, ready to lay out. Keys: `eps_vs_sales` ∈ eps | sales | same | "";
+/// The examination, ready to lay out. Keys: `eps_vs_sales` ∈ eps | sales | same | years | ""
+/// (`years` = the two ladders read different years: not compared);
 /// `factors_continue` ∈ yes | less | no | ""; `pe_position` ∈ higher | similar | lower | "";
-/// `sales_meets` / `eps_meets` / `eps_will_meet` ∈ yes | no | "" (`""` = objective not given).
+/// `sales_meets` / `eps_meets` ∈ yes | no | no-rate | unread | "" (`""` = objective blank,
+/// `no-rate` = the rate is absent, `unread` = the objective is not a number);
+/// `eps_will_meet` ∈ yes | no | "". The §3 « bases » say which wording a fact may carry: « cinq
+/// ans » only over the form's full five-year record (absence honesty, G1 review).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QuickScreen {
     pub ticker: String,
@@ -52,13 +61,32 @@ pub struct QuickScreen {
     pub pe_high_avg: String,
     pub pe_low_avg: String,
     pub pe_avg_of_avgs: String,
+    /// five | all | partial | "" — the rows the P/E totals and averages cover: the form's five
+    /// consecutive years, every row of a shorter record, some rows only, or none.
+    pub pe_basis: String,
+    /// How many rows the P/E figures cover, and how many the record holds.
+    pub pe_years: String,
+    pub record_years: String,
     pub present_price: String,
     pub present_eps: String,
     pub present_pe: String,
     pub high_five_years_ago: String,
+    /// five | year | "" — the high is the form's « il y a cinq ans », the named `high_year`, or
+    /// absent.
+    pub high_basis: String,
+    pub high_year: String,
     pub price_vs_high_pct: String,
+    /// higher | lower | same | "" — decided on the DISPLAYED percentage, passed as a key (never
+    /// parsed back from the formatted string).
+    pub price_vs_high: String,
     pub years_sold_as_high: String,
+    /// five | count | "" — « des cinq dernières années », over `sold_of` rows with a known high,
+    /// or absent (no present price, no known high).
+    pub sold_basis: String,
+    pub sold_of: String,
     pub pe_position: String,
+    /// Why `pe_position` is absent: pe (present P/E) | average (the record's) | both | "".
+    pub pe_absent: String,
     pub pe_notes: String,
     pub objective: String,
     pub sales_meets: String,
@@ -85,6 +113,7 @@ const L_TOTAL_B: &str = "(7) Total de (5) + (6)";
 const L_HALF_B: &str = "(8) (7) divisé par 2";
 const L_INCREASE: &str = "(9) Hausse sur la période, (4) − (8)";
 const L_INCREASE_PCT: &str = "(10) Hausse en pour cent, (9) ÷ (8)";
+const L_INCREASE_PCT_NONPOS: &str = "(10) Hausse en pour cent, (9) ÷ (8) : base non positive";
 const E_RECENT: &str = "(1) BPA de l'année la plus récente";
 const E_RECENT_PRIOR: &str = "(2) BPA de l'année précédente";
 const E_OLD: &str = "(5) BPA il y a {} ans";
@@ -92,7 +121,11 @@ const E_OLD_PRIOR: &str = "(6) BPA il y a {} ans";
 const RATE_SALES: &str = "Taux annuel composé de croissance des ventes";
 const RATE_EPS: &str = "Taux annuel composé de croissance du BPA";
 const SPAN_NOTE: &str = "Base : deux moyennes de deux ans, à {} ans d'écart (formulaire : 5).";
-const UNAVAILABLE: &str = "indisponible (moins de trois années exploitables)";
+const UNAVAILABLE: &str = "indisponible (moins de deux paires d'années consécutives distinctes dans la fenêtre de six ans du formulaire)";
+const RATE_NONPOSITIVE: &str =
+    "Taux « — » : la moyenne (4) ou (8) n'est pas positive ; un taux composé n'y est pas défini.";
+const DIFFERENT_YEARS: &str =
+    "Le BPA et les ventes ne couvrent pas les mêmes années : leurs taux ne sont pas comparés.";
 const EPS_FASTER: &str = "Le BPA a augmenté plus vite que les ventes sur la période.";
 const SALES_FASTER: &str = "Le BPA a augmenté moins vite que les ventes sur la période.";
 const SAME_PACE: &str = "Le BPA et les ventes ont augmenté au même rythme sur la période.";
@@ -114,12 +147,26 @@ const H_PE_LOW: &str = "PER au bas (B ÷ C)";
 const TOTALS: &str = "Totaux";
 const AVERAGES: &str = "Moyennes";
 const AVG_OF_AVGS: &str = "Moyenne des PER moyens haut et bas sur cinq ans";
-const PRICE_VS_HIGH: &str =
-    "Cours actuel par rapport au cours haut d'il y a cinq ans ({}) : {} ({})";
+const AVG_OF_AVGS_N: &str = "Moyenne des PER moyens haut et bas sur {} années du relevé";
+const AVG_OF_AVGS_1: &str = "Moyenne des PER moyens haut et bas sur la seule année du relevé";
+const AVG_OF_AVGS_NONE: &str = "Moyenne des PER moyens haut et bas";
+const PE_PARTIAL: &str = "Totaux et moyennes des PER sur {} des {} années du relevé ; un cours ou un BPA absent ou non positif ne donne pas de PER.";
+const PRICE_VS_HIGH: &str = "Cours actuel par rapport au cours haut d'il y a cinq ans ({}) : {}";
+const PRICE_VS_HIGH_YEAR: &str = "Cours actuel par rapport au cours haut de {} ({}) : {}";
+const PRICE_VS_HIGH_NONE: &str = "Cours actuel par rapport au cours haut du début du relevé : {}";
 const HIGHER: &str = "plus haut";
 const LOWER: &str = "plus bas";
+const SAME_LEVEL: &str = "au même niveau";
 const SOLD_AS_HIGH: &str = "L'action s'est vendue aussi haut que le cours actuel au cours de {} des cinq dernières années.";
+const SOLD_AS_HIGH_N: &str = "L'action s'est vendue aussi haut que le cours actuel au cours de {} des {} années dont le cours haut est connu.";
+const SOLD_AS_HIGH_ONE_YES: &str = "L'action s'est vendue aussi haut que le cours actuel lors de la seule année dont le cours haut est connu.";
+const SOLD_AS_HIGH_ONE_NO: &str = "L'action ne s'est pas vendue aussi haut que le cours actuel lors de la seule année dont le cours haut est connu.";
+const SOLD_AS_HIGH_NONE: &str =
+    "Années où l'action s'est vendue aussi haut que le cours actuel : {}";
 const PE_POS: &str = "Le PER actuel ({}) est {} de la moyenne des cinq ans ({}).";
+const PE_POS_N: &str = "Le PER actuel ({}) est {} de la moyenne des {} années du relevé ({}).";
+const PE_POS_1: &str = "Le PER actuel ({}) est {} du PER moyen de la seule année du relevé ({}).";
+const PE_POS_NONE: &str = "Le PER actuel ({}) par rapport à la moyenne des PER du relevé ({}) : {}";
 const PE_HIGHER: &str = "au-dessus";
 const PE_SIMILAR: &str = "voisin";
 const PE_LOWER: &str = "au-dessous";
@@ -130,8 +177,21 @@ const C1: &str = "1. Le taux de croissance passé des ventes ({}) {} l'objectif.
 const C2: &str = "2. Le taux de croissance passé du BPA ({}) {} l'objectif.";
 const C1_NONE: &str = "1. Le taux de croissance passé des ventes ({}) : objectif non renseigné.";
 const C2_NONE: &str = "2. Le taux de croissance passé du BPA ({}) : objectif non renseigné.";
+const C1_NO_RATE: &str =
+    "1. Le taux de croissance passé des ventes est indisponible : pas de comparaison à l'objectif.";
+const C2_NO_RATE: &str =
+    "2. Le taux de croissance passé du BPA est indisponible : pas de comparaison à l'objectif.";
+const C1_UNREAD: &str =
+    "1. Le taux de croissance passé des ventes ({}) : objectif non reconnu comme un pourcentage.";
+const C2_UNREAD: &str =
+    "2. Le taux de croissance passé du BPA ({}) : objectif non reconnu comme un pourcentage.";
 const C3: &str = "3. Croissance possible du BPA sur cinq ans, avis du lecteur : {}";
 const C4: &str = "4. Le cours : PER actuel {} de la norme des cinq ans.";
+const C4_N: &str = "4. Le cours : PER actuel {} de la norme des {} années du relevé.";
+const C4_1: &str = "4. Le cours : PER actuel {} de la norme de la seule année du relevé.";
+const C4_NO_PE: &str = "4. Le cours : PER actuel indisponible.";
+const C4_NO_AVG: &str = "4. Le cours : moyenne des PER du relevé indisponible.";
+const C4_NO_BOTH: &str = "4. Le cours : PER actuel et moyenne des PER du relevé indisponibles.";
 const MEETS: &str = "atteint";
 const MISSES: &str = "n'atteint pas";
 const YES: &str = "oui";
@@ -158,6 +218,7 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     L_HALF_B,
     L_INCREASE,
     L_INCREASE_PCT,
+    L_INCREASE_PCT_NONPOS,
     E_RECENT,
     E_RECENT_PRIOR,
     E_OLD,
@@ -166,6 +227,8 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     RATE_EPS,
     SPAN_NOTE,
     UNAVAILABLE,
+    RATE_NONPOSITIVE,
+    DIFFERENT_YEARS,
     EPS_FASTER,
     SALES_FASTER,
     SAME_PACE,
@@ -187,11 +250,25 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     TOTALS,
     AVERAGES,
     AVG_OF_AVGS,
+    AVG_OF_AVGS_N,
+    AVG_OF_AVGS_1,
+    AVG_OF_AVGS_NONE,
+    PE_PARTIAL,
     PRICE_VS_HIGH,
+    PRICE_VS_HIGH_YEAR,
+    PRICE_VS_HIGH_NONE,
     HIGHER,
     LOWER,
+    SAME_LEVEL,
     SOLD_AS_HIGH,
+    SOLD_AS_HIGH_N,
+    SOLD_AS_HIGH_ONE_YES,
+    SOLD_AS_HIGH_ONE_NO,
+    SOLD_AS_HIGH_NONE,
     PE_POS,
+    PE_POS_N,
+    PE_POS_1,
+    PE_POS_NONE,
     PE_HIGHER,
     PE_SIMILAR,
     PE_LOWER,
@@ -202,8 +279,17 @@ const QUICK_SCREEN_USER_FACING: &[&str] = &[
     C2,
     C1_NONE,
     C2_NONE,
+    C1_NO_RATE,
+    C2_NO_RATE,
+    C1_UNREAD,
+    C2_UNREAD,
     C3,
     C4,
+    C4_N,
+    C4_1,
+    C4_NO_PE,
+    C4_NO_AVG,
+    C4_NO_BOTH,
     MEETS,
     MISSES,
     YES,
@@ -252,13 +338,129 @@ fn ladder(doc: &mut Doc, l: &QuickScreenLadder, labels: [&str; 10], rate_label: 
         (labels[6].to_string(), get(6)),
         (labels[7].to_string(), get(7)),
         (labels[8].to_string(), get(8)),
-        (labels[9].to_string(), get(9)),
+        // Line (10) is absent on a non-positive old average: its label says why (G1 D review).
+        (
+            if l.nonpositive_base {
+                L_INCREASE_PCT_NONPOS.to_string()
+            } else {
+                labels[9].to_string()
+            },
+            get(9),
+        ),
     ];
     for (label, value) in rows {
         doc.two_columns(&label, or_dash(value));
     }
     doc.two_columns(rate_label, or_dash(&l.rate));
+    if let Some(note) = rate_note(l) {
+        doc.small_line(note);
+    }
     doc.small_line(&fill(SPAN_NOTE, &[span]));
+}
+
+/// Why a ladder's rate reads « — », when the cause is a non-positive average (G1 final review).
+fn rate_note(l: &QuickScreenLadder) -> Option<&'static str> {
+    (l.rate_nonpositive && l.rate.is_empty()).then_some(RATE_NONPOSITIVE)
+}
+
+/// The EPS-versus-sales fact from its key; two different periods say so (G1 final review).
+fn eps_vs_sales_line(key: &str) -> Option<&'static str> {
+    match key {
+        "eps" => Some(EPS_FASTER),
+        "sales" => Some(SALES_FASTER),
+        "same" => Some(SAME_PACE),
+        "years" => Some(DIFFERENT_YEARS),
+        _ => None,
+    }
+}
+
+fn price_vs_high_word(key: &str) -> Option<&'static str> {
+    match key {
+        "higher" => Some(HIGHER),
+        "lower" => Some(LOWER),
+        "same" => Some(SAME_LEVEL),
+        _ => None,
+    }
+}
+
+fn pe_word(q: &QuickScreen) -> Option<&'static str> {
+    match q.pe_position.as_str() {
+        "higher" => Some(PE_HIGHER),
+        "similar" => Some(PE_SIMILAR),
+        "lower" => Some(PE_LOWER),
+        _ => None,
+    }
+}
+
+/// The three §3 facts, worded from their keys and bases: the present price against the oldest
+/// high (the word from the `price_vs_high` key), the years it sold as high, the present P/E
+/// against the record's average. Each always has a line; an absent figure reads « — ».
+fn price_facts(q: &QuickScreen) -> [String; 3] {
+    let vs_high = match price_vs_high_word(&q.price_vs_high) {
+        Some(word) if !q.price_vs_high_pct.is_empty() => {
+            format!("{word} ({})", q.price_vs_high_pct)
+        }
+        _ => EM_DASH.to_string(),
+    };
+    let high = match q.high_basis.as_str() {
+        "five" => fill(PRICE_VS_HIGH, &[or_dash(&q.high_five_years_ago), &vs_high]),
+        "year" => fill(
+            PRICE_VS_HIGH_YEAR,
+            &[&q.high_year, or_dash(&q.high_five_years_ago), &vs_high],
+        ),
+        _ => fill(PRICE_VS_HIGH_NONE, &[EM_DASH]),
+    };
+    let sold = match q.sold_basis.as_str() {
+        "five" => fill(SOLD_AS_HIGH, &[&q.years_sold_as_high]),
+        // One known high: « de 1 des 1 années » would not read — the singular says it plainly.
+        "count" if q.sold_of == "1" => match q.years_sold_as_high.as_str() {
+            "1" => SOLD_AS_HIGH_ONE_YES.to_string(),
+            _ => SOLD_AS_HIGH_ONE_NO.to_string(),
+        },
+        "count" => fill(SOLD_AS_HIGH_N, &[&q.years_sold_as_high, &q.sold_of]),
+        _ => fill(SOLD_AS_HIGH_NONE, &[EM_DASH]),
+    };
+    let pe = match (pe_word(q), q.pe_basis.as_str()) {
+        (Some(word), "five") => fill(PE_POS, &[&q.present_pe, word, &q.pe_avg_of_avgs]),
+        (Some(word), _) if q.pe_years == "1" => {
+            fill(PE_POS_1, &[&q.present_pe, word, &q.pe_avg_of_avgs])
+        }
+        (Some(word), _) => fill(
+            PE_POS_N,
+            &[&q.present_pe, word, &q.pe_years, &q.pe_avg_of_avgs],
+        ),
+        (None, _) => fill(
+            PE_POS_NONE,
+            &[or_dash(&q.present_pe), or_dash(&q.pe_avg_of_avgs), EM_DASH],
+        ),
+    };
+    [high, sold, pe]
+}
+
+/// Conclusions 1 / 2 from the `*_meets` key: `[met-or-not, objective blank, rate absent,
+/// objective unread]` — « objectif non renseigné » only when the objective IS blank.
+fn conclusion(templates: [&str; 4], rate: &str, key: &str) -> String {
+    let [with, blank, no_rate, unread] = templates;
+    match key {
+        "yes" => fill(with, &[or_dash(rate), MEETS]),
+        "no" => fill(with, &[or_dash(rate), MISSES]),
+        "no-rate" => no_rate.to_string(),
+        "unread" => fill(unread, &[or_dash(rate)]),
+        _ => fill(blank, &[or_dash(rate)]),
+    }
+}
+
+/// Conclusion 4: the P/E fact in the form's words, or which figure is missing — the present
+/// P/E, the record's average, or both (never « PER actuel » blamed for the average).
+fn conclusion_4(q: &QuickScreen) -> String {
+    match (pe_word(q), q.pe_basis.as_str(), q.pe_absent.as_str()) {
+        (Some(word), "five", _) => fill(C4, &[word]),
+        (Some(word), _, _) if q.pe_years == "1" => fill(C4_1, &[word]),
+        (Some(word), _, _) => fill(C4_N, &[word, &q.pe_years]),
+        (None, _, "average") => C4_NO_AVG.to_string(),
+        (None, _, "both") => C4_NO_BOTH.to_string(),
+        (None, _, _) => C4_NO_PE.to_string(),
+    }
 }
 
 /// Render the examination (FR53): A4 portrait, deterministic, greyscale, neutral labels.
@@ -324,11 +526,8 @@ pub fn render_quick_screen(q: &QuickScreen) -> Vec<u8> {
         ],
         RATE_EPS,
     );
-    match q.eps_vs_sales.as_str() {
-        "eps" => doc.line(EPS_FASTER),
-        "sales" => doc.line(SALES_FASTER),
-        "same" => doc.line(SAME_PACE),
-        _ => {}
+    if let Some(line) = eps_vs_sales_line(&q.eps_vs_sales) {
+        doc.line(line);
     }
     doc.small_line(REASONS);
     doc.indent_line(or_dash(&q.reasons));
@@ -342,6 +541,12 @@ pub fn render_quick_screen(q: &QuickScreen) -> Vec<u8> {
     doc.indent_line(factors);
     doc.gap(4.0);
 
+    // The form's two pages: §1–§2 on the first, §3–§4 on the second (spec §5, §7) — a break
+    // only while still on the first page: when a long note already carried §2 onto page 2, §3
+    // follows it there rather than jumping to a third (G1 D review).
+    if doc.page_index() == 0 {
+        doc.new_page();
+    }
     doc.section(S3);
     doc.two_columns(PRESENT_PRICE, or_dash(&q.present_price));
     doc.two_columns(PRESENT_EPS, or_dash(&q.present_eps));
@@ -398,30 +603,19 @@ pub fn render_quick_screen(q: &QuickScreen) -> Vec<u8> {
         1,
     );
     doc.grid_end(&edges);
-    doc.two_columns(AVG_OF_AVGS, or_dash(&q.pe_avg_of_avgs));
-    if !q.price_vs_high_pct.is_empty() {
-        let word = if q.price_vs_high_pct.starts_with('-') || q.price_vs_high_pct.starts_with('−')
-        {
-            LOWER
-        } else {
-            HIGHER
-        };
-        doc.line(&fill(
-            PRICE_VS_HIGH,
-            &[or_dash(&q.high_five_years_ago), word, &q.price_vs_high_pct],
-        ));
+    if q.pe_basis == "partial" {
+        doc.small_line(&fill(PE_PARTIAL, &[&q.pe_years, &q.record_years]));
     }
-    if !q.years_sold_as_high.is_empty() {
-        doc.line(&fill(SOLD_AS_HIGH, &[&q.years_sold_as_high]));
-    }
-    let pe_word = match q.pe_position.as_str() {
-        "higher" => Some(PE_HIGHER),
-        "similar" => Some(PE_SIMILAR),
-        "lower" => Some(PE_LOWER),
-        _ => None,
+    let avg_label = match q.pe_basis.as_str() {
+        "five" => AVG_OF_AVGS.to_string(),
+        "all" | "partial" if q.pe_years == "1" => AVG_OF_AVGS_1.to_string(),
+        "all" | "partial" => fill(AVG_OF_AVGS_N, &[&q.pe_years]),
+        _ => AVG_OF_AVGS_NONE.to_string(),
     };
-    if let Some(word) = pe_word {
-        doc.line(&fill(PE_POS, &[&q.present_pe, word, &q.pe_avg_of_avgs]));
+    doc.two_columns(&avg_label, or_dash(&q.pe_avg_of_avgs));
+    // The three §3 facts always print — « — » where a figure is absent (spec §6), never vanish.
+    for fact in price_facts(q) {
+        doc.line(&fact);
     }
     doc.small_line(PE_NOTES);
     doc.indent_line(or_dash(&q.pe_notes));
@@ -436,26 +630,24 @@ pub fn render_quick_screen(q: &QuickScreen) -> Vec<u8> {
             &q.objective
         },
     );
-    let meets = |key: &str| match key {
-        "yes" => Some(MEETS),
-        "no" => Some(MISSES),
-        _ => None,
-    };
-    let conclusion = |with: &str, without: &str, rate: &str, key: &str| match meets(key) {
-        Some(word) => fill(with, &[or_dash(rate), word]),
-        None => fill(without, &[or_dash(rate)]),
-    };
-    doc.line(&conclusion(C1, C1_NONE, &q.sales.rate, &q.sales_meets));
-    doc.line(&conclusion(C2, C2_NONE, &q.eps.rate, &q.eps_meets));
+    doc.line(&conclusion(
+        [C1, C1_NONE, C1_NO_RATE, C1_UNREAD],
+        &q.sales.rate,
+        &q.sales_meets,
+    ));
+    doc.line(&conclusion(
+        [C2, C2_NONE, C2_NO_RATE, C2_UNREAD],
+        &q.eps.rate,
+        &q.eps_meets,
+    ));
     let will = match q.eps_will_meet.as_str() {
         "yes" => YES,
         "no" => NO,
         _ => NOT_FILLED,
     };
     doc.line(&fill(C3, &[will]));
-    if let Some(word) = pe_word {
-        doc.line(&fill(C4, &[word]));
-    }
+    // Conclusion 4 always prints, with the screen's key and wording (G1 review).
+    doc.line(&conclusion_4(q));
     doc.gap(6.0);
     doc.small_line(FOOTER);
     doc.finish()
@@ -471,6 +663,8 @@ mod tests {
             years: vec!["2026".into(), "2025".into(), "2021".into(), "2020".into()],
             rate: rate.into(),
             span_years: "5".into(),
+            nonpositive_base: false,
+            rate_nonpositive: false,
             unavailable: false,
         };
         QuickScreen {
@@ -499,13 +693,22 @@ mod tests {
             pe_high_avg: "20,0".into(),
             pe_low_avg: "10,0".into(),
             pe_avg_of_avgs: "15,0".into(),
+            pe_basis: "five".into(),
+            pe_years: "5".into(),
+            record_years: "5".into(),
             present_price: "110".into(),
             present_eps: "5".into(),
             present_pe: "22,0".into(),
             high_five_years_ago: "100".into(),
+            high_basis: "five".into(),
+            high_year: "2022".into(),
             price_vs_high_pct: "10,0 %".into(),
+            price_vs_high: "higher".into(),
             years_sold_as_high: "1".into(),
+            sold_basis: "five".into(),
+            sold_of: "5".into(),
             pe_position: "higher".into(),
+            pe_absent: String::new(),
             pe_notes: String::new(),
             objective: "7 %".into(),
             sales_meets: "yes".into(),
@@ -530,6 +733,168 @@ mod tests {
         assert!(render_quick_screen(&q).starts_with(b"%PDF-"));
         q.sales.unavailable = true;
         assert!(render_quick_screen(&q).starts_with(b"%PDF-"));
+    }
+
+    #[test]
+    fn an_absent_rate_and_an_uncompared_pair_name_their_causes() {
+        let mut q = sample();
+        assert_eq!(rate_note(&q.sales), None);
+        q.sales.rate.clear();
+        q.sales.rate_nonpositive = true;
+        assert_eq!(rate_note(&q.sales), Some(RATE_NONPOSITIVE));
+        assert_eq!(eps_vs_sales_line("years"), Some(DIFFERENT_YEARS));
+        assert_eq!(eps_vs_sales_line("sales"), Some(SALES_FASTER));
+        assert_eq!(eps_vs_sales_line(""), None);
+        q.eps_vs_sales = "years".into();
+        assert!(render_quick_screen(&q).starts_with(b"%PDF-"));
+    }
+
+    fn page_count(bytes: &[u8]) -> u32 {
+        let at = bytes
+            .windows(7)
+            .position(|w| w == b"/Count ")
+            .expect("a page tree with a /Count");
+        bytes[at + 7..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .fold(0, |acc, b| acc * 10 + u32::from(b - b'0'))
+    }
+
+    /// Spec §5 / §7: the form's two pages — §1–§2, then §3–§4.
+    #[test]
+    fn the_examination_prints_on_the_forms_two_pages() {
+        assert_eq!(page_count(&render_quick_screen(&sample())), 2);
+        assert_eq!(page_count(&render_quick_screen(&QuickScreen::default())), 2);
+    }
+
+    #[test]
+    fn without_a_price_the_three_facts_read_a_dash_and_never_vanish() {
+        let mut q = sample();
+        q.present_price.clear();
+        q.present_pe.clear();
+        q.price_vs_high_pct.clear();
+        q.price_vs_high.clear();
+        q.years_sold_as_high.clear();
+        q.sold_basis.clear();
+        q.pe_position.clear();
+        q.pe_absent = "pe".into();
+        let [high, sold, pe] = price_facts(&q);
+        assert_eq!(
+            high,
+            "Cours actuel par rapport au cours haut d'il y a cinq ans (100) : —"
+        );
+        assert_eq!(
+            sold,
+            "Années où l'action s'est vendue aussi haut que le cours actuel : —"
+        );
+        assert_eq!(
+            pe,
+            "Le PER actuel (—) par rapport à la moyenne des PER du relevé (15,0) : —"
+        );
+        assert_eq!(conclusion_4(&q), C4_NO_PE);
+    }
+
+    #[test]
+    fn the_higher_lower_word_comes_from_the_key_not_the_string() {
+        let mut q = sample();
+        let [high, ..] = price_facts(&q);
+        assert!(high.ends_with(": plus haut (10,0 %)"), "{high}");
+        // A formatted value the old code parsed back: the key decides, whatever the string.
+        q.price_vs_high = "lower".into();
+        q.price_vs_high_pct = "−40,2 %".into();
+        assert!(price_facts(&q)[0].ends_with(": plus bas (−40,2 %)"));
+        q.price_vs_high = "same".into();
+        q.price_vs_high_pct = "0,0 %".into();
+        assert!(price_facts(&q)[0].ends_with(": au même niveau (0,0 %)"));
+    }
+
+    #[test]
+    fn a_short_record_names_its_years_never_five() {
+        let mut q = sample();
+        q.pe_basis = "partial".into();
+        q.pe_years = "3".into();
+        q.record_years = "4".into();
+        q.high_basis = "year".into();
+        q.high_year = "2023".into();
+        q.sold_basis = "count".into();
+        q.sold_of = "4".into();
+        let facts = price_facts(&q);
+        assert_eq!(
+            facts[0],
+            "Cours actuel par rapport au cours haut de 2023 (100) : plus haut (10,0 %)"
+        );
+        assert!(facts[1].contains("au cours de 1 des 4 années dont le cours haut est connu"));
+        assert!(facts[2].contains("de la moyenne des 3 années du relevé (15,0)"));
+        assert_eq!(
+            conclusion_4(&q),
+            "4. Le cours : PER actuel au-dessus de la norme des 3 années du relevé."
+        );
+        for f in facts {
+            assert!(!f.contains("cinq"), "{f}");
+        }
+    }
+
+    #[test]
+    fn a_single_year_reads_in_the_singular() {
+        let mut q = sample();
+        q.pe_basis = "all".into();
+        q.pe_years = "1".into();
+        q.high_basis = "year".into();
+        q.sold_basis = "count".into();
+        q.sold_of = "1".into();
+        q.years_sold_as_high = "0".into();
+        let facts = price_facts(&q);
+        assert_eq!(facts[1], SOLD_AS_HIGH_ONE_NO);
+        assert_eq!(
+            facts[2],
+            "Le PER actuel (22,0) est au-dessus du PER moyen de la seule année du relevé (15,0)."
+        );
+        assert_eq!(
+            conclusion_4(&q),
+            "4. Le cours : PER actuel au-dessus de la norme de la seule année du relevé."
+        );
+        q.years_sold_as_high = "1".into();
+        assert_eq!(price_facts(&q)[1], SOLD_AS_HIGH_ONE_YES);
+        for f in price_facts(&q) {
+            assert!(!f.contains(" 1 années") && !f.contains("des 1 "), "{f}");
+        }
+    }
+
+    /// A long note that already carries §2 onto page 2: §3 follows it there, never on a third.
+    #[test]
+    fn a_long_note_does_not_push_section_3_to_a_third_page() {
+        let mut q = sample();
+        q.reasons = "une raison de la croissance passée, notée longuement. ".repeat(90);
+        assert_eq!(page_count(&render_quick_screen(&q)), 2);
+    }
+
+    #[test]
+    fn the_conclusions_name_what_is_missing() {
+        let c1 = [C1, C1_NONE, C1_NO_RATE, C1_UNREAD];
+        assert_eq!(
+            conclusion(c1, "8,1 %", "yes"),
+            "1. Le taux de croissance passé des ventes (8,1 %) atteint l'objectif."
+        );
+        assert_eq!(
+            conclusion(c1, "", ""),
+            "1. Le taux de croissance passé des ventes (—) : objectif non renseigné."
+        );
+        assert_eq!(conclusion(c1, "", "no-rate"), C1_NO_RATE);
+        assert_eq!(
+            conclusion(c1, "8,1 %", "unread"),
+            "1. Le taux de croissance passé des ventes (8,1 %) : objectif non reconnu comme un pourcentage."
+        );
+        // Conclusion 4: the screen's key and wording, the missing figure named.
+        let mut q = sample();
+        assert_eq!(
+            conclusion_4(&q),
+            "4. Le cours : PER actuel au-dessus de la norme des cinq ans."
+        );
+        q.pe_position.clear();
+        q.pe_absent = "average".into();
+        assert_eq!(conclusion_4(&q), C4_NO_AVG);
+        q.pe_absent = "both".into();
+        assert_eq!(conclusion_4(&q), C4_NO_BOTH);
     }
 
     #[test]

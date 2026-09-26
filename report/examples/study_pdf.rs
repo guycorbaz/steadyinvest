@@ -79,7 +79,9 @@ fn main() {
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "study-demo.pdf".to_string());
-    let bytes = steadyinvest_report::render_study_pdf(&study).expect("the demo study renders");
+    let bytes =
+        steadyinvest_report::render_study_pdf(&study, steadyinvest_report::NumberStyle::default())
+            .expect("the demo study renders");
     std::fs::write(&path, &bytes).expect("write the PDF");
     println!("wrote {} ({} bytes)", path, bytes.len());
 }

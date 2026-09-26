@@ -33,6 +33,8 @@ pub const MSG_NO_DATA_DIR: &str =
     "Aucun emplacement de dossier n'est disponible ; les études ne sont pas enregistrées.";
 /// A save failed for a reason other than the read-only / identity guards (cause appended).
 pub const MSG_SAVE_FAILED: &str = "L'enregistrement a échoué.";
+/// G1 P: a write rail's preliminary READ failed — the write was never attempted.
+pub const MSG_READ_FAILED: &str = "Le dossier n'a pas pu être lu ; rien n'a été enregistré.";
 /// The system clipboard could not be read for a paste-a-column (Story 2.4).
 pub const MSG_CLIPBOARD_UNAVAILABLE: &str =
     "Le presse-papiers est indisponible ; aucune colonne n'a été collée.";
@@ -80,6 +82,9 @@ pub const MSG_PROVIDER_NONE: &str =
     "Aucun fournisseur de données n'est sélectionné ; la récupération n'a pas eu lieu.";
 pub const MSG_PROVIDER_FETCHING: &str = "Récupération des données du fournisseur en cours.";
 pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause}";
+/// The `{cause}` of [`MSG_PROVIDER_FAILED`] when the fetch worker is gone (a registered message,
+/// never French baked into a rail — G1 final review).
+pub const MSG_FETCH_WORKER_GONE: &str = "le service de récupération est indisponible";
 
 /// Graceful-failure cause-named copy (Story 3.5, FR23/FR24) — fact-stating, posture-gated. Each
 /// names the cause; last-known values stay in place and affected provider data is flagged stale. The
@@ -88,6 +93,13 @@ pub const MSG_PROVIDER_FAILED: &str = "La récupération n'a pas abouti : {cause
 pub const MSG_PROVIDER_OFFLINE: &str = "La connexion au fournisseur a échoué ; les dernières données connues restent affichées (à actualiser).";
 pub const MSG_PROVIDER_QUOTA: &str = "Le fournisseur a signalé une limite d'usage ; les dernières données connues restent affichées, réessayez plus tard.";
 pub const MSG_PROVIDER_NO_DATA: &str = "Le fournisseur n'a renvoyé aucune donnée pour ce symbole ; les dernières données connues restent affichées.";
+/// G1 H (#237, owner decision 10): the share-split history could not be read, so the fetch is
+/// refused whole (no price at a wrong scale) — named apart from the fundamentals / prices
+/// failures. The plan-excludes-it (403) and usage-limit (429) causes keep their own wording; any
+/// other cause (connection, an unreadable body, a malformed ratio) reads the plain form.
+pub const MSG_SPLITS_UNAVAILABLE: &str = "Historique des divisions d'actions indisponible : les cours ne peuvent pas être ramenés au nombre d'actions actuel ; les dernières données connues restent affichées.";
+pub const MSG_SPLITS_FORBIDDEN: &str = "Historique des divisions d'actions indisponible : l'abonnement ne couvre pas ces données, le fournisseur a refusé l'accès ; les dernières données connues restent affichées.";
+pub const MSG_SPLITS_QUOTA: &str = "Historique des divisions d'actions indisponible : le fournisseur a signalé une limite d'usage ; les dernières données connues restent affichées, réessayez plus tard.";
 
 /// Manual-refresh recompute-cause copy (Story 3.3, FR29) — fact-stating, posture-gated. The cause is
 /// a classification of what the refresh changed; the message names it (price / fundamentals / both),
@@ -113,17 +125,67 @@ pub const MSG_REFRESH_UNMATCHED_YEARS: &str =
 /// but no saved study matches the watched ticker.
 pub const MSG_WATCH_NO_STUDY: &str =
     "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études.";
+/// G1 final review (L6): « Lier une étude » when the studies (or the list itself) could not be
+/// READ — named, never « aucune étude pour ce symbole ».
+pub const MSG_WATCH_STUDY_UNAVAILABLE: &str =
+    "Les études du dossier ne peuvent pas être lues ; aucun lien n'a été enregistré.";
+pub const MSG_WATCH_LINK_LIST_UNREADABLE: &str =
+    "La liste de suivi n'a pas pu être lue ; aucun lien n'a été enregistré.";
 /// Walk finding (2026-09-24): the same symbol twice on the watchlist is a slip, not a wish.
 pub const MSG_WATCH_DUPLICATE: &str = "Ce symbole est déjà dans la liste de suivi.";
 
 /// Issue #218 (Guy's decision, 2026-09-23): a position exists only for a ticker that has a study,
 /// in that study's currency — raised when no saved study matches the symbol; nothing is written.
 pub const MSG_HOLDING_NO_STUDY: &str = "Aucune étude enregistrée pour ce symbole ; créez-la d'abord depuis Études, la position en prendra la devise.";
+/// G1 review (issue #95 on the position rail): the studies behind a position could not be READ —
+/// never stated as « aucune étude » (a study may well exist); nothing is written.
+pub const MSG_HOLDING_STUDY_UNAVAILABLE: &str =
+    "Les études du dossier ne peuvent pas être lues ; la position n'a pas été enregistrée.";
+/// G1 E review: the study chosen in the position dialog was deleted before « Enregistrer » and
+/// no other study of the same symbol AND currency remains — named as such, never « aucune étude
+/// pour ce symbole » (one may exist in another currency).
+pub const MSG_HOLDING_STUDY_DELETED: &str =
+    "L'étude choisie a été supprimée entre-temps ; la position n'a pas été enregistrée.";
+/// G1 review (Guy's decision 4, 2026-09-25): « Modifier » never changes a holding's currency — a
+/// NEW symbol must have a study in the position's own currency; a study in another currency is
+/// named. Template: `{t}` the symbol, `{s}` the study's currency, `{p}` the position's.
+pub const MSG_HOLDING_STUDY_OTHER_CURRENCY: &str = "L'étude de {t} est en {s} et la position en {p} ; la devise d'une position ne change pas, rien n'a été enregistré.";
+/// G1 review: the holding a gesture targets no longer exists (or its id is unreadable) — a
+/// refusal that names itself instead of a form that silently stays open.
+pub const MSG_HOLDING_NOT_FOUND: &str =
+    "La position visée est introuvable ; rien n'a été enregistré.";
+/// G1 final review (Guy's decision): « Retirer » on a position with ledger transactions is
+/// refused UP FRONT, naming the cause — never a confirm promising a removal the write refuses.
+pub const MSG_HOLDING_HAS_TRANSACTIONS: &str = "Cette position a des transactions enregistrées : elle ne peut être retirée qu'une fois ses transactions supprimées ; elle n'a pas été retirée.";
+/// The same guard when the transactions could not be read — the cause named, never a guess.
+pub const MSG_HOLDING_LEDGER_UNREADABLE: &str =
+    "Les transactions de cette position n'ont pas pu être lues ; elle n'a pas été retirée.";
+/// G1 review: same, for a ledger row.
+pub const MSG_TRANSACTION_NOT_FOUND: &str =
+    "La transaction visée est introuvable ; rien n'a été enregistré.";
+/// G1 review: same, for a portfolio (an unreadable id no longer reports success).
+pub const MSG_PORTFOLIO_NOT_FOUND: &str =
+    "Le portefeuille visé est introuvable ; rien n'a été enregistré.";
+
+/// [`MSG_HOLDING_STUDY_OTHER_CURRENCY`] with its three facts substituted.
+pub fn holding_study_other_currency_message(
+    ticker: &str,
+    study_currency: &str,
+    position_currency: &str,
+) -> String {
+    MSG_HOLDING_STUDY_OTHER_CURRENCY
+        .replace("{t}", ticker)
+        .replace("{s}", study_currency)
+        .replace("{p}", position_currency)
+}
 
 /// Story 7.2 — the review's export outcome and the nine quality flags as neutral facts (the engine's
 /// `QualityFlagKey`s, worded once here so the review screen and its PDF share the inventory).
 pub const MSG_REVIEW_EXPORTED: &str = "La revue a été exportée.";
 pub const MSG_COMPARISON_EXPORTED: &str = "La comparaison a été exportée.";
+/// G1 (#237): the marker of a comparison pick whose study is gone — « NESN.SW (introuvable) »,
+/// so a gone pick's label never equals a live one (a recreated study of the same ticker).
+pub const MSG_COMPARISON_PICK_GONE: &str = "introuvable";
 pub const MSG_QUICK_SCREEN_EXPORTED: &str = "L'examen rapide a été exporté.";
 /// Story 7.3: « Créer l'étude » from an examination wrote the study with the fetched data.
 pub const MSG_QUICK_SCREEN_STUDY_CREATED: &str = "L'étude a été créée avec les données récupérées.";
@@ -132,6 +194,15 @@ pub const MSG_QUICK_SOURCE_STUDY: &str = "depuis l'étude";
 pub const MSG_QUICK_SOURCE_PROVIDER: &str = "fournisseur : {provider}";
 /// Story 7.3: the picked symbol is blank (no fetch).
 pub const MSG_QUICK_BLANK_TICKER: &str = "Le symbole est vide ; aucun examen n'a été lancé.";
+/// Story 7.3 (G1 review): « Examiner » needs the currency the study would be created in.
+pub const MSG_QUICK_BLANK_CURRENCY: &str = "La devise est vide ; aucun examen n'a été lancé.";
+/// Story 7.3 (G1 review): the study was created but the fetched financials were not written into
+/// it — `{cause}` names why (never the success notice over a failed write).
+pub const MSG_QUICK_SCREEN_STUDY_EMPTY: &str =
+    "L'étude a été créée, mais les données récupérées n'y ont pas été écrites : {cause}";
+/// Story 7.3 (G1 review): the watchlist could not be read — never shown as « 0 valeur(s) ».
+pub const MSG_SCREENING_LIST_UNREADABLE: &str =
+    "La liste de suivi est illisible ; aucun criblage n'a été lancé.";
 pub const MSG_FLAG_PTP_TREND_DECLINING: &str = "marge avant impôt en baisse";
 pub const MSG_FLAG_ROE_TREND_DECLINING: &str = "rendement des capitaux propres en baisse";
 pub const MSG_FLAG_ROE_LOW: &str = "rendement des capitaux propres sous 10 %";
@@ -219,6 +290,58 @@ pub const MSG_LEDGER_DELETED: &str = "La transaction a été supprimée.";
 /// the history — the ledger never goes negative; nothing is written.
 pub const MSG_LEDGER_OVERSELL: &str =
     "La quantité dépasse la quantité détenue à cette date ; rien n'a été enregistré.";
+/// The ledger's amount refusals (G1 final review, M2/M4): each names the ONE field at fault —
+/// never « La quantité et le prix d'achat… aucune position » for fees, a withholding or a
+/// dividend's gross. The quantity of a buy or a sale is REQUIRED (Guy's decision: no
+/// « vide = toute la position » in the ledger form); its absence names itself.
+pub const MSG_LEDGER_QUANTITY_EMPTY: &str =
+    "La quantité est vide ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_QUANTITY: &str =
+    "La quantité doit être un nombre strictement positif ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_PRICE: &str =
+    "Le prix unitaire doit être un nombre positif ou nul ; aucune transaction n'a été enregistrée.";
+pub const MSG_LEDGER_INVALID_FEES: &str =
+    "Les frais doivent être un nombre positif ou nul ; aucune transaction n'a été enregistrée.";
+/// The replay (or a dividend's gross) left `Decimal`'s range — named as such, never as a typo.
+pub const MSG_LEDGER_OUT_OF_RANGE: &str =
+    "Les montants dépassent la plage prise en charge ; aucune transaction n'a été enregistrée.";
+/// A STORED row (imported, legacy) carries a nonpositive quantity or a negative amount — the
+/// history cannot be replayed; the cause is the recorded row, not what the user just typed.
+pub const MSG_LEDGER_ROW_INVALID: &str = "Une transaction déjà enregistrée dans ce registre porte une quantité ou un montant invalide ; rien n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_QUANTITY: &str = "Le nombre d'actions concernées doit être un nombre strictement positif ; aucun dividende n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_GROSS: &str =
+    "Le brut par action doit être un nombre positif ou nul ; aucun dividende n'a été enregistré.";
+pub const MSG_DIVIDEND_INVALID_WITHHOLDING: &str = "La retenue à la source doit être un montant positif ou nul ; aucun dividende n'a été enregistré.";
+/// G1 final review (L7): the trigger sale and the trailing stop take the linked study's price —
+/// the cost basis stands in only for a TRUE absence; a study that could not be READ refuses by
+/// name, never silently falls back to the cost basis.
+pub const MSG_SELL_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix actuel de la vente est inconnu ; rien n'a été enregistré.";
+pub const MSG_STOP_STUDY_UNAVAILABLE: &str = "L'étude liée ne peut pas être lue : le prix de référence du seuil est inconnu ; rien n'a été enregistré.";
+/// D5 (Guy, 2026-09-25): a position without a declared currency is presumed in the reference
+/// currency — its linked study in another currency never prices the trigger sale. Template: `{s}`
+/// the study's currency, `{r}` the reference currency.
+pub const MSG_SELL_STUDY_OTHER_CURRENCY: &str = "La position n'a pas de devise renseignée (présumée en {r}) et son étude est en {s} : ce prix ne sert pas à la vente ; rien n'a été enregistré. La vente s'enregistre depuis ses transactions (« Vente… »), au prix obtenu.";
+/// G1 P review (M3, the lead's conservative decision): after a reference-currency change, the
+/// legacy positions (no declared currency) that carry a stop are named — their level was set in
+/// the FORMER reference currency and is never converted. Template: `{tickers}`, `{old}`.
+pub const MSG_LEGACY_STOPS_REFERENCE_CHANGED: &str = "La devise de référence a changé : le seuil suiveur des positions sans devise renseignée ({tickers}) avait été fixé en {old} et n'est pas converti. Redéfinir leur seuil (« Seuil… ») le recalcule dans la nouvelle devise de référence.";
+
+/// [`MSG_LEGACY_STOPS_REFERENCE_CHANGED`] filled.
+pub fn legacy_stops_reference_changed_message(tickers: &[String], former: &str) -> String {
+    MSG_LEGACY_STOPS_REFERENCE_CHANGED
+        .replace("{tickers}", &tickers.join(", "))
+        .replace("{old}", former)
+}
+/// G1 P review (L-c): a legacy position's stop seeded from its cost basis because its only study
+/// is in another currency — stated, never silent.
+pub const MSG_STOP_SEEDED_FROM_COST: &str = "Le seuil est calculé depuis le prix de revient : la position n'a pas de devise renseignée et aucune de ses études n'est dans la devise de référence.";
+
+/// [`MSG_SELL_STUDY_OTHER_CURRENCY`] filled.
+pub fn sell_study_other_currency_message(study_currency: &str, reference_currency: &str) -> String {
+    MSG_SELL_STUDY_OTHER_CURRENCY
+        .replace("{s}", study_currency)
+        .replace("{r}", reference_currency)
+}
 /// Raised when the transaction date is not a plausible AAAA-MM-JJ; nothing is written.
 pub const MSG_LEDGER_INVALID_DATE: &str =
     "La date doit être au format AAAA-MM-JJ ; rien n'a été enregistré.";
@@ -226,7 +349,7 @@ pub const MSG_LEDGER_INVALID_DATE: &str =
 /// holding whose position derives from its transaction ledger (2026-07-02 review, HIGH): a direct
 /// aggregate rewrite would silently desynchronize it from the recorded history — the ledger is the
 /// place to correct the position.
-pub const MSG_LEDGER_BACKED: &str = "La quantité, le prix et la devise de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
+pub const MSG_LEDGER_BACKED: &str = "La quantité et le prix de cette position proviennent de son registre de transactions ; ils n'ont pas été modifiés.";
 /// Issue #85: a ledger row carries a transaction `kind` this build does not recognise (a #78
 /// forward-compat case — a journal written by a newer version). The position can't be replayed from
 /// an unknown transaction, so this holding's ledger is suspended; the notice NAMES the cause (a newer
@@ -328,8 +451,15 @@ pub fn fx_refreshed_message(landed: usize, total: usize) -> String {
 /// two guarded-delete refusals (the register never orphans a holding nor drops its last portfolio).
 pub const MSG_PORTFOLIO_INVALID_NAME: &str =
     "Le nom du portefeuille est vide ; aucun portefeuille n'a été créé.";
+/// Template (G1 review, spec §5.1: the guard NAMES the count): `{n}` the positions it holds,
+/// active or sold — the persistence guard counts both.
 pub const MSG_PORTFOLIO_HAS_HOLDINGS: &str =
-    "Ce portefeuille contient un historique de positions ; il n'a pas été supprimé.";
+    "Ce portefeuille contient {n} position(s), en cours ou vendues ; il n'a pas été supprimé.";
+
+/// [`MSG_PORTFOLIO_HAS_HOLDINGS`] with the count substituted.
+pub fn portfolio_has_holdings_message(count: usize) -> String {
+    MSG_PORTFOLIO_HAS_HOLDINGS.replace("{n}", &count.to_string())
+}
 pub const MSG_PORTFOLIO_LAST: &str = "C'est le dernier portefeuille ; il n'a pas été supprimé.";
 
 /// Study export/import copy (Story 5.2, FR59) — fact-stating, posture-gated. The export envelope is
@@ -343,6 +473,23 @@ pub const MSG_EXPORT_MISSING: &str = "L'étude est introuvable ; rien n'a été 
 /// parse) is present but unreadable, distinct from a truly absent id ([`MSG_EXPORT_MISSING`]).
 pub const MSG_EXPORT_UNREADABLE: &str =
     "L'étude est présente mais illisible par cette version ; rien n'a été exporté.";
+/// G1 final (M3) — the study PDF could not be laid out: its inputs do not normalize (the same
+/// cause the open study states). Named as such, never « L'enregistrement a échoué ».
+pub const MSG_STUDY_PDF_UNRENDERABLE: &str =
+    "Les données de l'étude ne peuvent pas être préparées ; aucun PDF n'a été écrit.";
+/// G1 final (M4) — an export file could not be written where it was asked (the OS cause is
+/// logged, never appended in English).
+pub const MSG_EXPORT_WRITE_FAILED: &str =
+    "Le fichier n'a pas pu être écrit à cet emplacement ; rien n'a été exporté.";
+/// G1 final review (M-b) — the PDF name was completed with « .pdf » and a file of that name
+/// already exists (the picker asked only about the name it returned). `{name}` is the file name
+/// (user data, not scanned).
+pub const MSG_EXPORT_NAME_TAKEN: &str = "Un fichier « {name} » existe déjà à cet emplacement ; choisissez un autre nom. Rien n'a été exporté.";
+
+/// [`MSG_EXPORT_NAME_TAKEN`] with the file name substituted.
+pub fn export_name_taken_message(name: &str) -> String {
+    MSG_EXPORT_NAME_TAKEN.replace("{name}", name)
+}
 pub const MSG_IMPORT_INTEGRITY: &str = "Le fichier ne correspond pas à son empreinte d'intégrité (fichier corrompu ou incomplet) ; rien n'a été importé.";
 pub const MSG_IMPORT_VERSION: &str =
     "Le fichier provient d'une version incompatible du format ; rien n'a été importé.";
@@ -379,6 +526,35 @@ pub const MSG_RESTORE_UNREADABLE: &str =
 /// Issue #67: a non-empty sibling `-wal` = a raw copy of a live journal — its most recent
 /// writes are NOT in the `.db` file, so restoring it would silently drop them.
 pub const MSG_RESTORE_UNCHECKPOINTED: &str = "La sauvegarde est accompagnée d'un fichier -wal non vidé : ses écritures les plus récentes n'y figurent pas. Recréez la sauvegarde depuis l'application ; rien n'a été restauré.";
+/// G1 final review (L12): the restore's two preconditions on the CURRENT dossier — its checkpoint
+/// (so its `.db` holds every write) and its safety snapshot (the rollback if the restored file will
+/// not open). Either failure refuses the restore by name; nothing is replaced.
+pub const MSG_RESTORE_CHECKPOINT_FAILED: &str = "Le dossier actuel n'a pas pu être consolidé (ses écritures les plus récentes restent dans son fichier -wal) ; rien n'a été restauré.";
+/// G1 P (G3 M1): a `-prerestore` file from an earlier restore sits beside the dossier — it may be
+/// the only copy of an original, so it is never replaced nor deleted. Template: `{file}`.
+pub const MSG_RESTORE_SNAPSHOT_EXISTS: &str = "Une copie de sécurité d'une restauration précédente existe déjà ({file}) ; elle n'est ni remplacée ni supprimée, et rien n'a été restauré. Une fois le dossier vérifié, déplacez ou renommez ce fichier.";
+/// G1 P review (L-f): at startup, a `-prerestore` beside the open dossier — left by a restore
+/// whose rollback failed — is named: it may be the only copy of an original. Template: `{file}`.
+pub const MSG_PRERESTORE_FOUND: &str = "Une copie de sécurité laissée par une restauration précédente se trouve à côté du dossier ({file}) : elle peut être la seule copie du dossier d'origine. Une fois le dossier vérifié, déplacez ou renommez ce fichier.";
+
+/// [`MSG_PRERESTORE_FOUND`] filled with the snapshot's path.
+pub fn prerestore_found_message(snapshot: &std::path::Path) -> String {
+    MSG_PRERESTORE_FOUND.replace("{file}", &snapshot.display().to_string())
+}
+/// G1 P (G3 M1): the restored file would not open AND the return to the original failed — the
+/// dossier WAS replaced; the original survives only in the named snapshot. Template: `{file}`.
+pub const MSG_RESTORE_ROLLBACK_FAILED: &str = "Le fichier restauré ne s'ouvre pas et le retour au dossier d'origine a échoué : le dossier a été remplacé. L'original est conservé dans {file}.";
+
+/// [`MSG_RESTORE_SNAPSHOT_EXISTS`] filled with the snapshot's path.
+pub fn restore_snapshot_exists_message(snapshot: &std::path::Path) -> String {
+    MSG_RESTORE_SNAPSHOT_EXISTS.replace("{file}", &snapshot.display().to_string())
+}
+
+/// [`MSG_RESTORE_ROLLBACK_FAILED`] filled with the snapshot's path.
+pub fn restore_rollback_failed_message(snapshot: &std::path::Path) -> String {
+    MSG_RESTORE_ROLLBACK_FAILED.replace("{file}", &snapshot.display().to_string())
+}
+pub const MSG_RESTORE_SNAPSHOT_FAILED: &str = "La copie de sécurité du dossier actuel n'a pas pu être créée à côté de lui ; rien n'a été restauré.";
 /// Substitution templates (the consts are posture-scanned; [`restore_confirm_message`] fills them).
 pub const MSG_RESTORE_CONFIRM: &str = "Restaurer depuis cette sauvegarde (dossier {jid}, version {ver}) ? {reason}Le dossier actuel sera remplacé.";
 pub const MSG_RESTORE_REASON_STALE: &str =
@@ -390,6 +566,10 @@ pub const MSG_RESTORE_REASON_FOREIGN: &str = "Cette sauvegarde appartient à un 
 pub const MSG_JOURNAL_OPENED: &str = "Le dossier a été ouvert.";
 pub const MSG_JOURNAL_CREATED: &str = "Le nouveau dossier a été créé et ouvert.";
 pub const MSG_JOURNAL_OPEN_FAILED: &str = "Le dossier n'a pas pu être ouvert.";
+/// G1 final review L10: after a refused switch the previous dossier could not be reopened either —
+/// the location status states that no dossier is open (never the previous one's « ouvert »).
+pub const MSG_NO_JOURNAL_OPEN: &str =
+    "Aucun dossier n'est ouvert : le dossier précédent n'a pas pu être rouvert.";
 pub const MSG_JOURNAL_LOCKED: &str = "Ce dossier est déjà ouvert dans une autre fenêtre ou un autre processus ; il n'a pas été ouvert.";
 pub const MSG_JOURNAL_LOCK_RECLAIMABLE: &str =
     "Ce dossier porte un verrou laissé par une session interrompue ; le verrou peut être levé.";
@@ -463,6 +643,10 @@ pub const MSG_KEY_OK_QUOTA: &str =
 pub const MSG_KEY_TEST_INCONCLUSIVE: &str = "Test non concluant : le fournisseur n'a pas pu être joint ; la clé n'est ni confirmée ni refusée.";
 pub const MSG_KEY_INVALID: &str = "La clé est invalide ou absente ; le fournisseur l'a refusée.";
 pub const MSG_KEY_FORBIDDEN: &str = "La clé est valide, mais l'abonnement ne couvre pas ces données ; le fournisseur a refusé l'accès.";
+/// G1 H review: the key test reached EODHD's `/splits` only after `/fundamentals` and `/eod`
+/// answered — the key IS valid — but the split history was refused (a plan without `/splits`) or
+/// unreadable, so no study fetch can complete. Both causes are named, neither is guessed away.
+pub const MSG_KEY_OK_NO_SPLITS: &str = "La clé est valide, mais l'historique des divisions d'actions est inaccessible (abonnement qui ne le couvre pas, ou réponse illisible) ; les données d'étude ne peuvent pas être récupérées.";
 pub const MSG_KEYCHAIN_UNAVAILABLE: &str =
     "Le trousseau du système est indisponible ; la clé n'a pas été enregistrée.";
 /// Issue #44 (F11): the slot has more than one stored credential — actionable, not a generic error.
@@ -575,10 +759,49 @@ pub fn provider_failure_notice(error: &steadyinvest_ingestion::IngestionError) -
             // prepared — the neutral "data can't be prepared" notice (a static string, no token, and
             // never `MSG_PROVIDER_FAILED`'s `{cause}` placeholder which only the worker-gone path fills).
             ProviderError::Parse { .. } | ProviderError::Unsupported { .. } => MSG_NORMALIZE_FAILED,
+            // G1 H: the split history's failure is named as such — never the generic quota /
+            // plan / preparation notice, which would misattribute it to the fundamentals.
+            ProviderError::SplitHistory { cause } => match cause.root_cause() {
+                ProviderError::Forbidden { .. } => MSG_SPLITS_FORBIDDEN,
+                ProviderError::Quota { .. } => MSG_SPLITS_QUOTA,
+                _ => MSG_SPLITS_UNAVAILABLE,
+            },
         },
         // The fetched data reached us but did not normalize (a structural payload error).
         IngestionError::Normalize(_) => MSG_NORMALIZE_FAILED,
     }
+}
+
+/// PURE: the key test's verdict (Story 3.2) for Réglages — a statement about the KEY, cause-named.
+/// Issue #42: a quota proves acceptance, a network cut is inconclusive; a 403 is a valid key on a
+/// plan that does not cover the data. G1 H review: a failure of EODHD's `/splits` (reached only
+/// after `/fundamentals` and `/eod` answered) is classified on its ROOT cause — never a split
+/// notice in place of a key verdict: quota → accepted-with-quota, network → inconclusive, a
+/// rejected key → invalid, any other (a plan without `/splits`, an unreadable body) → valid key
+/// without the split history.
+pub fn key_test_status(result: &Result<(), steadyinvest_ingestion::IngestionError>) -> String {
+    use steadyinvest_ingestion::{IngestionError, ProviderError};
+    let Err(error) = result else {
+        return MSG_KEY_OK.to_string();
+    };
+    let verdict = match error {
+        IngestionError::Provider(ProviderError::SplitHistory { cause }) => {
+            match cause.root_cause() {
+                ProviderError::Quota { .. } => MSG_KEY_OK_QUOTA,
+                ProviderError::Network { .. } => MSG_KEY_TEST_INCONCLUSIVE,
+                ProviderError::InvalidOrAbsentKey => MSG_KEY_INVALID,
+                _ => MSG_KEY_OK_NO_SPLITS,
+            }
+        }
+        IngestionError::Provider(ProviderError::InvalidOrAbsentKey) => MSG_KEY_INVALID,
+        // 403: the key is valid but the plan/account is not authorized (e.g. EODHD free tier
+        // excludes fundamentals) — say so honestly, not "key invalid".
+        IngestionError::Provider(ProviderError::Forbidden { .. }) => MSG_KEY_FORBIDDEN,
+        IngestionError::Provider(ProviderError::Quota { .. }) => MSG_KEY_OK_QUOTA,
+        IngestionError::Provider(ProviderError::Network { .. }) => MSG_KEY_TEST_INCONCLUSIVE,
+        other => return MSG_PROVIDER_FAILED.replace("{cause}", &other.to_string()),
+    };
+    verdict.to_string()
 }
 
 /// The completion notice after a dashboard lifecycle action on `ticker` completes (Story 2.12).
@@ -598,6 +821,69 @@ pub fn size_field_invalid_message(field: &str) -> String {
     MSG_SIZE_FIELD_INVALID.replace("{field}", field)
 }
 
+/// A typed number that is a number in some spelling, but not unambiguously in the user's comma
+/// format (G1 I review: « 1.085 » could be 1,085 or 1085) — refused, named, with the expected
+/// spelling; never guessed.
+pub const MSG_NUMBER_AMBIGUOUS_COMMA: &str = "Nombre ambigu : écrivez-le 1\u{00A0}234,5 ou 1234,5 (format des nombres choisi dans les Réglages) ; rien n'a été enregistré.";
+/// The point-format twin of [`MSG_NUMBER_AMBIGUOUS_COMMA`] (« 10,5 » : the comma is this
+/// format's grouping character, never its decimal mark).
+pub const MSG_NUMBER_AMBIGUOUS_POINT: &str = "Nombre ambigu : écrivez-le 1,234.5 ou 1234.5 (format des nombres choisi dans les Réglages) ; rien n'a été enregistré.";
+/// A study cell or judgment field typed with a text that is no number (G1 I review): refused, the
+/// value left as it was — never turned into an empty « à remplir » hole.
+pub const MSG_VALUE_NOT_A_NUMBER: &str =
+    "Ce texte ne se lit pas comme un nombre ; la valeur est inchangée.";
+/// A diversify-by-size field typed with an ambiguous number (G1 I re-review): the field is named
+/// (issue #96) with the expected spelling; the table commits whole or not at all.
+pub const MSG_SIZE_FIELD_AMBIGUOUS: &str = "« {field} » : nombre ambigu ; écrivez-le {spelling} (format des nombres choisi dans les Réglages) ; rien n'a été enregistré.";
+/// A pasted column whose some lines are no number or an ambiguous one (G1 I review): those lines
+/// are named (their years) and their cells left as they were; the others are pasted.
+pub const MSG_PASTE_LINES_KEPT: &str =
+    "Lignes non collées, nombre ambigu ou illisible : {years} ; ces cellules sont inchangées.";
+
+/// The ambiguous-number refusal for the user's number format (G1 I review).
+pub fn ambiguous_number_message(format: crate::viewmodel::format::NumberFormat) -> &'static str {
+    match format {
+        crate::viewmodel::format::NumberFormat::Comma => MSG_NUMBER_AMBIGUOUS_COMMA,
+        crate::viewmodel::format::NumberFormat::Point => MSG_NUMBER_AMBIGUOUS_POINT,
+    }
+}
+
+/// The pasted-lines refusal naming the years whose cells were left as they were.
+pub fn paste_lines_kept_message(years: &[i32]) -> String {
+    let years: Vec<String> = years.iter().map(i32::to_string).collect();
+    MSG_PASTE_LINES_KEPT.replace("{years}", &years.join(", "))
+}
+
+/// What a paste of `lines` lines left unwritten, or `None` when every line was written: the kept
+/// years (refused lines) and the surplus lines past the grid bottom, BOTH named when both happened
+/// (G1 I re-review — one notice never hides the other).
+pub fn paste_outcome_message(kept_years: &[i32], filled: usize, lines: usize) -> Option<String> {
+    let mut parts = Vec::new();
+    if !kept_years.is_empty() {
+        parts.push(paste_lines_kept_message(kept_years));
+    }
+    if filled < lines {
+        parts.push(MSG_PASTE_CLIPPED.to_string());
+    }
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+/// The diversify-by-size refusal of an AMBIGUOUS number, naming its field like
+/// [`size_field_invalid_message`] (issue #96; G1 I re-review) with the spelling the user's format
+/// expects.
+pub fn size_field_ambiguous_message(
+    field: &str,
+    format: crate::viewmodel::format::NumberFormat,
+) -> String {
+    let spelling = match format {
+        crate::viewmodel::format::NumberFormat::Comma => "1\u{00A0}234,5 ou 1234,5",
+        crate::viewmodel::format::NumberFormat::Point => "1,234.5 ou 1234.5",
+    };
+    MSG_SIZE_FIELD_AMBIGUOUS
+        .replace("{field}", field)
+        .replace("{spelling}", spelling)
+}
+
 /// Every static user-facing message above — exposed so the crate-local posture gate (FR13) scans
 /// them for banned verbs alongside the `@tr()` literals. Test-only (the gate's sole consumer);
 /// the individual `MSG_*` consts are the runtime surfaces. Keep in sync with the consts.
@@ -611,8 +897,13 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,
+    MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,
+    MSG_NUMBER_AMBIGUOUS_COMMA,
+    MSG_NUMBER_AMBIGUOUS_POINT,
+    MSG_VALUE_NOT_A_NUMBER,
+    MSG_PASTE_LINES_KEPT,
     MSG_SOFT_LOCKED,
     MSG_YEARS_MAX,
     MSG_UNLOCK_CONFIRM,
@@ -631,6 +922,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_PROVIDER_NONE,
     MSG_PROVIDER_FETCHING,
     MSG_PROVIDER_FAILED,
+    MSG_FETCH_WORKER_GONE,
     MSG_PROVIDER_OFFLINE,
     MSG_PROVIDER_QUOTA,
     MSG_PROVIDER_NO_DATA,
@@ -642,14 +934,28 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_UNMATCHED_YEARS,
     MSG_WATCH_NO_STUDY,
     MSG_WATCH_DUPLICATE,
+    MSG_WATCH_STUDY_UNAVAILABLE,
+    MSG_WATCH_LINK_LIST_UNREADABLE,
     MSG_HOLDING_NO_STUDY,
+    MSG_HOLDING_STUDY_UNAVAILABLE,
+    MSG_HOLDING_STUDY_DELETED,
+    MSG_HOLDING_STUDY_OTHER_CURRENCY,
+    MSG_HOLDING_NOT_FOUND,
+    MSG_HOLDING_HAS_TRANSACTIONS,
+    MSG_HOLDING_LEDGER_UNREADABLE,
+    MSG_TRANSACTION_NOT_FOUND,
+    MSG_PORTFOLIO_NOT_FOUND,
     MSG_REVIEW_EXPORTED,
     MSG_COMPARISON_EXPORTED,
+    MSG_COMPARISON_PICK_GONE,
     MSG_QUICK_SCREEN_EXPORTED,
     MSG_QUICK_SCREEN_STUDY_CREATED,
     MSG_QUICK_SOURCE_STUDY,
     MSG_QUICK_SOURCE_PROVIDER,
     MSG_QUICK_BLANK_TICKER,
+    MSG_QUICK_BLANK_CURRENCY,
+    MSG_QUICK_SCREEN_STUDY_EMPTY,
+    MSG_SCREENING_LIST_UNREADABLE,
     MSG_FLAG_PTP_TREND_DECLINING,
     MSG_FLAG_ROE_TREND_DECLINING,
     MSG_FLAG_ROE_LOW,
@@ -674,6 +980,20 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_LEDGER_UPDATED,
     MSG_LEDGER_DELETED,
     MSG_LEDGER_OVERSELL,
+    MSG_LEDGER_QUANTITY_EMPTY,
+    MSG_LEDGER_INVALID_QUANTITY,
+    MSG_LEDGER_INVALID_PRICE,
+    MSG_LEDGER_INVALID_FEES,
+    MSG_LEDGER_OUT_OF_RANGE,
+    MSG_LEDGER_ROW_INVALID,
+    MSG_DIVIDEND_INVALID_QUANTITY,
+    MSG_DIVIDEND_INVALID_GROSS,
+    MSG_DIVIDEND_INVALID_WITHHOLDING,
+    MSG_SELL_STUDY_UNAVAILABLE,
+    MSG_STOP_STUDY_UNAVAILABLE,
+    MSG_SELL_STUDY_OTHER_CURRENCY,
+    MSG_STOP_SEEDED_FROM_COST,
+    MSG_LEGACY_STOPS_REFERENCE_CHANGED,
     MSG_LEDGER_INVALID_DATE,
     MSG_LEDGER_BACKED,
     MSG_LEDGER_UNKNOWN_KIND,
@@ -694,6 +1014,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_TRAILING_STOP_INVALID,
     MSG_WITHHOLDING_INVALID,
     MSG_SIZE_FIELD_INVALID,
+    MSG_SIZE_FIELD_AMBIGUOUS,
     MSG_SIZE_PAIR_CROSSED,
     MSG_PROVIDER_FALLBACK,
     MSG_FALLBACK_NO_KEY,
@@ -705,6 +1026,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_STUDY_UPDATED,
     MSG_EXPORT_MISSING,
     MSG_EXPORT_UNREADABLE,
+    MSG_STUDY_PDF_UNRENDERABLE,
+    MSG_EXPORT_WRITE_FAILED,
+    MSG_EXPORT_NAME_TAKEN,
     MSG_IMPORT_INTEGRITY,
     MSG_IMPORT_VERSION,
     MSG_IMPORT_MALFORMED,
@@ -719,12 +1043,18 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_RESTORE_NOT_A_JOURNAL,
     MSG_RESTORE_UNREADABLE,
     MSG_RESTORE_UNCHECKPOINTED,
+    MSG_RESTORE_CHECKPOINT_FAILED,
+    MSG_RESTORE_SNAPSHOT_FAILED,
+    MSG_RESTORE_SNAPSHOT_EXISTS,
+    MSG_PRERESTORE_FOUND,
+    MSG_RESTORE_ROLLBACK_FAILED,
     MSG_RESTORE_CONFIRM,
     MSG_RESTORE_REASON_STALE,
     MSG_RESTORE_REASON_FOREIGN,
     MSG_JOURNAL_OPENED,
     MSG_JOURNAL_CREATED,
     MSG_JOURNAL_OPEN_FAILED,
+    MSG_NO_JOURNAL_OPEN,
     MSG_JOURNAL_LOCKED,
     MSG_JOURNAL_LOCK_RECLAIMABLE,
     MSG_SYNC_FOLDER_WARNING,
@@ -742,4 +1072,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_KEY_AMBIGUOUS,
     MSG_KEY_TOO_LONG,
     MSG_KEYCHAIN_ERROR,
+    MSG_SPLITS_UNAVAILABLE,
+    MSG_SPLITS_FORBIDDEN,
+    MSG_SPLITS_QUOTA,
+    MSG_KEY_OK_NO_SPLITS,
 ];

@@ -8,7 +8,7 @@
 // Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
 import { Tokens } from "../tokens.slint";
-import { Comparison, Dialog, Holdings, Labels, Prefs, Studies, StudyRow, Confront } from "../state.slint";
+import { Comparison, Dialog, Holdings, Labels, Studies, StudyRow, Confront } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
@@ -256,7 +256,8 @@ export component DashboardScreen inherits Rectangle {
                         Dialog.form("study-create", @tr("Créer une étude"),
                             @tr("Le symbole est celui du fournisseur de données (p. ex. NESN.SW) ; la devise est celle dans laquelle les chiffres du titre sont publiés."),
                             "", "");
-                        Dialog.draft-currency = Prefs.reference-currency;
+                        // G1 decision 8: no currency prefilled — an explicit pick, never the
+                        // reference currency by reflex (the CHF/USD trap of the walk).
                     }
                 }
             }
@@ -417,34 +418,66 @@ export component DashboardScreen inherits Rectangle {
                         clicked => { QuickScreen.examine(QuickScreen.pick-ticker, QuickScreen.pick-currency); }
                     }
                 }
+                // G1 final review: a result that arrived while another screen was open is kept
+                // and named here — never lost, never laid over what was open.
+                if QuickScreen.ready-ticker != "" && QuickScreen.ready-failure == "": StatusBand {
+                    icon: "◦";
+                    text: @tr("L'examen de {} est arrivé pendant qu'un autre écran était ouvert ; il est gardé ici.", QuickScreen.ready-ticker);
+                }
+                if QuickScreen.ready-ticker != "" && QuickScreen.ready-failure == "": HorizontalLayout {
+                    alignment: start;
+                    ActionButton {
+                        label: @tr("Ouvrir l'examen");
+                        clicked => { QuickScreen.open-ready(); }
+                    }
+                }
+                // A failure that arrived meanwhile: named here with its own cause, not in a
+                // dialog over what was open.
+                if QuickScreen.ready-failure != "": StatusBand {
+                    icon: "◦";
+                    text: @tr("Examen de {}, demandé pendant qu'un autre écran était ouvert : {}", QuickScreen.ready-ticker, QuickScreen.ready-failure);
+                }
+                if QuickScreen.ready-failure != "": HorizontalLayout {
+                    alignment: start;
+                    ActionButton {
+                        label: @tr("Compris");
+                        clicked => { QuickScreen.dismiss-ready(); }
+                    }
+                }
             }
 
             // ── Story 7.1: pick up to five studies to compare side by side (the comparison form). ──
             PanelCard {
                 title: @tr("Comparer des études");
                 subtitle: @tr("Jusqu'à cinq études côte à côte, sur les trente lignes du formulaire de comparaison ; des faits, jamais un classement.");
+                // G1 decision 3 (#237): each list names STUDIES (« TICKER · CUR » when a ticker has
+                // several); a pick resolves to its study id in Rust BY INDEX (the dropdown contract)
+                // and leaves the other lists.
+                if Comparison.choices-unavailable: StatusBand {
+                    icon: "◦";
+                    text: @tr("La liste des études est indisponible : aucune étude ne peut être choisie pour la comparaison.");
+                }
                 HorizontalLayout {
                     spacing: Tokens.space-8;
-                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick1; placeholder: @tr("étude 1"); horizontal-stretch: 1; }
-                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick2; placeholder: @tr("étude 2"); horizontal-stretch: 1; }
-                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick3; placeholder: @tr("étude 3"); horizontal-stretch: 1; }
-                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick4; placeholder: @tr("étude 4"); horizontal-stretch: 1; }
-                    Dropdown { options: Holdings.study-tickers; value <=> Comparison.pick5; placeholder: @tr("étude 5"); horizontal-stretch: 1; }
+                    Dropdown { options: Comparison.options1; value <=> Comparison.pick1; placeholder: @tr("étude 1"); horizontal-stretch: 1; picked(i) => { Comparison.picked(0, i); } }
+                    Dropdown { options: Comparison.options2; value <=> Comparison.pick2; placeholder: @tr("étude 2"); horizontal-stretch: 1; picked(i) => { Comparison.picked(1, i); } }
+                    Dropdown { options: Comparison.options3; value <=> Comparison.pick3; placeholder: @tr("étude 3"); horizontal-stretch: 1; picked(i) => { Comparison.picked(2, i); } }
+                    Dropdown { options: Comparison.options4; value <=> Comparison.pick4; placeholder: @tr("étude 4"); horizontal-stretch: 1; picked(i) => { Comparison.picked(3, i); } }
+                    Dropdown { options: Comparison.options5; value <=> Comparison.pick5; placeholder: @tr("étude 5"); horizontal-stretch: 1; picked(i) => { Comparison.picked(4, i); } }
                 }
                 HorizontalLayout {
                     alignment: start;
                     spacing: Tokens.space-8;
                     ActionButton {
                         label: @tr("Comparer");
-                        enabled: (Comparison.pick1 != "" ? 1 : 0) + (Comparison.pick2 != "" ? 1 : 0) + (Comparison.pick3 != "" ? 1 : 0) + (Comparison.pick4 != "" ? 1 : 0) + (Comparison.pick5 != "" ? 1 : 0) >= 2;
+                        // Two DISTINCT studies (identity, not a count of filled slots).
+                        enabled: Comparison.distinct-picks >= 2;
                         clicked => { Studies.compare-open = true; }
                     }
                     ActionButton {
                         label: @tr("Effacer");
                         enabled: Comparison.pick1 != "" || Comparison.pick2 != "" || Comparison.pick3 != "" || Comparison.pick4 != "" || Comparison.pick5 != "";
-                        clicked => {
-                            Comparison.pick1 = ""; Comparison.pick2 = ""; Comparison.pick3 = ""; Comparison.pick4 = ""; Comparison.pick5 = "";
-                        }
+                        clicked => { Comparison.clear-picks(); }
                     }
                 }
             }

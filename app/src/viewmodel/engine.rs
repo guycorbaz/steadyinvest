@@ -377,20 +377,56 @@ pub fn judgment_suggestions(
     // trend-low of 18 against a current 4.09 pushed the forecast low to 619 and the price
     // « sous la bande »). Adopting stays the judgment. The dividend proposal = the latest year
     // with a known dividend per share.
-    let est_low_eps = series.iter().rev().find_map(|y| y.eps);
-    let dividend = series.iter().rev().find_map(|y| y.dividend_per_share);
+    //
+    // G1 review: both chips now carry the YEAR they come from (shown on the chip), and come only
+    // from a RECENT year (see `recent_year_value`) — never a figure from a long-past year dressed
+    // as current. The est-low EPS must also be POSITIVE: a zero/negative EPS makes candidate (a)
+    // meaningless (a nonpositive forecast low), so no chip rather than a trap.
+    let est_low_eps = recent_year_value(series, |y| y.eps).filter(|(_, v)| *v > Decimal::ZERO);
+    let dividend = recent_year_value(series, |y| y.dividend_per_share);
+    let year_of = |v: &Option<(i32, Decimal)>| -> slint::SharedString {
+        v.map(|(year, _)| year.to_string())
+            .unwrap_or_default()
+            .into()
+    };
     JudgmentSuggestions {
         sales_growth: opt(outputs.growth.sales_cagr_pct, DisplayField::Percent),
         eps_growth: opt(outputs.growth.eps_cagr_pct, DisplayField::Percent),
-        est_low_eps: opt(est_low_eps, DisplayField::PerShare),
+        est_low_eps: opt(est_low_eps.map(|(_, v)| v), DisplayField::PerShare),
+        est_low_eps_year: year_of(&est_low_eps),
         high_pe: opt(outputs.valuation.avg_high_pe, DisplayField::PeRatio),
         low_pe: opt(outputs.valuation.avg_low_pe, DisplayField::PeRatio),
         recent_severe_low: opt(
             steadyinvest_core::ssg::recent_severe_low_proposal(series),
             DisplayField::Price,
         ),
-        dividend: opt(dividend, DisplayField::PerShare),
+        dividend: opt(dividend.map(|(_, v)| v), DisplayField::PerShare),
+        dividend_year: year_of(&dividend),
     }
+}
+
+/// How far behind the study's latest reported year a « hist. » per-year proposal may lie (G1
+/// review, #214): the latest year itself or the one before — a figure older than that is not a
+/// « current » dividend nor a « current » EPS, so no chip is offered.
+const SUGGESTION_MAX_AGE_YEARS: i32 = 1;
+
+/// The latest year carrying `pick`, with its value — only when that year is within
+/// [`SUGGESTION_MAX_AGE_YEARS`] of the study's latest REPORTED year (the newest year with sales or
+/// EPS; an empty roll-forward column does not count). `None` when there is no such recent value.
+fn recent_year_value(
+    series: &[normalize::CanonicalYear],
+    pick: impl Fn(&normalize::CanonicalYear) -> Option<Decimal>,
+) -> Option<(i32, Decimal)> {
+    let latest_reported = series
+        .iter()
+        .filter(|y| y.sales.is_some() || y.eps.is_some())
+        .map(|y| y.year)
+        .max()?;
+    series
+        .iter()
+        .filter_map(|y| pick(y).map(|v| (y.year, v)))
+        .max_by_key(|(year, _)| *year)
+        .filter(|(year, _)| *year >= latest_reported - SUGGESTION_MAX_AGE_YEARS)
 }
 
 /// The §2 management computed results (per-year PTP%/ROE%, the 5-yr averages + trends). The per-year
@@ -407,13 +443,57 @@ pub fn mgmt_computed(outputs: &SsgOutputs, years: &[i32], format: NumberFormat) 
         .iter()
         .map(|y| fmt_pct(lookup(*y).and_then(|r| r.roe_pct), format).into())
         .collect();
+    let (ptp_years, roe_years) = (
+        m.avg_ptp_pct.map(|_| m.ptp_avg_years),
+        m.avg_roe_pct.map(|_| m.roe_avg_years),
+    );
+    let title = avg_years_title(ptp_years, roe_years);
+    // Spans that differ: the title says « Moyenne » and each average names its own span.
+    let cell = |avg: Option<Decimal>, years: Option<usize>| -> slint::SharedString {
+        let shown = fmt_pct(avg, format);
+        match years {
+            Some(n) if title.is_none() => with_avg_years(&shown, n).into(),
+            _ => shown.into(),
+        }
+    };
     MgmtComputed {
         ptp: slint::ModelRc::new(slint::VecModel::from(ptp)),
         roe: slint::ModelRc::new(slint::VecModel::from(roe)),
-        avg_ptp: fmt_pct(m.avg_ptp_pct, format).into(),
-        avg_roe: fmt_pct(m.avg_roe_pct, format).into(),
+        avg_ptp: cell(m.avg_ptp_pct, ptp_years),
+        avg_roe: cell(m.avg_roe_pct, roe_years),
         ptp_trend: fmt_trend(m.ptp_trend).into(),
         roe_trend: fmt_trend(m.roe_trend).into(),
+        avg_years: title.map_or(0, |n| i32::try_from(n).unwrap_or(i32::MAX)),
+    }
+}
+
+/// PURE: the §2 « Moy. n ans » column title's years (G1, #237) — `Some(n)` when every SHOWN
+/// average (PTP, ROE) runs over n years; `None` when none is shown or the two differ (the title
+/// then says « Moyenne » and each average cell names its span — never « a / b », which reads
+/// « a of b » elsewhere in the app).
+pub(crate) fn avg_years_title(ptp: Option<usize>, roe: Option<usize>) -> Option<usize> {
+    match (ptp.filter(|x| *x > 0), roe.filter(|x| *x > 0)) {
+        (Some(a), Some(b)) if a != b => None,
+        (Some(a), _) | (None, Some(a)) => Some(a),
+        (None, None) => None,
+    }
+}
+
+/// A §2 average's cell naming its own span, when the spans differ (G1, #237) — « 47,6 % sur 3
+/// ans · ↑ hausse » (comparison, trend attached) or « 47,6 % sur 3 ans » (study screen). An empty
+/// or « — » cell stays as is; `years` 0 leaves it as is.
+pub fn with_avg_years(cell: &str, years: usize) -> String {
+    if cell.is_empty() || cell == EMPTY_SLOT || years == 0 {
+        return cell.to_string();
+    }
+    let span = if years == 1 {
+        AVG_OVER_ONE_YEAR.to_string()
+    } else {
+        AVG_OVER_YEARS.replace("{n}", &years.to_string())
+    };
+    match cell.split_once(" · ") {
+        Some((avg, trend)) => format!("{avg} {span} · {trend}"),
+        None => format!("{cell} {span}"),
     }
 }
 
@@ -432,8 +512,15 @@ pub fn pe_computed(outputs: &SsgOutputs, format: NumberFormat) -> PeComputed {
 /// The §4 risk/reward computed results (forecast high/low, the four low candidates, U/D,
 /// appreciation). Issue #213: each candidate (a)–(d) carries its value ("" when unknown) AND a
 /// reason KEY for the absence — the words live in Slint (posture-gated), the key names the
-/// missing input: "est_low_eps" | "low_pe" | "low_prices" | "severe_low" | "dividend" | "yield" | "".
-pub fn risk_computed(outputs: &SsgOutputs, format: NumberFormat) -> RiskComputed {
+/// missing input: "est_low_eps" | "low_pe" | "low_prices" | "severe_low" | "dividend" | "yield" |
+/// "overflow" | "". The G1 review made the (a)
+/// and (d) reasons exact: each is read from the INPUTS (`judgment`), so an overflowing product is
+/// « calcul hors limites » — never misattributed to a present input.
+pub fn risk_computed(
+    outputs: &SsgOutputs,
+    judgment: &steadyinvest_contract::Judgment,
+    format: NumberFormat,
+) -> RiskComputed {
     let r = &outputs.risk_reward;
     let c = &r.low_candidates;
     let price = |v: Option<Decimal>| -> slint::SharedString {
@@ -444,27 +531,16 @@ pub fn risk_computed(outputs: &SsgOutputs, format: NumberFormat) -> RiskComputed
     let why = |value: Option<Decimal>, reason: &'static str| -> slint::SharedString {
         if value.is_some() { "" } else { reason }.into()
     };
-    // (a): the est-low EPS is the usual gap (a pure judgment), else the judged low P/E.
-    let why_a = if c.avg_low_pe_times_eps.is_some() {
-        ""
-    } else if outputs.growth.estimated_low_eps.is_none() {
-        "est_low_eps"
-    } else {
-        "low_pe"
-    };
-    // (d): a non-positive / unknown average high yield is named first (the §9 guard); with a
-    // usable yield, the only remaining gap is the dividend judgment.
-    let why_d = if c.dividend_supported.is_some() {
-        ""
-    } else if outputs
-        .valuation
-        .avg_high_yield_pct
-        .is_none_or(|y| y <= Decimal::ZERO)
-    {
-        "yield"
-    } else {
-        "dividend"
-    };
+    let why_a = low_a_reason(
+        c.avg_low_pe_times_eps.is_some(),
+        outputs.growth.estimated_low_eps,
+        judgment.judged_avg_low_pe.map(|m| m.as_decimal()),
+    );
+    let why_d = low_d_reason(
+        c.dividend_supported.is_some(),
+        outputs.valuation.avg_high_yield_pct,
+        judgment.present_full_year_dividend.map(|m| m.as_decimal()),
+    );
     RiskComputed {
         forecast_high: fmt(r.forecast_high, DisplayField::Price, format).into(),
         forecast_low: fmt(r.forecast_low, DisplayField::Price, format).into(),
@@ -478,6 +554,42 @@ pub fn risk_computed(outputs: &SsgOutputs, format: NumberFormat) -> RiskComputed
         low_d_why: why_d.into(),
         ud_ratio: fmt_ud(&r.upside_downside, format).into(),
         appreciation: fmt_pct(outputs.returns.projected_appreciation_pct, format).into(),
+    }
+}
+
+/// Why candidate (a) — avg low P/E × est. low EPS — is absent (G1 review): the missing input
+/// first (the est-low EPS is the usual gap, a pure judgment), and only when both are present the
+/// checked product overflowed. (Core computes (a) for any sign — a positivity rule would be a
+/// method change, left to the owner; no figure changes here.)
+fn low_a_reason(
+    present: bool,
+    est_low_eps: Option<Decimal>,
+    low_pe: Option<Decimal>,
+) -> &'static str {
+    match (present, est_low_eps, low_pe) {
+        (true, _, _) => "",
+        (false, None, _) => "est_low_eps",
+        (false, Some(_), None) => "low_pe",
+        (false, Some(_), Some(_)) => "overflow",
+    }
+}
+
+/// Why candidate (d) — dividend ÷ avg high yield — is absent (G1 review): a non-positive /
+/// unknown yield first (the §9 guard), then the dividend judgment, else the checked division
+/// overflowed.
+fn low_d_reason(
+    present: bool,
+    avg_high_yield_pct: Option<Decimal>,
+    dividend: Option<Decimal>,
+) -> &'static str {
+    if present {
+        ""
+    } else if avg_high_yield_pct.is_none_or(|y| y <= Decimal::ZERO) {
+        "yield"
+    } else if dividend.is_none() {
+        "dividend"
+    } else {
+        "overflow"
     }
 }
 
@@ -660,6 +772,7 @@ pub fn scenario_compare(
     ScenarioCompareState {
         visible: true,
         alt_input: alt_input.into(),
+        notice: Default::default(),
         current: outcome(current),
         alternate: outcome(alternate),
     }
@@ -943,6 +1056,10 @@ pub const CONFIDENCE_LOW: &str = "Historique insuffisant — confiance réduite"
 /// is unknown (no dividend history) but the annualised appreciation is computable. Fact-stating,
 /// no imperative — scanned by the posture gate alongside the other engine labels.
 pub const TOTAL_RETURN_NO_DIV: &str = "hors div.";
+/// The years a §2 average runs over, named in a comparison cell when the columns of rows 5 / 6
+/// differ (G1, #237: never « 5 ans » over three). `{n}` is the count.
+pub const AVG_OVER_ONE_YEAR: &str = "sur 1 an";
+pub const AVG_OVER_YEARS: &str = "sur {n} ans";
 
 /// Every Story-2.6 Rust-side user-facing label, exposed so the crate-local posture gate (FR13)
 /// scans them for banned verbs alongside the `@tr()` literals and `state::USER_FACING_MESSAGES`.
@@ -971,6 +1088,8 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TRACE_VERDICT_FORMULA,
     CONFIDENCE_LOW,
     TOTAL_RETURN_NO_DIV,
+    AVG_OVER_ONE_YEAR,
+    AVG_OVER_YEARS,
 ];
 
 #[cfg(test)]
@@ -1061,6 +1180,114 @@ mod tests {
         );
         s.years = years;
         s
+    }
+
+    /// G1 (#237): the §2 average column says the years actually averaged, never « 5 ans » over
+    /// three; two different spans leave the title « Moyenne » and each cell names its own.
+    #[test]
+    fn the_average_column_title_says_the_years_averaged() {
+        assert_eq!(avg_years_title(Some(5), Some(5)), Some(5));
+        assert_eq!(avg_years_title(Some(3), Some(3)), Some(3));
+        assert_eq!(avg_years_title(Some(3), Some(5)), None);
+        // An absent average does not vote.
+        assert_eq!(avg_years_title(None, Some(4)), Some(4));
+        assert_eq!(avg_years_title(Some(2), None), Some(2));
+        assert_eq!(avg_years_title(None, None), None);
+        assert_eq!(avg_years_title(Some(0), Some(0)), None);
+        // The cells then carry the span; an absent one stays « — ».
+        assert_eq!(with_avg_years("47,6 %", 3), "47,6 % sur 3 ans");
+        assert_eq!(with_avg_years(EMPTY_SLOT, 3), EMPTY_SLOT);
+    }
+
+    /// The study screen's §2 cells over two different spans (a year with pre-tax profit but no
+    /// book value): « Moyenne » title, each average naming its span.
+    #[test]
+    fn two_different_spans_are_named_in_the_average_cells() {
+        let study = crate::viewmodel::verify::demo_study().unwrap();
+        let frame = build_frame(&study).unwrap();
+        let mut o = frame.snapshot.outputs().clone();
+        o.management.ptp_avg_years = 5;
+        o.management.roe_avg_years = 4;
+        let years: Vec<i32> = study.years.iter().map(|y| y.year).collect();
+        let m = mgmt_computed(&o, &years, NumberFormat::Comma);
+        assert_eq!(m.avg_years, 0, "the title says « Moyenne »");
+        assert!(m.avg_ptp.ends_with(" sur 5 ans"), "{}", m.avg_ptp);
+        assert!(m.avg_roe.ends_with(" sur 4 ans"), "{}", m.avg_roe);
+        o.management.roe_avg_years = 5;
+        let m = mgmt_computed(&o, &years, NumberFormat::Comma);
+        assert_eq!(m.avg_years, 5);
+        assert!(!m.avg_ptp.contains(" sur "));
+    }
+
+    /// G1 review (#214): the per-year chips name their year, come only from a RECENT year, and
+    /// the est-low EPS chip is never a nonpositive EPS.
+    #[test]
+    fn per_year_suggestions_carry_their_year_and_are_recent_and_positive() {
+        let format = NumberFormat::default();
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let frame = build_frame(&study_with(years, full_judgment())).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
+        assert_eq!(s.est_low_eps_year.as_str(), "2025");
+        assert_eq!(s.dividend_year.as_str(), "2025");
+
+        // The dividend known only in 2021 (four years before the latest reported 2025) → no
+        // dividend chip; a dividend one year back (2024) is still offered, with its year.
+        let old_dividend: Vec<YearData> = (2021..=2025)
+            .map(|y| YearData {
+                dividend_per_share: (y == 2021).then(|| validated_cell("2")),
+                ..year(y, validated_cell)
+            })
+            .collect();
+        let frame = build_frame(&study_with(old_dividend, full_judgment())).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
+        assert_eq!(
+            s.dividend.as_str(),
+            "",
+            "a long-past dividend is no « current » one"
+        );
+        assert_eq!(s.dividend_year.as_str(), "");
+        let last_year_dividend: Vec<YearData> = (2021..=2025)
+            .map(|y| YearData {
+                dividend_per_share: (y <= 2024).then(|| validated_cell("2")),
+                ..year(y, validated_cell)
+            })
+            .collect();
+        let frame =
+            build_frame(&study_with(last_year_dividend, full_judgment())).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
+        assert_eq!(s.dividend_year.as_str(), "2024");
+
+        // A negative latest EPS → no est-low chip (never an older positive one either).
+        let loss: Vec<YearData> = (2021..=2025)
+            .map(|y| YearData {
+                eps: if y == 2025 {
+                    validated_cell("-1")
+                } else {
+                    validated_cell("5")
+                },
+                ..year(y, validated_cell)
+            })
+            .collect();
+        let frame = build_frame(&study_with(loss, full_judgment())).expect("normalizes");
+        let s = judgment_suggestions(frame.snapshot.outputs(), &frame.series, format);
+        assert_eq!(s.est_low_eps.as_str(), "");
+        assert_eq!(s.est_low_eps_year.as_str(), "");
+    }
+
+    /// G1 review (#213): the (a)/(d) absence reasons are read from the inputs — an overflow is
+    /// never blamed on a present input.
+    #[test]
+    fn low_candidate_reasons_name_the_real_cause() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        assert_eq!(low_a_reason(true, Some(d("2")), Some(d("10"))), "");
+        assert_eq!(low_a_reason(false, None, Some(d("10"))), "est_low_eps");
+        assert_eq!(low_a_reason(false, Some(d("2")), None), "low_pe");
+        assert_eq!(low_a_reason(false, Some(d("2")), Some(d("10"))), "overflow");
+        assert_eq!(low_d_reason(true, Some(d("4")), Some(d("2"))), "");
+        assert_eq!(low_d_reason(false, None, Some(d("2"))), "yield");
+        assert_eq!(low_d_reason(false, Some(d("0")), Some(d("2"))), "yield");
+        assert_eq!(low_d_reason(false, Some(d("4")), None), "dividend");
+        assert_eq!(low_d_reason(false, Some(d("4")), Some(d("2"))), "overflow");
     }
 
     /// 2026-07-12: the « hist. » proposals mirror the §1 historical CAGRs and §3 P/E averages
@@ -1384,7 +1611,7 @@ mod tests {
             "current P/E is honestly unknown (no quarterly data), never 0"
         );
 
-        let risk = risk_computed(snap.outputs(), NumberFormat::Comma);
+        let risk = risk_computed(snap.outputs(), &study.judgment, NumberFormat::Comma);
         assert_ne!(
             risk.forecast_high.as_str(),
             EMPTY_SLOT,

@@ -5671,6 +5671,7 @@ dependencies = [
  "directories",
  "keyring",
  "rfd",
+ "rusqlite",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -5719,6 +5720,7 @@ dependencies = [
 name = "steadyinvest-ingestion"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "reqwest",
  "rust_decimal",
  "rustls",

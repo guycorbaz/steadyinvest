@@ -9,6 +9,7 @@
 use std::rc::Rc;
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use steadyinvest_persistence::StudySummary;
 use uuid::Uuid;
 
 use crate::config::StudyViewState;
@@ -17,7 +18,10 @@ use crate::state::JournalState;
 use crate::wiring::push::{push_form, push_view_state};
 use crate::wiring::watchlist::refresh_watchlist;
 use crate::wiring::{Session, persist};
-use crate::{FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, Verify};
+use crate::wiring::{list_notice, study_notice};
+use crate::{
+    FixtureLine, MainWindow, Prefs, ScenarioCompareState, Studies, StudyRow, TraceState, Verify,
+};
 use crate::{regime, state, viewmodel};
 
 /// Write a study's export envelope to a file (Story 5.2, FR59) and return its path. The file lands in
@@ -60,12 +64,154 @@ fn safe_stem(ticker: &str) -> String {
     }
 }
 
+/// G1 final (L12) — the PDF's path as picked, with `.pdf` appended unless its name already ends
+/// so (any case, « .pdf » alone included); `true` when the path was changed. rfd does not force
+/// the filter's extension everywhere, and a picked name such as « etude-NESN.SW » HAS an extension
+/// (« SW ») — so the test is the name's ending, and the suffix is appended, never swapped for the
+/// name's own last dot-part. A name ending in a bare dot (« etude. ») takes « pdf », never
+/// « ..pdf ».
+fn with_pdf_extension(path: std::path::PathBuf) -> (std::path::PathBuf, bool) {
+    let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+        return (path, false);
+    };
+    let lower = name.to_lowercase();
+    if lower.ends_with(".pdf") {
+        return (path, false);
+    }
+    let named = match name.strip_suffix('.') {
+        Some(stem) => format!("{stem}.pdf"),
+        None => format!("{name}.pdf"),
+    };
+    (path.with_file_name(named), true)
+}
+
+/// One pickable study (G1 decision 3, #237): the `id` is the key carried end to end; the `label`
+/// is display only — « TICKER », or « TICKER · CUR » when the ticker has several studies (then
+/// « · date » and « · n » only if a currency is still shared or unreadable), unique within one
+/// list. `ordinal` is that « n » — the one disambiguator the column header (ticker, currency,
+/// date) does not already show, so the comparison carries it into the header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StudyChoice {
+    pub id: Uuid,
+    pub label: String,
+    pub ordinal: Option<usize>,
+}
+
+/// The facts a choice label is built from. `currency` is read only for an ambiguous ticker;
+/// `None` there means the study could not be read (it stays listed: it EXISTS, and compared it
+/// reads « indisponible »).
+#[derive(Debug, Clone)]
+struct ChoiceFacts {
+    id: Uuid,
+    ticker: String,
+    currency: Option<String>,
+    date: String,
+}
+
+/// PURE: label the studies (the discriminator rule: the label disambiguates, the id identifies),
+/// sorted by label. Every label is unique, so a drop-down value maps back to one study.
+fn label_choices(facts: &[ChoiceFacts]) -> Vec<StudyChoice> {
+    let count = |pred: &dyn Fn(&ChoiceFacts) -> bool| facts.iter().filter(|f| pred(f)).count();
+    let mut out: Vec<StudyChoice> = facts
+        .iter()
+        .map(|f| {
+            let label = if count(&|g| g.ticker == f.ticker) == 1 {
+                f.ticker.clone()
+            } else {
+                match &f.currency {
+                    Some(cur)
+                        if count(&|g| g.ticker == f.ticker && g.currency == f.currency) == 1 =>
+                    {
+                        format!("{} · {cur}", f.ticker)
+                    }
+                    Some(cur) => format!("{} · {cur} · {}", f.ticker, f.date),
+                    // Unreadable: no currency to name — the date (then a number) tells it apart.
+                    None => format!("{} · {}", f.ticker, f.date),
+                }
+            };
+            StudyChoice {
+                id: f.id,
+                label,
+                ordinal: None,
+            }
+        })
+        .collect();
+    // Same ticker, currency and day: number them in (date, id) order — still one label per study.
+    let mut totals: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for c in &out {
+        *totals.entry(c.label.clone()).or_insert(0) += 1;
+    }
+    let mut ordered: Vec<usize> = (0..facts.len()).collect();
+    ordered.sort_by(|&a, &b| (&facts[a].date, facts[a].id).cmp(&(&facts[b].date, facts[b].id)));
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for i in ordered {
+        if totals.get(&out[i].label).is_some_and(|&t| t > 1) {
+            let n = seen.entry(out[i].label.clone()).or_insert(0);
+            *n += 1;
+            out[i].label = format!("{} · {n}", out[i].label);
+            out[i].ordinal = Some(*n);
+        }
+    }
+    out.sort_by(|a, b| (&a.label, a.id).cmp(&(&b.label, b.id)));
+    out
+}
+
+/// PURE: the choice facts of a listing. `currency_of` reads a study's currency — asked only for
+/// an ambiguous ticker: `Ok(None)` (gone between the listing and the read) leaves the study out,
+/// it no longer exists; `Err` (unreadable) keeps it, currency-less.
+fn choice_facts(
+    summaries: &[StudySummary],
+    currency_of: impl Fn(Uuid) -> Result<Option<String>, String>,
+) -> Vec<ChoiceFacts> {
+    let mut facts: Vec<ChoiceFacts> = Vec::with_capacity(summaries.len());
+    for s in summaries {
+        let ticker = s.security_ticker.to_uppercase();
+        let ambiguous = summaries
+            .iter()
+            .filter(|o| o.security_ticker.eq_ignore_ascii_case(&ticker))
+            .count()
+            > 1;
+        let currency = if ambiguous {
+            match currency_of(s.id) {
+                Ok(Some(cur)) => Some(cur.to_uppercase()),
+                Ok(None) => continue,
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+        facts.push(ChoiceFacts {
+            id: s.id,
+            ticker,
+            currency,
+            date: s.created_at.0.chars().take(10).collect(),
+        });
+    }
+    facts
+}
+
+/// The dossier's studies as pickable choices (G1 decision 3) — for the comparison's five
+/// drop-downs, and for any other study picker. Fallible (#95): `Err` is a failure of the LISTING,
+/// which the picker states — never an empty list passed off as « aucune étude ». One unreadable
+/// study does not hide the others: it stays listed (see [`choice_facts`]).
+pub(crate) fn study_choices(state: &JournalState) -> Result<Vec<StudyChoice>, String> {
+    let summaries = state.try_list_studies()?;
+    let facts = choice_facts(&summaries, |id| {
+        state
+            .try_get_study(id)
+            .map(|s| s.map(|study| study.native_currency))
+    });
+    Ok(label_choices(&facts))
+}
+
 /// Rebuild the dashboard list from the journal and mirror the read-only flag into the `Studies`
 /// global. Called on startup and after every create.
 pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     let studies = ui.global::<Studies>();
-    // Story 7.1: the comparison picker (and the add-position dialog) offer the dossier's study
-    // tickers — pushed here too, so the list screen never shows a stale drop-down.
+    // Story 7.1 / G1 decision 3: the comparison's five pickers list STUDIES (ids), re-pushed here
+    // so the list screen never shows a stale drop-down.
+    crate::wiring::comparison::push_choices(ui, state);
+    // The add-position dialog offers the dossier's study tickers.
     {
         let mut tickers: Vec<String> = state
             .list_studies()
@@ -150,6 +296,25 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     studies.set_read_only(state.is_read_only());
 }
 
+/// G1 final review M3: what belongs to the study on screen and must never show over another study
+/// or the demo — the traceability panel, the scenario comparison (its overlay and cached
+/// baseline), the « Historique » panel and the §1 chart's drag/hover flags (a stuck flag disables
+/// the form's scroll).
+fn reset_study_overlays(
+    ui: &MainWindow,
+    compare_study: &Rc<std::cell::RefCell<Option<steadyinvest_contract::Study>>>,
+) {
+    let studies = ui.global::<Studies>();
+    *compare_study.borrow_mut() = None;
+    studies.set_scenario_compare(ScenarioCompareState::default());
+    studies.set_trace(TraceState::default());
+    studies.set_judgment_dragging(false);
+    studies.set_judgment_hover(false);
+    // G3 #9: the study's « Historique » panel too (through its own close path).
+    studies.invoke_close_history();
+    studies.set_history_unavailable(false);
+}
+
 /// Wire the studies domain: create / open (with per-study view-state restore) / fold / regime,
 /// the dashboard search / sort / filter + lifecycle actions behind their confirm overlay, the
 /// study JSON export/import + PDF export, and the verify / demo surfaces.
@@ -170,9 +335,14 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>()
-            .on_create_study(move |ticker, currency| {
+            .on_create_study(move |ticker, currency, company_name| {
                 let ui = ui_weak.unwrap();
-                let result = journal_state.borrow_mut().create_study(&ticker, &currency);
+                // G1 review (decision 8): the optional company name rides the same first write.
+                let result = journal_state.borrow_mut().create_study_named(
+                    &ticker,
+                    &currency,
+                    &company_name,
+                );
                 let studies = ui.global::<Studies>();
                 let written = result.is_ok();
                 match result {
@@ -319,19 +489,23 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_export_study(move |id| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Ok(uuid) = Uuid::parse_str(&id) else {
                 return;
             };
             let outcome = match journal_state.borrow().export_study(uuid) {
                 Ok(json) => match write_study_export(uuid, &json) {
                     Ok(path) => Ok(format!("{} {}", state::MSG_STUDY_EXPORTED, path.display())),
-                    Err(e) => Err(format!("{} {e}", state::MSG_SAVE_FAILED)),
+                    // G1 final (M4): the write failure is named in French, the OS cause logged.
+                    Err(error) => {
+                        tracing::warn!(study_id = %uuid, %error, "study export write failed");
+                        Err(state::MSG_EXPORT_WRITE_FAILED.to_string())
+                    }
                 },
                 Err(message) => Err(message),
             };
             match outcome {
-                Ok(notice) => studies.set_notice(notice.into()),
+                // F4: an export outcome never overwrites another source's notice.
+                Ok(notice) => list_notice::show(&ui, list_notice::Source::Export, &notice),
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
         });
@@ -345,20 +519,36 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_export_study_pdf(move |id| {
             let ui = ui_weak.unwrap();
-            let studies = ui.global::<Studies>();
             let Ok(uuid) = Uuid::parse_str(&id) else {
                 return;
             };
             // Fetch + render BEFORE opening a dialog, so a study that does not compute never prompts
-            // for a destination it can't fill.
-            let Some(study) = journal_state.borrow().get_study(uuid) else {
-                crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
-                return;
+            // for a destination it can't fill. G1 final (M3): each refusal names its own cause —
+            // a read failure (« illisible »), a vanished study (« introuvable »), a study whose data
+            // do not prepare — never « L'enregistrement a échoué », which nothing here attempted.
+            let read = journal_state.borrow().try_get_study(uuid);
+            let study = match read {
+                Ok(Some(study)) => study,
+                Ok(None) => {
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_MISSING);
+                    return;
+                }
+                Err(_) => {
+                    // The cause is logged by `try_get_study`.
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_UNREADABLE);
+                    return;
+                }
             };
-            let Ok(bytes) = steadyinvest_report::render_study_pdf(&study) else {
-                // The study does not compute as entered — a neutral refusal, no panic, no leak.
-                crate::wiring::dialog::refuse(&ui, state::MSG_SAVE_FAILED);
-                return;
+            // G1 I: the PDF's figures in the user's number format, as on the screen.
+            let numbers = journal_state.borrow().number_format().report_style();
+            let bytes = match steadyinvest_report::render_study_pdf(&study, numbers) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    // The study does not compute as entered — a named refusal, no panic, no leak.
+                    tracing::warn!(study_id = %uuid, %error, "study PDF not rendered");
+                    crate::wiring::dialog::refuse(&ui, state::MSG_STUDY_PDF_UNRENDERABLE);
+                    return;
+                }
             };
             // Native save picker on the UI thread (modal — the established `rfd` pattern, cf. the
             // journal export/create rails). Cancel → no notice, nothing written.
@@ -373,17 +563,32 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             let Some(path) = dialog.save_file() else {
                 return;
             };
-            // rfd does not force the filter extension on every platform — ensure `.pdf`.
-            let path = if path.extension().is_some() {
-                path
-            } else {
-                path.with_extension("pdf")
-            };
-            let notice = match std::fs::write(&path, &bytes) {
-                Ok(()) => format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
-                Err(e) => format!("{} {e}", state::MSG_SAVE_FAILED),
-            };
-            studies.set_notice(notice.into());
+            // rfd does not force the filter extension on every platform — ensure `.pdf` (L12).
+            let (path, renamed) = with_pdf_extension(path);
+            // The picker asked about overwriting the name it returned, not the one completed
+            // here: an existing file under the completed name is never overwritten in silence.
+            if renamed && path.exists() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                crate::wiring::dialog::refuse(&ui, &state::export_name_taken_message(&name));
+                return;
+            }
+            match std::fs::write(&path, &bytes) {
+                // F4: an export outcome never overwrites another source's notice (M4).
+                Ok(()) => list_notice::show(
+                    &ui,
+                    list_notice::Source::Export,
+                    &format!("{} {}", state::MSG_STUDY_EXPORTED, path.display()),
+                ),
+                // A write failure is a refusal, like its neighbours — named in French, the OS
+                // cause logged (M4).
+                Err(error) => {
+                    tracing::warn!(study_id = %uuid, %error, "study PDF write failed");
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_WRITE_FAILED);
+                }
+            }
         });
     }
     {
@@ -402,7 +607,8 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 Err(_) => Err(state::MSG_IMPORT_MALFORMED.to_string()),
             };
             match outcome {
-                Ok(notice) => ui.global::<Studies>().set_notice(notice.into()),
+                // F4: an import outcome never overwrites another source's failure.
+                Ok(notice) => list_notice::show(&ui, list_notice::Source::Import, notice),
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
             }
             refresh_studies(&ui, &journal_state.borrow());
@@ -430,6 +636,28 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         });
     }
 
+    // G1 J review — the ONE close path of an open study (in-form « Retour », the nav rail, the
+    // Portefeuille « go to studies », and — G1 final review L9 — a dossier change and the archive /
+    // delete of the open study): forget the open study's id, so a late fetch result is routed
+    // to the list and no edit rail can write a study that is no longer shown. G1 final review
+    // M3/L9: what belonged to the study on screen goes with it (the traceability panel, the
+    // scenario comparison, the §1 drag/hover flags), and so does the demo flag.
+    {
+        let ui_weak = ui.as_weak();
+        let current_study = Rc::clone(current_study);
+        let compare_study = Rc::clone(compare_study);
+        ui.global::<Studies>().on_close_study(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            *current_study.borrow_mut() = None;
+            studies.set_study_open(false);
+            studies.set_demo_active(false);
+            reset_study_overlays(&ui, &compare_study);
+            // G3 #6: a fetch result kept for a hidden study is said in the list's slot from here.
+            study_notice::drop_pending();
+        });
+    }
+
     // Money surfaces as formatted strings via the form adapter (the only float→string boundary), and
     // the persisted per-study fold/regime view-state is restored (default = Entry + all open).
     {
@@ -452,9 +680,17 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             // push_form so the mirrored can-undo/can-redo flags read empty.
             journal_state.borrow_mut().reset_undo();
             // Also discard any scenario-compare state from a previous study (review P3) — its overlay
-            // and cached baseline must never survive into a different study.
-            *compare_study.borrow_mut() = None;
-            studies.set_scenario_compare(ScenarioCompareState::default());
+            // and cached baseline must never survive into a different study; nor its traceability
+            // panel (G1 final review M3).
+            reset_study_overlays(&ui, &compare_study);
+            // G1 J: the study slot starts empty — nothing said of the previous study (a fetch
+            // result, a refusal) may read as this one's. Before the render, so a normalize failure
+            // of THIS study still shows.
+            study_notice::reset(&ui);
+            // G1 final review (G3 #6): …except THIS study's own fetch result, said while it was
+            // not on screen — the reader opening it (from the Revue, the candidates panel, the
+            // comparison) sees it here.
+            study_notice::take_pending(&ui, id);
             let format = config.borrow().number_format;
             push_form(&ui, &journal_state.borrow(), &study, format);
             // A freshly-opened form has no active entry cell (the cursor appears on first focus).
@@ -598,8 +834,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 let destructive = action == "delete";
                 *pending_study_action.borrow_mut() = Some((action, id));
                 // The UX pass: the prompt is a modal confirm (the overlay derives the title and
-                // the verb from `study-action-destructive`); the 2.12 banner props keep the facts.
-                studies.set_study_action_message(message.clone().into());
+                // the verb from `study-action-destructive`).
                 studies.set_study_action_destructive(destructive);
                 crate::wiring::dialog::confirm(&ui, "study-action", &message);
             });
@@ -612,7 +847,6 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>().on_confirm_study_action(move || {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
-            studies.set_study_action_confirm_visible(false);
             let Some((action, id)) = pending_study_action.borrow_mut().take() else {
                 return;
             };
@@ -632,14 +866,19 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             match result {
                 Ok(()) => {
-                    studies.set_notice(state::study_action_done_message(&action, &ticker).into());
+                    // F4: the outcome never overwrites another source's failure.
+                    list_notice::show(
+                        &ui,
+                        list_notice::Source::StudyAction,
+                        &state::study_action_done_message(&action, &ticker),
+                    );
                     // If the affected study is the one currently open, close it back to the dashboard
                     // (a hidden/removed study must not stay mounted).
                     let is_open =
                         current_study.borrow().as_deref() == Some(id.to_string().as_str());
                     if is_open {
-                        *current_study.borrow_mut() = None;
-                        studies.set_study_open(false);
+                        // G1 final review L9: through the ONE close path.
+                        studies.invoke_close_study();
                     }
                     refresh_studies(&ui, &journal_state.borrow());
                     // A delete clears any watchlist soft link to this study (Story 4.1) — re-render
@@ -651,13 +890,9 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         });
     }
     {
-        let ui_weak = ui.as_weak();
         let pending_study_action = Rc::clone(pending_study_action);
         ui.global::<Studies>().on_cancel_study_action(move || {
-            let ui = ui_weak.unwrap();
             *pending_study_action.borrow_mut() = None;
-            ui.global::<Studies>()
-                .set_study_action_confirm_visible(false);
         });
     }
 
@@ -694,6 +929,8 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let config = Rc::clone(config);
         let journal_state = Rc::clone(journal_state);
+        let current_study = Rc::clone(current_study);
+        let compare_study = Rc::clone(compare_study);
         ui.global::<Studies>().on_load_demo(move || {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
@@ -704,6 +941,13 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                     // the default (entry regime, all sections open) and an empty undo stack, so it never
                     // inherits the previously-open study's folds/regime or shows enabled undo/redo.
                     journal_state.borrow_mut().reset_undo();
+                    study_notice::reset(&ui); // G1 J: the demo inherits no study's notice
+                    // G1 final review M3: …nor a study's traceability panel or scenario comparison.
+                    reset_study_overlays(&ui, &compare_study);
+                    // G1 J review: `current_study` is None HERE, by construction — not merely
+                    // "stays" None: a study opened earlier would otherwise receive the demo's
+                    // edit rails and a late fetch result would render over the demo.
+                    *current_study.borrow_mut() = None;
                     push_form(&ui, &journal_state.borrow(), &study, format);
                     push_view_state(&ui, &StudyViewState::default());
                     studies.set_notice(SharedString::new());
@@ -713,5 +957,134 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 Err(_) => crate::wiring::dialog::refuse(&ui, state::MSG_DEMO_UNAVAILABLE),
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_picked_pdf_name_always_ends_in_pdf() {
+        // G1 final (L12): « etude-NESN.SW » has an extension (« SW ») — `.pdf` is appended.
+        let p = |s: &str| {
+            let (path, renamed) = with_pdf_extension(std::path::PathBuf::from(s));
+            (path.to_string_lossy().to_string(), renamed)
+        };
+        let changed = |s: &str| (s.to_string(), true);
+        let kept = |s: &str| (s.to_string(), false);
+        assert_eq!(p("/x/etude-NESN.SW"), changed("/x/etude-NESN.SW.pdf"));
+        assert_eq!(p("/x/etude"), changed("/x/etude.pdf"));
+        assert_eq!(p("/x/notes.txt"), changed("/x/notes.txt.pdf"));
+        // A bare trailing dot takes « pdf » — never « ..pdf ».
+        assert_eq!(p("/x/etude."), changed("/x/etude.pdf"));
+        // Already a PDF name, any case — « .pdf » alone too (never « .pdf.pdf »).
+        assert_eq!(p("/x/etude.pdf"), kept("/x/etude.pdf"));
+        assert_eq!(p("/x/etude.PDF"), kept("/x/etude.PDF"));
+        assert_eq!(p("/x/.pdf"), kept("/x/.pdf"));
+    }
+
+    fn facts(n: u128, ticker: &str, currency: &str, date: &str) -> ChoiceFacts {
+        ChoiceFacts {
+            id: Uuid::from_u128(n),
+            ticker: ticker.into(),
+            currency: (!currency.is_empty()).then(|| currency.to_string()),
+            date: date.into(),
+        }
+    }
+
+    fn summary(n: u128, ticker: &str, date: &str) -> StudySummary {
+        StudySummary {
+            id: Uuid::from_u128(n),
+            security_ticker: ticker.into(),
+            created_at: steadyinvest_contract::Timestamp(format!("{date}T00:00:00Z")),
+            status: "active".into(),
+        }
+    }
+
+    #[test]
+    fn an_unreadable_study_stays_listed_and_a_gone_one_is_left_out() {
+        let summaries = [
+            summary(1, "nesn.sw", "2026-01-01"),
+            summary(2, "NESN.SW", "2026-02-01"),
+            summary(3, "NESN.SW", "2026-03-01"),
+            summary(4, "ROG.SW", "2026-04-01"),
+        ];
+        let listed = choice_facts(&summaries, |id| match id.as_u128() {
+            1 => Ok(Some("chf".into())),
+            2 => Err("unreadable".into()),
+            3 => Ok(None), // deleted between the listing and the read
+            _ => panic!("an unambiguous ticker is never read"),
+        });
+        let c = label_choices(&listed);
+        assert_eq!(
+            c.len(),
+            3,
+            "the gone study is left out, the unreadable one kept"
+        );
+        assert_eq!(label_of(&c, 1), "NESN.SW · CHF");
+        assert_eq!(label_of(&c, 2), "NESN.SW · 2026-02-01");
+        assert_eq!(label_of(&c, 4), "ROG.SW");
+        // Two unreadable on one day: numbered, and the number is carried for the header.
+        let c = label_choices(&[
+            facts(5, "X.SW", "", "2026-01-01"),
+            facts(6, "X.SW", "", "2026-01-01"),
+        ]);
+        assert_eq!(label_of(&c, 5), "X.SW · 2026-01-01 · 1");
+        assert_eq!(
+            c.iter()
+                .find(|x| x.id == Uuid::from_u128(6))
+                .unwrap()
+                .ordinal,
+            Some(2)
+        );
+    }
+
+    fn label_of(choices: &[StudyChoice], n: u128) -> String {
+        choices
+            .iter()
+            .find(|c| c.id == Uuid::from_u128(n))
+            .map(|c| c.label.clone())
+            .unwrap()
+    }
+
+    #[test]
+    fn a_choice_names_its_currency_only_when_the_ticker_is_ambiguous() {
+        let c = label_choices(&[
+            facts(1, "NESN.SW", "", "2026-01-01"),
+            facts(2, "AAPL.US", "USD", "2026-02-01"),
+            facts(3, "AAPL.US", "CHF", "2026-03-01"),
+        ]);
+        assert_eq!(label_of(&c, 1), "NESN.SW");
+        assert_eq!(label_of(&c, 2), "AAPL.US · USD");
+        assert_eq!(label_of(&c, 3), "AAPL.US · CHF");
+        // Sorted by label, one entry per STUDY (never deduplicated by ticker).
+        let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        assert_eq!(labels, ["AAPL.US · CHF", "AAPL.US · USD", "NESN.SW"]);
+    }
+
+    #[test]
+    fn a_shared_ticker_and_currency_falls_back_to_the_date_then_a_number() {
+        let c = label_choices(&[
+            facts(1, "ROG.SW", "CHF", "2026-01-01"),
+            facts(2, "ROG.SW", "CHF", "2026-05-01"),
+            facts(4, "NOVN.SW", "CHF", "2026-06-01"),
+            facts(3, "NOVN.SW", "CHF", "2026-06-01"),
+        ]);
+        assert_eq!(label_of(&c, 1), "ROG.SW · CHF · 2026-01-01");
+        assert_eq!(label_of(&c, 2), "ROG.SW · CHF · 2026-05-01");
+        // Same day: numbered in id order — every label still names one study.
+        assert_eq!(label_of(&c, 3), "NOVN.SW · CHF · 2026-06-01 · 1");
+        assert_eq!(label_of(&c, 4), "NOVN.SW · CHF · 2026-06-01 · 2");
+        let ord = |n: u128| {
+            c.iter()
+                .find(|x| x.id == Uuid::from_u128(n))
+                .unwrap()
+                .ordinal
+        };
+        assert_eq!((ord(1), ord(3), ord(4)), (None, Some(1), Some(2)));
+        let mut labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+        labels.dedup();
+        assert_eq!(labels.len(), 4, "unique labels");
     }
 }

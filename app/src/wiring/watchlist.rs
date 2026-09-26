@@ -17,28 +17,33 @@ use crate::{state, viewmodel};
 /// resolving its optional study link to that study's ticker (the buy-zone source for Story 4.2).
 pub(crate) fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
     let watchlist = ui.global::<Watchlist>();
-    let by_id: std::collections::HashMap<Uuid, String> = state
-        .list_studies()
-        .into_iter()
-        .map(|s| (s.id, s.security_ticker))
-        .collect();
-    let items = state.list_watch_items();
+    // G1 final review (M5): a failed read is « indisponible », never the empty state.
+    let (items, unavailable) = match state.try_list_watch_items() {
+        Ok(items) => (items, false),
+        Err(_) => (Vec::new(), true),
+    };
+    watchlist.set_unavailable(unavailable);
     let mut in_buy_zone_count = 0i32;
     let rows: Vec<WatchRow> = items
         .iter()
         .map(|w| {
+            // G1 final review (L6): the link resolves by the study's OWN read — a failure is
+            // « Étude indisponible », never a dangling « Étude : » and never a silent absence of
+            // the zone fact. G1 P (G3 L2): a link whose study no longer exists is a true ABSENCE,
+            // worded as such — never « indisponible ».
+            let study = w.study_id.map(|sid| state.try_get_study(sid));
+            let study_unavailable = matches!(study, Some(Err(_)));
+            let study_deleted = matches!(study, Some(Ok(None)));
+            let study = study.and_then(Result::ok).flatten();
             // Story 4.2: a linked study whose current price is in its §4 buy zone flags a neutral
             // alert (unlinked entries are never in a zone). Issue #48: a price BELOW the recorded
             // band is its own neutral fact — mutually exclusive with the zone by construction.
-            let (in_buy_zone, below_band) =
-                w.study_id
-                    .and_then(|sid| state.get_study(sid))
-                    .map_or((false, false), |study| {
-                        (
-                            viewmodel::engine::study_in_buy_zone(&study),
-                            viewmodel::engine::study_below_forecast_band(&study),
-                        )
-                    });
+            let (in_buy_zone, below_band) = study.as_ref().map_or((false, false), |study| {
+                (
+                    viewmodel::engine::study_in_buy_zone(study),
+                    viewmodel::engine::study_below_forecast_band(study),
+                )
+            });
             if in_buy_zone {
                 in_buy_zone_count += 1;
             }
@@ -46,16 +51,17 @@ pub(crate) fn refresh_watchlist(ui: &MainWindow, state: &JournalState) {
                 id: w.id.to_string().into(),
                 ticker: w.security_ticker.clone().into(),
                 // `linked` is authoritative (the cell carries a study_id); `study_link` is the
-                // resolved ticker for display (may be "" if the linked study no longer resolves).
+                // resolved study's ticker for display.
                 linked: w.study_id.is_some(),
-                study_link: w
-                    .study_id
-                    .and_then(|sid| by_id.get(&sid))
-                    .cloned()
+                study_link: study
+                    .as_ref()
+                    .map(|s| s.security_ticker.clone())
                     .unwrap_or_default()
                     .into(),
                 in_buy_zone,
                 below_band,
+                study_unavailable,
+                study_deleted,
             }
         })
         .collect();
@@ -84,10 +90,19 @@ fn apply_watch_result(ui: &MainWindow, state: &JournalState, result: Result<(), 
 /// "no study for this ticker" notice if none exists (Story 4.1 — an explicit picker is a later
 /// refinement; auto-match by ticker covers the common case).
 fn link_watch_to_same_ticker_study(state: &mut JournalState, id: Uuid) -> Result<(), String> {
-    let Some(item) = state.list_watch_items().into_iter().find(|w| w.id == id) else {
+    let Some(item) = state
+        .try_list_watch_items()
+        .map_err(|_| state::MSG_WATCH_LINK_LIST_UNREADABLE.to_string())?
+        .into_iter()
+        .find(|w| w.id == id)
+    else {
         return Ok(()); // entry gone — nothing to link
     };
-    match state.study_id_for_ticker(&item.security_ticker) {
+    // G1 final review (L6): a failed study read is named — never « aucune étude pour ce symbole ».
+    match state
+        .try_study_id_for_ticker(&item.security_ticker)
+        .map_err(|_| state::MSG_WATCH_STUDY_UNAVAILABLE.to_string())?
+    {
         Some(sid) => state.update_watch_item(id, &item.security_ticker, Some(sid)),
         None => Err(state::MSG_WATCH_NO_STUDY.to_string()),
     }

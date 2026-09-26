@@ -17,8 +17,72 @@ import { Tokens } from "../tokens.slint";
 import { Studies, GridCellState, Warnings } from "../state.slint";
 import { TrustMarker } from "trust_markers.slint";
 
+// Shrink-to-fit for a grid figure (G1 J, #237). A figure is shown WHOLE — a clipped « 215 93… »
+// is neither the value nor an honest absence (absence honesty). `natural` is the figure's width
+// measured at the body size; when it exceeds the cell's value `room` the font scales down linearly
+// so the figure fits (2 px of slack absorbs glyph hinting) — but never below `Tokens.font-floor`
+// (G1 J review: a figure shrunk to 1 px is as unread as a clipped one). A figure that does not fit
+// even at the floor is NOT shown clipped: the cell shows the overflow mark « ⋯ » and reveals the
+// whole figure on focus (editable) / hover (read-only) in a `CellTip`. Shared by `EditableCell`
+// and the study screen's `GridCell` / `GridLabelCell`.
+export global CellFit {
+    pure public function font(room: length, natural: length) -> length {
+        return CellFit.scaled(Tokens.font-body, room, natural);
+    }
+    // The same rule from any base size (`natural` measured at `base`) — the §2 header titles use it
+    // at caption size so « Moy. 5 ans » / « Tendance » show whole rather than elide (G1 J remainder).
+    pure public function scaled(base: length, room: length, natural: length) -> length {
+        if (natural <= room) {
+            return base;
+        }
+        return max(Tokens.font-floor, base * (max(0px, room - 2px) / natural));
+    }
+    // Does a text of `natural` width at `base` fit `room` at all (at the floor size at worst)?
+    pure public function fits(base: length, room: length, natural: length) -> bool {
+        return natural * (Tokens.font-floor / base) <= max(0px, room - 2px);
+    }
+}
+
+// The overflow mark of a grid figure that does not fit even at the floor size — an honest
+// « there is more here », never a clipped figure passed off as the value (absence honesty).
+export global CellMark {
+    out property <string> overflow: "⋯";
+}
+
+// The whole figure of an overflowing grid cell, shown on focus / hover as a caption-like tip
+// anchored to the cell's RIGHT edge and extending leftward + upward (over the previous row and the
+// cells before it, which are drawn earlier — so the tip is never hidden under a later sibling).
+export component CellTip inherits Rectangle {
+    in property <string> text;
+    in property <string> family: Tokens.font-numeric;
+    width: tip.preferred-width + Tokens.space-8 * 2;
+    height: tip.preferred-height + Tokens.space-4 * 2;
+    // Placed by the user site: `x: root.width - self.width; y: -self.height;`.
+    background: Tokens.surface-alt;
+    border-width: Tokens.border;
+    border-color: Tokens.focus;
+    border-radius: Tokens.radius;
+    tip := Text {
+        x: Tokens.space-8;
+        y: Tokens.space-4;
+        text: root.text;
+        color: Tokens.text-high;
+        font-family: root.family;
+        font-size: Tokens.font-body;
+    }
+}
+
 export component EditableCell inherits Rectangle {
     in property <GridCellState> state;
+
+    // Grid-column rule (G1 J, #237): a column's width NEVER follows its content. Every grid cell
+    // (this one and the study screen's `GridCell` / `GridLabelCell` / `PeHeaderCell`) declares the
+    // same zero basis, so a row of equal-stretch cells splits its width identically whether a cell
+    // reads « — » or « 69,1 » — the header and every data row share one column geometry. The
+    // common floor `Tokens.grid-col-min` (G1 J review) stops a squeeze: past it the form scrolls
+    // sideways (the study Flickable's viewport follows the content's min width).
+    min-width: Tokens.grid-col-min;
+    preferred-width: 0px;
 
     // Soft-lock (Story 2.5): a validated (`✓`) cell is edit-protected — its value cannot be changed
     // by a stray keystroke; only the deliberate clear-✓ gesture releases it. Drives the read-only
@@ -51,14 +115,16 @@ export component EditableCell inherits Rectangle {
     }
 
     // Commit the typed text iff it differs from the displayed model value (so tabbing through
-    // untouched cells writes nothing — no no-op put_study, no polluted FR51 history). A blank /
-    // unparseable text clears the cell to a to-fill gap (Rust parses locale-aware → None, never 0).
-    // A refusal (read-only / save failure) keeps the user's text for a retry; Rust sets the notice.
+    // untouched cells writes nothing — no no-op put_study, no polluted FR51 history). A blank text
+    // clears the cell to a to-fill gap (never 0). G1 I on-screen check: a refusal (a text that is
+    // no number, an ambiguous number, read-only, soft-lock, save failure) is raised by Rust in the
+    // refusal dialog, and the cell shows its STORED value again — never a refused text that looks
+    // saved while the cursor moves on.
     function commit() {
-        // The written? result is intentionally ignored: on a refusal Rust sets the neutral notice
-        // and `commit()` leaves `input.text` untouched, so the user's text is retained either way.
         if (input.text != root.state.value) {
-            Studies.commit-cell(root.state.year-index, root.state.field, input.text);
+            if (!Studies.commit-cell(root.state.year-index, root.state.field, input.text)) {
+                input.text = root.state.value;
+            }
         }
     }
 
@@ -72,7 +138,7 @@ export component EditableCell inherits Rectangle {
         y: (parent.height - self.height) / 2;
     }
     // Quiet not-available-accepted marker — a calm "n/a", deliberately distinct from the gap.
-    Text {
+    na := Text {
         visible: root.state.coverage == "not-available";
         text: @tr("n/a");
         color: Tokens.text-low;
@@ -82,27 +148,82 @@ export component EditableCell inherits Rectangle {
     }
     // Stale murmur — a hollow dot beside a present-but-stale value (the value itself dims via the
     // root opacity below). No stale cell exists in 2.4 except via test fixtures (Epic 3 sets stale).
-    Text {
+    stale := Text {
         visible: root.state.coverage == "present" && root.state.stale;
         text: Tokens.stale-dot;
         color: Tokens.text-low;
-        font-size: Tokens.font-caption;
-        x: Tokens.space-4;
-        y: (parent.height - self.height) / 2;
+        font-size: Tokens.mark-font;
+        // G1 final review M4: the trailing marker column, bottom half (see the marker-space rule).
+        width: Tokens.mark-col;
+        height: parent.height / 2;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: root.trail-col-x;
+        y: parent.height / 2;
     }
-    // Story 2.7 — the plausibility warning glyph (△). Anchored at the TOP edge, just trailing of the
-    // leading trust-marker box and clear of the right-centred coverage/stale markers (AC3: a corner
-    // distinct from the review marker AND the coverage glyph, no collision). Neutral ink, never a hue;
+    // Story 2.7 — the plausibility warning glyph (△). Anchored at the TOP edge, in the trailing
+    // marker column (G1 final review M4) — the top-right corner, clear of the review mark (top-left)
+    // and of the stale dot under it (AC3: a corner distinct from the review marker AND the coverage
+    // glyph, no collision). Neutral ink, never a hue;
     // a static glyph (no animation → reduced-motion-safe by construction, AC5). Its human-readable
     // fact is revealed on focus via `Studies.active-warning` (the source-on-demand mirror).
-    Text {
+    // G1 J: its horizontal span is RESERVED out of the value room (`trail` below), so the glyph is
+    // never drawn over a wide figure (the on-screen 2020 « 14,726750 » overlap).
+    warn := Text {
         visible: root.state.warning;
         text: Tokens.warn-glyph;
         color: Tokens.gap-ink;
-        font-size: Tokens.font-caption;
-        x: Tokens.font-body + Tokens.space-8 + Tokens.space-4;
+        font-size: Tokens.mark-font;
+        // G1 final review M4: the trailing marker column, top half (see the marker-space rule).
+        width: Tokens.mark-col;
+        height: parent.height / 2;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: root.trail-col-x;
         y: 0;
     }
+
+    // Marker-space rule (G1 J, #237): the value never shares pixels with a marker, and the markers
+    // never share pixels with each other (G1 J review). G1 final review M4 (G3 rework): the markers
+    // sit in two narrow COLUMNS of constant geometry (`Tokens.mark-col`, the arithmetic in
+    // tokens.slint) — LEADING: the ?/✓ review mark (top half) and the lock (bottom half); TRAILING:
+    // the △ warning (top half) and the ◦ stale dot (bottom half). A column is reserved (`lead` /
+    // `trail`) only when one of its markers shows; otherwise the bare 8 px padding. Focus never
+    // changes the geometry (display ↔ edit never resizes). `trail` also reserves « n/a ». The value's
+    // TextInput lives strictly between them and shrinks its font (`CellFit`) down to the floor;
+    // past the floor the cell shows the overflow mark and reveals the figure on focus.
+    property <length> mark-span: Tokens.mark-inset * 2 + Tokens.mark-col;
+    property <bool> lead-col: root.state.review != "none";
+    property <bool> trail-col: stale.visible || warn.visible;
+    property <length> trail-col-x: root.width - Tokens.mark-inset - Tokens.mark-col;
+    property <length> lead: root.lead-col ? root.mark-span : Tokens.space-8;
+    property <length> trail: max(
+        root.trail-col ? root.mark-span : Tokens.space-8,
+        na.visible ? na.width + Tokens.space-8 * 2 : 0px);
+    // The shown/typed text measured at the body size — drives the shrink-to-fit font.
+    measure := Text {
+        visible: false;
+        text: input.text;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-body;
+    }
+    // Does the figure not fit its room even at the floor size? Then, unfocused, the cell shows the
+    // overflow mark instead of a clipped figure; focused, the TextInput keeps the floor size and
+    // scrolls horizontally (its native behaviour), and a `CellTip` shows the whole text above.
+    property <bool> overflows: !CellFit.fits(Tokens.font-body, input.width, measure.preferred-width);
+    Text {
+        visible: root.overflows && !input.has-focus;
+        x: root.lead;
+        width: input.width;
+        height: parent.height;
+        text: CellMark.overflow;
+        color: Tokens.text-high;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-body;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+
     TouchArea {
         mouse-cursor: text;
         clicked => {
@@ -115,17 +236,22 @@ export component EditableCell inherits Rectangle {
         color: Tokens.text-high;
         selection-background-color: Tokens.focus;
         font-family: Tokens.font-numeric;
-        font-size: Tokens.font-body;
+        // Shrink-to-fit (G1 J): a figure wider than its room is shown whole, at a smaller size —
+        // never below the floor (G1 J review), so the caret stays readable while typing.
+        font-size: CellFit.font(self.width, measure.preferred-width);
         horizontal-alignment: right;
         vertical-alignment: center;
         single-line: true;
         // A validated cell is soft-locked: the value is read-only until the sign-off is cleared.
         read-only: root.locked;
-        width: parent.width - Tokens.space-8 * 2;
+        // Strictly between the leading and trailing markers (the marker-space rule above).
+        width: max(0px, parent.width - root.lead - root.trail);
         height: 100%;
-        x: Tokens.space-8;
-        // Dim a stale value to ~60% (the murmur); a present-current value is full strength.
-        opacity: (root.state.coverage == "present" && root.state.stale) ? Tokens.stale-opacity : 1.0;
+        x: root.lead;
+        // Dim a stale value to ~60% (the murmur); a present-current value is full strength. An
+        // overflowing figure is hidden while unfocused — the overflow mark stands in (G1 J review).
+        opacity: (root.overflows && !self.has-focus) ? 0.0
+            : (root.state.coverage == "present" && root.state.stale) ? Tokens.stale-opacity : 1.0;
 
         // Seed the editable text from the model, and re-sync after every re-push (commit / paste
         // rebuild the rows). Typing changes `self.text` without changing `root.state`, so it does
@@ -218,9 +344,9 @@ export component EditableCell inherits Rectangle {
     // a locked cell it stays the way to reach the cycle by mouse. Constant geometry: a fixed box, so
     // the cell never resizes on a tag change. Reduced-motion mirrored from the platform.
     TrustMarker {
-        x: 0;
+        x: Tokens.mark-inset;
         y: 0;
-        height: 100%;
+        height: parent.height / 2; // the leading column's top half (G1 final review M4)
         review: root.state.review;
         reduced-motion: Studies.reduced-motion;
         clicked => {
@@ -228,12 +354,15 @@ export component EditableCell inherits Rectangle {
         }
     }
     // Calm lock affordance on a soft-locked cell — a glyph (NO colour spent), clickable to reach the
-    // deliberate clear-✓ → ? release by mouse. Distinct from the cycle marker so the first gesture
-    // clears and a normal edit needs the cleared (?) cell — never both in one keystroke.
+    // deliberate clear-✓ → ? release by mouse (Ctrl+Backspace from the keyboard). Distinct from the
+    // cycle marker so the first gesture clears and a normal edit needs the cleared (?) cell — never
+    // both in one keystroke. G1 final review M4/5: always shown on a ✓ cell, in the leading column's
+    // bottom half under the ✓ — no room of its own taken from the figure, no layout shift.
     if root.locked: TouchArea {
-        width: Tokens.font-body + Tokens.space-8;
-        height: 100%;
-        x: parent.width - self.width;
+        width: Tokens.mark-col;
+        height: parent.height / 2;
+        x: Tokens.mark-inset;
+        y: parent.height / 2;
         mouse-cursor: no-drop;
         clicked => {
             root.clear-validation();
@@ -243,11 +372,15 @@ export component EditableCell inherits Rectangle {
         Text {
             text: "⦸";
             color: Tokens.text-low;
-            font-size: Tokens.font-body;
+            font-size: Tokens.mark-font;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
     }
+
+    // G1 J review: the whole figure of an overflowing cell, revealed while it has focus (the typed
+    // text live). Last child → drawn above this cell's own markers.
+    if root.overflows && input.has-focus: CellTip { text: input.text; x: root.width - self.width; y: -self.height; }
 
     // Keep the active cell's TextInput focused when Rust-driven navigation makes it active.
     property <bool> is-active: Studies.active-year == root.state.year-index && Studies.active-field == root.state.field;

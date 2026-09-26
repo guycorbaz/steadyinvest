@@ -22,6 +22,9 @@ export component JudgmentField inherits VerticalLayout {
     // « hist. » chip under the box; clicking commits it through the SAME set-judgment path as
     // typing (the adoption gesture IS the judgment — the #23 rail, never a silent prefill).
     in property <string> suggestion;
+    // The year a per-year proposal comes from ("" = not a per-year figure) — shown on the chip
+    // (G1 review, #214: a last-year dividend never passes for the current one).
+    in property <string> suggestion-year;
 
     spacing: Tokens.space-4;
     // Pack label/box/chip at the top: in a row whose height is set by a taller sibling (the §1
@@ -104,14 +107,20 @@ export component JudgmentField inherits VerticalLayout {
                 init => {
                     self.text = root.value;
                 }
+                // G1 I on-screen check: a refused entry (Rust raises the refusal dialog) shows the
+                // stored value again — never a refused text that looks saved.
                 accepted => {
                     if (self.text != root.value) {
-                        Studies.set-judgment(root.field-key, self.text);
+                        if (!Studies.set-judgment(root.field-key, self.text)) {
+                            self.text = root.value;
+                        }
                     }
                 }
                 changed has-focus => {
                     if (!self.has-focus && self.text != root.value) {
-                        Studies.set-judgment(root.field-key, self.text);
+                        if (!Studies.set-judgment(root.field-key, self.text)) {
+                            self.text = root.value;
+                        }
                     }
                     if (self.has-focus) {
                         self.select-all();
@@ -143,7 +152,9 @@ export component JudgmentField inherits VerticalLayout {
             }
         }
         Text {
-            text: @tr("↩ hist. {}", root.suggestion);
+            text: root.suggestion-year != ""
+                ? @tr("↩ {} ({})", root.suggestion, root.suggestion-year)
+                : @tr("↩ hist. {}", root.suggestion);
             color: Tokens.text-mid;
             font-size: Tokens.font-caption;
             vertical-alignment: center;

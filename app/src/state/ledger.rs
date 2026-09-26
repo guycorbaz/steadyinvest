@@ -47,11 +47,18 @@ use steadyinvest_persistence::{
 };
 use uuid::Uuid;
 
+use super::read_typed;
+use crate::viewmodel::format::NumberFormat;
+
 use super::{
-    JournalState, MSG_DIVIDEND_RETIRED, MSG_DIVIDEND_WITHHOLDING, MSG_HOLDING_INVALID_NUMBER,
-    MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_OVERSELL, MSG_LEDGER_PARTIAL_SOLD,
-    MSG_LEDGER_UNKNOWN_KIND, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
-    effective_currency, watch_error,
+    JournalState, MSG_DIVIDEND_INVALID_GROSS, MSG_DIVIDEND_INVALID_QUANTITY,
+    MSG_DIVIDEND_INVALID_WITHHOLDING, MSG_DIVIDEND_RETIRED, MSG_DIVIDEND_WITHHOLDING,
+    MSG_HOLDING_NOT_FOUND, MSG_HOLDING_SOLD, MSG_LEDGER_INVALID_DATE, MSG_LEDGER_INVALID_FEES,
+    MSG_LEDGER_INVALID_PRICE, MSG_LEDGER_INVALID_QUANTITY, MSG_LEDGER_OUT_OF_RANGE,
+    MSG_LEDGER_OVERSELL, MSG_LEDGER_PARTIAL_SOLD, MSG_LEDGER_QUANTITY_EMPTY,
+    MSG_LEDGER_ROW_INVALID, MSG_LEDGER_UNKNOWN_KIND, MSG_NO_JOURNAL, MSG_READ_FAILED,
+    MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, MSG_SELL_STUDY_UNAVAILABLE, MSG_WITHHOLDING_INVALID,
+    effective_currency, read_error, watch_error,
 };
 
 /// An owned ledger-row draft — the borrow-free twin of [`LedgerEntry`] (which borrows), so the
@@ -125,28 +132,58 @@ pub(super) fn normalize_event_date(input: &str, now_rfc3339: &str) -> Result<Str
     Ok(format!("{date}T00:00:00Z"))
 }
 
+/// The refusals of one ledger form's three amount columns (G1 final review, M4): each names ITS
+/// field — a buy/sell (quantity, unit price, fees) or a dividend row (shares, gross per share,
+/// withholding) — never the holdings register's « quantité et prix d'achat ».
+struct AmountRefusals {
+    quantity_empty: &'static str,
+    quantity: &'static str,
+    price: &'static str,
+    fees: &'static str,
+}
+
+/// A buy or a sale: the quantity is REQUIRED (G1 final review, Guy's decision M2).
+const POSITION_AMOUNTS: AmountRefusals = AmountRefusals {
+    quantity_empty: MSG_LEDGER_QUANTITY_EMPTY,
+    quantity: MSG_LEDGER_INVALID_QUANTITY,
+    price: MSG_LEDGER_INVALID_PRICE,
+    fees: MSG_LEDGER_INVALID_FEES,
+};
+
+/// A dividend row edited through the ledger's update rail (the columns hold shares, gross per
+/// share and the withholding).
+const DIVIDEND_AMOUNTS: AmountRefusals = AmountRefusals {
+    quantity_empty: MSG_DIVIDEND_INVALID_QUANTITY,
+    quantity: MSG_DIVIDEND_INVALID_QUANTITY,
+    price: MSG_DIVIDEND_INVALID_GROSS,
+    fees: MSG_DIVIDEND_INVALID_WITHHOLDING,
+};
+
 /// Validate the ledger amounts (Story 6.3 twin of `validate_holding_amounts`): quantity strictly
-/// positive, unit price and fees non-negative; empty fees default to `"0"`. Returns the canonical
-/// decimal spellings.
+/// positive, unit price and fees non-negative; empty fees default to `"0"`. Each is read under the
+/// user's number format ([`parse_decimal`], G1 I); each refusal names its own field
+/// ([`AmountRefusals`]). Returns the canonical decimal spellings.
 fn validate_ledger_amounts(
     quantity: &str,
     unit_price: &str,
     fees: &str,
+    format: NumberFormat,
+    refusals: &AmountRefusals,
 ) -> Result<(String, String, String), String> {
-    let qty = Decimal::from_str_exact(quantity.trim())
-        .ok()
+    if quantity.trim().is_empty() {
+        return Err(refusals.quantity_empty.to_string());
+    }
+    let qty = Some(read_typed(quantity, format, refusals.quantity)?)
         .filter(|q| q.is_sign_positive() && !q.is_zero())
-        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
-    let price = Decimal::from_str_exact(unit_price.trim())
-        .ok()
+        .ok_or(refusals.quantity.to_string())?;
+    let price = Some(read_typed(unit_price, format, refusals.price)?)
         .filter(|p| !p.is_sign_negative())
-        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+        .ok_or(refusals.price.to_string())?;
     let fees = fees.trim();
     let fees = if fees.is_empty() { "0" } else { fees };
-    let fees = Decimal::from_str_exact(fees)
-        .ok()
+    let fees = Some(read_typed(fees, format, refusals.fees)?)
         .filter(|f| !f.is_sign_negative())
-        .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+        .ok_or(refusals.fees.to_string())?;
     Ok((qty.to_string(), price.to_string(), fees.to_string()))
 }
 
@@ -195,8 +232,10 @@ fn candidate_of_owned(
     kind: LedgerEventKind,
     created_at: &str,
 ) -> Result<Candidate, String> {
-    let dec =
-        |s: &str| Decimal::from_str_exact(s).map_err(|_| MSG_HOLDING_INVALID_NUMBER.to_string());
+    // The drafts hold canonical spellings (validated input, or the stored opening aggregate): a
+    // failed parse is a corrupt STORED value — named as such (G1 P, G3 L3), never « not a
+    // number » nor a generic save failure.
+    let dec = |s: &str| Decimal::from_str_exact(s).map_err(|_| MSG_LEDGER_ROW_INVALID.to_string());
     Ok(Candidate {
         occurred_at: entry.occurred_at.clone(),
         created_at: created_at.to_string(),
@@ -225,10 +264,14 @@ fn replay(mut candidates: Vec<Candidate>) -> Result<PositionBasis, String> {
             .then_with(|| a.id.cmp(&b.id))
     });
     let events: Vec<LedgerEvent> = candidates.iter().map(|c| c.event).collect();
+    // Each cause named (G1 final review, M4): the typed inputs are validated before the replay, so
+    // a nonpositive quantity or a negative amount here comes from a STORED row; an overflow is the
+    // range, never « not a number ».
     derive_position(None, &events).map_err(|e| match e {
         LedgerError::OverSell => MSG_LEDGER_OVERSELL.to_string(),
-        LedgerError::NonPositiveQuantity | LedgerError::NegativeAmount | LedgerError::Overflow => {
-            MSG_HOLDING_INVALID_NUMBER.to_string()
+        LedgerError::Overflow => MSG_LEDGER_OUT_OF_RANGE.to_string(),
+        LedgerError::NonPositiveQuantity | LedgerError::NegativeAmount => {
+            MSG_LEDGER_ROW_INVALID.to_string()
         }
     })
 }
@@ -237,11 +280,22 @@ impl JournalState {
     /// The holding's ledger rows, oldest first (Story 6.3, FR39) — read-only, `[]` without a
     /// journal or on a read failure (a DISPLAY surface, never a hard error). Write rails must use
     /// [`Self::ledger_rows_strict`] instead.
+    /// Test-only since G1 P: every surface reads [`Self::try_holding_ledger`].
+    #[cfg(test)]
     pub fn holding_ledger(&self, holding_id: Uuid) -> Vec<TransactionItem> {
-        self.journal
-            .as_ref()
-            .and_then(|j| j.list_transactions(holding_id).ok())
-            .unwrap_or_default()
+        self.try_holding_ledger(holding_id).unwrap_or_default()
+    }
+
+    /// Fallible [`Self::holding_ledger`] for the ledger PANEL (G1 final review, M5): `Err` on a
+    /// read failure — the panel says « indisponible », never « Aucune transaction enregistrée ».
+    pub fn try_holding_ledger(&self, holding_id: Uuid) -> Result<Vec<TransactionItem>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        journal.list_transactions(holding_id).map_err(|error| {
+            tracing::warn!("list_transactions failed: {error}");
+            error.to_string()
+        })
     }
 
     /// The holding's ledger rows for a WRITE rail (2026-07-02 review, HIGH): a failed read is a
@@ -252,7 +306,7 @@ impl JournalState {
             .as_ref()
             .ok_or(MSG_NO_JOURNAL.to_string())?
             .list_transactions(holding_id)
-            .map_err(watch_error)
+            .map_err(read_error)
     }
 
     /// Any holding by id — including a sold one (the ledger of a retired holding stays editable;
@@ -262,10 +316,10 @@ impl JournalState {
             .as_ref()
             .ok_or(MSG_NO_JOURNAL.to_string())?
             .list_all_holdings()
-            .map_err(watch_error)?
+            .map_err(read_error)?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string()) // G1 P review (L-e): named
     }
 
     /// The opening-position row to materialize, iff the holding's **current** ledger holds no buy
@@ -322,7 +376,13 @@ impl JournalState {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
         let holding = self.any_holding(holding_id)?;
-        let (qty, price, fees) = validate_ledger_amounts(quantity, unit_price, fees)?;
+        let (qty, price, fees) = validate_ledger_amounts(
+            quantity,
+            unit_price,
+            fees,
+            self.number_format(),
+            &POSITION_AMOUNTS,
+        )?;
         let now = self.clock.now();
         let occurred_at = normalize_event_date(date_input, &now.0)?;
         let rows = self.ledger_rows_strict(holding_id)?;
@@ -382,27 +442,47 @@ impl JournalState {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
         // Selling is an action on an ACTIVE position (a retired holding re-enters via a new add).
+        // G1 P (G3 L3): an absent position is named; a failed read of the register too.
         let holding = self
-            .list_holdings()
+            .try_list_holdings()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())?;
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string())?;
         let quantity_input = quantity_input.trim();
         let quantity = if quantity_input.is_empty() {
             holding.quantity.clone()
         } else {
-            Decimal::from_str_exact(quantity_input)
-                .ok()
+            Some(self.read_typed(quantity_input, MSG_LEDGER_INVALID_QUANTITY)?)
                 .filter(|q| q.is_sign_positive() && !q.is_zero())
-                .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
+                .ok_or(MSG_LEDGER_INVALID_QUANTITY.to_string())?
                 .to_string()
         };
         // The sale price: the matched study's current market price if known, else the cost basis.
         // Issue #81: match a study in the holding's own currency — never price a CHF sale from a
-        // same-ticker USD study.
-        let unit_price = self
-            .study_id_for_ticker_in_currency(&holding.security_ticker, holding.currency.as_deref())
-            .and_then(|sid| self.get_study(sid))
+        // same-ticker USD study. G1 final review (L7): the cost basis stands in only for a TRUE
+        // absence (no study, no price) — a study that could not be READ refuses the sale by name,
+        // never records it silently at the cost basis. D5 (G1 P review H1): the lot's ONE link
+        // ([`Self::try_lot_study`]) — a legacy lot links in the reference currency; when its only
+        // study is in ANOTHER currency, that price never prices the sale (nor does the cost basis
+        // stand in silently): refused, both facts named, the way out too.
+        let study = self
+            .try_lot_study(
+                &holding.security_ticker,
+                holding.currency.as_deref(),
+                reference_currency,
+            )
+            .map_err(|_| MSG_SELL_STUDY_UNAVAILABLE.to_string())?;
+        if study.is_none()
+            && let Some(study_currency) =
+                self.other_currency_hint(&holding.security_ticker, holding.currency.as_deref())
+        {
+            return Err(super::sell_study_other_currency_message(
+                &study_currency,
+                reference_currency,
+            ));
+        }
+        let unit_price = study
             .and_then(|s| s.judgment.current_price)
             .map(|m| m.as_decimal().to_string())
             .unwrap_or_else(|| holding.purchase_price.clone());
@@ -444,12 +524,20 @@ impl JournalState {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
+        // G1 P (G3 L3): an absent position is named; a failed read of the register too.
         let holding = self
-            .list_holdings()
+            .try_list_holdings()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
             .into_iter()
             .find(|h| h.id == holding_id)
-            .ok_or(MSG_SAVE_FAILED.to_string())?;
-        let (qty, price, fees) = validate_ledger_amounts(quantity, unit_price, fees)?;
+            .ok_or(MSG_HOLDING_NOT_FOUND.to_string())?;
+        let (qty, price, fees) = validate_ledger_amounts(
+            quantity,
+            unit_price,
+            fees,
+            self.number_format(),
+            &POSITION_AMOUNTS,
+        )?;
         let now = self.clock.now();
         let occurred_at = normalize_event_date(date_input, &now.0)?;
         let rows = self.ledger_rows_strict(holding_id)?;
@@ -528,49 +616,47 @@ impl JournalState {
         // v1 entry point: an ACTIVE holding (the ledger panel lives in the register; the
         // sold-positions surface is #84 — the panel READ still counts sold holdings' dividends).
         // A retired holding refuses with its own factual notice, not a fake save failure (review).
-        let holding = self
-            .any_holding(holding_id)
-            .map_err(|_| MSG_SAVE_FAILED.to_string())?;
+        let holding = self.any_holding(holding_id)?;
         if holding.sold_at.is_some() {
             return Err(MSG_DIVIDEND_RETIRED.to_string());
         }
         // An EMPTY quantity defaults to the whole current position (AC4's prefill, done at the
         // rail — the record-date position may differ, so an explicit value overrides).
+        // The stored quantity is canonical; a typed one reads under the user's format (G1 I).
         let quantity = quantity.trim();
-        let quantity = if quantity.is_empty() {
-            holding.quantity.as_str()
+        let qty = if quantity.is_empty() {
+            Decimal::from_str_exact(&holding.quantity).ok()
         } else {
-            quantity
-        };
-        let qty = Decimal::from_str_exact(quantity)
-            .ok()
-            .filter(|q| q.is_sign_positive() && !q.is_zero())
-            .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
-        let gross_per_share = Decimal::from_str_exact(per_share_gross.trim())
-            .ok()
+            Some(self.read_typed(quantity, MSG_DIVIDEND_INVALID_QUANTITY)?)
+        }
+        .filter(|q| q.is_sign_positive() && !q.is_zero())
+        .ok_or(MSG_DIVIDEND_INVALID_QUANTITY.to_string())?;
+        // Each refusal names its field (G1 final review, M4) — never the register's « quantité et
+        // prix d'achat… aucune position ».
+        let gross_per_share = Some(self.read_typed(per_share_gross, MSG_DIVIDEND_INVALID_GROSS)?)
             .filter(|p| !p.is_sign_negative())
-            .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+            .ok_or(MSG_DIVIDEND_INVALID_GROSS.to_string())?;
         let gross = qty
             .checked_mul(gross_per_share)
-            .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+            .ok_or(MSG_LEDGER_OUT_OF_RANGE.to_string())?;
         let withholding_input = withholding_input.trim();
         let withholding = if withholding_input.is_empty() {
             // The Appendix-A default: gross × rate, rounded to 2 decimals (money amounts at the
             // currency's minor unit — the exact-decimal posture is about never LOSING precision,
             // not inventing sub-centime cash no statement will match). The rate comes
             // pre-validated ([0, 100]) from `AppConfig::withholding_rate_pct_or_default`.
+            // (Unreachable through the UI; a bad rate names the Réglages setting.)
             let rate = Decimal::from_str_exact(withholding_rate_pct.trim())
-                .map_err(|_| MSG_HOLDING_INVALID_NUMBER.to_string())?;
+                .map_err(|_| MSG_WITHHOLDING_INVALID.to_string())?;
             gross
                 .checked_mul(rate)
                 .and_then(|w| w.checked_div(Decimal::ONE_HUNDRED))
                 .map(|w| w.round_dp(2))
-                .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
+                .ok_or(MSG_LEDGER_OUT_OF_RANGE.to_string())?
         } else {
-            Decimal::from_str_exact(withholding_input)
-                .ok()
+            Some(self.read_typed(withholding_input, MSG_DIVIDEND_INVALID_WITHHOLDING)?)
                 .filter(|w| !w.is_sign_negative())
-                .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?
+                .ok_or(MSG_DIVIDEND_INVALID_WITHHOLDING.to_string())?
         };
         if withholding > gross {
             return Err(MSG_DIVIDEND_WITHHOLDING.to_string());
@@ -602,21 +688,26 @@ impl JournalState {
     /// corrupt, imported, or over-withheld — is SKIPPED; it must never blank its whole currency
     /// bucket). Deterministic order; NO cross-currency total (FX is Story 6.5); a bucket whose
     /// dividends net to exactly zero still shows (a fully-withheld dividend is a recorded fact).
+    /// G1 P: a failed read (portfolios, holdings, a ledger) is `Err` — the panel says
+    /// « indisponible », never a panel that silently vanishes or a partial sum.
     pub fn portfolio_reinvestable_cash_by_currency(
         &self,
         reference_currency: &str,
-    ) -> Vec<(String, Decimal)> {
+    ) -> Result<Vec<(String, Decimal)>, String> {
         use std::collections::BTreeMap;
         let Some(journal) = self.journal.as_ref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let Some(portfolio) = self.active_portfolio() else {
-            return Vec::new();
+        let Some(portfolio) = self.try_active_portfolio()? else {
+            return Ok(Vec::new());
         };
-        let holdings = journal.list_all_holdings().unwrap_or_default();
+        let holdings = journal.list_all_holdings().map_err(|error| {
+            tracing::warn!("reinvestable cash: list_all_holdings failed: {error}");
+            error.to_string()
+        })?;
         let mut by_ccy: BTreeMap<String, Decimal> = BTreeMap::new();
         for holding in holdings.iter().filter(|h| h.portfolio_id == portfolio.id) {
-            for row in self.holding_ledger(holding.id) {
+            for row in self.try_holding_ledger(holding.id)? {
                 if row.kind.as_deref() != Some(KIND_DIVIDEND) {
                     continue;
                 }
@@ -641,7 +732,7 @@ impl JournalState {
                 *bucket = bucket.checked_add(net).unwrap_or(*bucket);
             }
         }
-        by_ccy.into_iter().collect()
+        Ok(by_ccy.into_iter().collect())
     }
 
     /// Edit a ledger row (Story 6.3, FR39): date, quantity, unit price, fees, rationale — never
@@ -665,7 +756,6 @@ impl JournalState {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
         let holding = self.any_holding(holding_id)?;
-        let (qty, price, fees) = validate_ledger_amounts(quantity, unit_price, fees)?;
         let now = self.clock.now();
         let normalized = normalize_event_date(date_input, &now.0)?;
         let rows = self.ledger_rows_strict(holding_id)?;
@@ -674,6 +764,15 @@ impl JournalState {
             .find(|r| r.id == transaction_id)
             .ok_or(MSG_SAVE_FAILED.to_string())?
             .clone();
+        // The row's kind names the columns (G1 final review, M4): a dividend's are shares, gross
+        // per share and the withholding — its refusals say so.
+        let refusals = if target.kind.as_deref() == Some(KIND_DIVIDEND) {
+            &DIVIDEND_AMOUNTS
+        } else {
+            &POSITION_AMOUNTS
+        };
+        let (qty, price, fees) =
+            validate_ledger_amounts(quantity, unit_price, fees, self.number_format(), refusals)?;
         // Preserve the stamp when the visible DATE is unchanged (2026-07-02 review): the edit form
         // carries only the day, so re-normalizing a legacy 4.7 wall-clock stamp to midnight would
         // silently reorder same-day history and break the C4 no-op guarantee for value-identical
@@ -687,12 +786,13 @@ impl JournalState {
         // withholding (the fees column) may never exceed its gross — the panel's per-row skip
         // would otherwise silently drop the row's cash, and "net" would read negative.
         if target.kind.as_deref() == Some(KIND_DIVIDEND) {
-            let q = Decimal::from_str_exact(&qty).map_err(|_| MSG_HOLDING_INVALID_NUMBER)?;
-            let p = Decimal::from_str_exact(&price).map_err(|_| MSG_HOLDING_INVALID_NUMBER)?;
-            let f = Decimal::from_str_exact(&fees).map_err(|_| MSG_HOLDING_INVALID_NUMBER)?;
+            // Canonical spellings just produced by the validation — the parse cannot fail.
+            let q = Decimal::from_str_exact(&qty).map_err(|_| MSG_DIVIDEND_INVALID_QUANTITY)?;
+            let p = Decimal::from_str_exact(&price).map_err(|_| MSG_DIVIDEND_INVALID_GROSS)?;
+            let f = Decimal::from_str_exact(&fees).map_err(|_| MSG_DIVIDEND_INVALID_WITHHOLDING)?;
             let gross = q
                 .checked_mul(p)
-                .ok_or(MSG_HOLDING_INVALID_NUMBER.to_string())?;
+                .ok_or(MSG_LEDGER_OUT_OF_RANGE.to_string())?;
             if f > gross {
                 return Err(MSG_DIVIDEND_WITHHOLDING.to_string());
             }

@@ -309,6 +309,31 @@ fn changing_a_holdings_ticker_clears_its_trailing_stop_but_qty_price_edits_keep_
     );
 }
 
+#[test]
+fn a_case_only_ticker_edit_keeps_the_trailing_stop() {
+    // G1 final review: « nesn » → « NESN » is the SAME security (links and ratchets match tickers
+    // ignoring case) — the respelling is stored, the stop is not a stale one and stays.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let id = add_at(&mut journal, "nesn", "10", "100", 0);
+    journal
+        .set_trailing_stop(id, Some("15"), Some("85"))
+        .unwrap();
+    journal
+        .update_holding(id, "NESN", "10", "100", "CHF", None)
+        .unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(h.security_ticker, "NESN", "the respelling is stored");
+    assert_eq!(h.trailing_stop_pct.as_deref(), Some("15"));
+    assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+    // G1 P (G3 L5): surrounding spaces do not name another security either (the app trims).
+    journal
+        .update_holding(id, " NESN ", "10", "100", "CHF", None)
+        .unwrap();
+    let h = &journal.list_holdings(portfolio_id()).unwrap()[0];
+    assert_eq!(h.trailing_stop_level.as_deref(), Some("85"));
+}
+
 // ── Story 6.2 — multi-currency holdings (FR38) ──
 
 #[test]

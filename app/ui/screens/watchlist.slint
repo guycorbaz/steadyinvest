@@ -18,7 +18,7 @@ component Head inherits Text {
 // The criblage's column widths, shared by the head and the rows so they line up.
 global Cols {
     out property <length> ticker: 120px;
-    out property <length> years: 70px;
+    out property <length> years: 100px;   // room for « fenêtre du BPA incomplète » (wrapped)
     out property <length> rate: 110px;
     out property <length> versus: 120px;
     out property <length> pe: 170px;
@@ -39,6 +39,14 @@ import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
 
 export component WatchlistScreen inherits Rectangle {
+    // A criblage rate, or the word for its absence (G1 final review).
+    pure function rate-or-cause(rate: string, gap: string) -> string {
+        if (rate != "") { return rate; }
+        if (gap == "absent") { return @tr("série absente"); }
+        if (gap == "window") { return @tr("fenêtre incomplète"); }
+        if (gap == "nonpositive") { return @tr("moyenne ≤ 0"); }
+        return "—";
+    }
     Flickable {
         viewport-height: content.preferred-height;
 
@@ -93,8 +101,13 @@ export component WatchlistScreen inherits Rectangle {
                     text: @tr("{} valeur(s) dans leur zone d'achat.", Watchlist.in-buy-zone-count);
                 }
 
+                // ── G1 final review (M5): a failed read is « indisponible », never the empty state ──
+                if Watchlist.unavailable: StatusBand {
+                    icon: "⊘";
+                    text: @tr("Liste de suivi indisponible : elle n'a pas pu être lue.");
+                }
                 // ── Empty state ──
-                if Watchlist.count == 0: Text {
+                if !Watchlist.unavailable && Watchlist.count == 0: Text {
                     text: @tr("Aucune valeur suivie pour le moment ; « Ajouter une valeur… » en crée une.");
                     color: Tokens.text-mid;
                     font-size: Tokens.font-body;
@@ -120,7 +133,11 @@ export component WatchlistScreen inherits Rectangle {
                             vertical-alignment: center;
                         }
                         Text {
-                            text: row.linked ? @tr("Étude : {}", row.study-link) : @tr("Aucune étude liée");
+                            // G1 final review (L6): an unreadable link is « indisponible ».
+                            text: !row.linked ? @tr("Aucune étude liée")
+                                : row.study-unavailable ? @tr("Étude indisponible")
+                                : row.study-deleted ? @tr("L'étude liée a été supprimée")
+                                : @tr("Étude : {}", row.study-link);
                             color: Tokens.text-mid;
                             font-size: Tokens.font-caption;
                             vertical-alignment: center;
@@ -211,8 +228,10 @@ export component WatchlistScreen inherits Rectangle {
                     Head { text: @tr("Ventes, taux annuel"); width: Cols.rate; }
                     Head { text: @tr("BPA, taux annuel"); width: Cols.rate; }
                     Head { text: @tr("BPA face aux ventes"); width: Cols.versus; }
-                    Head { text: @tr("PER actuel face à la moyenne 5 ans"); width: Cols.pe; }
-                    Head { text: @tr("Cours face au haut d'il y a 5 ans"); width: Cols.price; }
+                    // Neutral heads (G1 D review): a row's record may hold fewer than five years —
+                    // the examination itself states the count.
+                    Head { text: @tr("PER actuel face à la moyenne du relevé"); width: Cols.pe; }
+                    Head { text: @tr("Cours face au haut le plus ancien du relevé"); width: Cols.price; }
                     Head { text: @tr("Étude"); width: Cols.study; }
                     Rectangle { horizontal-stretch: 1; }
                     Rectangle { width: Cols.action; }
@@ -238,15 +257,37 @@ export component WatchlistScreen inherits Rectangle {
                         }
                         if row.state == "done": HorizontalLayout {
                             spacing: Tokens.space-8;
-                            Cell { text: row.years; width: Cols.years; }
-                            Cell { text: row.sales-rate != "" ? row.sales-rate : "—"; width: Cols.rate; }
-                            Cell { text: row.eps-rate != "" ? row.eps-rate : "—"; width: Cols.rate; }
+                            // Which ladder, and why: an absent series or a short window.
+                            Cell {
+                                text: row.years-gap == "both-absent" ? @tr("ventes et BPA absents")
+                                    : row.years-gap == "sales-absent" ? @tr("ventes absentes")
+                                    : row.years-gap == "eps-absent" ? @tr("BPA absent")
+                                    : row.years-gap == "both-window" ? @tr("fenêtres incomplètes")
+                                    : row.years-gap == "sales-window" ? @tr("fenêtre des ventes incomplète")
+                                    : row.years-gap == "eps-window" ? @tr("fenêtre du BPA incomplète")
+                                    : row.years;
+                                width: Cols.years;
+                                wrap: word-wrap;
+                            }
+                            // A rate « — » names its cause in a word (G1 final review).
+                            Cell {
+                                text: root.rate-or-cause(row.sales-rate, row.sales-rate-gap);
+                                width: Cols.rate;
+                                wrap: word-wrap;
+                            }
+                            Cell {
+                                text: root.rate-or-cause(row.eps-rate, row.eps-rate-gap);
+                                width: Cols.rate;
+                                wrap: word-wrap;
+                            }
                             Cell {
                                 width: Cols.versus;
                                 text: row.eps-vs-sales == "eps" ? @tr("plus vite")
                                     : row.eps-vs-sales == "sales" ? @tr("moins vite")
                                     : row.eps-vs-sales == "same" ? @tr("même rythme")
+                                    : row.eps-vs-sales == "years" ? @tr("années différentes")
                                     : "—";
+                                wrap: word-wrap;
                             }
                             Cell {
                                 width: Cols.pe;

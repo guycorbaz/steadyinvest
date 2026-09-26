@@ -123,33 +123,70 @@ Guy's (2026-09-25).
 
 - [x] [Review][Decision] The ladder's old pair is `recent−5 / recent−6` (seven years) while the spec reads six (Q2: midpoints 1,5 and 5,5); the fallback may take a non-consecutive or overlapping pair (n = 3) and leaves « il y a  ans » for spans > 5 — **six-year window (old pair n−4 / n−5), the form's exponent 5 kept (Q2); fallback = a consecutive pair disjoint from the recent one with the real span shown, else « indisponible »; labels (5) / (6) keep the form's wording** [core/src/checklist.rs:122-143, app/ui/screens/quick_screen.slint:59-66]
 - [x] [Review][Decision] Free fields differ from spec §2 / §3 (one field + three chips; one P/E notes field) — **ratified (seen on screen)**
-- [ ] [Review][Patch] « Fermer le criblage » empties the slot, so the next run is batch 1 again: late outcomes of the old run land on the new run's rows; `on_fetched` has no Pending guard [app/src/wiring/screening.rs:101-119,185-191,267]
-- [ ] [Review][Patch] The examination's currency is read from the picker when the result arrives — « Créer l'étude » can write the study in the wrong currency [app/src/wiring/quick_screen.rs:211]
-- [ ] [Review][Patch] A quick-screen result is not tied to its request: Enter bypasses the `!fetching` / currency guard (double fetch, empty currency); a late result replaces a study or criblage examination [app/src/wiring/quick_screen.rs:185-220, app/ui/screens/dashboard.slint:406-416]
-- [ ] [Review][Patch] « Créer l'étude »: an `apply_provider_refresh` error shows the refusal AND the success notice, and opens an empty study [app/src/wiring/quick_screen.rs:399-407]
-- [ ] [Review][Patch] The reader's fields (reasons, answers, objective) carry over to the next examination and its PDF [app/src/wiring/quick_screen.rs:49-51,112,240-246]
-- [ ] [Review][Patch] Examination and criblage sessions survive a dossier switch / restore [app/src/wiring/journal.rs:130-145,446-449]
-- [ ] [Review][Patch] Quota stop only when the chain's FINAL error is a quota one [app/src/fetch.rs:402]
-- [ ] [Review][Patch] `plan()` swallows read failures (empty list « 0 valeur(s) »; a studied ticker fetched again, spending quota) [app/src/wiring/screening.rs:127-133]
-- [ ] [Review][Patch] The #109 price-only-year filter applies to the fetch path only; an empty-after-filter series passes the « no data » refusal [app/src/wiring/quick_screen.rs:139-168,207, app/src/wiring/screening.rs:110]
-- [ ] [Review][Patch] Checklist arithmetic: `sum` overflow replaces the total by the last value; P/E totals / averages partial and over different subsets; `increase_pct` sign inverted on a negative base; « cinq ans » claimed over fewer rows, « 0 » when none [core/src/checklist.rs:152-157,190-243]
-- [ ] [Review][Patch] Conclusions: « atteint » decided on the raw rate while the rounded one is shown; « objectif non renseigné » when the RATE is absent; conclusion 4 says « PER actuel indisponible » when the 5-year average is missing, and the PDF drops it [app/src/viewmodel/quick_screen.rs:133-137, app/ui/screens/quick_screen.slint:296-313, report/src/quick_screen.rs:444-457]
-- [ ] [Review][Patch] Without a price the three §3 facts vanish instead of reading « — » (spec §6); the PDF's higher / lower word is parsed back from the formatted string [app/ui/screens/quick_screen.slint:263-271, report/src/quick_screen.rs:~400-425]
-- [ ] [Review][Patch] « Fermer le criblage » clears an unrelated watchlist notice (F4) [app/src/wiring/screening.rs:274]
-- [ ] [Review][Patch] Tests: n = 3 ladder, the two-page PDF, 27 % → 5,0 % through `quick_screen` (spec §6) [core/src/checklist.rs, report/src/quick_screen.rs]
+- [x] [Review][Patch] « Fermer le criblage » empties the slot, so the next run is batch 1 again: late outcomes of the old run land on the new run's rows; `on_fetched` has no Pending guard [app/src/wiring/screening.rs:101-119,185-191,267]
+- [x] [Review][Patch] The examination's currency is read from the picker when the result arrives — « Créer l'étude » can write the study in the wrong currency [app/src/wiring/quick_screen.rs:211]
+- [x] [Review][Patch] A quick-screen result is not tied to its request: Enter bypasses the `!fetching` / currency guard (double fetch, empty currency); a late result replaces a study or criblage examination [app/src/wiring/quick_screen.rs:185-220, app/ui/screens/dashboard.slint:406-416]
+- [x] [Review][Patch] « Créer l'étude »: an `apply_provider_refresh` error shows the refusal AND the success notice, and opens an empty study [app/src/wiring/quick_screen.rs:399-407]
+- [x] [Review][Patch] The reader's fields (reasons, answers, objective) carry over to the next examination and its PDF — answers reset on a new examination; the objective stays for the session (spec Q1) [app/src/wiring/quick_screen.rs:49-51,112,240-246]
+- [x] [Review][Patch] Examination and criblage sessions survive a dossier switch / restore [app/src/wiring/journal.rs:130-145,446-449]
+- [x] [Review][Patch] Quota stop only when the chain's FINAL error is a quota one [app/src/fetch.rs:402]
+- [x] [Review][Patch] `plan()` swallows read failures (empty list « 0 valeur(s) »; a studied ticker fetched again, spending quota) [app/src/wiring/screening.rs:127-133]
+- [x] [Review][Patch] The #109 price-only-year filter applies to the fetch path only; an empty-after-filter series passes the « no data » refusal — the empty-after-filter case fixed (PR A); the study path keeps its saved years (the apply path already drops the price-only row, so a saved study does not carry it) [app/src/wiring/quick_screen.rs:139-168,207, app/src/wiring/screening.rs:110]
+- [x] [Review][Patch] Checklist arithmetic: `sum` overflow replaces the total by the last value; P/E totals / averages partial and over different subsets; `increase_pct` sign inverted on a negative base; « cinq ans » claimed over fewer rows, « 0 » when none [core/src/checklist.rs:152-157,190-243]
+- [x] [Review][Patch] Conclusions: « atteint » decided on the raw rate while the rounded one is shown; « objectif non renseigné » when the RATE is absent; conclusion 4 says « PER actuel indisponible » when the 5-year average is missing, and the PDF drops it [app/src/viewmodel/quick_screen.rs:133-137, app/ui/screens/quick_screen.slint:296-313, report/src/quick_screen.rs:444-457]
+- [x] [Review][Patch] Without a price the three §3 facts vanish instead of reading « — » (spec §6); the PDF's higher / lower word is parsed back from the formatted string [app/ui/screens/quick_screen.slint:263-271, report/src/quick_screen.rs:~400-425]
+- [x] [Review][Patch] « Fermer le criblage » clears an unrelated watchlist notice (F4) [app/src/wiring/screening.rs:274]
+- [x] [Review][Patch] Tests: n = 3 ladder, the two-page PDF, 27 % → 5,0 % through `quick_screen` (spec §6) [core/src/checklist.rs, report/src/quick_screen.rs]
 - [x] [Review][Defer] Neutral §2 / §3 facts in a StatusBand with the « ◦ » glyph [app/ui/screens/quick_screen.slint] — deferred, cosmetic
 
 ### Story 7.5 — decision and PDF findings (G1, 2026-09-25)
 
 - [x] [Review][Decision] Story 7.5 (FR53) was closed without its own story file, as covered by the 7.1 / 7.2 / 7.3 PDFs (spec Q4) and the layout fixes #233 / #234 — **ratified by Guy as a recorded decision**.
 - [x] [Review][Decision] Study PDF vs the NAIC form (#207, PR #216): no shared semi-log grid (guides on the EPS scale only), §5 conversion table reduced to a footnote, always-« — » boxes; the opaque quarterly box hides plotted data — **the quarterly box moves out of the plot; the fidelity gaps are listed on #207 for Guy's side-by-side check (G9)**
-- [ ] [Review][Patch] `header_box` cuts values at 48 characters, not by width → text over the next cell; the review's dossier name is uncapped [report/src/pdf.rs:124,958-978, report/src/review.rs:384]
-- [ ] [Review][Patch] Numeric grid cells are wrapped / cut to « 1… » (§2 over ten years, annexe sales of JPY / KRW issuers) [report/src/pdf.rs:1056-1066,1603-1619]
-- [ ] [Review][Patch] §3 « Total » is a partial sum over the known years; `add_known` restarts after an overflow; « Moy. 5 ans » over fewer years; « saisie manuelle » also for derived cells [report/src/pdf.rs:211,553-558,587]
-- [ ] [Review][Patch] §4 / §5 `keep_together` reserves ignore wrapped lines [report/src/pdf.rs:525,632]
-- [ ] [Review][Patch] Chart: guides and projection start at the last positive EPS but end at the fixed horizon (drawn flatter than labelled; `CHART_SCALE_NOTE` then false); x axis by index (gap years collapse); the 30 % headroom value not filtered positive; a high-without-low year vanishes; the chart fills the page only on page 1 [report/src/pdf.rs:1202-1377]
-- [ ] [Review][Patch] WinAnsi 0x80–0x9F (œ “ ” • ‰ ™) print « ? »; glyph widths default to 556 (Æ œ ß © ®) [report/src/pdf.rs:1576-1594,1766-1782]
-- [ ] [Review][Patch] `fit` / `wrap_to_width` return wider text when the width is below « … »; wrapping on consecutive spaces [report/src/pdf.rs:1603-1619]
-- [ ] [Review][Patch] Tests for #216: §3 totals / averages, §4 candidates, the header box, the two-page split, the guides [report/src/pdf.rs]
+- [x] [Review][Patch] `header_box` cuts values at 48 characters, not by width → text over the next cell; the review's dossier name is uncapped [report/src/pdf.rs:124,958-978, report/src/review.rs:384]
+- [x] [Review][Patch] Numeric grid cells are wrapped / cut to « 1… » (§2 over ten years, annexe sales of JPY / KRW issuers) [report/src/pdf.rs:1056-1066,1603-1619]
+- [x] [Review][Patch] §3 « Total » is a partial sum over the known years; `add_known` restarts after an overflow; « Moy. 5 ans » over fewer years; « saisie manuelle » also for derived cells [report/src/pdf.rs:211,553-558,587]
+- [x] [Review][Patch] §4 / §5 `keep_together` reserves ignore wrapped lines [report/src/pdf.rs:525,632]
+- [x] [Review][Patch] Chart: guides and projection start at the last positive EPS but end at the fixed horizon (drawn flatter than labelled; `CHART_SCALE_NOTE` then false); x axis by index (gap years collapse); the 30 % headroom value not filtered positive; a high-without-low year vanishes; the chart fills the page only on page 1 [report/src/pdf.rs:1202-1377]
+- [x] [Review][Patch] WinAnsi 0x80–0x9F (œ “ ” • ‰ ™) print « ? »; glyph widths default to 556 (Æ œ ß © ®) [report/src/pdf.rs:1576-1594,1766-1782]
+- [x] [Review][Patch] `fit` / `wrap_to_width` return wider text when the width is below « … »; wrapping on consecutive spaces [report/src/pdf.rs:1603-1619]
+- [x] [Review][Patch] Tests for #216: §3 totals / averages, §4 candidates, the header box, the two-page split, the guides [report/src/pdf.rs]
 - [x] [Review][Defer] PDF exports write in place (no temp + rename, no self-alias guard against the dossier file) — all exports, including the 5.6 study export [app/src/wiring/{studies,comparison,review,quick_screen}.rs] — deferred, pre-existing
 - [x] [Review][Defer] Year and guide labels overlap on 30+ year studies [report/src/pdf.rs:1281-1287,1370-1377] — deferred, rare
+
+Fixed in PR A (G1, branch `fix/g1-a-quick-screen-async`): the items checked above, plus decisions 1
+(trigger sell: Enter records only a typed number) and 2 (six-year ladder). The n = 3 ladder test
+landed with decision 2; the two other test items and the dossier-switch item are in later PRs.
+Fixed in PR D (G1, branch `fix/g1-d-quick-screen-figures`): the checklist arithmetic, the
+conclusions, the §3 facts without a price and the tests (27 % → 5 % at the form's whole-percent
+precision; 27,6 % → « 5,0 % » at display precision). The PDF breaks before §3 while on page 1,
+for the form's two pages (spec §5, §7).
+
+Fixed in PR F (G1, branch `fix/g1-f-pdf-layout`): the study-PDF items above, decision 7 (the
+quarterly box below the chart), plus the shared engine fixes for 7.1 (every header row repeated,
+never orphaned) and 7.2 (a row and its note kept together) — checked off in those records once the
+PRs are merged. Figures are never cut: a figure too wide is shrunk (floor 6 pt), printed whole.
+Still open, pre-existing (5.6): the study PDF ignores the number locale (« 2.9 % »).
+
+Fixed in PR G (G1, branch `fix/g1-g-dossier-switch`): every dossier change ends the examination
+(fetch superseded, slot emptied, screen closed) and the criblage (run stopped, card hidden).
+
+### Review Findings — G1 final review (2026-09-25, #237)
+
+- [x] [Review][Patch] « BPA face aux ventes » decided on the raw rates, possibly over different periods — **decided on the rates as displayed, over the same four years only; different years read « années différentes » (screen, criblage, PDF)** [core/src/checklist.rs:341-346, app/src/viewmodel/{quick_screen,screening}.rs, report/src/quick_screen.rs]
+- [x] [Review][Patch] An « Examiner » result landing off the studies list is lost (the rail closes it) and may cover an open study — **opens at once only over the list; elsewhere it is kept and named on the « Examiner un titre » card with « Ouvrir l'examen »** [app/src/wiring/quick_screen.rs:198-213, app/src/wiring/mod.rs:96-110]
+- [x] [Review][Patch] « indisponible » / « < 4 / 6 » misstate the cause (the six-year window) — **the ladder band, the PDF and the criblage (« fenêtre incomplète ») name the window** [app/src/viewmodel/screening.rs:115-118, app/ui/screens/quick_screen.slint:70, report/src/quick_screen.rs]
+- [x] [Review][Patch] The rate's « — » is unexplained when an average is ≤ 0 — **named under the rate, screen and PDF** [core/src/checklist.rs:187-190]
+- [x] [Review][Dismiss] The primary's quota overrides the fallback's own cause on the latching row — deliberate (e10375c: the criblage stop keys off each member's final answer; the row that latched the stop reads « limite d'usage » like the rows behind it)
+- [x] [Review][Patch] A number-format change does not re-render a finished criblage card — **the card (running or finished), the examination and the open comparison re-render** [app/src/wiring/prefs.rs:204-246]
+- [x] [Review][Patch] « Ouvrir l'examen » (criblage) silently cancels an in-flight « Examiner » fetch — **no longer cancelled (nor from a study): its result is kept for the list** [app/src/wiring/screening.rs:303]
+- [x] [Review][Patch] Unchecked `Decimal` arithmetic in the P/E « voisin » band [core/src/checklist.rs:292-295]
+- [x] [Review][Patch] Nits: `MIN_LADDER_YEARS` unused with a misleading doc (removed); a French cause hard-coded in the rail (now `MSG_FETCH_WORKER_GONE`, also used by the two fetch rails) [core/src/checklist.rs:23, app/src/wiring/quick_screen.rs:443]
+
+Fixed in the G1 final-review branch `fix/g1-m-comparison-screen`.
+
+G3 review of the final-review branch: the kept « Examiner » outcome has one lifecycle (cleared by
+a new request and by any examination shown, replaced by a newer kept one, opened only over the
+list); a failure arriving over another screen is kept and named on the card, not a dialog; the
+criblage says which ladder is short or absent and why a rate reads « — »; a number-format change
+re-spells the objective.

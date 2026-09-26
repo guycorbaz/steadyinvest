@@ -121,6 +121,13 @@ export component ScenarioCompare inherits Rectangle {
                                 Studies.set-alternate(self.text);
                             }
                         }
+                        if root.sc.notice != "": Text {
+                            text: root.sc.notice;
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            wrap: word-wrap;
+                            width: 240px;
+                        }
                         OutcomeColumn {
                             title: @tr("Placement alternatif");
                             outcome: root.sc.alternate;

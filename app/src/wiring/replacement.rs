@@ -58,18 +58,7 @@ fn push_candidates(ui: &MainWindow, state: &JournalState) {
     holdings.set_candidates_rates(
         state
             .journal_currency_exposure(&reference)
-            .map(|e| {
-                e.rates_used
-                    .iter()
-                    .map(|r| {
-                        format!(
-                            "{} → {} {} ({}, {})",
-                            r.base_currency, r.quote_currency, r.rate, r.rate_date, r.source
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-            })
+            .map(|e| crate::wiring::fx::rate_notes(&e.rates_used, format))
             .unwrap_or_default()
             .into(),
     );
@@ -159,7 +148,11 @@ pub(crate) fn clear_candidates(ui: &MainWindow) {
 /// (`invoke_open_study` — undo reset, push_form, study-open: one code path); « Études »
 /// lands on the list/create form (study-open cleared, the nav-rail gesture).
 pub(crate) fn wire_replacement(ui: &MainWindow, s: &Session) {
-    let Session { journal_state, .. } = s;
+    let Session {
+        journal_state,
+        quick_screen,
+        ..
+    } = s;
     {
         let ui_weak = ui.as_weak();
         let journal_state = std::rc::Rc::clone(journal_state);
@@ -175,19 +168,28 @@ pub(crate) fn wire_replacement(ui: &MainWindow, s: &Session) {
         });
     }
     {
+        // G1 G review: a comparison or an examination left open over Études would hide the
+        // study opened here — they close first, through their own close paths.
         let ui_weak = ui.as_weak();
+        let journal_state = std::rc::Rc::clone(journal_state);
+        let quick_screen = std::rc::Rc::clone(quick_screen);
         ui.global::<Holdings>()
             .on_open_candidate_study(move |study_id| {
                 let ui = ui_weak.unwrap();
+                crate::wiring::close_studies_overlays(&ui, &journal_state.borrow(), &quick_screen);
                 ui.set_current_screen(0);
                 ui.global::<Studies>().invoke_open_study(study_id);
             });
     }
     {
         let ui_weak = ui.as_weak();
+        let journal_state = std::rc::Rc::clone(journal_state);
+        let quick_screen = std::rc::Rc::clone(quick_screen);
         ui.global::<Holdings>().on_go_to_studies(move || {
             let ui = ui_weak.unwrap();
-            ui.global::<Studies>().set_study_open(false);
+            // G1 J review: through the ONE close path (Rust forgets the open study's id).
+            ui.global::<Studies>().invoke_close_study();
+            crate::wiring::close_studies_overlays(&ui, &journal_state.borrow(), &quick_screen);
             ui.set_current_screen(0);
         });
     }

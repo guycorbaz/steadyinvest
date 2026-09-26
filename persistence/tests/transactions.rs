@@ -106,6 +106,39 @@ fn a_blank_rationale_persists_as_null() {
     );
 }
 
+#[test]
+fn holding_has_transactions_is_the_typed_twin_of_the_delete_guard() {
+    // G1 final review: the app refuses « Retirer » up front from this read — it must say exactly
+    // what the delete guard will say.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    assert!(!journal.holding_has_transactions(hid).unwrap());
+    journal
+        .record_sell(
+            Uuid::from_u128(0x9203),
+            hid,
+            "10",
+            "85",
+            "0",
+            "CHF",
+            None,
+            &ts("2026-06-29T11:00:00Z"),
+        )
+        .expect("the sell records");
+    assert!(journal.holding_has_transactions(hid).unwrap());
+    assert!(matches!(
+        journal.delete_holding(hid),
+        Err(steadyinvest_persistence::Error::HoldingHasTransactions)
+    ));
+    assert!(
+        !journal
+            .holding_has_transactions(Uuid::from_u128(0xDEAD))
+            .unwrap(),
+        "an absent holding has no transactions"
+    );
+}
+
 // ── Story 6.3 — the FR39 ledger writers (buys, partial sells, edit/delete). Persistence performs
 // no arithmetic: the aggregates below are the caller-computed values a real app derives via
 // `core::risk::ledger`; the tests only assert they land atomically with the ledger row. ──
@@ -140,6 +173,93 @@ fn holding_row(journal: &Journal, hid: Uuid) -> steadyinvest_persistence::Holdin
         .into_iter()
         .find(|h| h.id == hid)
         .expect("the holding row exists")
+}
+
+#[test]
+fn list_transactions_orders_a_full_tie_as_the_replay_does_buys_before_sells() {
+    // G1 final review (L14): same event day, same insertion stamp — the sale's id sorts FIRST,
+    // yet the app replays the buy first; the listing (the ledger panel's order) must agree.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    let now = ts("2026-07-01T12:00:00Z");
+    let day = "2026-07-01T00:00:00Z";
+    journal
+        .record_buy(
+            hid,
+            None,
+            &entry(0x2, day, "5", "100", "0"),
+            "15",
+            "100",
+            &now,
+        )
+        .unwrap();
+    journal
+        .record_partial_sell(hid, None, &entry(0x1, day, "3", "110", "0"), "12", &now)
+        .unwrap();
+    let kinds: Vec<Option<String>> = journal
+        .list_transactions(hid)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        [Some("buy".to_string()), Some("sell".to_string())],
+        "buy first on a full tie, whatever the ids"
+    );
+}
+
+#[test]
+fn a_legacy_null_kind_sale_and_a_dividend_list_in_replay_order_on_a_full_tie() {
+    // G1 P (G3 L6): a NULL kind is a legacy 4.7 SALE (it ranks with the sells), a dividend ranks
+    // with the buys — so on a full tie: buy, dividend (by id), then the legacy sale, whatever
+    // the ids.
+    let dir = TempDir::new().unwrap();
+    let mut journal = fresh(&dir);
+    let hid = seed_holding(&mut journal);
+    let now = ts("2026-07-01T12:00:00Z");
+    let day = "2026-07-01T00:00:00Z";
+    journal
+        .record_partial_sell(hid, None, &entry(0x1, day, "3", "110", "0"), "7", &now)
+        .unwrap();
+    journal
+        .record_buy(
+            hid,
+            None,
+            &entry(0x2, day, "5", "100", "0"),
+            "12",
+            "100",
+            &now,
+        )
+        .unwrap();
+    journal
+        .record_dividend(hid, &entry(0x3, day, "12", "1", "0"), &now)
+        .unwrap();
+    // Make the sale a pre-6.3 row: its kind NULL.
+    drop(journal);
+    let conn = rusqlite::Connection::open(dir.path().join("journal.db")).unwrap();
+    conn.execute(
+        "UPDATE transactions SET kind = NULL WHERE id = ?1",
+        [Uuid::from_u128(0x1).to_string()],
+    )
+    .unwrap();
+    drop(conn);
+    let journal = Journal::open(dir.path().join("journal.db")).unwrap();
+    let rows: Vec<(u128, Option<String>)> = journal
+        .list_transactions(hid)
+        .unwrap()
+        .into_iter()
+        .map(|t| (t.id.as_u128(), t.kind))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (0x2, Some("buy".to_string())),
+            (0x3, Some("dividend".to_string())),
+            (0x1, None),
+        ]
+    );
 }
 
 #[test]

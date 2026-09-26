@@ -44,7 +44,8 @@ fn ladder_years(l: &Ladder) -> Option<u32> {
     Some(((recent - oldest + 1).max(0) as u32).min(FORM_YEARS))
 }
 
-/// The years the examination rests on (the shorter of the two ladders); `None` = fewer than three.
+/// The years the examination rests on (the shorter of the two ladders); `None` = a ladder is
+/// unavailable (fewer than two non-overlapping consecutive pairs).
 pub fn years_used(out: &QuickScreenOutputs) -> Option<u32> {
     match (ladder_years(&out.sales), ladder_years(&out.eps)) {
         (Some(s), Some(e)) => Some(s.min(e)),
@@ -58,10 +59,17 @@ pub struct ScreeningRowView {
     pub ticker: String,
     /// pending | done | unavailable | quota
     pub state: String,
-    /// « 6 / 6 », « 4 / 6 », « < 3 / 6 »; "" before the examination.
+    /// « 6 / 6 », « 4 / 6 »; "" before the examination or when a ladder is unavailable.
     pub years: String,
+    /// Why `years` is empty on an examined row — which ladder, and whether its series is absent
+    /// or its six-year window short (G1 final review: never « < 4 / 6 »): sales-absent |
+    /// eps-absent | both-absent | sales-window | eps-window | both-window | "".
+    pub years_gap: String,
     pub sales_rate: String,
     pub eps_rate: String,
+    /// Why a rate reads « — »: absent (no series) | window | nonpositive (an average ≤ 0) | "".
+    pub sales_rate_gap: String,
+    pub eps_rate_gap: String,
     /// eps | sales | same | ""
     pub eps_vs_sales: String,
     /// higher | similar | lower | ""
@@ -69,6 +77,37 @@ pub struct ScreeningRowView {
     /// The present price against the high five years ago, signed; "" = unknown.
     pub price_vs_high: String,
     pub has_study: bool,
+}
+
+/// A ladder's gap: `absent` (no figure at all), `window` (no two disjoint pairs in the window),
+/// `nonpositive` (the rate is undefined over an average ≤ 0), `""` (none named).
+fn ladder_gap(l: &Ladder) -> &'static str {
+    if l.absent {
+        "absent"
+    } else if l.unavailable {
+        "window"
+    } else if crate::viewmodel::quick_screen::rate_nonpositive(l) {
+        "nonpositive"
+    } else {
+        ""
+    }
+}
+
+/// PURE: the years column's gap key from the two ladders (an absent series before a short
+/// window; « both » when the two ladders share the cause).
+pub fn years_gap(sales: &Ladder, eps: &Ladder) -> &'static str {
+    match (sales.absent, eps.absent) {
+        (true, true) => return "both-absent",
+        (true, false) => return "sales-absent",
+        (false, true) => return "eps-absent",
+        (false, false) => {}
+    }
+    match (sales.unavailable, eps.unavailable) {
+        (true, true) => "both-window",
+        (true, false) => "sales-window",
+        (false, true) => "eps-window",
+        (false, false) => "",
+    }
 }
 
 fn pct(v: Option<rust_decimal::Decimal>, format: NumberFormat) -> String {
@@ -111,16 +150,19 @@ pub fn screening_row_view(
     };
     ScreeningRowView {
         state: "done".into(),
-        years: match years_used(out) {
-            Some(n) => format!("{n} / {FORM_YEARS}"),
-            None => format!("< 3 / {FORM_YEARS}"),
-        },
+        years: years_used(out)
+            .map(|n| format!("{n} / {FORM_YEARS}"))
+            .unwrap_or_default(),
+        years_gap: years_gap(&out.sales, &out.eps).into(),
         sales_rate: pct(out.sales.compound_rate_pct, format),
         eps_rate: pct(out.eps.compound_rate_pct, format),
+        sales_rate_gap: ladder_gap(&out.sales).into(),
+        eps_rate_gap: ladder_gap(&out.eps).into(),
         eps_vs_sales: match out.eps_vs_sales {
             Some(RateComparison::EpsFaster) => "eps",
             Some(RateComparison::SalesFaster) => "sales",
             Some(RateComparison::Same) => "same",
+            Some(RateComparison::DifferentYears) => "years",
             None => "",
         }
         .into(),
@@ -228,10 +270,44 @@ mod tests {
 
     #[test]
     fn a_short_series_names_its_shortfall() {
-        let mut out = QuickScreenOutputs::default();
+        let mut out = QuickScreenOutputs {
+            eps: ladder(2025, 2020, "5.1"),
+            ..QuickScreenOutputs::default()
+        };
         out.sales.unavailable = true;
         let v = screening_row_view("x", false, &RowState::Examined(&out), NumberFormat::Comma);
-        assert_eq!(v.years, "< 3 / 6");
-        assert_eq!(v.sales_rate, "");
+        assert_eq!(v.years, "", "never « < 4 / 6 »: the cause is the window");
+        assert_eq!(v.years_gap, "sales-window", "which ladder is short");
+        assert_eq!(
+            (v.sales_rate.as_str(), v.sales_rate_gap.as_str()),
+            ("", "window")
+        );
+        assert_eq!(v.eps_rate_gap, "");
+        // A series with no figure at all is absent, not a short window.
+        out.eps.unavailable = true;
+        out.eps.absent = true;
+        let v = screening_row_view("x", false, &RowState::Examined(&out), NumberFormat::Comma);
+        assert_eq!(v.years_gap, "eps-absent");
+        assert_eq!(v.eps_rate_gap, "absent");
+        out.sales.absent = true;
+        assert_eq!(years_gap(&out.sales, &out.eps), "both-absent");
+        out.sales.absent = false;
+        out.eps.absent = false;
+        assert_eq!(years_gap(&out.sales, &out.eps), "both-window");
+        // A rate undefined over an average ≤ 0 names that cause.
+        let mut neg = ladder(2025, 2020, "1");
+        neg.compound_rate_pct = None;
+        neg.recent_avg = Some(Decimal::ZERO);
+        assert_eq!(ladder_gap(&neg), "nonpositive");
+        // Two ladders over different years: said, never compared.
+        let out = QuickScreenOutputs {
+            sales: ladder(2025, 2020, "8.2"),
+            eps: ladder(2024, 2019, "5.1"),
+            eps_vs_sales: Some(RateComparison::DifferentYears),
+            ..QuickScreenOutputs::default()
+        };
+        let v = screening_row_view("x", false, &RowState::Examined(&out), NumberFormat::Comma);
+        assert_eq!(v.eps_vs_sales, "years");
+        assert_eq!(v.years_gap, "");
     }
 }

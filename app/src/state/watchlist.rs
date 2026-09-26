@@ -7,21 +7,27 @@ use steadyinvest_persistence::WatchItem;
 use uuid::Uuid;
 
 use super::{
-    JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_WATCH_DUPLICATE,
-    watch_error,
+    JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_FAILED, MSG_READ_ONLY_WRITE,
+    MSG_WATCH_DUPLICATE, watch_error,
 };
 
 impl JournalState {
     // ── Watchlist (Story 4.1, FR34) ──
 
-    /// Every watched security, ordered by position. Empty when no journal is open.
+    /// Every watched security, ordered by position. Empty when no journal is open. Absence-blind —
+    /// a consumer that STATES absence must use [`Self::try_list_watch_items`] (issue #95).
     pub fn list_watch_items(&self) -> Vec<WatchItem> {
+        self.try_list_watch_items().unwrap_or_default()
+    }
+
+    /// Fallible [`Self::list_watch_items`] (issue #95): `Err` is a read failure, never an empty list.
+    pub fn try_list_watch_items(&self) -> Result<Vec<WatchItem>, String> {
         let Some(journal) = self.journal.as_ref() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        journal.list_watch_items().unwrap_or_else(|error| {
+        journal.list_watch_items().map_err(|error| {
             tracing::warn!("list_watch_items failed: {error}");
-            Vec::new()
+            error.to_string()
         })
     }
 
@@ -41,7 +47,7 @@ impl JournalState {
             .try_list_studies()?
             .into_iter()
             .rev()
-            .find(|s| s.security_ticker.eq_ignore_ascii_case(ticker))
+            .find(|s| same_ticker(&s.security_ticker, ticker))
             .map(|s| s.id))
     }
 
@@ -51,6 +57,8 @@ impl JournalState {
     /// with **no** declared currency (`None`) falls back to the ticker-only match (today's behaviour).
     /// The watchlist link (no currency) keeps using [`Self::study_id_for_ticker`]. Absence-blind —
     /// a consumer that STATES absence must use [`Self::try_matched_study_in_currency`] (issue #95).
+    /// Test-only since G1 P: every lot resolves through [`Self::lot_study_id`] / [`Self::try_lot_study`].
+    #[cfg(test)]
     pub fn study_id_for_ticker_in_currency(
         &self,
         ticker: &str,
@@ -79,16 +87,53 @@ impl JournalState {
             .try_list_studies()?
             .into_iter()
             .rev()
-            .filter(|s| s.security_ticker.eq_ignore_ascii_case(ticker))
+            .filter(|s| same_ticker(&s.security_ticker, ticker))
         {
             let Some(study) = self.try_get_study(summary.id)? else {
                 continue; // deleted between the listing and the read — a true absence
             };
-            if study.native_currency.eq_ignore_ascii_case(currency) {
+            if study
+                .native_currency
+                .trim()
+                .eq_ignore_ascii_case(currency.trim())
+            {
                 return Ok(Some(study.id));
             }
         }
         Ok(None)
+    }
+
+    /// THE link of a held lot (D5, Guy 2026-09-25; G1 P review H1): the newest study of the
+    /// lot's ticker in its EFFECTIVE currency — a legacy lot without a declared currency is
+    /// presumed in the reference currency and links by it, never ticker-only. The register, the
+    /// review, the stop's seed and ratchet, the trigger sale and the price refresh all resolve a
+    /// lot through here. A same-ticker study in another currency is only ever a HINT (named by
+    /// the surfaces that state « aucune étude liée »), never the link.
+    pub fn try_lot_study(
+        &self,
+        ticker: &str,
+        declared_currency: Option<&str>,
+        reference_currency: &str,
+    ) -> Result<Option<steadyinvest_contract::Study>, String> {
+        self.try_matched_study_in_currency(
+            ticker,
+            Some(declared_currency.unwrap_or(reference_currency)),
+        )
+    }
+
+    /// Absence-blind [`Self::try_lot_study`]'s id (the price-refresh targets).
+    pub fn lot_study_id(
+        &self,
+        ticker: &str,
+        declared_currency: Option<&str>,
+        reference_currency: &str,
+    ) -> Option<Uuid> {
+        self.try_study_id_for_ticker_in_currency(
+            ticker,
+            Some(declared_currency.unwrap_or(reference_currency)),
+        )
+        .ok()
+        .flatten()
     }
 
     /// The tri-state holding→study auto-match (issue #95): `Ok(Some)` the matched study,
@@ -115,8 +160,11 @@ impl JournalState {
         if self.read_only {
             return Err(MSG_READ_ONLY_WRITE.to_string());
         }
+        // G1 P (G3 L4): the duplicate check SEES a failed read — refused by name, never taken for
+        // an empty list (which would let a duplicate through).
         if self
-            .list_watch_items()
+            .try_list_watch_items()
+            .map_err(|_| MSG_READ_FAILED.to_string())?
             .iter()
             .any(|w| w.security_ticker.eq_ignore_ascii_case(ticker))
         {
@@ -186,4 +234,10 @@ impl JournalState {
             ])
             .map_err(watch_error)
     }
+}
+
+/// Two tickers name the same security (G1 P review L-h): compared ignoring case AND surrounding
+/// spaces — the rule the persistence stop-clearing compare (`UPPER(TRIM(…))`) shares.
+pub(crate) fn same_ticker(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
 }

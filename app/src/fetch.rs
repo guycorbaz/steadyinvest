@@ -79,6 +79,9 @@ pub struct FxRatesRequest {
     /// The CONFIGURED primary at enqueue (see [`FetchRequest::primary`]).
     pub primary: ProviderChoice,
     pub journal_id: Option<Uuid>,
+    /// The dossier generation at enqueue (G1 final review, G3 #2): a restore keeps the journal id,
+    /// so only the generation tells the restored dossier from the one that asked.
+    pub generation: u64,
 }
 
 /// One criblage row's fetch (Story 7.3, PR 2): `batch` identifies the run (a stale outcome of an
@@ -90,21 +93,72 @@ pub struct ScreeningRequest {
     pub stop: Arc<AtomicBool>,
 }
 
-/// Whether a chain's final error is the provider's usage limit (the criblage's stop condition).
+/// An « Examen rapide » fetch (Story 7.3): `request_id` identifies the request (only the latest
+/// one issued is shown — a superseded result is dropped), `currency` is the one picked WHEN the
+/// request was made (G1 review: never re-read from the picker when the result arrives).
+pub struct QuickScreenRequest {
+    pub request_id: u64,
+    pub currency: String,
+    pub request: FetchRequest,
+}
+
+/// The criblage's quota trace for one row (G1 review): each chain member's FINAL answer — a
+/// same-member retry after a declared retry-after replaces that member's first answer, so a quota
+/// that cleared on the retry never counts. Pure: fed by the worker, decided here.
+#[derive(Default)]
+pub(crate) struct QuotaTrace {
+    answers: Vec<(&'static str, bool)>,
+}
+
+impl QuotaTrace {
+    /// Record one call's answer for the member tagged `tag`.
+    pub(crate) fn record(&mut self, tag: &'static str, quota: bool) {
+        match self.answers.last_mut() {
+            Some((last, answer)) if *last == tag => *answer = quota,
+            _ => self.answers.push((tag, quota)),
+        }
+    }
+
+    /// Whether some member's final answer was its usage limit.
+    pub(crate) fn any_final_quota(&self) -> bool {
+        self.answers.iter().any(|(_, quota)| *quota)
+    }
+}
+
+/// Whether an error is the provider's usage limit (the criblage's stop condition).
 pub fn is_quota(error: &IngestionError) -> bool {
-    matches!(
-        error,
-        IngestionError::Provider(steadyinvest_ingestion::ProviderError::Quota { .. })
-    )
+    declared_quota(error).is_some()
+}
+
+/// PURE: `Some(retry_after_secs)` when the error is the provider's usage limit, seen through the
+/// split-history wrap (G1 H, #237): a 429 on EODHD's `/splits` request is the same account limit
+/// as on `/fundamentals` — it gets the same one bounded retry and stops the criblage the same way;
+/// only the user-facing notice names it apart (`provider_failure_notice`).
+pub(crate) fn declared_quota(error: &IngestionError) -> Option<Option<u64>> {
+    match error {
+        IngestionError::Provider(p) => match p.root_cause() {
+            steadyinvest_ingestion::ProviderError::Quota { retry_after_secs } => {
+                Some(*retry_after_secs)
+            }
+            _ => None,
+        },
+        IngestionError::Normalize(_) => None,
+    }
 }
 
 /// A job for the worker thread.
 pub enum WorkerJob {
-    Fetch(FetchRequest),
+    /// A study fetch (Story 3.1), stamped with the dossier GENERATION it was asked in (G1 final
+    /// review M1): the result rides it back, and a result whose dossier has since changed (another
+    /// dossier opened or created, a backup restored — same study ids included) is dropped unwritten.
+    Fetch {
+        request: FetchRequest,
+        generation: u64,
+    },
     /// Story 7.3: an « Examen rapide » of a ticker with no study — the same fundamentals fetch
     /// as [`WorkerJob::Fetch`] (`study_id` unused), routed to the examination screen and kept in
     /// the session only; nothing is written unless « Créer l'étude » follows.
-    QuickScreen(FetchRequest),
+    QuickScreen(QuickScreenRequest),
     /// Story 7.3 (PR 2): one row of the watchlist « criblage » — the same fundamentals fetch as
     /// [`WorkerJob::QuickScreen`], tagged with its batch + row. The batch's `stop` flag is raised BY
     /// THE WORKER on the first quota reply, so every row still queued behind it drains unfetched
@@ -113,7 +167,11 @@ pub enum WorkerJob {
     Screening(ScreeningRequest),
     /// A holdings PRICE refresh (Story 4.4 / issue #50): a price-only `/eod` fetch (no
     /// `/fundamentals`), routed to the holdings surface, not the open study screen.
-    RefreshHolding(FetchRequest),
+    /// G1 final review (G3 #2): stamped with the dossier generation, like [`WorkerJob::Fetch`].
+    RefreshHolding {
+        request: FetchRequest,
+        generation: u64,
+    },
     /// An FX-rates refresh (Story 6.5): the latest BASE→QUOTE rate per pair.
     FetchFxRates(FxRatesRequest),
     TestKey(TestKeyRequest),
@@ -125,6 +183,8 @@ pub enum WorkerJob {
 /// chain failed (the error names itself).
 pub struct FetchOutcome {
     pub study_id: Uuid,
+    /// The dossier generation stamped at enqueue (see [`WorkerJob::Fetch`]).
+    pub generation: u64,
     pub result: Result<FetchedFinancials, IngestionError>,
     pub fell_back_to: Option<ProviderChoice>,
 }
@@ -134,6 +194,8 @@ pub struct FetchOutcome {
 /// map; `None` price means the provider exposed no current close.
 pub struct HoldingPriceOutcome {
     pub study_id: Uuid,
+    /// The dossier generation stamped at enqueue (G3 #2).
+    pub generation: u64,
     pub ticker: String,
     /// Issue #72: the latest close rides with its trading-session date ([`DatedClose`]) so the
     /// confront cache is keyed by the real session, not the refresh day. `None` = no quote.
@@ -159,18 +221,25 @@ pub struct FxRateOutcome {
 /// What the worker produces, marshalled back to the UI thread.
 pub enum WorkerOutcome {
     Fetch(FetchOutcome),
-    /// Story 7.3: the examination's fetch result — the ticker rides back (there is no study).
+    /// Story 7.3: the examination's fetch result — its request identity, ticker and currency ride
+    /// back (there is no study). `effective` is the member that served (the primary captured at
+    /// enqueue when none did), never the preference read when the result lands.
     QuickScreen {
+        request_id: u64,
         ticker: String,
+        currency: String,
         result: Result<FetchedFinancials, IngestionError>,
-        fell_back_to: Option<ProviderChoice>,
+        effective: ProviderChoice,
     },
-    /// Story 7.3 (PR 2): one criblage row's fetch result.
+    /// Story 7.3 (PR 2): one criblage row's fetch result (`effective` as for `QuickScreen`).
+    /// `quota` = this row latched the run's quota stop (a member's final answer was its limit and
+    /// no member served) — the row reads « non examiné (limite d'usage) » like those behind it.
     Screening {
         batch: u64,
         index: usize,
         result: Result<FetchedFinancials, IngestionError>,
-        fell_back_to: Option<ProviderChoice>,
+        effective: ProviderChoice,
+        quota: bool,
     },
     /// Story 7.3 (PR 2): a criblage row the worker drained unfetched after the run's quota stop.
     ScreeningSkipped {
@@ -184,6 +253,7 @@ pub enum WorkerOutcome {
     /// source (Story 6.9). `fell_back_to` names the fallback when ANY pair used one.
     FxRates {
         journal_id: Option<Uuid>,
+        generation: u64,
         results: Vec<FxRateOutcome>,
         fell_back_to: Option<ProviderChoice>,
     },
@@ -195,10 +265,13 @@ pub enum WorkerOutcome {
     FxProgress {
         done: usize,
         total: usize,
+        generation: u64,
     },
     /// Issue #100: a per-ticker holdings job the worker SKIPPED because the batch was cancelled — it
     /// still decrements the pending latch so the "refreshing" state clears, but applies no price.
-    HoldingSkipped,
+    HoldingSkipped {
+        generation: u64,
+    },
 }
 
 /// The UI-thread handler that applies a [`WorkerOutcome`] to the app state + UI.
@@ -298,10 +371,9 @@ fn run_chain<'a, T>(
         let provider = select(member.provider);
         pace(last_request, provider.tag());
         let mut attempt = call(provider, member.api_key.as_ref().map(|k| k.as_str()));
-        if let Err(IngestionError::Provider(steadyinvest_ingestion::ProviderError::Quota {
-            retry_after_secs,
-        })) = &attempt
-            && let Some(wait) = quota_wait(*retry_after_secs)
+        if let Err(error) = &attempt
+            && let Some(retry_after_secs) = declared_quota(error)
+            && let Some(wait) = quota_wait(retry_after_secs)
         {
             // FR27: honor the declared retry-after (bounded) — ONE retry.
             std::thread::sleep(wait);
@@ -349,7 +421,10 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                 std::collections::HashMap::new();
             while let Ok(job) = rx.recv() {
                 let outcome = match job {
-                    WorkerJob::Fetch(req) => {
+                    WorkerJob::Fetch {
+                        request: req,
+                        generation,
+                    } => {
                         let (result, _, fell_back_to) = run_chain(
                             &mut last_request,
                             select,
@@ -361,12 +436,14 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                         );
                         WorkerOutcome::Fetch(FetchOutcome {
                             study_id: req.study_id,
+                            generation,
                             result,
                             fell_back_to,
                         })
                     }
-                    WorkerJob::QuickScreen(req) => {
-                        let (result, _, fell_back_to) = run_chain(
+                    WorkerJob::QuickScreen(job) => {
+                        let req = job.request;
+                        let (result, effective, _) = run_chain(
                             &mut last_request,
                             select,
                             &req.chain,
@@ -376,9 +453,11 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             },
                         );
                         WorkerOutcome::QuickScreen {
+                            request_id: job.request_id,
                             ticker: req.ticker,
+                            currency: job.currency,
                             result,
-                            fell_back_to,
+                            effective: effective.unwrap_or(req.primary),
                         }
                     }
                     WorkerJob::Screening(job) if job.stop.load(Ordering::Relaxed) => {
@@ -389,32 +468,51 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                     }
                     WorkerJob::Screening(job) => {
                         let req = &job.request;
-                        let (result, _, fell_back_to) = run_chain(
+                        // G1 review: ANY member's final quota answer counts, not only the chain's
+                        // final error — a primary out of quota whose fallback then fails otherwise
+                        // would be called again for every row still queued. A quota that cleared
+                        // on the retry-after retry does not count (QuotaTrace).
+                        let mut trace = QuotaTrace::default();
+                        let (result, effective, _) = run_chain(
                             &mut last_request,
                             select,
                             &req.chain,
                             req.primary,
                             |provider, key| {
-                                runtime.block_on(fetch_canonical(provider, &req.ticker, key))
+                                let attempt =
+                                    runtime.block_on(fetch_canonical(provider, &req.ticker, key));
+                                trace.record(
+                                    provider.tag(),
+                                    attempt.as_ref().err().is_some_and(is_quota),
+                                );
+                                attempt
                             },
                         );
-                        // The quota stop: latch BEFORE the next queued row is picked up.
-                        if result.as_ref().err().is_some_and(is_quota) {
+                        // The quota stop: latch BEFORE the next queued row is picked up (a row a
+                        // fallback served stands, and so does the run).
+                        let quota = trace.any_final_quota() && result.is_err();
+                        if quota {
                             job.stop.store(true, Ordering::Relaxed);
                         }
                         WorkerOutcome::Screening {
                             batch: job.batch,
                             index: job.index,
                             result,
-                            fell_back_to,
+                            effective: effective.unwrap_or(req.primary),
+                            quota,
                         }
                     }
-                    WorkerJob::RefreshHolding(_) if worker_cancel.load(Ordering::Relaxed) => {
+                    WorkerJob::RefreshHolding { generation, .. }
+                        if worker_cancel.load(Ordering::Relaxed) =>
+                    {
                         // Issue #100: the batch was cancelled — drain this queued per-ticker job without
                         // fetching. The skip still decrements the pending latch so "refreshing" clears.
-                        WorkerOutcome::HoldingSkipped
+                        WorkerOutcome::HoldingSkipped { generation }
                     }
-                    WorkerJob::RefreshHolding(req) => {
+                    WorkerJob::RefreshHolding {
+                        request: req,
+                        generation,
+                    } => {
                         // Issue #50: a PRICE-ONLY fetch (no fundamentals) so the holdings refresh works
                         // on a free tier; routed to the holdings surface. Twelve Data uses `/price`.
                         // 2026-07-03 review: an `Ok(None)` (the provider has no quote) ADVANCES the
@@ -440,6 +538,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                         );
                         WorkerOutcome::HoldingFetch(HoldingPriceOutcome {
                             study_id: req.study_id,
+                            generation,
                             ticker: req.ticker,
                             result,
                             fell_back_to,
@@ -450,6 +549,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                         // one pair fails over per pair), all paced through the shared map. Each
                         // pair keeps its own result — one failed pair never hides the others.
                         let total = req.pairs.len();
+                        let generation = req.generation;
                         let mut results = Vec::with_capacity(total);
                         let mut fell_back_to: Option<ProviderChoice> = None;
                         for (i, (base, quote)) in req.pairs.into_iter().enumerate() {
@@ -491,11 +591,16 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                             // Issue #100: per-pair progress so the panel counts up instead of freezing.
                             let done = i + 1;
                             let _ = slint::invoke_from_event_loop(move || {
-                                dispatch_outcome(WorkerOutcome::FxProgress { done, total })
+                                dispatch_outcome(WorkerOutcome::FxProgress {
+                                    done,
+                                    total,
+                                    generation,
+                                })
                             });
                         }
                         WorkerOutcome::FxRates {
                             journal_id: req.journal_id,
+                            generation,
                             results,
                             fell_back_to,
                         }
@@ -529,6 +634,60 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
     use steadyinvest_ingestion::{FakeProvider, ProviderError};
+
+    // ── G1 review — the criblage's quota stop keys off each member's FINAL answer ──
+
+    #[test]
+    fn a_quota_that_clears_on_the_retry_does_not_stop_the_run() {
+        // TwelveData: quota (retry-after) → retried → not found. The limit cleared: no stop.
+        let mut trace = QuotaTrace::default();
+        trace.record("twelvedata", true);
+        trace.record("twelvedata", false);
+        assert!(!trace.any_final_quota());
+        // EODHD out of quota (final), then TwelveData not found: the primary's limit stands.
+        let mut trace = QuotaTrace::default();
+        trace.record("eodhd", true);
+        trace.record("twelvedata", false);
+        assert!(trace.any_final_quota());
+        // A quota on the retry too is final.
+        let mut trace = QuotaTrace::default();
+        trace.record("eodhd", true);
+        trace.record("eodhd", true);
+        assert!(trace.any_final_quota());
+    }
+
+    /// G1 H (#237): a 429 on EODHD's `/splits` request arrives wrapped as the split history's
+    /// failure — it is still the account's usage limit, so the chain's one bounded retry and the
+    /// criblage's quota stop see through the wrap; any other split failure is not a quota.
+    #[test]
+    fn a_split_history_quota_is_still_a_quota_for_the_retry_and_the_stop() {
+        let wrapped = |cause: ProviderError| {
+            IngestionError::Provider(ProviderError::SplitHistory {
+                cause: Box::new(cause),
+            })
+        };
+        let quota = wrapped(ProviderError::Quota {
+            retry_after_secs: Some(5),
+        });
+        assert_eq!(declared_quota(&quota), Some(Some(5)));
+        assert!(is_quota(&quota));
+        assert_eq!(
+            quota_wait(declared_quota(&quota).flatten()),
+            Some(Duration::from_secs(5)),
+            "the declared retry-after is honoured like a plain 429's"
+        );
+        let forbidden = wrapped(ProviderError::Forbidden {
+            detail: "plan".into(),
+        });
+        assert_eq!(declared_quota(&forbidden), None);
+        assert!(!is_quota(&forbidden));
+        assert_eq!(
+            declared_quota(&IngestionError::Provider(ProviderError::Quota {
+                retry_after_secs: None
+            })),
+            Some(None)
+        );
+    }
 
     // ── Story 6.9 — the pure pacing/retry decisions (FR27; no sleep-based tests) ──
 

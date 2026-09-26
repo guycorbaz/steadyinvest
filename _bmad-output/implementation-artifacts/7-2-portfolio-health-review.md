@@ -84,20 +84,56 @@ so that a portfolio review is one screen of facts instead of a walk through ever
 
 - [x] [Review][Decision] The review's own « seuil − 5 » murmur, applied to concentration, sectors and currencies (an all-CHF dossier is always warned), fallback literal 50 — **apply the spec: concentration = `core::risk::concentration_flagged` (as Portefeuille), sectors at/over the threshold, currencies no murmur, fallback through the config default** [app/src/wiring/review.rs:178-182]
 - [x] [Review][Decision] PDF: « Études à revoir » does not start page 3; signals printed without their count — **page flow ratified; « Signaux (n) » added** [report/src/review.rs]
-- [ ] [Review][Patch] PDF prints stale rows or « Aucune donnée. » for a block that is « indisponible » on screen; no unavailable flags in `PortfolioReview` [app/src/wiring/review.rs:206,230,382-480, report/src/review.rs:60,310]
-- [ ] [Review][Patch] PDF loses the named absences: `global_missing`, `concentration_missing`, per-position missing pairs, the other-currency cause of « aucune étude » [app/src/wiring/review.rs:428-455, report/src/review.rs:26,357]
-- [ ] [Review][Patch] An unconsolidated bank reads « non classé (étude indisponible) » [app/src/wiring/review.rs:247-257]
-- [ ] [Review][Patch] A history read failure falls back to the creation date (false « plus de 12 mois ») [app/src/state/review.rs:246-256]
-- [ ] [Review][Patch] A normalize failure is worded as a read failure; a global total absent without a named pair shows nothing; shares blocked by a missing global pair don't name it; only the first missing pair is named [app/src/state/review.rs:234, app/src/wiring/review.rs:132-158,247-285]
-- [ ] [Review][Patch] Study line dangles: « prix actuel :  CHF · H/B  · valeur relative : » [app/ui/screens/review.slint:205-207]
-- [ ] [Review][Patch] Trailing stop and breach taken from `held[0]` only (other banks ignored) [app/src/state/review.rs:202,275-288]
-- [ ] [Review][Patch] A legacy holding with no currency is matched differently from the register [app/src/state/review.rs:203,219]
-- [ ] [Review][Patch] Threshold and size targets shown as raw config strings beside formatted shares (locale rule) [app/src/wiring/review.rs:107,130-156,425]
-- [ ] [Review][Patch] One due reason per study (« age » hides « withheld » / « low confidence ») [app/src/state/review.rs:305]
-- [ ] [Review][Patch] Other-currency study lookup is absence-blind (#95) [app/src/state/review.rs:223]
-- [ ] [Review][Patch] Share-row labels keyed by string value (a bank or sector named « small » reads « Petite »); PDF unclassified `MissingRate` rows lose « non classé » [app/ui/screens/review.slint:65-71, report/src/review.rs:270-297]
-- [ ] [Review][Patch] Export notice never cleared (survives a dossier switch) [app/src/wiring/review.rs:514]
-- [ ] [Review][Patch] « Ouvrir l'étude » skips `invoke_screen_activated` (#94) [app/src/wiring/review.rs:1158-1163]
+- [x] [Review][Patch] PDF prints stale rows or « Aucune donnée. » for a block that is « indisponible » on screen; no unavailable flags in `PortfolioReview` [app/src/wiring/review.rs:206,230,382-480, report/src/review.rs:60,310]
+- [x] [Review][Patch] PDF loses the named absences: `global_missing`, `concentration_missing`, per-position missing pairs, the other-currency cause of « aucune étude » [app/src/wiring/review.rs:428-455, report/src/review.rs:26,357]
+- [x] [Review][Patch] An unconsolidated bank reads « non classé (étude indisponible) » [app/src/wiring/review.rs:247-257]
+- [x] [Review][Patch] A history read failure falls back to the creation date (false « plus de 12 mois ») [app/src/state/review.rs:246-256]
+- [x] [Review][Patch] A normalize failure is worded as a read failure; a global total absent without a named pair shows nothing; shares blocked by a missing global pair don't name it; only the first missing pair is named [app/src/state/review.rs:234, app/src/wiring/review.rs:132-158,247-285]
+- [x] [Review][Patch] Study line dangles: « prix actuel :  CHF · H/B  · valeur relative : » [app/ui/screens/review.slint:205-207]
+- [x] [Review][Patch] Trailing stop and breach taken from `held[0]` only (other banks ignored) [app/src/state/review.rs:202,275-288]
+- [x] [Review][Patch] A legacy holding with no currency is matched differently from the register [app/src/state/review.rs:203,219]
+- [x] [Review][Patch] Threshold and size targets shown as raw config strings beside formatted shares (locale rule) [app/src/wiring/review.rs:107,130-156,425]
+- [x] [Review][Patch] One due reason per study (« age » hides « withheld » / « low confidence ») [app/src/state/review.rs:305]
+- [x] [Review][Patch] Other-currency study lookup is absence-blind (#95) [app/src/state/review.rs:223]
+- [x] [Review][Patch] Share-row labels keyed by string value (a bank or sector named « small » reads « Petite »); PDF unclassified `MissingRate` rows lose « non classé » [app/ui/screens/review.slint:65-71, report/src/review.rs:270-297]
+- [x] [Review][Patch] Export notice never cleared (survives a dossier switch) [app/src/wiring/review.rs:514]
+- [x] [Review][Patch] « Ouvrir l'étude » skips `invoke_screen_activated` (#94) [app/src/wiring/review.rs:1158-1163]
 - [ ] [Review][Patch] PDF: a position's note line can be split from its row by a page break [report/src/pdf.rs:1166-1184, report/src/review.rs:477]
-- [ ] [Review][Patch] Zone / verdict logic duplicated from `viewmodel::engine`; dead-code silencers (`let _ = …`) [app/src/state/review.rs:135, app/src/wiring/review.rs:542, report/src/review.rs:519-520]
-- [ ] [Review][Patch] Tests: the 12-month path, a missing pair, two banks, a row with signals, parity with Portefeuille, header repeat [app/src/state/tests.rs, report/src/review.rs]
+- [x] [Review][Patch] Zone / verdict logic duplicated from `viewmodel::engine`; dead-code silencers (`let _ = …`) [app/src/state/review.rs:135, app/src/wiring/review.rs:542, report/src/review.rs:519-520]
+- [x] [Review][Patch] Tests: the 12-month path, a missing pair, two banks, a row with signals, parity with Portefeuille, header repeat [app/src/state/tests.rs, report/src/review.rs]
+
+Fixed in PR B (G1, branch `fix/g1-b-review`): every item checked above, and decisions 6
+(concentration = `concentration_murmur` shared with Portefeuille — with the « present and positive »
+guard on both sides; sectors at/over the threshold; currencies never) and 9d (« Signaux (n) »).
+Also: stops and study links read per lot as the register does; « non calculable » studies counted
+and listed as due (« données non calculables »); an unknown last-save date listed as due
+(« ancienneté inconnue »). The PDF note-row page break is in the PDF PR.
+
+### Review Findings — G1 final review, area 2 (2026-09-25, #237, on integ/g1-final e686141)
+
+- [x] [Review][Patch] M1 — A legacy lot (no declared currency): its stop was labelled in the reference currency, and the study price in the position's currency — **the stop carries no currency and is never compared; the row (and the PDF) say why (« non comparé au prix : le lot n'a pas de devise renseignée », worded per lot after G3); the price is labelled with the STUDY's currency**. The register (`wiring/holdings.rs`) computes its own comparison (not shared) and still compares unconditionally — left to the portfolio branch [app/src/state/review.rs, app/src/wiring/review.rs]
+- [x] [Review][Patch] M2 — The row's study was `links[0]` (lot position); counts / due read the first lot's study only — **chosen by identity (the newest linked study — the ticker's own; a failed read before « aucune étude »); flag / zone counts and the due list read every lot's study (« NESN (USD) » when the lots link to different studies); the verdict partition follows the row's study** [app/src/state/review.rs]
+- [x] [Review][Patch] M3 — The review was not re-pushed when a price / FX / study fetch landed while shown; the PDF exported the pushed rows as they were — **re-pushed on every async arrival while on display; the export re-pushes first** [app/src/wiring/fetch.rs, app/src/wiring/review.rs]
+- [x] [Review][Patch] L4 — Amounts at 0 dp (`LargeMonetary`) where Portefeuille shows `Price` (at most 2 dp) — **`Price` (at most two decimals, trailing zeros not padded), as Portefeuille; the PDF columns widened for « 12 345 678,99 CHF »** [app/src/wiring/review.rs, report/src/review.rs]
+- [x] [Review][Patch] L5 — An empty dossier read three « indisponible » size classes — **one statement « Aucune position classée : le dossier ne contient aucune position. », screen and PDF**
+- [x] [Review][Patch] L6 — PDF share / target columns without « % » (the test data carried it) — **the layout writes the unit; the sample hands the bare figure, as the app does**
+- [x] [Review][Patch] L7 — FX footnote rate as the stored « 0.8 » — **through the user's number format** (Portefeuille's footnote is the same and is left to the portfolio branch)
+- [x] [Review][Patch] L8 — A dismissed trigger was still shown — **per-lot triggers keyed by holding id; the register's dismissed set honoured**
+- [x] [Review][Patch] L9 — A global total absent for pairs AND a non-pair cause named only the pairs — **both named**
+- [x] [Review][Patch] L10 — Trigger words differed screen / PDF; the due subtitle named three of five reasons — **« Le prix a atteint le seuil suiveur. » / « Le prix est dans la zone haute. » on both; the subtitle lists all five**
+
+Fixed on branch `fix/g1-l-review`.
+
+#### G3 review of `fix/g1-l-review` (2026-09-25)
+
+- [x] [Review][Patch] M-a — Counts « avec au moins un signal » / « zone haute » read every lot's study while the row shows one — **read the row's shown study only; the due count is worded « {} études à revoir » on its own line (screen and PDF); the mixed-links band names the OTHER studies' signals / high zone**
+- [x] [Review][Patch] M-c — One full re-composition per async result (recompute storm) — **coalesced: a latch + one zero-delay single-shot timer per burst (`RepushLatch`, tested)**
+- [x] [Review][Patch] L-a — An async re-push cleared « Revue exportée : chemin » — **the notice is cleared on arrival (screen-activated arm) and at the start of an export only**
+- [x] [Review][Patch] L-b — Row currency taken from the shown lot's effective currency — **the shown study's own currency; without a study every lot's declared currency, « — » kept for a lot declaring none**
+- [x] [Review][Patch] L-c — « aucune étude » and « indisponible » merged into one « — »; the band claimed « la plus récente » over an unreadable lot; an unreadable lot's stop was silently « not breached » — **two facts on the band; « une étude lue, sans pouvoir dire si c'est la plus récente »; the stop reads « non comparé au prix : l'étude du lot n'a pas pu être lue »**
+- [x] [Review][Patch] L-d — « la position » → « le lot n'a pas de devise renseignée » (screen + PDF)
+- [x] [Review][Patch] L-e — `size_empty` keyed by the review's own positions
+- [x] [Review][Patch] L-g — Tests: three lots CHF / USD / CHF with studies created on different days (the newer with the smaller id), an identity tie; the « at most two decimals » comments
+- M-b (register side) and L-f (Portefeuille's FX footnote) belong to the portfolio branch — not touched here.
+- G1 P (`fix/g1-p-followups`): D5 — a currency-less lot is presumed in the reference currency; its stop is compared against a reference-currency study and, against a study in another currency, « non comparé au prix : le lot n'a pas de devise renseignée et l'étude est en USD » (screen + PDF), through the register's own rule (`state::stop_basis`). The unreadable-study cause is kept.
+- G1 P review H1: the review's lot link is `try_lot_study` (a legacy lot links by the reference currency, never ticker-only); a legacy lot with only another-currency study links none and its stop names that study's currency (the hint).

@@ -680,9 +680,45 @@ mod tests {
         // « Examen rapide » (the picker card, the two ladders' labels, the price record, the
         // reader's fields, the four conclusions) and measures 850. Story 7.3 PR 2 adds the watchlist
         // criblage (the button, the card, its column heads, the row states and fact words, the
-        // quota band, the « Retour à la liste de suivi » label) and measures 892. Floor strict.
+        // quota band, the « Retour à la liste de suivi » label) and measures 892. The G1 review of
+        // 7.2 adds the sector murmur « atteint ou dépassé » (Decision 6), the size block's and the
+        // global total's plain « indisponible », « Parts indisponibles. », the « non calculable »
+        // study band and the two unknown-last-save variants (position caption, due line): +7 =
+        // 899. Its follow-up review adds the two due reasons « ancienneté inconnue » and
+        // « données non calculables » and the mixed-links band (lots linked to different
+        // studies); the stop captions and the counts line are reworded in place: +3 = 902.
+        // Floor strict.
+        // The G1 on-screen check adds the stop caption without a repeated level list (every level
+        // breached): +1 = 903.
+        // integ/g1-a-to-h (G1 fix PRs A–H combined): 892 + B 11 + C 9 + D 26 + E 15 = 953, measured.
+        // G1 I (locale numbers + its review) adds no @tr literal (its refusals are MSG_*; the new
+        // Slint lines are callbacks and handlers): 953 + 0 = 953, measured.
+        // G1 final review of the « Revue » (area 2): the empty dossier's size statement, the
+        // global total's both-causes band and the not-compared legacy stop: 953 + 3 = 956,
+        // measured (the reworded trigger / mixed-links / due-subtitle lines replace, not add).
+        // Its G3 review: the mixed-links band's four more variants (a lot without a study, an
+        // unreadable one), the other studies' signals / high zone, the unreadable lot's stop, and
+        // the due count on its own line: 956 + 8 = 964, measured.
+        // G1 M (#237): rows 5 / 6 of the comparison and the study screen's §2 average column say
+        // the years actually averaged (comparison 2 → 6 labels, study 1 → 4 titles): +7 = 960,
+        // measured. The same pass, area 4 (#237): the rate « — » cause, the « different years »
+        // band and criblage word, the criblage's « fenêtre incomplète », the kept-examination band
+        // and its « Ouvrir l'examen » (the ladder's unavailable band is reworded in place): +6 =
+        // 966, measured. Its G3 review: the study screen's « Moy. a / b ans » goes (−1); the
+        // criblage names which ladder is short or absent (6 years-column words, the « fenêtre
+        // incomplète » one reworded: +5) and a rate's « — » cause (+3); the kept failure's band
+        // and its « Compris » (+2): +9 = 975, measured.
+        // G1 final review (K): every read failure of the portfolio, watchlist and FX surfaces is
+        // « indisponible » (portfolios, positions, ledger ×2, sold positions title + band, FX
+        // rates, watchlist, a watched study): 953 + 9 = 962, measured. (The ledger sale's
+        // « Quantité vendue » replaces its « (vide = toute la position) » occurrence: ±0.)
+        // The legacy lot's uncompared stop is stated (« non comparé au prix : le lot n'a pas de
+        // devise renseignée »): 962 + 1 = 963, measured.
+        // integ/g1-final2: 953 + L 11 + M 22 + K 10 = 996, measured.
+        // G1 P: a watched study that was deleted is worded as an absence, and the reinvestable
+        // dividends say « indisponible » on a failed read: 996 + 2 = 998, measured.
         assert!(
-            total >= 892,
+            total >= 998,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -793,10 +829,48 @@ mod tests {
         // comparison's export outcome (MSG_COMPARISON_EXPORTED): 132 + 1 = 133. The walk of
         // 2026-09-24 adds the watchlist duplicate refusal (MSG_WATCH_DUPLICATE): 134. Story 7.3
         // adds the examination's export / study-created outcomes, its two source words and its
-        // blank-symbol refusal: 139.
+        // blank-symbol refusal: 139. The G1 review adds the examination's blank-currency refusal
+        // and the study-created-but-empty notice (MSG_QUICK_BLANK_CURRENCY,
+        // MSG_QUICK_SCREEN_STUDY_EMPTY) and the criblage's unreadable-watchlist refusal
+        // (MSG_SCREENING_LIST_UNREADABLE): 142. The G1 review of 7.1 (#237) adds the marker of a
+        // comparison pick whose study is gone (MSG_COMPARISON_PICK_GONE): 142 + 1 = 143. The G1 I
+        // review names the ambiguous typed number (MSG_NUMBER_AMBIGUOUS_COMMA / _POINT, the
+        // expected spelling per format), the study entry that is no number
+        // (MSG_VALUE_NOT_A_NUMBER — refused, the value kept) and the pasted lines kept by year
+        // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            139,
+            187,
+            // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
+            // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
+            // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
+            // names its own refusals (MSG_STUDY_PDF_UNRENDERABLE, MSG_EXPORT_WRITE_FAILED):
+            // 158 + 2 = 160, measured. Its G3 review refuses a completed « .pdf » name that is taken
+            // (MSG_EXPORT_NAME_TAKEN): 160 + 1 = 161, measured. The G1 final review (L10) states
+            // that no dossier is open after a refused switch that lost the previous one
+            // (MSG_NO_JOURNAL_OPEN): 161 + 1 = 162. The worker-gone cause moves out of three rails
+            // into a registered message (MSG_FETCH_WORKER_GONE): 162 + 1 = 163.
+            // G1 final review (K), counted from 158 on its own branch: « Retirer » refused up front
+            // by cause (MSG_HOLDING_HAS_TRANSACTIONS, MSG_HOLDING_LEDGER_UNREADABLE): +2.
+            // Each ledger amount refusal names its field (MSG_LEDGER_QUANTITY_EMPTY / _INVALID_
+            // QUANTITY / _PRICE / _FEES / _OUT_OF_RANGE / _ROW_INVALID, MSG_DIVIDEND_INVALID_
+            // QUANTITY / _GROSS / _WITHHOLDING) and an unreadable linked study refuses the trigger
+            // sale and the stop (MSG_SELL_STUDY_UNAVAILABLE, MSG_STOP_STUDY_UNAVAILABLE):
+            // +11. A restore whose checkpoint or safety snapshot of the
+            // current dossier fails is refused by name (MSG_RESTORE_CHECKPOINT_FAILED,
+            // MSG_RESTORE_SNAPSHOT_FAILED): +2. « Lier une étude » names an
+            // unreadable study list or watchlist (MSG_WATCH_STUDY_UNAVAILABLE,
+            // MSG_WATCH_LINK_LIST_UNREADABLE): +2. integ/g1-final2: 163 + K 17 = 180, measured.
+            // G1 P (D5): a currency-less lot's trigger sale is refused against a study in another
+            // currency (MSG_SELL_STUDY_OTHER_CURRENCY): 180 + 1 = 181, measured. A restore
+            // never replaces an earlier `-prerestore` and a failed rollback says the dossier was
+            // replaced (MSG_RESTORE_SNAPSHOT_EXISTS, MSG_RESTORE_ROLLBACK_FAILED): 181 + 2 = 183. A write
+            // rail's failed READ is named as a read (MSG_READ_FAILED): 183 + 1 = 184, measured.
+            // G1 P review (L-c): a legacy lot's cost-basis seed is stated
+            // (MSG_STOP_SEEDED_FROM_COST): 184 + 1 = 185, measured. A leftover
+            // -prerestore is named at startup (MSG_PRERESTORE_FOUND): 185 + 1 = 186, measured. A reference
+            // change names the legacy stops it does not convert
+            // (MSG_LEGACY_STOPS_REFERENCE_CHANGED): 186 + 1 = 187, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }
@@ -817,7 +891,9 @@ mod tests {
         }
         assert_eq!(
             crate::viewmodel::engine::USER_FACING_LABELS.len(),
-            23,
+            // G1 M (#237): the years a comparison cell's §2 average runs over (AVG_OVER_ONE_YEAR,
+            // AVG_OVER_YEARS): 23 + 2 = 25.
+            25,
             "engine.rs label inventory changed — register the new label"
         );
     }

@@ -108,7 +108,9 @@ fn main() {
             book_value_per_share: Some(cell(bv)),
         })
         .collect();
-    let bytes = steadyinvest_report::render_study_pdf(&s).expect("renders");
+    let bytes =
+        steadyinvest_report::render_study_pdf(&s, steadyinvest_report::NumberStyle::default())
+            .expect("renders");
     let out = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "/tmp/demo.pdf".to_string());

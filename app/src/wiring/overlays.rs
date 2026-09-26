@@ -5,11 +5,12 @@
 
 use std::rc::Rc;
 
-use slint::{ComponentHandle, SharedString};
+use slint::ComponentHandle;
 use uuid::Uuid;
 
 use crate::wiring::Session;
 use crate::wiring::push::push_form;
+use crate::wiring::study_notice::{self, Source};
 use crate::{Confront, MainWindow, ScenarioCompareState, Studies, TraceState};
 use crate::{state, viewmodel};
 
@@ -93,7 +94,18 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
                 return;
             };
             let format = config.borrow().number_format;
-            let value = viewmodel::format::parse_amount(&text, format);
+            // G1 I re-review: the alternate reads under the same rule as every typed number (blank
+            // → no value). A text that is no number, or an ambiguous one, is STATED in the overlay
+            // and the alternate column keeps its last placement — never a silent empty column.
+            let value = match state::typed_entry(&text, format) {
+                Ok(value) => value,
+                Err(message) => {
+                    let mut shown = studies.get_scenario_compare();
+                    shown.notice = message.into();
+                    studies.set_scenario_compare(shown);
+                    return;
+                }
+            };
             let mut alternate = current.clone();
             // The alternate placement is the user's typed est-high-EPS (the §4-forecast driver).
             state::apply_judgment_field(&mut alternate.judgment, "est_high_eps", value);
@@ -126,7 +138,6 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_set_forecast_low_option(move |key| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return;
                 };
@@ -143,12 +154,12 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
                     .set_forecast_low_option(id, option);
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -179,7 +190,7 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
                 Ok(snapshot) => {
                     studies.set_trace(viewmodel::engine::verdict_trace(&study, &snapshot, format));
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }

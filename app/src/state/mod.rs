@@ -29,11 +29,14 @@
 
 use std::path::{Path, PathBuf};
 
+use rust_decimal::Decimal;
 use steadyinvest_contract::{ForecastLowOption, Judgment, Timestamp};
 use steadyinvest_persistence::{Error as PersistError, Journal, clear_lock, lock_is_stale};
 use uuid::Uuid;
 
 use crate::clock::{Clock, IdGen};
+use crate::viewmodel::format::{NumberFormat, NumberReading};
+use steadyinvest_contract::Money;
 
 mod cells;
 mod concentration;
@@ -59,7 +62,8 @@ pub use cells::*;
 pub use concentration::*;
 pub use confront::*;
 pub use export_import::ImportRequest;
-pub(crate) use holdings::effective_currency;
+pub use holdings::StudyChoice;
+pub(crate) use holdings::{StopBasis, effective_currency, stop_basis};
 pub use journal_io::*;
 pub use messages::*;
 pub use refresh::*;
@@ -67,6 +71,7 @@ pub use replacement::*;
 pub use restore::*;
 pub use review::*;
 pub use undo::*;
+pub(crate) use watchlist::same_ticker;
 
 /// Where a default journal lives when the user has none yet: the OS **data** dir (NOT the config
 /// dir, NOT beside `config.json`, NOT inside the journal) — outside any sync-watched tree (the
@@ -120,6 +125,10 @@ pub struct JournalState {
     /// (deterministic). `main.rs` loads it from / persists it to `AppConfig.active_portfolio_id`; it
     /// is in-memory here (validated against the live portfolio list by [`Self::active_portfolio`]).
     active_portfolio_id: Option<Uuid>,
+    /// The user's number format (G1 I, #237), pushed by the wiring from app-config at startup and
+    /// on every Réglages change: the rails read every user-typed amount through
+    /// [`crate::viewmodel::format::parse_decimal`] under it (« 10,5 » under the comma format).
+    number_format: NumberFormat,
 }
 
 /// The result of opening/creating/switching a journal (Story 5.5) — the identity + version the caller
@@ -131,6 +140,36 @@ pub struct OpenOutcome {
     /// `true` when the journal lives in a detected sync folder and was opened in the sync-safe
     /// (`DELETE`) mode — the UI surfaces the warning + the recommended pattern (ADD8).
     pub sync_warning: bool,
+    /// `true` when the target was the journal ALREADY open (re-selecting it is a no-op): the
+    /// dossier did not change, so the session it carries must not be reset (G1 G review).
+    pub unchanged: bool,
+}
+
+/// A user-typed amount under the user's number format (G1 I review): its value, or the named
+/// refusal — `not_a_number` (the rail's own message) for a blank field or a text that is no number,
+/// the format's ambiguous-number message for a number in another spelling. Never a guess.
+pub(crate) fn read_typed(
+    input: &str,
+    format: NumberFormat,
+    not_a_number: &str,
+) -> Result<Decimal, String> {
+    match crate::viewmodel::format::read_number(input, format) {
+        NumberReading::Value(d) => Ok(d),
+        NumberReading::Ambiguous => Err(ambiguous_number_message(format).to_string()),
+        NumberReading::Blank | NumberReading::NotANumber => Err(not_a_number.to_string()),
+    }
+}
+
+/// A user-typed study entry (cell, judgment field) under the user's number format (G1 I review):
+/// blank → `None` (the field is cleared — an explicit gap); a number → its value; a text that is no
+/// number, or an ambiguous one, is REFUSED with its reason — never turned into an empty hole.
+pub fn typed_entry(input: &str, format: NumberFormat) -> Result<Option<Money>, String> {
+    match crate::viewmodel::format::read_number(input, format) {
+        NumberReading::Blank => Ok(None),
+        NumberReading::Value(d) => Ok(Some(Money::from(d))),
+        NumberReading::Ambiguous => Err(ambiguous_number_message(format).to_string()),
+        NumberReading::NotANumber => Err(MSG_VALUE_NOT_A_NUMBER.to_string()),
+    }
 }
 
 impl JournalState {
@@ -138,6 +177,27 @@ impl JournalState {
     /// default journal in the OS data dir. Returns the state plus an optional neutral startup notice
     /// to surface in a banner. Never panics; a failure leaves a usable (journal-less) state.
     pub fn open_or_create(
+        configured: Option<&Path>,
+        clock: Box<dyn Clock>,
+        idgen: Box<dyn IdGen>,
+    ) -> (Self, Option<String>) {
+        let (state, notice) = Self::open_or_create_inner(configured, clock, idgen);
+        // G1 P review (L-f): a `-prerestore` beside the open dossier (a restore whose rollback
+        // failed) is named at startup — it may be the only copy of an original.
+        let leftover = state
+            .path
+            .as_deref()
+            .map(|live| path_with_suffix(live, "-prerestore"))
+            .filter(|snapshot| std::fs::symlink_metadata(snapshot).is_ok())
+            .map(|snapshot| prerestore_found_message(&snapshot));
+        let notice = match (notice, leftover) {
+            (Some(first), Some(second)) => Some(format!("{first} {second}")),
+            (first, second) => first.or(second),
+        };
+        (state, notice)
+    }
+
+    fn open_or_create_inner(
         configured: Option<&Path>,
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
@@ -167,6 +227,7 @@ impl JournalState {
                             pending_restore: None,
                             pending_import: None,
                             active_portfolio_id: None,
+                            number_format: NumberFormat::default(),
                         },
                         read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                     );
@@ -203,6 +264,7 @@ impl JournalState {
                     pending_restore: None,
                     pending_import: None,
                     active_portfolio_id: None,
+                    number_format: NumberFormat::default(),
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
             );
@@ -233,6 +295,7 @@ impl JournalState {
                         pending_restore: None,
                         pending_import: None,
                         active_portfolio_id: None,
+                        number_format: NumberFormat::default(),
                     },
                     read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
                 )
@@ -250,6 +313,7 @@ impl JournalState {
                         pending_restore: None,
                         pending_import: None,
                         active_portfolio_id: None,
+                        number_format: NumberFormat::default(),
                     },
                     Some(format!("{MSG_SAVE_FAILED} {error}")),
                 )
@@ -262,9 +326,37 @@ impl JournalState {
         self.path.as_deref()
     }
 
+    /// Set the user's number format the rails read typed amounts under (G1 I).
+    pub fn set_number_format(&mut self, format: NumberFormat) {
+        self.number_format = format;
+    }
+
+    /// The user's number format (G1 I): the rails' reading of typed amounts, and the spelling of
+    /// the figures the wiring bakes from this state.
+    pub fn number_format(&self) -> NumberFormat {
+        self.number_format
+    }
+
+    /// Read a user-typed amount under the user's number format (G1 I) — see [`read_typed`].
+    pub(crate) fn read_typed(&self, input: &str, not_a_number: &str) -> Result<Decimal, String> {
+        read_typed(input, self.number_format, not_a_number)
+    }
+
     /// True when the open journal is read-only (newer-schema file).
     pub fn is_read_only(&self) -> bool {
         self.read_only
+    }
+
+    /// The up-front refusal of a rail that would WRITE the open journal (G1 G, on-screen check):
+    /// on a read-only journal, « Restaurer une sauvegarde… » and « Importer un dossier… » refuse
+    /// at once with the reason — before any file picker or confirm (the write guards behind them
+    /// stay as second guards).
+    pub fn refuse_if_read_only(&self) -> Result<(), &'static str> {
+        if self.read_only {
+            Err(MSG_READ_ONLY_WRITE)
+        } else {
+            Ok(())
+        }
     }
 
     /// The open journal's identity (UUID), or `None` when no journal is open. Used to name a
@@ -308,10 +400,25 @@ pub fn created_at_date(ts: &Timestamp) -> String {
 }
 
 /// Map a persistence error from a watchlist write to a neutral notice (Story 4.1): a newer-schema
-/// journal reads as read-only, anything else as the generic save-failure (cause appended).
+/// journal reads as read-only, a holding still referenced by transactions names that cause (G1
+/// final review — matched on the TYPED variant, never on its text), anything else as the generic
+/// save-failure. The persistence error's own (English) text is LOGGED, never appended to the French
+/// refusal (G1 final review: a raw `transaction rows still reference…` under « L'enregistrement a
+/// échoué. » was no cause the user could read).
+/// A failed READ on a write rail (G1 P): named as a read failure — never « L'enregistrement a
+/// échoué. » for a write that was never attempted. The persistence error's text is logged.
+fn read_error(error: PersistError) -> String {
+    tracing::warn!("journal read failed: {error}");
+    MSG_READ_FAILED.to_string()
+}
+
 fn watch_error(error: PersistError) -> String {
     match error {
         PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
-        other => format!("{MSG_SAVE_FAILED} {other}"),
+        PersistError::HoldingHasTransactions => MSG_HOLDING_HAS_TRANSACTIONS.to_string(),
+        other => {
+            tracing::warn!("journal write failed: {other}");
+            MSG_SAVE_FAILED.to_string()
+        }
     }
 }

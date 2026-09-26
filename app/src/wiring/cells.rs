@@ -12,8 +12,10 @@ use uuid::Uuid;
 use steadyinvest_contract::Money;
 
 use crate::state::UnlockScope;
+use crate::viewmodel::format::NumberReading;
 use crate::wiring::Session;
 use crate::wiring::push::push_form;
+use crate::wiring::study_notice::{self, Source};
 use crate::{MainWindow, Studies};
 use crate::{state, viewmodel};
 
@@ -43,9 +45,11 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
     //    (validate→mutate→persist→rebuild — the 2.3 single-source-of-truth shape). Every refusal
     //    surfaces a neutral banner, never a silent `.ok()`. ──
 
-    // Commit a typed cell: parse the text locale-aware (None for blank/unparseable → a to-fill gap,
-    // never 0), edit + persist, then rebuild the form from the re-read study. Returns written? so
-    // the cell keeps the user's text on a recoverable refusal.
+    // Commit a typed cell: read the text under the user's number format (blank → a to-fill gap,
+    // never 0), edit + persist, then rebuild the form from the re-read study. G1 I: a text that is
+    // no number, or an ambiguous one, is refused with its reason. Every refusal goes to the refusal
+    // dialog (the study screen has no notice slot) and returns `false`, so the cell re-shows its
+    // stored value (G1 I on-screen check) — a refused text never stays looking saved.
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
@@ -54,7 +58,6 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_commit_cell(move |year_index, field, text| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return false;
                 };
@@ -64,8 +67,17 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 let format = config.borrow().number_format;
                 // Issue #117: Sales / pre-tax profit are typed in millions — scale back to the stored
                 // absolute value before persisting (a no-op for every other field).
-                let value = viewmodel::format::parse_amount(&text, format)
-                    .map(|m| viewmodel::entry::entered_to_stored(m, field.as_str()));
+                // G1 I review: a blank clears the cell; a non-number or an ambiguous number is
+                // REFUSED with its reason and the cell left as it was — never an empty hole.
+                let value = match state::typed_entry(&text, format) {
+                    Ok(value) => {
+                        value.map(|m| viewmodel::entry::entered_to_stored(m, field.as_str()))
+                    }
+                    Err(message) => {
+                        crate::wiring::dialog::refuse(&ui, &message);
+                        return false;
+                    }
+                };
                 let result = journal_state.borrow_mut().edit_cell(
                     id,
                     year_index.max(0) as usize,
@@ -74,14 +86,14 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                         true
                     }
                     Err(message) => {
-                        studies.set_notice(message.into());
+                        crate::wiring::dialog::refuse(&ui, &message);
                         false
                     }
                 }
@@ -89,8 +101,8 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
     }
 
     // Paste a clipboard column downward from the active cell (same field). Read the clipboard via
-    // `arboard`; a failure is a neutral notice, never a panic. Surplus lines past the grid bottom
-    // are dropped with a neutral count notice.
+    // `arboard`; a failure is a neutral notice, never a panic. Lines left unwritten (refused, or
+    // past the grid bottom) are named in the refusal dialog.
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
@@ -99,7 +111,6 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_paste_column(move |year_index, field| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return;
                 };
@@ -111,19 +122,28 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                     Ok(text) => text,
                     Err(error) => {
                         tracing::warn!("clipboard read failed: {error}");
-                        studies.set_notice(state::MSG_CLIPBOARD_UNAVAILABLE.into());
+                        study_notice::fail(&ui, Source::Edit, state::MSG_CLIPBOARD_UNAVAILABLE);
                         return;
                     }
                 };
-                let values = viewmodel::entry::parse_pasted_column(&text, format);
-                if values.is_empty() {
+                let readings = viewmodel::entry::parse_pasted_column(&text, format);
+                if readings.is_empty() {
                     return;
                 }
                 // Issue #117: a column pasted into Sales / pre-tax profit is in millions — scale each
-                // value back to the stored absolute (a no-op for every other field).
-                let values: Vec<Option<Money>> = values
+                // value back to the stored absolute (a no-op for every other field). G1 I review: a
+                // line that is no number, or an ambiguous one, keeps its cell as it was.
+                let values: Vec<state::PastedLine> = readings
                     .into_iter()
-                    .map(|v| v.map(|m| viewmodel::entry::entered_to_stored(m, field.as_str())))
+                    .map(|reading| match reading {
+                        NumberReading::Value(d) => state::PastedLine::Set(Some(
+                            viewmodel::entry::entered_to_stored(Money::from(d), field.as_str()),
+                        )),
+                        NumberReading::Blank => state::PastedLine::Set(None),
+                        NumberReading::NotANumber | NumberReading::Ambiguous => {
+                            state::PastedLine::Keep
+                        }
+                    })
                     .collect();
                 let result = journal_state.borrow_mut().paste_column(
                     id,
@@ -132,17 +152,23 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                     &values,
                 );
                 match result {
-                    Ok(filled) => {
-                        if filled < values.len() {
-                            studies.set_notice(state::MSG_PASTE_CLIPPED.into());
-                        } else {
-                            studies.set_notice(SharedString::new());
-                        }
+                    Ok(outcome) => {
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
+                        // G1 I on-screen check: the lines left unwritten (refused, or past the
+                        // grid bottom — both named when both) go to the refusal dialog, the one
+                        // surface the study screen shows.
+                        if let Some(message) = state::paste_outcome_message(
+                            &outcome.kept_years,
+                            outcome.filled,
+                            values.len(),
+                        ) {
+                            crate::wiring::dialog::refuse(&ui, &message);
+                        }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => crate::wiring::dialog::refuse(&ui, &message),
                 }
             });
     }
@@ -157,7 +183,6 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_set_not_available(move |year_index, field, accepted| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return;
                 };
@@ -173,12 +198,12 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -216,7 +241,6 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>()
             .on_set_review(move |year_index, field, review| {
                 let ui = ui_weak.unwrap();
-                let studies = ui.global::<Studies>();
                 let Some(id_text) = current_study.borrow().clone() else {
                     return;
                 };
@@ -232,12 +256,12 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -267,7 +291,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         // The divergence is resolved — hide the reveal + resolve controls (the
                         // reveal is set only on focus, so clear it explicitly here).
                         studies.set_active_pending(SharedString::new());
@@ -275,7 +299,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -302,14 +326,14 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
                 );
                 match result {
                     Ok(()) => {
-                        studies.set_notice(SharedString::new());
+                        study_notice::clear(&ui, Source::Edit);
                         // The divergence is dismissed — hide the reveal + resolve controls.
                         studies.set_active_pending(SharedString::new());
                         if let Some(study) = journal_state.borrow().get_study(id) {
                             push_form(&ui, &journal_state.borrow(), &study, format);
                         }
                     }
-                    Err(message) => studies.set_notice(message.into()),
+                    Err(message) => study_notice::fail(&ui, Source::Edit, &message),
                 }
             });
     }
@@ -320,8 +344,7 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         ui.global::<Studies>().on_notify_soft_lock(move || {
             let ui = ui_weak.unwrap();
-            ui.global::<Studies>()
-                .set_notice(state::MSG_SOFT_LOCKED.into());
+            study_notice::fail(&ui, Source::Edit, state::MSG_SOFT_LOCKED);
         });
     }
 
@@ -381,12 +404,12 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
             let unlocked = journal_state.borrow_mut().unlock_all(id, &scope);
             match unlocked {
                 Ok(count) => {
-                    studies.set_notice(state::unlock_done_message(count).into());
+                    study_notice::outcome(&ui, Source::Edit, &state::unlock_done_message(count));
                     if let Some(study) = journal_state.borrow().get_study(id) {
                         push_form(&ui, &journal_state.borrow(), &study, format);
                     }
                 }
-                Err(message) => studies.set_notice(message.into()),
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }
         });
     }

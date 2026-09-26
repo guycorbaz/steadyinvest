@@ -127,6 +127,7 @@ impl JournalState {
                     journal_id: journal.id(),
                     logical_version,
                     sync_warning: matches!(mode, JournalMode::Delete),
+                    unchanged: false,
                 };
                 self.read_only = journal.is_read_only();
                 self.journal = Some(journal);
@@ -141,11 +142,18 @@ impl JournalState {
     }
 
     /// Re-acquire the previous journal after a failed open/create, so the app is never journal-less
-    /// (Story 5.5) — best-effort (mirrors the Story 5.4 `reopen_live` discipline).
+    /// (Story 5.5) — best-effort (mirrors the Story 5.4 `reopen_live` discipline). G1 final review
+    /// L10: when even that fails, NO journal is open — the path goes too, so nothing (the location
+    /// status above all) reads the previous path as an open dossier.
     fn restore_previous(&mut self, prev: Option<PathBuf>) {
-        if let Some(prev) = prev {
+        let reopened = prev.is_some_and(|prev| {
             let mode = sync_mode_for(&prev);
-            let _ = self.adopt_open(&prev, mode);
+            self.adopt_open(&prev, mode).is_ok()
+        });
+        if !reopened {
+            self.journal = None;
+            self.path = None;
+            self.read_only = false;
         }
     }
 
@@ -165,6 +173,7 @@ impl JournalState {
                 journal_id: self.journal_id().unwrap_or_else(Uuid::nil),
                 logical_version: self.logical_version_or_zero(),
                 sync_warning: matches!(sync_mode_for(path), JournalMode::Delete),
+                unchanged: true,
             });
         }
         let prev = self.path.clone();
@@ -204,6 +213,7 @@ impl JournalState {
                     journal_id: journal.id(),
                     logical_version,
                     sync_warning: matches!(mode, JournalMode::Delete),
+                    unchanged: false,
                 };
                 self.read_only = journal.is_read_only();
                 self.journal = Some(journal);

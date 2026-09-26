@@ -17,7 +17,7 @@ import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen } from "../s
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
-import { EditableCell } from "../components/editable_cell.slint";
+import { EditableCell, CellFit, CellMark, CellTip } from "../components/editable_cell.slint";
 import { JudgmentField } from "../components/judgment_field.slint";
 import { ZoneBar } from "../components/zone_bar.slint";
 import { VerdictBar } from "../components/verdict_badge.slint";
@@ -33,51 +33,97 @@ global FormConst {
 
 // ── Grid primitives (visible 1 px cell borders, the high-fidelity SSG look) ──
 
-// A data cell: right-aligned tabular figures on a bordered cell.
+// Grid-column rule (G1 J, #237) — honoured by EVERY grid cell below and by `EditableCell`: a
+// column's width NEVER follows its content. Each cell declares the same basis (`preferred-width:
+// 0px`, `min-width: Tokens.grid-col-min`), so equal-stretch cells split a row identically whether
+// they read « — » or « 69,1 », and the header + every data row share one column geometry (the
+// on-screen §3 shift of the « — » rows 2017–2021 against the figure rows 2022+). Fixed columns keep
+// their explicit width. G1 J review: the common `grid-col-min` floor stops the squeeze — past it
+// the study form scrolls sideways (its Flickable's viewport follows the content's min width).
+
+// A data cell: right-aligned tabular figures on a bordered cell. Shown WHOLE: a figure wider than
+// the cell shrinks its font (`CellFit`) down to the floor; past it the cell shows the overflow mark
+// and reveals the whole figure on hover (a read-only cell takes no focus) — never a clipped figure.
 component GridCell inherits Rectangle {
     in property <string> value;
     in property <bool> emphasise: false;
+    min-width: Tokens.grid-col-min;
+    preferred-width: 0px;
     min-height: Tokens.row-height;
     horizontal-stretch: 1;
     background: transparent;
     border-width: Tokens.border;
     border-color: Tokens.grid-line;
-    HorizontalLayout {
-        padding-left: Tokens.space-8;
-        padding-right: Tokens.space-8;
-        Text {
-            text: root.value;
-            color: root.emphasise ? Tokens.text-high : Tokens.text-mid;
-            font-family: Tokens.font-numeric;
-            font-size: Tokens.font-body;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-            horizontal-stretch: 1;
-        }
+    measure := Text {
+        visible: false;
+        text: root.value;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-body;
     }
+    property <length> room: max(0px, root.width - Tokens.space-8 * 2);
+    property <bool> overflows: !CellFit.fits(Tokens.font-body, root.room, measure.preferred-width);
+    Text {
+        x: Tokens.space-8;
+        width: root.room;
+        height: parent.height;
+        text: root.overflows ? CellMark.overflow : root.value;
+        color: root.emphasise ? Tokens.text-high : Tokens.text-mid;
+        font-family: Tokens.font-numeric;
+        font-size: root.overflows ? Tokens.font-body : CellFit.font(self.width, measure.preferred-width);
+        vertical-alignment: center;
+        horizontal-alignment: right;
+    }
+    hover := TouchArea { }
+    if root.overflows && hover.has-hover: CellTip { text: root.value; x: root.width - self.width; y: -self.height; }
 }
 
-// A left-aligned label cell (row labels, year cells) on the same grid.
+// A left-aligned label cell (row labels, year cells) on the same grid. A label may elide (its full
+// wording lives in the source); a FIGURE never does — figures go in `GridCell` / `EditableCell`.
+// A column TITLE sets `fit: true`: it is shown whole, shrinking its font by the `CellFit` rule
+// instead of eliding (G1 J remainder: « Moy. 5… » / « Tenda… » in the §2 header).
 component GridLabelCell inherits Rectangle {
     in property <string> label;
     in property <bool> numeric: false;
+    in property <bool> fit: false;
+    min-width: Tokens.grid-col-min;
+    preferred-width: 0px;
     min-height: Tokens.row-height;
     horizontal-stretch: 1;
     background: Tokens.surface-alt;
     border-width: Tokens.border;
     border-color: Tokens.grid-line;
-    HorizontalLayout {
-        padding-left: Tokens.space-8;
-        padding-right: Tokens.space-8;
-        Text {
-            text: root.label;
-            color: Tokens.text-mid;
-            font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-            overflow: elide;
-        }
+    measure := Text {
+        visible: false;
+        text: root.label;
+        font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
+        font-size: Tokens.font-caption;
+    }
+    property <length> room: max(0px, root.width - Tokens.space-8 * 2);
+    // Elided: a plain label wider than its room; a fitted title that does not fit even at the floor.
+    property <bool> elided: root.fit
+        ? !CellFit.fits(Tokens.font-caption, root.room, measure.preferred-width)
+        : measure.preferred-width > root.room;
+    // Placed explicitly (no inner layout), like `GridCell`: a width-driven font inside a layout
+    // would feed the row's layout back into its own width (a binding loop).
+    Text {
+        x: Tokens.space-8;
+        width: max(0px, parent.width - Tokens.space-8 * 2);
+        height: parent.height;
+        text: root.label;
+        color: Tokens.text-mid;
+        font-family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
+        font-size: root.fit ? CellFit.scaled(Tokens.font-caption, self.width, measure.preferred-width) : Tokens.font-caption;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    // G1 J review: an elided label (a long §2 formula such as « ROE — BPA ÷ valeur comptable/
+    // action ») is revealed whole on hover — the elision never hides the wording for good.
+    hover := TouchArea { }
+    if root.elided && hover.has-hover: CellTip {
+        text: root.label;
+        family: root.numeric ? Tokens.font-numeric : Tokens.font-ui;
+        x: 0px;
+        y: -self.height;
     }
 }
 
@@ -85,6 +131,8 @@ component GridLabelCell inherits Rectangle {
 component PeHeaderCell inherits Rectangle {
     in property <string> letter;
     in property <string> caption;
+    min-width: Tokens.grid-col-min;
+    preferred-width: 0px;
     min-height: Tokens.row-height + Tokens.space-12;
     horizontal-stretch: 1;
     background: Tokens.surface-alt;
@@ -271,6 +319,9 @@ export component StudyScreen inherits Rectangle {
         if (key == "severe_low") { return @tr("plus bas sévère récent à saisir"); }
         if (key == "dividend") { return @tr("dividende annuel courant à saisir"); }
         if (key == "yield") { return @tr("rendement haut moyen nul ou inconnu"); }
+        // G1 review: the exact reasons of (a) and (d) — a figure beyond
+        // the calculation's range (never misattributed to an input that is present).
+        if (key == "overflow") { return @tr("indisponible (calcul hors limites)"); }
         return FormConst.empty-slot;
     }
     in property <FormHeader> header: Studies.form-header;
@@ -279,10 +330,15 @@ export component StudyScreen inherits Rectangle {
     // Fixed grid-column widths (the alignment fix). Pinning the label / stat / year-label columns to
     // a constant width makes every independently-laid-out row share the same column boundaries, so the
     // year cells align regardless of how long a given row's label is. The remaining width is split
-    // equally among the (stretchy) year columns.
+    // equally among the (stretchy) year columns — equally for real only because every grid cell
+    // declares a zero basis (the grid-column rule, G1 J). G1 J widths: the stat columns fit
+    // « ↑ hausse » / « 47,6 % » at body size, the year label fits « Année » (= the grid column
+    // floor). G1 J review: the row-label column stays 240 px (216 elided the §2 formulas more; an
+    // elided label shows whole on hover), and a year column never goes below `grid-col-min` —
+    // many years or a narrow window scroll the form sideways instead of squeezing the figures.
     property <length> col-label: 240px; // §2 "Indicateur" row-label column
-    property <length> col-stat: 72px;   // §2 "Moy. 5 ans" / "Tendance" columns
-    property <length> col-year: 64px;   // §3 "Année" row-label column
+    property <length> col-stat: 96px;   // §2 "Moy. 5 ans" / "Tendance" columns
+    property <length> col-year: Tokens.grid-col-min; // §3 "Année" row-label column (the floor)
 
     background: Tokens.bg;
 
@@ -317,6 +373,29 @@ export component StudyScreen inherits Rectangle {
         }
         Rectangle { height: Tokens.border; background: Tokens.separator; }
 
+        // ── G1 J — the open study's notice slot. Pinned OUTSIDE the scroll, just under the verdict
+        //    bar, so a notice raised deep in the form (the soft-lock on a §3 cell, a drag refusal)
+        //    is seen where the user is, not at the top of a scrolled-away page. Shown inline (the
+        //    UX pass: caption ink, no colour, no band): a gesture's OUTCOME, its in-progress
+        //    banner, and the FAILURES that need no acknowledgement — a fetch failure, an edit
+        //    refused in passing (the soft-lock, an unreadable clipboard), the study's own
+        //    normalize state (G1 final review L8: this slot does carry failures).
+        //    Only a refusal the user must acknowledge goes to the refusal dialog instead. The F4
+        //    notice-slot rule is enforced where it is written (Rust `wiring::study_notice`). ──
+        if Studies.study-notice != "": VerticalLayout {
+            padding-left: Tokens.space-24;
+            padding-right: Tokens.space-24;
+            padding-top: Tokens.space-8;
+            padding-bottom: Tokens.space-8;
+            Text {
+                text: Studies.study-notice;
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                wrap: word-wrap;
+            }
+        }
+        if Studies.study-notice != "": Rectangle { height: Tokens.border; background: Tokens.separator; }
+
         Flickable {
         vertical-stretch: 1;
         viewport-height: content.preferred-height;
@@ -342,6 +421,7 @@ export component StudyScreen inherits Rectangle {
                         Studies.judgment-dragging = false; // clear any stuck drag flag (review P5)
                         Studies.judgment-hover = false; // and the #187 hover flag with it
                         Studies.demo-active = false; // leaving the read-only demo (Story 2.13)
+                        Studies.close-study(); // G1 J review: Rust forgets the open study's id
                         // 2026-07-12: the list re-derives its rows (§5 potential / zone) from the
                         // edits made in this form — this pure-Slint path bypasses screen-activated.
                         Studies.list-refresh-requested();
@@ -834,6 +914,7 @@ export component StudyScreen inherits Rectangle {
                             value: Studies.judgment.est-low-eps;
                             // Issue #214: the latest EPS (the downside case), adoptable in one click.
                             suggestion: Studies.judgment-suggestions.est-low-eps;
+                            suggestion-year: Studies.judgment-suggestions.est-low-eps-year;
                         }
                         // 2026-09-24 (Guy, from use): the field's meaning stated where it is typed —
                         // a low EPS taken from the growth trend lifts the forecast low above the
@@ -863,9 +944,16 @@ export component StudyScreen inherits Rectangle {
                 HorizontalLayout {
                     spacing: 0;
                     GridLabelCell { label: @tr("Indicateur"); width: root.col-label; }
-                    for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; }
-                    GridLabelCell { label: @tr("Moy. 5 ans"); width: root.col-stat; }
-                    GridLabelCell { label: @tr("Tendance"); width: root.col-stat; }
+                    for yh in Studies.year-headers: GridLabelCell { label: yh; numeric: true; fit: true; }
+                    // The years actually averaged, never « 5 ans » over three (G1, #237).
+                    GridLabelCell {
+                        label: Studies.mgmt-computed.avg-years == 1 ? @tr("Moy. 1 an")
+                            : Studies.mgmt-computed.avg-years > 1 ? @tr("Moy. {} ans", Studies.mgmt-computed.avg-years)
+                            : @tr("Moyenne");
+                        width: root.col-stat;
+                        fit: true;
+                    }
+                    GridLabelCell { label: @tr("Tendance"); width: root.col-stat; fit: true; }
                 }
                 // Editable raw-input rows (sales · pre-tax profit · book value), paired with their
                 // label by index — the row order is fixed by `viewmodel/form.rs`.
@@ -1050,6 +1138,7 @@ export component StudyScreen inherits Rectangle {
                         value: Studies.judgment.dividend;
                         // Issue #214: the latest year's fetched dividend per share, adoptable.
                         suggestion: Studies.judgment-suggestions.dividend;
+                        suggestion-year: Studies.judgment-suggestions.dividend-year;
                     }
                 }
 
