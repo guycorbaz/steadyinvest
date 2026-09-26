@@ -41,6 +41,10 @@ export component ZoneLabel inherits Text {
 }
 
 // The verdict badge — a small state chip carried by texture + label.
+//
+// It takes its NATURAL width (2026-09-26 on-screen defect: pinned at 180 px, « Confiance
+// provisoire » and its hatching ran out of the chip over « Prix : … » at a 1600 px window). Its
+// min and preferred widths are its own row's — the caption is never elided nor overdrawn.
 export component VerdictBadge inherits Rectangle {
     in property <VerdictState> v;
     // When this badge stands alone it carries the low-confidence label itself (AC1); the sticky bar
@@ -53,6 +57,8 @@ export component VerdictBadge inherits Rectangle {
         : "";
 
     min-height: Tokens.row-height;
+    min-width: badge-row.min-width;
+    preferred-width: badge-row.preferred-width;
     horizontal-stretch: 0;
     border-radius: Tokens.radius;
 
@@ -62,15 +68,19 @@ export component VerdictBadge inherits Rectangle {
         width: 100%;
         height: 100%;
     }
-    // provisional → a neutral hatched strip (texture, NOT a colour band).
+    // provisional → a neutral hatched strip (texture, NOT a colour band). Clipped to the chip: the
+    // hatching is texture, it never paints outside the badge.
     if root.v.state == "provisional": Rectangle {
         width: 100%;
         height: 100%;
+        clip: true;
         background: Tokens.surface-alt;
         border-width: Tokens.border;
         border-color: Tokens.separator;
         border-radius: Tokens.radius;
         Text {
+            width: 100%;
+            height: 100%;
             text: "╱╱╱╱╱╱";
             color: Tokens.text-low;
             font-size: Tokens.font-caption;
@@ -80,7 +90,7 @@ export component VerdictBadge inherits Rectangle {
         }
     }
 
-    HorizontalLayout {
+    badge-row := HorizontalLayout {
         padding-left: Tokens.space-8;
         padding-right: Tokens.space-8;
         spacing: Tokens.space-8;
@@ -106,109 +116,176 @@ export component VerdictBadge inherits Rectangle {
     }
 }
 
+// The surfaced facts — present price · projected return · appreciation · capital-at-risk
+// (Epic-4 forward, caption-only em-dash) — then the temporal-provenance caption (degraded verdict
+// only). Fact-stating, neutral. When the bar is narrower than the facts (the minimum window
+// width) they ELIDE — shortened with « … », never drawn over a neighbour — in reverse order of
+// importance: the box layout takes the missing width from each item in proportion to its
+// `horizontal-stretch`, so the provenance caption gives most, the placeholder capital-at-risk
+// next, the two ratios after, and the price (stretch 0) only once all the others are at « … ».
+// Each fact is capped at its natural width (`FactText`), so spare width never spreads them apart.
+component FactText inherits Text {
+    max-width: self.preferred-width;
+    font-size: Tokens.font-caption;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+component VerdictFacts inherits HorizontalLayout {
+    in property <VerdictState> v;
+    spacing: Tokens.space-16;
+    FactText {
+        text: @tr("Prix : {}", root.v.present-price);
+        color: Tokens.text-mid;
+        font-family: Tokens.font-numeric;
+        horizontal-stretch: 0;
+    }
+    FactText {
+        text: @tr("Rendement annuel : {}", root.v.projected-return);
+        color: Tokens.text-mid;
+        font-family: Tokens.font-numeric;
+        horizontal-stretch: 1;
+    }
+    FactText {
+        text: @tr("Appréciation : {}", root.v.appreciation);
+        color: Tokens.text-mid;
+        font-family: Tokens.font-numeric;
+        horizontal-stretch: 1;
+    }
+    FactText {
+        text: @tr("Capital à risque : —");
+        color: Tokens.text-low;
+        horizontal-stretch: 2;
+    }
+    if root.v.provenance-date != "": FactText {
+        text: @tr("Calculé à partir des données du {}", root.v.provenance-date);
+        color: Tokens.text-low;
+        horizontal-stretch: 4;
+    }
+    // Packs the facts at the start: spare width goes here, not between the facts.
+    Rectangle {
+        horizontal-stretch: 1;
+    }
+}
+
 // The sticky verdict bar (AC 5): pinned ABOVE the study scroll area (the caller places it outside the
 // Flickable), always visible while scrolling/folding. Derives from the SAME snapshot as the §4 badge.
+//
+// One row when everything fits at its natural width: badge · low-confidence reason · facts ·
+// « Traçabilité ». When the bar is narrower (2026-09-26 on-screen defect: at a 1600 px window the
+// row overflowed and the badge was drawn over « Prix : … »), the facts WRAP to a second row under
+// the badge; below that (the minimum window width) they elide. The badge keeps its natural width
+// and « Traçabilité » its own in every case — nothing is drawn over anything.
 export component VerdictBar inherits Rectangle {
     in property <VerdictState> v: Studies.verdict;
     callback open-traceability();
 
-    height: Tokens.row-height + Tokens.space-16;
+    property <length> trace-width: 120px;
+    // The one-row width at every item's natural size. Measured on a hidden copy of the facts and
+    // of the reason (below), never on the placed ones: those are sized BY the bar, so reading them
+    // here would make the row choice depend on itself (a binding loop).
+    property <length> one-row-width: Tokens.space-16 * 2 + badge.preferred-width
+        + (root.v.low-confidence ? measure-reason.preferred-width + Tokens.space-16 : 0px)
+        + Tokens.space-16 + measure-facts.preferred-width
+        + Tokens.space-16 + root.trace-width;
+    property <bool> one-row: root.width >= root.one-row-width;
+
+    // The bar's own width constraints never depend on the row choice (same binding-loop reason):
+    // at least the badge and « Traçabilité », ideally the one-row width.
+    min-width: Tokens.space-16 * 3 + badge.min-width + root.trace-width;
+    preferred-width: root.one-row-width;
     background: Tokens.surface;
 
-    HorizontalLayout {
+    // The measuring copies: laid out in a zero-size, invisible box — only their natural widths are
+    // read. No text of their own (the facts' literals live once, in `VerdictFacts`).
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+        visible: false;
+        clip: true;
+        measure-facts := VerdictFacts {
+            v: root.v;
+        }
+        measure-reason := Text {
+            text: root.v.confidence-label;
+            font-size: Tokens.font-caption;
+        }
+    }
+
+    VerticalLayout {
         padding-left: Tokens.space-16;
         padding-right: Tokens.space-16;
-        spacing: Tokens.space-16;
+        padding-bottom: root.one-row ? 0px : Tokens.space-8;
 
-        VerdictBadge {
-            v: root.v;
-            width: 180px;
-            // The bar renders the low-confidence label itself (below) — keep the embedded badge from
-            // drawing it too, so the reason shows once, in the roomier fact row.
-            show-confidence-label: false;
-        }
-
-        // Story 2.7 (AC1) — the low-confidence reason on the sticky bar (travels with the verdict).
-        // Neutral ink; shown whenever low-confidence, independent of the Provisional/Withheld split.
-        if root.v.low-confidence: Text {
-            text: root.v.confidence-label;
-            color: Tokens.text-mid;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
-        }
-
-        // The surfaced facts — present price · projected return · appreciation · capital-at-risk
-        // (Epic-4 forward, caption-only em-dash). Fact-stating, neutral.
-        fact := HorizontalLayout {
+        HorizontalLayout {
             spacing: Tokens.space-16;
-            horizontal-stretch: 1;
-            Text {
-                text: @tr("Prix : {}", root.v.present-price);
-                color: Tokens.text-mid;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-                vertical-alignment: center;
-            }
-            Text {
-                text: @tr("Rendement annuel : {}", root.v.projected-return);
-                color: Tokens.text-mid;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-                vertical-alignment: center;
-            }
-            Text {
-                text: @tr("Appréciation : {}", root.v.appreciation);
-                color: Tokens.text-mid;
-                font-family: Tokens.font-numeric;
-                font-size: Tokens.font-caption;
-                vertical-alignment: center;
-            }
-            Text {
-                text: @tr("Capital à risque : —");
-                color: Tokens.text-low;
-                font-size: Tokens.font-caption;
-                vertical-alignment: center;
-            }
-        }
+            min-height: Tokens.row-height + Tokens.space-16;
 
-        // The temporal-provenance caption (degraded verdict only) — fact-stating.
-        if root.v.provenance-date != "": Text {
-            text: @tr("Calculé à partir des données du {}", root.v.provenance-date);
-            color: Tokens.text-low;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
-        }
-
-        // Traceability entry point (keyboard-reachable button).
-        trace-fs := FocusScope {
-            width: 120px;
-            key-pressed(e) => {
-                if (e.text == Key.Return || e.text == " ") {
-                    root.open-traceability();
-                    return accept;
-                }
-                reject
+            badge := VerdictBadge {
+                v: root.v;
+                // The bar renders the low-confidence label itself (below) — keep the embedded badge
+                // from drawing it too, so the reason shows once, in the roomier fact row.
+                show-confidence-label: false;
             }
-            Rectangle {
-                border-radius: Tokens.radius;
-                border-width: trace-fs.has-focus ? Tokens.focus-border : Tokens.border;
-                border-color: trace-fs.has-focus ? Tokens.focus : Tokens.separator;
-                background: ta.has-hover ? Tokens.surface-alt : transparent;
-                ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        trace-fs.focus();
+
+            // Story 2.7 (AC1) — the low-confidence reason on the sticky bar (travels with the
+            // verdict). Neutral ink; shown whenever low-confidence, independent of the
+            // Provisional/Withheld split.
+            if root.v.low-confidence: Text {
+                text: root.v.confidence-label;
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            if root.one-row: VerdictFacts {
+                v: root.v;
+                horizontal-stretch: 1;
+            }
+            if !root.one-row: Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            // Traceability entry point (keyboard-reachable button).
+            trace-fs := FocusScope {
+                width: root.trace-width;
+                key-pressed(e) => {
+                    if (e.text == Key.Return || e.text == " ") {
                         root.open-traceability();
+                        return accept;
+                    }
+                    reject
+                }
+                Rectangle {
+                    border-radius: Tokens.radius;
+                    border-width: trace-fs.has-focus ? Tokens.focus-border : Tokens.border;
+                    border-color: trace-fs.has-focus ? Tokens.focus : Tokens.separator;
+                    background: ta.has-hover ? Tokens.surface-alt : transparent;
+                    ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            trace-fs.focus();
+                            root.open-traceability();
+                        }
+                    }
+                    Text {
+                        text: @tr("Traçabilité");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
                 }
-                Text {
-                    text: @tr("Traçabilité");
-                    color: Tokens.text-mid;
-                    font-size: Tokens.font-caption;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
             }
+        }
+
+        // The wrapped second row: the facts under the badge when one row cannot hold them.
+        if !root.one-row: VerdictFacts {
+            v: root.v;
+            min-height: Tokens.row-height;
         }
     }
 }
