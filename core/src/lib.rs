@@ -25,7 +25,7 @@ pub mod ssg;
 pub mod verdict;
 
 pub use golden::{GoldenDeviation, GoldenReport, GoldenStudy, check, check_all};
-pub use method_version::METHOD_VERSION;
+pub use method_version::{INPUTS_DEFINED_AT, METHOD_VERSION, predates_inputs_definition};
 pub use normalize::{CanonicalFinancials, RawFinancials, normalize};
 pub use ssg::{JudgmentInputs, QuarterlyObservations, SsgOutputs, compute};
 pub use verdict::{

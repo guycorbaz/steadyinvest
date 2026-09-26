@@ -200,6 +200,21 @@ pub const MSG_REFRESH_CONTRADICTED: &str =
 /// `{n}` is the count of dropped provider years.
 pub const MSG_REFRESH_UNMATCHED_YEARS: &str =
     "{n} année(s) du fournisseur hors de la grille actuelle n'ont pas été intégrées.";
+/// Issue #252: provider values fetched under an earlier definition of the inputs (spec §0) that this
+/// refresh found DIFFERENT — updated in place, or (a validated cell, frozen) a different value
+/// parked beside it: « diffèrent », never « ont changé » (a ✓ value did not). The difference may
+/// come from the method, not only from the provider's data. `{n}` is the count, `{v}` the method
+/// version that defined the inputs (`INPUTS_DEFINED_AT`).
+pub const MSG_REFRESH_METHOD: &str = "{n} valeur(s) récupérée(s) avant la méthode {v} diffèrent de la nouvelle récupération : l'écart peut venir de la nouvelle définition des données (exercice fiscal, BPA dilué publié), pas seulement du fournisseur.";
+/// Issue #252: values fetched under an earlier definition of the inputs that this refresh CONFIRMED
+/// identical — re-stamped, no figure moved (it replaces « aucun changement » when nothing else did:
+/// the study's history records the re-stamp). `{n}` / `{v}` as above.
+pub const MSG_REFRESH_METHOD_CONFIRMED: &str = "{n} valeur(s) récupérée(s) avant la méthode {v} confirmée(s) à l'identique : elles suivent désormais la nouvelle définition des données.";
+/// Issue #252: said when a study opens whose provider figures were fetched under an earlier
+/// definition of the inputs. `{n}` / `{v}` as above. Validated (✓) and manual figures are not
+/// counted (they are the user's) — validating a figure is how it stops being named, since a
+/// provider may no longer serve its year (a new fetch then never reaches it).
+pub const MSG_STUDY_PREDATES_METHOD: &str = "{n} chiffre(s) du fournisseur de cette étude ont été récupérés avant la méthode {v} (exercice fiscal, BPA dilué publié) : une nouvelle récupération peut les modifier ; un chiffre que vous validez (✓) n'est plus signalé.";
 
 /// Watchlist copy (Story 4.1, FR34) — fact-stating, posture-gated. Raised when a link is requested
 /// but no saved study matches the watched ticker.
@@ -831,14 +846,43 @@ pub fn refresh_notice(report: RefreshReport) -> &'static str {
 pub fn refresh_summary(report: RefreshReport) -> String {
     // The recompute cause, then any neutral clauses (contradicted validated cells #110, unmatched
     // provider years #37) joined by « · » — each surfaced only when it applies.
-    let mut parts = vec![refresh_notice(report).to_string()];
+    let mut parts = Vec::new();
+    // Issue #252: a refresh that only re-stamped confirmed values did change the study (its
+    // history records it) — « aucun changement » would contradict that; the confirmation says it.
+    if report.changed() || report.restamped == 0 {
+        parts.push(refresh_notice(report).to_string());
+    }
     if report.contradicted > 0 {
         parts.push(MSG_REFRESH_CONTRADICTED.replace("{n}", &report.contradicted.to_string()));
     }
     if report.unmatched_years > 0 {
         parts.push(MSG_REFRESH_UNMATCHED_YEARS.replace("{n}", &report.unmatched_years.to_string()));
     }
+    if report.method_changed > 0 {
+        parts.push(
+            MSG_REFRESH_METHOD
+                .replace("{n}", &report.method_changed.to_string())
+                .replace("{v}", steadyinvest_core::INPUTS_DEFINED_AT),
+        );
+    }
+    if report.restamped > 0 {
+        parts.push(
+            MSG_REFRESH_METHOD_CONFIRMED
+                .replace("{n}", &report.restamped.to_string())
+                .replace("{v}", steadyinvest_core::INPUTS_DEFINED_AT),
+        );
+    }
     parts.join(" · ")
+}
+
+/// Issue #252: what an opening study says of provider figures fetched under an earlier definition
+/// of the inputs — `None` when it has none.
+pub fn study_predates_method_notice(count: usize) -> Option<String> {
+    (count > 0).then(|| {
+        MSG_STUDY_PREDATES_METHOD
+            .replace("{n}", &count.to_string())
+            .replace("{v}", steadyinvest_core::INPUTS_DEFINED_AT)
+    })
 }
 
 /// Classify a provider/ingestion failure into its neutral, cause-named notice (Story 3.5, FR24).
@@ -1066,6 +1110,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_REFRESH_BOTH,
     MSG_REFRESH_CONTRADICTED,
     MSG_REFRESH_UNMATCHED_YEARS,
+    MSG_REFRESH_METHOD,
+    MSG_REFRESH_METHOD_CONFIRMED,
+    MSG_STUDY_PREDATES_METHOD,
     MSG_WATCH_NO_STUDY,
     MSG_WATCH_DUPLICATE,
     MSG_WATCH_STUDY_UNAVAILABLE,
