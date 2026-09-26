@@ -10,6 +10,10 @@
 //! file mutation that belongs to the read-write path only. Story 5.5 added the sync-path
 //! `journal_mode=DELETE` switching ([`JournalMode`]) and the single-instance lock sidecar
 //! ([`lock_is_stale`] / [`clear_lock`]) implemented in this module.
+//!
+//! **Write protection** (2026-09-26 on-screen defect): a file or directory the OS will not let us
+//! write opens read-only with its named [`ReadOnlyCause`] — detected at open, never discovered by
+//! the first write's SQLite error.
 
 use crate::error::{Error, Result};
 use crate::migrations;
@@ -39,6 +43,23 @@ impl JournalMode {
     }
 }
 
+/// Why an open journal is read-only — each cause is named apart, so the refusal of a write says
+/// the RIGHT reason (a newer schema is not a protected file).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadOnlyCause {
+    /// The file was written by a newer schema than this build knows (NFR-R3).
+    NewerSchema { file_user_version: i64 },
+    /// The OS refuses to write the file itself (`chmod 444`, a read-only medium).
+    FileWriteProtected,
+    /// The file is writable but its directory is not: SQLite cannot create the `-wal`/`-journal`
+    /// sidecar a write needs, so the first write would fail.
+    DirectoryWriteProtected,
+    /// The file and its directory are writable but its `-wal` / `-shm` is not, and cannot be made
+    /// so by this account (another account's file): SQLite would fail at the first write (second
+    /// G3 L4 — named apart, never a « protected file »).
+    SidecarNotWritable,
+}
+
 /// An open journal: one SQLite connection plus the journal's identity. Single connection per
 /// `Journal` is enough for this headless story (the mutex-guarded write connection + WAL
 /// concurrent readers is app-era machinery).
@@ -46,12 +67,206 @@ impl JournalMode {
 pub struct Journal {
     pub(crate) conn: Connection,
     id: Uuid,
-    /// `Some(file_user_version)` when the file is newer than this build's latest migration:
-    /// the journal is read-only (NFR-R3) and write methods fail with the cause-named error.
-    newer_file_version: Option<i64>,
+    /// The journal's own (resolved) file — the backup takes its mode (second G3 M-c).
+    path: PathBuf,
+    /// `Some(cause)` when the journal is read-only — a file newer than this build's latest
+    /// migration (NFR-R3), or a file/directory protected against writing — and write methods fail
+    /// with the cause-named error.
+    read_only: Option<ReadOnlyCause>,
+    /// The private read copy a protected journal is read through (see
+    /// [`Journal::open_write_protected`]), removed on drop. Declared **after** `conn` so the
+    /// connection closes before its files go.
+    _scratch: Option<ScratchCopy>,
     /// The single-instance lock guard (Story 5.5, ADD6). Dropping the `Journal` (close / switch /
     /// exit) drops this, releasing the lock. Declared **after** `conn` so the connection closes first.
     _lock: JournalLock,
+}
+
+/// A private copy of a protected journal (its `.db` and any `-wal` / `-journal` holding content)
+/// in a fresh directory under the OS temp dir. Reading THROUGH it is what lets a protected journal
+/// with unconsolidated writes be read at all without touching its own directory: SQLite needs a
+/// `-shm` beside a WAL file it reads, and would otherwise create one beside the protected file —
+/// with that file's `r--r--r--` mode, which then breaks the first write once the protection is
+/// lifted (G3 M1) — or fail outright in a protected directory (G3 M2). Removed on drop; a copy
+/// left by a crashed run is removed at the next start ([`sweep_stale_read_copies`]).
+///
+/// The copy of a private dossier stays private (G1 P L-b, second G3 M-a): the directory is
+/// `rwx------` and every copied file `rw-------`, in the shared temp dir. Being WRITABLE by us is
+/// also what lets SQLite recover the copy — replay a `-wal`, roll back a hot `-journal` (second
+/// G3 M-b: a copied `r--r--r--` file could not be rolled back and the open failed).
+#[derive(Debug)]
+struct ScratchCopy {
+    dir: PathBuf,
+}
+
+impl Drop for ScratchCopy {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// The prefix of a private read copy's directory name (`<prefix><pid>-<n>`).
+const READ_COPY_PREFIX: &str = "steadyinvest-read-";
+
+/// The `(size, modified)` of `path`, `None` when absent — the identity of a file's content for
+/// the copy's before/after comparison.
+fn file_stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
+/// Create a directory only this account can enter (`rwx------` on Unix).
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir)
+}
+
+/// Open a NEW file only this account can read (`rw-------` on Unix) — refuses an existing one.
+fn create_private_file(path: &Path, mode: u32) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    options.open(path)
+}
+
+impl ScratchCopy {
+    /// Copy `path` and its content-holding sidecars into a new private directory; returns the
+    /// guard and the copy's `.db` path. The directory name is the process id plus a per-process
+    /// counter (no clock, no random identity — ADD15), created exclusively.
+    ///
+    /// Second G3 L7: nothing stops another account writing a journal whose directory WE cannot
+    /// write (no lock is possible there). The files' size and modification time are compared
+    /// before and after the copy; a change is retried once, then refused by name
+    /// ([`Error::ChangedDuringCopy`]) — never a torn copy read as the dossier.
+    fn of(path: &Path) -> Result<(Self, PathBuf)> {
+        const SIDECARS: [&str; 3] = ["", "-wal", "-journal"];
+        let stamps = || -> Vec<_> {
+            SIDECARS
+                .iter()
+                .map(|s| file_stamp(&with_suffix(path, s)))
+                .collect()
+        };
+        for _attempt in 0..2 {
+            let before = stamps();
+            let (guard, copy) = Self::copy_once(path, &SIDECARS)?;
+            if stamps() == before {
+                return Ok((guard, copy));
+            }
+            // `guard` drops here: the torn copy goes before the retry.
+        }
+        Err(Error::ChangedDuringCopy)
+    }
+
+    fn copy_once(path: &Path, sidecars: &[&str]) -> Result<(Self, PathBuf)> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let io_failure = |what: &str, e: std::io::Error| Error::ReadCopy {
+            detail: format!("{what}: {e}"),
+            cause: e.kind(),
+        };
+        let base = std::env::temp_dir();
+        let dir = loop {
+            let candidate = base.join(format!(
+                "{READ_COPY_PREFIX}{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match create_private_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(io_failure("its directory could not be created", e)),
+            }
+        };
+        let guard = ScratchCopy { dir };
+        let copy = guard.dir.join("journal.db");
+        for suffix in sidecars {
+            let from = with_suffix(path, suffix);
+            if suffix.is_empty() || std::fs::metadata(&from).is_ok_and(|m| m.len() > 0) {
+                let mut source = std::fs::File::open(&from)
+                    .map_err(|e| io_failure("a file could not be read", e))?;
+                let mut target = create_private_file(&with_suffix(&copy, suffix), 0o600)
+                    .map_err(|e| io_failure("a file could not be created", e))?;
+                std::io::copy(&mut source, &mut target)
+                    .map_err(|e| io_failure("a file could not be copied", e))?;
+            }
+        }
+        Ok((guard, copy))
+    }
+}
+
+/// Remove the private read copies a crashed run left in the OS temp dir (second G3 M-a): only
+/// directories named like ours, owned by this account, whose process is no longer alive — a live
+/// instance's copy is never touched. Best-effort, silent. Called once at startup.
+pub fn sweep_stale_read_copies() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    #[cfg(unix)]
+    let me = {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata("/proc/self").map(|m| m.uid()).ok()
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(rest) = name.to_str().and_then(|n| n.strip_prefix(READ_COPY_PREFIX)) else {
+            continue;
+        };
+        let Some(pid) = rest.split('-').next().and_then(|p| p.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid == std::process::id() || process_start_time(pid).is_some() {
+            continue; // ours, or a live process's
+        }
+        let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if !meta.is_dir() {
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if me != Some(meta.uid()) {
+                continue; // another account's
+            }
+        }
+        let _ = std::fs::remove_dir_all(entry.path());
+    }
+}
+
+/// `path` with `suffix` appended to its file name (`journal.db` + `-wal`).
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut p = path.as_os_str().to_os_string();
+    p.push(suffix);
+    PathBuf::from(p)
+}
+
+/// The journal path as the filesystem resolves it (G3 L3): a symlinked dossier has its lock, its
+/// write probe and SQLite's `-wal` / `-shm` all beside the TARGET — never the lock beside the link
+/// and the sidecars beside the target. A path that does not exist yet (a create) resolves through
+/// its parent; anything unresolvable stays as given. Public so the app resolves a dossier ONCE
+/// and uses that path everywhere (sync-folder mode, backups, restore — second G3 L6).
+pub fn resolved_path(path: &Path) -> PathBuf {
+    if let Ok(real) = std::fs::canonicalize(path) {
+        return real;
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+            std::fs::canonicalize(parent).map_or_else(|_| path.to_path_buf(), |p| p.join(name))
+        }
+        _ => path.to_path_buf(),
+    }
 }
 
 /// An RAII guard over a journal's single-instance lock sidecar (`…-lock`). The **owning** guard
@@ -78,9 +293,7 @@ impl Drop for JournalLock {
 
 /// The lock sidecar path for a journal (`<path>-lock`) — distinct from the SQLite `-wal`/`-shm`.
 fn lock_path_for(path: &Path) -> PathBuf {
-    let mut p = path.as_os_str().to_os_string();
-    p.push("-lock");
-    PathBuf::from(p)
+    with_suffix(&resolved_path(path), "-lock")
 }
 
 /// The `(pid, start_time)` recorded in a lock sidecar, if it parses (Story 5.5). The start-time
@@ -115,7 +328,11 @@ fn lock_owner_is_live(pid: u32, start_time: u64) -> bool {
 /// sidecar (crashed/PID-reused owner) → also [`Error::LockHeld`] but [`lock_is_stale`] reports it
 /// reclaimable. A lock-file IO failure on a **read-only** location is non-fatal: the open proceeds
 /// without a lock (a journal that cannot be locked also cannot be double-written — the read-only case).
-fn acquire_lock(path: &Path) -> Result<JournalLock> {
+///
+/// The sidecar's creation doubles as the **directory write probe**: the second value is `false` when
+/// the OS refused to create a file beside the journal (permission denied / read-only file system),
+/// which is exactly the refusal SQLite would meet creating its `-wal`/`-journal` at the first write.
+fn acquire_lock(path: &Path) -> Result<(JournalLock, bool)> {
     let lock_path = lock_path_for(path);
     match std::fs::OpenOptions::new()
         .write(true)
@@ -126,20 +343,27 @@ fn acquire_lock(path: &Path) -> Result<JournalLock> {
             let pid = std::process::id();
             let start = process_start_time(pid).unwrap_or(0);
             let _ = write!(file, "{pid} {start}");
-            Ok(JournalLock {
-                path: lock_path,
-                owns: true,
-            })
+            Ok((
+                JournalLock {
+                    path: lock_path,
+                    owns: true,
+                },
+                true,
+            ))
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let us = (std::process::id(), process_start_time(std::process::id()));
             match read_lock(&lock_path) {
                 // The SAME process instance (pid + start-time) re-opening — allowed (non-owning guard;
                 // SQLite coordinates intra-process connections). A reused PID has a different start-time.
-                Some((pid, start)) if us.1 == Some(start) && us.0 == pid => Ok(JournalLock {
-                    path: lock_path,
-                    owns: false,
-                }),
+                // The sidecar was created there, so the directory took a new file.
+                Some((pid, start)) if us.1 == Some(start) && us.0 == pid => Ok((
+                    JournalLock {
+                        path: lock_path,
+                        owns: false,
+                    },
+                    true,
+                )),
                 // A genuinely live other instance → refused.
                 Some((pid, start)) if lock_owner_is_live(pid, start) => {
                     Err(Error::LockHeld { pid })
@@ -151,11 +375,19 @@ fn acquire_lock(path: &Path) -> Result<JournalLock> {
             }
         }
         // A read-only directory / media cannot hold a lock — proceed lock-less (a read-only journal
-        // cannot be double-written, so single-instance write-protection is moot). Best-effort.
-        Err(_) => Ok(JournalLock {
-            path: lock_path,
-            owns: false,
-        }),
+        // cannot be double-written, so single-instance write-protection is moot). Best-effort. Only
+        // the OS's write refusals mark the directory protected; any other failure keeps the
+        // lock-less read-write open (SQLite then reports what it meets).
+        Err(e) => Ok((
+            JournalLock {
+                path: lock_path,
+                owns: false,
+            },
+            !matches!(
+                e.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+            ),
+        )),
     }
 }
 
@@ -242,7 +474,12 @@ impl Journal {
     ) -> Result<Self> {
         // Acquire the lock BEFORE opening — a second instance is refused before touching the file. A
         // failure anywhere below drops this guard, releasing the lock.
-        let lock = acquire_lock(path)?;
+        let (lock, directory_writable) = acquire_lock(path)?;
+        // G3 L2: a directory that refused the lock sidecar refuses the new file too — named as
+        // the protected directory it is, never SQLite's « unable to open » (read as « missing »).
+        if !directory_writable {
+            return Err(Error::WriteProtected { directory: true });
+        }
         let mut conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -268,7 +505,9 @@ impl Journal {
         Ok(Journal {
             conn,
             id: journal_id,
-            newer_file_version: None,
+            path: resolved_path(path),
+            read_only: None,
+            _scratch: None,
             _lock: lock,
         })
     }
@@ -279,7 +518,8 @@ impl Journal {
     /// `user_version` is **newer** than the latest known migration, the journal opens
     /// **read-only** (NFR-R3): the handle is re-opened with `SQLITE_OPEN_READ_ONLY`, only
     /// connection-local pragmas apply, no migration runs, and write methods return the
-    /// cause-named error while reads keep working.
+    /// cause-named error while reads keep working. A file or directory **protected against
+    /// writing** opens read-only the same way, with its own cause ([`ReadOnlyCause`]).
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_mode(path, JournalMode::Wal)
     }
@@ -287,15 +527,41 @@ impl Journal {
     /// Open an existing journal with a chosen [`JournalMode`] (Story 5.5) — `Delete` for a sync-folder
     /// location (ADD8). Acquires the single-instance lock first.
     pub fn open_with_mode(path: impl AsRef<Path>, mode: JournalMode) -> Result<Self> {
-        let path = path.as_ref();
+        // G3 L3: the lock, the probes and SQLite's sidecars all work on the resolved file.
+        let path = &resolved_path(path.as_ref());
         // Lock before touching the file — a second instance is refused up front. Any error below drops
         // this guard, releasing the lock.
-        let lock = acquire_lock(path)?;
+        let (lock, directory_writable) = acquire_lock(path)?;
         // No CREATE flag: opening a missing file is an error, never a silent empty journal.
         let mut conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+
+        // Write-protection probe, BEFORE the first read: SQLite's own detection (a READ_WRITE open
+        // of a file the OS will not let it write falls back to read-only and says so) for the file,
+        // the lock sidecar's creation for the directory. Checked before any read because the first
+        // read of a WAL file creates `-wal`/`-shm` beside it — with the protected file's own
+        // `r--r--r--` mode, strays left behind after close (seen on screen 2026-09-26).
+        let mut protection = if conn.is_readonly(rusqlite::MAIN_DB)? {
+            Some(ReadOnlyCause::FileWriteProtected)
+        } else if !directory_writable {
+            Some(ReadOnlyCause::DirectoryWriteProtected)
+        } else {
+            None
+        };
+        // G3 M1: a writable file whose `-wal` / `-shm` is NOT writable (left `r--r--r--` by an
+        // earlier read-only open, before this fix, or by any other tool) would open writable and
+        // fail at the first write. Such a sidecar is ours to repair (owner write added back); when
+        // it cannot be (another account's), the journal opens read-only up front with its own
+        // cause, read through the private copy (second G3 L4).
+        if protection.is_none() && !repair_read_only_sidecars(path) {
+            protection = Some(ReadOnlyCause::SidecarNotWritable);
+        }
+        if let Some(cause) = protection {
+            drop(conn);
+            return Self::open_write_protected(path, cause, lock);
+        }
 
         // Version check BEFORE any pragma that mutates the file (journal_mode=WAL writes).
         let file_version = migrations::user_version(&conn)?;
@@ -311,7 +577,11 @@ impl Journal {
             return Ok(Journal {
                 conn,
                 id,
-                newer_file_version: Some(file_version),
+                path: path.clone(),
+                read_only: Some(ReadOnlyCause::NewerSchema {
+                    file_user_version: file_version,
+                }),
+                _scratch: None,
                 _lock: lock,
             });
         }
@@ -326,7 +596,76 @@ impl Journal {
         Ok(Journal {
             conn,
             id,
-            newer_file_version: None,
+            path: path.clone(),
+            read_only: None,
+            _scratch: None,
+            _lock: lock,
+        })
+    }
+
+    /// The read-only open of a journal the OS will not let us write (`cause` is file or directory
+    /// protection). Nothing is ever created beside the protected file:
+    ///
+    /// - a protected FILE with no `-wal` / `-journal` holding content is read in place,
+    ///   `mode=ro&immutable=1` — SQLite reads it as it stands and creates no sidecar. Immutability
+    ///   holds because this process cannot change the file (G3 L4: only for the protected FILE);
+    /// - otherwise — a protected directory (its file may still be written by others, and SQLite
+    ///   could not create the `-shm` a WAL read needs there, G3 M2), or unconsolidated writes in a
+    ///   sidecar (a `-shm` would be created beside the protected file, `r--r--r--`, and break the
+    ///   first write once the protection is lifted, G3 M1) — it is read through a private COPY
+    ///   ([`ScratchCopy`]) of the file and its content-holding sidecars, which SQLite recovers there.
+    ///
+    /// A file newer than this build keeps the newer-schema cause (the more lasting reason: lifting
+    /// the protection would not make it writable); a file OLDER than this build is refused
+    /// ([`Error::WriteProtectedOutdated`]) — its migrations cannot run, and this build's queries
+    /// would misread an unmigrated file.
+    fn open_write_protected(path: &Path, cause: ReadOnlyCause, lock: JournalLock) -> Result<Self> {
+        let sidecar_has_content = ["-wal", "-journal"]
+            .iter()
+            .any(|suffix| std::fs::metadata(with_suffix(path, suffix)).is_ok_and(|m| m.len() > 0));
+        let in_place = cause == ReadOnlyCause::FileWriteProtected && !sidecar_has_content;
+        let (conn, scratch) = if in_place {
+            let conn = Connection::open_with_flags(
+                format!("{}?mode=ro&immutable=1", file_uri(path)),
+                OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | OpenFlags::SQLITE_OPEN_URI
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
+            (conn, None)
+        } else {
+            // The copy is private and writable: SQLite replays a `-wal` / rolls back a hot journal
+            // THERE. The journal stays read-only through the API gate (`check_writable`).
+            let (scratch, copy) = ScratchCopy::of(path)?;
+            let conn = Connection::open_with_flags(
+                &copy,
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
+            (conn, Some(scratch))
+        };
+        apply_connection_local_pragmas(&conn)?;
+        let file_version = migrations::user_version(&conn)?;
+        let latest = migrations::latest_version(migrations::REGISTRY);
+        let cause = match file_version.cmp(&i64::from(latest)) {
+            std::cmp::Ordering::Greater => ReadOnlyCause::NewerSchema {
+                file_user_version: file_version,
+            },
+            std::cmp::Ordering::Less => {
+                return Err(Error::WriteProtectedOutdated {
+                    file_user_version: file_version,
+                    supported: latest,
+                    // G3 M5: which is protected — the file wins when both are.
+                    directory: cause == ReadOnlyCause::DirectoryWriteProtected,
+                });
+            }
+            std::cmp::Ordering::Equal => cause,
+        };
+        let id = read_journal_id(&conn)?;
+        Ok(Journal {
+            conn,
+            id,
+            path: path.to_path_buf(),
+            read_only: Some(cause),
+            _scratch: scratch,
             _lock: lock,
         })
     }
@@ -354,19 +693,102 @@ impl Journal {
         })
     }
 
-    /// True when the file was written by a newer schema and is therefore opened read-only.
+    /// True when the journal is opened read-only (a newer schema, or write protection).
     pub fn is_read_only(&self) -> bool {
-        self.newer_file_version.is_some()
+        self.read_only.is_some()
+    }
+
+    /// Why the journal is read-only, or `None` when it is writable.
+    pub fn read_only_cause(&self) -> Option<ReadOnlyCause> {
+        self.read_only
+    }
+
+    /// Write a self-contained copy of the journal AS THIS CONNECTION READS IT to `dest` (`VACUUM
+    /// INTO`): every committed page, those still in a `-wal` included, in one standalone file with
+    /// no sidecar. Works on a read-only handle too (G3 M3: a protected dossier's backup used to
+    /// copy only its `.db` and silently drop the commits still in its `-wal`).
+    ///
+    /// Second G3 review:
+    /// - M-c: the backup keeps the dossier's own file mode (`VACUUM INTO` alone creates `0644`
+    ///   whatever the dossier's privacy): the target is pre-created with that mode, and SQLite
+    ///   writes into the empty file;
+    /// - M-d: it is written to `<dest>.partial`, flushed to disk, then given its final name, the
+    ///   directory flushed too — a failure never leaves a truncated file under a valid-looking
+    ///   backup name (the partial is removed on any failure);
+    /// - L3: any path the OS accepts (bound as bytes, never required to be UTF-8).
+    ///
+    /// Never overwrites: an existing `dest` (or a concurrent `<dest>.partial`) is refused with
+    /// [`Error::Backup`] of cause `AlreadyExists`, which the caller answers with another name.
+    pub fn backup_to(&self, dest: &Path) -> Result<()> {
+        let partial = with_suffix(dest, ".partial");
+        let failure = |what: &str, e: std::io::Error| Error::Backup {
+            detail: format!("{what}: {e}"),
+            cause: e.kind(),
+        };
+        // The dossier's group / other bits (its privacy), the owner always `rw` — a backup of a
+        // `r--r--r--` protected dossier must still be writable by SQLite while it is written.
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(&self.path).map_or(0o600, |m| m.permissions().mode() & 0o066 | 0o600)
+        };
+        #[cfg(not(unix))]
+        let mode = 0o600;
+        // `create_new`: a partial that exists is someone else's — refused, never removed.
+        drop(create_private_file(&partial, mode).map_err(|e| failure("the partial file", e))?);
+        let written = (|| -> Result<()> {
+            self.conn.execute(
+                "VACUUM INTO CAST(?1 AS TEXT)",
+                [partial.as_os_str().as_encoded_bytes()],
+            )?;
+            std::fs::File::open(&partial)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| failure("the backup could not be flushed", e))?;
+            // No-clobber final name: a hard link fails on an existing target; where links are
+            // unsupported, an existence check guards the rename.
+            match std::fs::hard_link(&partial, dest) {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&partial);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(failure("the backup name is taken", e));
+                }
+                Err(_) => {
+                    if dest.exists() {
+                        return Err(failure(
+                            "the backup name is taken",
+                            std::io::Error::from(std::io::ErrorKind::AlreadyExists),
+                        ));
+                    }
+                    std::fs::rename(&partial, dest)
+                        .map_err(|e| failure("the backup could not be named", e))?;
+                }
+            }
+            #[cfg(unix)]
+            if let Some(dir) = dest.parent() {
+                let dir = if dir.as_os_str().is_empty() {
+                    Path::new(".")
+                } else {
+                    dir
+                };
+                std::fs::File::open(dir)
+                    .and_then(|d| d.sync_all())
+                    .map_err(|e| failure("the backup directory could not be flushed", e))?;
+            }
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = std::fs::remove_file(&partial);
+        }
+        written
     }
 
     /// Checkpoint the WAL into the main database file and truncate it (`PRAGMA
-    /// wal_checkpoint(TRUNCATE)`), so a plain file copy of the `.db` is **self-contained** — no
-    /// recently-committed data left stranded in a `-wal` sidecar (Story 5.4 `create_backup`). A
+    /// wal_checkpoint(TRUNCATE)`) — on close, so the file left behind is self-contained. A
     /// read-safe operation that changes no logical data. A no-op on a read-only handle (nothing to
     /// checkpoint there).
     pub fn checkpoint(&self) -> Result<()> {
-        // A read-only handle (for any reason) cannot checkpoint — a no-op rather than a hard error, so
-        // backing up a read-only journal still works (it just copies the main `.db`).
+        // A read-only handle (for any reason) cannot checkpoint — a no-op rather than a hard error.
         if self.is_read_only() {
             return Ok(());
         }
@@ -378,14 +800,79 @@ impl Journal {
     /// API-level write gate (defense in depth on top of `SQLITE_OPEN_READ_ONLY`): every mutating
     /// method calls this first.
     pub(crate) fn check_writable(&self) -> Result<()> {
-        match self.newer_file_version {
-            Some(file_user_version) => Err(Error::NewerJournalSchema {
-                file_user_version,
-                supported: migrations::latest_version(migrations::REGISTRY),
-            }),
+        match self.read_only {
+            Some(ReadOnlyCause::NewerSchema { file_user_version }) => {
+                Err(Error::NewerJournalSchema {
+                    file_user_version,
+                    supported: migrations::latest_version(migrations::REGISTRY),
+                })
+            }
+            Some(ReadOnlyCause::FileWriteProtected) => {
+                Err(Error::WriteProtected { directory: false })
+            }
+            Some(ReadOnlyCause::DirectoryWriteProtected) => {
+                Err(Error::WriteProtected { directory: true })
+            }
+            Some(ReadOnlyCause::SidecarNotWritable) => Err(Error::SidecarNotWritable),
             None => Ok(()),
         }
     }
+}
+
+/// A filesystem path as an SQLite `file:` URI: every byte outside the unreserved set (and `/`)
+/// percent-encoded, so a `?`, `#`, `%` or space in a user-chosen folder name cannot be read as URI
+/// syntax and open a different file. An absolute path carries the explicit `localhost` authority
+/// (G3 L5): `file:` + a path starting `//` would otherwise read its first segment as a host.
+fn file_uri(path: &Path) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from(if path.is_absolute() {
+        "file://localhost"
+    } else {
+        "file:"
+    });
+    for &byte in path.as_os_str().as_encoded_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
+/// G3 M1: make any existing `-wal` / `-shm` of a writable journal writable again. SQLite gives a
+/// sidecar the mode of its database file, so a read of a `r--r--r--` file (before the 2026-09-26
+/// fix, or by any other SQLite tool) leaves `r--r--r--` sidecars; once the file is writable again,
+/// its first write then fails « readonly » while nothing is protected. Only the OWNER write bit is
+/// added back (the file's own mode stays as the user set it). `false` when a read-only sidecar
+/// could not be repaired (not ours) — the caller then opens the journal read-only, up front.
+fn repair_read_only_sidecars(path: &Path) -> bool {
+    ["-wal", "-shm"].iter().all(|suffix| {
+        let sidecar = with_suffix(path, suffix);
+        let Ok(meta) = std::fs::metadata(&sidecar) else {
+            return true; // absent: nothing to repair
+        };
+        let writable = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&sidecar)
+            .is_ok();
+        writable || add_owner_write(&sidecar, meta.permissions())
+    })
+}
+
+#[cfg(unix)]
+fn add_owner_write(path: &Path, mut permissions: std::fs::Permissions) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    permissions.set_mode(permissions.mode() | 0o200);
+    std::fs::set_permissions(path, permissions).is_ok()
+        && std::fs::OpenOptions::new().write(true).open(path).is_ok()
+}
+
+#[cfg(not(unix))]
+fn add_owner_write(path: &Path, mut permissions: std::fs::Permissions) -> bool {
+    #[allow(clippy::permissions_set_readonly_false)] // Windows: the read-only attribute only
+    permissions.set_readonly(false);
+    std::fs::set_permissions(path, permissions).is_ok()
 }
 
 /// Pragmas that only affect this connection — safe on a read-only handle.
@@ -439,5 +926,46 @@ fn map_missing_meta(e: rusqlite::Error) -> Error {
             }
         }
         other => Error::Sqlite(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_uri_never_reads_a_path_segment_as_a_host() {
+        // G3 L5: `//server/x.db` must stay a path.
+        assert_eq!(
+            file_uri(Path::new("//home/a b/x?.db")),
+            "file://localhost//home/a%20b/x%3F.db"
+        );
+        assert_eq!(file_uri(Path::new("/d/x.db")), "file://localhost/d/x.db");
+        assert_eq!(file_uri(Path::new("rel/x.db")), "file:rel/x.db");
+    }
+
+    #[test]
+    fn a_failed_backup_leaves_no_file_under_any_name() {
+        // Second G3 M-d: a forced failure (the connection refuses to write any file).
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("j.db");
+        let journal = Journal::create(
+            &path,
+            Uuid::from_u128(1),
+            &steadyinvest_contract::Timestamp("2026-09-26T00:00:00Z".to_string()),
+        )
+        .expect("create");
+        journal
+            .conn
+            .pragma_update(None, "query_only", true)
+            .expect("query_only");
+        let out = tempfile::TempDir::new().expect("tempdir");
+        let dest = out.path().join("backup.db");
+        assert!(journal.backup_to(&dest).is_err(), "the backup fails");
+        assert_eq!(
+            std::fs::read_dir(out.path()).expect("dir").count(),
+            0,
+            "neither the backup nor its partial is left"
+        );
     }
 }

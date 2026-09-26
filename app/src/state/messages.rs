@@ -25,6 +25,86 @@ pub const MSG_NO_JOURNAL: &str = "Aucun dossier n'est ouvert ; l'écriture n'a p
 /// Startup: the open journal is read-only because its file was written by a newer schema.
 pub const MSG_STARTUP_READ_ONLY: &str =
     "Le dossier a été écrit par un schéma plus récent ; il est ouvert en lecture seule.";
+/// A write was attempted on a dossier whose FILE the OS will not let us write (`chmod 444`, a
+/// read-only medium) — the write-protected sibling of [`MSG_READ_ONLY_WRITE`], its cause named
+/// apart (2026-09-26 on-screen defect: the refusal read SQLite's English text).
+pub const MSG_READ_ONLY_FILE_WRITE: &str =
+    "Dossier en lecture seule (fichier protégé contre l'écriture) ; l'écriture n'a pas eu lieu.";
+/// A write was attempted on a dossier whose DIRECTORY the OS will not let us write into (SQLite
+/// could not create the side file a write needs).
+pub const MSG_READ_ONLY_DIR_WRITE: &str =
+    "Dossier en lecture seule (répertoire protégé contre l'écriture) ; l'écriture n'a pas eu lieu.";
+/// Open/startup: the dossier's file is protected against writing, so it is open read-only.
+pub const MSG_STARTUP_FILE_PROTECTED: &str =
+    "Le fichier du dossier est protégé contre l'écriture ; il est ouvert en lecture seule.";
+/// Open/startup: the dossier's directory is protected against writing, so it is open read-only.
+pub const MSG_STARTUP_DIR_PROTECTED: &str = "Le répertoire du dossier est protégé contre l'écriture ; le dossier est ouvert en lecture seule.";
+/// A write the OS refused at the moment it happened (the protection changed after the open, or a
+/// protected backups folder) — named in French, the OS / SQLite cause logged, never shown.
+pub const MSG_WRITE_REFUSED_BY_SYSTEM: &str = "Le système a refusé l'écriture (emplacement protégé contre l'écriture) ; rien n'a été enregistré.";
+
+// ── No raw error text reaches the user (2026-09-26): a persistence / SQLite / file / provider
+//    error's Display is LOGGED, never shown. The user reads what failed ({what}) and, when a
+//    named cause applies, why ({cause}) — both registered here, selected from the TYPED error
+//    kind (`persistence::ErrorKind`, `std::io::ErrorKind`), never from its text. The posture
+//    test `no_error_display_reaches_a_user_string` keeps it so. ──
+
+/// A save failed for a named cause (`{cause}` is one of the `MSG_CAUSE_*` below).
+pub const MSG_SAVE_FAILED_CAUSE: &str = "L'enregistrement a échoué : {cause}.";
+/// A dossier could not be opened for a named cause.
+pub const MSG_JOURNAL_OPEN_FAILED_CAUSE: &str = "Le dossier n'a pas pu être ouvert : {cause}.";
+/// A read failed — `{what}` is one of the `MSG_SUBJECT_*` below.
+pub const MSG_READ_SUBJECT_FAILED: &str = "Lecture impossible : {what}.";
+/// A read failed for a named cause.
+pub const MSG_READ_SUBJECT_FAILED_CAUSE: &str = "Lecture impossible : {what} ; {cause}.";
+/// Cause: the journal is busy / locked by another access.
+pub const MSG_CAUSE_LOCKED: &str = "le dossier est verrouillé par un autre accès";
+/// Cause: the file is damaged or is not a journal.
+pub const MSG_CAUSE_CORRUPT: &str = "le fichier est endommagé ou n'est pas un dossier steadyinvest";
+/// Cause: the disk is full.
+pub const MSG_CAUSE_DISK_FULL: &str = "le disque est plein";
+/// Cause: the OS refuses the write.
+pub const MSG_CAUSE_PROTECTED: &str = "l'emplacement est protégé contre l'écriture";
+/// Cause: the file cannot be found or opened.
+pub const MSG_CAUSE_MISSING: &str = "le fichier est introuvable ou inaccessible";
+/// Cause: a newer version of the app wrote the data.
+pub const MSG_CAUSE_NEWER_DATA: &str = "des données ont été écrites par une version plus récente";
+/// Cause: the schema update of the file failed.
+pub const MSG_CAUSE_MIGRATION: &str = "la mise à niveau de son schéma a échoué";
+/// Cause (G3 M5): the file is protected AND older than this version — its schema update cannot
+/// be written (reading it unmigrated would misread it). The directory has its own wording.
+pub const MSG_CAUSE_OUTDATED_FILE: &str = "son fichier est protégé contre l'écriture et son schéma, antérieur à cette version, ne peut pas être mis à niveau";
+pub const MSG_CAUSE_OUTDATED_DIR: &str = "son répertoire est protégé contre l'écriture et son schéma, antérieur à cette version, ne peut pas être mis à niveau";
+/// Cause (G3 L1): the file was replaced / moved while open (a sync tool) — SQLite refuses its
+/// writes until it is opened again.
+pub const MSG_CAUSE_REPLACED: &str =
+    "le fichier du dossier a été remplacé pendant son ouverture ; rouvrez-le";
+/// Second G3 M-e: the configured dossier was refused for a named cause AND no stand-in could be
+/// opened — no dossier is open (the stand-in's own refusal follows).
+pub const MSG_CONFIGURED_REFUSED_NONE: &str = "Le dossier configuré n'a pas pu être ouvert : {cause} ; aucun dossier n'est ouvert, le dossier configuré reste retenu.";
+/// The configured dossier is unreadable and no stand-in could be opened either.
+pub const MSG_CONFIGURED_UNREADABLE_NONE: &str =
+    "Le dossier configuré est illisible ; aucun dossier n'est ouvert.";
+/// Cause (second G3 M-f): the private read copy of a protected dossier could not be prepared.
+pub const MSG_CAUSE_READ_COPY: &str = "sa copie de lecture n'a pas pu être préparée";
+/// Cause (second G3 L7): the protected dossier changed while it was being copied for reading.
+pub const MSG_CAUSE_CHANGED_DURING_COPY: &str =
+    "le fichier a été modifié par un autre accès pendant sa lecture";
+/// Second G3 L4: a side file (`-wal` / `-shm`) of the dossier cannot be written by this account.
+pub const MSG_STARTUP_SIDECAR_PROTECTED: &str = "Un fichier annexe du dossier (-wal ou -shm) n'est pas modifiable par ce compte ; le dossier est ouvert en lecture seule.";
+pub const MSG_READ_ONLY_SIDECAR_WRITE: &str = "Dossier en lecture seule (fichier annexe -wal ou -shm non modifiable) ; l'écriture n'a pas eu lieu.";
+/// Startup (G3 M4): the configured dossier was refused for a named cause; the default one is used
+/// for this session and app-config keeps the configured one.
+pub const MSG_CONFIGURED_REFUSED: &str = "Le dossier configuré n'a pas pu être ouvert : {cause} ; le dossier par défaut est utilisé pour cette séance, le dossier configuré reste retenu.";
+/// Subjects of a failed read.
+pub const MSG_SUBJECT_STUDIES: &str = "la liste des études";
+pub const MSG_SUBJECT_STUDY: &str = "l'étude";
+pub const MSG_SUBJECT_HISTORY: &str = "l'historique de l'étude";
+pub const MSG_SUBJECT_WATCHLIST: &str = "la liste de suivi";
+pub const MSG_SUBJECT_FX: &str = "les taux de change";
+pub const MSG_SUBJECT_PORTFOLIOS: &str = "les portefeuilles";
+pub const MSG_SUBJECT_HOLDINGS: &str = "les positions";
+pub const MSG_SUBJECT_TRANSACTIONS: &str = "les transactions";
 /// Startup: the configured journal file was unreadable, so the default journal is in use instead.
 pub const MSG_CONFIGURED_UNREADABLE: &str =
     "Le dossier configuré est illisible ; le dossier par défaut est utilisé.";
@@ -817,7 +897,9 @@ pub fn key_test_status(result: &Result<(), steadyinvest_ingestion::IngestionErro
         IngestionError::Provider(ProviderError::Forbidden { .. }) => MSG_KEY_FORBIDDEN,
         IngestionError::Provider(ProviderError::Quota { .. }) => MSG_KEY_OK_QUOTA,
         IngestionError::Provider(ProviderError::Network { .. }) => MSG_KEY_TEST_INCONCLUSIVE,
-        other => return MSG_PROVIDER_FAILED.replace("{cause}", &other.to_string()),
+        // Any other failure (no data for the symbol, an unreadable payload): its own cause-named
+        // notice — never the ingestion error's English Display (2026-09-26).
+        other => provider_failure_notice(other),
     };
     verdict.to_string()
 }
@@ -912,6 +994,40 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_READ_ONLY_WRITE,
     MSG_NO_JOURNAL,
     MSG_STARTUP_READ_ONLY,
+    MSG_READ_ONLY_FILE_WRITE,
+    MSG_READ_ONLY_DIR_WRITE,
+    MSG_STARTUP_FILE_PROTECTED,
+    MSG_STARTUP_DIR_PROTECTED,
+    MSG_WRITE_REFUSED_BY_SYSTEM,
+    MSG_SAVE_FAILED_CAUSE,
+    MSG_JOURNAL_OPEN_FAILED_CAUSE,
+    MSG_READ_SUBJECT_FAILED,
+    MSG_READ_SUBJECT_FAILED_CAUSE,
+    MSG_CAUSE_LOCKED,
+    MSG_CAUSE_CORRUPT,
+    MSG_CAUSE_DISK_FULL,
+    MSG_CAUSE_PROTECTED,
+    MSG_CAUSE_MISSING,
+    MSG_CAUSE_NEWER_DATA,
+    MSG_CAUSE_MIGRATION,
+    MSG_CAUSE_OUTDATED_FILE,
+    MSG_CAUSE_OUTDATED_DIR,
+    MSG_CAUSE_REPLACED,
+    MSG_CONFIGURED_REFUSED,
+    MSG_CONFIGURED_REFUSED_NONE,
+    MSG_CONFIGURED_UNREADABLE_NONE,
+    MSG_CAUSE_READ_COPY,
+    MSG_CAUSE_CHANGED_DURING_COPY,
+    MSG_STARTUP_SIDECAR_PROTECTED,
+    MSG_READ_ONLY_SIDECAR_WRITE,
+    MSG_SUBJECT_STUDIES,
+    MSG_SUBJECT_STUDY,
+    MSG_SUBJECT_HISTORY,
+    MSG_SUBJECT_WATCHLIST,
+    MSG_SUBJECT_FX,
+    MSG_SUBJECT_PORTFOLIOS,
+    MSG_SUBJECT_HOLDINGS,
+    MSG_SUBJECT_TRANSACTIONS,
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,

@@ -31,7 +31,9 @@ use std::path::{Path, PathBuf};
 
 use rust_decimal::Decimal;
 use steadyinvest_contract::{ForecastLowOption, Judgment, Timestamp};
-use steadyinvest_persistence::{Error as PersistError, Journal, clear_lock, lock_is_stale};
+use steadyinvest_persistence::{
+    Error as PersistError, Journal, ReadOnlyCause, clear_lock, lock_is_stale, resolved_path,
+};
 use uuid::Uuid;
 
 use crate::clock::{Clock, IdGen};
@@ -108,8 +110,9 @@ pub struct JournalState {
     journal: Option<Journal>,
     /// The resolved on-disk path (to persist into app-config), when a journal is open.
     path: Option<PathBuf>,
-    /// True when the open journal is read-only (newer-schema file): writes are refused up front.
-    read_only: bool,
+    /// Why the open journal is read-only (a newer-schema file, or a file / directory protected
+    /// against writing), `None` when it is writable: writes are refused up front, by that cause.
+    read_only: Option<ReadOnlyCause>,
     clock: Box<dyn Clock>,
     idgen: Box<dyn IdGen>,
     /// Undo/redo history for the currently-open study (Story 2.9). Reset on open.
@@ -129,6 +132,10 @@ pub struct JournalState {
     /// on every Réglages change: the rails read every user-typed amount through
     /// [`crate::viewmodel::format::parse_decimal`] under it (« 10,5 » under the comma format).
     number_format: NumberFormat,
+    /// G3 M4: the configured dossier refused AT STARTUP for a named cause (locked by another
+    /// instance, protected and too old to be updated…) while the default one stands in — main
+    /// keeps app-config pointing at it, so the user's dossier is never forgotten.
+    kept_configured: Option<PathBuf>,
 }
 
 /// The result of opening/creating/switching a journal (Story 5.5) — the identity + version the caller
@@ -181,7 +188,18 @@ impl JournalState {
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
-        let (state, notice) = Self::open_or_create_inner(configured, clock, idgen);
+        Self::open_or_create_with_default(configured, default_journal_path(), clock, idgen)
+    }
+
+    /// [`Self::open_or_create`] with the default journal's location given — the tests pass a
+    /// temporary one, so the startup fallback is exercised without touching the OS data dir.
+    pub(crate) fn open_or_create_with_default(
+        configured: Option<&Path>,
+        default: Option<PathBuf>,
+        clock: Box<dyn Clock>,
+        idgen: Box<dyn IdGen>,
+    ) -> (Self, Option<String>) {
+        let (state, notice) = Self::open_or_create_inner(configured, default, clock, idgen);
         // G1 P review (L-f): a `-prerestore` beside the open dossier (a restore whose rollback
         // failed) is named at startup — it may be the only copy of an original.
         let leftover = state
@@ -199,11 +217,13 @@ impl JournalState {
 
     fn open_or_create_inner(
         configured: Option<&Path>,
+        default: Option<PathBuf>,
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
-        // 1) A configured journal that exists on disk → open it.
-        if let Some(path) = configured
+        // 1) A configured journal that exists on disk → open it. Resolved once (second G3 L6):
+        //    its sync-folder mode, its backups and a restore all act on the real file.
+        if let Some(path) = configured.map(resolved_path).as_deref()
             && path.exists()
         {
             // Story 5.5: a STALE lock (left by a crashed prior run — no live owner) on the
@@ -215,7 +235,7 @@ impl JournalState {
             }
             match Journal::open_with_mode(path, sync_mode_for(path)) {
                 Ok(journal) => {
-                    let read_only = journal.is_read_only();
+                    let read_only = journal.read_only_cause();
                     return (
                         Self {
                             journal: Some(journal),
@@ -228,36 +248,91 @@ impl JournalState {
                             pending_import: None,
                             active_portfolio_id: None,
                             number_format: NumberFormat::default(),
+                            kept_configured: None,
                         },
-                        read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
+                        read_only.map(|cause| read_only_notice(cause).to_string()),
                     );
                 }
                 Err(error) => {
-                    // The configured pick is corrupt/foreign/damaged — never write our schema
-                    // into it (open already refused without writing). Fall back to the default
-                    // journal so the app stays usable, and surface the cause.
-                    tracing::warn!("configured journal {} unreadable: {error}", path.display());
-                    let (state, _) = Self::open_or_create_default(clock, idgen);
-                    return (state, Some(MSG_CONFIGURED_UNREADABLE.to_string()));
+                    // Never write our schema into a refused pick (open already refused without
+                    // writing). The default journal keeps the app usable. G3 M4: a refusal with a
+                    // NAMED cause (another instance holds it, it is protected and too old to be
+                    // updated, the disk is full…) says so — never « illisible » — and the
+                    // configured path is KEPT (`kept_configured`): the dossier is not forgotten.
+                    // Only a damaged / foreign file (or an unnamed failure) keeps the Story-2.2
+                    // behaviour: « illisible », the default dossier replaces it.
+                    tracing::warn!("configured journal {} not opened: {error}", path.display());
+                    let named = persist_cause(&error)
+                        .filter(|_| error.kind() != steadyinvest_persistence::ErrorKind::Corrupt);
+                    // Second G3 M-e: the stand-in may fail too (a second instance holding a
+                    // dossier that IS the default one…) — then no dossier is open, and the notice
+                    // says so, the stand-in's own refusal after it; never « le dossier par défaut
+                    // est utilisé ». A configured dossier that is the default is not retried.
+                    let same = default
+                        .as_deref()
+                        .is_some_and(|d| journal_io::same_file_path(path, d));
+                    let (mut state, fallback) = if same {
+                        (Self::journal_less(clock, idgen), None)
+                    } else {
+                        Self::open_or_create_default(default, clock, idgen)
+                    };
+                    let stood_in = state.journal.is_some();
+                    let notice = match named {
+                        Some(cause) => {
+                            state.kept_configured = Some(path.to_path_buf());
+                            let template = if stood_in {
+                                MSG_CONFIGURED_REFUSED
+                            } else {
+                                MSG_CONFIGURED_REFUSED_NONE
+                            };
+                            template.replace("{cause}", cause)
+                        }
+                        None if stood_in => MSG_CONFIGURED_UNREADABLE.to_string(),
+                        None => MSG_CONFIGURED_UNREADABLE_NONE.to_string(),
+                    };
+                    let notice = match fallback.filter(|_| !stood_in) {
+                        Some(why) => format!("{notice} {why}"),
+                        None => notice,
+                    };
+                    return (state, Some(notice));
                 }
             }
         }
         // 2) No usable configured path → the default journal.
-        Self::open_or_create_default(clock, idgen)
+        Self::open_or_create_default(default, clock, idgen)
+    }
+
+    /// A state with no dossier open (the app stays usable, writes refused with
+    /// [`MSG_NO_JOURNAL`]).
+    fn journal_less(clock: Box<dyn Clock>, idgen: Box<dyn IdGen>) -> Self {
+        Self {
+            journal: None,
+            path: None,
+            read_only: None,
+            clock,
+            idgen,
+            history: UndoHistory::default(),
+            pending_restore: None,
+            pending_import: None,
+            active_portfolio_id: None,
+            number_format: NumberFormat::default(),
+            kept_configured: None,
+        }
     }
 
     /// Open the default journal if its file already exists, else create it (parent dirs included),
     /// stamping identity + creation time from the injected sources.
     fn open_or_create_default(
+        default: Option<PathBuf>,
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
-        let Some(path) = default_journal_path() else {
+        let Some(path) = default else {
             return (
                 Self {
                     journal: None,
                     path: None,
-                    read_only: false,
+                    read_only: None,
                     clock,
                     idgen,
                     history: UndoHistory::default(),
@@ -265,6 +340,7 @@ impl JournalState {
                     pending_import: None,
                     active_portfolio_id: None,
                     number_format: NumberFormat::default(),
+                    kept_configured: None,
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
             );
@@ -283,7 +359,7 @@ impl JournalState {
 
         match result {
             Ok(journal) => {
-                let read_only = journal.is_read_only();
+                let read_only = journal.read_only_cause();
                 (
                     Self {
                         journal: Some(journal),
@@ -296,8 +372,9 @@ impl JournalState {
                         pending_import: None,
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
+                        kept_configured: None,
                     },
-                    read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
+                    read_only.map(|cause| read_only_notice(cause).to_string()),
                 )
             }
             Err(error) => {
@@ -306,7 +383,7 @@ impl JournalState {
                     Self {
                         journal: None,
                         path: None,
-                        read_only: false,
+                        read_only: None,
                         clock,
                         idgen,
                         history: UndoHistory::default(),
@@ -314,11 +391,18 @@ impl JournalState {
                         pending_import: None,
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
+                        kept_configured: None,
                     },
-                    Some(format!("{MSG_SAVE_FAILED} {error}")),
+                    Some(open_error(error)),
                 )
             }
         }
+    }
+
+    /// The configured dossier refused at startup for a named cause, which app-config must keep
+    /// pointing at (G3 M4) — `None` otherwise.
+    pub fn kept_configured_path(&self) -> Option<&Path> {
+        self.kept_configured.as_deref()
     }
 
     /// The resolved on-disk path of the open journal, for persisting into app-config.
@@ -342,20 +426,39 @@ impl JournalState {
         read_typed(input, self.number_format, not_a_number)
     }
 
-    /// True when the open journal is read-only (newer-schema file).
+    /// True when the open journal is read-only (newer-schema file, or write-protected).
     pub fn is_read_only(&self) -> bool {
-        self.read_only
+        self.read_only.is_some()
+    }
+
+    /// The open dossier's read-only STATE line (the startup banner, the location status), by
+    /// cause — `None` when it is writable.
+    pub fn read_only_notice(&self) -> Option<&'static str> {
+        self.read_only.map(read_only_notice)
+    }
+
+    /// The read-only cause as the stable key the Slint read-only bands select their wording by
+    /// (`Holdings.read-only-cause`): `"newer-schema"`, `"file"`, `"directory"`, or `""` when the
+    /// dossier is writable. A key, never display text.
+    pub fn read_only_cause_key(&self) -> &'static str {
+        match self.read_only {
+            None => "",
+            Some(ReadOnlyCause::NewerSchema { .. }) => "newer-schema",
+            Some(ReadOnlyCause::FileWriteProtected) => "file",
+            Some(ReadOnlyCause::DirectoryWriteProtected) => "directory",
+            Some(ReadOnlyCause::SidecarNotWritable) => "sidecar",
+        }
     }
 
     /// The up-front refusal of a rail that would WRITE the open journal (G1 G, on-screen check):
     /// on a read-only journal, « Restaurer une sauvegarde… » and « Importer un dossier… » refuse
     /// at once with the reason — before any file picker or confirm (the write guards behind them
-    /// stay as second guards).
+    /// stay as second guards). Every write rail opens with this guard, so each refusal names the
+    /// cause actually in force (a protected file is not a newer schema).
     pub fn refuse_if_read_only(&self) -> Result<(), &'static str> {
-        if self.read_only {
-            Err(MSG_READ_ONLY_WRITE)
-        } else {
-            Ok(())
+        match self.read_only {
+            Some(cause) => Err(read_only_refusal(cause)),
+            None => Ok(()),
         }
     }
 
@@ -399,12 +502,6 @@ pub fn created_at_date(ts: &Timestamp) -> String {
     ts.0.split('T').next().unwrap_or(&ts.0).to_string()
 }
 
-/// Map a persistence error from a watchlist write to a neutral notice (Story 4.1): a newer-schema
-/// journal reads as read-only, a holding still referenced by transactions names that cause (G1
-/// final review — matched on the TYPED variant, never on its text), anything else as the generic
-/// save-failure. The persistence error's own (English) text is LOGGED, never appended to the French
-/// refusal (G1 final review: a raw `transaction rows still reference…` under « L'enregistrement a
-/// échoué. » was no cause the user could read).
 /// A failed READ on a write rail (G1 P): named as a read failure — never « L'enregistrement a
 /// échoué. » for a write that was never attempted. The persistence error's text is logged.
 fn read_error(error: PersistError) -> String {
@@ -412,13 +509,142 @@ fn read_error(error: PersistError) -> String {
     MSG_READ_FAILED.to_string()
 }
 
-fn watch_error(error: PersistError) -> String {
+/// The open dossier's read-only state line, by cause (startup banner, location status).
+pub(crate) fn read_only_notice(cause: ReadOnlyCause) -> &'static str {
+    match cause {
+        ReadOnlyCause::NewerSchema { .. } => MSG_STARTUP_READ_ONLY,
+        ReadOnlyCause::FileWriteProtected => MSG_STARTUP_FILE_PROTECTED,
+        ReadOnlyCause::DirectoryWriteProtected => MSG_STARTUP_DIR_PROTECTED,
+        ReadOnlyCause::SidecarNotWritable => MSG_STARTUP_SIDECAR_PROTECTED,
+    }
+}
+
+/// The up-front refusal of a write on a read-only dossier, by cause.
+pub(crate) fn read_only_refusal(cause: ReadOnlyCause) -> &'static str {
+    match cause {
+        ReadOnlyCause::NewerSchema { .. } => MSG_READ_ONLY_WRITE,
+        ReadOnlyCause::FileWriteProtected => MSG_READ_ONLY_FILE_WRITE,
+        ReadOnlyCause::DirectoryWriteProtected => MSG_READ_ONLY_DIR_WRITE,
+        ReadOnlyCause::SidecarNotWritable => MSG_READ_ONLY_SIDECAR_WRITE,
+    }
+}
+
+/// Map a persistence error from a WRITE to its French refusal — the one mapping every write rail
+/// shares. The read-only gates name their cause (newer schema, protected file, protected
+/// directory); a write the OS refused on the spot (SQLite's READONLY / PERM — the protection
+/// changed after the open) names that; anything else is the plain « L'enregistrement a échoué. ».
+/// The persistence error's own text — SQLite's English above all — is LOGGED, never appended to
+/// the French (2026-09-26 on-screen defect: « … sqlite operation failed: attempt to write a
+/// readonly database » reached the refusal dialog).
+pub(crate) fn save_error(error: PersistError) -> String {
     match error {
         PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
-        PersistError::HoldingHasTransactions => MSG_HOLDING_HAS_TRANSACTIONS.to_string(),
+        PersistError::WriteProtected { directory: false } => MSG_READ_ONLY_FILE_WRITE.to_string(),
+        PersistError::WriteProtected { directory: true } => MSG_READ_ONLY_DIR_WRITE.to_string(),
+        PersistError::SidecarNotWritable => MSG_READ_ONLY_SIDECAR_WRITE.to_string(),
+        other if other.is_write_protected() => {
+            tracing::warn!("journal write refused by the system: {other}");
+            MSG_WRITE_REFUSED_BY_SYSTEM.to_string()
+        }
         other => {
             tracing::warn!("journal write failed: {other}");
-            MSG_SAVE_FAILED.to_string()
+            with_cause(
+                MSG_SAVE_FAILED,
+                MSG_SAVE_FAILED_CAUSE,
+                persist_cause(&other),
+            )
         }
+    }
+}
+
+/// The French cause of a persistence failure, from its TYPED kind — `None` when no named cause
+/// applies (the message then says only what failed; the detail is in the log).
+pub(crate) fn persist_cause(error: &PersistError) -> Option<&'static str> {
+    use steadyinvest_persistence::ErrorKind as K;
+    match error.kind() {
+        K::WriteProtected => Some(MSG_CAUSE_PROTECTED),
+        K::Locked => Some(MSG_CAUSE_LOCKED),
+        K::Corrupt => Some(MSG_CAUSE_CORRUPT),
+        K::DiskFull => Some(MSG_CAUSE_DISK_FULL),
+        K::Missing => Some(MSG_CAUSE_MISSING),
+        K::NewerData => Some(MSG_CAUSE_NEWER_DATA),
+        K::Migration => Some(MSG_CAUSE_MIGRATION),
+        K::ProtectedOutdated { directory: false } => Some(MSG_CAUSE_OUTDATED_FILE),
+        K::ProtectedOutdated { directory: true } => Some(MSG_CAUSE_OUTDATED_DIR),
+        K::Replaced => Some(MSG_CAUSE_REPLACED),
+        K::ReadCopy => Some(MSG_CAUSE_READ_COPY),
+        K::ChangedDuringCopy => Some(MSG_CAUSE_CHANGED_DURING_COPY),
+        K::Other => None,
+    }
+}
+
+/// The French cause of a file-system failure, from its `io::ErrorKind`.
+fn io_cause(error: &std::io::Error) -> Option<&'static str> {
+    use std::io::ErrorKind as K;
+    match error.kind() {
+        K::PermissionDenied | K::ReadOnlyFilesystem => Some(MSG_CAUSE_PROTECTED),
+        K::StorageFull => Some(MSG_CAUSE_DISK_FULL),
+        K::NotFound => Some(MSG_CAUSE_MISSING),
+        _ => None,
+    }
+}
+
+/// `plain` when no cause is named, else `template` with its `{cause}` filled.
+fn with_cause(plain: &str, template: &str, cause: Option<&str>) -> String {
+    match cause {
+        Some(cause) => template.replace("{cause}", cause),
+        None => plain.to_string(),
+    }
+}
+
+/// A failed READ of `subject` (one of the `MSG_SUBJECT_*`), named in French with its cause when
+/// one applies — the persistence text logged only (2026-09-26: the read rails returned the
+/// English Display, which their callers could put in a refusal or a notice).
+pub(crate) fn read_failure(subject: &'static str, error: PersistError) -> String {
+    tracing::warn!("journal read failed ({subject}): {error}");
+    let message = match persist_cause(&error) {
+        Some(cause) => MSG_READ_SUBJECT_FAILED_CAUSE.replace("{cause}", cause),
+        None => MSG_READ_SUBJECT_FAILED.to_string(),
+    };
+    message.replace("{what}", subject)
+}
+
+/// A dossier that could not be opened, named in French with its cause (2026-09-26: the open
+/// notice appended the persistence Display). The lock held by another instance keeps its own
+/// message (the reclaim offer matches it).
+pub(crate) fn open_error(error: PersistError) -> String {
+    tracing::warn!("journal open failed: {error}");
+    match error {
+        PersistError::LockHeld { .. } => MSG_JOURNAL_LOCKED.to_string(),
+        other => with_cause(
+            MSG_JOURNAL_OPEN_FAILED,
+            MSG_JOURNAL_OPEN_FAILED_CAUSE,
+            persist_cause(&other),
+        ),
+    }
+}
+
+/// Map a file-system error from a WRITE beside the dossier (a backup copy) to its French refusal:
+/// the OS's write refusals (permission, read-only file system) are named, a full disk or a
+/// missing folder too, anything else is the plain save failure. The OS text is logged, never shown.
+pub(crate) fn io_save_error(error: std::io::Error) -> String {
+    tracing::warn!("file write failed: {error}");
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
+            MSG_WRITE_REFUSED_BY_SYSTEM.to_string()
+        }
+        _ => with_cause(MSG_SAVE_FAILED, MSG_SAVE_FAILED_CAUSE, io_cause(&error)),
+    }
+}
+
+/// Map a persistence error from a watchlist / holdings write to a neutral notice (Story 4.1): a
+/// holding still referenced by transactions names that cause (G1 final review — matched on the
+/// TYPED variant, never on its text); everything else goes through [`save_error`] (the read-only
+/// causes named, the English text logged, never appended — G1 final review: a raw `transaction
+/// rows still reference…` under « L'enregistrement a échoué. » was no cause the user could read).
+fn watch_error(error: PersistError) -> String {
+    match error {
+        PersistError::HoldingHasTransactions => MSG_HOLDING_HAS_TRANSACTIONS.to_string(),
+        other => save_error(other),
     }
 }

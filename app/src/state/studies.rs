@@ -6,14 +6,14 @@
 
 use steadyinvest_contract::Study;
 use steadyinvest_core::verdict::StudySnapshot;
-use steadyinvest_persistence::{Error as PersistError, StudySummary};
+use steadyinvest_persistence::StudySummary;
 use uuid::Uuid;
 
 use crate::viewmodel::engine;
 
 use super::{
     JournalState, MSG_BLANK_CURRENCY, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_NORMALIZE_FAILED,
-    MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, empty_judgment,
+    MSG_SAVE_FAILED, empty_judgment, save_error,
 };
 
 impl JournalState {
@@ -31,10 +31,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_studies().map_err(|error| {
-            tracing::warn!("list_studies failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_studies()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_STUDIES, error))
     }
 
     /// Archive a study (Story 2.12, FR54): flip `status` to `"archived"` so it leaves the default
@@ -53,16 +52,13 @@ impl JournalState {
 
     /// The shared status-change rail (read-only / no-journal / save-failure guards → persist).
     pub(crate) fn set_study_status(&mut self, study_id: Uuid, status: &str) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let Some(journal) = self.journal.as_mut() else {
             return Err(MSG_NO_JOURNAL.to_string());
         };
         match journal.set_study_status(study_id, status) {
             Ok(()) => Ok(()),
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => Err(save_error(error)),
         }
     }
 
@@ -72,9 +68,7 @@ impl JournalState {
     /// a later Ctrl+Z can't resurrect a pointer to a deleted study. Guarded (read-only / no-journal /
     /// save-failure → a neutral notice, never a silent `.ok()`).
     pub fn delete_study(&mut self, study_id: Uuid) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let Some(journal) = self.journal.as_mut() else {
             return Err(MSG_NO_JOURNAL.to_string());
         };
@@ -84,8 +78,7 @@ impl JournalState {
                 self.reset_undo();
                 Ok(())
             }
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => Err(save_error(error)),
         }
     }
 
@@ -113,9 +106,7 @@ impl JournalState {
         if currency.is_empty() {
             return Err(MSG_BLANK_CURRENCY.to_string());
         }
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let Some(journal) = self.journal.as_mut() else {
             return Err(MSG_NO_JOURNAL.to_string());
         };
@@ -136,8 +127,7 @@ impl JournalState {
         match journal.put_study_with_history(&study, &study.created_at) {
             Ok(()) => Ok(id),
             // The newer-schema guard can also fire here (defense in depth); name it neutrally.
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => Err(save_error(error)),
         }
     }
 
@@ -174,10 +164,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_judgment_snapshots(study_id).map_err(|error| {
-            tracing::warn!("list_judgment_snapshots({study_id}) failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_judgment_snapshots(study_id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HISTORY, error))
     }
 
     /// One FR51 snapshot's full state (issue #34, PR 2) — same tri-state contract as
@@ -186,10 +175,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(None);
         };
-        journal.get_judgment_snapshot(id).map_err(|error| {
-            tracing::warn!("get_judgment_snapshot({id}) failed: {error}");
-            error.to_string()
-        })
+        journal
+            .get_judgment_snapshot(id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HISTORY, error))
     }
 
     /// Fallible reopen (issue #95): `Ok(Some)` found, `Ok(None)` truly absent (also when no
@@ -199,9 +187,8 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(None);
         };
-        journal.get_study(id).map_err(|error| {
-            tracing::warn!("get_study({id}) failed: {error}");
-            error.to_string()
-        })
+        journal
+            .get_study(id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_STUDY, error))
     }
 }

@@ -13,8 +13,8 @@ use steadyinvest_persistence::{
 use uuid::Uuid;
 
 use super::{
-    JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_RESTORE_CHECKPOINT_FAILED,
-    MSG_RESTORE_FAILED, MSG_RESTORE_INTEGRITY, MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL,
+    JournalState, MSG_NO_JOURNAL, MSG_RESTORE_CHECKPOINT_FAILED, MSG_RESTORE_FAILED,
+    MSG_RESTORE_INTEGRITY, MSG_RESTORE_NEWER_SCHEMA, MSG_RESTORE_NOT_A_JOURNAL,
     MSG_RESTORE_SNAPSHOT_FAILED, MSG_RESTORE_UNCHECKPOINTED, MSG_RESTORE_UNREADABLE,
     path_with_suffix, restore_rollback_failed_message, restore_snapshot_exists_message,
     same_file_path, sync_mode_for,
@@ -173,9 +173,7 @@ impl JournalState {
         // G1 review (Guy's decision 5): a dossier open READ-ONLY (written by a newer version) is
         // never overwritten — the confirm dialog names the reason and blocks its verb, and the rule
         // lives HERE too, so no other caller can bypass it. The parked restore is dropped.
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let live = self.path.clone().ok_or(MSG_NO_JOURNAL.to_string())?;
 
         // Restoring the journal onto itself is a no-op — the live journal already IS this content (and
@@ -273,7 +271,7 @@ impl JournalState {
         match open(live) {
             Ok(journal) => {
                 remove_snapshot(snapshot);
-                self.read_only = journal.is_read_only();
+                self.read_only = journal.read_only_cause();
                 self.journal = Some(journal);
                 self.reset_undo();
                 Ok(())
@@ -315,7 +313,7 @@ impl JournalState {
     fn reopen_live(&mut self, path: &Path) {
         match Journal::open_with_mode(path, sync_mode_for(path)) {
             Ok(journal) => {
-                self.read_only = journal.is_read_only();
+                self.read_only = journal.read_only_cause();
                 self.journal = Some(journal);
             }
             Err(error) => {
@@ -324,7 +322,7 @@ impl JournalState {
                 // live path as an open dossier.
                 self.journal = None;
                 self.path = None;
-                self.read_only = false;
+                self.read_only = None;
             }
         }
     }

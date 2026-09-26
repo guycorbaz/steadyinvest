@@ -60,28 +60,44 @@ pub(crate) fn sync_mode_for(path: &Path) -> JournalMode {
 }
 
 impl JournalState {
-    /// Create a raw `.db` backup of the live journal (Story 5.4, FR61) — checkpoint the WAL so the copy
-    /// is self-contained, then copy the file to a `backups/` folder **beside the journal** (Story 5.5 —
-    /// so backups follow a user-selected location; falls back to the OS data dir if the journal has no
-    /// parent). Returns the written path (the caller surfaces it). Guarded: no journal → a neutral notice.
+    /// Create a `.db` backup of the live journal (Story 5.4, FR61) in a `backups/` folder **beside
+    /// the journal** (Story 5.5 — so backups follow a user-selected location; falls back to the OS
+    /// data dir if the journal has no parent). Returns the written path (the caller surfaces it).
+    /// Guarded: no journal → a neutral notice.
+    ///
+    /// G3 M3: the backup is written by SQLite from the OPEN connection (`VACUUM INTO`), never a
+    /// file copy of the `.db` — so it holds exactly what the dossier shows, the commits still in a
+    /// `-wal` included, even on a read-only (protected) dossier whose `-wal` cannot be checkpointed
+    /// (a copy there silently dropped them). One self-contained file, no sidecar.
     pub fn create_backup(&self) -> Result<PathBuf, String> {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         let live = self.path.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-        journal
-            .checkpoint()
-            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
-        let version = journal
-            .logical_version()
-            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        let version = journal.logical_version().map_err(super::read_error)?;
         let dir = Self::backups_dir_for(live).ok_or(MSG_NO_DATA_DIR.to_string())?;
-        std::fs::create_dir_all(&dir).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        std::fs::create_dir_all(&dir).map_err(super::io_save_error)?;
         // Key the filename on (id, version, timestamp) so two backups never silently overwrite each
         // other — a same-version backup (e.g. one taken right after a restore) keeps its own file. The
         // timestamp is filesystem-safe (no `:`).
         let stamp = self.clock.now().0.replace(':', "");
-        let dest = dir.join(format!("journal-{}-v{version}-{stamp}.db", journal.id()));
-        std::fs::copy(live, &dest).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
-        Ok(dest)
+        let base = format!("journal-{}-v{version}-{stamp}", journal.id());
+        // Second G3 L2: two backups in the same second — the name is taken, the next one gets a
+        // `-2`, `-3`… suffix; `backup_to` never overwrites.
+        for n in 1..=99u32 {
+            let dest = if n == 1 {
+                dir.join(format!("{base}.db"))
+            } else {
+                dir.join(format!("{base}-{n}.db"))
+            };
+            match journal.backup_to(&dest) {
+                Ok(()) => return Ok(dest),
+                Err(PersistError::Backup {
+                    cause: std::io::ErrorKind::AlreadyExists,
+                    ..
+                }) => continue,
+                Err(error) => return Err(super::save_error(error)),
+            }
+        }
+        Err(MSG_SAVE_FAILED.to_string())
     }
 
     /// The `backups/` folder of the live journal (Story 5.5 rule, see [`Self::backups_dir_for`]) — where
@@ -120,24 +136,23 @@ impl JournalState {
     fn adopt_open(&mut self, path: &Path, mode: JournalMode) -> Result<OpenOutcome, String> {
         match Journal::open_with_mode(path, mode) {
             Ok(journal) => {
-                let logical_version = journal
-                    .logical_version()
-                    .map_err(|error| format!("{MSG_JOURNAL_OPEN_FAILED} {error}"))?;
+                let logical_version = journal.logical_version().map_err(super::open_error)?;
                 let outcome = OpenOutcome {
                     journal_id: journal.id(),
                     logical_version,
                     sync_warning: matches!(mode, JournalMode::Delete),
                     unchanged: false,
                 };
-                self.read_only = journal.is_read_only();
+                self.read_only = journal.read_only_cause();
                 self.journal = Some(journal);
                 self.path = Some(path.to_path_buf());
                 self.reset_undo();
                 self.pending_restore = None;
                 Ok(outcome)
             }
-            Err(PersistError::LockHeld { .. }) => Err(MSG_JOURNAL_LOCKED.to_string()),
-            Err(error) => Err(format!("{MSG_JOURNAL_OPEN_FAILED} {error}")),
+            // Named in French by `open_error` — the instance lock, the protected-and-outdated file,
+            // else the cause kind; never the persistence Display (2026-09-26).
+            Err(error) => Err(super::open_error(error)),
         }
     }
 
@@ -153,7 +168,7 @@ impl JournalState {
         if !reopened {
             self.journal = None;
             self.path = None;
-            self.read_only = false;
+            self.read_only = None;
         }
     }
 
@@ -169,6 +184,8 @@ impl JournalState {
             && self.journal.is_some()
             && same_file_path(&current, path)
         {
+            // The user chose this dossier — even the startup stand-in (second G3 L5).
+            self.kept_configured = None;
             return Ok(OpenOutcome {
                 journal_id: self.journal_id().unwrap_or_else(Uuid::nil),
                 logical_version: self.logical_version_or_zero(),
@@ -178,8 +195,14 @@ impl JournalState {
         }
         let prev = self.path.clone();
         self.close_current();
+        // Resolved once (second G3 L6): the mode, backups and a restore act on the real file.
+        let path = &steadyinvest_persistence::resolved_path(path);
         match self.adopt_open(path, sync_mode_for(path)) {
-            Ok(outcome) => Ok(outcome),
+            Ok(outcome) => {
+                // The user chose a dossier: the startup stand-in (G3 M4) is over.
+                self.kept_configured = None;
+                Ok(outcome)
+            }
             Err(notice) => {
                 self.restore_previous(prev);
                 Err(notice)
@@ -200,6 +223,7 @@ impl JournalState {
         } else {
             format!("{trimmed}.db")
         };
+        let dir = &steadyinvest_persistence::resolved_path(dir);
         let path = dir.join(file_name);
         let mode = sync_mode_for(dir);
         let prev = self.path.clone();
@@ -215,11 +239,13 @@ impl JournalState {
                     sync_warning: matches!(mode, JournalMode::Delete),
                     unchanged: false,
                 };
-                self.read_only = journal.is_read_only();
+                self.read_only = journal.read_only_cause();
                 self.journal = Some(journal);
                 self.path = Some(path);
                 self.reset_undo();
                 self.pending_restore = None;
+                // The user chose a dossier: the startup stand-in (G3 M4) is over.
+                self.kept_configured = None;
                 Ok(outcome)
             }
             Err(PersistError::JournalExists(_)) => {
@@ -232,7 +258,7 @@ impl JournalState {
             }
             Err(error) => {
                 self.restore_previous(prev);
-                Err(format!("{MSG_JOURNAL_OPEN_FAILED} {error}"))
+                Err(super::open_error(error))
             }
         }
     }

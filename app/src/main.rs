@@ -101,6 +101,8 @@ fn main() -> Result<(), slint::PlatformError> {
     // Open the last-used journal (or create the default one), with identity + time from the
     // injected sources (ADD15). This is the first time the app opens the journal — Story 2.1
     // deliberately did not. Failure degrades to a usable journal-less state, never a crash.
+    // Second G3 M-a: the private read copies a crashed run left in the OS temp dir go.
+    steadyinvest_persistence::sweep_stale_read_copies();
     let configured = config.borrow().journal_path.clone();
     let (mut journal_state, startup_notice) = JournalState::open_or_create(
         configured.as_deref(),
@@ -110,8 +112,13 @@ fn main() -> Result<(), slint::PlatformError> {
     // G1 I: the rails read typed amounts under the user's number format.
     journal_state.set_number_format(config.borrow().number_format);
     // Persist the resolved path so the same journal reopens next launch (only when it changed).
+    // G3 M4: a configured dossier refused for a NAMED cause (locked, protected and too old…) stays
+    // the configured one — the default dossier only stands in for this session.
     {
-        let resolved = journal_state.path().map(Path::to_path_buf);
+        let resolved = journal_state
+            .kept_configured_path()
+            .or(journal_state.path())
+            .map(Path::to_path_buf);
         let mut cfg = config.borrow_mut();
         if cfg.journal_path != resolved {
             cfg.journal_path = resolved;
@@ -249,9 +256,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 && let Some(jid) = st.journal_id()
             {
                 let version = st.logical_version_or_zero();
-                config
-                    .borrow_mut()
-                    .record_recent(&path, &jid.to_string(), version);
+                {
+                    let mut cfg = config.borrow_mut();
+                    cfg.record_recent(&path, &jid.to_string(), version);
+                    // G3 M4: recording the stand-in must not repoint app-config away from a
+                    // configured dossier refused by name.
+                    if let Some(kept) = st.kept_configured_path() {
+                        cfg.journal_path = Some(kept.to_path_buf());
+                    }
+                }
                 persist(config_path.as_ref(), &config.borrow());
             }
             render_journal_panel(&ui, &st, &config.borrow());

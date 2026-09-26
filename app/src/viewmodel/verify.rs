@@ -76,12 +76,12 @@ const DEMO_FIXTURE_ID: &str = "g01-worked-example";
 
 // ── User-facing neutral prose rendered in the verify panel / demo notices (FR13). Extracted to
 // consts so the posture gate (`app::posture`) scans them via `USER_FACING_TEMPLATES`; the
-// interpolated `{…}` values (serde errors, fixture ids, engine deviation numbers) are data, never
+// interpolated `{…}` values (fixture ids, engine deviation numbers) are data, never
 // scanned. The deviation values themselves are `core::golden::GoldenDeviation` strings, gated in
 // `core`'s own posture test.
-const MSG_FIXTURE_UNREADABLE_PREFIX: &str = "fixture illisible : ";
+const MSG_FIXTURE_UNREADABLE: &str = "fixture illisible";
 const MSG_DEMO_MISSING: &str = "étude de démonstration introuvable";
-const MSG_DEMO_UNREADABLE_PREFIX: &str = "étude de démonstration illisible : ";
+const MSG_DEMO_UNREADABLE: &str = "étude de démonstration illisible";
 /// Scan-only template mirroring the deviation `format!` in [`run`] (the `{}` holes are data).
 #[cfg(test)]
 const MSG_DEVIATION_TEMPLATE: &str = "{path} : attendu {expected}, obtenu {actual}";
@@ -90,9 +90,9 @@ const MSG_DEVIATION_TEMPLATE: &str = "{path} : attendu {expected}, obtenu {actua
 /// `format!`/const sites in [`run`] and [`demo_study`].
 #[cfg(test)]
 pub(crate) const USER_FACING_TEMPLATES: &[&str] = &[
-    MSG_FIXTURE_UNREADABLE_PREFIX,
+    MSG_FIXTURE_UNREADABLE,
     MSG_DEMO_MISSING,
-    MSG_DEMO_UNREADABLE_PREFIX,
+    MSG_DEMO_UNREADABLE,
     MSG_DEVIATION_TEMPLATE,
 ];
 
@@ -130,11 +130,16 @@ pub fn run() -> VerifyReport {
     for (id, json) in GOLDEN_FIXTURES {
         match serde_json::from_str::<GoldenStudy>(json) {
             Ok(study) => parsed.push(study),
-            Err(error) => results.push(FixtureResult {
-                id: (*id).to_string(),
-                passed: false,
-                deviations: vec![format!("{MSG_FIXTURE_UNREADABLE_PREFIX}{error}")],
-            }),
+            Err(error) => {
+                // The serde text is logged, never shown (2026-09-26: no raw error Display in
+                // a user-visible string).
+                tracing::warn!(fixture = %id, %error, "golden fixture unreadable");
+                results.push(FixtureResult {
+                    id: (*id).to_string(),
+                    passed: false,
+                    deviations: vec![MSG_FIXTURE_UNREADABLE.to_string()],
+                });
+            }
         }
     }
     for report in check_all(&parsed) {
@@ -171,8 +176,10 @@ pub fn demo_study() -> Result<Study, String> {
         .find(|(id, _)| *id == DEMO_FIXTURE_ID)
         .map(|(_, json)| *json)
         .ok_or_else(|| MSG_DEMO_MISSING.to_string())?;
-    let fixture: GoldenStudy =
-        serde_json::from_str(json).map_err(|e| format!("{MSG_DEMO_UNREADABLE_PREFIX}{e}"))?;
+    let fixture: GoldenStudy = serde_json::from_str(json).map_err(|error| {
+        tracing::warn!(%error, "demo study unreadable");
+        MSG_DEMO_UNREADABLE.to_string()
+    })?;
 
     // A fixed, deterministic identity — the demo is in-memory only, so its id need not be unique in
     // any journal. Cells carry a provider provenance (reference data), Present coverage, Current.

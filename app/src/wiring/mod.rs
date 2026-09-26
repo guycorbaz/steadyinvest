@@ -93,9 +93,12 @@ pub(crate) struct Session {
 pub(crate) fn persist(path: Option<&PathBuf>, config: &AppConfig) {
     let Some(path) = path else { return };
     if let Err(error) = crate::config::save(path, config) {
-        let message = format!("app-config save to {} failed: {error}", path.display());
-        tracing::warn!("{message}");
-        eprintln!("steadyinvest: {message}");
+        // Log + stderr only: the Display is never built into a String the UI could show.
+        tracing::warn!("app-config save to {} failed: {error}", path.display());
+        eprintln!(
+            "steadyinvest: app-config save to {} failed: {error}",
+            path.display()
+        );
     }
 }
 

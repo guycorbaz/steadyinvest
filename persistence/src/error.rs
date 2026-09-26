@@ -43,6 +43,32 @@ pub enum Error {
         supported: u32,
     },
 
+    /// The journal file (or the directory holding it) is protected against writing at the OS level
+    /// — a `chmod 444` file, a read-only directory or medium. The journal is opened read-only and
+    /// write methods return this variant; `directory` names WHICH is protected (the file wins when
+    /// both are), so the refusal never names the wrong cause.
+    #[error(
+        "the journal {} is protected against writing; it is opened read-only",
+        if *.directory { "directory" } else { "file" }
+    )]
+    WriteProtected { directory: bool },
+
+    /// A write-protected journal whose schema is OLDER than this build: the pending migrations
+    /// cannot run on a file that cannot be written, and reading an unmigrated file with this build's
+    /// queries would misread it — so the open is refused and the file stays untouched. `directory`
+    /// names WHICH is protected (G3 M5: a writable file in a protected directory is not a
+    /// protected file).
+    #[error(
+        "this journal's {} is protected against writing and its schema (file user_version \
+         {file_user_version}) is older than this build's ({supported}); it was not opened",
+        if *.directory { "directory" } else { "file" }
+    )]
+    WriteProtectedOutdated {
+        file_user_version: i64,
+        supported: u32,
+        directory: bool,
+    },
+
     /// A single row carries a `schema_version` newer than the contract this build was built with.
     /// The read fails loudly — never a silent partial parse.
     #[error(
@@ -113,6 +139,126 @@ pub enum Error {
     /// backup could not be copied beside the journal. The live journal is unchanged.
     #[error("the backup file could not be staged: {detail}; the journal is unchanged")]
     Restore { detail: String },
+
+    /// A protected journal is read through a private copy (its unconsolidated writes cannot be
+    /// read in place without creating files beside it); that copy could not be prepared. `cause`
+    /// is the file-system error's kind (a full disk is named as such).
+    #[error("the private read copy of the protected journal could not be prepared: {detail}")]
+    ReadCopy {
+        detail: String,
+        cause: std::io::ErrorKind,
+    },
+
+    /// The protected journal changed while it was being copied for reading (another account
+    /// writing it — a directory we cannot write holds no lock), twice in a row. Nothing was read.
+    #[error("the journal changed while it was being copied for reading; it was not opened")]
+    ChangedDuringCopy,
+
+    /// The journal's `-wal` / `-shm` is not writable by this account and could not be made so;
+    /// the journal is opened read-only and write methods return this variant.
+    #[error("a side file of the journal (-wal / -shm) is not writable; it is opened read-only")]
+    SidecarNotWritable,
+
+    /// A backup file could not be written, flushed or named. `cause` is the file-system error's
+    /// kind (`AlreadyExists` when the name is taken — the caller picks another).
+    #[error("the backup could not be written: {detail}")]
+    Backup {
+        detail: String,
+        cause: std::io::ErrorKind,
+    },
+}
+
+/// The KIND of a failure, for a caller that names causes in its own language (the app speaks
+/// French and never shows this crate's — or SQLite's — English Display, 2026-09-26). A typed
+/// classification, never a match on message text; `Other` when no named cause applies (the
+/// technical detail then lives in the log only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// The OS refuses the write: a protected file / directory / medium.
+    WriteProtected,
+    /// The journal is busy or locked by another access (SQLite BUSY/LOCKED, the instance lock).
+    Locked,
+    /// The file is damaged or is not a journal (SQLite CORRUPT/NOTADB, unparseable rows or meta).
+    Corrupt,
+    /// The disk is full (SQLite FULL).
+    DiskFull,
+    /// The file cannot be found or opened (SQLite CANTOPEN).
+    Missing,
+    /// A newer version of the app wrote the file or a row.
+    NewerData,
+    /// The journal is protected against writing and older than this build (its schema update
+    /// cannot be written); `directory` names which is protected.
+    ProtectedOutdated { directory: bool },
+    /// A protected journal's private read copy could not be prepared.
+    ReadCopy,
+    /// The journal changed while being copied for reading.
+    ChangedDuringCopy,
+    /// The database file was replaced or moved while open (SQLite READONLY_DBMOVED — a sync
+    /// tool swapping the file, G3 L1): its writes are refused until it is reopened.
+    Replaced,
+    /// A schema update of the file failed.
+    Migration,
+    /// No named cause.
+    Other,
+}
+
+/// The named kind of a file-system failure (second G3 M-f: a full disk is `DiskFull` wherever it
+/// happens), `Other` when none applies.
+fn io_kind(kind: std::io::ErrorKind) -> ErrorKind {
+    use std::io::ErrorKind as K;
+    match kind {
+        K::StorageFull | K::QuotaExceeded => ErrorKind::DiskFull,
+        K::PermissionDenied | K::ReadOnlyFilesystem => ErrorKind::WriteProtected,
+        K::NotFound => ErrorKind::Missing,
+        _ => ErrorKind::Other,
+    }
+}
+
+impl Error {
+    /// This failure's [`ErrorKind`].
+    pub fn kind(&self) -> ErrorKind {
+        use rusqlite::ErrorCode as C;
+        match self {
+            Error::WriteProtected { .. } => ErrorKind::WriteProtected,
+            Error::ReadCopy { cause, .. } => match io_kind(*cause) {
+                ErrorKind::Other => ErrorKind::ReadCopy,
+                named => named,
+            },
+            Error::Backup { cause, .. } => io_kind(*cause),
+            Error::ChangedDuringCopy => ErrorKind::ChangedDuringCopy,
+            Error::SidecarNotWritable => ErrorKind::WriteProtected,
+            Error::WriteProtectedOutdated { directory, .. } => ErrorKind::ProtectedOutdated {
+                directory: *directory,
+            },
+            // Before the READONLY family: a moved/replaced file is not a protected one.
+            Error::Sqlite(rusqlite::Error::SqliteFailure(code, _))
+                if code.extended_code == rusqlite::ffi::SQLITE_READONLY_DBMOVED =>
+            {
+                ErrorKind::Replaced
+            }
+            Error::Sqlite(rusqlite::Error::SqliteFailure(code, _)) => match code.code {
+                C::ReadOnly | C::PermissionDenied => ErrorKind::WriteProtected,
+                C::DatabaseBusy | C::DatabaseLocked => ErrorKind::Locked,
+                C::DatabaseCorrupt | C::NotADatabase => ErrorKind::Corrupt,
+                C::DiskFull => ErrorKind::DiskFull,
+                C::CannotOpen => ErrorKind::Missing,
+                _ => ErrorKind::Other,
+            },
+            Error::LockHeld { .. } => ErrorKind::Locked,
+            Error::CorruptPayload { .. } | Error::CorruptJournalMeta { .. } => ErrorKind::Corrupt,
+            Error::NewerJournalSchema { .. } | Error::NewerRowSchema { .. } => ErrorKind::NewerData,
+            Error::Migration { .. } => ErrorKind::Migration,
+            _ => ErrorKind::Other,
+        }
+    }
+
+    /// Whether this failure is the OS refusing a write — the API gate of a write-protected journal,
+    /// or SQLite reporting a read-only database / a denied permission at write time (a file whose
+    /// protection changed after it was opened). The app names this cause in French instead of
+    /// surfacing SQLite's own English text (2026-09-26 on-screen defect).
+    pub fn is_write_protected(&self) -> bool {
+        self.kind() == ErrorKind::WriteProtected
+    }
 }
 
 impl From<steadyinvest_contract::ImportError> for Error {
@@ -214,6 +360,18 @@ mod tests {
                 file_user_version: 9,
                 supported: 1,
             },
+            Error::WriteProtected { directory: false },
+            Error::WriteProtected { directory: true },
+            Error::WriteProtectedOutdated {
+                file_user_version: 3,
+                supported: 9,
+                directory: false,
+            },
+            Error::WriteProtectedOutdated {
+                file_user_version: 3,
+                supported: 9,
+                directory: true,
+            },
             Error::NewerRowSchema {
                 row_schema_version: 9,
                 supported: 1,
@@ -244,6 +402,16 @@ mod tests {
             Error::Restore {
                 detail: "the copy failed".to_string(),
             },
+            Error::ReadCopy {
+                detail: "a file could not be copied".to_string(),
+                cause: std::io::ErrorKind::StorageFull,
+            },
+            Error::ChangedDuringCopy,
+            Error::SidecarNotWritable,
+            Error::Backup {
+                detail: "the partial file: exists".to_string(),
+                cause: std::io::ErrorKind::AlreadyExists,
+            },
         ]
     }
 
@@ -258,6 +426,8 @@ mod tests {
                 | Error::CorruptPayload { .. }
                 | Error::CorruptJournalMeta { .. }
                 | Error::NewerJournalSchema { .. }
+                | Error::WriteProtected { .. }
+                | Error::WriteProtectedOutdated { .. }
                 | Error::NewerRowSchema { .. }
                 | Error::JournalIdentityMismatch { .. }
                 | Error::Migration { .. }
@@ -267,10 +437,20 @@ mod tests {
                 | Error::LockHeld { .. }
                 | Error::Lock { .. }
                 | Error::HoldingHasTransactions
-                | Error::Restore { .. } => {}
+                | Error::Restore { .. }
+                | Error::ReadCopy { .. }
+                | Error::ChangedDuringCopy
+                | Error::SidecarNotWritable
+                | Error::Backup { .. } => {}
             }
         }
-        assert_eq!(sample_errors().len(), 15, "one sample per variant");
+        // 21 variants; `WriteProtected` and `WriteProtectedOutdated` are sampled for both of
+        // their causes (file, directory).
+        assert_eq!(
+            sample_errors().len(),
+            23,
+            "one sample per variant (+2 causes)"
+        );
     }
 
     #[test]
@@ -284,6 +464,75 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn write_protection_is_recognised_from_the_gate_and_from_sqlite() {
+        let sqlite = |code| {
+            Error::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some("attempt to write a readonly database".to_string()),
+            ))
+        };
+        assert!(Error::WriteProtected { directory: true }.is_write_protected());
+        assert!(sqlite(rusqlite::ffi::SQLITE_READONLY).is_write_protected());
+        assert!(sqlite(rusqlite::ffi::SQLITE_PERM).is_write_protected());
+        assert!(!sqlite(rusqlite::ffi::SQLITE_BUSY).is_write_protected());
+        assert!(!Error::HoldingHasTransactions.is_write_protected());
+    }
+
+    #[test]
+    fn every_failure_has_a_typed_kind() {
+        let sqlite = |code| {
+            Error::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                None,
+            ))
+        };
+        use rusqlite::ffi;
+        assert_eq!(sqlite(ffi::SQLITE_BUSY).kind(), ErrorKind::Locked);
+        assert_eq!(sqlite(ffi::SQLITE_LOCKED).kind(), ErrorKind::Locked);
+        assert_eq!(sqlite(ffi::SQLITE_CORRUPT).kind(), ErrorKind::Corrupt);
+        assert_eq!(sqlite(ffi::SQLITE_NOTADB).kind(), ErrorKind::Corrupt);
+        assert_eq!(sqlite(ffi::SQLITE_FULL).kind(), ErrorKind::DiskFull);
+        assert_eq!(sqlite(ffi::SQLITE_CANTOPEN).kind(), ErrorKind::Missing);
+        assert_eq!(
+            sqlite(ffi::SQLITE_READONLY).kind(),
+            ErrorKind::WriteProtected
+        );
+        assert_eq!(sqlite(ffi::SQLITE_ERROR).kind(), ErrorKind::Other);
+        assert_eq!(Error::LockHeld { pid: 1 }.kind(), ErrorKind::Locked);
+        assert_eq!(
+            Error::CorruptPayload { detail: "x".into() }.kind(),
+            ErrorKind::Corrupt
+        );
+        assert_eq!(
+            Error::NewerRowSchema {
+                row_schema_version: 9,
+                supported: 1
+            }
+            .kind(),
+            ErrorKind::NewerData
+        );
+        assert_eq!(Error::HoldingHasTransactions.kind(), ErrorKind::Other);
+        let moved = Error::Sqlite(rusqlite::Error::SqliteFailure(
+            ffi::Error::new(ffi::SQLITE_READONLY_DBMOVED),
+            None,
+        ));
+        assert_eq!(moved.kind(), ErrorKind::Replaced);
+        assert!(
+            !moved.is_write_protected(),
+            "a replaced file is not a protected one"
+        );
+        assert_eq!(
+            Error::WriteProtectedOutdated {
+                file_user_version: 1,
+                supported: 9,
+                directory: true
+            }
+            .kind(),
+            ErrorKind::ProtectedOutdated { directory: true }
+        );
     }
 
     #[test]

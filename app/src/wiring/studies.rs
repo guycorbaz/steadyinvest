@@ -825,6 +825,14 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 let Ok(id) = Uuid::parse_str(&id_text) else {
                     return;
                 };
+                // On a read-only dossier every study action writes, so it is refused up front
+                // with its cause (a protected file, a newer schema) — never a confirm whose
+                // « Confirmer » can only fail (2026-09-26 on-screen defect; the G1 G rule of
+                // « Restaurer » / « Importer »). The rail keeps its own guard behind this one.
+                if let Err(reason) = journal_state.borrow().refuse_if_read_only() {
+                    crate::wiring::dialog::refuse(&ui, reason);
+                    return;
+                }
                 // The ticker for the fact-stating prompt (user data, not scanned); absent study → bail.
                 let Some(study) = journal_state.borrow().get_study(id) else {
                     return;

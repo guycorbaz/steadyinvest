@@ -110,9 +110,16 @@ export component PortfolioScreen inherits Rectangle {
                 subtitle: @tr("Un portefeuille par banque ou compte ; devise de référence : {} (modifiable dans Réglages).", Holdings.reference-currency);
 
                 // G1 review (spec §5.1): the read-only state is a band, not only greyed buttons.
+                // Its reason is the cause in force (2026-09-26), keyed by `read-only-cause`.
                 if Holdings.read-only: StatusBand {
                     icon: "⊘";
-                    text: @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; les positions se consultent mais ne se modifient pas.");
+                    text: Holdings.read-only-cause == "file"
+                        ? @tr("Dossier en lecture seule : son fichier est protégé contre l'écriture ; les positions se consultent mais ne se modifient pas.")
+                        : Holdings.read-only-cause == "directory"
+                        ? @tr("Dossier en lecture seule : son répertoire est protégé contre l'écriture ; les positions se consultent mais ne se modifient pas.")
+                        : Holdings.read-only-cause == "sidecar"
+                        ? @tr("Dossier en lecture seule : un de ses fichiers annexes (-wal ou -shm) n'est pas modifiable par ce compte ; les positions se consultent mais ne se modifient pas.")
+                        : @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; les positions se consultent mais ne se modifient pas.");
                 }
 
                 // G1 final review (M5): a failed read is « indisponible », never a silent selector.

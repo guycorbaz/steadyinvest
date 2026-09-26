@@ -17,7 +17,7 @@ use super::{
     MSG_HOLDING_INVALID_TICKER, MSG_HOLDING_LEDGER_UNREADABLE, MSG_HOLDING_NO_STUDY,
     MSG_HOLDING_NOT_FOUND, MSG_HOLDING_STUDY_DELETED, MSG_HOLDING_STUDY_UNAVAILABLE,
     MSG_LEDGER_BACKED, MSG_NO_JOURNAL, MSG_PORTFOLIO_INVALID_NAME, MSG_PORTFOLIO_LAST,
-    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_FAILED, MSG_READ_ONLY_WRITE, MSG_STOP_SEEDED_FROM_COST,
+    MSG_PORTFOLIO_NOT_FOUND, MSG_READ_FAILED, MSG_STOP_SEEDED_FROM_COST,
     MSG_STOP_STUDY_UNAVAILABLE, holding_study_other_currency_message,
     portfolio_has_holdings_message, read_error, read_typed, watch_error,
 };
@@ -49,10 +49,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_portfolios().map_err(|error| {
-            tracing::warn!("list_portfolios failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_portfolios()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_PORTFOLIOS, error))
     }
 
     /// The **active** portfolio (Story 6.1): the user-selected one when it still exists, else the
@@ -89,9 +88,7 @@ impl JournalState {
     /// in the app layer; id/timestamp from the injected sources (ADD15). A fresh portfolio becomes the
     /// active one. Guarded (read-only / no-journal / save-failure → a neutral notice).
     pub fn add_portfolio(&mut self, name: &str) -> Result<Uuid, String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let name = name.trim();
         if name.is_empty() {
             return Err(MSG_PORTFOLIO_INVALID_NAME.to_string());
@@ -108,9 +105,7 @@ impl JournalState {
 
     /// Rename a portfolio (Story 6.1). Same name guard. A no-op (identical name) writes nothing.
     pub fn rename_portfolio(&mut self, id: Uuid, name: &str) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let name = name.trim();
         if name.is_empty() {
             return Err(MSG_PORTFOLIO_INVALID_NAME.to_string());
@@ -126,9 +121,7 @@ impl JournalState {
     /// portfolio with holdings, or the last portfolio, is **not** removed. On a real delete that drops
     /// the active selection, the active id is cleared → the getter falls back to the first.
     pub fn delete_portfolio(&mut self, id: Uuid) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         match journal.delete_portfolio(id).map_err(watch_error)? {
             DeletePortfolioOutcome::Deleted => {
@@ -150,9 +143,7 @@ impl JournalState {
     /// may be asked; [`Self::delete_portfolio`] re-checks inside its transaction (the persistence
     /// guards stay the authority).
     pub fn portfolio_delete_guard(&self, id: Uuid) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let portfolios = {
             let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
             journal.list_portfolios().map_err(read_error)?
@@ -214,10 +205,9 @@ impl JournalState {
         let Some(portfolio) = self.try_active_portfolio()? else {
             return Ok(Vec::new());
         };
-        journal.list_holdings(portfolio.id).map_err(|error| {
-            tracing::warn!("list_holdings failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_holdings(portfolio.id)
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HOLDINGS, error))
     }
 
     /// The active portfolio's **sold (retired) positions** (issue #84, the « Positions vendues »
@@ -242,10 +232,7 @@ impl JournalState {
         };
         let mut sold: Vec<HoldingItem> = journal
             .list_all_holdings()
-            .map_err(|error| {
-                tracing::warn!("sold_holdings failed: {error}");
-                error.to_string()
-            })?
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HOLDINGS, error))?
             .into_iter()
             .filter(|h| h.portfolio_id == portfolio.id && h.sold_at.is_some())
             .collect();
@@ -356,9 +343,7 @@ impl JournalState {
         purchase_price: &str,
         sector: &str,
     ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let unavailable = |_| MSG_HOLDING_STUDY_UNAVAILABLE.to_string();
         let study = match self.try_get_study(study_id).map_err(unavailable)? {
             Some(study) => study,
@@ -399,9 +384,7 @@ impl JournalState {
         sector: &str,
         reference_currency: &str,
     ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let current = {
             let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
             journal
@@ -464,9 +447,7 @@ impl JournalState {
         currency: &str,
         sector: &str,
     ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let ticker = ticker.trim();
         if ticker.is_empty() {
             return Err(MSG_HOLDING_INVALID_TICKER.to_string());
@@ -534,9 +515,7 @@ impl JournalState {
         currency: Option<&str>,
         sector: &str,
     ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let ticker = ticker.trim();
         if ticker.is_empty() {
             return Err(MSG_HOLDING_INVALID_TICKER.to_string());
@@ -601,9 +580,7 @@ impl JournalState {
     /// [`Self::delete_holding`] re-checks inside its transaction (the persistence guard stays the
     /// authority).
     pub fn holding_remove_guard(&self, id: Uuid) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         match journal.holding_has_transactions(id) {
             Ok(false) => Ok(()),
@@ -619,9 +596,7 @@ impl JournalState {
     /// has transactions is refused by name ([`MSG_HOLDING_HAS_TRANSACTIONS`], via the typed
     /// persistence error — see [`super::watch_error`]).
     pub fn delete_holding(&mut self, id: Uuid) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal.delete_holding(id).map_err(watch_error)
     }
@@ -640,9 +615,7 @@ impl JournalState {
         pct_input: &str,
         reference_currency: &str,
     ) -> Result<Option<&'static str>, String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let pct_input = pct_input.trim();
         if pct_input.is_empty() {
             // Clear the stop (both fields → NULL).
@@ -707,7 +680,7 @@ impl JournalState {
         };
         let mut tickers: Vec<String> = journal
             .list_all_holdings()
-            .map_err(|error| error.to_string())?
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_HOLDINGS, error))?
             .into_iter()
             .filter(|h| {
                 h.sold_at.is_none() && h.currency.is_none() && h.trailing_stop_level.is_some()
@@ -746,7 +719,7 @@ impl JournalState {
         price: Decimal,
         reference_currency: &str,
     ) -> Result<(), String> {
-        if self.read_only {
+        if self.is_read_only() {
             return Ok(()); // a read-only refresh simply doesn't ratchet — never an error
         }
         let Some(ticker) = self.get_study(study_id).map(|s| s.security_ticker) else {

@@ -5,10 +5,9 @@
 //! `put_study` path, so a step is itself reversible and the history is never silently lost.
 
 use steadyinvest_contract::Study;
-use steadyinvest_persistence::Error as PersistError;
 use uuid::Uuid;
 
-use super::{JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED};
+use super::{JournalState, MSG_NO_JOURNAL, MSG_SAVE_FAILED, save_error};
 
 /// The maximum number of undo steps kept in memory (oldest dropped past this). `Study` clones are
 /// small but not free; a long session does not grow the history unboundedly (Story 2.9).
@@ -99,9 +98,7 @@ impl JournalState {
     /// state onto the opposite stack so the step is itself reversible. On a write failure the popped
     /// snapshot is pushed back (the history is never silently lost) and a neutral notice surfaces.
     fn step(&mut self, study_id: Uuid, dir: Direction) -> Result<bool, String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         if self.journal.is_none() {
             return Err(MSG_NO_JOURNAL.to_string());
         }
@@ -139,13 +136,9 @@ impl JournalState {
                 }
                 Ok(true)
             }
-            Err(PersistError::NewerJournalSchema { .. }) => {
-                push_back(&mut self.history, restored);
-                Err(MSG_READ_ONLY_WRITE.to_string())
-            }
             Err(error) => {
                 push_back(&mut self.history, restored);
-                Err(format!("{MSG_SAVE_FAILED} {error}"))
+                Err(save_error(error))
             }
         }
     }

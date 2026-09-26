@@ -559,7 +559,8 @@ export global Studies {
     // soft-lock notice, an edit/undo/drag failure…). Written only through Rust's `study_notice`
     // (the F4 slot rule lives there); emptied whenever a study or the demo opens. Empty = hidden.
     in-out property <string> study-notice;
-    // True when the open journal is read-only (newer-schema file) — creation is refused.
+    // True when the open journal is read-only (a newer-schema file, or a file / directory
+    // protected against writing) — creation is refused.
     in-out property <bool> read-only;
 
     // ── Reopened study → the faithful §1–§5 form (Story 2.3, replaces the 2.2 minimal restore) ──
@@ -1472,6 +1473,10 @@ export global Holdings {
     // « indisponible », never the empty-looking « Aucune position pour le moment ».
     in-out property <bool> holdings-unavailable;
     in-out property <bool> read-only;
+    // WHY the dossier is read-only, keyed by cause (2026-09-26): "newer-schema", "file" or
+    // "directory" (protected against writing), "sidecar" (a -wal / -shm this account cannot
+    // write) — the read-only bands name the right reason.
+    in-out property <string> read-only-cause;
     in-out property <string> notice;
     in-out property <string> reference-currency: "CHF";
     // Story 6.2 (FR38): the fixed allow-list a holding may be denominated in, pushed from Rust

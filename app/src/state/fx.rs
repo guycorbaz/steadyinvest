@@ -19,7 +19,7 @@ use steadyinvest_persistence::FxRateItem;
 use super::ledger::normalize_event_date;
 use super::{
     JournalState, MSG_FX_FUTURE_DATE, MSG_FX_INVALID_CURRENCY, MSG_FX_INVALID_RATE,
-    MSG_FX_SAME_CURRENCY, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, watch_error,
+    MSG_FX_SAME_CURRENCY, MSG_NO_JOURNAL, watch_error,
 };
 use uuid::Uuid;
 
@@ -38,10 +38,9 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(Vec::new());
         };
-        journal.list_fx_rates().map_err(|error| {
-            tracing::warn!("list_fx_rates failed: {error}");
-            error.to_string()
-        })
+        journal
+            .list_fx_rates()
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_FX, error))
     }
 
     /// The FOREIGN currencies in use (Story 6.5, AC3): the effective currencies of the ACTIVE
@@ -109,9 +108,7 @@ impl JournalState {
         quote: &str,
         source: &str,
     ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let base = base.trim().to_uppercase();
         let quote = quote.trim().to_uppercase();
         if base == quote {
@@ -156,9 +153,7 @@ impl JournalState {
     /// honest downstream: the affected consolidation goes ABSENT with the pair named (Story 6.6),
     /// never falling back to a stale figure.
     pub fn delete_fx_rate(&mut self, id: &str) -> Result<bool, String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let Ok(id) = Uuid::parse_str(id.trim()) else {
             return Ok(false);
         };
