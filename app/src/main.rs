@@ -101,6 +101,8 @@ fn main() -> Result<(), slint::PlatformError> {
     // Open the last-used journal (or create the default one), with identity + time from the
     // injected sources (ADD15). This is the first time the app opens the journal — Story 2.1
     // deliberately did not. Failure degrades to a usable journal-less state, never a crash.
+    // Second G3 M-a: the private read copies a crashed run left in the OS temp dir go.
+    steadyinvest_persistence::sweep_stale_read_copies();
     let configured = config.borrow().journal_path.clone();
     let (mut journal_state, startup_notice) = JournalState::open_or_create(
         configured.as_deref(),

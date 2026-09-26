@@ -141,9 +141,31 @@ pub enum Error {
     Restore { detail: String },
 
     /// A protected journal is read through a private copy (its unconsolidated writes cannot be
-    /// read in place without creating files beside it); that copy could not be prepared.
+    /// read in place without creating files beside it); that copy could not be prepared. `cause`
+    /// is the file-system error's kind (a full disk is named as such).
     #[error("the private read copy of the protected journal could not be prepared: {detail}")]
-    ReadCopy { detail: String },
+    ReadCopy {
+        detail: String,
+        cause: std::io::ErrorKind,
+    },
+
+    /// The protected journal changed while it was being copied for reading (another account
+    /// writing it — a directory we cannot write holds no lock), twice in a row. Nothing was read.
+    #[error("the journal changed while it was being copied for reading; it was not opened")]
+    ChangedDuringCopy,
+
+    /// The journal's `-wal` / `-shm` is not writable by this account and could not be made so;
+    /// the journal is opened read-only and write methods return this variant.
+    #[error("a side file of the journal (-wal / -shm) is not writable; it is opened read-only")]
+    SidecarNotWritable,
+
+    /// A backup file could not be written, flushed or named. `cause` is the file-system error's
+    /// kind (`AlreadyExists` when the name is taken — the caller picks another).
+    #[error("the backup could not be written: {detail}")]
+    Backup {
+        detail: String,
+        cause: std::io::ErrorKind,
+    },
 }
 
 /// The KIND of a failure, for a caller that names causes in its own language (the app speaks
@@ -167,6 +189,10 @@ pub enum ErrorKind {
     /// The journal is protected against writing and older than this build (its schema update
     /// cannot be written); `directory` names which is protected.
     ProtectedOutdated { directory: bool },
+    /// A protected journal's private read copy could not be prepared.
+    ReadCopy,
+    /// The journal changed while being copied for reading.
+    ChangedDuringCopy,
     /// The database file was replaced or moved while open (SQLite READONLY_DBMOVED — a sync
     /// tool swapping the file, G3 L1): its writes are refused until it is reopened.
     Replaced,
@@ -176,12 +202,31 @@ pub enum ErrorKind {
     Other,
 }
 
+/// The named kind of a file-system failure (second G3 M-f: a full disk is `DiskFull` wherever it
+/// happens), `Other` when none applies.
+fn io_kind(kind: std::io::ErrorKind) -> ErrorKind {
+    use std::io::ErrorKind as K;
+    match kind {
+        K::StorageFull | K::QuotaExceeded => ErrorKind::DiskFull,
+        K::PermissionDenied | K::ReadOnlyFilesystem => ErrorKind::WriteProtected,
+        K::NotFound => ErrorKind::Missing,
+        _ => ErrorKind::Other,
+    }
+}
+
 impl Error {
     /// This failure's [`ErrorKind`].
     pub fn kind(&self) -> ErrorKind {
         use rusqlite::ErrorCode as C;
         match self {
             Error::WriteProtected { .. } => ErrorKind::WriteProtected,
+            Error::ReadCopy { cause, .. } => match io_kind(*cause) {
+                ErrorKind::Other => ErrorKind::ReadCopy,
+                named => named,
+            },
+            Error::Backup { cause, .. } => io_kind(*cause),
+            Error::ChangedDuringCopy => ErrorKind::ChangedDuringCopy,
+            Error::SidecarNotWritable => ErrorKind::WriteProtected,
             Error::WriteProtectedOutdated { directory, .. } => ErrorKind::ProtectedOutdated {
                 directory: *directory,
             },
@@ -359,6 +404,13 @@ mod tests {
             },
             Error::ReadCopy {
                 detail: "a file could not be copied".to_string(),
+                cause: std::io::ErrorKind::StorageFull,
+            },
+            Error::ChangedDuringCopy,
+            Error::SidecarNotWritable,
+            Error::Backup {
+                detail: "the partial file: exists".to_string(),
+                cause: std::io::ErrorKind::AlreadyExists,
             },
         ]
     }
@@ -386,14 +438,17 @@ mod tests {
                 | Error::Lock { .. }
                 | Error::HoldingHasTransactions
                 | Error::Restore { .. }
-                | Error::ReadCopy { .. } => {}
+                | Error::ReadCopy { .. }
+                | Error::ChangedDuringCopy
+                | Error::SidecarNotWritable
+                | Error::Backup { .. } => {}
             }
         }
-        // 18 variants; `WriteProtected` and `WriteProtectedOutdated` are sampled for both of
+        // 21 variants; `WriteProtected` and `WriteProtectedOutdated` are sampled for both of
         // their causes (file, directory).
         assert_eq!(
             sample_errors().len(),
-            20,
+            23,
             "one sample per variant (+2 causes)"
         );
     }

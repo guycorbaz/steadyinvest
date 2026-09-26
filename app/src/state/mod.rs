@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use rust_decimal::Decimal;
 use steadyinvest_contract::{ForecastLowOption, Judgment, Timestamp};
 use steadyinvest_persistence::{
-    Error as PersistError, Journal, ReadOnlyCause, clear_lock, lock_is_stale,
+    Error as PersistError, Journal, ReadOnlyCause, clear_lock, lock_is_stale, resolved_path,
 };
 use uuid::Uuid;
 
@@ -221,8 +221,9 @@ impl JournalState {
         clock: Box<dyn Clock>,
         idgen: Box<dyn IdGen>,
     ) -> (Self, Option<String>) {
-        // 1) A configured journal that exists on disk → open it.
-        if let Some(path) = configured
+        // 1) A configured journal that exists on disk → open it. Resolved once (second G3 L6):
+        //    its sync-folder mode, its backups and a restore all act on the real file.
+        if let Some(path) = configured.map(resolved_path).as_deref()
             && path.exists()
         {
             // Story 5.5: a STALE lock (left by a crashed prior run — no live owner) on the
@@ -263,22 +264,60 @@ impl JournalState {
                     tracing::warn!("configured journal {} not opened: {error}", path.display());
                     let named = persist_cause(&error)
                         .filter(|_| error.kind() != steadyinvest_persistence::ErrorKind::Corrupt);
-                    let (mut state, _) = Self::open_or_create_default(default, clock, idgen);
-                    return match named {
+                    // Second G3 M-e: the stand-in may fail too (a second instance holding a
+                    // dossier that IS the default one…) — then no dossier is open, and the notice
+                    // says so, the stand-in's own refusal after it; never « le dossier par défaut
+                    // est utilisé ». A configured dossier that is the default is not retried.
+                    let same = default
+                        .as_deref()
+                        .is_some_and(|d| journal_io::same_file_path(path, d));
+                    let (mut state, fallback) = if same {
+                        (Self::journal_less(clock, idgen), None)
+                    } else {
+                        Self::open_or_create_default(default, clock, idgen)
+                    };
+                    let stood_in = state.journal.is_some();
+                    let notice = match named {
                         Some(cause) => {
                             state.kept_configured = Some(path.to_path_buf());
-                            (
-                                state,
-                                Some(MSG_CONFIGURED_REFUSED.replace("{cause}", cause)),
-                            )
+                            let template = if stood_in {
+                                MSG_CONFIGURED_REFUSED
+                            } else {
+                                MSG_CONFIGURED_REFUSED_NONE
+                            };
+                            template.replace("{cause}", cause)
                         }
-                        None => (state, Some(MSG_CONFIGURED_UNREADABLE.to_string())),
+                        None if stood_in => MSG_CONFIGURED_UNREADABLE.to_string(),
+                        None => MSG_CONFIGURED_UNREADABLE_NONE.to_string(),
                     };
+                    let notice = match fallback.filter(|_| !stood_in) {
+                        Some(why) => format!("{notice} {why}"),
+                        None => notice,
+                    };
+                    return (state, Some(notice));
                 }
             }
         }
         // 2) No usable configured path → the default journal.
         Self::open_or_create_default(default, clock, idgen)
+    }
+
+    /// A state with no dossier open (the app stays usable, writes refused with
+    /// [`MSG_NO_JOURNAL`]).
+    fn journal_less(clock: Box<dyn Clock>, idgen: Box<dyn IdGen>) -> Self {
+        Self {
+            journal: None,
+            path: None,
+            read_only: None,
+            clock,
+            idgen,
+            history: UndoHistory::default(),
+            pending_restore: None,
+            pending_import: None,
+            active_portfolio_id: None,
+            number_format: NumberFormat::default(),
+            kept_configured: None,
+        }
     }
 
     /// Open the default journal if its file already exists, else create it (parent dirs included),
@@ -407,6 +446,7 @@ impl JournalState {
             Some(ReadOnlyCause::NewerSchema { .. }) => "newer-schema",
             Some(ReadOnlyCause::FileWriteProtected) => "file",
             Some(ReadOnlyCause::DirectoryWriteProtected) => "directory",
+            Some(ReadOnlyCause::SidecarNotWritable) => "sidecar",
         }
     }
 
@@ -475,6 +515,7 @@ pub(crate) fn read_only_notice(cause: ReadOnlyCause) -> &'static str {
         ReadOnlyCause::NewerSchema { .. } => MSG_STARTUP_READ_ONLY,
         ReadOnlyCause::FileWriteProtected => MSG_STARTUP_FILE_PROTECTED,
         ReadOnlyCause::DirectoryWriteProtected => MSG_STARTUP_DIR_PROTECTED,
+        ReadOnlyCause::SidecarNotWritable => MSG_STARTUP_SIDECAR_PROTECTED,
     }
 }
 
@@ -484,6 +525,7 @@ pub(crate) fn read_only_refusal(cause: ReadOnlyCause) -> &'static str {
         ReadOnlyCause::NewerSchema { .. } => MSG_READ_ONLY_WRITE,
         ReadOnlyCause::FileWriteProtected => MSG_READ_ONLY_FILE_WRITE,
         ReadOnlyCause::DirectoryWriteProtected => MSG_READ_ONLY_DIR_WRITE,
+        ReadOnlyCause::SidecarNotWritable => MSG_READ_ONLY_SIDECAR_WRITE,
     }
 }
 
@@ -499,6 +541,7 @@ pub(crate) fn save_error(error: PersistError) -> String {
         PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
         PersistError::WriteProtected { directory: false } => MSG_READ_ONLY_FILE_WRITE.to_string(),
         PersistError::WriteProtected { directory: true } => MSG_READ_ONLY_DIR_WRITE.to_string(),
+        PersistError::SidecarNotWritable => MSG_READ_ONLY_SIDECAR_WRITE.to_string(),
         other if other.is_write_protected() => {
             tracing::warn!("journal write refused by the system: {other}");
             MSG_WRITE_REFUSED_BY_SYSTEM.to_string()
@@ -529,6 +572,8 @@ pub(crate) fn persist_cause(error: &PersistError) -> Option<&'static str> {
         K::ProtectedOutdated { directory: false } => Some(MSG_CAUSE_OUTDATED_FILE),
         K::ProtectedOutdated { directory: true } => Some(MSG_CAUSE_OUTDATED_DIR),
         K::Replaced => Some(MSG_CAUSE_REPLACED),
+        K::ReadCopy => Some(MSG_CAUSE_READ_COPY),
+        K::ChangedDuringCopy => Some(MSG_CAUSE_CHANGED_DURING_COPY),
         K::Other => None,
     }
 }

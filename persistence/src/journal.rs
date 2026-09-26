@@ -54,6 +54,10 @@ pub enum ReadOnlyCause {
     /// The file is writable but its directory is not: SQLite cannot create the `-wal`/`-journal`
     /// sidecar a write needs, so the first write would fail.
     DirectoryWriteProtected,
+    /// The file and its directory are writable but its `-wal` / `-shm` is not, and cannot be made
+    /// so by this account (another account's file): SQLite would fail at the first write (second
+    /// G3 L4 — named apart, never a « protected file »).
+    SidecarNotWritable,
 }
 
 /// An open journal: one SQLite connection plus the journal's identity. Single connection per
@@ -63,6 +67,8 @@ pub enum ReadOnlyCause {
 pub struct Journal {
     pub(crate) conn: Connection,
     id: Uuid,
+    /// The journal's own (resolved) file — the backup takes its mode (second G3 M-c).
+    path: PathBuf,
     /// `Some(cause)` when the journal is read-only — a file newer than this build's latest
     /// migration (NFR-R3), or a file/directory protected against writing — and write methods fail
     /// with the cause-named error.
@@ -81,7 +87,13 @@ pub struct Journal {
 /// with unconsolidated writes be read at all without touching its own directory: SQLite needs a
 /// `-shm` beside a WAL file it reads, and would otherwise create one beside the protected file —
 /// with that file's `r--r--r--` mode, which then breaks the first write once the protection is
-/// lifted (G3 M1) — or fail outright in a protected directory (G3 M2). Removed on drop.
+/// lifted (G3 M1) — or fail outright in a protected directory (G3 M2). Removed on drop; a copy
+/// left by a crashed run is removed at the next start ([`sweep_stale_read_copies`]).
+///
+/// The copy of a private dossier stays private (G1 P L-b, second G3 M-a): the directory is
+/// `rwx------` and every copied file `rw-------`, in the shared temp dir. Being WRITABLE by us is
+/// also what lets SQLite recover the copy — replay a `-wal`, roll back a hot `-journal` (second
+/// G3 M-b: a copied `r--r--r--` file could not be rolled back and the open failed).
 #[derive(Debug)]
 struct ScratchCopy {
     dir: PathBuf,
@@ -93,41 +105,143 @@ impl Drop for ScratchCopy {
     }
 }
 
+/// The prefix of a private read copy's directory name (`<prefix><pid>-<n>`).
+const READ_COPY_PREFIX: &str = "steadyinvest-read-";
+
+/// The `(size, modified)` of `path`, `None` when absent — the identity of a file's content for
+/// the copy's before/after comparison.
+fn file_stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
+/// Create a directory only this account can enter (`rwx------` on Unix).
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir)
+}
+
+/// Open a NEW file only this account can read (`rw-------` on Unix) — refuses an existing one.
+fn create_private_file(path: &Path, mode: u32) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    options.open(path)
+}
+
 impl ScratchCopy {
     /// Copy `path` and its content-holding sidecars into a new private directory; returns the
     /// guard and the copy's `.db` path. The directory name is the process id plus a per-process
     /// counter (no clock, no random identity — ADD15), created exclusively.
+    ///
+    /// Second G3 L7: nothing stops another account writing a journal whose directory WE cannot
+    /// write (no lock is possible there). The files' size and modification time are compared
+    /// before and after the copy; a change is retried once, then refused by name
+    /// ([`Error::ChangedDuringCopy`]) — never a torn copy read as the dossier.
     fn of(path: &Path) -> Result<(Self, PathBuf)> {
+        const SIDECARS: [&str; 3] = ["", "-wal", "-journal"];
+        let stamps = || -> Vec<_> {
+            SIDECARS
+                .iter()
+                .map(|s| file_stamp(&with_suffix(path, s)))
+                .collect()
+        };
+        for _attempt in 0..2 {
+            let before = stamps();
+            let (guard, copy) = Self::copy_once(path, &SIDECARS)?;
+            if stamps() == before {
+                return Ok((guard, copy));
+            }
+            // `guard` drops here: the torn copy goes before the retry.
+        }
+        Err(Error::ChangedDuringCopy)
+    }
+
+    fn copy_once(path: &Path, sidecars: &[&str]) -> Result<(Self, PathBuf)> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
+        let io_failure = |what: &str, e: std::io::Error| Error::ReadCopy {
+            detail: format!("{what}: {e}"),
+            cause: e.kind(),
+        };
         let base = std::env::temp_dir();
         let dir = loop {
             let candidate = base.join(format!(
-                "steadyinvest-read-{}-{}",
+                "{READ_COPY_PREFIX}{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
-            match std::fs::create_dir(&candidate) {
+            match create_private_dir(&candidate) {
                 Ok(()) => break candidate,
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => {
-                    return Err(Error::ReadCopy {
-                        detail: format!("its directory could not be created: {e}"),
-                    });
-                }
+                Err(e) => return Err(io_failure("its directory could not be created", e)),
             }
         };
         let guard = ScratchCopy { dir };
         let copy = guard.dir.join("journal.db");
-        for suffix in ["", "-wal", "-journal"] {
+        for suffix in sidecars {
             let from = with_suffix(path, suffix);
             if suffix.is_empty() || std::fs::metadata(&from).is_ok_and(|m| m.len() > 0) {
-                std::fs::copy(&from, with_suffix(&copy, suffix)).map_err(|e| Error::ReadCopy {
-                    detail: format!("a file could not be copied: {e}"),
-                })?;
+                let mut source = std::fs::File::open(&from)
+                    .map_err(|e| io_failure("a file could not be read", e))?;
+                let mut target = create_private_file(&with_suffix(&copy, suffix), 0o600)
+                    .map_err(|e| io_failure("a file could not be created", e))?;
+                std::io::copy(&mut source, &mut target)
+                    .map_err(|e| io_failure("a file could not be copied", e))?;
             }
         }
         Ok((guard, copy))
+    }
+}
+
+/// Remove the private read copies a crashed run left in the OS temp dir (second G3 M-a): only
+/// directories named like ours, owned by this account, whose process is no longer alive — a live
+/// instance's copy is never touched. Best-effort, silent. Called once at startup.
+pub fn sweep_stale_read_copies() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    #[cfg(unix)]
+    let me = {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata("/proc/self").map(|m| m.uid()).ok()
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(rest) = name.to_str().and_then(|n| n.strip_prefix(READ_COPY_PREFIX)) else {
+            continue;
+        };
+        let Some(pid) = rest.split('-').next().and_then(|p| p.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid == std::process::id() || process_start_time(pid).is_some() {
+            continue; // ours, or a live process's
+        }
+        let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if !meta.is_dir() {
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if me != Some(meta.uid()) {
+                continue; // another account's
+            }
+        }
+        let _ = std::fs::remove_dir_all(entry.path());
     }
 }
 
@@ -141,8 +255,9 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 /// The journal path as the filesystem resolves it (G3 L3): a symlinked dossier has its lock, its
 /// write probe and SQLite's `-wal` / `-shm` all beside the TARGET — never the lock beside the link
 /// and the sidecars beside the target. A path that does not exist yet (a create) resolves through
-/// its parent; anything unresolvable stays as given.
-fn resolved(path: &Path) -> PathBuf {
+/// its parent; anything unresolvable stays as given. Public so the app resolves a dossier ONCE
+/// and uses that path everywhere (sync-folder mode, backups, restore — second G3 L6).
+pub fn resolved_path(path: &Path) -> PathBuf {
     if let Ok(real) = std::fs::canonicalize(path) {
         return real;
     }
@@ -178,7 +293,7 @@ impl Drop for JournalLock {
 
 /// The lock sidecar path for a journal (`<path>-lock`) — distinct from the SQLite `-wal`/`-shm`.
 fn lock_path_for(path: &Path) -> PathBuf {
-    with_suffix(&resolved(path), "-lock")
+    with_suffix(&resolved_path(path), "-lock")
 }
 
 /// The `(pid, start_time)` recorded in a lock sidecar, if it parses (Story 5.5). The start-time
@@ -390,6 +505,7 @@ impl Journal {
         Ok(Journal {
             conn,
             id: journal_id,
+            path: resolved_path(path),
             read_only: None,
             _scratch: None,
             _lock: lock,
@@ -412,7 +528,7 @@ impl Journal {
     /// location (ADD8). Acquires the single-instance lock first.
     pub fn open_with_mode(path: impl AsRef<Path>, mode: JournalMode) -> Result<Self> {
         // G3 L3: the lock, the probes and SQLite's sidecars all work on the resolved file.
-        let path = &resolved(path.as_ref());
+        let path = &resolved_path(path.as_ref());
         // Lock before touching the file — a second instance is refused up front. Any error below drops
         // this guard, releasing the lock.
         let (lock, directory_writable) = acquire_lock(path)?;
@@ -437,9 +553,10 @@ impl Journal {
         // G3 M1: a writable file whose `-wal` / `-shm` is NOT writable (left `r--r--r--` by an
         // earlier read-only open, before this fix, or by any other tool) would open writable and
         // fail at the first write. Such a sidecar is ours to repair (owner write added back); when
-        // it cannot be, the file is treated as protected — up front, never at the first write.
+        // it cannot be (another account's), the journal opens read-only up front with its own
+        // cause, read through the private copy (second G3 L4).
         if protection.is_none() && !repair_read_only_sidecars(path) {
-            protection = Some(ReadOnlyCause::FileWriteProtected);
+            protection = Some(ReadOnlyCause::SidecarNotWritable);
         }
         if let Some(cause) = protection {
             drop(conn);
@@ -460,6 +577,7 @@ impl Journal {
             return Ok(Journal {
                 conn,
                 id,
+                path: path.clone(),
                 read_only: Some(ReadOnlyCause::NewerSchema {
                     file_user_version: file_version,
                 }),
@@ -478,6 +596,7 @@ impl Journal {
         Ok(Journal {
             conn,
             id,
+            path: path.clone(),
             read_only: None,
             _scratch: None,
             _lock: lock,
@@ -544,6 +663,7 @@ impl Journal {
         Ok(Journal {
             conn,
             id,
+            path: path.to_path_buf(),
             read_only: Some(cause),
             _scratch: scratch,
             _lock: lock,
@@ -586,14 +706,81 @@ impl Journal {
     /// Write a self-contained copy of the journal AS THIS CONNECTION READS IT to `dest` (`VACUUM
     /// INTO`): every committed page, those still in a `-wal` included, in one standalone file with
     /// no sidecar. Works on a read-only handle too (G3 M3: a protected dossier's backup used to
-    /// copy only its `.db` and silently drop the commits still in its `-wal`). `dest` must not
-    /// exist — SQLite refuses to overwrite.
+    /// copy only its `.db` and silently drop the commits still in its `-wal`).
+    ///
+    /// Second G3 review:
+    /// - M-c: the backup keeps the dossier's own file mode (`VACUUM INTO` alone creates `0644`
+    ///   whatever the dossier's privacy): the target is pre-created with that mode, and SQLite
+    ///   writes into the empty file;
+    /// - M-d: it is written to `<dest>.partial`, flushed to disk, then given its final name, the
+    ///   directory flushed too — a failure never leaves a truncated file under a valid-looking
+    ///   backup name (the partial is removed on any failure);
+    /// - L3: any path the OS accepts (bound as bytes, never required to be UTF-8).
+    ///
+    /// Never overwrites: an existing `dest` (or a concurrent `<dest>.partial`) is refused with
+    /// [`Error::Backup`] of cause `AlreadyExists`, which the caller answers with another name.
     pub fn backup_to(&self, dest: &Path) -> Result<()> {
-        let dest = dest.to_str().ok_or_else(|| Error::Restore {
-            detail: "the backup path is not valid UTF-8".to_string(),
-        })?;
-        self.conn.execute("VACUUM INTO ?1", [dest])?;
-        Ok(())
+        let partial = with_suffix(dest, ".partial");
+        let failure = |what: &str, e: std::io::Error| Error::Backup {
+            detail: format!("{what}: {e}"),
+            cause: e.kind(),
+        };
+        // The dossier's group / other bits (its privacy), the owner always `rw` — a backup of a
+        // `r--r--r--` protected dossier must still be writable by SQLite while it is written.
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(&self.path).map_or(0o600, |m| m.permissions().mode() & 0o066 | 0o600)
+        };
+        #[cfg(not(unix))]
+        let mode = 0o600;
+        // `create_new`: a partial that exists is someone else's — refused, never removed.
+        drop(create_private_file(&partial, mode).map_err(|e| failure("the partial file", e))?);
+        let written = (|| -> Result<()> {
+            self.conn.execute(
+                "VACUUM INTO CAST(?1 AS TEXT)",
+                [partial.as_os_str().as_encoded_bytes()],
+            )?;
+            std::fs::File::open(&partial)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| failure("the backup could not be flushed", e))?;
+            // No-clobber final name: a hard link fails on an existing target; where links are
+            // unsupported, an existence check guards the rename.
+            match std::fs::hard_link(&partial, dest) {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&partial);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(failure("the backup name is taken", e));
+                }
+                Err(_) => {
+                    if dest.exists() {
+                        return Err(failure(
+                            "the backup name is taken",
+                            std::io::Error::from(std::io::ErrorKind::AlreadyExists),
+                        ));
+                    }
+                    std::fs::rename(&partial, dest)
+                        .map_err(|e| failure("the backup could not be named", e))?;
+                }
+            }
+            #[cfg(unix)]
+            if let Some(dir) = dest.parent() {
+                let dir = if dir.as_os_str().is_empty() {
+                    Path::new(".")
+                } else {
+                    dir
+                };
+                std::fs::File::open(dir)
+                    .and_then(|d| d.sync_all())
+                    .map_err(|e| failure("the backup directory could not be flushed", e))?;
+            }
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = std::fs::remove_file(&partial);
+        }
+        written
     }
 
     /// Checkpoint the WAL into the main database file and truncate it (`PRAGMA
@@ -626,6 +813,7 @@ impl Journal {
             Some(ReadOnlyCause::DirectoryWriteProtected) => {
                 Err(Error::WriteProtected { directory: true })
             }
+            Some(ReadOnlyCause::SidecarNotWritable) => Err(Error::SidecarNotWritable),
             None => Ok(()),
         }
     }
@@ -754,5 +942,30 @@ mod tests {
         );
         assert_eq!(file_uri(Path::new("/d/x.db")), "file://localhost/d/x.db");
         assert_eq!(file_uri(Path::new("rel/x.db")), "file:rel/x.db");
+    }
+
+    #[test]
+    fn a_failed_backup_leaves_no_file_under_any_name() {
+        // Second G3 M-d: a forced failure (the connection refuses to write any file).
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("j.db");
+        let journal = Journal::create(
+            &path,
+            Uuid::from_u128(1),
+            &steadyinvest_contract::Timestamp("2026-09-26T00:00:00Z".to_string()),
+        )
+        .expect("create");
+        journal
+            .conn
+            .pragma_update(None, "query_only", true)
+            .expect("query_only");
+        let out = tempfile::TempDir::new().expect("tempdir");
+        let dest = out.path().join("backup.db");
+        assert!(journal.backup_to(&dest).is_err(), "the backup fails");
+        assert_eq!(
+            std::fs::read_dir(out.path()).expect("dir").count(),
+            0,
+            "neither the backup nor its partial is left"
+        );
     }
 }

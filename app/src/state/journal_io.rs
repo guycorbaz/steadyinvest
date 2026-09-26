@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::{
     JournalState, MSG_JOURNAL_LOCKED, MSG_JOURNAL_OPEN_FAILED, MSG_NO_DATA_DIR, MSG_NO_JOURNAL,
-    OpenOutcome,
+    MSG_SAVE_FAILED, OpenOutcome,
 };
 
 /// Whether `path` (a journal file or its directory) lives in a **detected sync folder** (Story 5.5,
@@ -79,9 +79,25 @@ impl JournalState {
         // other — a same-version backup (e.g. one taken right after a restore) keeps its own file. The
         // timestamp is filesystem-safe (no `:`).
         let stamp = self.clock.now().0.replace(':', "");
-        let dest = dir.join(format!("journal-{}-v{version}-{stamp}.db", journal.id()));
-        journal.backup_to(&dest).map_err(super::save_error)?;
-        Ok(dest)
+        let base = format!("journal-{}-v{version}-{stamp}", journal.id());
+        // Second G3 L2: two backups in the same second — the name is taken, the next one gets a
+        // `-2`, `-3`… suffix; `backup_to` never overwrites.
+        for n in 1..=99u32 {
+            let dest = if n == 1 {
+                dir.join(format!("{base}.db"))
+            } else {
+                dir.join(format!("{base}-{n}.db"))
+            };
+            match journal.backup_to(&dest) {
+                Ok(()) => return Ok(dest),
+                Err(PersistError::Backup {
+                    cause: std::io::ErrorKind::AlreadyExists,
+                    ..
+                }) => continue,
+                Err(error) => return Err(super::save_error(error)),
+            }
+        }
+        Err(MSG_SAVE_FAILED.to_string())
     }
 
     /// The `backups/` folder of the live journal (Story 5.5 rule, see [`Self::backups_dir_for`]) — where
@@ -168,6 +184,8 @@ impl JournalState {
             && self.journal.is_some()
             && same_file_path(&current, path)
         {
+            // The user chose this dossier — even the startup stand-in (second G3 L5).
+            self.kept_configured = None;
             return Ok(OpenOutcome {
                 journal_id: self.journal_id().unwrap_or_else(Uuid::nil),
                 logical_version: self.logical_version_or_zero(),
@@ -177,6 +195,8 @@ impl JournalState {
         }
         let prev = self.path.clone();
         self.close_current();
+        // Resolved once (second G3 L6): the mode, backups and a restore act on the real file.
+        let path = &steadyinvest_persistence::resolved_path(path);
         match self.adopt_open(path, sync_mode_for(path)) {
             Ok(outcome) => {
                 // The user chose a dossier: the startup stand-in (G3 M4) is over.
@@ -203,6 +223,7 @@ impl JournalState {
         } else {
             format!("{trimmed}.db")
         };
+        let dir = &steadyinvest_persistence::resolved_path(dir);
         let path = dir.join(file_name);
         let mode = sync_mode_for(dir);
         let prev = self.path.clone();

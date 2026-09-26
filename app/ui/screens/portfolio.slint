@@ -117,6 +117,8 @@ export component PortfolioScreen inherits Rectangle {
                         ? @tr("Dossier en lecture seule : son fichier est protégé contre l'écriture ; les positions se consultent mais ne se modifient pas.")
                         : Holdings.read-only-cause == "directory"
                         ? @tr("Dossier en lecture seule : son répertoire est protégé contre l'écriture ; les positions se consultent mais ne se modifient pas.")
+                        : Holdings.read-only-cause == "sidecar"
+                        ? @tr("Dossier en lecture seule : un de ses fichiers annexes (-wal ou -shm) n'est pas modifiable par ce compte ; les positions se consultent mais ne se modifient pas.")
                         : @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; les positions se consultent mais ne se modifient pas.");
                 }
 

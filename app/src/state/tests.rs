@@ -8219,3 +8219,120 @@ fn a_backup_holds_what_the_dossier_shows() {
     assert_eq!(copy.list_studies().unwrap().len(), 1);
     assert_eq!(copy.id(), state.journal_id().unwrap());
 }
+
+// ── Second G3 review ──
+
+/// Mark `path` as held by a LIVE other instance: its lock sidecar names process 1 (always alive)
+/// with its real start time. `false` when `/proc/1/stat` is unreadable (then nothing to observe).
+fn held_by_another_instance(path: &std::path::Path) -> bool {
+    let Ok(stat) = std::fs::read_to_string("/proc/1/stat") else {
+        return false;
+    };
+    let Some(start) = stat
+        .rsplit_once(')')
+        .and_then(|(_, rest)| rest.split_whitespace().nth(19))
+    else {
+        return false;
+    };
+    let mut lock = path.as_os_str().to_os_string();
+    lock.push("-lock");
+    std::fs::write(lock, format!("1 {start}")).is_ok()
+}
+
+fn fresh_journal(path: &std::path::Path) {
+    drop(
+        Journal::create(
+            path,
+            Uuid::from_u128(0x51),
+            &Timestamp("2026-09-26T00:00:00Z".to_string()),
+        )
+        .unwrap(),
+    );
+}
+
+#[test]
+fn a_refused_configured_dossier_that_is_the_default_opens_nothing_and_says_so() {
+    // M-e: a second instance on the default dossier — no stand-in, never « le dossier par
+    // défaut est utilisé ».
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("journal.db");
+    fresh_journal(&path);
+    if !held_by_another_instance(&path) {
+        return;
+    }
+    let (clock, idgen) = fixed(0x52, "2026-09-26T10:00:00Z");
+    let (state, notice) =
+        JournalState::open_or_create_with_default(Some(&path), Some(path.clone()), clock, idgen);
+    assert_eq!(state.journal_id(), None, "no dossier is open");
+    assert_eq!(
+        notice.as_deref(),
+        Some(
+            MSG_CONFIGURED_REFUSED_NONE
+                .replace("{cause}", MSG_CAUSE_LOCKED)
+                .as_str()
+        )
+    );
+    assert_eq!(state.kept_configured_path(), Some(path.as_path()));
+}
+
+#[test]
+fn a_refused_configured_dossier_whose_stand_in_fails_names_both() {
+    // M-e: the stand-in's own refusal follows; no « default in use » claim.
+    let dir = TempDir::new().unwrap();
+    let configured = dir.path().join("mine.db");
+    let default = dir.path().join("default.db");
+    fresh_journal(&configured);
+    fresh_journal(&default);
+    if !held_by_another_instance(&configured) || !held_by_another_instance(&default) {
+        return;
+    }
+    let (clock, idgen) = fixed(0x53, "2026-09-26T10:00:00Z");
+    let (state, notice) =
+        JournalState::open_or_create_with_default(Some(&configured), Some(default), clock, idgen);
+    assert_eq!(state.journal_id(), None);
+    let notice = notice.expect("a notice");
+    assert!(
+        notice.starts_with(&MSG_CONFIGURED_REFUSED_NONE.replace("{cause}", MSG_CAUSE_LOCKED)),
+        "{notice}"
+    );
+    assert!(notice.ends_with(MSG_JOURNAL_LOCKED), "{notice}");
+}
+
+#[test]
+fn reselecting_the_stand_in_ends_the_kept_configured_dossier() {
+    // L5: the user chose the stand-in — app-config follows the choice.
+    let dir = TempDir::new().unwrap();
+    let configured = dir.path().join("mine.db");
+    let default = dir.path().join("default.db");
+    fresh_journal(&configured);
+    if !held_by_another_instance(&configured) {
+        return;
+    }
+    let (clock, idgen) = fixed(0x54, "2026-09-26T10:00:00Z");
+    let (mut state, _) = JournalState::open_or_create_with_default(
+        Some(&configured),
+        Some(default.clone()),
+        clock,
+        idgen,
+    );
+    assert_eq!(state.kept_configured_path(), Some(configured.as_path()));
+    let outcome = state.open_journal(&default).expect("reselect the stand-in");
+    assert!(outcome.unchanged);
+    assert_eq!(state.kept_configured_path(), None);
+}
+
+#[test]
+fn two_backups_in_the_same_second_both_land() {
+    // L2: the fixed clock gives both the same stamp; the second gets a suffix.
+    let dir = TempDir::new().unwrap();
+    let state = watch_state(&dir, 0x55);
+    let first = state.create_backup().expect("first");
+    let second = state.create_backup().expect("second, same second");
+    assert_ne!(first, second);
+    assert!(
+        second.to_string_lossy().ends_with("-2.db"),
+        "{}",
+        second.display()
+    );
+    assert!(first.exists() && second.exists());
+}

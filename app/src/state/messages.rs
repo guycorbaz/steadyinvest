@@ -79,6 +79,20 @@ pub const MSG_CAUSE_OUTDATED_DIR: &str = "son répertoire est protégé contre l
 /// writes until it is opened again.
 pub const MSG_CAUSE_REPLACED: &str =
     "le fichier du dossier a été remplacé pendant son ouverture ; rouvrez-le";
+/// Second G3 M-e: the configured dossier was refused for a named cause AND no stand-in could be
+/// opened — no dossier is open (the stand-in's own refusal follows).
+pub const MSG_CONFIGURED_REFUSED_NONE: &str = "Le dossier configuré n'a pas pu être ouvert : {cause} ; aucun dossier n'est ouvert, le dossier configuré reste retenu.";
+/// The configured dossier is unreadable and no stand-in could be opened either.
+pub const MSG_CONFIGURED_UNREADABLE_NONE: &str =
+    "Le dossier configuré est illisible ; aucun dossier n'est ouvert.";
+/// Cause (second G3 M-f): the private read copy of a protected dossier could not be prepared.
+pub const MSG_CAUSE_READ_COPY: &str = "sa copie de lecture n'a pas pu être préparée";
+/// Cause (second G3 L7): the protected dossier changed while it was being copied for reading.
+pub const MSG_CAUSE_CHANGED_DURING_COPY: &str =
+    "le fichier a été modifié par un autre accès pendant sa lecture";
+/// Second G3 L4: a side file (`-wal` / `-shm`) of the dossier cannot be written by this account.
+pub const MSG_STARTUP_SIDECAR_PROTECTED: &str = "Un fichier annexe du dossier (-wal ou -shm) n'est pas modifiable par ce compte ; le dossier est ouvert en lecture seule.";
+pub const MSG_READ_ONLY_SIDECAR_WRITE: &str = "Dossier en lecture seule (fichier annexe -wal ou -shm non modifiable) ; l'écriture n'a pas eu lieu.";
 /// Startup (G3 M4): the configured dossier was refused for a named cause; the default one is used
 /// for this session and app-config keeps the configured one.
 pub const MSG_CONFIGURED_REFUSED: &str = "Le dossier configuré n'a pas pu être ouvert : {cause} ; le dossier par défaut est utilisé pour cette séance, le dossier configuré reste retenu.";
@@ -1000,6 +1014,12 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CAUSE_OUTDATED_DIR,
     MSG_CAUSE_REPLACED,
     MSG_CONFIGURED_REFUSED,
+    MSG_CONFIGURED_REFUSED_NONE,
+    MSG_CONFIGURED_UNREADABLE_NONE,
+    MSG_CAUSE_READ_COPY,
+    MSG_CAUSE_CHANGED_DURING_COPY,
+    MSG_STARTUP_SIDECAR_PROTECTED,
+    MSG_READ_ONLY_SIDECAR_WRITE,
     MSG_SUBJECT_STUDIES,
     MSG_SUBJECT_STUDY,
     MSG_SUBJECT_HISTORY,

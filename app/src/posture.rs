@@ -737,9 +737,10 @@ mod tests {
         // unclassified bands are reworded in place). The 2026-09-26 on-screen defect names the
         // cause of a read-only dossier in its two bands (the dialog, « Portefeuilles ») — a
         // protected file, a protected directory, beside the newer schema: 1002 + 4 = 1006,
-        // measured.
+        // measured. The second G3 review names a side file (-wal / -shm) this account cannot
+        // write, in both bands: 1006 + 2 = 1008, measured.
         assert!(
-            total >= 1006,
+            total >= 1008,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -861,7 +862,7 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            215,
+            221,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -904,7 +905,11 @@ mod tests {
             // protected-and-outdated cause by what is protected (MSG_CAUSE_OUTDATED_FILE /
             // _DIR, replacing MSG_OPEN_PROTECTED_OUTDATED), a file replaced while open
             // (MSG_CAUSE_REPLACED) and a configured dossier refused by name at startup
-            // (MSG_CONFIGURED_REFUSED): 212 - 1 + 4 = 215, measured.
+            // (MSG_CONFIGURED_REFUSED): 212 - 1 + 4 = 215, measured. The second G3 review: no dossier
+            // open after a refused configured one (MSG_CONFIGURED_REFUSED_NONE,
+            // MSG_CONFIGURED_UNREADABLE_NONE), the read copy failure and a concurrent change
+            // (MSG_CAUSE_READ_COPY, MSG_CAUSE_CHANGED_DURING_COPY), an unwritable side file
+            // (MSG_STARTUP_SIDECAR_PROTECTED, MSG_READ_ONLY_SIDECAR_WRITE): 215 + 6 = 221, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }

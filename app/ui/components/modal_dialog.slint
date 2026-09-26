@@ -339,6 +339,8 @@ export component ModalDialog inherits Rectangle {
                         ? @tr("Dossier en lecture seule : son fichier est protégé contre l'écriture ; rien ne peut y être enregistré.")
                         : Holdings.read-only-cause == "directory"
                         ? @tr("Dossier en lecture seule : son répertoire est protégé contre l'écriture ; rien ne peut y être enregistré.")
+                        : Holdings.read-only-cause == "sidecar"
+                        ? @tr("Dossier en lecture seule : un de ses fichiers annexes (-wal ou -shm) n'est pas modifiable par ce compte ; rien ne peut y être enregistré.")
                         : @tr("Dossier en lecture seule : il a été écrit par une version plus récente de l'application ; rien ne peut y être enregistré.");
                 }
                 if Dialog.kind == "form" && Dialog.context != "": Text {

@@ -449,3 +449,200 @@ fn a_writable_journal_is_not_read_only() {
     let journal = Journal::open(&path).expect("opens");
     assert_eq!(journal.read_only_cause(), None);
 }
+
+// ── Second G3 review ──
+
+fn mode_of(path: &Path) -> u32 {
+    std::fs::metadata(path)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777
+}
+
+/// The private read copies of THIS process in the OS temp dir.
+fn our_read_copies() -> Vec<PathBuf> {
+    let prefix = format!("steadyinvest-read-{}-", std::process::id());
+    std::fs::read_dir(std::env::temp_dir())
+        .expect("temp dir")
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .map(|e| e.path())
+        .collect()
+}
+
+#[test]
+fn the_private_read_copy_stays_private() {
+    // M-a: `rwx------` directory, `rw-------` files, in the shared temp dir.
+    let dir = TempDir::new().expect("tempdir");
+    let Some(copy) = journal_with_uncheckpointed_wal(dir.path(), "ro.db") else {
+        return;
+    };
+    set_mode(&copy, 0o444);
+    if !write_refused(&copy) {
+        return;
+    }
+    let journal = Journal::open(&copy).expect("opens read-only");
+    let copies = our_read_copies();
+    assert!(!copies.is_empty(), "read through a private copy");
+    for scratch in &copies {
+        let Ok(entries) = std::fs::read_dir(scratch) else {
+            continue; // another test's copy, already gone
+        };
+        assert_eq!(mode_of(scratch), 0o700, "{}", scratch.display());
+        for entry in entries.flatten() {
+            let m = mode_of(&entry.path());
+            assert_eq!(m & 0o077, 0, "{} is {m:o}", entry.path().display());
+        }
+    }
+    drop(journal);
+    set_mode(&copy, 0o644);
+}
+
+#[test]
+fn a_crashed_runs_read_copy_is_swept_and_a_live_one_kept() {
+    // M-a: only ours, by name, owner and dead PID.
+    let dead = (4_000_000u32..4_190_000)
+        .rev()
+        .find(|pid| !Path::new(&format!("/proc/{pid}")).exists())
+        .expect("a free pid");
+    let stale = std::env::temp_dir().join(format!("steadyinvest-read-{dead}-0"));
+    let live =
+        std::env::temp_dir().join(format!("steadyinvest-read-{}-999999", std::process::id()));
+    std::fs::create_dir_all(&stale).expect("stale dir");
+    std::fs::write(stale.join("journal.db"), b"x").expect("file");
+    std::fs::create_dir_all(&live).expect("live dir");
+    steadyinvest_persistence::sweep_stale_read_copies();
+    let stale_gone = !stale.exists();
+    let live_kept = live.exists();
+    let _ = std::fs::remove_dir_all(&live);
+    let _ = std::fs::remove_dir_all(&stale);
+    assert!(stale_gone, "a dead process's copy is removed");
+    assert!(live_kept, "a live process's copy is never touched");
+}
+
+#[test]
+fn a_protected_dossier_with_a_hot_rollback_journal_reads_as_committed() {
+    // M-b: a DELETE-mode dossier that crashed mid-transaction (a hot `-journal`), then protected:
+    // the copy is writable, so SQLite rolls the transaction back there; the dossier reads as it
+    // was committed — never refused as « protected ».
+    let src = TempDir::new().expect("tempdir");
+    let path = src.path().join("delete.db");
+    {
+        let mut journal =
+            Journal::create_with_mode(&path, JID, &ts("2026-09-26T00:00:00Z"), JournalMode::Delete)
+                .expect("create");
+        journal.put_study(&minimal_study(1, JID)).expect("study");
+    }
+    let dir = TempDir::new().expect("tempdir");
+    let copy = dir.path().join("ro.db");
+    {
+        let conn = Connection::open(&path).expect("raw");
+        conn.pragma_update(None, "cache_size", 1)
+            .expect("tiny cache");
+        conn.execute_batch(
+            "BEGIN; DELETE FROM studies; CREATE TABLE filler(x); \
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 3000) \
+             INSERT INTO filler SELECT randomblob(200) FROM n;",
+        )
+        .expect("an uncommitted transaction that spilled to the file");
+        // The crash: the files as they are mid-transaction.
+        let mut journal_file = path.as_os_str().to_os_string();
+        journal_file.push("-journal");
+        if std::fs::metadata(&journal_file).map_or(true, |m| m.len() == 0) {
+            return; // no hot journal on this platform
+        }
+        std::fs::copy(&path, &copy).expect("copy db");
+        let mut to = copy.as_os_str().to_os_string();
+        to.push("-journal");
+        std::fs::copy(&journal_file, &to).expect("copy journal");
+    }
+    set_mode(&copy, 0o444);
+    if !write_refused(&copy) {
+        return;
+    }
+    let journal = Journal::open_with_mode(&copy, JournalMode::Delete).expect("opens read-only");
+    assert_eq!(
+        journal.read_only_cause(),
+        Some(ReadOnlyCause::FileWriteProtected)
+    );
+    assert_eq!(
+        journal.list_studies().expect("list").len(),
+        1,
+        "the interrupted transaction is rolled back"
+    );
+    drop(journal);
+    set_mode(&copy, 0o644);
+}
+
+#[test]
+fn a_backup_keeps_the_dossiers_mode_and_never_overwrites() {
+    // M-c / M-d / L2.
+    let dir = TempDir::new().expect("tempdir");
+    let path = journal_with_one_study(dir.path(), "private.db");
+    set_mode(&path, 0o600);
+    let journal = Journal::open(&path).expect("open");
+    let out = TempDir::new().expect("tempdir");
+    let dest = out.path().join("backup.db");
+    journal.backup_to(&dest).expect("backup");
+    assert_eq!(mode_of(&dest), 0o600, "the dossier's privacy is kept");
+    assert_eq!(
+        names_in(out.path()),
+        vec!["backup.db".to_string()],
+        "no partial left"
+    );
+    let again = journal.backup_to(&dest).expect_err("never overwrites");
+    assert!(
+        matches!(
+            again,
+            Error::Backup {
+                cause: std::io::ErrorKind::AlreadyExists,
+                ..
+            }
+        ),
+        "got {again:?}"
+    );
+    assert_eq!(names_in(out.path()), vec!["backup.db".to_string()]);
+}
+
+#[test]
+fn a_backup_accepts_a_path_that_is_not_utf8() {
+    // L3: any path the OS accepts.
+    use std::os::unix::ffi::OsStrExt;
+    let dir = TempDir::new().expect("tempdir");
+    let path = journal_with_one_study(dir.path(), "j.db");
+    let journal = Journal::open(&path).expect("open");
+    let odd = dir
+        .path()
+        .join(std::ffi::OsStr::from_bytes(b"sauvegardes-\xff"));
+    if std::fs::create_dir(&odd).is_err() {
+        return; // a file system that refuses such names
+    }
+    let dest = odd.join("backup.db");
+    journal
+        .backup_to(&dest)
+        .expect("backup under a non-UTF-8 name");
+    let copy = Journal::open(&dest).expect("a journal");
+    assert_eq!(copy.list_studies().expect("list").len(), 1);
+}
+
+#[test]
+fn an_unwritable_side_file_is_named_apart_and_read_through_the_copy() {
+    // L4: a `-shm` that cannot be written nor repaired (here: a directory in its place — what
+    // another account's file looks like to us). Read-only up front, its own cause, read whole.
+    let dir = TempDir::new().expect("tempdir");
+    let path = journal_with_one_study(dir.path(), "j.db");
+    let mut shm = path.as_os_str().to_os_string();
+    shm.push("-shm");
+    std::fs::create_dir(&shm).expect("a -shm we cannot write");
+    let mut journal = Journal::open(&path).expect("opens read-only");
+    assert_eq!(
+        journal.read_only_cause(),
+        Some(ReadOnlyCause::SidecarNotWritable)
+    );
+    assert_eq!(journal.list_studies().expect("list").len(), 1);
+    let err = journal
+        .put_study(&minimal_study(2, JID))
+        .expect_err("refused up front");
+    assert!(matches!(err, Error::SidecarNotWritable), "got {err:?}");
+}
