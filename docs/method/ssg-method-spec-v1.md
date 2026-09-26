@@ -392,4 +392,9 @@ scale **must** bump `METHOD_VERSION` (next: `ssg-1.3.0` for additive, `ssg-2.0.0
 every golden fixture's `meta.method_version` must be re-validated by hand (§7). A change to what a
 historical input IS (§0) — which period a figure covers, which EPS is used — bumps it too, although
 no `core` constant moves (the precedent is `ssg-1.2.0`): the figures a study shows change, and that
-must never happen silently.
+must never happen silently. The app keeps it from happening silently (issue #252): every provider figure carries the
+method it was fetched under (`@ssg-X.Y.Z` at the end of its dependency digest); `INPUTS_DEFINED_AT`
+(`core`) names the version that last changed §0 and moves only with it. A study whose unvalidated
+provider figures predate it says so on opening; a refresh that changes such figures says the
+difference may come from the method; one that confirms them re-stamps them silently. A validated
+(✓) figure keeps its value (Issue #110) — a contradicting provider value is parked beside it.

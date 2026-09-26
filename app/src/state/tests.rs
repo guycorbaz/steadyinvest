@@ -223,8 +223,9 @@ fn provider_fetch_fills_a_fresh_study_with_provider_stamped_cells() {
     assert_eq!(sales.coverage, Coverage::Present);
     assert_eq!(sales.provenance.source, Source::Provider);
     assert_eq!(
-        sales.provenance.hash_of_dependencies, "deadbeefcafe",
-        "the real fetch digest replaces the manual placeholder (#21)"
+        sales.provenance.hash_of_dependencies,
+        format!("deadbeefcafe@{}", steadyinvest_core::METHOD_VERSION),
+        "the real fetch digest replaces the manual placeholder (#21), stamped with the method (#252)"
     );
 }
 
@@ -1294,8 +1295,9 @@ fn refresh_updates_a_changed_provider_cell() {
     assert_eq!(high.value, Some(und_money(200)), "the new value is stamped");
     assert_eq!(high.source, Source::Provider);
     assert_eq!(
-        high.provenance.hash_of_dependencies, "feed0042",
-        "the cell carries the new fetch digest (re-stamped)"
+        high.provenance.hash_of_dependencies,
+        format!("feed0042@{}", steadyinvest_core::METHOD_VERSION),
+        "the cell carries the new fetch digest (re-stamped), with the method (#252)"
     );
 }
 
@@ -1324,6 +1326,140 @@ fn idempotent_refresh_changes_nothing_and_records_no_undo_step() {
         state.undo_depth(),
         depth_after_fill,
         "a no-op refresh records no phantom undo step"
+    );
+}
+
+/// Issue #252: make every provider figure of `id` look fetched before `ssg-1.2.0` — the bare
+/// `"{tag}:{hex}"` digest, no method stamp (what a pre-1.2.0 build wrote).
+fn unstamp_provider_cells(state: &mut JournalState, id: Uuid) {
+    state
+        .mutate_study(id, |study| {
+            for year in &mut study.years {
+                for cell in [
+                    &mut year.sales,
+                    &mut year.eps,
+                    &mut year.high_price,
+                    &mut year.low_price,
+                ] {
+                    cell.provenance.hash_of_dependencies = "eodhd:deadbeefcafe".to_string();
+                }
+            }
+        })
+        .unwrap();
+}
+
+/// Issue #252: a study fetched before `ssg-1.2.0` names its provider figures; a refresh that
+/// CONFIRMS them (equal values) only re-stamps them — no change, no cause, no method clause — and
+/// the study no longer names them afterwards.
+#[test]
+fn a_confirming_refresh_restamps_figures_fetched_under_an_earlier_method() {
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x5a, "2026-09-27T10:00:00Z");
+    let id = state.create_study("NVDA.US", "USD").unwrap();
+    let years = [2021, 2022, 2023, 2024, 2025];
+    state
+        .apply_provider_refresh(id, &fetched_for(&years))
+        .unwrap();
+    assert_eq!(
+        provider_figures_predating_method(&state.get_study(id).unwrap()),
+        0,
+        "a fetch under today's method is stamped with it"
+    );
+    unstamp_provider_cells(&mut state, id);
+    assert_eq!(
+        provider_figures_predating_method(&state.get_study(id).unwrap()),
+        20,
+        "4 figures × 5 years fetched before the stamp"
+    );
+    assert!(
+        study_predates_method_notice(20)
+            .unwrap()
+            .contains("ssg-1.2.0")
+    );
+
+    let report = state
+        .apply_provider_refresh(id, &fetched_for(&years))
+        .unwrap();
+    assert!(!report.changed(), "equal values: no figure moved");
+    assert_eq!(report.method_changed, 0);
+    assert_eq!(report.restamped, 20);
+    assert_eq!(
+        refresh_summary(report),
+        "20 valeur(s) récupérée(s) avant la méthode ssg-1.2.0 confirmée(s) à l'identique : elles \
+         suivent désormais la nouvelle définition des données.",
+        "the re-stamp is said, never « aucun changement » beside a history entry"
+    );
+    assert_eq!(
+        provider_figures_predating_method(&state.get_study(id).unwrap()),
+        0,
+        "confirmed figures now follow today's definition"
+    );
+    // Idempotent from there on: a second confirming refresh is a true no-op again.
+    let depth = state.undo_depth();
+    state
+        .apply_provider_refresh(id, &fetched_for(&years))
+        .unwrap();
+    assert_eq!(state.undo_depth(), depth, "no churn once re-stamped");
+}
+
+/// Issue #252: a refresh that CHANGES figures fetched before `ssg-1.2.0` says the difference may
+/// come from the method; a validated figure keeps its value and is not named on opening (it is the
+/// user's checked figure), but a contradicting provider value on it counts as a method change too.
+#[test]
+fn a_changing_refresh_names_the_method_for_figures_fetched_before_it() {
+    let dir = TempDir::new().unwrap();
+    let mut state = undo_state(&dir, 0x5b, "2026-09-27T11:00:00Z");
+    let id = state.create_study("NVDA.US", "USD").unwrap();
+    let years = [2021, 2022, 2023, 2024, 2025];
+    state
+        .apply_provider_refresh(id, &fetched_for(&years))
+        .unwrap();
+    unstamp_provider_cells(&mut state, id);
+    state
+        .set_review(id, 0, crate::viewmodel::entry::FIELD_EPS, Review::Validated)
+        .unwrap();
+    assert_eq!(
+        provider_figures_predating_method(&state.get_study(id).unwrap()),
+        19,
+        "the validated EPS is the user's checked figure — not named"
+    );
+
+    // EPS 5 → 7 everywhere (as the reported EPS replaced the adjusted one).
+    let report = state
+        .apply_provider_refresh(id, &fetched_custom(&years, 1000, 7, 100, 50, "feed0252"))
+        .unwrap();
+    assert_eq!(report.updated, 4, "four unvalidated EPS changed");
+    assert_eq!(report.contradicted, 1, "the validated EPS is contradicted");
+    assert_eq!(
+        report.method_changed, 5,
+        "all five fetched before the method"
+    );
+    let summary = refresh_summary(report);
+    assert!(
+        summary.contains("5 valeur(s) récupérée(s) avant la méthode ssg-1.2.0 diffèrent"),
+        "{summary}"
+    );
+    // G3: the same contradicting fetch again never re-stamps the validated ✓ 5 — it was not
+    // confirmed (the provider says 7): it stays « fetched before ».
+    state
+        .apply_provider_refresh(id, &fetched_custom(&years, 1000, 7, 100, 50, "feed0252"))
+        .unwrap();
+    let eps0 = state.get_study(id).unwrap().years[0].eps.clone();
+    assert_eq!(eps0.value, Some(und_money(5)));
+    assert!(
+        steadyinvest_core::predates_inputs_definition(fetched_under(&eps0.provenance)),
+        "a contradicted validated value keeps its pre-1.2.0 provenance"
+    );
+    let study = state.get_study(id).unwrap();
+    assert_eq!(
+        study.years[0].eps.value,
+        Some(und_money(5)),
+        "the validated EPS kept its value"
+    );
+    assert_eq!(
+        provider_figures_predating_method(&study),
+        0,
+        "the unvalidated figures were re-fetched (changed or re-stamped)"
     );
 }
 

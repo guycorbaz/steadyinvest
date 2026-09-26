@@ -693,6 +693,14 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             study_notice::take_pending(&ui, id);
             let format = config.borrow().number_format;
             push_form(&ui, &journal_state.borrow(), &study, format);
+            // Issue #252: provider figures fetched under an earlier definition of the inputs are
+            // named on opening — AFTER the render (which clears its own source's notice), and only
+            // into an EMPTY slot: never over a kept fetch result nor the normalize failure (F4).
+            if let Some(text) = crate::state::study_predates_method_notice(
+                crate::state::provider_figures_predating_method(&study),
+            ) {
+                study_notice::info_if_empty(&ui, study_notice::Source::Render, &text);
+            }
             // A freshly-opened form has no active entry cell (the cursor appears on first focus).
             studies.set_active_year(-1);
             studies.set_active_field(SharedString::new());

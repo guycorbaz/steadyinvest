@@ -37,12 +37,17 @@ impl JournalState {
     /// timestamp, and the **real** dependency digest from the fetch (#21 — no longer the `"manual"`
     /// sentinel). `logical_version` stays the app-side sentinel `1` (there is no per-cell counter;
     /// the study-level bump on `put_study` records the act's timing).
+    ///
+    /// Issue #252: the digest carries the method it was fetched under — `"{tag}:{hex}@ssg-X.Y.Z"` —
+    /// so a figure fetched before today's definition of the inputs (spec §0) is known by identity,
+    /// never guessed from a date. The stamp rides in the digest's VALUE, not in a new contract field
+    /// (review checklist §5, the 6.9 precedent); the provider tag stays the first `:` segment.
     fn provider_provenance(&self, digest: String) -> Provenance {
         Provenance {
             source: Source::Provider,
             logical_version: 1,
             timestamp: self.clock.now(),
-            hash_of_dependencies: digest,
+            hash_of_dependencies: format!("{digest}@{}", steadyinvest_core::METHOD_VERSION),
         }
     }
 
@@ -268,6 +273,15 @@ pub struct RefreshReport {
     /// to do". A whole-grid fact, set once (not per-year), so `merge` leaves it untouched.
     pub unmatched_years: usize,
     pub cause: RefreshCause,
+    /// Issue #252: provider values fetched under an earlier definition of the inputs (spec §0) that
+    /// this refresh CHANGED (updated in place, or — on a validated cell — parked as a contradicting
+    /// pending). The difference may come from the method, not the provider's data: the notice says
+    /// so. An equal value is only re-stamped (see [`CellRefresh::Restamped`]) and is not counted.
+    pub method_changed: usize,
+    /// Issue #252: values fetched under an earlier definition of the inputs that this refresh
+    /// CONFIRMED identical and re-stamped. No figure moved, but the study did change (provenance —
+    /// one undo step, one history entry), so the notice says so instead of « aucun changement ».
+    pub restamped: usize,
 }
 
 impl RefreshReport {
@@ -282,6 +296,8 @@ impl RefreshReport {
             // merge never zeroes it, though in practice only one side is ever nonzero.
             unmatched_years: self.unmatched_years.max(other.unmatched_years),
             cause: self.cause.merge(other.cause),
+            method_changed: self.method_changed + other.method_changed,
+            restamped: self.restamped + other.restamped,
         }
     }
 
@@ -336,6 +352,47 @@ fn count_provider_to_stale(study: &Study) -> usize {
         .count()
 }
 
+/// Issue #252: the method a provider figure was fetched under — the `@ssg-X.Y.Z` suffix of its
+/// digest, `None` for a figure fetched before stamps existed (before `ssg-1.2.0`). PURE.
+pub(crate) fn fetched_under(provenance: &Provenance) -> Option<&str> {
+    provenance
+        .hash_of_dependencies
+        .rsplit_once('@')
+        .map(|(_, stamp)| stamp)
+}
+
+/// Issue #252: is this cell a PROVIDER figure fetched under an earlier definition of the inputs
+/// (spec §0), still standing as the provider gave it? A validated (`✓`) cell is the user's checked
+/// figure and a manual one the user's own — neither is counted: only what a new fetch may change.
+pub(crate) fn provider_figure_predates_method(cell: &Cell) -> bool {
+    cell.source == Source::Provider
+        && cell.value.is_some()
+        && cell.review != Review::Validated
+        && steadyinvest_core::predates_inputs_definition(fetched_under(&cell.provenance))
+}
+
+/// Issue #252: how many provider figures of `study` predate today's definition of the inputs — the
+/// count the open study states, so the user knows a fetch may change them for that reason.
+pub fn provider_figures_predating_method(study: &Study) -> usize {
+    study
+        .years
+        .iter()
+        .flat_map(|y| {
+            [&y.sales, &y.eps, &y.high_price, &y.low_price]
+                .into_iter()
+                .map(Some)
+                .chain([
+                    y.dividend_per_share.as_ref(),
+                    y.pre_tax_profit.as_ref(),
+                    y.book_value_per_share.as_ref(),
+                ])
+                .flatten()
+                .collect::<Vec<_>>()
+        })
+        .filter(|c| provider_figure_predates_method(c))
+        .count()
+}
+
 /// A provider-sourced cell: `Source::Provider`, `Freshness::Current`, `Review::None` (unvalidated),
 /// `Coverage::Present` for a value / `ToFill` for a gap (absent stays hand-editable, never `0`).
 fn provider_cell(value: Option<Decimal>, provenance: &Provenance) -> Cell {
@@ -383,6 +440,10 @@ enum CellRefresh {
     /// A present **manual** value diverged from the provider: the manual value stands, the divergent
     /// provider value is preserved alongside (pending), and a `✓` demoted (Story 3.4, FR22).
     Reconciled,
+    /// Issue #252: a provider value fetched under an earlier definition of the inputs, confirmed
+    /// EQUAL by this fetch — only its provenance is re-stamped (it now follows today's definition).
+    /// No value moved: not a change, no cause.
+    Restamped,
 }
 
 /// Refresh one **required** load-bearing cell. Returns `(outcome, demoted)` where `demoted` is `true`
@@ -394,14 +455,26 @@ fn refresh_cell(
     cell: &mut Cell,
     value: Option<Decimal>,
     provenance: &Provenance,
-) -> (CellRefresh, bool) {
+) -> (CellRefresh, bool, bool) {
     let was_validated = cell.review == Review::Validated;
+    // Issue #252: a provider figure fetched under an earlier definition of the inputs (validated or
+    // not — a ✓ cell keeps its value, but a contradicting pending on it may come from the method).
+    let predated = cell.source == Source::Provider
+        && cell.value.is_some()
+        && steadyinvest_core::predates_inputs_definition(fetched_under(&cell.provenance));
     let outcome = refresh_cell_inner(cell, value, provenance);
     // Issue #110 (b): a validated cell is FROZEN, never demoted — but a divergent provider value on it
     // is a *contradiction* (a new pending was parked → `Reconciled`). Count that so the notice can flag
     // "the provider now reports N different values for your validated cells", without the ✓/value moving.
     let contradicted = was_validated && matches!(outcome, CellRefresh::Reconciled);
-    (outcome, contradicted)
+    // (A reconciliation that only CLEARED a pending — the provider now agrees — changed no figure.)
+    let method_changed = predated
+        && match outcome {
+            CellRefresh::Updated => true,
+            CellRefresh::Reconciled => cell.pending.is_some(),
+            _ => false,
+        };
+    (outcome, contradicted, method_changed)
 }
 
 /// The branching that actually mutates the cell (Story 3.3):
@@ -440,7 +513,7 @@ fn refresh_cell_inner(
             Some(v) => {
                 let frozen = cell.reconcile_frozen(Some(Money::from(v)), provenance.clone());
                 if frozen == *cell {
-                    CellRefresh::Unchanged
+                    restamp_if_predated(cell, Some(Money::from(v)), provenance)
                 } else {
                     *cell = frozen;
                     CellRefresh::Reconciled
@@ -457,7 +530,7 @@ fn refresh_cell_inner(
             Some(v) => {
                 let reconciled = cell.reconcile(Some(Money::from(v)), provenance.clone());
                 if reconciled == *cell {
-                    CellRefresh::Unchanged
+                    restamp_if_predated(cell, Some(Money::from(v)), provenance)
                 } else {
                     *cell = reconciled;
                     CellRefresh::Reconciled
@@ -472,8 +545,10 @@ fn refresh_cell_inner(
                 if cell.value == new_value {
                     // The value agrees → a true no-op. (Any `Stale` flag from a prior failed refresh
                     // was already cleared up front by `apply_provider_refresh`'s outage-recovery pass,
-                    // Story 3.5 — so this stays a pure value-based idempotency check.)
-                    CellRefresh::Unchanged
+                    // Story 3.5 — so this stays a pure value-based idempotency check.) Issue #252:
+                    // except a figure fetched under an earlier definition of the inputs, re-stamped
+                    // once — equal today, it now follows today's definition.
+                    restamp_if_predated(cell, new_value, provenance)
                 } else {
                     *cell = cell.edited(new_value, provenance.clone());
                     CellRefresh::Updated
@@ -485,6 +560,40 @@ fn refresh_cell_inner(
     }
 }
 
+/// Issue #252: a provider value this fetch CONFIRMED — equal to `fetched` — but fetched under an
+/// earlier definition of the inputs takes today's provenance, once (a value already stamped with
+/// today's definition stays a true no-op: idempotency, no timestamp churn). Two such values:
+/// - the live value of a PROVIDER cell (validated or not) — never a manual one (the user's own);
+/// - a PENDING provider value parked beside a manual or validated cell, re-fetched identical (so
+///   accepting it later does not bring back an unstamped figure).
+///
+/// A live value the fetch CONTRADICTS is never re-stamped (G3: a validated ✓ 5 under a parked 7
+/// stays « fetched before »). Value, review and coverage are untouched.
+fn restamp_if_predated(
+    cell: &mut Cell,
+    fetched: Option<Money>,
+    provenance: &Provenance,
+) -> CellRefresh {
+    let predated = |p: &Provenance| steadyinvest_core::predates_inputs_definition(fetched_under(p));
+    let mut restamped = false;
+    if cell.source == Source::Provider && cell.value == fetched && predated(&cell.provenance) {
+        cell.provenance = provenance.clone();
+        restamped = true;
+    }
+    if let Some(pending) = cell.pending.as_mut()
+        && pending.value == fetched
+        && predated(&pending.provenance)
+    {
+        pending.provenance = provenance.clone();
+        restamped = true;
+    }
+    if restamped {
+        CellRefresh::Restamped
+    } else {
+        CellRefresh::Unchanged
+    }
+}
+
 /// Refresh one **optional** cell slot (same semantics as [`refresh_cell`]; an absent slot is a gap).
 /// Any present slot — including a value-less `ToFill` or `NotAvailableAccepted` cell — delegates to
 /// [`refresh_cell`] so the N/A-accepted skip and the manual-skip rules apply uniformly; only a truly
@@ -493,15 +602,15 @@ fn refresh_optional(
     slot: &mut Option<Cell>,
     value: Option<Decimal>,
     provenance: &Provenance,
-) -> (CellRefresh, bool) {
+) -> (CellRefresh, bool, bool) {
     match slot {
         Some(cell) => refresh_cell(cell, value, provenance),
         None => match value {
             Some(v) => {
                 *slot = Some(provider_cell(Some(v), provenance));
-                (CellRefresh::Filled, false)
+                (CellRefresh::Filled, false, false)
             }
-            None => (CellRefresh::Unchanged, false),
+            None => (CellRefresh::Unchanged, false, false),
         },
     }
 }
@@ -511,7 +620,13 @@ fn refresh_optional(
 /// feeds the recompute). Field names drive [`refresh::classify_field`] (no parallel list).
 fn refresh_year(yd: &mut YearData, cy: &CanonicalYear, provenance: &Provenance) -> RefreshReport {
     let mut report = RefreshReport::default();
-    let mut account = |(outcome, contradicted): (CellRefresh, bool), field: &str| {
+    let mut account = |(outcome, contradicted, method_changed): (CellRefresh, bool, bool),
+                       field: &str| {
+        // Issue #252: a figure fetched under an earlier definition of the inputs that this fetch
+        // changed — the notice says the difference may come from the method.
+        if method_changed {
+            report.method_changed += 1;
+        }
         // Issue #110 (b): a validated cell the provider now contradicts (frozen, ✓ kept, a new pending
         // parked) — counted so the notice can surface "N validated cells the provider disagrees with",
         // independent of the value-change tally below. (Was the Story-3.6 ✓→? re-validation scope.)
@@ -539,6 +654,7 @@ fn refresh_year(yd: &mut YearData, cy: &CanonicalYear, provenance: &Provenance) 
                     .cause
                     .merge(crate::viewmodel::refresh::classify_field(field));
             }
+            CellRefresh::Restamped => report.restamped += 1,
             CellRefresh::Skipped | CellRefresh::Unchanged => {}
         }
     };

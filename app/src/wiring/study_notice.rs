@@ -134,6 +134,15 @@ pub(crate) fn outcome(ui: &MainWindow, source: Source, text: &str) {
     }
 }
 
+/// Issue #252: an informative notice of the study just opened — shown only into an EMPTY slot (never
+/// over anything already said: a kept fetch result, a failure). Stays until the next gesture
+/// replaces it (a render of its source clears it, like any of its outcomes).
+pub(crate) fn info_if_empty(ui: &MainWindow, source: Source, text: &str) {
+    if SHOWN.with(Cell::get).is_none() {
+        write(ui, Some((source, Kind::Outcome)), text);
+    }
+}
+
 /// A render-time failure STATE (the normalize failure, rewritten on every render that fails): it
 /// never erases another source's failure (a fetch failure, an edit refusal) — F4.
 pub(crate) fn standing(ui: &MainWindow, source: Source, text: &str) {
