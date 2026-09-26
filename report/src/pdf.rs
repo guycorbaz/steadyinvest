@@ -8,8 +8,10 @@
 //! - **Neutral labels only** (no NAIC marks/logos or verbatim instructional text — open-source
 //!   constraint); the zone nouns mirror the app's neutral set ("Zone basse/médiane/haute").
 //! - **All sections expanded** (a PDF has no collapsibles).
-//! - **Greyscale only** (NFR-U3): nothing reads by colour — text + position + line weight, never hue.
-//!   The renderer emits only black/grey strokes and black text.
+//! - **Black-and-white first** (NFR-U3): nothing reads by colour ALONE — text + position + line
+//!   weight + the « * » of a judged value carry every fact. Owner decision (Guy, 2026-09-26): the
+//!   greyscale-only rule is lifted — a few sober hues ([`Ink`]: the §1 series, the judged values)
+//!   are a second channel, never the only one.
 //! - **`None` → the faithful em-dash**, never `0` (the project's most-repeated rail).
 //! - **Deterministic bytes**: no timestamp / file-id / random — the same study renders identically
 //!   (so a fixture's bytes are testable).
@@ -65,6 +67,8 @@ const MIN_SERIES_DECADES: f64 = 0.6; // a flat series still gets this much span 
 const YEAR_PAD: f64 = 0.5; // room (in years) at each end of the §1 x axis — no bar on the frame
 // Issue #207: the growth guide lines of the printed form — compound rates from the last EPS point.
 const GUIDE_RATES_PCT: [u32; 6] = [5, 10, 15, 20, 25, 30];
+const GUIDE_LABEL_SIZE: f32 = 5.5; // the guides' rate labels, in the right margin
+const AXIS_LABEL_SIZE: f32 = 6.5; // the year labels under the plot
 // The form's quarterly box, under the plot (owner decision 7): size and the space around it.
 const QUARTER_BOX_W: f32 = 200.0;
 const QUARTER_BOX_H: f32 = 4.0 * (SMALL + 3.0) + 8.0;
@@ -99,9 +103,31 @@ const COLS9: [f32; 10] = [
     PAGE_W - MARGIN,
 ];
 const RULE_GRAY: f32 = 0.35; // the default rule/grid grey (restored after a chart)
-const GRID_GRAY: f32 = 0.75; // faint decade gridlines
+const GRID_GRAY: f32 = 0.75; // the labelled 1 / 2 / 5 × 10^k gridlines
 const GUIDE_GRAY: f32 = 0.82; // the growth guide lines (lighter than the grid)
-const SERIES_GRAY: f32 = 0.0; // series strokes (black; told apart by weight + dash, never hue)
+// Owner decision (Guy, 2026-09-26): the log paper's minor lines — 3, 4, 6 … 9 × 10^k and one
+// vertical per year, forecast years included — lighter than the curves AND than the labelled
+// gridlines, so the curves and the labelled scale still read first.
+const MINOR_GRID_GRAY: f32 = 0.9;
+const MINOR_GRID_W: f32 = 0.25;
+
+/// A stroke or fill colour, `[r, g, b]` in 0…1.
+///
+/// Owner decision (Guy, 2026-09-26): the PDFs may use colour, as a SECOND channel only — every
+/// fact still reads in a black-and-white print (weight, dash, position, words, the « * » of a
+/// judged value); the colour only makes the same fact quicker to find on screen or in a colour
+/// print. Hence `gray` for everything that was grey before, and a few sober hues below.
+pub(crate) type Ink = [f32; 3];
+
+pub(crate) const fn gray(g: f32) -> Ink {
+    [g, g, g]
+}
+
+// The §1 series, told apart as on the printed form's coloured plot — and still by weight in a
+// black-and-white print (EPS thick, sales thin, prices as bars).
+const EPS_INK: Ink = [0.08, 0.28, 0.66]; // blue, the thick line
+const SALES_INK: Ink = [0.05, 0.45, 0.22]; // green, the thin line
+const PRICE_INK: Ink = gray(0.0); // black bars
 
 /// Render a study to a faithful, neutral, greyscale PDF (FR52). Read-only: it computes nothing the
 /// engine does not already compute, writes no journal, and needs no provider.
@@ -1018,7 +1044,7 @@ const OPTION_C: &str = "plus bas sévère récent";
 const OPTION_D: &str = "soutenu par le dividende";
 
 // ── issue #105 / #207 — the embedded charts' neutral labels (greyscale legend + zone bands) ──
-const CHART_LEGEND: &str = "BPA (trait épais)   ·   Ventes (trait fin)   ·   Cours haut–bas (barres)   ·   projection (pointillés)   ·   guides de croissance 5–30 % (gris clair)";
+const CHART_LEGEND: &str = "BPA (trait épais, bleu)   ·   Ventes (trait fin, vert)   ·   Cours haut–bas (barres)   ·   projection du BPA (pointillés)   ·   guides de croissance 5–30 % (gris clair, taux en marge droite)";
 const CHART_SCALE: &str =
     "Échelle logarithmique, propre à chaque série (l'axe gradué est celui du BPA)";
 const GUIDES_FROM: &str = "les guides partent du BPA positif de";
@@ -1756,9 +1782,10 @@ impl Doc {
     /// form. Sales / EPS / Price on log scales (each series its own — issue #25; the EPS scale is the
     /// labelled one), the yearly high–low PRICE as vertical bars, the est-high / est-low EPS
     /// projection over the forecast horizon, and the form's growth GUIDE lines (5–30 % compound
-    /// from the last positive EPS point, light grey, labelled at their end). Greyscale-safe:
-    /// weight + dash + shade, NEVER colour. Nothing is drawn when there is no plottable data (the
-    /// annexe already carries the em-dashes).
+    /// from the last positive EPS point, light grey, labelled in the right margin). Readable in
+    /// black and white: weight + dash + shade; the series' hues (owner decision, 2026-09-26) are a
+    /// second channel only. Nothing is drawn when there is no plottable data (the annexe already
+    /// carries the em-dashes).
     ///
     /// G1 F: the x axis is by YEAR (a gap year keeps its place, the years after it do not slide
     /// left); the guides and the projection run from their anchor year over exactly the horizon, so
@@ -1873,28 +1900,73 @@ impl Doc {
         let eps_b = series_log_bounds(&eps_scale_vals);
 
         stroke_rect(&mut self.cur, x0, top, plot_w, chart_h, 0.6);
-        // Gridlines + labels on the EPS scale (nice 1/2/5×10^k).
+        let axis_years = axis_years(first_year, last_year);
+        // Owner decision (Guy, 2026-09-26), NAIC semi-log paper: a light vertical for EVERY year
+        // of the axis — the five forecast years included, the plot runs over them — and the
+        // minor decade lines (3, 4, 6 … 9 × 10^k), both lighter than the labelled gridlines and
+        // than the curves; drawn first, so everything else lies over them.
+        for year in axis_years.clone() {
+            let x = px(f64::from(year));
+            polyline(
+                &mut self.cur,
+                &[(x, top), (x, top + chart_h)],
+                MINOR_GRID_W,
+                gray(MINOR_GRID_GRAY),
+                &[],
+            );
+        }
+        if let Some((lmin, lmax)) = eps_b {
+            for v in minor_ticks(lmin, lmax) {
+                let gy = py(v, lmin, lmax);
+                polyline(
+                    &mut self.cur,
+                    &[(x0, gy), (x1, gy)],
+                    MINOR_GRID_W,
+                    gray(MINOR_GRID_GRAY),
+                    &[],
+                );
+            }
+        }
+        // Gridlines + labels on the EPS scale (nice 1/2/5×10^k) — the only labelled ones.
         if let Some((lmin, lmax)) = eps_b {
             for (v, lbl) in nice_ticks(lmin, lmax, nf) {
                 let gy = py(v, lmin, lmax);
-                polyline(&mut self.cur, &[(x0, gy), (x1, gy)], 0.3, GRID_GRAY, &[]);
+                polyline(
+                    &mut self.cur,
+                    &[(x0, gy), (x1, gy)],
+                    0.3,
+                    gray(GRID_GRAY),
+                    &[],
+                );
                 text(&mut self.cur, MARGIN, gy + 2.5, 7.0, &lbl);
             }
         }
         // Issue #207 — the growth guide lines: from the last positive EPS point, each rate
-        // compounded over the horizon and ending at the anchor year + the horizon, light grey,
-        // labelled at their end (the printed form's fan).
+        // compounded over the horizon and ending at the anchor year + the horizon, light grey.
+        // Owner decision (Guy, 2026-09-26): their rate labels sit in the right margin, just
+        // outside the frame at the height each guide ends — the dotted projection runs INSIDE
+        // the frame, so it can never cross a label (it used to run through « 20 % »).
         if let (Some((lmin, lmax)), Some((ly, lv))) = (eps_b, anchor) {
             let (ox, oy) = (px(f64::from(ly)), py(lv, lmin, lmax));
+            let mut label_ys: Vec<(u32, f32)> = Vec::new();
             for rate in GUIDE_RATES_PCT {
                 let (ey_year, end) = guide_end(ly, lv, rate);
                 let (ex, ey) = (px(f64::from(ey_year)), py(end, lmin, lmax));
-                polyline(&mut self.cur, &[(ox, oy), (ex, ey)], 0.4, GUIDE_GRAY, &[]);
+                polyline(
+                    &mut self.cur,
+                    &[(ox, oy), (ex, ey)],
+                    0.4,
+                    gray(GUIDE_GRAY),
+                    &[],
+                );
+                label_ys.push((rate, ey + 2.0));
+            }
+            for (rate, y) in guide_label_rows(&label_ys, GUIDE_LABEL_SIZE + 1.0) {
                 text(
                     &mut self.cur,
-                    ex.min(x1) - 19.0,
-                    ey - 2.0,
-                    5.5,
+                    x1 + 2.0,
+                    y,
+                    GUIDE_LABEL_SIZE,
                     &format!("{rate} %"),
                 );
             }
@@ -1906,7 +1978,7 @@ impl Doc {
             years.sort_unstable();
             years.dedup();
             let cap = |cur: &mut Content, x: f32, y: f32| {
-                polyline(cur, &[(x - 2.0, y), (x + 2.0, y)], 0.8, SERIES_GRAY, &[]);
+                polyline(cur, &[(x - 2.0, y), (x + 2.0, y)], 0.8, PRICE_INK, &[]);
             };
             for year in years {
                 let x = px(f64::from(year));
@@ -1919,17 +1991,22 @@ impl Doc {
                     .find(|p| p.0 == year)
                     .map(|p| py(p.1, lmin, lmax));
                 if let (Some(yh), Some(yl)) = (hi, lo) {
-                    polyline(&mut self.cur, &[(x, yh), (x, yl)], 0.8, SERIES_GRAY, &[]);
+                    polyline(&mut self.cur, &[(x, yh), (x, yl)], 0.8, PRICE_INK, &[]);
                 }
                 for y in hi.into_iter().chain(lo) {
                     cap(&mut self.cur, x, y);
                 }
             }
         }
-        // The Sales (thin) and EPS (thick) lines, each on its own scale (greyscale: weight). G1
-        // final (M2 / L5): each line is drawn run by run — it breaks at a missing year and at a
-        // value the log scale cannot hold, and a lone point shows as a dot.
-        let draw = |cur: &mut Content, runs: &[Vec<(i32, f64)>], b: Option<(f64, f64)>, w: f32| {
+        // The Sales (thin) and EPS (thick) lines, each on its own scale — told apart by weight in
+        // black and white, and by hue in colour (owner decision, 2026-09-26). G1 final (M2 / L5):
+        // each line is drawn run by run — it breaks at a missing year and at a value the log
+        // scale cannot hold, and a lone point shows as a dot.
+        let draw = |cur: &mut Content,
+                    runs: &[Vec<(i32, f64)>],
+                    b: Option<(f64, f64)>,
+                    w: f32,
+                    ink: Ink| {
             let Some((lmin, lmax)) = b else {
                 return;
             };
@@ -1941,9 +2018,9 @@ impl Doc {
                 match p.as_slice() {
                     [(x, y)] => {
                         let r = w + 0.6;
-                        fill_rect(cur, x - r, y - r, 2.0 * r, 2.0 * r, SERIES_GRAY);
+                        fill_rect_ink(cur, x - r, y - r, 2.0 * r, 2.0 * r, ink);
                     }
-                    _ => polyline(cur, &p, w, SERIES_GRAY, &[]),
+                    _ => polyline(cur, &p, w, ink, &[]),
                 }
             }
         };
@@ -1955,10 +2032,17 @@ impl Doc {
                     .collect::<Vec<_>>(),
             )
         };
-        draw(&mut self.cur, &runs_of(&|cy| cy.sales), sales_b, 0.8);
-        draw(&mut self.cur, &runs_of(&|cy| cy.eps), eps_b, 1.6);
-        // Projection to est-high / est-low (dotted, EPS scale): from the latest usable year's EPS
-        // (the estimates' base) to that year + the horizon — or not drawn (see `base_year`).
+        draw(
+            &mut self.cur,
+            &runs_of(&|cy| cy.sales),
+            sales_b,
+            0.8,
+            SALES_INK,
+        );
+        draw(&mut self.cur, &runs_of(&|cy| cy.eps), eps_b, 1.6, EPS_INK);
+        // Projection to est-high / est-low (dotted, EPS scale, the EPS line's hue): from the latest
+        // usable year's EPS (the estimates' base) to that year + the horizon — or not drawn (see
+        // `base_year`).
         if let (Some((lmin, lmax)), Some((by, bv))) = (eps_b, projection_start) {
             let (ox, oy) = (px(f64::from(by)), py(bv, lmin, lmax));
             let ex = px(f64::from(by + horizon));
@@ -1968,20 +2052,28 @@ impl Doc {
                         &mut self.cur,
                         &[(ox, oy), (ex, py(v, lmin, lmax))],
                         w,
-                        SERIES_GRAY,
+                        EPS_INK,
                         &[1.5, 2.0],
                     );
                 }
             }
         }
-        // Issue #104 — year labels along the x-axis (each historical year under its own place).
-        for cy in series {
+        // Issue #104 / owner decision (Guy, 2026-09-26) — a label under EVERY year of the axis,
+        // the forecast years included (the axis used to stop at the last historical year while
+        // the plot ran five years further); thinned only when the years are too close to hold
+        // one label each.
+        let year_step = px(f64::from(first_year) + 1.0) - px(f64::from(first_year));
+        let every = label_stride(year_step, AXIS_LABEL_SIZE);
+        for (i, year) in axis_years.enumerate() {
+            if i % every != 0 {
+                continue;
+            }
             text_centered(
                 &mut self.cur,
-                px(f64::from(cy.year)),
+                px(f64::from(year)),
                 top + chart_h + 9.0,
-                6.5,
-                &cy.year.to_string(),
+                AXIS_LABEL_SIZE,
+                &year.to_string(),
             );
         }
         self.y = top + chart_h + 13.0;
@@ -2088,7 +2180,7 @@ impl Doc {
                     &mut self.cur,
                     &[(mx, top - 4.0), (mx, top + ZONEBAR_H + 2.0)],
                     1.3,
-                    0.0,
+                    gray(0.0),
                     &[],
                 );
                 // Kept inside the margins: a price near an edge never runs its caption off.
@@ -2449,14 +2541,19 @@ pub(crate) fn vline(content: &mut Content, x: f32, top_y1: f32, top_y2: f32, wid
 
 // ── vector-graphics primitives for the embedded charts (issue #105), all in top-origin coords ──
 
-/// A polyline through top-origin `pts` in grey `gray`, weight `width`; `dash` (on, off) lengths make
+/// A polyline through top-origin `pts` in `ink`, weight `width`; `dash` (on, off) lengths make
 /// it dashed (empty = solid). Fewer than two points draws nothing (a lone point has no line). The
 /// stroke grey is restored to [`RULE_GRAY`] after, so later rules keep the default weight/tone.
-fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, gray: f32, dash: &[f32]) {
+fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, ink: Ink, dash: &[f32]) {
     if pts.len() < 2 {
         return;
     }
-    content.set_stroke_gray(gray);
+    let [r, g, b] = ink;
+    if r == g && g == b {
+        content.set_stroke_gray(g);
+    } else {
+        content.set_stroke_rgb(r, g, b);
+    }
     content.set_line_width(width);
     if !dash.is_empty() {
         content.set_dash_pattern(dash.iter().copied(), 0.0);
@@ -2481,7 +2578,13 @@ fn polyline(content: &mut Content, pts: &[(f32, f32)], width: f32, gray: f32, da
 /// in the margin so it never reads as a position ON the bar.
 fn edge_arrow(content: &mut Content, edge_x: f32, y: f32, dir: f32) {
     let tip = edge_x + dir * 14.0;
-    polyline(content, &[(edge_x + dir * 2.0, y), (tip, y)], 1.3, 0.0, &[]);
+    polyline(
+        content,
+        &[(edge_x + dir * 2.0, y), (tip, y)],
+        1.3,
+        gray(0.0),
+        &[],
+    );
     polyline(
         content,
         &[
@@ -2490,7 +2593,7 @@ fn edge_arrow(content: &mut Content, edge_x: f32, y: f32, dir: f32) {
             (tip - dir * 4.0, y + 3.5),
         ],
         1.3,
-        0.0,
+        gray(0.0),
         &[],
     );
 }
@@ -2506,6 +2609,15 @@ pub(crate) fn stroke_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: 
 /// (text) after — the greyscale zone fills are the only non-black fill in the document.
 pub(crate) fn fill_rect(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, gray: f32) {
     content.set_fill_gray(gray);
+    content.rect(x, PAGE_H - top_y - h, w, h);
+    content.fill_nonzero();
+    content.set_fill_gray(0.0);
+}
+
+/// [`fill_rect`] in any [`Ink`] (a chart's lone point takes its series' hue).
+fn fill_rect_ink(content: &mut Content, x: f32, top_y: f32, w: f32, h: f32, ink: Ink) {
+    let [r, g, b] = ink;
+    content.set_fill_rgb(r, g, b);
     content.rect(x, PAGE_H - top_y - h, w, h);
     content.fill_nonzero();
     content.set_fill_gray(0.0);
@@ -2627,6 +2739,55 @@ fn chart_scale_note(
         }
     }
     format!("{}.", parts.join(" ; "))
+}
+
+/// Owner decision (Guy, 2026-09-26) — the §1 x axis's years: every year from the first
+/// historical one to the last one + the forecast horizon (the plot runs over the forecast years,
+/// so the axis does too).
+fn axis_years(first_year: i32, last_year: i32) -> std::ops::RangeInclusive<i32> {
+    first_year..=last_year + FORECAST_HORIZON_YEARS as i32
+}
+
+/// Every how many years a year label is printed: 1 while a label (« 2031 » at `size`, plus a
+/// little air) fits in one year's width `step`, else the smallest stride that fits.
+fn label_stride(step: f32, size: f32) -> usize {
+    let need = text_width("0000", size) + 3.0;
+    if step <= 0.0 {
+        return 1;
+    }
+    (need / step).ceil().max(1.0) as usize
+}
+
+/// Owner decision (Guy, 2026-09-26) — the semi-log paper's minor lines inside `[10^lmin,
+/// 10^lmax]`: `m × 10^k` for m = 3, 4, 6, 7, 8, 9 (1, 2 and 5 are the labelled [`nice_ticks`]).
+fn minor_ticks(lmin: f64, lmax: f64) -> Vec<f64> {
+    let (min, max) = (10f64.powf(lmin), 10f64.powf(lmax));
+    let mut out = Vec::new();
+    for k in (lmin.floor() as i32)..=(lmax.ceil() as i32) {
+        for m in [3.0, 4.0, 6.0, 7.0, 8.0, 9.0] {
+            let v = m * 10f64.powi(k);
+            if v >= min && v <= max {
+                out.push(v);
+            }
+        }
+    }
+    out
+}
+
+/// The guide labels' baselines, from `(rate, wanted baseline)`: each at its guide's end height,
+/// pushed apart (upwards, the steeper guide's label above) so no two are closer than `gap` —
+/// two labels never print over each other.
+fn guide_label_rows(wanted: &[(u32, f32)], gap: f32) -> Vec<(u32, f32)> {
+    let mut rows: Vec<(u32, f32)> = wanted.to_vec();
+    // Lowest on the page first (largest top-origin y): the flattest guide.
+    rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+    for i in 1..rows.len() {
+        let floor = rows[i - 1].1 - gap;
+        if rows[i].1 > floor {
+            rows[i].1 = floor;
+        }
+    }
+    rows
 }
 
 /// Nice `1 / 2 / 5 × 10^k` tick values (+ their compact labels) inside a log scale `[10^lmin, 10^lmax]`.
@@ -3485,6 +3646,48 @@ mod tests {
             "no bounds from non-finite values"
         );
         assert!(series_log_bounds(&[1.0, 10.0, f64::INFINITY]).is_some());
+    }
+
+    #[test]
+    fn the_axis_runs_over_the_forecast_years_with_the_log_papers_minor_lines() {
+        // Owner decision (Guy, 2026-09-26): a year (and its vertical) for every year of the plot,
+        // the five forecast years included; the minor lines are 3–4, 6–9 × 10^k only.
+        let h = FORECAST_HORIZON_YEARS as i32;
+        let years: Vec<i32> = axis_years(2021, 2025).collect();
+        assert_eq!(years.first(), Some(&2021));
+        assert_eq!(years.last(), Some(&(2025 + h)));
+        let bytes = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let page1 = &page_streams(&bytes)[0];
+        for y in 2021..=2025 + h {
+            assert!(contains(page1, &y.to_string()), "the axis labels {y}");
+        }
+        let minor = minor_ticks(0.0, 2.0);
+        assert_eq!(
+            minor,
+            vec![
+                3.0, 4.0, 6.0, 7.0, 8.0, 9.0, 30.0, 40.0, 60.0, 70.0, 80.0, 90.0
+            ]
+        );
+        for v in minor {
+            let m = v / 10f64.powf(v.log10().floor());
+            assert!(
+                ![1.0, 2.0, 5.0].contains(&m.round()),
+                "{v} is a labelled line"
+            );
+        }
+        // Too many years for one label each: the labels thin out, the verticals do not.
+        assert_eq!(label_stride(40.0, AXIS_LABEL_SIZE), 1);
+        assert!(label_stride(8.0, AXIS_LABEL_SIZE) >= 2);
+    }
+
+    #[test]
+    fn the_guide_labels_never_print_over_each_other() {
+        // Two guides ending 1 pt apart: their labels are pushed a line apart, the flatter below.
+        let rows = guide_label_rows(&[(5, 300.0), (10, 299.0), (15, 250.0)], 6.5);
+        let y = |rate| rows.iter().find(|r| r.0 == rate).unwrap().1;
+        assert_eq!(y(5), 300.0);
+        assert!(y(5) - y(10) >= 6.5 - 1e-3);
+        assert_eq!(y(15), 250.0, "a label with room keeps its height");
     }
 
     #[test]
