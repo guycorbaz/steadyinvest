@@ -26,7 +26,7 @@ classification:
   projectType: desktop_app
   projectTypeNote: "data-integration is a significant sub-system in its own right"
   domain: fintech
-  domainQualifier: "investment analysis, educational, non-regulated by design (neutral signals, footer disclaimer on every page, no personalized advice, no remuneration)"
+  domainQualifier: "investment analysis, educational, non-regulated by design (neutral signals, footer disclaimer on every page, no personalized advice, no remuneration); AI proposals enter only as owner-validated drafts from a user-directed external AI client"
   complexity: high
   topRisk: "integrity of the data->calculation chain producing a silent, plausible, wrong buy/sell signal"
   secondaryRisk: "Slint interactive charting (draggable judgment lines)"
@@ -45,12 +45,12 @@ discoveryDecisions:
   - "Differentiation: durable edge is CH/EU coverage incumbents ignore, but only if SSG is ADAPTED to EU reality (multi-currency, dividend taxation by jurisdiction, IFRS vs US-GAAP, exchange fragmentation), not merely translated. Faithful form clone = table stake, not the moat"
   - "UX: TWO REGIMES sharing one data truth - (1) faithful paper-form grid for contemplation/judgment, (2) high-throughput entry/reconciliation surface (keyboard nav, paste a column of years, undo) for filling CH/EU gaps. Provenance shown by ATTENTION HIERARCHY not equal signposting: missing = the only state that shouts, stale = a discreet uniform murmur, auto-vs-manual = revealed on demand; strong colors reserved for judgment zones, never for provenance"
   - "UX: judgment lines = gesture+value duality (drag for intuition, type exact value for rigor, always synced), reversible (moving a line never destroys a saved input; undo + scenario compare), never auto-moved on a provider refresh, and NEVER a 'suggested line' (suggesting = recommending = breaks neutral posture)"
-  - "AI interaction (the 'touch of madness'): AI is a GREFFIER OF MEMORY, not an advisor of the future. It makes PROPOSALS and CRITIQUES (coherence checks, discipline-drift detection, pre-mortem on past misses, fill candidates for missing/stale cells) but NEVER mutates data or judgments. Read-only on journal+engine; any AI output is a draft stamped source:ai-suggested requiring human validation in the UI (a 4th cell source alongside provider/manual/derived). AI must never suggest/place a judgment line (the future is the user's sovereign territory). Purity test for any API endpoint: if an AI response could replace the user's gesture on the line, it is forbidden; if it can only force him to look at his past gesture, it is allowed"
-  - "AI runs 100% LOCALLY by default (consistent with offline/private), via a pluggable 'AI provider' abstraction (same pattern as MarketDataProvider) that allows an optional REMOTE AI later"
+  - "[SUPERSEDED 2026-09-27 by G2 — see last entry] AI interaction (the 'touch of madness'): AI is a GREFFIER OF MEMORY, not an advisor of the future. It makes PROPOSALS and CRITIQUES (coherence checks, discipline-drift detection, pre-mortem on past misses, fill candidates for missing/stale cells) but NEVER mutates data or judgments. Read-only on journal+engine; any AI output is a draft stamped source:ai-suggested requiring human validation in the UI (a 4th cell source alongside provider/manual/derived). AI must never suggest/place a judgment line (the future is the user's sovereign territory). Purity test for any API endpoint: if an AI response could replace the user's gesture on the line, it is forbidden; if it can only force him to look at his past gesture, it is allowed"
+  - "[SUPERSEDED 2026-09-27 by G2 — see last entry] AI runs 100% LOCALLY by default (consistent with offline/private), via a pluggable 'AI provider' abstraction (same pattern as MarketDataProvider) that allows an optional REMOTE AI later"
   - "Portfolio RISK MANAGEMENT is a deliberate overlay BEYOND canonical NAIC (NAIC is strong on stock selection, weak on portfolio risk). Keep it as a SEPARATE, optional, decoupled subsystem so it never weighs down the pure SSG engine. Includes: (a) position-sizing / concentration limits (avoid one holding being a majority of invested capital; thresholds must account for early-stage portfolios being naturally concentrated; extends diversification by holding/sector/size/currency, NAIC-aligned), and (b) trailing stop-loss protection"
   - "Trailing stop-loss model = portfolio 'capital at risk' / portfolio heat. Per position, risk = (purchase_price - stop) * quantity, counted ONLY when stop <= purchase_price; once the trailing stop ratchets above purchase price the capital-loss risk disappears. Portfolio risk of loss = sum of those positive differences, converted to portfolio reference currency (valuation/aggregation layer => FX applies), expressible as % of total invested capital. Show TWO views: capital-at-risk (vs purchase price) and open-profit-at-risk (vs current price). Trailing stop ratchets UP automatically (param: %/ATR/manual) and NEVER down; the parameter is the user's judgment. App does NOT execute orders (no brokerage, out of scope) - a stop breach is a NEUTRAL ALERT ('position X crossed the stop YOU set'), same posture as buy-zone alerts"
   - "Design tension to SURFACE (never auto-resolve): SSG sell discipline (sell in Sell zone or on quality degradation) can conflict with stop-loss sell discipline (sell on trailing-stop breach). A quality holding may hit its stop in a market dip while still a great long-term hold in its Buy zone. Show both as neutral facts; the user arbitrates between long-term-quality vs capital-protection philosophies. USER'S ARBITRATION RULE (Guy's default policy): the STOP-LOSS takes priority over the Sell zone because the stop mitigates the REAL (capital) risk while the Sell zone is only a theoretical valuation marker. When a holding clearly enters the Sell zone, it is a DECISION TRIGGER (not an order): Guy either sells manually OR raises the stop-loss. UX implication: a Sell-zone entry is a neutral alert that may offer the two manual actions (sell / adjust stop) but never auto-acts"
-  - "API posture: NO API/server in v1. Build a VERSIONED DATA CONTRACT now - calc crate + judgment-journal exposed as clean serde types with explicit schema_version, decoupled from Slint and rusqlite - to preserve optionality at near-zero cost. Versions: version the DATA CONTRACT now (cumulative journal must last years), defer transport SemVer. First façade when needed = read-only MCP. Capability asymmetry (AI read-only, all writes via human UI validation) is enforced by construction, not by prompt, and is a NON-NEGOTIABLE NFR"
+  - "[AI parts SUPERSEDED 2026-09-27 by G2 — see last entry] API posture: NO API/server in v1. Build a VERSIONED DATA CONTRACT now - calc crate + judgment-journal exposed as clean serde types with explicit schema_version, decoupled from Slint and rusqlite - to preserve optionality at near-zero cost. Versions: version the DATA CONTRACT now (cumulative journal must last years), defer transport SemVer. First façade when needed = read-only MCP. Capability asymmetry (AI read-only, all writes via human UI validation) is enforced by construction, not by prompt, and is a NON-NEGOTIABLE NFR"
   - "NO onboarding wizard: multiple providers are usable and some need NO API key, so configuration is done as-needed in Settings (provider choice, optional API key in OS keychain, reference currency, risk thresholds, label set NAIC<->neutral), not via a forced first-run wizard"
   - "Per-cell/per-study user-set 'validated' flag (e.g. a checkbox) that the USER turns on AFTER reviewing the data. This is the primary guard against 'present-but-wrong' data (Murat's top risk): a human verification flag, not auto-plausibility. Data dimensions: source (provider/manual/derived) + freshness (current/stale/to-update) + validated (yes/no, user-set)"
   - "Backup/restore is delegated to an EXTERNAL system (e.g. NAS sync), manual or automatic. App responsibility = keep the journal as a single, well-located, copy-friendly local file (and document its location); it does not build elaborate in-app backup in v1"
@@ -64,7 +64,13 @@ discoveryDecisions:
   - "DIVIDENDS: the SSG/study return projection (Section 5) uses the GROSS dividend (method fidelity). The portfolio's reinvestable cash uses the NET dividend (gross minus withholding; Swiss pattern = 35% impot anticipe, refundable at tax declaration; withholding rate is per-jurisdiction). v1 simply reduces reinvestable cash to net; tracking the withholding as a recoverable receivable / refund = ROADMAP"
   - "Locale-aware number entry (decimal comma, thousands separators for CH/EU) to prevent input errors; decision RATIONALE (the 'why' of a buy/sell) is a first-class field of the journal (fuel for cumulative memory and the AI-greffier)"
   - "REPLACEMENT / capital-redeployment workflow: selling a holding is not an end - it triggers finding what to replace it with (freed cash should be redeployed, NAIC-aligned 'sell only for a better opportunity, stay invested'). On a sell / stop-trigger / Sell-zone entry, the app surfaces replacement candidates from the watchlist (e.g. nearest to / inside their Buy zone, best upside/downside), supports side-by-side Company Comparison, and launches a new Stock Study. The replacement flow must respect portfolio rules (preserve diversification, not re-concentrate by sector/currency; respect capital-at-risk). Neutral posture: surfaces candidates & comparisons (facts), never says 'buy this one'. Cumulative memory records 'sold X -> replaced by Y, date, rationale' for the AI-greffier to later interrogate replacement quality"
+  - "2026-09-27 (G2, supersedes the AI parts of the 'AI interaction', 'AI runs 100% LOCALLY' and 'API posture' entries above): NO AI inside the app — it exposes an MCP server; current client = Claude Code on the owner's workstation (local, not network-exposed); a remote model is accepted for now; a self-hosted local model on a dedicated host stays Vision (topology undecided). Exposed to the AI: studies with their data, provenance, judgments, rationale, notes and judgment history — NEVER the portfolio (holdings, transactions, dividends), the watchlist, keys or config. The AI may PROPOSE, only as DRAFTS with a mandatory comment entering the dossier marked draft until the owner validates them in the UI: (a) new studies (tickers it found), (b) notes attached to a study, (c) cell values including judgment values; never a direct write to studies/cells/judgments/verdicts/notes/transactions/portfolio. The owner may give the AI search objectives (market, potential growth, upside/downside ratio…), held in the AI client session only. Ticker search uses the AI's own means; the AI never triggers provider calls — after validating a draft study the owner fetches as usual and the AI then reads the data via MCP. STANCE REVISED: the AI is no longer a read-only 'clerk of memory' that never recommends; it may propose tickers, notes and judgment values; the app's OWN outputs stay neutral. An AI-proposed judgment appears on the chart as an 'AI'-annotated line beside the owner's, counts for nothing while pending, and once validated becomes the study's judgment keeping 'placed by AI' + validation date. New study notes (FR78) are a prerequisite for AI note drafts. Epic 8 = Phase 4 [P4] 'AI assistance'. The AI-greffier interrogation of replacement quality (entries on rationale and replacement workflow) is dropped while the portfolio is not exposed"
 workflowType: 'prd'
+lastEdited: '2026-09-27'
+editStepsCompleted: ['step-e-01-discovery', 'step-e-02-review', 'step-e-03-edit']
+editHistory:
+  - date: '2026-09-27'
+    changes: "G2 — AI assistance (Epic 8) re-scoped as Phase 4 [P4]: external owner-directed AI client over a local MCP server; studies exposed, portfolio/watchlist/keys/config never; AI proposals (draft studies, notes, cell/judgment values) enter only as commented drafts validated or rejected one by one in the UI; product stance revised (AI may propose; app outputs stay neutral). Updated Executive Summary, Classification, Success Criteria, Product Scope, Journey 6 and summary, Domain requirements and risks, Innovation, Desktop-specific, Scoping, FR13/14/15/17/20/21/22/33/49/51/55/60/64/65/67/68, NFR-S1–S4/R2, Constraints, Appendix A; added FR69–FR78 and NFR-A1–A4"
 ---
 
 # Product Requirements Document - steadyinvest
@@ -137,20 +143,26 @@ known dependency to validate against the chosen data provider).
   **trailing-stop "capital-at-risk" model** — portfolio risk of loss = the summed gap between
   purchase price and stop while the stop sits at or below cost. The stop-loss takes priority over
   the theoretical Sell zone because it mitigates the *real* (capital) risk.
-- **Neutral by design:** the app surfaces facts, never recommendations — "the price entered the
-  zone *you* defined" — with a footer on every page stating it does not replace a financial
-  advisor, and the user as sole decider. This is a *design intent* to remain educational and
-  outside regulated advice — not a legal opinion.
+- **Neutral by design, human-gated AI:** the app's own outputs state facts, never
+  recommendations — "the price entered the zone *you* defined". An external AI the owner selects
+  and directs may propose tickers, notes and judgment values, but **only as labelled drafts** that
+  have no effect until the owner validates them; the owner is the sole decider. A footer on every
+  page states the app does not replace a financial advisor. This is a *design intent* to remain
+  educational and outside regulated advice — not a legal opinion.
 
 **Core insight.** The value is not saved time — it is **forged, owned, durable conviction**.
-Discipline comes from friction (the user draws the judgment lines himself); independence comes
-from owning both the process and its record.
+Discipline comes from friction (the user sets — or explicitly validates — every judgment line);
+independence comes from owning both the process and its record.
 
-**What's next (vision, post-v1).** An optional, **local-first AI "clerk of memory"** that makes
-proposals and critiques by interrogating the *past* (coherence checks, discipline-drift
-detection, pre-mortems) — never mutating data or judgments, never touching the future. v1 does
-not build it; v1 only builds the **versioned data contract** that keeps it (and screening,
-rotation, Company Comparison, Portfolio Health Review) cheap to add later.
+**AI assistance (Epic 8, Phase 4).** No AI runs inside the app. steadyinvest exposes a local MCP
+server to an AI client of the owner's choice (today Claude Code on his workstation, not
+network-exposed; a remote model is accepted; a self-hosted local model is Vision). The AI reads
+studies — data, provenance, judgments, rationale, notes, judgment history — never the portfolio,
+the watchlist, keys or configuration. Given search objectives in its own session, it may propose
+new studies, study notes and cell values including judgment values, each as a commented draft the
+owner validates or rejects in the UI; it never writes directly and never triggers a provider
+fetch. This **revises the earlier stance** of a read-only "clerk of memory" that never recommends:
+the AI may now propose, while the app itself stays neutral.
 
 **Definition of success (primary).** The author uses steadyinvest for **every** buy/hold/sell
 decision over a sustained period and can, at any later date, **replay the full reasoning** behind
@@ -167,18 +179,19 @@ transaction ledger and the complete risk overlay are **Phase 2**.)
 
 **Out (non-goals):** brokerage / order execution; regulated or personalized investment advice;
 real-time intraday data (daily EOD suffices); multi-user / accounts / cloud sync; public
-distribution (private repo until IP/data-licensing posture is revisited). Roadmap (not v1):
-multi-portfolio & multi-currency/FX consolidation, the full transaction ledger and complete risk
-overlay, discovery/screening, replacement/rotation, Company Comparison, Portfolio Health Review,
-the AI clerk-of-memory, legacy study import, export/share.
+distribution (private repo until IP/data-licensing posture is revisited); an AI model embedded in
+the app. Roadmap (not v1): multi-portfolio & multi-currency/FX consolidation, the full transaction
+ledger and complete risk overlay, discovery/screening, replacement/rotation, Company Comparison,
+Portfolio Health Review, AI assistance (Phase 4), legacy study import, export/share.
 
 ## Project Classification
 
 - **Project type:** Desktop application (Rust + Slint, cross-platform Windows/macOS/Linux,
   offline-first, local SQLite). Data integration is a significant sub-system in its own right.
 - **Domain:** Fintech — investment analysis; designed to remain **educational and non-regulated**
-  (neutral signals, no personalized advice, no remuneration, no brokerage/money movement). Design
-  intent, not a legal opinion.
+  (neutral signals, no personalized advice, no remuneration, no brokerage/money movement). AI
+  proposals are third-party content from an AI the owner selects and directs, shown as labelled
+  drafts; the app itself issues none. Design intent, not a legal opinion.
 - **Complexity:** High. **Top risk:** integrity of the data→calculation chain producing a *silent,
   plausible, wrong* buy/sell signal — mitigated by a deterministic, unit-tested calculation crate
   with golden-fixture and property-based tests, plus per-cell provenance and input plausibility
@@ -240,6 +253,21 @@ the AI clerk-of-memory, legacy study import, export/share.
 - Adoption: author uses it for **100% of decisions** over the trial period and can **replay every
   one**.
 
+### AI Assistance Outcomes (Epic 8, Phase 4)
+
+- **100%** of MCP write attempts outside the draft inbox are rejected and logged (CI suite).
+- **No** MCP resource or tool returns portfolio data (holdings, transactions, dividends), watchlist
+  or secrets — verified by a test over the whole MCP surface.
+- **No** provider call is reachable from MCP (tested).
+- A pending draft changes **no** computed output — metamorphic test: every output is identical with
+  and without pending drafts.
+- **100%** of drafts carry a non-empty comment and an origin (client + model).
+- The owner validates or rejects a draft in **≤ 2 actions**, with current and proposed values side
+  by side.
+- A study created from a validated draft follows the normal path (owner fetch, then AI read) with
+  **no** special step.
+- **Every** surface showing AI-origin text carries the AI label and the disclaimer (tested).
+
 ## Product Scope
 
 ### MVP — Minimum Viable Product
@@ -261,19 +289,27 @@ net reinvestable); **Company Comparison**; **Portfolio Health Review** (diversif
 roll-up); **discovery/screening** + **Quick Screen**; full **replacement/rotation** flow; additional
 data-provider adapters; PDF/print export of a study; optional OS-native notifications.
 
+### Phase 4 — AI assistance (MCP)
+
+A **local MCP server over studies** (data, provenance, judgments, rationale, notes, judgment
+history; portfolio, watchlist, keys and configuration excluded); a **draft inbox** for AI-proposed
+studies, notes and cell values including judgment values, each with a mandatory comment, validated
+or rejected in the UI; **study notes** (create/edit/delete). Client: Claude Code on the owner's
+workstation, MCP server not network-exposed; a remote model is accepted. Search objectives are
+given in the AI client session, not stored in the dossier.
+
 ### Vision (Future)
 
-Optional **local-first AI "clerk of memory"** (proposals & critiques on the past, never
-recommending) with a later **remote-AI** option; **legacy study import** (.ITK / SSGPlus);
-deeper multi-portfolio risk analytics; export/share; eventual **public open-source release**
-after IP/data-licensing review.
+A **self-hosted local AI model** on a dedicated host (topology undecided); **legacy study import**
+(.ITK / SSGPlus); deeper multi-portfolio risk analytics; export/share; eventual **public open-source
+release** after IP/data-licensing review.
 
 ## User Journeys
 
 **Persona — "Guy", the self-directed investor.** Experienced across CH/EU/US markets, knows the
 SSG method by heart, has done studies by hand in spreadsheets for years. Wants a fast,
-independent, offline tool he fully owns — that never tells him what to do, but holds the memory
-of why he decided what he decided. He is the primary and, in v1, the only user.
+independent, offline tool he fully owns — that never decides for him (tools and AI may propose;
+only he validates), and holds the memory of why he decided what he decided. He is the primary and, in v1, the only user.
 
 **Setup & configuration (no wizard).** Because several data providers are usable — and some need
 no API key — there is no forced onboarding wizard. Configuration is done as needed in **Settings**:
@@ -378,14 +414,24 @@ events but a journal that makes him a better investor over time.
 provenance + validation + rationale + notes over time; before/after comparison against real
 outcomes.
 
-### Journey 6 — The clerk of memory (vision, post-v1)
+### Journey 6 — An AI scout under a human gate (Phase 4)
 
-Later, an optional local AI reads (only reads) his journal. As he drags an optimistic growth line,
-it asks: "In 2024 you set this same slope on three names; two disappointed. Still confident?" It
-proposes, critiques, and interrogates his past — but never moves the line, never recommends a buy.
-*New reality:* his own history holds him accountable.
-**Reveals (future):** read-only AI provider over the versioned contract, ai-suggested drafts
-requiring human validation, coherence / discipline-drift / pre-mortem prompts. *(Not v1.)*
+Guy opens his AI client and gives it an objective: Swiss mid-caps, ≥ 10% potential growth, upside/
+downside above 3:1. The AI searches by its own means and drops **three draft studies** into the
+dossier's inbox, each with a comment explaining why; on an existing study it also drafts a note and
+a lower forecast P/E. In the inbox Guy sees each proposal with its origin, comment, and current vs
+proposed value side by side: he rejects one ticker, validates two. He fetches their provider data
+himself, as for any study. The AI then reads the fetched figures through MCP and drafts growth
+judgments, which appear on the chart as lines annotated "AI" beside his own — changing no zone or
+verdict while pending. He accepts one (it becomes his judgment and keeps "placed by AI"), rejects
+the other, and draws the remaining line himself. At no point can the AI see his holdings or his
+watchlist. *New reality:* the AI widens his search and challenges his numbers, but nothing enters
+his dossier without his hand.
+**Reveals:** MCP read of studies (portfolio and watchlist excluded); draft studies / notes / cell
+and judgment values with mandatory comment and origin; dossier-level draft inbox + per-study
+reminder; one-by-one validate/reject; AI-annotated judgment lines inert while pending; persistent
+AI origin after validation; owner-only provider fetch; study notes; record of proposals and
+outcomes.
 
 ### Journey Requirements Summary
 
@@ -420,8 +466,12 @@ requiring human validation, coherence / discipline-drift / pre-mortem prompts. *
   rationale (first-class)**; notes; versioned, journal-ready data model.
 - **Neutral posture (cross-cutting):** facts not recommendations, footer disclaimer, user sole
   decider.
-- **Future / roadmap:** read-only local-first AI; Quick Screen / Starter Checklist; replacement
-  rotation; Company Comparison; Portfolio Health Review; legacy import; export/share.
+- **AI assistance [P4] (Journey 6 → FR69–FR78, Epic 8):** local MCP server over studies (portfolio,
+  watchlist, keys, config excluded); draft inbox (studies, notes, cell/judgment values) with
+  mandatory comment and origin; one-by-one validate/reject in the UI; AI-annotated judgment lines
+  inert while pending; study notes; proposal record; provider fetch owner-only.
+- **Future / roadmap:** Quick Screen / Starter Checklist; replacement rotation; Company Comparison;
+  Portfolio Health Review; legacy import; export/share.
 
 ## Domain-Specific Requirements
 
@@ -430,12 +480,16 @@ requiring human validation, coherence / discipline-drift / pre-mortem prompts. *
 - **Not a regulated financial service.** No brokerage/order execution, no money movement, no
   custody, no KYC/AML, no PCI-DSS — none apply, because the app neither holds assets nor moves
   funds. Standard fintech compliance is therefore **out of scope** by construction.
-- **Boundary to maintain (the design line):** the app surfaces **facts, never personalized
-  recommendations** ("the price entered the zone *you* defined"); no remuneration; a footer on
-  every page states it is educational and **does not replace a financial advisor**.
+- **Boundary to maintain (the design line):** the app's own signals state **facts, never
+  personalized recommendations** ("the price entered the zone *you* defined"). Proposals come only
+  from an external AI the owner selects and directs, stored as **labelled drafts with no effect
+  until he validates them**. No remuneration; a disclaimer on every page — draft inbox included —
+  states the app is educational and **does not replace a financial advisor**.
 - **Jurisdictional note:** advice-regulation triggers differ — CH (FINMA / LSFin), EU (MiFID II),
   US (Investment Advisers Act) — but all hinge on *personalized advice for remuneration*, which is
-  out of scope. This is a **design intent, not a legal opinion**; revisit before any public release.
+  out of scope. Hosting third-party AI proposals for the owner's sole use is assumed to fall outside
+  advice regulation. This is a **design intent, not a legal opinion**; revisit before any public
+  release.
 
 ### Methodology fidelity & calculation integrity (the real "compliance")
 
@@ -455,6 +509,8 @@ requiring human validation, coherence / discipline-drift / pre-mortem prompts. *
 - ToS distinction: not redistributing covers *distribution*, but **usage/retention terms remain
   the end-user's responsibility** and a per-provider check (some ToS restrict durable storage —
   which the cumulative-memory model relies on).
+- Exposing provider data to an AI client — especially a remote model — is a use under the
+  provider's terms: an end-user responsibility, **explicitly accepted by the owner**.
 - Private repo for now; **no public distribution** until this posture is revisited.
 
 ### Intellectual property / trademark
@@ -471,6 +527,8 @@ requiring human validation, coherence / discipline-drift / pre-mortem prompts. *
 - **API keys in the OS keychain**, never in version control.
 - **Local-first, single-user, offline**: no cloud, no accounts, no third-party PII → minimal
   privacy surface; the only sensitive material is the user's own keys and journal.
+- **AI exposure:** study data may reach a remote model the owner chooses; portfolio data never; the
+  MCP server is not network-exposed in the current setup.
 - **Data safety:** the journal is a single, copy-friendly local file; backup/restore delegated to
   an external system (e.g. NAS sync).
 
@@ -478,7 +536,8 @@ requiring human validation, coherence / discipline-drift / pre-mortem prompts. *
 
 - Per-cell **source + provenance + validated + timestamp**, **decision rationale**, and a
   **versioned data contract** give a natural, durable audit trail of how each judgment was formed —
-  serving both the cumulative memory and any future read-only AI.
+  serving the cumulative memory. AI drafts record their origin (client + model), timestamp, comment
+  and outcome, and a validated value keeps its AI origin and validation date.
 
 ### Domain risk mitigations (summary)
 
@@ -490,17 +549,20 @@ requiring human validation, coherence / discipline-drift / pre-mortem prompts. *
 | IP / trademark exposure | neutral labels + original design; private repo; pre-release legal review |
 | Data-licensing / ToS | no vendor data shipped; user's own key; per-provider ToS is the user's responsibility |
 | Loss of irreplaceable journal | external backup (NAS sync); single copy-friendly file |
+| AI proposal taken as advice | AI-origin text always framed and labelled "AI" with the disclaimer; drafts inert until validated; owner validates one by one |
+| AI write-path abuse | only MCP write = draft creation, by construction; any other write rejected and logged (CI suite) |
+| Portfolio leak to a remote model | portfolio, watchlist, keys and config absent from the MCP surface by construction; whole-surface test |
 
 ## Innovation & Novel Patterns
 
 ### Detected Innovation Areas
 
-- **The AI "clerk of memory" — inverting the AI-advisor pattern (Desktop AI signal).** Instead of
-  an AI that predicts or recommends, a **local-first, read-only** AI that interrogates the user's
-  **past** judgments (coherence checks, discipline-drift detection, pre-mortems) and is
-  **architecturally forbidden** from recommending or touching the future (capability asymmetry, not
-  a prompt rule). Novel because it *hardens* discipline instead of outsourcing it — the opposite of
-  every "AI stock advisor".
+- **Human-gated AI over a sovereign dossier (Desktop AI signal).** An external AI the owner
+  selects and directs reads his studies and may propose tickers, notes and judgment values — but
+  its **only write path is a commented draft** that has no effect until the owner validates it, and
+  it **cannot see the portfolio** (capability asymmetry by construction, not a prompt rule). Novel
+  because the AI widens the search and challenges the numbers while the owner keeps every decision
+  — unlike "AI stock advisors" that act or decide in his place.
 - **Cumulative judgment memory as a first-class asset.** Turning a stock-study tool into a
   **longitudinal journal of conviction** — the time-series of judgments, provenance, validation and
   rationale, revisitable and confrontable against real outcomes. Incumbents monetize the *recurring
@@ -517,15 +579,15 @@ requiring human validation, coherence / discipline-drift / pre-mortem prompts. *
 
 Per the domain research (June 2026): incumbents are **CoreSSG / SSGPlus** (web, Morningstar-locked,
 subscription) and **Toolkit 6** (Windows-only, discontinued). **None** combines offline + owned +
-provider-agnostic + **CH/EU-adapted** + **cumulative judgment memory** + **local read-only AI**.
-That intersection is the empty quadrant steadyinvest occupies — not a faithful clone (table-stakes),
-but the *memory + risk + neutral-AI* layer on top.
+provider-agnostic + **CH/EU-adapted** + **cumulative judgment memory** + **human-gated AI (MCP,
+draft inbox)**. That intersection is the empty quadrant steadyinvest occupies — not a faithful clone
+(table-stakes), but the *memory + risk + human-gated-AI* layer on top.
 
 ### Validation Approach
 
-- **AI posture:** validate the read-only / never-recommends boundary by **capability-asymmetry
-  tests** (the AI surface exposes no write/act path); usefulness validated by whether past-
-  interrogation prompts actually change the user's behavior.
+- **AI posture:** validate the human gate by **capability-asymmetry tests** — no write except draft
+  creation, no portfolio read, no provider trigger from the MCP surface; usefulness measured as the
+  share of drafts the owner validates.
 - **Capital-at-risk model:** validate the per-currency → per-bank → global math with hand-computed
   cases (independent of the SSG engine).
 - **Cumulative memory:** validated in practice by reopening old studies (Journey 5); the "stop ~2y
@@ -535,8 +597,8 @@ but the *memory + risk + neutral-AI* layer on top.
 
 ### Risk Mitigation
 
-- **AI scope creep / posture erosion** → capability asymmetry enforced by construction; AI is
-  post-v1, and v1 only builds the versioned contract it will sit on.
+- **AI scope creep / posture erosion** → AI is Phase 4; asymmetry enforced by construction
+  (draft-only writes, portfolio never exposed).
 - **Slint interactive-charting maturity** → week-1 spike; fallback = a **dedicated Slint canvas** or
   **`plotters`→`SharedPixelBuffer` backdrop + `TouchArea` overlay** (NOT egui; egui was removed by the
   2026-06-08 Architecture decision — chart is native Slint).
@@ -550,7 +612,7 @@ but the *memory + risk + neutral-AI* layer on top.
 A single-user, **offline-first** native desktop application (Rust + Slint) for Windows, macOS and
 Linux, owning all data locally. No web/SEO and no mobile concerns apply. The "System automation"
 innovation signal is **not** pursued in v1 (the only system touchpoints are the keychain, the file
-system, and locale).
+system, locale and, from Phase 4, a local MCP endpoint for an owner-chosen AI client).
 
 ### Platform Support
 
@@ -570,6 +632,8 @@ system, and locale).
   configurable — preventing manual-entry errors.
 - **Notifications:** **in-app only** in v1 (alerts surface on manual refresh); OS-native
   notifications are a later nice-to-have.
+- **AI client integration [P4]:** a local MCP server serving the active dossier to an AI client the
+  owner chooses; not network-exposed in the current setup; no AI model bundled with the app.
 
 ### Update Strategy
 
@@ -586,6 +650,7 @@ system, and locale).
 - Fetched data is **cached locally** with source + timestamp; on provider failure, affected data is
   flagged **stale / to-update** (never a silent wrong signal). FX rates are likewise cached and
   dated.
+- The app itself makes **no AI network call**; no core workflow depends on AI assistance.
 
 ### Implementation Considerations
 
@@ -633,12 +698,13 @@ manual sell/raise-stop).
 ### Post-MVP Features
 
 Per-phase feature lists are in **Product Scope** above and carried per-requirement via the phase
-tags (**[P2]/[P3]/[V]**) in **Functional Requirements**. In brief: **Phase 2** = multi-portfolio,
-multi-currency/FX consolidation, full transaction ledger, complete risk overlay, dividends,
-replacement surfacing; **Phase 3** = Company Comparison, Portfolio Health Review,
+tags (**[P2]/[P3]/[P4]/[V]**) in **Functional Requirements**. In brief: **Phase 2** =
+multi-portfolio, multi-currency/FX consolidation, full transaction ledger, complete risk overlay,
+dividends, replacement surfacing; **Phase 3** = Company Comparison, Portfolio Health Review,
 discovery/screening + Quick Screen, more provider adapters, PDF/print export, optional OS-native
-notifications; **Vision** = read-only AI clerk-of-memory (+ remote option), legacy import, deeper
-multi-portfolio analytics, withholding-refund tracking, export/share, eventual public release.
+notifications; **Phase 4** (AI assistance, Epic 8) = MCP server over studies, draft inbox, study
+notes; **Vision** = self-hosted local AI model, legacy import, deeper multi-portfolio analytics,
+withholding-refund tracking, export/share, eventual public release.
 
 ### Risk Mitigation Strategy
 
@@ -649,11 +715,12 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 - **Market / adoption:** the only user is the author → de-risked by building exactly his real
   workflow; validated by whether he actually uses it for every decision.
 - **Resource (solo dev):** the lean MVP defers portfolio complexity to Phase 2; ship the
-  **versioned data contract** now so later phases and the AI façade are cheap to add.
+  **versioned data contract** now so later phases and the MCP server are cheap to add.
 
 ## Functional Requirements
 
-> Phase tags: **[P1]** MVP · **[P2]** Portfolio depth · **[P3]** Growth · **[V]** Vision.
+> Phase tags: **[P1]** MVP · **[P2]** Portfolio depth · **[P3]** Growth · **[P4]** AI assistance ·
+> **[V]** Vision.
 > FRs reference pinned definitions in **Appendix A — Definitions** (exact formulas/thresholds are
 > finalized in the NFRs / Architecture phase). Implementation choices (Rust/Slint, local store,
 > OS secret store, direct-manipulation gestures, single backup file) are captured as
@@ -682,25 +749,32 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
   the rule that produced the result.
 - FR12 **[P1]:** The verdict's presentation is **degraded or withheld testably** when a load-bearing
   input is not validated or the study is low-confidence (Appendix A defines "load-bearing input").
-- FR13 **[P1]:** All user-facing signals are **neutral** — no output contains an action/recommendation
-  verb from the banned-verb list in Appendix A (verifiable).
-- FR14 **[V]:** The AI module is **verifiably read-only** — any write to studies/judgments/verdicts/
-  transactions is rejected and logged.
+- FR13 **[P1]:** All **app-generated** signals are **neutral** — no app output contains an
+  action/recommendation verb from the banned-verb list in Appendix A (verifiable). AI-origin text is
+  third-party content: always shown inside a frame labelled "AI" with the disclaimer, not subject to
+  the banned-verb gate, and never restyled as an app signal.
+- FR14 **[P4]:** The MCP surface is **verifiably draft-only** — any write outside the draft inbox
+  (studies, cells, judgments, verdicts, notes, transactions, portfolio) is rejected and logged;
+  drafts take effect only on the owner's validation in the UI.
 
 ### Data Acquisition, Provenance & Providers
 - FR15 **[P1]:** The user can auto-fetch a security's fundamentals, prices and estimates from a
-  configured provider.
+  configured provider. A fetch is user-initiated only, never through MCP.
 - FR16 **[P1]:** The user can enter, override and later correct any data field by hand.
-- FR17 **[P1]:** Each data cell carries an independently queryable **source** (provider/manual/derived).
+- FR17 **[P1]:** Each data cell carries an independently queryable **source** (provider/manual/derived;
+  **ai-suggested** from [P4]); after validation of an AI draft the AI origin remains visible.
 - FR18 **[P1]:** Each data cell carries an independently queryable **provenance and timestamp**.
 - FR19 **[P1]:** Per-cell coverage is represented as **present / to-fill / not-available-accepted**.
 - FR20 **[P1]:** Each cell (and the study as a whole) carries a **tri-state review tag** —
   `none` / `? to-review` / `✓ validated` — with a **soft-lock**: a `✓` cell must be explicitly
   un-validated (→ `?`) before its value can be edited, and a refresh that diverges from a validated
   value auto-tags it `✓→?`. (Supersedes the original binary auto-reset wording; see GitHub issue #1.)
-- FR21 **[P1]:** The user can trigger a **manual refresh** of provider data.
+  A validated AI value [P4] enters with review tag `?`.
+- FR21 **[P1]:** The user can trigger a **manual refresh** of provider data; a refresh is
+  user-initiated only, never through MCP.
 - FR22 **[P1]:** On refresh, a **manual value takes precedence** over a fetched value while the fetched
-  value is preserved (non-destructive reconciliation).
+  value is preserved (non-destructive reconciliation). A validated AI value [P4] reconciles as a
+  manual value.
 - FR23 **[P1]:** On provider failure, last-known values are retained and affected data is flagged
   **stale/to-update**.
 - FR24 **[P1]:** A provider failure's **cause** (network, quota/rate-limit, invalid/absent key) is
@@ -721,7 +795,10 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 - FR31 **[P1]:** The user can set a judgment line by **exact value or direct manipulation** (kept in
   sync), with live recalculation of zones.
 - FR32 **[P1]:** The user can undo judgment changes; adjusting a line never destroys a saved input.
-- FR33 **[P1]:** The system never auto-places or suggests a judgment line.
+- FR33 **[P1]:** The system never auto-places or suggests a judgment line. **[P4]:** an AI-proposed
+  judgment (FR72) is shown on the chart as a line annotated "AI" beside the owner's; while pending it
+  changes no verdict, zone or alert. Once validated it becomes the study's judgment and keeps the
+  annotation "placed by AI" with its validation date.
 
 ### Watchlist & Alerts
 - FR34 **[P1]:** The user can maintain a watchlist (add, edit, remove, reorder).
@@ -756,11 +833,11 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 
 ### Cumulative Memory & Journal
 - FR49 **[P1]:** The user can capture a **decision rationale** as a first-class field on studies and
-  transactions.
+  transactions; study notes (FR78) and processed AI drafts [P4] are preserved in the study history.
 - FR50 **[P1]:** The user can reopen a past study and **visually compare** its recorded projection to
   the security's actual trajectory since.
 - FR51 **[P1]:** The system durably preserves the **time-series** of judgments, provenance, validation,
-  rationale and notes.
+  rationale and notes, including study notes (FR78) and processed AI drafts [P4].
 
 ### Reporting & Printing
 - FR52 **[P1]:** The user can **print / export to PDF a Stock Study** in a layout close to the original
@@ -782,7 +859,8 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 - FR59 **[P1]:** The user can **export/import a single study** to a portable versioned file (round-trip
   preserves identity), enabling golden-study and seeding.
 - FR60 **[P1]:** The user can **export/import the whole journal** in a versioned format, validated on
-  import (reject/migrate on version mismatch).
+  import (reject/migrate on version mismatch); the export and backups include AI drafts [P4]
+  (pending, validated, rejected, stale).
 - FR61 **[P1]:** The user can **restore from a backup** with integrity and version-compatibility checks
   before overwrite.
 - FR62 **[P1]:** The user can access **non-blocking contextual help / glossary** and a read-only
@@ -791,10 +869,11 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 ### Configuration, Posture & Operation
 - FR63 **[P1]:** The user can configure providers/keys, the single global reference currency, risk
   thresholds, the label set (NAIC↔neutral) and locale number format — without a blocking setup flow.
-- FR64 **[P1]:** A disclaimer (educational, not a financial advisor) is **always visible**, and the
-  product never issues recommendations.
+- FR64 **[P1]:** A disclaimer (educational, not a financial advisor) is **always visible** — including
+  in the draft inbox and beside every AI-origin item [P4]; the app's own outputs never issue
+  recommendations, and AI proposals are always labelled as such.
 - FR65 **[P1]:** The user can run the full study and portfolio-risk workflow **offline**; the only online
-  action is a user-initiated refresh.
+  action is a user-initiated refresh. AI assistance [P4] is optional; no workflow requires it.
 - FR66 **[P1]:** The journal is kept in a **portable local store** an external system (e.g. file sync) can
   back up.
 - FR67 **[P1]:** The user can **choose the journal directory**; the app remembers recent journals and
@@ -802,13 +881,44 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
   per-machine app-config (via `directories`), **never inside the journal**. A **single-instance lock**
   guards the open journal. The app **detects a sync folder** (Synology/Dropbox/OneDrive/iCloud) and
   warns, keeping the **live DB local** with **versioned backups** to the sync folder (SQLite
-  `journal_mode=DELETE/TRUNCATE`). (New requirement; arch ADD7/ADD8; GitHub issue #2.)
+  `journal_mode=DELETE/TRUNCATE`). (New requirement; arch ADD7/ADD8; GitHub issue #2.) **[P4]:** draft
+  writes arriving through MCP never corrupt or race the open session.
 - FR68 **[P1]:** The **decision-time verdict is frozen and immutable** — stamped with `method_version`,
   dated FX and the exact inputs — and is the **only verdict persisted**. A "recompute with today's
   method" verdict is produced **on demand** for comparison/debug, **never persisted and never
   automatic**. On a `method_version` change the UI offers a labelled
   **"frozen (vNN, DD/MM) vs recomputed (vMM, today)"** compare. (New requirement; arch ADD10; GitHub
-  issue #3.)
+  issue #3.) **[P4]:** no verdict is frozen or changed through MCP.
+
+### AI Assistance (MCP)
+> Traceability: Journey 6 → FR69–FR78 (with FR13, FR14, FR33, FR64) → Epic 8.
+
+- FR69 **[P4]:** An AI client can read, through MCP, the dossier's studies — data cells, provenance,
+  judgments, rationale, notes and judgment history; the portfolio (holdings, transactions,
+  dividends), the watchlist, keys and configuration are never exposed.
+- FR70 **[P4]:** An AI client can submit a **draft study** (security identifier + mandatory comment) to
+  the draft inbox; it creates no study until validated, and is refused if the security is already
+  studied in the dossier.
+- FR71 **[P4]:** An AI client can submit a **draft note** on an existing study, with a mandatory comment.
+- FR72 **[P4]:** An AI client can submit a **draft cell value**, judgment values included, with a
+  mandatory comment. While pending it changes no value, line, zone, alert or verdict; a judgment draft
+  is shown on the chart as an AI-annotated line beside the owner's (FR33). A pending draft whose
+  target changed meanwhile (owner edit or refresh) is marked **stale**.
+- FR73 **[P4]:** The owner can review pending drafts in a **dossier-level inbox**, with a reminder in
+  each concerned study, showing for each draft its AI origin (client + model), comment, target, and
+  current vs proposed value side by side.
+- FR74 **[P4]:** The owner can **validate or reject each draft individually** (no bulk action).
+  Validation applies the draft as an owner entry with review tag `?` and visible AI origin; editing a
+  draft before validation makes it the owner's own entry; validating a draft study does not add it to
+  the watchlist.
+- FR75 **[P4] (scope note):** Search objectives (market, potential growth, upside/downside ratio…) are
+  given to the AI in its client session; the dossier does not store them in Phase 4.
+- FR76 **[P4]:** Provider data is fetched only on the owner's action: after validating a draft study
+  the owner fetches it as for any study, and the fetched data then becomes readable through MCP; no
+  MCP request can trigger a provider call.
+- FR77 **[P4]:** The system keeps a durable **record of every draft** (origin, comment, content,
+  timestamps, outcome) that the owner can view and the AI can read.
+- FR78 **[P4]:** The owner can **create, edit and delete notes** attached to a study.
 
 > **Definitions referenced by these FRs** (SSG output set, quality-flag thresholds, "usable year"
 > & low-confidence rule, plausibility rules, "load-bearing input", neutrality banned-verb list,
@@ -844,19 +954,21 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 ### Security & Privacy
 
 - **NFR-S1:** Provider API keys live **only in the OS secret store** — never in the repo, plaintext
-  config, logs, exports or backups.
+  config, logs, exports, backups or MCP responses.
 - **NFR-S2:** **No telemetry/analytics**; the only network calls are user-initiated provider/FX
-  fetches.
-- **NFR-S3:** All persistent data is **local**; nothing is sent to third parties beyond the chosen
-  provider under the user's own key.
-- **NFR-S4:** The AI module never exfiltrates the journal to a remote service **unless the user
-  explicitly enables a remote AI**.
+  fetches. The MCP server is not network-exposed in the current setup.
+- **NFR-S3:** All persistent data is **local**. Beyond the chosen provider (under the user's own key),
+  study data may leave the machine only through the AI client the owner chooses; portfolio data
+  never leaves it.
+- **NFR-S4:** The MCP surface never returns portfolio data (holdings, transactions, dividends), keys
+  or configuration secrets — verified by tests over every MCP resource and tool.
 
 ### Reliability & Data Integrity
 
 - **NFR-R1:** The full study + portfolio-risk workflow runs **offline**; losing the network degrades
   only fetching, with **stale flagging** — never a silent wrong value.
 - **NFR-R2:** Writes are **crash-safe/atomic** — an interrupted operation never corrupts the journal.
+  Draft writes through MCP [P4] are atomic and never corrupt or race the open session.
 - **NFR-R3:** Schema migrations are **forward-safe**; an older journal always opens (or is migrated)
   in a newer build, with **no data loss**.
 - **NFR-R4:** Reconciliation **never destroys** a manual value or judgment; the provider value is
@@ -888,10 +1000,21 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
 - **NFR-M2:** The data contract carries an explicit `schema_version`; any breaking change ships a
   migration.
 
+### AI Capability Asymmetry [P4]
+
+- **NFR-A1:** Capability asymmetry holds **by construction**, not by prompt: the only write the MCP
+  surface offers is draft creation; every other write is rejected and logged (CI suite).
+- **NFR-A2:** Portfolio non-exposure holds **by construction**: holdings, transactions, dividends and
+  watchlist are absent from the MCP surface (whole-surface test).
+- **NFR-A3:** No provider call is reachable from MCP (tested).
+- **NFR-A4:** Every draft carries its origin (client + model), a timestamp and a non-empty comment
+  (100% of drafts; tested).
+
 ### Constraints (technical & legal/IP)
 
 - **Technical:** Rust + Slint, chart drawn **natively in Slint** (`Path`/`TouchArea`); local embedded
-  database (SQLite); offline-first; no server. *(The 2026-06-08 Architecture decision removed egui
+  database (SQLite); offline-first; no network server — a local MCP server for the owner's AI client
+  is the only external interface. *(The 2026-06-08 Architecture decision removed egui
   entirely; the charting fallback is a dedicated Slint canvas or `plotters`→`SharedPixelBuffer` +
   `TouchArea`, not egui.)*
 - **Legal / IP:** **GPL-3.0**, subject to a dependency-license audit (Slint tier; one-way
@@ -916,7 +1039,16 @@ multi-portfolio analytics, withholding-refund tracking, export/share, eventual p
   study uses gross.
 - **Stale threshold (FR23):** price data older than the user-configured horizon (default: older than
   one trading day) is flagged stale.
-- **Neutrality (FR13):** system-generated signals contain **no imperative action verb** (buy/sell/
+- **Neutrality (FR13):** app-generated signals contain **no imperative action verb** (buy/sell/
   hold as a command); they state facts only. (Exact banned-verb list finalized in Architecture.)
+  Scope rule: AI-origin text is outside the banned-verb gate; it is always shown inside a frame
+  labelled "AI" with the disclaimer and never presented as an app signal.
+- **AI draft (FR70–FR74):** a proposal from an AI client with a mandatory comment, an origin (client
+  + model), a timestamp and a status — pending / validated / rejected / stale; it has no effect while
+  pending.
+- **Search objectives (FR75):** criteria the owner gives the AI in its client session (e.g. market,
+  potential growth, upside/downside ratio); not stored in the dossier.
+- **MCP-exposed scope (FR69, NFR-S4):** studies, their data cells with provenance, judgments, rationale,
+  notes and judgment history. Excluded: holdings, transactions, dividends, watchlist, keys, configuration.
 - **SSG output set (FR4), plausibility rules (FR10), load-bearing input (FR12), golden tolerance
   (FR9):** finalized in Architecture.
