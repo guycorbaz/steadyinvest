@@ -1,6 +1,6 @@
 # steadyinvest — SSG Method Specification (v1)
 
-**`method_version`: `ssg-1.1.0`**
+**`method_version`: `ssg-1.2.0`**
 **Status:** authoritative oracle for the calculation engine (`steadyinvest-core`) and its golden tests.
 **Independent project — not affiliated with NAIC / BetterInvesting.** This document specifies the
 *method* (formulas, ratios, thresholds — which are not protectable). It uses **neutral labels** and
@@ -23,8 +23,36 @@ scope here). All money/ratio math is **exact decimal** (`rust_decimal`), never `
 |---|---|
 | `ssg-1.0.0` | Initial normative spec. |
 | `ssg-1.1.0` | **Additive, zero behavioral change.** Absorbed as normative text the interpretations recorded while implementing Stories 1.7–1.9 (issues #12, #13, #15) — every rule marked *(absorbed at ssg-1.1.0)* below was already the engine's behavior under `ssg-1.0.0`. |
+| `ssg-1.2.0` | **Additive: the historical inputs are defined (§0).** A year is the company's fiscal year; its high/low prices are the fiscal year's (not the calendar year's); its EPS is the reported diluted EPS (never an adjusted, non-GAAP one). The engine's formulas, thresholds and scales are unchanged; the provider mapping follows §0 from this version (found on a real NVDA.US fetch, 2026-09-26: calendar-year prices beside January-fiscal-year EPS, and EODHD's non-GAAP `epsActual`), so a study fetched under `ssg-1.2.0` can show other figures than the same study fetched before. A stored study keeps its figures until the user fetches again. |
 
 ---
+
+## 0. Historical inputs — what a year's figures are *(added at ssg-1.2.0)*
+
+The engine takes the yearly figures as given; this section fixes what they must BE, so that a
+provider mapping (or a manual entry) feeds the method the figures the method is defined on.
+[Tutorial p6, p13–14; SSG Handbook]
+
+- **A year is the company's fiscal year**, labelled by the calendar year in which it ENDS (a fiscal
+  year ended 28 January 2024 is « 2024 »). Every yearly figure of that label — `sales`, `eps`,
+  `high_price`, `low_price`, dividend, pre-tax profit, book value — covers that same fiscal year.
+- **`high_price` / `low_price`** are the highest and lowest daily prices of that fiscal year: from
+  the day after the previous fiscal-year end through the fiscal-year end, in today's shares (every
+  price before a split restated by that split). Not the calendar year's: for a company whose year
+  does not end in December, a calendar-year high/low beside the fiscal-year EPS skews the high
+  and low P/E of §3.
+- **`eps`** is the **reported diluted EPS** of the fiscal year (as published under GAAP / IFRS: net
+  income attributable to the common shares ÷ the diluted weighted-average share count), restated
+  into today's shares — never an « adjusted », « operating » or other non-GAAP figure. When the
+  reported figure is not available the year's EPS is **absent**, never replaced by an adjusted one.
+- The **fiscal year in progress** (not yet reported) is not a history year: it has no annual
+  statements, and a study's history holds complete fiscal years only.
+
+Provider mappings *(ssg-1.2.0)*: the EODHD adapter reduces the daily bars into the fiscal years of
+the statement dates, and computes the reported diluted EPS from one fiscal year's statements
+(`netIncomeApplicableToCommonShares` ÷ `commonStockSharesOutstanding`), because EODHD's
+`Earnings.Annual.epsActual` is its non-GAAP EPS. Twelve Data serves no statement and no fiscal
+calendar: its price-only years are calendar years and never enter a study's history.
 
 ## 1. SSG output set (FR4)
 
@@ -320,6 +348,9 @@ division-by-zero panic.
 
 ## Change control
 Any edit to a formula, threshold, the banned-verb list, the tolerance, the rounding mode, or a display
-scale **must** bump `METHOD_VERSION` (next: `ssg-1.2.0` for additive, `ssg-2.0.0` for breaking). The
+scale **must** bump `METHOD_VERSION` (next: `ssg-1.3.0` for additive, `ssg-2.0.0` for breaking). The
 `core` change-detection test will fail until the version is bumped and the snapshot regenerated, and
-every golden fixture's `meta.method_version` must be re-validated by hand (§7).
+every golden fixture's `meta.method_version` must be re-validated by hand (§7). A change to what a
+historical input IS (§0) — which period a figure covers, which EPS is used — bumps it too, although
+no `core` constant moves (the precedent is `ssg-1.2.0`): the figures a study shows change, and that
+must never happen silently.
