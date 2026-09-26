@@ -119,7 +119,7 @@ const ROWS: [&str; 30] = [
 ];
 // Row 20 names the band of rows 17–19 in their own words — the screen says the same (G1, #237) —
 // in lower case like every other worded cell (owner decision, 2026-09-26: « zone médiane »,
-// « sous la bande », as « provisoire » or « critères validés » in row 28).
+// « sous la bande », as « provisoire » or « données validées » in row 28).
 const ZONE_BUY: &str = "zone basse";
 const ZONE_NEUTRAL: &str = "zone médiane";
 const ZONE_SELL: &str = "zone haute";
@@ -131,7 +131,7 @@ const BOLD_ROWS: std::ops::RangeInclusive<usize> = 20..=23;
 // The Cours group breaks, when it must, between the P/E history (rows 8–16, sections 3) and the
 // zones and returns (rows 17–23, sections 4–5) — never with row 23 alone on the next page.
 const PRICE_TAIL: std::ops::RangeInclusive<usize> = 17..=23;
-const STATE_FULL: &str = "critères validés";
+const STATE_FULL: &str = "données validées"; // the data state, not the method's criteria (Guy, 2026-09-26)
 const STATE_PROVISIONAL: &str = "provisoire";
 const STATE_WITHHELD: &str = "en attente";
 const LOW_CONFIDENCE: &str = "confiance réduite";

@@ -93,7 +93,7 @@ component ShareBlock inherits VerticalLayout {
 
 export component ReviewScreen inherits Rectangle {
     pure function study-words(row: ReviewPositionRow) -> string {
-        if (row.study == "full") { return row.low-confidence ? @tr("critères validés · confiance réduite") : @tr("critères validés"); }
+        if (row.study == "full") { return row.low-confidence ? @tr("données validées · confiance réduite") : @tr("données validées"); }
         if (row.study == "provisional") { return row.low-confidence ? @tr("provisoire · confiance réduite") : @tr("provisoire"); }
         if (row.study == "withheld") { return row.low-confidence ? @tr("en attente · confiance réduite") : @tr("en attente"); }
         if (row.study == "unavailable") { return @tr("étude indisponible"); }

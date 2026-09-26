@@ -203,7 +203,7 @@ const P_STUDY: &str = "Étude";
 const P_ZONE: &str = "Zone";
 const P_UD: &str = "H/B";
 const P_RELATIVE: &str = "Val. rel.";
-const STUDY_FULL: &str = "critères validés";
+const STUDY_FULL: &str = "données validées"; // the data state, not the method's criteria (Guy, 2026-09-26)
 const STUDY_PROVISIONAL: &str = "provisoire";
 const STUDY_WITHHELD: &str = "en attente";
 const STUDY_NONE: &str = "aucune étude";
@@ -393,7 +393,9 @@ const COLS_SHARE: [f32; 6] = [
 // (on-screen check 2: « au-dessus de la bande » needs ≈ 101 pt; the relative value and H/B had
 // room to give; G1 final review: the invested amount now carries up to two decimals, as on
 // Portefeuille — « 12 345 678,99 CHF » needs ≈ 89 pt, taken from the symbol and relative-value
-// columns). Guarded by `every_positions_word_fits_its_column`.
+// columns). « données validées » (Guy, 2026-09-26) is the one study word that wraps: ≈ 80 pt,
+// and no column has 9 pt to give without clipping a figure. Guarded by
+// `every_positions_word_fits_its_column`.
 const COLS_POSITIONS: [f32; 9] = [
     MARGIN,
     MARGIN + 56.0,
@@ -1233,7 +1235,11 @@ mod tests {
             STUDY_UNAVAILABLE,
             STUDY_NOT_COMPUTABLE,
         ] {
-            fits(4, study);
+            // Each WORD fits (the grid wraps a cell between words, never inside one): the full
+            // state « données validées » goes on two lines rather than clip a neighbour's figure.
+            for word in study.split(' ') {
+                fits(4, word);
+            }
         }
         // The other columns keep room for their usual figures.
         fits(0, "NESN.SW");
