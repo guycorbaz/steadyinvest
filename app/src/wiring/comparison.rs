@@ -515,8 +515,11 @@ pub(crate) fn wire_comparison(ui: &MainWindow, s: &Session) {
                 Ok(()) => ui.global::<Comparison>().set_notice(
                     format!("{} {}", state::MSG_COMPARISON_EXPORTED, path.display()).into(),
                 ),
-                Err(e) => {
-                    crate::wiring::dialog::refuse(&ui, &format!("{} {e}", state::MSG_SAVE_FAILED))
+                // Named in French, the OS cause logged — never appended in English (G1 final M4,
+                // 2026-09-26: no raw third-party text in a save-failure refusal).
+                Err(error) => {
+                    tracing::warn!(%error, "export write failed");
+                    crate::wiring::dialog::refuse(&ui, state::MSG_EXPORT_WRITE_FAILED)
                 }
             }
         });

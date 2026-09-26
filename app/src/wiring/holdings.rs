@@ -253,6 +253,7 @@ pub(crate) fn refresh_holdings(
     holdings.set_holding_count(items.len() as i32);
     holdings.set_rows(ModelRc::new(VecModel::from(rows)));
     holdings.set_read_only(state.is_read_only());
+    holdings.set_read_only_cause(state.read_only_cause_key().into());
     // Every study's ticker, unique, sorted — the comparison pickers' list. (The position dialog no
     // longer reads it: its choices are studies, pushed fresh and fallibly by
     // `push_position_choices` when it opens — G1 review.)

@@ -7,8 +7,8 @@ use steadyinvest_persistence::WatchItem;
 use uuid::Uuid;
 
 use super::{
-    JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_FAILED, MSG_READ_ONLY_WRITE,
-    MSG_WATCH_DUPLICATE, watch_error,
+    JournalState, MSG_BLANK_TICKER, MSG_NO_JOURNAL, MSG_READ_FAILED, MSG_WATCH_DUPLICATE,
+    watch_error,
 };
 
 impl JournalState {
@@ -157,9 +157,7 @@ impl JournalState {
         if ticker.is_empty() {
             return Err(MSG_BLANK_TICKER.to_string());
         }
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         // G1 P (G3 L4): the duplicate check SEES a failed read — refused by name, never taken for
         // an empty list (which would let a duplicate through).
         if self
@@ -190,9 +188,7 @@ impl JournalState {
         if ticker.is_empty() {
             return Err(MSG_BLANK_TICKER.to_string());
         }
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal
             .update_watch_item(id, ticker, study_id)
@@ -201,9 +197,7 @@ impl JournalState {
 
     /// Remove a watched security (FR34); the remaining rows re-pack to contiguous positions.
     pub fn delete_watch_item(&mut self, id: Uuid) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         journal.delete_watch_item(id).map_err(watch_error)
     }
@@ -211,9 +205,7 @@ impl JournalState {
     /// Move a watched security one slot up (`up = true`) or down in the order (FR34): swap its
     /// position with its neighbour. A no-op at the list edge.
     pub fn move_watch_item(&mut self, id: Uuid, up: bool) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let items = self.list_watch_items();
         let Some(index) = items.iter().position(|w| w.id == id) else {
             return Ok(()); // gone — nothing to move

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::{
     JournalState, MSG_JOURNAL_LOCKED, MSG_JOURNAL_OPEN_FAILED, MSG_NO_DATA_DIR, MSG_NO_JOURNAL,
-    MSG_SAVE_FAILED, OpenOutcome,
+    MSG_OPEN_PROTECTED_OUTDATED, OpenOutcome,
 };
 
 /// Whether `path` (a journal file or its directory) lives in a **detected sync folder** (Story 5.5,
@@ -67,20 +67,16 @@ impl JournalState {
     pub fn create_backup(&self) -> Result<PathBuf, String> {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
         let live = self.path.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-        journal
-            .checkpoint()
-            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
-        let version = journal
-            .logical_version()
-            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        journal.checkpoint().map_err(super::save_error)?;
+        let version = journal.logical_version().map_err(super::read_error)?;
         let dir = Self::backups_dir_for(live).ok_or(MSG_NO_DATA_DIR.to_string())?;
-        std::fs::create_dir_all(&dir).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        std::fs::create_dir_all(&dir).map_err(super::io_save_error)?;
         // Key the filename on (id, version, timestamp) so two backups never silently overwrite each
         // other — a same-version backup (e.g. one taken right after a restore) keeps its own file. The
         // timestamp is filesystem-safe (no `:`).
         let stamp = self.clock.now().0.replace(':', "");
         let dest = dir.join(format!("journal-{}-v{version}-{stamp}.db", journal.id()));
-        std::fs::copy(live, &dest).map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        std::fs::copy(live, &dest).map_err(super::io_save_error)?;
         Ok(dest)
     }
 
@@ -129,7 +125,7 @@ impl JournalState {
                     sync_warning: matches!(mode, JournalMode::Delete),
                     unchanged: false,
                 };
-                self.read_only = journal.is_read_only();
+                self.read_only = journal.read_only_cause();
                 self.journal = Some(journal);
                 self.path = Some(path.to_path_buf());
                 self.reset_undo();
@@ -137,6 +133,11 @@ impl JournalState {
                 Ok(outcome)
             }
             Err(PersistError::LockHeld { .. }) => Err(MSG_JOURNAL_LOCKED.to_string()),
+            // A protected file older than this build: its migrations cannot be written — named,
+            // never SQLite's or our English text (2026-09-26 on-screen defect).
+            Err(PersistError::WriteProtectedOutdated { .. }) => {
+                Err(MSG_OPEN_PROTECTED_OUTDATED.to_string())
+            }
             Err(error) => Err(format!("{MSG_JOURNAL_OPEN_FAILED} {error}")),
         }
     }
@@ -153,7 +154,7 @@ impl JournalState {
         if !reopened {
             self.journal = None;
             self.path = None;
-            self.read_only = false;
+            self.read_only = None;
         }
     }
 
@@ -215,7 +216,7 @@ impl JournalState {
                     sync_warning: matches!(mode, JournalMode::Delete),
                     unchanged: false,
                 };
-                self.read_only = journal.is_read_only();
+                self.read_only = journal.read_only_cause();
                 self.journal = Some(journal);
                 self.path = Some(path);
                 self.reset_undo();

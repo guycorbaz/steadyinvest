@@ -31,7 +31,9 @@ use std::path::{Path, PathBuf};
 
 use rust_decimal::Decimal;
 use steadyinvest_contract::{ForecastLowOption, Judgment, Timestamp};
-use steadyinvest_persistence::{Error as PersistError, Journal, clear_lock, lock_is_stale};
+use steadyinvest_persistence::{
+    Error as PersistError, Journal, ReadOnlyCause, clear_lock, lock_is_stale,
+};
 use uuid::Uuid;
 
 use crate::clock::{Clock, IdGen};
@@ -108,8 +110,9 @@ pub struct JournalState {
     journal: Option<Journal>,
     /// The resolved on-disk path (to persist into app-config), when a journal is open.
     path: Option<PathBuf>,
-    /// True when the open journal is read-only (newer-schema file): writes are refused up front.
-    read_only: bool,
+    /// Why the open journal is read-only (a newer-schema file, or a file / directory protected
+    /// against writing), `None` when it is writable: writes are refused up front, by that cause.
+    read_only: Option<ReadOnlyCause>,
     clock: Box<dyn Clock>,
     idgen: Box<dyn IdGen>,
     /// Undo/redo history for the currently-open study (Story 2.9). Reset on open.
@@ -215,7 +218,7 @@ impl JournalState {
             }
             match Journal::open_with_mode(path, sync_mode_for(path)) {
                 Ok(journal) => {
-                    let read_only = journal.is_read_only();
+                    let read_only = journal.read_only_cause();
                     return (
                         Self {
                             journal: Some(journal),
@@ -229,7 +232,7 @@ impl JournalState {
                             active_portfolio_id: None,
                             number_format: NumberFormat::default(),
                         },
-                        read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
+                        read_only.map(|cause| read_only_notice(cause).to_string()),
                     );
                 }
                 Err(error) => {
@@ -257,7 +260,7 @@ impl JournalState {
                 Self {
                     journal: None,
                     path: None,
-                    read_only: false,
+                    read_only: None,
                     clock,
                     idgen,
                     history: UndoHistory::default(),
@@ -283,7 +286,7 @@ impl JournalState {
 
         match result {
             Ok(journal) => {
-                let read_only = journal.is_read_only();
+                let read_only = journal.read_only_cause();
                 (
                     Self {
                         journal: Some(journal),
@@ -297,7 +300,7 @@ impl JournalState {
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
                     },
-                    read_only.then(|| MSG_STARTUP_READ_ONLY.to_string()),
+                    read_only.map(|cause| read_only_notice(cause).to_string()),
                 )
             }
             Err(error) => {
@@ -306,7 +309,7 @@ impl JournalState {
                     Self {
                         journal: None,
                         path: None,
-                        read_only: false,
+                        read_only: None,
                         clock,
                         idgen,
                         history: UndoHistory::default(),
@@ -315,7 +318,7 @@ impl JournalState {
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
                     },
-                    Some(format!("{MSG_SAVE_FAILED} {error}")),
+                    Some(save_error(error)),
                 )
             }
         }
@@ -342,20 +345,38 @@ impl JournalState {
         read_typed(input, self.number_format, not_a_number)
     }
 
-    /// True when the open journal is read-only (newer-schema file).
+    /// True when the open journal is read-only (newer-schema file, or write-protected).
     pub fn is_read_only(&self) -> bool {
-        self.read_only
+        self.read_only.is_some()
+    }
+
+    /// The open dossier's read-only STATE line (the startup banner, the location status), by
+    /// cause — `None` when it is writable.
+    pub fn read_only_notice(&self) -> Option<&'static str> {
+        self.read_only.map(read_only_notice)
+    }
+
+    /// The read-only cause as the stable key the Slint read-only bands select their wording by
+    /// (`Holdings.read-only-cause`): `"newer-schema"`, `"file"`, `"directory"`, or `""` when the
+    /// dossier is writable. A key, never display text.
+    pub fn read_only_cause_key(&self) -> &'static str {
+        match self.read_only {
+            None => "",
+            Some(ReadOnlyCause::NewerSchema { .. }) => "newer-schema",
+            Some(ReadOnlyCause::FileWriteProtected) => "file",
+            Some(ReadOnlyCause::DirectoryWriteProtected) => "directory",
+        }
     }
 
     /// The up-front refusal of a rail that would WRITE the open journal (G1 G, on-screen check):
     /// on a read-only journal, « Restaurer une sauvegarde… » and « Importer un dossier… » refuse
     /// at once with the reason — before any file picker or confirm (the write guards behind them
-    /// stay as second guards).
+    /// stay as second guards). Every write rail opens with this guard, so each refusal names the
+    /// cause actually in force (a protected file is not a newer schema).
     pub fn refuse_if_read_only(&self) -> Result<(), &'static str> {
-        if self.read_only {
-            Err(MSG_READ_ONLY_WRITE)
-        } else {
-            Ok(())
+        match self.read_only {
+            Some(cause) => Err(read_only_refusal(cause)),
+            None => Ok(()),
         }
     }
 
@@ -399,12 +420,6 @@ pub fn created_at_date(ts: &Timestamp) -> String {
     ts.0.split('T').next().unwrap_or(&ts.0).to_string()
 }
 
-/// Map a persistence error from a watchlist write to a neutral notice (Story 4.1): a newer-schema
-/// journal reads as read-only, a holding still referenced by transactions names that cause (G1
-/// final review — matched on the TYPED variant, never on its text), anything else as the generic
-/// save-failure. The persistence error's own (English) text is LOGGED, never appended to the French
-/// refusal (G1 final review: a raw `transaction rows still reference…` under « L'enregistrement a
-/// échoué. » was no cause the user could read).
 /// A failed READ on a write rail (G1 P): named as a read failure — never « L'enregistrement a
 /// échoué. » for a write that was never attempted. The persistence error's text is logged.
 fn read_error(error: PersistError) -> String {
@@ -412,13 +427,68 @@ fn read_error(error: PersistError) -> String {
     MSG_READ_FAILED.to_string()
 }
 
-fn watch_error(error: PersistError) -> String {
+/// The open dossier's read-only state line, by cause (startup banner, location status).
+pub(crate) fn read_only_notice(cause: ReadOnlyCause) -> &'static str {
+    match cause {
+        ReadOnlyCause::NewerSchema { .. } => MSG_STARTUP_READ_ONLY,
+        ReadOnlyCause::FileWriteProtected => MSG_STARTUP_FILE_PROTECTED,
+        ReadOnlyCause::DirectoryWriteProtected => MSG_STARTUP_DIR_PROTECTED,
+    }
+}
+
+/// The up-front refusal of a write on a read-only dossier, by cause.
+pub(crate) fn read_only_refusal(cause: ReadOnlyCause) -> &'static str {
+    match cause {
+        ReadOnlyCause::NewerSchema { .. } => MSG_READ_ONLY_WRITE,
+        ReadOnlyCause::FileWriteProtected => MSG_READ_ONLY_FILE_WRITE,
+        ReadOnlyCause::DirectoryWriteProtected => MSG_READ_ONLY_DIR_WRITE,
+    }
+}
+
+/// Map a persistence error from a WRITE to its French refusal — the one mapping every write rail
+/// shares. The read-only gates name their cause (newer schema, protected file, protected
+/// directory); a write the OS refused on the spot (SQLite's READONLY / PERM — the protection
+/// changed after the open) names that; anything else is the plain « L'enregistrement a échoué. ».
+/// The persistence error's own text — SQLite's English above all — is LOGGED, never appended to
+/// the French (2026-09-26 on-screen defect: « … sqlite operation failed: attempt to write a
+/// readonly database » reached the refusal dialog).
+pub(crate) fn save_error(error: PersistError) -> String {
     match error {
         PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
-        PersistError::HoldingHasTransactions => MSG_HOLDING_HAS_TRANSACTIONS.to_string(),
+        PersistError::WriteProtected { directory: false } => MSG_READ_ONLY_FILE_WRITE.to_string(),
+        PersistError::WriteProtected { directory: true } => MSG_READ_ONLY_DIR_WRITE.to_string(),
+        other if other.is_write_protected() => {
+            tracing::warn!("journal write refused by the system: {other}");
+            MSG_WRITE_REFUSED_BY_SYSTEM.to_string()
+        }
         other => {
             tracing::warn!("journal write failed: {other}");
             MSG_SAVE_FAILED.to_string()
         }
+    }
+}
+
+/// Map a file-system error from a WRITE beside the dossier (a backup copy) to its French refusal:
+/// the OS's write refusals (permission, read-only file system) are named, anything else is the
+/// plain save failure. The OS text is logged, never shown.
+pub(crate) fn io_save_error(error: std::io::Error) -> String {
+    tracing::warn!("file write failed: {error}");
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
+            MSG_WRITE_REFUSED_BY_SYSTEM.to_string()
+        }
+        _ => MSG_SAVE_FAILED.to_string(),
+    }
+}
+
+/// Map a persistence error from a watchlist / holdings write to a neutral notice (Story 4.1): a
+/// holding still referenced by transactions names that cause (G1 final review — matched on the
+/// TYPED variant, never on its text); everything else goes through [`save_error`] (the read-only
+/// causes named, the English text logged, never appended — G1 final review: a raw `transaction
+/// rows still reference…` under « L'enregistrement a échoué. » was no cause the user could read).
+fn watch_error(error: PersistError) -> String {
+    match error {
+        PersistError::HoldingHasTransactions => MSG_HOLDING_HAS_TRANSACTIONS.to_string(),
+        other => save_error(other),
     }
 }

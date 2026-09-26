@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::{
     JournalState, MSG_EXPORT_MISSING, MSG_EXPORT_UNREADABLE, MSG_IMPORT_INTEGRITY,
-    MSG_IMPORT_MALFORMED, MSG_IMPORT_VERSION, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED,
+    MSG_IMPORT_MALFORMED, MSG_IMPORT_VERSION, MSG_NO_JOURNAL, read_error, save_error,
 };
 
 /// The outcome of [`JournalState::request_import_journal`] (issue #65): applied straight away, or
@@ -54,9 +54,7 @@ impl JournalState {
     /// so an imported study is never silently left hidden. Each [`ImportError`] maps to a neutral
     /// notice; nothing is written on a rejection. Guarded.
     pub fn import_study(&mut self, json: &str) -> Result<(Uuid, bool), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let mut study = steadyinvest_contract::from_export_json(json).map_err(|e| match e {
             ImportError::Integrity => MSG_IMPORT_INTEGRITY.to_string(),
             ImportError::Version { .. } => MSG_IMPORT_VERSION.to_string(),
@@ -78,10 +76,7 @@ impl JournalState {
         study.journal_id = journal.id();
         match journal.put_study_with_history(&study, &now) {
             Ok(()) => {}
-            Err(PersistError::NewerJournalSchema { .. }) => {
-                return Err(MSG_READ_ONLY_WRITE.to_string());
-            }
-            Err(error) => return Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => return Err(save_error(error)),
         }
         // `put_study`'s upsert does not touch `status`; an imported study must be visible, so an
         // overwrite onto an archived id is reactivated.
@@ -97,9 +92,7 @@ impl JournalState {
     /// Guarded: no journal → a neutral notice.
     pub fn export_journal(&self) -> Result<String, String> {
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-        journal
-            .export_journal()
-            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))
+        journal.export_journal().map_err(read_error)
     }
 
     /// Import a **whole journal** from its portable envelope JSON (Story 5.3, FR60/NFR-R5): verify
@@ -115,16 +108,13 @@ impl JournalState {
     /// arbitrates a same-journal version REGRESSION behind a confirm; this direct rail is the
     /// shared apply tail.
     pub fn import_journal(&mut self, text: &str) -> Result<ImportSummary, String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let journal = self.journal.as_mut().ok_or(MSG_NO_JOURNAL.to_string())?;
         let summary = journal.import_journal(text).map_err(|error| match error {
             PersistError::ImportIntegrity => MSG_IMPORT_INTEGRITY.to_string(),
             PersistError::ImportVersion { .. } => MSG_IMPORT_VERSION.to_string(),
             PersistError::ImportMalformed { .. } => MSG_IMPORT_MALFORMED.to_string(),
-            PersistError::NewerJournalSchema { .. } => MSG_READ_ONLY_WRITE.to_string(),
-            other => format!("{MSG_SAVE_FAILED} {other}"),
+            other => save_error(other),
         })?;
         // Issue #65 (the 6.3 sharpening): make the aggregates truthful against the merged ledger
         // NOW — not at the next ledger mutation, which would silently snap them back.
@@ -142,18 +132,14 @@ impl JournalState {
     /// applies straight away. Guarded (read-only / no journal).
     pub fn request_import_journal(&mut self, text: &str) -> Result<ImportRequest, String> {
         self.pending_import = None;
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         let (source_id, source_version) = inspect_journal_envelope(text).map_err(|e| match e {
             ImportError::Integrity => MSG_IMPORT_INTEGRITY.to_string(),
             ImportError::Version { .. } => MSG_IMPORT_VERSION.to_string(),
             ImportError::Malformed(_) => MSG_IMPORT_MALFORMED.to_string(),
         })?;
         let journal = self.journal.as_ref().ok_or(MSG_NO_JOURNAL.to_string())?;
-        let current = journal
-            .logical_version()
-            .map_err(|error| format!("{MSG_SAVE_FAILED} {error}"))?;
+        let current = journal.logical_version().map_err(read_error)?;
         if source_id == journal.id() && source_version < current {
             self.pending_import = Some(text.to_string());
             return Ok(ImportRequest::NeedsConfirm {

@@ -10,8 +10,13 @@ use crate::viewmodel::{engine, entry};
 use rust_decimal::Decimal;
 use steadyinvest_contract::{Coverage, Freshness, Money, Review, Source, Study};
 use steadyinvest_ingestion::FetchedFinancials;
-use steadyinvest_persistence::ImportSummary;
+use steadyinvest_persistence::{ImportSummary, ReadOnlyCause};
 use tempfile::TempDir;
+
+/// The newer-schema read-only cause, for the tests that flip a state read-only by hand.
+const NEWER_SCHEMA: ReadOnlyCause = ReadOnlyCause::NewerSchema {
+    file_user_version: 99,
+};
 
 fn fixed(id: u128, ts: &str) -> (Box<dyn Clock>, Box<dyn IdGen>) {
     (
@@ -621,7 +626,7 @@ fn a_read_only_journal_refuses_restore_and_import_up_front() {
     let mut state = watch_state(&dir, 0x544);
     assert_eq!(state.refuse_if_read_only(), Ok(()));
     make_backup(&dir, "foreign.db", 0xBEEF, true); // a backup that would otherwise park
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(state.refuse_if_read_only(), Err(MSG_READ_ONLY_WRITE));
     assert_eq!(
         state
@@ -692,7 +697,7 @@ fn confirm_restore_is_refused_on_a_read_only_dossier() {
     state
         .request_restore(dir.path().join("src.db").to_str().unwrap())
         .unwrap();
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.confirm_restore(),
         Err(MSG_READ_ONLY_WRITE.to_string())
@@ -2695,7 +2700,7 @@ fn a_linked_holding_requires_a_study_and_takes_its_currency() {
     assert_eq!(holdings[0].security_ticker, "NVDA.US");
     assert_eq!(holdings[0].currency.as_deref(), Some("USD"));
     // Read-only: refused before any lookup.
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.add_holding_for_study(nvda, ("NVDA.US", "USD"), "1", "1", ""),
         Err(MSG_READ_ONLY_WRITE.to_string())
@@ -2908,7 +2913,7 @@ fn deleting_a_portfolio_with_positions_is_refused_before_the_confirm_with_its_co
         Err(MSG_PORTFOLIO_NOT_FOUND.to_string())
     );
     state.delete_portfolio(bank2).unwrap();
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.portfolio_delete_guard(default_id),
         Err(MSG_READ_ONLY_WRITE.to_string())
@@ -4027,7 +4032,7 @@ fn ledger_writes_are_refused_on_a_read_only_journal() {
     let mut state = watch_state(&dir, 0x635);
     state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
     let id = state.list_holdings()[0].id;
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.record_buy_for(id, "", "1", "1", "", "", "CHF"),
         Err(MSG_READ_ONLY_WRITE.to_string())
@@ -5062,7 +5067,7 @@ fn extend_history_on_a_read_only_journal_is_refused() {
     let id = study_with_entry(&path).1; // seeds + materializes the 5-year window, then drops the state
 
     let mut state = open_state(&path);
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.extend_history(id),
         Err(MSG_READ_ONLY_WRITE.to_string())
@@ -5756,7 +5761,7 @@ fn an_edit_on_a_read_only_journal_is_refused_and_writes_nothing() {
     };
     // Force a read-only state by constructing one whose `read_only` flag is set.
     let mut state = open_state(&path);
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.edit_cell(id, 0, entry::FIELD_HIGH, Some(money("1"))),
         Err(MSG_READ_ONLY_WRITE.to_string())
@@ -5818,7 +5823,7 @@ fn archive_and_delete_are_refused_on_a_read_only_journal() {
     let id = study_with_entry(&path).1;
 
     let mut state = open_state(&path);
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.archive_study(id),
         Err(MSG_READ_ONLY_WRITE.to_string())
@@ -6069,7 +6074,7 @@ fn an_off_list_holding_currency_never_poisons_the_fetch_pair_set() {
 fn fx_writes_are_refused_on_a_read_only_journal() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x654);
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.upsert_manual_fx_rate("EUR", "0.93", "", "CHF"),
         Err(MSG_READ_ONLY_WRITE.to_string())
@@ -7140,12 +7145,12 @@ fn a_rebuy_is_still_guarded_read_only_and_validated() {
     let id = state.list_holdings()[0].id;
     assert_eq!(state.sell_holding(id, "", "", "CHF"), Ok(MSG_HOLDING_SOLD));
 
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.record_buy_for(id, "", "5", "120", "", "", "CHF"),
         Err(MSG_READ_ONLY_WRITE.to_string())
     );
-    state.read_only = false;
+    state.read_only = None;
     assert_eq!(
         state.record_buy_for(id, "", "0", "120", "", "", "CHF"),
         Err(MSG_LEDGER_INVALID_QUANTITY.to_string()),
@@ -7308,12 +7313,12 @@ fn request_import_is_guarded_and_maps_envelope_rejections() {
     let dir = TempDir::new().unwrap();
     let mut state = watch_state(&dir, 0x654);
     let envelope = state.export_journal().unwrap();
-    state.read_only = true;
+    state.read_only = Some(NEWER_SCHEMA);
     assert_eq!(
         state.request_import_journal(&envelope).unwrap_err(),
         MSG_READ_ONLY_WRITE.to_string()
     );
-    state.read_only = false;
+    state.read_only = None;
     assert_eq!(
         state.request_import_journal("not json at all").unwrap_err(),
         MSG_IMPORT_MALFORMED.to_string(),
@@ -7939,5 +7944,148 @@ fn a_typed_study_entry_is_blank_a_value_or_a_named_refusal() {
     assert_eq!(
         typed_entry("1.085", NumberFormat::Comma),
         Err(MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+    );
+}
+
+// ── 2026-09-26 on-screen defect — a dossier protected against writing ──
+
+/// A closed journal at `dir/ro.db` holding one study (its id returned), then `chmod 444`. `None`
+/// when permissions do not bind (running as root) — the caller then has nothing to observe.
+#[cfg(unix)]
+fn protected_dossier(dir: &TempDir) -> Option<(std::path::PathBuf, Uuid)> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.path().join("ro.db");
+    drop(
+        Journal::create(
+            &path,
+            Uuid::from_u128(0x0444),
+            &Timestamp("2026-09-26T00:00:00Z".to_string()),
+        )
+        .unwrap(),
+    );
+    let (clock, idgen) = fixed(0x4440, "2026-09-26T10:00:00Z");
+    let study_id = {
+        // The configured path EXISTS, so this opens it — never the default journal.
+        let (mut state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+        state.create_study("NESN", "CHF").unwrap()
+    };
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let refused = std::fs::OpenOptions::new().write(true).open(&path).is_err();
+    refused.then_some((path, study_id))
+}
+
+#[cfg(unix)]
+#[test]
+fn opening_a_protected_dossier_says_so_and_refuses_writes_up_front_in_french() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x445);
+    let other = TempDir::new().unwrap();
+    let Some((path, study_id)) = protected_dossier(&other) else {
+        return;
+    };
+    state
+        .open_journal(&path)
+        .expect("a protected dossier opens");
+    assert!(state.is_read_only());
+    assert_eq!(state.read_only_notice(), Some(MSG_STARTUP_FILE_PROTECTED));
+    assert_eq!(state.list_studies().len(), 1, "reads work");
+    // « Archiver » is refused up front, by the right cause — not SQLite's English.
+    assert_eq!(
+        state.archive_study(study_id),
+        Err(MSG_READ_ONLY_FILE_WRITE.to_string())
+    );
+    assert_eq!(
+        state.create_study("MSFT", "USD"),
+        Err(MSG_READ_ONLY_FILE_WRITE.to_string())
+    );
+    assert_eq!(state.refuse_if_read_only(), Err(MSG_READ_ONLY_FILE_WRITE));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_protected_configured_dossier_is_named_at_startup() {
+    let dir = TempDir::new().unwrap();
+    let Some((path, _)) = protected_dossier(&dir) else {
+        return;
+    };
+    let (clock, idgen) = fixed(0x446, "2026-09-26T10:00:00Z");
+    let (state, notice) = JournalState::open_or_create(Some(&path), clock, idgen);
+    assert_eq!(
+        state.path(),
+        Some(path.as_path()),
+        "the protected dossier itself"
+    );
+    assert_eq!(notice.as_deref(), Some(MSG_STARTUP_FILE_PROTECTED));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_protected_dossier_older_than_this_build_is_refused_by_name() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x447);
+    let other = TempDir::new().unwrap();
+    let Some((path, _)) = protected_dossier(&other) else {
+        return;
+    };
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .pragma_update(None, "user_version", 1)
+        .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    assert_eq!(
+        state.open_journal(&path),
+        Err(MSG_OPEN_PROTECTED_OUTDATED.to_string())
+    );
+    assert!(!state.is_read_only(), "the previous dossier stays open");
+}
+
+#[test]
+fn a_save_failure_never_carries_sqlite_english() {
+    let sqlite = |code| {
+        PersistError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            Some("attempt to write a readonly database".to_string()),
+        ))
+    };
+    // The OS refused the write at the moment it happened: named in French.
+    assert_eq!(
+        save_error(sqlite(rusqlite::ffi::SQLITE_READONLY)),
+        MSG_WRITE_REFUSED_BY_SYSTEM
+    );
+    assert_eq!(
+        save_error(sqlite(rusqlite::ffi::SQLITE_PERM)),
+        MSG_WRITE_REFUSED_BY_SYSTEM
+    );
+    // Any other cause: the bare catch-all, the English text logged only.
+    assert_eq!(
+        save_error(sqlite(rusqlite::ffi::SQLITE_BUSY)),
+        MSG_SAVE_FAILED
+    );
+    // The read-only gates by cause.
+    assert_eq!(
+        save_error(PersistError::WriteProtected { directory: false }),
+        MSG_READ_ONLY_FILE_WRITE
+    );
+    assert_eq!(
+        save_error(PersistError::WriteProtected { directory: true }),
+        MSG_READ_ONLY_DIR_WRITE
+    );
+    assert_eq!(
+        save_error(PersistError::NewerJournalSchema {
+            file_user_version: 9,
+            supported: 1
+        }),
+        MSG_READ_ONLY_WRITE
+    );
+    // A backup folder the OS refuses.
+    assert_eq!(
+        io_save_error(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+        MSG_WRITE_REFUSED_BY_SYSTEM
+    );
+    assert_eq!(
+        io_save_error(std::io::Error::other("disk on fire")),
+        MSG_SAVE_FAILED
     );
 }

@@ -25,6 +25,26 @@ pub const MSG_NO_JOURNAL: &str = "Aucun dossier n'est ouvert ; l'écriture n'a p
 /// Startup: the open journal is read-only because its file was written by a newer schema.
 pub const MSG_STARTUP_READ_ONLY: &str =
     "Le dossier a été écrit par un schéma plus récent ; il est ouvert en lecture seule.";
+/// A write was attempted on a dossier whose FILE the OS will not let us write (`chmod 444`, a
+/// read-only medium) — the write-protected sibling of [`MSG_READ_ONLY_WRITE`], its cause named
+/// apart (2026-09-26 on-screen defect: the refusal read SQLite's English text).
+pub const MSG_READ_ONLY_FILE_WRITE: &str =
+    "Dossier en lecture seule (fichier protégé contre l'écriture) ; l'écriture n'a pas eu lieu.";
+/// A write was attempted on a dossier whose DIRECTORY the OS will not let us write into (SQLite
+/// could not create the side file a write needs).
+pub const MSG_READ_ONLY_DIR_WRITE: &str =
+    "Dossier en lecture seule (répertoire protégé contre l'écriture) ; l'écriture n'a pas eu lieu.";
+/// Open/startup: the dossier's file is protected against writing, so it is open read-only.
+pub const MSG_STARTUP_FILE_PROTECTED: &str =
+    "Le fichier du dossier est protégé contre l'écriture ; il est ouvert en lecture seule.";
+/// Open/startup: the dossier's directory is protected against writing, so it is open read-only.
+pub const MSG_STARTUP_DIR_PROTECTED: &str = "Le répertoire du dossier est protégé contre l'écriture ; le dossier est ouvert en lecture seule.";
+/// An open refused: the file is protected against writing AND older than this version, so the
+/// schema update it needs cannot be written (reading it unmigrated would misread it).
+pub const MSG_OPEN_PROTECTED_OUTDATED: &str = "Le fichier du dossier est protégé contre l'écriture et son schéma est antérieur à cette version ; sans mise à niveau possible, il n'a pas été ouvert.";
+/// A write the OS refused at the moment it happened (the protection changed after the open, or a
+/// protected backups folder) — named in French, the OS / SQLite cause logged, never shown.
+pub const MSG_WRITE_REFUSED_BY_SYSTEM: &str = "Le système a refusé l'écriture (emplacement protégé contre l'écriture) ; rien n'a été enregistré.";
 /// Startup: the configured journal file was unreadable, so the default journal is in use instead.
 pub const MSG_CONFIGURED_UNREADABLE: &str =
     "Le dossier configuré est illisible ; le dossier par défaut est utilisé.";
@@ -912,6 +932,12 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_READ_ONLY_WRITE,
     MSG_NO_JOURNAL,
     MSG_STARTUP_READ_ONLY,
+    MSG_READ_ONLY_FILE_WRITE,
+    MSG_READ_ONLY_DIR_WRITE,
+    MSG_STARTUP_FILE_PROTECTED,
+    MSG_STARTUP_DIR_PROTECTED,
+    MSG_OPEN_PROTECTED_OUTDATED,
+    MSG_WRITE_REFUSED_BY_SYSTEM,
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,

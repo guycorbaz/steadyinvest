@@ -10,14 +10,12 @@
 use steadyinvest_contract::{
     Cell, Coverage, ForecastLowOption, Judgment, Money, PendingProvider, Provenance, Review, Study,
 };
-use steadyinvest_persistence::Error as PersistError;
 use uuid::Uuid;
 
 use crate::viewmodel::entry;
 
 use super::{
-    JournalState, MSG_NO_JOURNAL, MSG_READ_ONLY_WRITE, MSG_SAVE_FAILED, MSG_SOFT_LOCKED,
-    MSG_YEARS_MAX,
+    JournalState, MSG_NO_JOURNAL, MSG_SAVE_FAILED, MSG_SOFT_LOCKED, MSG_YEARS_MAX, save_error,
 };
 
 /// One line of a pasted column (G1 I review): a value to write (`None` = a blank line, an empty
@@ -211,9 +209,7 @@ impl JournalState {
     /// neutral notice). A review-only flip — values/coverage are never touched. Reuses the read-only /
     /// no-journal / save-failure guards.
     pub fn unlock_all(&mut self, study_id: Uuid, scope: &UnlockScope) -> Result<usize, String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         if self.journal.is_none() {
             return Err(MSG_NO_JOURNAL.to_string());
         }
@@ -259,8 +255,7 @@ impl JournalState {
                 }
                 Ok(flipped)
             }
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => Err(save_error(error)),
         }
     }
 
@@ -329,9 +324,7 @@ impl JournalState {
         field: &str,
         make: impl FnOnce(Cell, Provenance) -> Cell,
     ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         if self.journal.is_none() {
             return Err(MSG_NO_JOURNAL.to_string());
         }
@@ -373,8 +366,7 @@ impl JournalState {
                 }
                 Ok(())
             }
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => Err(save_error(error)),
         }
     }
 
@@ -391,9 +383,7 @@ impl JournalState {
         field: &str,
         values: &[PastedLine],
     ) -> Result<PasteOutcome, String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         if self.journal.is_none() {
             return Err(MSG_NO_JOURNAL.to_string());
         }
@@ -443,8 +433,7 @@ impl JournalState {
                 }
                 Ok(PasteOutcome { filled, kept_years })
             }
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => Err(save_error(error)),
         }
     }
 
@@ -515,9 +504,7 @@ impl JournalState {
     /// `year 0` — safe, never a panic.
     pub fn extend_history(&mut self, study_id: Uuid) -> Result<(), String> {
         // Read-only takes precedence over the cap (you cannot extend a read-only journal at all).
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         // Issue #35: bound the window so repeated "+ année" cannot overflow the §2 horizontal layout.
         // A fresh (never-edited) study shows the materialized `YEAR_WINDOW`, so count THAT, not 0 —
         // the append below materializes first, then grows it. A neutral notice, never a silent stop.
@@ -563,9 +550,7 @@ impl JournalState {
         study_id: Uuid,
         apply: impl FnOnce(&mut Study),
     ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         if self.journal.is_none() {
             return Err(MSG_NO_JOURNAL.to_string());
         }
@@ -593,8 +578,7 @@ impl JournalState {
                 }
                 Ok(())
             }
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => Err(save_error(error)),
         }
     }
 
@@ -606,9 +590,7 @@ impl JournalState {
         study_id: Uuid,
         apply: impl FnOnce(&mut Judgment) -> bool,
     ) -> Result<(), String> {
-        if self.read_only {
-            return Err(MSG_READ_ONLY_WRITE.to_string());
-        }
+        self.refuse_if_read_only()?;
         if self.journal.is_none() {
             return Err(MSG_NO_JOURNAL.to_string());
         }
@@ -638,8 +620,7 @@ impl JournalState {
                 }
                 Ok(())
             }
-            Err(PersistError::NewerJournalSchema { .. }) => Err(MSG_READ_ONLY_WRITE.to_string()),
-            Err(error) => Err(format!("{MSG_SAVE_FAILED} {error}")),
+            Err(error) => Err(save_error(error)),
         }
     }
 }

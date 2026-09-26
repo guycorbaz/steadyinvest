@@ -1472,6 +1472,9 @@ export global Holdings {
     // « indisponible », never the empty-looking « Aucune position pour le moment ».
     in-out property <bool> holdings-unavailable;
     in-out property <bool> read-only;
+    // WHY the dossier is read-only, keyed by cause (2026-09-26): "newer-schema", "file" or
+    // "directory" (protected against writing) — the read-only bands name the right reason.
+    in-out property <string> read-only-cause;
     in-out property <string> notice;
     in-out property <string> reference-currency: "CHF";
     // Story 6.2 (FR38): the fixed allow-list a holding may be denominated in, pushed from Rust

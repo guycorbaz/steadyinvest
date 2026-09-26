@@ -343,8 +343,10 @@ mod tests {
     }
 
     /// Representative `persistence::Error` instances. Covers every variant whose own prose the app
-    /// could surface in a banner (the app interpolates `persistence::Error` Display verbatim into
-    /// the `MSG_SAVE_FAILED` catch-all). `Sqlite(rusqlite::Error)` cannot be constructed here
+    /// could surface in a banner. Since 2026-09-26 no save-failure path interpolates it any more
+    /// (`state::save_error` names the cause in French and LOGS the Display — SQLite's « attempt to
+    /// write a readonly database » had reached the refusal dialog); the open-failure notice still
+    /// appends it, so the scan stays. `Sqlite(rusqlite::Error)` cannot be constructed here
     /// (`app` has no `rusqlite` dep), so its static own-prefix is scanned as a literal instead; the
     /// variable tail is third-party `rusqlite` text, outside our signal.
     fn sample_persistence_error_messages() -> Vec<String> {
@@ -366,6 +368,13 @@ mod tests {
             Error::NewerJournalSchema {
                 file_user_version: 9,
                 supported: 1,
+            }
+            .to_string(),
+            Error::WriteProtected { directory: false }.to_string(),
+            Error::WriteProtected { directory: true }.to_string(),
+            Error::WriteProtectedOutdated {
+                file_user_version: 1,
+                supported: 9,
             }
             .to_string(),
             Error::NewerRowSchema {
@@ -847,7 +856,7 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            187,
+            193,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -877,7 +886,12 @@ mod tests {
             // (MSG_STOP_SEEDED_FROM_COST): 184 + 1 = 185, measured. A leftover
             // -prerestore is named at startup (MSG_PRERESTORE_FOUND): 185 + 1 = 186, measured. A reference
             // change names the legacy stops it does not convert
-            // (MSG_LEGACY_STOPS_REFERENCE_CHANGED): 186 + 1 = 187, measured.
+            // (MSG_LEGACY_STOPS_REFERENCE_CHANGED): 186 + 1 = 187, measured. The 2026-09-26
+            // on-screen defect names a dossier protected against writing — the write refusals by
+            // cause (MSG_READ_ONLY_FILE_WRITE, MSG_READ_ONLY_DIR_WRITE), the state lines
+            // (MSG_STARTUP_FILE_PROTECTED, MSG_STARTUP_DIR_PROTECTED), the unmigratable open
+            // (MSG_OPEN_PROTECTED_OUTDATED) and a write the OS refused on the spot
+            // (MSG_WRITE_REFUSED_BY_SYSTEM): 187 + 6 = 193, measured.
             "state.rs message inventory changed — register the new notice"
         );
     }
