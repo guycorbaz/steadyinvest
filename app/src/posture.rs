@@ -1018,86 +1018,94 @@ mod tests {
         files
     }
 
-    /// `(start, end)` byte spans of the string and char literals of `code` (plain, escaped and
-    /// raw `r#"…"#` strings; a `'a` lifetime is not a literal).
-    fn literal_spans(code: &str) -> Vec<(usize, usize)> {
-        let b = code.as_bytes();
-        let mut spans = Vec::new();
+    /// One pass over Rust source: the code WITHOUT its comments, and per byte of that code
+    /// whether it lies inside a string / char literal (plain, escaped, byte and raw `r#"…"#`
+    /// strings; a `'a` lifetime is no literal). Comments and literals are read together, so a
+    /// lone `"` in a comment cannot flip the rest of the file (second G3 L8).
+    fn lex(source: &str) -> (String, Vec<bool>) {
+        let b = source.as_bytes();
+        let mut code = String::with_capacity(source.len());
+        let mut mask: Vec<bool> = Vec::with_capacity(source.len());
+        let push = |code: &mut String, mask: &mut Vec<bool>, text: &str, lit: bool| {
+            code.push_str(text);
+            mask.extend(std::iter::repeat_n(lit, text.len()));
+        };
         let mut i = 0;
         while i < b.len() {
-            match b[i] {
-                b'r' if i + 1 < b.len()
-                    && (b[i + 1] == b'"' || b[i + 1] == b'#')
-                    && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) =>
-                {
-                    let mut j = i + 1;
-                    let mut hashes = 0;
-                    while j < b.len() && b[j] == b'#' {
-                        hashes += 1;
-                        j += 1;
-                    }
-                    if j >= b.len() || b[j] != b'"' {
-                        i += 1;
-                        continue;
-                    }
-                    let close: Vec<u8> = std::iter::once(b'"')
-                        .chain(std::iter::repeat_n(b'#', hashes))
-                        .collect();
-                    let end = b[j + 1..]
-                        .windows(close.len())
-                        .position(|w| w == close.as_slice())
-                        .map_or(b.len() - 1, |p| j + 1 + p + close.len() - 1);
-                    spans.push((i, end));
-                    i = end + 1;
-                }
-                b'"' => {
-                    let mut j = i + 1;
-                    while j < b.len() && b[j] != b'"' {
-                        j += if b[j] == b'\\' { 2 } else { 1 };
-                    }
-                    spans.push((i, j.min(b.len() - 1)));
-                    i = j + 1;
-                }
-                b'\'' => {
-                    // A char literal: 'x', '\n', '\'' — else a lifetime / label.
-                    if i + 2 < b.len() && b[i + 1] == b'\\' {
-                        let end = code[i + 2..].find('\'').map_or(i + 2, |p| i + 2 + p);
-                        spans.push((i, end));
-                        i = end + 1;
-                    } else if let Some(c) = code[i + 1..].chars().next()
-                        && code[i + 1 + c.len_utf8()..].starts_with('\'')
-                    {
-                        let end = i + 1 + c.len_utf8();
-                        spans.push((i, end));
-                        i = end + 1;
-                    } else {
-                        i += 1;
-                    }
-                }
-                _ => i += 1,
+            let rest = &source[i..];
+            if rest.starts_with("//") {
+                i += rest.find('\n').unwrap_or(rest.len());
+                continue;
             }
-        }
-        spans
-    }
-
-    /// Per byte of `code`: inside a literal?
-    fn literal_mask(code: &str) -> Vec<bool> {
-        let mut mask = vec![false; code.len()];
-        for (s, e) in literal_spans(code) {
-            for m in &mut mask[s..=e.min(code.len() - 1)] {
-                *m = true;
+            if rest.starts_with("/*") {
+                i += rest.find("*/").map_or(rest.len(), |p| p + 2);
+                continue;
             }
+            let ident_before = i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
+            // Raw strings: r"…", r#"…"#, br#"…"#.
+            let raw_at = if !ident_before && rest.starts_with("br") {
+                Some(2)
+            } else if !ident_before && rest.starts_with('r') {
+                Some(1)
+            } else {
+                None
+            };
+            if let Some(skip) = raw_at {
+                let hashes = rest[skip..].bytes().take_while(|&c| c == b'#').count();
+                if rest[skip + hashes..].starts_with('"') {
+                    let close = format!("\"{}", "#".repeat(hashes));
+                    let body = skip + hashes + 1;
+                    let end = rest[body..]
+                        .find(&close)
+                        .map_or(rest.len(), |p| body + p + close.len());
+                    push(&mut code, &mut mask, &rest[..end], true);
+                    i += end;
+                    continue;
+                }
+            }
+            if b[i] == b'"' {
+                let mut j = i + 1;
+                while j < b.len() && b[j] != b'"' {
+                    j += if b[j] == b'\\' { 2 } else { 1 };
+                }
+                let end = (j + 1).min(b.len());
+                push(&mut code, &mut mask, &source[i..end], true);
+                i = end;
+                continue;
+            }
+            if b[i] == b'\'' {
+                // 'x', '\n', '\'' — else a lifetime / label.
+                let len = if rest[1..].starts_with('\\') {
+                    rest[2..].find('\'').map(|p| p + 3)
+                } else {
+                    rest[1..]
+                        .chars()
+                        .next()
+                        .filter(|c| rest[1 + c.len_utf8()..].starts_with('\''))
+                        .map(|c| c.len_utf8() + 2)
+                };
+                if let Some(len) = len {
+                    push(&mut code, &mut mask, &rest[..len], true);
+                    i += len;
+                    continue;
+                }
+            }
+            let ch = rest.chars().next().expect("char");
+            let mut buf = [0u8; 4];
+            push(&mut code, &mut mask, ch.encode_utf8(&mut buf), false);
+            i += ch.len_utf8();
         }
-        mask
+        (code, mask)
     }
 
     /// The byte index of the bracket closing the one at `open`, literals skipped (`mask` from
-    /// [`literal_mask`]); the end of `code` when unbalanced.
+    /// [`lex`]); the end of `code` when unbalanced.
     fn group_end(code: &str, mask: &[bool], open: usize) -> usize {
         let b = code.as_bytes();
         let (o, c) = match b[open] {
             b'(' => (b'(', b')'),
             b'{' => (b'{', b'}'),
+            b'<' => (b'<', b'>'),
             _ => (b'[', b']'),
         };
         let mut depth = 1usize;
@@ -1117,31 +1125,15 @@ mod tests {
         b.len() - 1
     }
 
-    /// `source` without comments (literals honoured), without `#[cfg(test)] mod …` modules, and
-    /// without the bodies of the macros that never reach the user (logging, stderr, panics,
-    /// asserts).
+    /// `source` without comments, without `#[cfg(test)] mod …` modules, and without the bodies of
+    /// the macros that never reach the user (logging, stderr, panics, asserts).
     fn user_reachable_code(source: &str) -> String {
-        let mask = literal_mask(source);
-        let b = source.as_bytes();
-        let mut code = String::with_capacity(source.len());
-        let mut i = 0;
-        while i < b.len() {
-            if !mask[i] && source[i..].starts_with("//") {
-                i = source[i..].find('\n').map_or(b.len(), |p| i + p);
-                continue;
-            }
-            if !mask[i] && source[i..].starts_with("/*") {
-                i = source[i..].find("*/").map_or(b.len(), |p| i + p + 2);
-                continue;
-            }
-            let ch = source[i..].chars().next().expect("char");
-            code.push(ch);
-            i += ch.len_utf8();
-        }
+        let (mut code, _) = lex(source);
         for marker in ["#[cfg(test)]\nmod ", "#[cfg(test)]\n    mod "] {
             while let Some(start) = code.find(marker) {
                 let open = start + code[start..].find('{').expect("test module body");
-                let end = group_end(&code, &literal_mask(&code), open);
+                let (_, mask) = lex(&code);
+                let end = group_end(&code, &mask, open);
                 code.replace_range(start..=end, "");
             }
         }
@@ -1162,7 +1154,7 @@ mod tests {
             let mut from = 0;
             while let Some(p) = code[from..].find(mac) {
                 let start = from + p;
-                let mask = literal_mask(&code);
+                let (_, mask) = lex(&code);
                 if mask[start] {
                     from = start + mac.len();
                     continue;
@@ -1179,48 +1171,123 @@ mod tests {
         c.is_ascii_alphanumeric() || c == b'_'
     }
 
-    /// The identifier starting at `at`, if any.
-    fn ident_at(code: &str, at: usize) -> Option<&str> {
+    /// The identifier starting at `at` (leading whitespace skipped), and where it ends.
+    fn ident_at(code: &str, at: usize) -> Option<(&str, usize)> {
         let b = code.as_bytes();
-        let end = (at..b.len())
+        let start = (at..b.len()).find(|&i| !b[i].is_ascii_whitespace())?;
+        let end = (start..b.len())
             .find(|&i| !is_ident_byte(b[i]))
             .unwrap_or(b.len());
-        (end > at).then(|| &code[at..end])
+        (end > start).then(|| (&code[start..end], end))
     }
 
-    /// The error bindings of `code`: `error` / `e` / `err`, and every name bound by `Err(x)`,
-    /// `map_err(|x|`, `unwrap_or_else(|x|`, `or_else(|x|`.
+    /// Skip whitespace and the pattern keywords `move` / `ref` / `mut` from `at`.
+    fn skip_keywords(code: &str, mut at: usize) -> usize {
+        loop {
+            match ident_at(code, at) {
+                Some((kw @ ("move" | "ref" | "mut"), end))
+                    if code
+                        .as_bytes()
+                        .get(end)
+                        .is_some_and(|c| c.is_ascii_whitespace()) =>
+                {
+                    let _ = kw;
+                    at = end;
+                }
+                _ => return at,
+            }
+        }
+    }
+
+    fn is_binding_name(name: &str) -> bool {
+        !name.starts_with('_')
+            && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+            && !matches!(name, "ref" | "mut" | "move")
+    }
+
+    /// The error bindings of `code` (see the section comment): `error` / `e` / `err`, every
+    /// name bound by an `Err(…)` PATTERN (`Err(x)`, `Err(ref x)`, `Err(E::V { a, b: c })`), by
+    /// `map_err` / `unwrap_or_else` / `or_else` closures (`move`, spacing and all), and by
+    /// `Some(x) = ….err()`.
     fn error_bindings(code: &str) -> std::collections::BTreeSet<String> {
+        let (_, mask) = lex(code);
+        let b = code.as_bytes();
         let mut names: std::collections::BTreeSet<String> = ["error", "e", "err"]
             .iter()
             .map(|s| s.to_string())
             .collect();
-        for opener in ["Err(", "map_err(|", "unwrap_or_else(|", "or_else(|"] {
+        // Closures.
+        for opener in ["map_err(", "unwrap_or_else(", "or_else("] {
             for (p, _) in code.match_indices(opener) {
-                if opener == "Err(" && p > 0 && is_ident_byte(code.as_bytes()[p - 1]) {
-                    continue; // `IoErr(`, `MyErr(`
-                }
-                let Some(name) = ident_at(code, p + opener.len()) else {
+                if mask[p] {
                     continue;
-                };
-                // `Err(x)` BINDS only as a pattern (`Err(x) =>`, `let Err(x) =`, `Err(x) |`);
-                // `Err(x)` followed by `,` / `;` / `)` builds a value — no binding.
-                let after = p + opener.len() + name.len();
-                let is_pattern = opener != "Err(" || {
-                    let rest = code[after..].trim_start();
-                    rest.starts_with(')') && {
-                        let rest = rest[1..].trim_start();
-                        rest.starts_with("=>")
-                            || rest.starts_with('|')
-                            || (rest.starts_with('=') && !rest.starts_with("=="))
-                    }
-                };
-                if is_pattern
-                    && !name.starts_with('_')
-                    && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+                }
+                let at = skip_keywords(code, p + opener.len());
+                let at = (at..b.len())
+                    .find(|&i| !b[i].is_ascii_whitespace())
+                    .unwrap_or(b.len());
+                if b.get(at) != Some(&b'|') {
+                    continue;
+                }
+                let at = skip_keywords(code, at + 1);
+                if let Some((name, _)) = ident_at(code, at)
+                    && is_binding_name(name)
                 {
                     names.insert(name.to_string());
                 }
+            }
+        }
+        // `Err(…)` patterns.
+        for (p, _) in code.match_indices("Err(") {
+            if mask[p] || (p > 0 && is_ident_byte(b[p - 1])) {
+                continue;
+            }
+            let open = p + 3;
+            let close = group_end(code, &mask, open);
+            let after = code[close + 1..].trim_start();
+            let is_pattern = after.starts_with("=>")
+                || after.starts_with('|')
+                || (after.starts_with('=') && !after.starts_with("=="));
+            if !is_pattern {
+                continue; // `Err(x)` builds a value
+            }
+            let inner = &code[open + 1..close];
+            if let Some(brace) = inner.find('{') {
+                // A destructured variant: every bound field (`a`, `b: c` → `c`).
+                let fields = &inner[brace + 1..inner.rfind('}').unwrap_or(inner.len())];
+                for field in fields.split(',') {
+                    let bound = field.rsplit(':').next().unwrap_or("").trim();
+                    let bound = bound
+                        .trim_start_matches("ref ")
+                        .trim_start_matches("mut ")
+                        .trim();
+                    if bound.bytes().all(is_ident_byte) && is_binding_name(bound) {
+                        names.insert(bound.to_string());
+                    }
+                }
+            } else {
+                let at = skip_keywords(code, open + 1);
+                if let Some((name, end)) = ident_at(code, at)
+                    && code[end..].trim_start().starts_with(')')
+                    && is_binding_name(name)
+                {
+                    names.insert(name.to_string());
+                }
+            }
+        }
+        // `Some(x) = … .err()` within one statement.
+        for (p, _) in code.match_indices(".err()") {
+            if mask[p] {
+                continue;
+            }
+            let statement_start = code[..p].rfind([';', '{', '}']).map_or(0, |s| s + 1);
+            let statement = &code[statement_start..p];
+            if let Some(some) = statement.find("Some(")
+                && let Some((name, end)) = ident_at(statement, some + 5)
+                && statement[end..].trim_start().starts_with(')')
+                && is_binding_name(name)
+            {
+                names.insert(name.to_string());
             }
         }
         names
@@ -1229,7 +1296,8 @@ mod tests {
     /// Every error-Display shape in `code` (see the section comment), as short site excerpts.
     fn error_display_sites(code: &str) -> Vec<String> {
         let bindings = error_bindings(code);
-        let mask = literal_mask(code);
+        let (_, mask) = lex(code);
+        let b = code.as_bytes();
         let excerpt = |at: usize| -> String {
             let start = code[..at].rfind('\n').map_or(0, |p| p + 1);
             let end = code[at..].find('\n').map_or(code.len(), |p| at + p);
@@ -1239,30 +1307,30 @@ mod tests {
         if let Some(p) = code.find("ToString::to_string") {
             sites.push(excerpt(p));
         }
-        for name in &bindings {
-            for hole in [
-                format!("{{{name}}}"),
-                format!("{{{name}:?}}"),
-                format!("{{{name}:#?}}"),
-            ] {
-                for (p, _) in code.match_indices(&hole) {
-                    if mask[p] {
-                        sites.push(excerpt(p));
-                    }
-                }
+        // A binding in a format string: `{x}`, `{x:?}`, `{x:#}`, `{x:>8}`…
+        for (p, _) in code.match_indices('{') {
+            if !mask[p] {
+                continue;
             }
+            if let Some((name, end)) = ident_at(code, p + 1)
+                && end == p + 1 + name.len()
+                && matches!(b.get(end), Some(b'}') | Some(b':'))
+                && bindings.contains(name)
+            {
+                sites.push(excerpt(p));
+            }
+        }
+        // `x.to_string()`.
+        for name in &bindings {
             let call = format!("{name}.to_string()");
             for (p, _) in code.match_indices(&call) {
-                let bounded = p == 0 || {
-                    let c = code.as_bytes()[p - 1];
-                    !(is_ident_byte(c) || c == b'.')
-                };
+                let bounded = p == 0 || !(is_ident_byte(b[p - 1]) || b[p - 1] == b'.');
                 if bounded && !mask[p] {
                     sites.push(excerpt(p));
                 }
             }
         }
-        // A binding passed as a `format!` / `write!` ARGUMENT (multi-line calls included).
+        // A binding passed as a `format!` / `write!` ARGUMENT (multi-line calls, named args).
         for mac in ["format!(", "write!(", "writeln!("] {
             for (p, _) in code.match_indices(mac) {
                 if mask[p] {
@@ -1270,29 +1338,36 @@ mod tests {
                 }
                 let open = p + mac.len() - 1;
                 let end = group_end(code, &mask, open);
-                let inner = &code[open + 1..end];
-                let inner_mask = literal_mask(inner);
                 let mut depth = 0i32;
-                let mut arg_start = 0;
+                let mut arg_start = open + 1;
                 let mut args = Vec::new();
-                for (i, ch) in inner.char_indices() {
-                    if inner_mask[i] {
+                for i in open + 1..end {
+                    if mask[i] {
                         continue;
                     }
-                    match ch {
-                        '(' | '[' | '{' => depth += 1,
-                        ')' | ']' | '}' => depth -= 1,
-                        ',' if depth == 0 => {
-                            args.push(&inner[arg_start..i]);
+                    match b[i] {
+                        b'(' | b'[' | b'{' => depth += 1,
+                        b')' | b']' | b'}' => depth -= 1,
+                        b',' if depth == 0 => {
+                            args.push(&code[arg_start..i]);
                             arg_start = i + 1;
                         }
                         _ => {}
                     }
                 }
-                args.push(&inner[arg_start..]);
+                args.push(&code[arg_start..end]);
                 for arg in args.iter().skip(1) {
-                    let arg = arg.trim().trim_start_matches('&');
-                    if bindings.contains(arg) {
+                    // `name = value` → the value.
+                    let value = match arg.split_once('=') {
+                        Some((lhs, rhs))
+                            if lhs.trim().bytes().all(is_ident_byte) && !rhs.starts_with('=') =>
+                        {
+                            rhs
+                        }
+                        _ => arg,
+                    };
+                    let value = value.trim().trim_start_matches('&').trim();
+                    if bindings.contains(value) {
                         sites.push(excerpt(p));
                     }
                 }
@@ -1333,25 +1408,56 @@ mod tests {
         );
     }
 
+    /// Every `Result<…, String>` in `code` — any signature (`pub`, `async`, `const`, trait
+    /// methods) and any `type` alias alike.
+    fn stringly_results(code: &str) -> Vec<String> {
+        let (_, mask) = lex(code);
+        let mut found = Vec::new();
+        for (p, _) in code.match_indices("Result<") {
+            if mask[p] || (p > 0 && is_ident_byte(code.as_bytes()[p - 1])) {
+                continue;
+            }
+            let open = p + "Result".len();
+            let close = group_end(code, &mask, open);
+            let inner = &code[open + 1..close];
+            let mut depth = 0i32;
+            let mut start = 0;
+            let mut args = Vec::new();
+            for (i, c) in inner.char_indices() {
+                match c {
+                    '<' | '(' | '[' => depth += 1,
+                    '>' | ')' | ']' => depth -= 1,
+                    ',' if depth == 0 => {
+                        args.push(inner[start..i].trim());
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            args.push(inner[start..].trim());
+            args.retain(|a| !a.is_empty()); // a trailing comma
+            if args.len() == 2 && args[1] == "String" {
+                found.push(
+                    code[p..=close]
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+            }
+        }
+        found
+    }
+
     #[test]
     fn sibling_crates_hand_the_app_typed_errors_only() {
         // An English String built from an error inside another crate would bypass the app scan:
-        // no public API of theirs returns a stringly error.
+        // none of their code carries a stringly error — public or not, signature or alias.
         let mut offenders = Vec::new();
         for krate in ["persistence", "ingestion", "report", "core", "contract"] {
             for file in rust_sources(krate) {
                 let source = std::fs::read_to_string(&file).expect("source readable");
-                let code = user_reachable_code(&source);
-                // Every public signature, however it wraps over lines.
-                for (p, _) in code.match_indices("pub fn ") {
-                    let end = code[p..].find(['{', ';']).map_or(code.len(), |e| p + e);
-                    let signature: String = code[p..end]
-                        .split_whitespace()
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    if signature.contains("Result<") && signature.contains(", String>") {
-                        offenders.push(format!("{}: {signature}", file.display()));
-                    }
+                for site in stringly_results(&user_reachable_code(&source)) {
+                    offenders.push(format!("{}: {site}", file.display()));
                 }
             }
         }
@@ -1381,12 +1487,35 @@ mod tests {
         );
         assert_eq!(sites("r.map_err(|failure| failure.to_string())").len(), 1);
         assert_eq!(sites("r.unwrap_or_else(|x| format!(\"{x:?}\"))").len(), 1);
+        // Second G3 L8: `move` and spacing, `ref`, destructured fields, `.err()`.
+        assert_eq!(sites("r.map_err(move |x| x.to_string())").len(), 1);
+        assert_eq!(sites("r.map_err( | x | x.to_string())").len(), 1);
+        assert_eq!(
+            sites("match r { Err(ref x) => show(x.to_string()), _ => {} }").len(),
+            1
+        );
+        assert_eq!(
+            sites("match r { Err(E::Restore { detail }) => format!(\"{detail}\"), _ => {} }").len(),
+            1
+        );
+        assert_eq!(
+            sites("match r { Err(E::V { detail: why, .. }) => why.to_string(), _ => {} }").len(),
+            1
+        );
+        assert_eq!(
+            sites("if let Some(fault) = r.err() { show(fault.to_string()); }").len(),
+            1
+        );
+        // Every hole shape and a named argument.
+        assert_eq!(sites(r#"format!("{error:#}")"#).len(), 1);
+        assert_eq!(sites(r#"format!("{e:>8}")"#).len(), 1);
+        assert_eq!(sites(r#"format!("{msg}", msg = error)"#).len(), 1);
         // A multi-line `format!` argument.
         assert_eq!(
             sites("let s = format!(\n    \"{} {}\",\n    MSG,\n    error\n);").len(),
             1
         );
-        // Logged, in a test module, or in a comment: fine.
+        // Logged, in a test module, or in a comment: fine — a lone `"` in a comment included.
         assert!(sites("tracing::warn!(\n    \"read failed: {error}\"\n);").is_empty());
         assert!(sites("tracing::warn!(\"a ) in a literal {}\", error);").is_empty());
         assert!(
@@ -1394,10 +1523,37 @@ mod tests {
                 .is_empty()
         );
         assert!(sites("// format!(\"{error}\")\nlet a = 1;").is_empty());
-        // A French message handed on, a field or a longer name ending in `e`: not an error Display.
+        assert_eq!(
+            sites("// a lone \" quote\nlet m = format!(\"{error}\");").len(),
+            1,
+            "a quote in a comment does not hide the next line"
+        );
+        assert!(sites("let c = '\"'; let s = \"{error}-free literal\";").len() == 1);
+        // A French message handed on, a value built, a longer name: no error Display.
         assert!(sites("match r { Err(message) => refuse(&ui, &message), _ => {} }").is_empty());
-        // `Err(x.to_string())` BUILDS an error from a French message: no binding.
         assert!(sites("return Err(invalid.to_string());").is_empty());
         assert!(sites("let k = base.to_string(); let v = self.e.to_string();").is_empty());
+    }
+
+    #[test]
+    fn the_stringly_result_scan_sees_every_signature_shape() {
+        let found = |s: &str| stringly_results(&user_reachable_code(s));
+        assert_eq!(found("pub fn f() -> Result<u8, String> {}").len(), 1);
+        assert_eq!(found("pub async fn f() -> Result<u8, String> {}").len(), 1);
+        assert_eq!(found("pub const fn f() -> Result<u8, String> {}").len(), 1);
+        assert_eq!(
+            found("trait T { fn f(&self) -> Result<u8, String>; }").len(),
+            1
+        );
+        assert_eq!(
+            found("pub type Out<T> = std::result::Result<T, String>;").len(),
+            1
+        );
+        assert_eq!(
+            found("fn f() -> Result<\n    Vec<(u8, u8)>,\n    String,\n> {}").len(),
+            1
+        );
+        assert!(found("fn f() -> Result<Vec<String>, Error> {}").is_empty());
+        assert!(found("let v = r.get::<_, String>(0)?;").is_empty());
     }
 }
