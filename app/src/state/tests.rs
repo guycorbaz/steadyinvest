@@ -9181,6 +9181,26 @@ mod drafts_8_2b {
         assert_eq!(facts(&state, draft), ("rejected".into(), None, None));
     }
 
+    // AC 14 — a write failure is named, the study and the draft unchanged, no undo step.
+    #[test]
+    fn a_failed_decision_write_is_named_and_changes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 20, id, cell_target(2024, "eps"), "7.5");
+        let before = state.get_study(id).unwrap();
+        raw(&state)
+            .execute_batch(
+                "CREATE TRIGGER inject BEFORE UPDATE ON ai_drafts \
+                 BEGIN SELECT RAISE(ABORT, 'injected'); END",
+            )
+            .unwrap();
+        let err = state.decide_draft(id, draft, validate()).unwrap_err();
+        assert_eq!(err, MSG_DECISION_SAVE_FAILED);
+        assert_eq!(state.get_study(id).unwrap(), before);
+        assert_eq!(facts(&state, draft).0, "pending");
+        assert_eq!(state.undo_depth(), 0);
+    }
+
     // AC 12 — undo / redo move the draft with the study; a new edit after an undo clears redo.
     #[test]
     fn undo_and_redo_of_a_validation_move_the_draft_status() {

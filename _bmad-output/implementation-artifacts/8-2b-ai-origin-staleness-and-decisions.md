@@ -1,6 +1,6 @@
 # Story 8.2b: AI origin, staleness and decisions (headless)
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created 2026-09-27 by create-story (ultimate context engine). Branch: feat/8-2b-ai-origin-decisions
      (main with 8.1 #257 and 8.2a #258 merged). No UI in this story — the inbox is 8.5a/8.5b. -->
@@ -82,75 +82,75 @@ so that a decision can never be half-applied, lost by a later save, or confused 
 
 ## Tasks / Subtasks
 
-- [ ] **T1 — Contract types (AC 1)**
-  - [ ] T1.1 `contract/src/ai.rs`: add `DraftOrigin { client: String, model: String }` (serde, Eq);
+- [x] **T1 — Contract types (AC 1)**
+  - [x] T1.1 `contract/src/ai.rs`: add `DraftOrigin { client: String, model: String }` (serde, Eq);
         re-export from `lib.rs`. Update the module doc (drop « arrives with Story 8.2b »).
-  - [ ] T1.2 `Provenance.ai_origin` (additive, `default` + `skip_serializing_if`). Update **every**
+  - [x] T1.2 `Provenance.ai_origin` (additive, `default` + `skip_serializing_if`). Update **every**
         `Provenance { … }` literal with `ai_origin: None` (list in Dev Notes §9). Consider a
         `Provenance::new(source, lv, ts, hash)` helper only if it removes churn without hiding intent —
         do not add `Default` (a default provenance would be a lie).
-  - [ ] T1.3 `AiPlaced` struct (`Default`, `is_empty()`), one `Option<AiOrigin>` per draftable judgment
+  - [x] T1.3 `AiPlaced` struct (`Default`, `is_empty()`), one `Option<AiOrigin>` per draftable judgment
         field (Dev Notes §2), field `Judgment.ai_placed` (additive, `default` + `skip_serializing_if`).
         Update every `Judgment { … }` **construction** (not patterns) with `ai_placed:
         AiPlaced::default()`.
-  - [ ] T1.4 Tests: legacy JSON without the fields reads `None` / empty; a study without AI marks
+  - [x] T1.4 Tests: legacy JSON without the fields reads `None` / empty; a study without AI marks
         serializes byte-identically to a pinned string; round-trip with marks.
-- [ ] **T2 — Draftable fields + parser (AC 2)** in new `contract/src/draftable.rs`
-  - [ ] T2.1 `DraftField` enum (16 variants, Dev Notes §2) with `key()`, `from_key()`, `kind()` (cell
+- [x] **T2 — Draftable fields + parser (AC 2)** in new `contract/src/draftable.rs`
+  - [x] T2.1 `DraftField` enum (16 variants, Dev Notes §2) with `key()`, `from_key()`, `kind()` (cell
         / judgment), `unit()` (`DraftUnit`), `options()` for `ForecastLowOption`.
-  - [ ] T2.2 `DraftField::parse_value(&self, text) -> Result<DraftValue, DraftValueProblem>`:
+  - [x] T2.2 `DraftField::parse_value(&self, text) -> Result<DraftValue, DraftValueProblem>`:
         decimals via `Decimal::from_str_exact` on the trimmed text, **plain notation only** (no
         exponent, no `+`, no locale separators, no thousands); `-0` → `0`; the enum by exact snake
         name. `DraftValue::{Number(Money), Option(ForecastLowOption)}`.
-  - [ ] T2.3 `DraftTarget` ↔ `DraftField` helper: `DraftField::of_target(&DraftTarget) ->
+  - [x] T2.3 `DraftTarget` ↔ `DraftField` helper: `DraftField::of_target(&DraftTarget) ->
         Option<(DraftField, Option<i32>)>` (unknown key → `None`).
-  - [ ] T2.4 Tests: every key round-trips; `current_price` / `ttm_eps` are not draftable; units; parse
+  - [x] T2.4 Tests: every key round-trips; `current_price` / `ttm_eps` are not draftable; units; parse
         accepts `12.5`, `-3`, `0.001`; refuses `1e3`, `+2`, `1'000`, `1,5`, ``, `abc`; option names.
-- [ ] **T3 — Fingerprint + draft state (AC 5, 6)** in `contract/src/draftable.rs` (or `fingerprint.rs`)
-  - [ ] T3.1 `draft_fingerprint(study: &Study, target: &DraftTarget, method_version: &str) ->
+- [x] **T3 — Fingerprint + draft state (AC 5, 6)** in `contract/src/draftable.rs` (or `fingerprint.rs`)
+  - [x] T3.1 `draft_fingerprint(study: &Study, target: &DraftTarget, method_version: &str) ->
         Option<String>` per Dev Notes §3 (SHA-256 hex, `fp1:` prefix).
-  - [ ] T3.2 App-side pure classifier (`app/src/state/drafts.rs`): `draft_freshness(study:
+  - [x] T3.2 App-side pure classifier (`app/src/state/drafts.rs`): `draft_freshness(study:
         Option<&Study>, record: &DraftRecord) -> DraftFreshness { Fresh, Stale, TargetGone(GoneReason) }`
         using `steadyinvest_core::METHOD_VERSION`; note drafts: fresh unless the study is gone.
-  - [ ] T3.3 Tests (AC 5 list + scale change + coverage change + review-only toggle does **not** stale).
-- [ ] **T4 — Rails that write the marks (AC 3, 4)**
-  - [ ] T4.1 `contract::Cell::validated_from_draft(&self, value: Option<Money>, provenance: Provenance)
+  - [x] T3.3 Tests (AC 5 list + scale change + coverage change + review-only toggle does **not** stale).
+- [x] **T4 — Rails that write the marks (AC 3, 4)**
+  - [x] T4.1 `contract::Cell::validated_from_draft(&self, value: Option<Money>, provenance: Provenance)
         -> Cell` = `edited(value, provenance)` then `review = Review::ToReview` — documented as **the**
         D5 exception to invariant 2b; `contract/tests/cell_rails.rs` cases: untagged → `?`, `✓` same
         value → `?`, `✓` new value → `?`, pending cleared, coverage Present.
-  - [ ] T4.2 `apply_judgment_field` and `set_forecast_low_option` clear the field's `ai_placed` slot;
+  - [x] T4.2 `apply_judgment_field` and `set_forecast_low_option` clear the field's `ai_placed` slot;
         a grep-backed test lists every writer of a draftable judgment field (refresh writes only
         `current_price`/`ttm_eps` — assert they are not draftable).
-  - [ ] T4.3 Reconciliation test extension (contract + `app/src/state/tests.rs` refresh case): manual
+  - [x] T4.3 Reconciliation test extension (contract + `app/src/state/tests.rs` refresh case): manual
         AI-origin cell + divergent fetch → value kept, pending parked, `ai_origin` kept; + agreeing
         fetch → pending cleared, `ai_origin` kept.
-- [ ] **T5 — Persistence decision writes (AC 7, 10, 12, 13)** in `persistence/src/drafts.rs`
-  - [ ] T5.1 `Journal::get_draft(id) -> Result<Option<DraftRecord>>` (same corruption rule as
+- [x] **T5 — Persistence decision writes (AC 7, 10, 12, 13)** in `persistence/src/drafts.rs`
+  - [x] T5.1 `Journal::get_draft(id) -> Result<Option<DraftRecord>>` (same corruption rule as
         `list_drafts`); `Journal::study_status(id) -> Result<Option<String>>` if no existing getter fits.
-  - [ ] T5.2 `Journal::decide_draft(&mut self, d: DraftDecisionWrite<'_>) -> Result<()>` (Dev Notes §5):
+  - [x] T5.2 `Journal::decide_draft(&mut self, d: DraftDecisionWrite<'_>) -> Result<()>` (Dev Notes §5):
         one transaction: draft still `pending` (else `Error::DraftNotPending`), optional study write
         guarded by "stored payload re-serialized == expected-before serialized" (else
         `Error::StudyChangedSinceRead`), study upsert + FR51 snapshot (factor the body of
         `put_study_with_history` into a `tx`-level helper — do **not** duplicate the dedup logic),
         draft `UPDATE … WHERE id = ? AND status = 'pending'` (assert 1 row), one
         `bump_logical_version`.
-  - [ ] T5.3 `Journal::step_draft_decision(&mut self, study: &Study, draft_id, to: DraftStatus, now)`
+  - [x] T5.3 `Journal::step_draft_decision(&mut self, study: &Study, draft_id, to: DraftStatus, now)`
         for undo (`validated → validated_undone`) and redo (`validated_undone → validated`): same
         transaction shape, `from` status checked, `decided_at = now`.
-  - [ ] T5.4 New `Error` variants (+ `ErrorKind` mapping, likely `Other`/`Missing`): `DraftNotFound`,
+  - [x] T5.4 New `Error` variants (+ `ErrorKind` mapping, likely `Other`/`Missing`): `DraftNotFound`,
         `DraftNotPending { status }`, `DraftStatusMismatch { expected, found }`,
         `StudyChangedSinceRead`.
-  - [ ] T5.5 Tests (`persistence/tests/drafts.rs`): validate / reject / undo / redo transitions obey
+  - [x] T5.5 Tests (`persistence/tests/drafts.rs`): validate / reject / undo / redo transitions obey
         the 8.2a CHECKs; version bump exactly +1 per decision (the trigger fires on INSERT only);
         a non-pending draft is refused; a changed study is refused; crash injection (Dev Notes §7).
-- [ ] **T6 — App state rail (AC 7–9, 11, 12, 14)** in new `app/src/state/drafts.rs`
-  - [ ] T6.1 `UndoHistory` entries become `UndoStep { study: Study, draft: Option<Uuid> }`;
+- [x] **T6 — App state rail (AC 7–9, 11, 12, 14)** in new `app/src/state/drafts.rs`
+  - [x] T6.1 `UndoHistory` entries become `UndoStep { study: Study, draft: Option<Uuid> }`;
         `record(before)` unchanged for every existing caller; `record_draft(before, draft_id)`;
         `step()` routes a draft step through `step_draft_decision` (undo → `ValidatedUndone`, redo →
         `Validated`), the displaced present keeps the same draft id; failure pushes back (existing
         rule). `UndoHistory` also records its owner study (`reset_undo_for(Some(id))` at the open
         sites, `None` for the demo) — keep `reset_undo()` as a thin wrapper if call sites prefer.
-  - [ ] T6.2 `pub enum Decision { Validate { seen_fingerprint: Option<String> }, ValidateEdited {
+  - [x] T6.2 `pub enum Decision { Validate { seen_fingerprint: Option<String> }, ValidateEdited {
         seen_fingerprint: Option<String>, value: String }, Reject }` and `JournalState::decide_draft
         (study_id, draft_id, decision) -> Result<(), String>`: read-only → `MSG_DECISION_READ_ONLY`;
         study ≠ history owner → `MSG_NO_STUDY_OPEN` (8.1); draft read / status / archived / gone /
@@ -160,17 +160,17 @@ so that a decision can never be half-applied, lost by a later save, or confused 
         `Journal::decide_draft`; on success `history.record_draft(before, draft_id)` (validation only).
         Draft **study** kind: `Reject` supported; `Validate` → refused here with a clear internal
         error (8.7 owns creation).
-  - [ ] T6.3 Map persistence errors: `DraftNotPending` → `MSG_DECISION_ALREADY_DECIDED`;
+  - [x] T6.3 Map persistence errors: `DraftNotPending` → `MSG_DECISION_ALREADY_DECIDED`;
         `StudyChangedSinceRead` → `MSG_DECISION_CHANGED`; others → `MSG_DECISION_SAVE_FAILED` with the
         typed cause (`persist_cause`), never a silent `.ok()`.
-  - [ ] T6.4 Messages (Dev Notes §6) in `messages.rs`, added to `USER_FACING_MESSAGES`; target-gone
+  - [x] T6.4 Messages (Dev Notes §6) in `messages.rs`, added to `USER_FACING_MESSAGES`; target-gone
         reasons in a scanned inventory; posture count delta stated in `posture.rs`.
-  - [ ] T6.5 Tests (`app/src/state/tests.rs`, FixedClock/FixedIdGen, seeded drafts through a test-only
+  - [x] T6.5 Tests (`app/src/state/tests.rs`, FixedClock/FixedIdGen, seeded drafts through a test-only
         persistence insert helper — 8.3 owns the real writer): each AC 3/7/8/9/11/12/14 case;
         undo/redo transitions and record; lost-update suite (AC 11); a decision on a study that is not
         the history owner refused.
-- [ ] **T7 — Record + closure**
-  - [ ] T7.1 Story record (Dev Agent Record, File List, deltas); sprint-status `8-2b…: review`.
+- [x] **T7 — Record + closure**
+  - [x] T7.1 Story record (Dev Agent Record, File List, deltas); sprint-status `8-2b…: review`.
 
 ## Dev Notes
 
@@ -379,10 +379,100 @@ free of `core` — the method version is passed in by `app`).
 
 ### Agent Model Used
 
+Claude Opus 5.5 (claude-opus-5-5), 2026-09-27.
+
 ### Debug Log References
+
+- The posture gate `no_error_display_reaches_a_user_string` matched the `{reason}` placeholder of
+  `MSG_DECISION_TARGET_GONE` against an `Err(reason)` binding elsewhere in `state/drafts.rs`; the
+  binding was renamed (`why`) and the refusal mapping moved into `BuildProblem::refusal`.
+- clippy `too_many_arguments` on `decided_study` → the injected parts are a `DecisionContext`.
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed — comprehensive developer guide created.
+- **Owner-pending defaults applied** (story questions 1–5, pending Guy's confirmation): adopt
+  « Cette proposition a déjà été traitée ; rien n'a été enregistré. »; a price refresh makes pending
+  judgment drafts stale (`cp:` in the fingerprint); sales / pre-tax drafts propose **absolute**
+  amounts; the cell fingerprint includes coverage; `decided_at` after an undo / redo is the time of
+  that transition.
+- **AC 1** — `DraftOrigin`, `Provenance.ai_origin`, `Judgment.ai_placed` (`AiPlaced`, 9 slots) are
+  additive and skipped when empty: the pinned corpus JSON and export hashes are unchanged (the
+  corpus gate passes without re-capture). Every `Provenance` / `Judgment` construction was updated
+  from the compiler's E0063 list (36 files).
+- **AC 2** — `contract::draftable`: 16 fields (7 cell, 9 judgment; `current_price` / `ttm_eps` not
+  draftable), units, options, the plain-decimal parser (`-0` → `0`; refuses exponent, `+`, locale
+  and thousands separators, `.5`, `5.`), `of_target`, slot accessors.
+- **AC 3 / 4** — `Cell::validated_from_draft` (the D5 exception, property-tested over every cell
+  state); `apply_judgment_field` and `set_forecast_low_option` clear the field's mark; a source scan
+  proves no other production code writes a draftable judgment field; reconciliation keeps the AI
+  origin (manual wins, pending parked; agreement clears the pending, keeps the origin).
+- **AC 5 / 6** — `draft_fingerprint` (`fp1`), 13 contract tests (EPS refresh, method change, price
+  refresh, parked pending, pending-absent, re-stamp not stale, Money scale not stale, coverage,
+  source, absent slot ≠ materialized empty cell, missing year = gone, a cell draft ignores the rest);
+  `draft_freshness` classifies fresh / stale / target gone (an absent base fingerprint reads stale —
+  it cannot prove freshness).
+- **AC 7–12** — `Journal::decide_draft` / `step_draft_decision` (one transaction, one bump, the
+  draft and study re-checks inside); `JournalState::decide_draft`; the undo history's steps carry the
+  draft id and the history knows its owner study (`reset_undo_for`, called at the study-open site).
+  Failure injection at either write (persistence) and at the app rail leaves everything unchanged.
+- **AC 13** — every transition passes the 8.2a CHECKs (validate, reject, undo, redo; a rejection
+  carrying `edited_before_validation` is refused by the engine).
+- **AC 14** — the refusals are named; the persistence errors map to `MSG_DECISION_ALREADY_DECIDED`,
+  `MSG_DECISION_CHANGED`, `MSG_STUDY_GONE` (a draft only leaves with its study) or the save failure
+  with its cause.
+- **AC 15** — `cargo test --workspace`: 1249 passed, 0 failed, 2 ignored (the corpus generators);
+  clippy `-D warnings` and `fmt --check` clean. No `SCHEMA_VERSION` bump, no UI, no `@tr` delta.
+- **Posture deltas** — `USER_FACING_MESSAGES` 228 → 236 (+8); new inventory `DRAFT_GONE_REASONS`
+  0 → 3; persistence error sample inventory 23 → 27 (+4 variants).
+- **Deviations from the story (all small, for the review):**
+  1. **+8 messages, not +7**: the save failure has a plain form (« La décision n'a pas pu être
+     enregistrée ; rien n'a été modifié. ») beside the §3.3 `({cause})` form — the existing
+     `MSG_SAVE_FAILED` / `_CAUSE` pattern, so no « () » when no cause is named.
+  2. **A third target-gone reason**, « le champ {field} n'existe pas dans l'étude », for a draft whose
+     field names no draftable slot — reachable only through a malformed import (8.3 checks MCP
+     submissions); not in §3.3.
+  3. **Wire-key maps**: only `judgment_draft_field` (wire → field, used to clear the mark) exists; no
+     inverse and no cell map, because the decision writes through `DraftField::put_cell` /
+     `set_judgment` and never through `set_cell` / `apply_judgment_field` — nothing to map yet.
+  4. A draft of **another study than the open one** is refused with `MSG_NO_STUDY_OPEN` (the inbox of
+     8.5b opens that study first); a draft that is **gone** (the O7 cascade) reads `MSG_STUDY_GONE`.
+  5. The persistence errors carry the status as its snake-case **text** (`DraftStatus` has no
+     `Display`).
+  6. The decision module is `#[cfg_attr(not(test), allow(dead_code))]` until its UI callers land
+     (8.5a / 8.5b) — the `list_notice.rs` precedent. No `try_list_drafts` app wrapper yet (8.5a).
 
 ### File List
+
+- `contract/src/ai.rs` — `DraftOrigin`.
+- `contract/src/provenance.rs` — `Provenance.ai_origin`.
+- `contract/src/study.rs` — `Judgment.ai_placed`, `AiPlaced`.
+- `contract/src/cell.rs` — `Cell::validated_from_draft`.
+- `contract/src/draftable.rs` (new) — fields, units, parser, slots, `draft_fingerprint`.
+- `contract/src/draft.rs`, `contract/src/lib.rs` — doc pointer, exports.
+- `contract/tests/ai_marks.rs` (new), `contract/tests/fingerprint.rs` (new),
+  `contract/tests/cell_rails.rs` — AC 1 / 3 / 4 / 5 tests.
+- `persistence/src/drafts.rs` — `get_draft`, `study_status`, `decide_draft`,
+  `step_draft_decision`, `DraftVerdict`, `DraftStep`, `StudyWrite`, `DraftDecisionWrite`.
+- `persistence/src/studies.rs` — `write_study_with_snapshot`, `stored_study_is`,
+  `check_study_identity` (shared by `put_study_with_history`).
+- `persistence/src/error.rs` — 4 variants (+ kind, inventory).
+- `persistence/src/lib.rs` — exports.
+- `persistence/tests/draft_decisions.rs` (new) — transitions, refusals, failure injection.
+- `app/src/state/drafts.rs` (new) — freshness, `decided_study`, `JournalState::decide_draft`.
+- `app/src/state/undo.rs` — `UndoStep`, owner, `record_draft`, draft steps.
+- `app/src/state/cells.rs` — marks cleared by the judgment writers, `judgment_draft_field`.
+- `app/src/state/messages.rs`, `app/src/state/mod.rs`, `app/src/posture.rs` — messages, inventory,
+  counts.
+- `app/src/state/tests.rs` — `drafts_8_2b` (21 tests).
+- `app/src/wiring/studies.rs` — `reset_undo_for(id)` at the study-open site.
+- Mechanical `ai_origin: None` / `ai_placed: Default::default()` additions: `contract/src/{cell,
+  export,provenance,study}.rs`, `contract/tests/{cell_rails,roundtrip}.rs`,
+  `core/tests/verdict_coherence.rs`, `app/src/{seam_check,posture}.rs`,
+  `app/src/state/{refresh,mod,studies,…}.rs`, `app/src/viewmodel/*.rs`, `report/src/{form,pdf}.rs`,
+  `report/examples/*`, `persistence/tests/*` (the compiler's list, commit 47984ee).
+
+### Change Log
+
+- 2026-09-27 — Story 8.2b implemented (commits 47984ee contract, 82b514d persistence, 8ff4700 app,
+  + tests/record); status → review.
