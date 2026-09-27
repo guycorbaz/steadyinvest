@@ -1,6 +1,6 @@
 # Story 8.1: Study notes
 
-Status: review
+Status: done
 
 <!-- Created 2026-09-27 by the create-story workflow (fork of the G2 session). Source of truth for
      scope: epics.md Story 8.1 + the Epic 8 posture AC; UX: ux-ai-assistance-surfaces.md §3.3 « Notes »
