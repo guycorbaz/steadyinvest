@@ -3,6 +3,7 @@
 //! under. Field names align with `core::method`'s load-bearing keys so the engine (Story 1.8) can map
 //! them directly. New/optional fields use `#[serde(default)]` for forward-compatibility.
 
+use crate::ai::AiOrigin;
 use crate::cell::Cell;
 use crate::money::Money;
 use crate::provenance::Timestamp;
@@ -122,6 +123,11 @@ pub struct Study {
     /// future fetch may pre-fill it, but it is user-editable by design (no fetch dependency).
     #[serde(default)]
     pub company_name: Option<String>,
+    /// The owner's dated notes on the study (Story 8.1, FR78), in insertion order. An additive
+    /// `#[serde(default)]` field like `company_name` — a study written before it reads an empty list;
+    /// no `SCHEMA_VERSION` bump (owner, 2026-09-27: the app is not in production).
+    #[serde(default)]
+    pub notes: Vec<Note>,
     /// When the study was created (RFC3339 UTC).
     pub created_at: Timestamp,
     /// The [`SCHEMA_VERSION`] the study was written under.
@@ -147,10 +153,30 @@ impl Study {
             judgment,
             rationale: None,
             company_name: None,
+            notes: Vec::new(),
             created_at,
             schema_version: SCHEMA_VERSION,
         }
     }
+}
+
+/// One dated note of the owner on a study (Story 8.1, FR78). Plain owner text — never
+/// posture-scanned (FR13 covers app-generated signals only). A deleted note leaves the study but
+/// stays readable in the study history (FR51, owner decision O6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Note {
+    /// The note's stable identity (history diffs key on it, never on position).
+    pub id: Uuid,
+    /// The note text, trimmed; never empty.
+    pub text: String,
+    /// When the note was added (RFC3339 UTC).
+    pub created_at: Timestamp,
+    /// When the note text last changed (equals `created_at` until the first edit).
+    pub updated_at: Timestamp,
+    /// The AI origin of a note validated from an AI draft (Epic 8, Story 8.5b). Always `None` in
+    /// Story 8.1.
+    #[serde(default)]
+    pub ai_origin: Option<AiOrigin>,
 }
 
 #[cfg(test)]
@@ -184,6 +210,45 @@ mod tests {
             Timestamp("2026-06-09T00:00:00Z".to_string()),
         );
         assert_eq!(s.schema_version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn study_with_notes_round_trips() {
+        let mut s = Study::new(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            "AAPL",
+            "USD",
+            empty_judgment(),
+            Timestamp("2026-06-09T00:00:00Z".to_string()),
+        );
+        s.notes.push(Note {
+            id: Uuid::from_u128(3),
+            text: "Marge en hausse".to_string(),
+            created_at: Timestamp("2026-09-27T08:00:00Z".to_string()),
+            updated_at: Timestamp("2026-09-27T09:00:00Z".to_string()),
+            ai_origin: None,
+        });
+        let json = serde_json::to_string(&s).unwrap();
+        assert_eq!(serde_json::from_str::<Study>(&json).unwrap(), s);
+    }
+
+    #[test]
+    fn a_study_written_before_notes_reads_an_empty_list() {
+        let s = Study::new(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            "AAPL",
+            "USD",
+            empty_judgment(),
+            Timestamp("2026-06-09T00:00:00Z".to_string()),
+        );
+        let mut v = serde_json::to_value(&s).unwrap();
+        v.as_object_mut().unwrap().remove("notes");
+        assert_eq!(
+            serde_json::from_value::<Study>(v).unwrap().notes,
+            Vec::new()
+        );
     }
 
     #[test]

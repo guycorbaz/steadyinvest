@@ -112,7 +112,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - FR57 [P1]: The user can view a consistent legend for freshness/provenance/coverage/confidence states.
 - FR58 [P1]: Every main surface presents an actionable empty state and clear neutral error/feedback messages.
 - FR59 [P1]: The user can export/import a single study to a portable versioned file (round-trip preserves identity).
-- FR60 [P1]: The user can export/import the whole journal in a versioned format, validated on import (reject/migrate on version mismatch); the export and backups include AI drafts [P4] (pending, validated, validated then undone, rejected); an export carrying notes, AI origins or drafts is refused by an older build, never imported with them silently dropped.
+- FR60 [P1]: The user can export/import the whole journal in a versioned format, validated on import (reject/migrate on version mismatch); the export and backups include AI drafts [P4] (pending, validated, validated then undone, rejected).
 - FR61 [P1]: The user can restore from a backup with integrity and version-compatibility checks before overwrite.
 - FR62 [P1]: The user can access non-blocking contextual help / glossary and a read-only demonstration study.
 
@@ -1130,9 +1130,7 @@ So that my thinking around a study lives beside it (and an AI note draft later h
 **And** this story defines the contract type `AiOrigin{draft_id, client, model, validated_at}` (arch A6), used by 8.2b
 **And** each note change is saved through the normal study upsert and appears in the study's history; a deleted note disappears from the study but remains readable in the study history (FR49, FR51, owner decision O6)
 **And** note-only history entries — identified by comparing consecutive snapshots with `notes` ignored (history rows carry no cause column) — are labelled as such and can be filtered out of the history view, so judgment changes stay readable (arch A12)
-**And** the contract `SCHEMA_VERSION` goes 1 → 2, and every study save (so every history row) re-stamps `study.schema_version` to the current version, so both export envelopes carry it (arch A5)
-**And** the import accepts versions ≤ 2 (a v1 file reads with an empty note list) at every strict check that exists today — the single-study envelope (`contract/src/export.rs`), the journal envelope and each study record (`persistence/src/export.rs`) — and keeps the "newer than supported" rule on judgment rows; the new build re-imports its own whole-dossier export, including studies not saved since the bump
-**And** a test takes a study created before the bump, adds a note, exports it as a single study and as a dossier, and shows that a version-1 reader refuses both loudly; a re-stamped row is refused by an older build (`NewerRowSchema`), as intended
+**And** no `SCHEMA_VERSION` bump or compatibility work: `notes` is an additive `#[serde(default)]` field, and a dossier saved before this story opens with empty note lists — the app is not in production (owner, 2026-09-27; D9 withdrawn)
 **And** a single-study and a whole-dossier export/import round-trip preserves notes byte-identically, including their ids and timestamps (FR59, FR60, NFR-R5)
 **And** deleting a note asks for confirmation (UX-DR25) and is undoable within the session; notes are keyboard-operable (NFR-U2)
 **And** this story contains **no AI**: no MCP code, no draft, no AI label; `ai_origin` exists in the type but is always `None` here
@@ -1173,7 +1171,6 @@ So that a decision can never be half-applied, lost by a later save, or confused 
 **When** they are defined
 **Then** `DraftOrigin{client, model}` (a draft's submitter) is added, distinct from `AiOrigin{draft_id, client, model, validated_at}` (a validated value's origin, defined in 8.1); `Provenance` gains `#[serde(default)] ai_origin: Option<AiOrigin>` — **no new `Source` variant** — and each draftable `Judgment` field gains `#[serde(default)] ai_placed: Option<AiOrigin>`; `Note.ai_origin` is an `Option<AiOrigin>` (arch A6)
 **And** the draftable fields are enumerated in one place: the study-grid cell fields, and the judgment fields except `current_price` and `ttm_eps` (owner decision D6), with each field's unit (percent fields as percent) and, for enum fields such as `forecast_low_option`, their variant names
-**And** the contract `SCHEMA_VERSION` goes 2 → 3 through the same re-stamp and relaxed checks as 8.1, with the import accepting versions ≤ 3; an older build refuses an export carrying AI marks, tested like 8.1 (owner decision D9)
 **When** a validated draft is applied
 **Then** it is an owner entry: `Source::Manual`, review tag `?` **set explicitly** in every case — also on an untagged cell, on a `✓` cell, and when the value is unchanged (owner decisions O5, D5) — reconciled exactly as a manual value (manual wins, provider preserved), covered by the reconciliation tests extended with an AI-origin case (FR17, FR20, FR22, FR74, NFR-R4)
 **And** the next owner edit of that cell clears `ai_origin`; **any** write to a judgment field clears its `ai_placed` (arch A6)
@@ -1361,7 +1358,7 @@ So that my decision stays on record and a later refresh never silently rewrites 
 **And** when nothing differs, only the verdict and « validée le JJ/MM » are shown
 **And** the wording is neutral — facts only, no banned verb (FR13); the highlight is distinguishable without colour alone (NFR-U1)
 **And** the study PDF shows the frozen verdict and, when it differs, the current one, as decided in 8.0 (FR52)
-**And** the contract `SCHEMA_VERSION` is bumped with the re-stamp and relaxed import checks of arch A5, so an older build refuses an export or row carrying a frozen verdict instead of dropping it; an export/import round-trip preserves it (FR59, FR60, NFR-R5)
+**And** an export/import round-trip preserves the frozen verdict (FR59, FR60)
 **And** the MCP study read returns the frozen verdict beside the current one; `frozen_verdict` is not a draftable field, and the 8.3 rejected-writes and 8.4 non-exposure suites are extended to it — no verdict is frozen or changed through MCP (FR68 [P4], FR69)
 **And** a test: freeze, refresh with a changed EPS series, and check that the frozen verdict is byte-identical while the current one differs and the difference is shown; the same with a `METHOD_VERSION` change
 **And** the Epic 8 posture AC holds.

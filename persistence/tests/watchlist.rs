@@ -192,6 +192,7 @@ fn deleting_a_linked_study_clears_the_watchlist_link() {
         },
         rationale: None,
         company_name: None,
+        notes: Vec::new(),
         created_at: ts("2026-06-27T00:00:00Z"),
         schema_version: SCHEMA_VERSION,
     };

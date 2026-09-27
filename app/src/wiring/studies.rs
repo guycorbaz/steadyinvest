@@ -313,6 +313,9 @@ fn reset_study_overlays(
     // G3 #9: the study's « Historique » panel too (through its own close path).
     studies.invoke_close_history();
     studies.set_history_unavailable(false);
+    // Story 8.1 (G3 F8/E5, owner default): « Masquer les notes » starts shown for every study
+    // opened — and on a dossier switch, which closes the study through here.
+    studies.set_history_hide_notes(false);
 }
 
 /// Wire the studies domain: create / open (with per-study view-state restore) / fold / regime,
@@ -385,6 +388,31 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 return;
             };
             ui.global::<Studies>().set_history_open(true);
+            crate::wiring::push::push_history(
+                &ui,
+                &journal_state.borrow(),
+                id,
+                config.borrow().number_format,
+            );
+        });
+    }
+    // Story 8.1 (arch A12): « Masquer les notes » / « Afficher les notes » — flip the filter and
+    // rebuild the open timeline.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let current_study = Rc::clone(current_study);
+        ui.global::<Studies>().on_toggle_history_notes(move || {
+            let ui = ui_weak.unwrap();
+            let studies = ui.global::<Studies>();
+            studies.set_history_hide_notes(!studies.get_history_hide_notes());
+            let Some(id) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id) else {
+                return;
+            };
             crate::wiring::push::push_history(
                 &ui,
                 &journal_state.borrow(),

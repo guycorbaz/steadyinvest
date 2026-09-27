@@ -566,8 +566,8 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
   adding a whole entity **array** is rejected loudly by an older build rather than partially
   imported. [P4] `ai_drafts` is an additive array (`#[serde(default, skip_serializing_if =
   "Vec::is_empty")]`); because notes and AI marks are **fields** inside `Study` (which tolerates
-  unknown fields), Epic 8 bumps the contract `SCHEMA_VERSION` (8.1: 1 → 2, 8.2b: 2 → 3) and the
-  import accepts versions ≤ current — an older build rejects such an export (§Phase 4, A5/A6).
+  unknown fields), an older build would drop them — accepted while the app is not in production
+  (§Phase 4, A5; D9 withdrawn 2026-09-27).
 - **Versions:** `schema_version` = integer; `method_version` = string (semver-like).
 - **Decimal in JSON:** serialized as a **string** (exact), parsed to `rust_decimal::Decimal`.
 - **Dates/times:** RFC3339 UTC strings everywhere (storage, export, logs).
@@ -880,8 +880,8 @@ and architecture decisions A1–A13 below are final._
 - **D6** — provider market facts (`current_price`, `ttm_eps`) are not draftable judgment fields.
 - **D7** — stories 8.2 and 8.5 are split in two (8.2a/8.2b, 8.5a/8.5b).
 - **D8** — a second draft study for a security already pending is refused (confirmed).
-- **D9** — an export carrying notes, AI marks or drafts is refused by an older build: the contract
-  `SCHEMA_VERSION` is bumped (A5, A6).
+- **D9** — *withdrawn 2026-09-27*: the app is not in production, so no version bump or compatibility
+  work for older builds or existing data; new fields are additive `#[serde(default)]` (A5).
 - **D10** — the dossier is resolved **per call**; each submission carries the `journal_id` + path the
   AI read and is refused on mismatch.
 - **D11** — FR68: the verdict is frozen by an explicit « Valider l'étude » on a full verdict; any
@@ -995,8 +995,8 @@ and architecture decisions A1–A13 below are final._
   Indexes on `status`, `study_id`, `created_study_id`. **All enum variants are defined up front** —
   adding a variant later costs a `SCHEMA_VERSION` bump.
 - **Backup/export:** included in the `VACUUM INTO` backup automatically. The JSON export gains an
-  `ai_drafts` array (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`); older builds
-  refuse such a file through the `SCHEMA_VERSION` bump (A6). Frozen corpus gains `v8.db`.
+  `ai_drafts` array (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`); an older build
+  refuses it through the envelope's `deny_unknown_fields` (#78). Frozen corpus gains `v8.db`.
 - **Rationale:** the same file keeps drafts inside the dossier's identity, backup and export (FR77:
   durable record); a separate table keeps pending proposals physically outside the `Study` blob the
   engine reads, which is what makes "a pending draft changes nothing" true by construction.
@@ -1009,18 +1009,9 @@ and architecture decisions A1–A13 below are final._
 - **Decision:** `#[serde(default)] notes: Vec<Note { id, text, created_at, updated_at, ai_origin:
   Option<AiOrigin> }>` inside `Study` (`AiOrigin` as defined in A6). Additive in storage — no
   `user_version` migration.
-- **Export compatibility (D9):** `Study` tolerates unknown fields, so without a version change an
-  older build would import notes and drop them silently (the #78 rule: "a field whose ABSENCE would
-  be unsafe needs its own guard"). Story 8.1 therefore bumps the contract **`SCHEMA_VERSION` 1 → 2**:
-  every study save (and so every history row) re-stamps `study.schema_version = SCHEMA_VERSION`
-  (today it is set only by `Study::new`), and both export envelopes carry the current version — so a
-  study created before the bump and given a note after it can no longer export, or sit in the
-  dossier, as version 1. An older build refuses such an export loudly, and refuses a re-stamped row
-  in the dossier (`NewerRowSchema`) — the intended outcome. The new build's import accepts versions
-  **≤ current** (a v1 file reads with the new fields defaulted) at every strict check that exists
-  today — the single-study envelope (`contract/src/export.rs`), the journal envelope and each
-  study record (`persistence/src/export.rs`) — and keeps the existing "newer than supported" rule on
-  judgment rows. `AiOrigin` (A6) is defined in Story 8.1, with the note type.
+- **Compatibility:** none beyond the additive `#[serde(default)]` — no `SCHEMA_VERSION` bump, no
+  re-stamp, no relaxed import (owner, 2026-09-27: « steadyinvest n'est pas en production : pas besoin de migrer l'existant »). An older build would drop
+  notes silently; accepted while the app is not in production (D9 withdrawn).
 - **Rationale:** export, MCP read and history snapshots come for free (O6: a deleted note stays in
   the study history). A note is study content, not an aggregated/queried entity.
 
@@ -1038,8 +1029,7 @@ and architecture decisions A1–A13 below are final._
   Option<AiOrigin>` on each draftable `Judgment` field, which drives the chart's "placed by AI" +
   validation-date annotation (FR33) and is cleared by **any** write to that field. Refresh never
   writes a draftable judgment field (D6), so the mark cannot survive a provider overwrite.
-- **Export compatibility (D9):** Story 8.2b bumps `SCHEMA_VERSION` again (2 → 3), for the same reason
-  as A5.
+- **Compatibility:** additive fields only, as A5 (D9 withdrawn).
 - **Rationale:** a new `Source` variant would ripple through reconciliation, the review tri-state
   and every exhaustive `match`, and an older build would fail to parse it; the owner's validation is
   what makes the value authoritative, so it reconciles exactly as a manual entry.
@@ -1168,8 +1158,7 @@ and architecture decisions A1–A13 below are final._
   « figé (vNN, JJ/MM) » and « actuel (vMM, aujourd'hui) », naming the changed items and the cause
   where known (refresh, owner edit, method change — FR29, the #252 method stamp). Neutral wording
   only (FR13).
-- **Export compatibility:** same rule as A5 — `SCHEMA_VERSION` bump with re-stamp, so an older build
-  refuses an export or row carrying a frozen verdict instead of dropping it.
+- **Compatibility:** additive field only, as A5 (D9 withdrawn).
 - **MCP:** the study read returns the frozen verdict beside the current one; `frozen_verdict` is not a
   draftable field, and the 8.3 rejected-writes suite covers it (FR68 [P4]). A validated AI draft
   changes the current verdict only, so the difference is highlighted like any other change.

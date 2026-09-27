@@ -8472,3 +8472,209 @@ fn two_backups_in_the_same_second_both_land() {
     );
     assert!(first.exists() && second.exists());
 }
+
+// ── Story 8.1 — study notes ──
+
+#[test]
+fn notes_are_added_edited_and_deleted_through_the_study_rail() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8100);
+    let id = state.create_study("NESN", "CHF").unwrap();
+
+    let first = state.add_note(id, "  Marge en hausse.  ").unwrap();
+    let second = state.add_note(id, "Dividende stable.").unwrap();
+    assert_ne!(first, second, "ids come from the injected IdGen");
+    let notes = state.get_study(id).unwrap().notes;
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[0].text, "Marge en hausse.", "the text is trimmed");
+    assert_eq!(
+        notes[0].created_at,
+        Timestamp("2026-06-27T15:00:00Z".to_string()),
+        "the time comes from the injected Clock"
+    );
+    assert_eq!(notes[0].updated_at, notes[0].created_at);
+    assert!(notes.iter().all(|n| n.ai_origin.is_none()), "no AI in 8.1");
+
+    state
+        .edit_note(id, first, "Marge en nette hausse.")
+        .unwrap();
+    assert_eq!(
+        state.get_study(id).unwrap().notes[0].text,
+        "Marge en nette hausse."
+    );
+
+    state.delete_note(id, second).unwrap();
+    let notes = state.get_study(id).unwrap().notes;
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].id, first);
+}
+
+#[test]
+fn an_empty_note_is_refused_and_writes_nothing() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8110);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let history_before = state.try_list_study_history(id).unwrap().len();
+
+    assert_eq!(state.add_note(id, "   "), Err(MSG_NOTE_EMPTY.to_string()));
+    let note = state.add_note(id, "Texte.").unwrap();
+    assert_eq!(
+        state.edit_note(id, note, "\n"),
+        Err(MSG_NOTE_EMPTY.to_string())
+    );
+    assert_eq!(state.get_study(id).unwrap().notes[0].text, "Texte.");
+    assert_eq!(
+        state.try_list_study_history(id).unwrap().len(),
+        history_before + 1,
+        "only the one real add reached the history"
+    );
+}
+
+#[test]
+fn an_unchanged_note_edit_records_no_undo_step_and_no_history_entry() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8120);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let note = state.add_note(id, "Texte.").unwrap();
+    let depth = state.undo_depth();
+    let history = state.try_list_study_history(id).unwrap().len();
+
+    state.edit_note(id, note, "  Texte.  ").unwrap();
+    assert_eq!(state.undo_depth(), depth, "no phantom undo step");
+    assert_eq!(state.try_list_study_history(id).unwrap().len(), history);
+}
+
+#[test]
+fn note_changes_undo_and_redo() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8130);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let note = state.add_note(id, "Avant.").unwrap();
+    state.edit_note(id, note, "Après.").unwrap();
+    state.delete_note(id, note).unwrap();
+    assert!(state.get_study(id).unwrap().notes.is_empty());
+
+    assert!(state.undo(id).unwrap());
+    assert_eq!(
+        state.get_study(id).unwrap().notes[0].text,
+        "Après.",
+        "delete undone"
+    );
+    assert!(state.undo(id).unwrap());
+    assert_eq!(
+        state.get_study(id).unwrap().notes[0].text,
+        "Avant.",
+        "edit undone"
+    );
+    assert!(state.undo(id).unwrap());
+    assert!(state.get_study(id).unwrap().notes.is_empty(), "add undone");
+    assert!(state.redo(id).unwrap());
+    assert_eq!(
+        state.get_study(id).unwrap().notes[0].text,
+        "Avant.",
+        "add redone"
+    );
+}
+
+#[test]
+fn a_vanished_note_is_refused_by_name_and_a_read_only_dossier_up_front() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8140);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let note = state.add_note(id, "Texte.").unwrap();
+    assert!(state.undo(id).unwrap()); // the note is gone
+    assert_eq!(
+        state.edit_note(id, note, "X"),
+        Err(MSG_NOTE_GONE.to_string())
+    );
+    assert_eq!(state.delete_note(id, note), Err(MSG_NOTE_GONE.to_string()));
+
+    state.read_only = Some(NEWER_SCHEMA);
+    assert_eq!(
+        state.add_note(id, "X"),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+    assert_eq!(
+        state.delete_note(id, note),
+        Err(MSG_READ_ONLY_WRITE.to_string())
+    );
+}
+
+#[test]
+fn a_note_rail_names_a_read_failure_never_a_vanished_note() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8150);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let note = state.add_note(id, "Texte.").unwrap();
+    make_study_unreadable(&mut state, id);
+    assert_eq!(
+        state.delete_note(id, note),
+        Err(MSG_READ_FAILED.to_string()),
+        "a read failure is not passed off as absence"
+    );
+    assert_eq!(
+        state.edit_note(id, note, "X"),
+        Err(MSG_READ_FAILED.to_string())
+    );
+    assert_eq!(state.add_note(id, "X"), Err(MSG_READ_FAILED.to_string()));
+}
+
+#[test]
+fn a_note_rail_on_a_deleted_study_names_the_study_not_the_note() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8160);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let note = state.add_note(id, "Texte.").unwrap();
+    state.journal.as_mut().unwrap().delete_study(id).unwrap();
+    assert_eq!(state.add_note(id, "X"), Err(MSG_STUDY_GONE.to_string()));
+    assert_eq!(
+        state.edit_note(id, note, "X"),
+        Err(MSG_STUDY_GONE.to_string())
+    );
+    assert_eq!(state.delete_note(id, note), Err(MSG_STUDY_GONE.to_string()));
+}
+
+#[test]
+fn an_identical_edit_writes_nothing_not_even_a_version_bump() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8170);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let note = state.add_note(id, "Texte.").unwrap();
+    let version = state.logical_version_or_zero();
+    state.edit_note(id, note, " Texte.\r\n").unwrap();
+    assert_eq!(state.logical_version_or_zero(), version, "no write at all");
+}
+
+#[test]
+fn note_text_is_normalised_and_invisible_only_text_is_empty() {
+    use crate::state::notes_text_for_tests as norm;
+    assert_eq!(
+        norm("a\r\nb\rc"),
+        Some("a\nb\nc".to_string()),
+        "CRLF and lone CR → LF"
+    );
+    assert_eq!(norm("  a  "), Some("a".to_string()));
+    assert_eq!(
+        norm("\u{200B}\u{FEFF} \u{2060}\n"),
+        None,
+        "zero-width / BOM / word joiner only"
+    );
+    assert_eq!(
+        norm("\u{200E}x"),
+        Some("\u{200E}x".to_string()),
+        "a visible char keeps the note"
+    );
+
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8180);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    assert_eq!(
+        state.add_note(id, "\u{200B}"),
+        Err(MSG_NOTE_EMPTY.to_string())
+    );
+    state.add_note(id, "ligne 1\r\nligne 2").unwrap();
+    assert_eq!(
+        state.get_study(id).unwrap().notes[0].text,
+        "ligne 1\nligne 2"
+    );
+}

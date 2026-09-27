@@ -8,6 +8,7 @@ pub mod entry;
 pub mod form;
 pub mod format;
 pub mod history;
+pub mod notes;
 pub mod quick_screen;
 pub mod refresh;
 pub mod screening;

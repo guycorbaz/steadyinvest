@@ -3379,6 +3379,24 @@ mod tests {
     }
 
     #[test]
+    fn notes_are_not_printed_the_pdf_is_byte_identical_with_and_without() {
+        // Story 8.1 (UX 8.0 §7, Q10): the study PDF does not print the owner's notes.
+        let plain = demo_study();
+        let mut noted = plain.clone();
+        noted.notes.push(steadyinvest_contract::Note {
+            id: uuid::Uuid::from_u128(0x81),
+            text: "Une note qui ne doit pas être imprimée.".to_string(),
+            created_at: steadyinvest_contract::Timestamp("2026-09-27T08:00:00Z".to_string()),
+            updated_at: steadyinvest_contract::Timestamp("2026-09-27T08:00:00Z".to_string()),
+            ai_origin: None,
+        });
+        assert_eq!(
+            render_study_pdf(&noted, NumberStyle::Point).unwrap(),
+            render_study_pdf(&plain, NumberStyle::Point).unwrap()
+        );
+    }
+
+    #[test]
     fn a_degenerate_study_renders_neutrally_without_panicking() {
         // A study with no years still normalizes (no usable data → unknown figures); the renderer must
         // produce a calm PDF with em-dashes, never panic. (Genuine normalize failures take the

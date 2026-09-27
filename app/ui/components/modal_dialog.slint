@@ -94,6 +94,106 @@ component LabeledDropdown inherits VerticalLayout {
     }
 }
 
+// Story 8.1 (UX 8.0 §4.3): a multi-line labelled text area for the note forms — the `RationaleNote`
+// box (3 rows, growing to 8, then it scrolls, the caret kept in view). Enter inserts a newline;
+// Ctrl+Enter (Cmd+Enter on macOS) validates (`accepted`); Esc is not handled here, so it reaches
+// the card's cancel. A mouse drag selects text (the Flickable is not interactive; the wheel still
+// scrolls it).
+component LabeledTextArea inherits VerticalLayout {
+    in property <string> label;
+    in property <string> placeholder;
+    in-out property <string> text <=> input.text;
+    in property <bool> autofocus: false;
+    in property <int> focus-request;
+    callback accepted();
+
+    spacing: Tokens.space-4;
+    changed focus-request => {
+        if (root.autofocus) { input.focus(); }
+    }
+    Timer {
+        interval: 30ms;
+        running: root.autofocus;
+        triggered => {
+            self.running = false;
+            input.focus();
+        }
+    }
+    Text {
+        text: root.label;
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+    }
+    keys := FocusScope {
+        focus-on-tab-navigation: false;
+        focus-on-click: false;
+        // A FocusScope is no layout: it takes the box's height so the form sizes around it.
+        height: box.height;
+        // Seen BEFORE the text input: Ctrl+Enter validates; a plain Enter goes on to the input
+        // (a newline).
+        capture-key-pressed(event) => {
+            if (event.text == Key.Return && (event.modifiers.control || event.modifiers.meta)) {
+                root.accepted();
+                return accept;
+            }
+            reject
+        }
+        box := Rectangle {
+            width: parent.width;
+            height: Math.max(Tokens.row-height * 3, Math.min(Tokens.row-height * 8, input.preferred-height + Tokens.space-8 * 2));
+            border-radius: Tokens.radius;
+            background: Tokens.surface-alt;
+            border-width: input.has-focus ? Tokens.focus-border : Tokens.border;
+            border-color: input.has-focus ? Tokens.focus : Tokens.separator;
+            clip: true;
+
+            Text {
+                text: root.placeholder;
+                color: Tokens.text-low;
+                font-size: Tokens.font-body;
+                x: Tokens.space-8;
+                y: Tokens.space-8;
+                visible: input.text == "";
+            }
+            flick := Flickable {
+                x: Tokens.space-8;
+                y: Tokens.space-8;
+                width: parent.width - Tokens.space-8 * 2;
+                height: parent.height - Tokens.space-8 * 2;
+                viewport-height: Math.max(self.height, input.preferred-height);
+                interactive: false;
+            // The box grows with the text AFTER a caret move may have scrolled it: keep the
+            // offset inside the content whenever either size changes (seen on screen with fast
+            // typing — the text scrolled out of a box that then grew).
+            changed height => {
+                self.viewport-y = Math.max(Math.min(self.viewport-y, 0), Math.min(0, self.height - self.viewport-height));
+            }
+            changed viewport-height => {
+                self.viewport-y = Math.max(Math.min(self.viewport-y, 0), Math.min(0, self.height - self.viewport-height));
+            }
+                input := TextInput {
+                    color: Tokens.text-high;
+                    selection-background-color: Tokens.focus;
+                    font-family: Tokens.font-ui;
+                    font-size: Tokens.font-body;
+                    single-line: false;
+                    wrap: word-wrap;
+                    width: parent.width;
+                    // Keep the caret's line inside the visible box (G3 B1).
+                    cursor-position-changed(pos) => {
+                        let line = self.font-size * 1.5;
+                        if (pos.y + flick.viewport-y < 0) {
+                            flick.viewport-y = -pos.y;
+                        } else if (pos.y + line + flick.viewport-y > flick.height) {
+                            flick.viewport-y = flick.height - pos.y - line;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component ModalDialog inherits Rectangle {
     // A dimming scrim over the whole window; a click outside the card cancels.
     background: Tokens.bg.with-alpha(0.72);
@@ -128,6 +228,9 @@ export component ModalDialog inherits Rectangle {
         if (Dialog.form-id == "watch-add") { return Dialog.draft-ticker != ""; }
         if (Dialog.form-id == "study-create") { return Dialog.draft-ticker != "" && Dialog.draft-currency != ""; }
         if (Dialog.form-id == "fx-rate") { return Dialog.draft-ticker != "" && Dialog.draft-price != ""; }
+        // Story 8.1: an empty note is refused by Rust with its reason (« La note est vide… »), so
+        // the verb stays enabled — never a silent greyed button.
+        if (Dialog.form-id == "note-add" || Dialog.form-id == "note-edit") { return true; }
         // sell-trigger: an empty quantity sells the whole position (the 4.7 flow).
         return true;
     }
@@ -169,17 +272,48 @@ export component ModalDialog inherits Rectangle {
             if (Studies.create-study(Dialog.draft-ticker, Dialog.draft-currency, Dialog.draft-name)) { Dialog.close(); }
         } else if (Dialog.form-id == "fx-rate") {
             if (Fx.add-rate(Dialog.draft-ticker, Dialog.draft-price, Dialog.draft-date)) { Dialog.close(); }
+        } else if (Dialog.form-id == "note-add") {
+            if (Studies.add-note(Dialog.draft-text)) { Dialog.close(); }
+        } else if (Dialog.form-id == "note-edit") {
+            if (Studies.edit-note(Dialog.target-id, Dialog.draft-text)) { Dialog.close(); }
         }
     }
 
     // ── Cancel: the confirms Rust parked keep a pending action on their side — tell them. ──
     function cancel() {
+        // Story 8.1 (G3 E2, owner default): a note being written is never lost on a reflex — Esc
+        // or « Annuler » with a text that differs from its seed asks first; the text is kept.
+        if (Dialog.kind == "form" && root.is-note-form() && Dialog.draft-text != Dialog.seed-text) {
+            Dialog.resume-title = Dialog.title;
+            Dialog.resume-body = Dialog.body;
+            Dialog.confirm(@tr("Abandonner la note en cours ?"), "", @tr("Abandonner"), "discard-note", Dialog.target-id);
+            return;
+        }
+        // …and « Annuler » on that question goes back to the note, text intact.
+        if (Dialog.kind == "confirm" && Dialog.action == "discard-note") {
+            Dialog.title = Dialog.resume-title;
+            Dialog.body = Dialog.resume-body;
+            Dialog.action = "";
+            Dialog.verb = "";
+            Dialog.kind = "form";
+            return;
+        }
         if (Dialog.kind == "confirm") {
             if (Dialog.action == "study-action") { Studies.cancel-study-action(); }
             else if (Dialog.action == "confirm-import") { Prefs.cancel-import(); }
             else if (Dialog.action == "confirm-restore") { Prefs.cancel-restore(); }
         }
         Dialog.close();
+    }
+
+    function is-note-form() -> bool {
+        return Dialog.form-id == "note-add" || Dialog.form-id == "note-edit";
+    }
+    // A click on the scrim: ignored while a note is being written (G3 E2) — Esc or « Annuler »
+    // still leave; anything else cancels as before.
+    function scrim-clicked() {
+        if (Dialog.kind == "form" && root.is-note-form()) { return; }
+        root.cancel();
     }
 
     // The confirm title and verb, derived from the action when Rust parked it (the strings stay
@@ -192,6 +326,7 @@ export component ModalDialog inherits Rectangle {
         if (Dialog.action == "confirm-import") { return @tr("Importer un dossier plus ancien ?"); }
         if (Dialog.action == "confirm-restore") { return @tr("Restaurer cette sauvegarde ?"); }
         if (Dialog.action == "delete-portfolio") { return @tr("Supprimer ce portefeuille ?"); }
+        if (Dialog.action == "delete-note") { return @tr("Supprimer la note ?"); }
         return "";
     }
     // The confirm's sentence: the state layer's prompt, or — for a confirm Rust raises after a
@@ -201,11 +336,16 @@ export component ModalDialog inherits Rectangle {
         if (Dialog.action == "delete-portfolio") {
             return @tr("Le portefeuille ne contient aucune position ; sa suppression est définitive.");
         }
+        if (Dialog.action == "delete-note") {
+            return @tr("La note quitte l'étude ; elle reste lisible dans l'historique.");
+        }
         return "";
     }
     // G1 review (Guy's decision 5): every confirm verb writes the dossier — on a read-only one it
     // stays blocked, and the dialog SAYS why instead of greying the verb in silence.
     function confirm-enabled() -> bool {
+        // Abandoning a draft writes nothing.
+        if (Dialog.action == "discard-note") { return true; }
         return !Holdings.read-only;
     }
     function confirm-verb() -> string {
@@ -215,7 +355,7 @@ export component ModalDialog inherits Rectangle {
         }
         if (Dialog.action == "confirm-import") { return @tr("Confirmer l'import"); }
         if (Dialog.action == "confirm-restore") { return @tr("Confirmer la restauration"); }
-        if (Dialog.action == "delete-portfolio") { return @tr("Supprimer"); }
+        if (Dialog.action == "delete-portfolio" || Dialog.action == "delete-note") { return @tr("Supprimer"); }
         return @tr("Confirmer");
     }
 
@@ -254,6 +394,8 @@ export component ModalDialog inherits Rectangle {
             Prefs.confirm-import();
         } else if (action == "confirm-restore") {
             Prefs.confirm-restore();
+        } else if (action == "delete-note") {
+            Studies.delete-note(target);
         }
     }
 
@@ -273,7 +415,7 @@ export component ModalDialog inherits Rectangle {
         }
 
         scrim := TouchArea {
-            clicked => { root.cancel(); }
+            clicked => { root.scrim-clicked(); }
         }
 
         // The card — its own TouchArea swallows clicks so they never reach the scrim behind it.
@@ -718,6 +860,18 @@ export component ModalDialog inherits Rectangle {
                             label: @tr("Date du taux (vide = aujourd'hui)");
                             placeholder: @tr("AAAA-MM-JJ");
                             text <=> Dialog.draft-date;
+                            accepted => { root.submit(); }
+                        }
+                    }
+
+                    // A study note (Story 8.1, UX 8.0 §5.6): one multi-line field — Enter is a
+                    // newline, Ctrl+Enter validates (the sentence says so), Esc cancels.
+                    if Dialog.form-id == "note-add" || Dialog.form-id == "note-edit": VerticalLayout {
+                        LabeledTextArea {
+                            label: @tr("Note");
+                            text <=> Dialog.draft-text;
+                            autofocus: true;
+                            focus-request: root.first-request;
                             accepted => { root.submit(); }
                         }
                     }

@@ -28,6 +28,12 @@ pub const HIST_RATIONALE_CHANGED: &str = "raison consignée modifiée";
 pub const HIST_YEAR_ADDED: &str = "année ajoutée";
 pub const HIST_OTHER: &str = "autres champs modifiés";
 pub const HIST_CELLS_CHANGED: &str = "cellule(s) modifiée(s)";
+/// Story 8.1 — note changes, each keyed by the note's id. Lower-case like every other history clause
+/// (« année ajoutée », « raison consignée modifiée ») — a wording adjustment of the 8.0 §3.3 list
+/// (« Note ajoutée… »), submitted to Guy.
+pub const HIST_NOTE_ADDED: &str = "note ajoutée";
+pub const HIST_NOTE_EDITED: &str = "note modifiée";
+pub const HIST_NOTE_DELETED: &str = "note supprimée";
 /// The empty display slot — the same faithful em-dash the form uses for an absent figure.
 pub const HIST_EMPTY_SLOT: &str = "—";
 pub const LBL_DIVIDEND_PS: &str = "Dividende par action";
@@ -51,6 +57,9 @@ pub const HISTORY_USER_FACING_LABELS: &[&str] = &[
     HIST_YEAR_ADDED,
     HIST_OTHER,
     HIST_CELLS_CHANGED,
+    HIST_NOTE_ADDED,
+    HIST_NOTE_EDITED,
+    HIST_NOTE_DELETED,
     HIST_EMPTY_SLOT,
     LBL_DIVIDEND_PS,
     LBL_PRETAX_PROFIT,
@@ -75,6 +84,17 @@ pub struct HistoryEntryView {
     /// `HH:MM` (empty when the stamp is malformed — display only, never a hard error).
     pub time: String,
     pub summary: String,
+    /// Story 8.1 (arch A12): the entry changes notes and nothing else — the « Masquer les notes »
+    /// chip hides exactly these, so judgment changes stay readable.
+    pub notes_only: bool,
+}
+
+/// One note change between two consecutive states, keyed by the note's id (never its position).
+/// The texts are the owner's own words — a deleted note stays readable here (O6).
+enum NoteChange {
+    Added(String),
+    Edited { before: String, after: String },
+    Deleted(String),
 }
 
 /// The diff facets between two consecutive states — the shared source of both the summary and the
@@ -86,6 +106,9 @@ struct Diff {
     judgment: Vec<(String, String)>,
     rationale_changed: bool,
     years_added: Vec<i32>,
+    /// Note changes (Story 8.1), in the order: edits and deletions of the previous notes, then
+    /// additions.
+    notes: Vec<NoteChange>,
     /// A change none of the named facets caught (defensive — the dedup guarantees the states
     /// differ, so an empty diff must still say *something* honest).
     other: bool,
@@ -249,17 +272,54 @@ fn diff_states(prev: &Study, next: &Study, format: NumberFormat) -> Diff {
     }
     let judgment = diff_judgment(&prev.judgment, &next.judgment, format);
     let rationale_changed = prev.rationale != next.rationale;
+    let notes = diff_notes(prev, next);
     let other = cells.is_empty()
         && judgment.is_empty()
         && !rationale_changed
         && years_added.is_empty()
+        && notes.is_empty()
         && prev != next;
     Diff {
         cells,
         judgment,
         rationale_changed,
         years_added,
+        notes,
         other,
+    }
+}
+
+/// Note changes keyed by id: a previous note absent from `next` was deleted, one whose text
+/// differs was edited; a `next` note absent from `prev` was added.
+fn diff_notes(prev: &Study, next: &Study) -> Vec<NoteChange> {
+    let mut out = Vec::new();
+    for before in &prev.notes {
+        match next.notes.iter().find(|n| n.id == before.id) {
+            None => out.push(NoteChange::Deleted(before.text.clone())),
+            Some(after) if after.text != before.text => out.push(NoteChange::Edited {
+                before: before.text.clone(),
+                after: after.text.clone(),
+            }),
+            Some(_) => {}
+        }
+    }
+    for after in &next.notes {
+        if !prev.notes.iter().any(|n| n.id == after.id) {
+            out.push(NoteChange::Added(after.text.clone()));
+        }
+    }
+    out
+}
+
+impl Diff {
+    /// Only notes changed (Story 8.1): the entry the « Masquer les notes » chip hides.
+    fn notes_only(&self) -> bool {
+        !self.notes.is_empty()
+            && self.cells.is_empty()
+            && self.judgment.is_empty()
+            && !self.rationale_changed
+            && self.years_added.is_empty()
+            && !self.other
     }
 }
 
@@ -299,6 +359,13 @@ fn summary_of(diff: &Diff, created: bool) -> String {
     if diff.rationale_changed {
         parts.push(HIST_RATIONALE_CHANGED.to_string());
     }
+    // One clause per kind of change (the detail lists each note); the app writes one note per
+    // snapshot, so a count would never show.
+    for label in [HIST_NOTE_EDITED, HIST_NOTE_DELETED, HIST_NOTE_ADDED] {
+        if diff.notes.iter().any(|c| note_change_label(c) == label) {
+            parts.push(label.to_string());
+        }
+    }
     if diff.other || parts.is_empty() {
         parts.push(HIST_OTHER.to_string());
     }
@@ -319,10 +386,27 @@ fn detail_of(diff: &Diff, created: bool) -> Vec<String> {
     if diff.rationale_changed {
         lines.push(HIST_RATIONALE_CHANGED.to_string());
     }
+    for change in &diff.notes {
+        lines.push(match change {
+            NoteChange::Added(text) => format!("{HIST_NOTE_ADDED} : {text}"),
+            NoteChange::Edited { before, after } => {
+                format!("{HIST_NOTE_EDITED} : {before} → {after}")
+            }
+            NoteChange::Deleted(text) => format!("{HIST_NOTE_DELETED} : {text}"),
+        });
+    }
     if diff.other || lines.is_empty() {
         lines.push(HIST_OTHER.to_string());
     }
     lines
+}
+
+fn note_change_label(change: &NoteChange) -> &'static str {
+    match change {
+        NoteChange::Added(_) => HIST_NOTE_ADDED,
+        NoteChange::Edited { .. } => HIST_NOTE_EDITED,
+        NoteChange::Deleted(_) => HIST_NOTE_DELETED,
+    }
 }
 
 fn day_of(stamp: &str) -> String {
@@ -344,23 +428,45 @@ pub fn history_entries(
     let mut entries: Vec<HistoryEntryView> = Vec::with_capacity(snapshots.len());
     for index in (0..snapshots.len()).rev() {
         let (id, stamp, next) = &snapshots[index];
-        let (created, summary) = match index.checked_sub(1).map(|i| &snapshots[i].2) {
-            Some(prev) => (false, summary_of(&diff_states(prev, next, format), false)),
-            None => (true, summary_of(&empty_diff(), true)),
+        let (summary, notes_only) = match index.checked_sub(1).map(|i| &snapshots[i].2) {
+            Some(prev) => {
+                let diff = diff_states(prev, next, format);
+                (summary_of(&diff, false), diff.notes_only())
+            }
+            None => (summary_of(&empty_diff(), true), false),
         };
-        let _ = created;
         entries.push(HistoryEntryView {
             id: *id,
             day: day_of(stamp),
             first_of_day: false, // filled below
             time: time_of(stamp),
             summary,
+            notes_only,
         });
     }
+    mark_first_of_day(&mut entries);
+    entries
+}
+
+/// Mark where the UI draws a day header — re-run after any filtering (Story 8.1: hiding the
+/// note-only entries must not orphan a day's header).
+pub fn mark_first_of_day(entries: &mut [HistoryEntryView]) {
     let mut last_day: Option<String> = None;
-    for entry in &mut entries {
+    for entry in entries.iter_mut() {
         entry.first_of_day = last_day.as_deref() != Some(entry.day.as_str());
         last_day = Some(entry.day.clone());
+    }
+}
+
+/// The entries the panel shows: all of them, or — with « Masquer les notes » on — all but the
+/// note-only ones, with the day headers recomputed on what remains.
+pub fn visible_history(
+    mut entries: Vec<HistoryEntryView>,
+    hide_notes: bool,
+) -> Vec<HistoryEntryView> {
+    if hide_notes {
+        entries.retain(|e| !e.notes_only);
+        mark_first_of_day(&mut entries);
     }
     entries
 }
@@ -371,6 +477,7 @@ fn empty_diff() -> Diff {
         judgment: Vec::new(),
         rationale_changed: false,
         years_added: Vec::new(),
+        notes: Vec::new(),
         other: false,
     }
 }
@@ -584,5 +691,141 @@ mod tests {
             4,
             "the detail stays complete — the ellipsis is summary-only"
         );
+    }
+
+    fn note(id: u128, text: &str) -> steadyinvest_contract::Note {
+        steadyinvest_contract::Note {
+            id: Uuid::from_u128(id),
+            text: text.to_string(),
+            created_at: Timestamp("2026-09-27T08:00:00Z".to_string()),
+            updated_at: Timestamp("2026-09-27T08:00:00Z".to_string()),
+            ai_origin: None,
+        }
+    }
+
+    #[test]
+    fn note_changes_are_summarised_detailed_and_keyed_by_id() {
+        let base = study(vec![year(2024, Some("383000000000"))], judgment(), None);
+        let mut before = base.clone();
+        before.notes = vec![
+            note(1, "A garder."),
+            note(2, "A modifier."),
+            note(3, "A supprimer."),
+        ];
+        let mut after = base.clone();
+        // Reordered on purpose: the diff keys on the id, never on the position.
+        after.notes = vec![
+            note(2, "Modifiée."),
+            note(1, "A garder."),
+            note(4, "Nouvelle."),
+        ];
+
+        let lines = history_detail(Some(&before), &after, NumberFormat::Comma);
+        assert_eq!(
+            lines,
+            vec![
+                format!("{HIST_NOTE_EDITED} : A modifier. → Modifiée."),
+                format!("{HIST_NOTE_DELETED} : A supprimer."),
+                format!("{HIST_NOTE_ADDED} : Nouvelle."),
+            ],
+            "a deleted note stays readable in the detail (O6)"
+        );
+        let entries = history_entries(
+            &[
+                (
+                    Uuid::from_u128(0xA),
+                    "2026-09-27T08:00:00Z".to_string(),
+                    before,
+                ),
+                (
+                    Uuid::from_u128(0xB),
+                    "2026-09-27T09:00:00Z".to_string(),
+                    after,
+                ),
+            ],
+            NumberFormat::Comma,
+        );
+        assert_eq!(
+            entries[0].summary,
+            format!("{HIST_NOTE_EDITED} · {HIST_NOTE_DELETED} · {HIST_NOTE_ADDED}")
+        );
+        assert!(
+            !entries[0].summary.contains(HIST_OTHER),
+            "a note change is a named facet"
+        );
+        assert!(entries[0].notes_only);
+        assert!(
+            !entries[1].notes_only,
+            "the creation entry is never note-only"
+        );
+    }
+
+    #[test]
+    fn notes_only_is_false_when_anything_else_changed_too() {
+        let before = study(vec![year(2024, Some("383000000000"))], judgment(), None);
+        let mut after = before.clone();
+        after.notes = vec![note(1, "Nouvelle.")];
+        after.rationale = Some("Raison.".to_string());
+        let entries = history_entries(
+            &[
+                (
+                    Uuid::from_u128(0xA),
+                    "2026-09-27T08:00:00Z".to_string(),
+                    before,
+                ),
+                (
+                    Uuid::from_u128(0xB),
+                    "2026-09-27T09:00:00Z".to_string(),
+                    after,
+                ),
+            ],
+            NumberFormat::Comma,
+        );
+        assert!(!entries[0].notes_only);
+        assert!(entries[0].summary.contains(HIST_NOTE_ADDED));
+        assert!(entries[0].summary.contains(HIST_RATIONALE_CHANGED));
+    }
+
+    #[test]
+    fn hiding_notes_drops_note_only_entries_and_recomputes_day_headers() {
+        let created = study(vec![year(2024, Some("383000000000"))], judgment(), None);
+        let mut noted = created.clone();
+        noted.notes = vec![note(1, "Note.")];
+        let mut edited = noted.clone();
+        edited.years[0].sales.value = Some(money("400000000000"));
+        let mut noted_again = edited.clone();
+        noted_again.notes.push(note(2, "Autre."));
+        let snapshots = vec![
+            (
+                Uuid::from_u128(1),
+                "2026-09-26T08:00:00Z".to_string(),
+                created,
+            ),
+            (
+                Uuid::from_u128(2),
+                "2026-09-27T08:00:00Z".to_string(),
+                noted,
+            ),
+            (
+                Uuid::from_u128(3),
+                "2026-09-27T09:00:00Z".to_string(),
+                edited,
+            ),
+            (
+                Uuid::from_u128(4),
+                "2026-09-28T09:00:00Z".to_string(),
+                noted_again,
+            ),
+        ];
+        let all = history_entries(&snapshots, NumberFormat::Comma);
+        assert_eq!(visible_history(all.clone(), false), all, "shown by default");
+        let shown = visible_history(all, true);
+        let ids: Vec<Uuid> = shown.iter().map(|e| e.id).collect();
+        assert_eq!(ids, vec![Uuid::from_u128(3), Uuid::from_u128(1)]);
+        assert!(
+            shown[0].first_of_day,
+            "the 27th keeps its header once its first entry is hidden"
+        );
+        assert!(shown[1].first_of_day);
     }
 }
