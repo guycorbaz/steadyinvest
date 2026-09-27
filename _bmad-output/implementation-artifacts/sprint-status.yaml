@@ -720,7 +720,10 @@ development_status:
   # 2026-09-28: 8-3 G3 applied (2 critical/high + mediums/lows; v9 id guard) → 1303 tests → review.
   # 2026-09-28: 8-3 dev + G3 (3 layers + security re-review; 2 high fixed) → PR #260 merged → done.
   8-3-mcp-access-gated-access-surface: done
-  8-4-steadyinvest-mcp-stdio-server: backlog
+  # 2026-09-28: 8-4 story file created (create-story) → ready-for-dev. SDK decision: rmcp 3.4
+  #             (server + transport-io + macros + schemars; no HTTP in the closure, cargo deny ok);
+  #             new crates paths/ (shared locations) and mcp/.
+  8-4-steadyinvest-mcp-stdio-server: ready-for-dev
   8-5a-ai-frame-and-draft-inbox: backlog
   8-5b-deciding-drafts: backlog
   8-6-ai-judgment-lines: backlog
