@@ -332,6 +332,29 @@ claude-opus-5-5 (worker fork, bmad-dev-story)
   `cargo clippy --workspace --all-targets -D warnings` clean; `cargo fmt --check` clean. No
   dependency change (cargo deny unaffected). No UI, no user-facing string, no posture delta.
 - Deviation: none of substance. `PayloadProblem` (typed, crate-private) added for the posture rule.
+- **G3 review (3 layers, no high) applied** — commits 633a105, 7ab4983:
+  - DDL: a draft study is never `validated_undone` and carries `created_study_id` exactly when
+    `validated` (arch A8 / Story 8.7: reversed by deleting the study, O7); only draft studies carry
+    it; pending ⇒ no decision facts; `edited_before_validation` only on validated / undone; ids,
+    `study_id`, `created_study_id` are lower-case 36-char UUID text. `v8.db` regenerated (never
+    published) — the rejected judgment row now carries `stale_at_decision` instead of
+    `edited_before_validation`.
+  - Contract: `deny_unknown_fields` on `DraftPayload` and `DraftTarget` (an exception to the
+    tolerant-fields rule — AI-written input, versioned); `fits` refuses blank note text, field or
+    proposed value; the version constant documents "a bump keeps reading older versions".
+  - `PayloadProblem::Newer` → `NewerRowSchema` on read, `ImportVersion` on import; version 0 /
+    unparsable stay corrupt / malformed.
+  - Import: Unicode-blank comment / origin, blank ticker, non-ISO-form currency (three ASCII
+    upper-case letters — the contract has no currency rule; the 8.0 spec's `identifier_invalid`
+    form is used), non-RFC3339-UTC timestamps refused; refusals name the draft id, the referenced
+    study and SQLite's message; the upsert keeps an already-decided draft and never erases a
+    `created_study_id` (keep-existing, chosen per review).
+  - Tests: +7 (column set + index names pinned, dangling `created_study_id`, 1 + N then 1 bumps,
+    older export after a decision, newer payload read / import, invalid imported fields, planted
+    corrupt id / kind / status / boolean with checks off) and +9 CHECK cases; the isolation scan
+    also rejects a `../persistence` path dependency. Docs: `delete_study` names the trigger; corpus
+    README: `v8.db` is WAL — copy before inspecting.
+  - Gates: 1187 passed, 0 failed (2 ignored generators); clippy and fmt clean.
 
 ### File List
 
