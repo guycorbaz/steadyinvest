@@ -1,6 +1,6 @@
 # Story 8.4: `steadyinvest-mcp` stdio server
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created 2026-09-28 by create-story (Epic 8 autonomous run). Sources: epics.md Story 8.4 + Epic 8
 preamble; architecture.md §Phase 4 A1 / A2 / A3 / A10 / A11 / A12; ux-ai-assistance-surfaces.md §3.3
@@ -188,93 +188,93 @@ so that the AI can read my studies and drop drafts into my inbox — and nothing
 
 ## Tasks / Subtasks
 
-- [ ] **T1 — `steadyinvest-paths` crate (AC 3)**
-  - [ ] T1.1 `paths/Cargo.toml` (workspace package fields, deps `directories`, `serde`, `serde_json`
+- [x] **T1 — `steadyinvest-paths` crate (AC 3)**
+  - [x] T1.1 `paths/Cargo.toml` (workspace package fields, deps `directories`, `serde`, `serde_json`
         workspace = true); add `"paths"` to `[workspace].members` and
         `steadyinvest-paths = { path = "paths", version = "0.1.0" }` to `[workspace.dependencies]`.
-  - [ ] T1.2 `paths/src/lib.rs`: `project_dirs()`, `config_file_path()`, `default_journal_path()`,
+  - [x] T1.2 `paths/src/lib.rs`: `project_dirs()`, `config_file_path()`, `default_journal_path()`,
         `log_dir()`; `DossierPointers` + `read_dossier_pointers(path) -> Result<Option<DossierPointers>,
         PointerError>` (`Ok(None)` = file absent; `Err` = unreadable or not JSON; never writes).
-  - [ ] T1.3 `resolve_dossier(explicit: Option<&Path>) -> Result<PathBuf, ResolveError>` implementing
+  - [x] T1.3 `resolve_dossier(explicit: Option<&Path>) -> Result<PathBuf, ResolveError>` implementing
         AC 5's order (pure function over `explicit`, the pointers and `default_journal_path()`; a
         `resolve_dossier_with(explicit, pointers, default)` inner for tests).
-  - [ ] T1.4 Unit tests: order of precedence; refused-configured scenario (AC 5); missing config →
+  - [x] T1.4 Unit tests: order of precedence; refused-configured scenario (AC 5); missing config →
         default; invalid JSON → error, file untouched (bytes + name unchanged); unknown fields
         tolerated.
-  - [ ] T1.5 App delegation: `app/src/config.rs::default_path` → `steadyinvest_paths::config_file_path`;
+  - [x] T1.5 App delegation: `app/src/config.rs::default_path` → `steadyinvest_paths::config_file_path`;
         `app/src/state/mod.rs::default_journal_path` → `steadyinvest_paths::default_journal_path`;
         `app/src/logging.rs` log dir → `steadyinvest_paths::log_dir`. Behaviour identical.
-- [ ] **T2 — `last_opened_path` in the app (AC 4)**
-  - [ ] T2.1 `AppConfig.last_opened_path` (`#[serde(default)]`, `Default` = `None`, doc comment).
-  - [ ] T2.2 `record_recent` sets `self.last_opened_path = Some(path.to_path_buf())`.
-  - [ ] T2.3 Tests: config round-trip; old config without the field loads; the G3 M4 stand-in scenario
+- [x] **T2 — `last_opened_path` in the app (AC 4)**
+  - [x] T2.1 `AppConfig.last_opened_path` (`#[serde(default)]`, `Default` = `None`, doc comment).
+  - [x] T2.2 `record_recent` sets `self.last_opened_path = Some(path.to_path_buf())`.
+  - [x] T2.3 Tests: config round-trip; old config without the field loads; the G3 M4 stand-in scenario
         through `record_current_pointer` / the startup block (journal_path kept, last_opened = stand-in).
-- [ ] **T3 — `mcp` crate skeleton (AC 1, 2, 12, 13)**
-  - [ ] T3.1 `mcp/Cargo.toml` (`[[bin]] name = "steadyinvest-mcp"`, `path = "src/main.rs"`); add
+- [x] **T3 — `mcp` crate skeleton (AC 1, 2, 12, 13)**
+  - [x] T3.1 `mcp/Cargo.toml` (`[[bin]] name = "steadyinvest-mcp"`, `path = "src/main.rs"`); add
         `rmcp` to `[workspace.dependencies]` with the AC 2 features; workspace member `"mcp"`.
         `tokio` from the workspace (+ `io-std` comes from rmcp's `transport-io`). Dev-deps:
         `tempfile`, `serde_json`.
-  - [ ] T3.2 `mcp/clippy.toml` (AC 13) + `#![deny(clippy::print_stdout, clippy::print_stderr)]`
+  - [x] T3.2 `mcp/clippy.toml` (AC 13) + `#![deny(clippy::print_stdout, clippy::print_stderr)]`
         in `main.rs` except the allowed stderr lines (use `eprintln!` behind a small `fn warn_stderr`
         with a scoped `#[expect(clippy::print_stderr)]`).
-  - [ ] T3.3 Argument parsing by hand (no `clap`): `--dossier <path>` (optional, once), `--version`;
+  - [x] T3.3 Argument parsing by hand (no `clap`): `--dossier <path>` (optional, once), `--version`;
         anything else → one stderr line + exit code 2. Relative `--dossier` resolved against the cwd.
-  - [ ] T3.4 Logging (AC 12): `tracing_appender::rolling::daily(log_dir, "steadyinvest-mcp.log")`,
+  - [x] T3.4 Logging (AC 12): `tracing_appender::rolling::daily(log_dir, "steadyinvest-mcp.log")`,
         `with_ansi(false)`, INFO; panic hook to the log + stderr (the app's `logging.rs` pattern).
-  - [ ] T3.5 Runtime: `tokio::runtime::Builder::new_current_thread().enable_all()`; serve
+  - [x] T3.5 Runtime: `tokio::runtime::Builder::new_current_thread().enable_all()`; serve
         `Server.serve(rmcp::transport::stdio())` and `waiting()`; every `McpAccess` call inside
         `tokio::task::spawn_blocking` (SQLite is blocking; `busy_timeout` up to 5 s must not stall the
         transport).
-- [ ] **T4 — Tools (AC 6–9)**
-  - [ ] T4.1 `mcp/src/tools.rs`: the eight tools with `#[tool]` / `#[tool_router]` and
+- [x] **T4 — Tools (AC 6–9)**
+  - [x] T4.1 `mcp/src/tools.rs`: the eight tools with `#[tool]` / `#[tool_router]` and
         `schemars`-derived parameter structs; `ServerHandler::get_info` with tools capability only,
         `server_info.name = "steadyinvest-mcp"`, version from `CARGO_PKG_VERSION`, and an
         `instructions` text (English, neutral — scanned by AC 10's banned-verb test).
-  - [ ] T4.2 Per call: resolve (T1.3) → `McpAccess::at(path)` → `identity()` → the method → JSON with
+  - [x] T4.2 Per call: resolve (T1.3) → `McpAccess::at(path)` → `identity()` → the method → JSON with
         `dossier`. Paging args → `Page { offset, limit }` (limit defaults per AC 7).
-  - [ ] T4.3 `mcp/src/dto.rs`: serde DTOs for studies (the contract `Study` already serializes —
+  - [x] T4.3 `mcp/src/dto.rs`: serde DTOs for studies (the contract `Study` already serializes —
         return it as is inside the result), `StudySummary`, snapshots, `DraftRecord`, and the computed
         outputs (AC 8) with neutral zone codes and criterion codes.
-  - [ ] T4.4 Submit tools build `DraftSubmission` (kind-specific fields only — extraneous fields are an
+  - [x] T4.4 Submit tools build `DraftSubmission` (kind-specific fields only — extraneous fields are an
         `invalid_call` in 8.3); `DraftTarget` from `field` + `fiscal_year` via
         `DraftField::from_key` / `kind()` (a cell field without year, or a judgment field with one →
         `invalid_call` rendered from `McpInvalidCall`; an unknown key → let 8.3 refuse
         `field_not_draftable`).
-  - [ ] T4.5 `submit_draft_value`'s schema/description from the registry (AC 9): generate the enum
+  - [x] T4.5 `submit_draft_value`'s schema/description from the registry (AC 9): generate the enum
         and the per-field unit/options lines at runtime from `DraftField::ALL`, so a registry change
         cannot drift from the schema (test: the schema's enum == `DraftField::ALL` keys).
-- [ ] **T5 — Messages and errors (AC 10, 11)**
-  - [ ] T5.1 `mcp/src/messages.rs`: `render(&Outcome) -> (code, message)` exhaustive over
+- [x] **T5 — Messages and errors (AC 10, 11)**
+  - [x] T5.1 `mcp/src/messages.rs`: `render(&Outcome) -> (code, message)` exhaustive over
         `SubmissionRefusal`, `McpUnavailable`, and the `Error` variants with an MCP code, plus
         `config_unreadable` / `dossier_error`. Texts verbatim from §3.3; units and option lists
         rendered from the registry.
-  - [ ] T5.2 Tests: every code rendered (a table test listing all codes), placeholders filled, no
+  - [x] T5.2 Tests: every code rendered (a table test listing all codes), placeholders filled, no
         banned verb in any message nor in tool names / descriptions / schema descriptions /
         `instructions` (FR13).
-  - [ ] T5.3 Add `config_unreadable` and `dossier_error` to `ux-ai-assistance-surfaces.md` §3.3
+  - [x] T5.3 Add `config_unreadable` and `dossier_error` to `ux-ai-assistance-surfaces.md` §3.3
         (« Added by Story 8.4 » note).
-- [ ] **T6 — Tests (AC 1, 14–17)**
-  - [ ] T6.1 `mcp/tests/closure.rs` (AC 1) — `cargo metadata` via `std::env::var("CARGO")`,
+- [x] **T6 — Tests (AC 1, 14–17)**
+  - [x] T6.1 `mcp/tests/closure.rs` (AC 1) — `cargo metadata` via `std::env::var("CARGO")`,
         `--locked`, parse with `serde_json`, BFS over `resolve.nodes[].deps` whose `dep_kinds` has a
         `kind: null` entry.
-  - [ ] T6.2 `mcp/tests/support/mod.rs`: temp-dossier builder (`Journal::create` + fixtures, scoped
+  - [x] T6.2 `mcp/tests/support/mod.rs`: temp-dossier builder (`Journal::create` + fixtures, scoped
         `expect`), a stdio driver (spawn the binary, write one JSON-RPC line, read one line; timeout),
         `initialize` + `notifications/initialized` handshake.
-  - [ ] T6.3 `mcp/tests/non_exposure.rs` (AC 14), `mcp/tests/home_isolation.rs` (AC 15, Linux-only),
+  - [x] T6.3 `mcp/tests/non_exposure.rs` (AC 14), `mcp/tests/home_isolation.rs` (AC 15, Linux-only),
         `mcp/tests/stdio_e2e.rs` (AC 16, 17).
-  - [ ] T6.4 `paths` unit tests (T1.4) and app tests (T2.3).
-- [ ] **T7 — Seed, doc, glossary (AC 18–20)**
-  - [ ] T7.1 `mcp/examples/seed.rs` + the two `justfile` recipes; the real-dossier refusal (canonical
+  - [x] T6.4 `paths` unit tests (T1.4) and app tests (T2.3).
+- [x] **T7 — Seed, doc, glossary (AC 18–20)**
+  - [x] T7.1 `mcp/examples/seed.rs` + the two `justfile` recipes; the real-dossier refusal (canonical
         path compare) tested (a unit test on the guard function).
-  - [ ] T7.2 `docs/mcp-registration.md` (French).
-  - [ ] T7.3 Glossary entry « Serveur MCP » in `app/ui/screens/settings.slint` (after « Notes »,
+  - [x] T7.2 `docs/mcp-registration.md` (French).
+  - [x] T7.3 Glossary entry « Serveur MCP » in `app/ui/screens/settings.slint` (after « Notes »,
         `// Story 8.4 (FR75).`), `@tr` floor comment and value in `app/src/posture.rs`.
-- [ ] **T8 — Gates and record (AC 21)**
-  - [ ] T8.1 All gates green; `cargo deny check` green; state measured test counts and posture deltas.
-  - [ ] T8.2 Manual smoke (no AI client): `just mcp-build`, copy a fixture dossier to a temp dir, run
+- [x] **T8 — Gates and record (AC 21)**
+  - [x] T8.1 All gates green; `cargo deny check` green; state measured test counts and posture deltas.
+  - [x] T8.2 Manual smoke (no AI client): `just mcp-build`, copy a fixture dossier to a temp dir, run
         `just mcp-seed <copy>`, open the copy in the app headless only if needed — never the real
         dossier; never register the server.
-  - [ ] T8.3 Story record (Dev Agent Record, file list, decisions), sprint-status 8-4 → review.
+  - [x] T8.3 Story record (Dev Agent Record, file list, decisions), sprint-status 8-4 → review.
 
 ## Dev Notes
 
@@ -414,10 +414,110 @@ _bmad-output/planning-artifacts/ux-ai-assistance-surfaces.md (§3.3 two codes)
 
 ### Agent Model Used
 
+Claude Opus 5.5 (claude-opus-5-5), Epic 8 autonomous run, 2026-09-28.
+
 ### Debug Log References
+
+- `cargo test --workspace --locked`: **1334 passed, 0 failed, 2 ignored** (the corpus generators);
+  8.3 closed at 1310 → +24 (paths 6, mcp unit 8, mcp integration 8, app 2).
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: clean;
+  `cargo fmt --all --check`: clean; `cargo deny check`: advisories, bans, licenses, sources ok
+  (lockfile gains rmcp 3.4.1, rmcp-macros, schemars 1.2, darling, dyn-clone, ref-cast, tokio-util,
+  steadyinvest-paths, steadyinvest-mcp — no hyper / reqwest / http / axum).
+- Clippy boundary probed: a temporary `Journal` / `clear_lock` / `inspect_backup` /
+  `sweep_stale_read_copies` / `println!` in `mcp/src/lib.rs` each failed clippy, then removed.
+- Posture: `@tr` floor 1033 → **1035** (+2, measured: the glossary term and definition). No
+  `MSG_*` change in the app (the MCP messages live in `mcp/src/messages.rs`, scanned by their own
+  banned-verb test).
+- Manual smoke (T8.2): `mcp-seed` on a scratch v9 copy of the v8 corpus (session scratchpad, temp
+  HOME / XDG) recorded one draft study, one note, one cell, one judgment and one option draft, all
+  `pending`, origin `mcp-seed`; the guard refuses a missing path. A v8 copy is refused
+  `schema_mismatch` (« … ouvrez-le d'abord dans l'application. »). The server's log landed in the
+  temp `XDG_DATA_HOME/steadyinvest/logs/steadyinvest-mcp.log.*`.
+- Headless check (verify skill, fresh temp dossier, provider « none », temp XDG): Réglages →
+  glossary shows « Serveur MCP » after « Notes » (screenshot
+  `scratchpad/v84/g84-glossary-serveur-mcp.png`); the temp config then carries `last_opened_path`.
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- **T1 paths crate** (`steadyinvest-paths`): `project_dirs`, `config_file_path`,
+  `default_journal_path`, `log_dir`, `DossierPointers` + `read_dossier_pointers` (never writes),
+  `resolve_dossier` / `resolve_dossier_with` (AC 5 precedence; invalid config → `ConfigUnreadable`).
+  The app's `config::default_path`, `state::default_journal_path` and `logging::init` delegate to it.
+- **T2 `last_opened_path`**: `AppConfig` field (`#[serde(default)]`), set by `record_recent`; tests
+  for round-trip / old config, and the G3 M4 stand-in scenario through
+  `wiring::journal::record_current_pointer` (journal_path = refused, last_opened = stand-in, and
+  the persisted file resolves to the stand-in for MCP).
+- **T3–T5 the `mcp` crate**: lib + bin; hand-written argument parsing; own daily log; current-thread
+  tokio runtime; every `McpAccess` call on `spawn_blocking`; eight tools; DTOs (`dto.rs`) with
+  computed outputs from `report::form::build_snapshot`; exhaustive French rendering of every §3.3
+  code (`messages.rs`) plus `config_unreadable` / `dossier_error`.
+- **T6 tests**: `closure.rs` (cargo metadata walk, normal edges, all platforms), `non_exposure.rs`
+  (markers in the six denied tables + a marked config; every tool, every page with `limit: 1`),
+  `home_isolation.rs` (Linux: temp pointer followed; no config → `no_dossier` under the temp home,
+  nothing created but the log dir), `stdio_e2e.rs` (the eight tools, one draft of each kind
+  `pending`, studies unchanged, idempotent retry, four refusal families with their §3.3 text,
+  `no_dossier` then serving once the file appears, `schema_mismatch` left at v7).
+- **T7** `examples/seed.rs` + guard (`seed_guard.rs`, canonical compare incl. symlinks, tested),
+  `justfile` `mcp-build` / `mcp-seed`, `docs/mcp-registration.md`, glossary entry.
+
+**Deviations from the story (owner-pending):**
+1. **`ServerHandler` implemented by hand, not with `#[tool]` / `#[tool_router]`.** T4.1 asked for the
+   macros, T4.5 for schemas generated at runtime from `DraftField::ALL` — the macros derive schemas
+   at compile time from structs, so the hand-written handler is what satisfies T4.5 (the
+   `field` enum and the per-field unit lines come from the registry; a test asserts equality). The
+   AC 2 rmcp features are kept as listed (`macros`, `schemars` enabled, unused by our code).
+2. **Optional `draft_id` on the three submit tools** (AC 16's idempotent retry): `McpAccess` compares
+   `created_at` too, so a server-assigned id + time could never repeat. With `draft_id`, the server
+   reuses the stored `created_at` of that id (a bounded scan of the record) → the same proposition
+   is recorded once; different content → `draft_id_conflict`. Without it, the server assigns both.
+3. **Error body adds `resolved_path`** beside `code` / `message` / `dossier` — `no_dossier`'s §3.3
+   text has no path placeholder, and AC 15 needs the resolved path in the output.
+4. **Strict arguments**: an unknown argument, a wrong type, a cell field without `fiscal_year` or a
+   judgment field with one → `invalid_call` (schemas carry `additionalProperties: false`);
+   `proposed_value` must be a string.
+5. **Placeholder renderings**: `text_too_long` {champ} as « du commentaire / de la note / du nom de
+   la société / du client / du modèle » (« Le texte du commentaire dépasse … »);
+   `target_has_pending` {cible} as « Le champ {key} de l'année {AAAA} » / « Le champ {key} »;
+   `schema_mismatch` newer: « Le dossier est au schéma v{a}, ce serveur MCP en v{b} ; ce serveur MCP
+   est plus ancien que le dossier. »; `identifier_invalid` {règle} spelled out
+   (`IDENTIFIER_RULE_FR`); `get_study` / `get_notes` on an unknown study reuse `study_not_found`.
+6. **Neutral JSON keys** in the computed outputs beyond the zone codes: `low_zone_top` /
+   `middle_zone_top` (not `buy_top` / `neutral_top`), `present_price_in_low_zone`; upside/downside
+   as `upside_downside` + `upside_downside_state` (`ratio` / `undefined` / `unknown`).
+
+**Found on the way (dev safety — reported to the lead):** the app test
+`missing_configured_file_falls_through_to_a_created_default_or_none` used the REAL
+`default_journal_path()` and created an empty dossier in the owner's data dir on every test run
+(`~/.local/share/steadyinvest/journal.db`, journal id `…0002`, 0 studies, created 2026-09-28 00:52 —
+after the owner had deleted his test dossiers). Fixed: the test now passes a temp default. The file
+itself was **not** deleted (outside the repository; the owner's call).
+
+**Decisions taken in the story file (owner-pending):** rmcp over hand-rolled JSON-RPC; the shared
+locations are a crate; `config_unreadable` / `dossier_error`; zone codes `low` / `middle` / `high`;
+page sizes 50 / 20; registration at `--scope local` from a directory outside the repository.
+
+**Not verified:** the Windows path of the resolution / log locations (no Windows target; CI Linux
+only). No AI client was connected and nothing was registered (dev-safety rule).
 
 ### File List
+
+- `Cargo.toml` (members `paths`, `mcp`; `steadyinvest-paths`, `rmcp` workspace deps), `Cargo.lock`
+- `paths/Cargo.toml`, `paths/src/lib.rs` (new)
+- `mcp/Cargo.toml`, `mcp/clippy.toml` (new)
+- `mcp/src/lib.rs`, `mcp/src/main.rs`, `mcp/src/server.rs`, `mcp/src/tools.rs`, `mcp/src/dto.rs`,
+  `mcp/src/messages.rs`, `mcp/src/logging.rs`, `mcp/src/seed_guard.rs` (new)
+- `mcp/tests/support/mod.rs`, `mcp/tests/closure.rs`, `mcp/tests/stdio_e2e.rs`,
+  `mcp/tests/non_exposure.rs`, `mcp/tests/home_isolation.rs` (new)
+- `mcp/examples/seed.rs` (new)
+- `justfile` (`mcp-build`, `mcp-seed`)
+- `docs/mcp-registration.md` (new)
+- `app/Cargo.toml`, `app/src/config.rs`, `app/src/logging.rs`, `app/src/state/mod.rs`,
+  `app/src/state/tests.rs`, `app/src/posture.rs`, `app/ui/screens/settings.slint`
+- `_bmad-output/planning-artifacts/ux-ai-assistance-surfaces.md` (§3.3: two codes)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`,
+  `_bmad-output/implementation-artifacts/8-4-steadyinvest-mcp-stdio-server.md
+
+### Change Log
+
+- 2026-09-28: dev complete (commits f4f659e, 30efd07) → review.
