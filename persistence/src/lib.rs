@@ -48,7 +48,7 @@ pub use mcp_access::{
     MAX_NOTE_CHARS, MAX_ORIGIN_CHARS, MAX_PAGE, McpAccess, McpDenial, McpSnapshot, McpStudyRead,
     McpUnavailable, Page, Paged, SubmissionRefusal, SubmitError,
 };
-pub use restore::{BackupInfo, inspect_backup, restore_journal_file};
+pub use restore::{BackupInfo, inspect_backup, restore_journal_file, restore_journal_file_keeping};
 pub use studies::{JudgmentSnapshotSummary, StudySummary};
 pub use transactions::{KIND_BUY, KIND_DIVIDEND, KIND_SELL, LedgerEntry, TransactionItem};
 pub use watchlist::WatchItem;

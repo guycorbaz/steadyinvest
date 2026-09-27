@@ -177,9 +177,14 @@ pub enum McpUnavailable {
     Missing,
     /// The file is empty, is not a SQLite database, or is not a journal.
     NotADossier,
-    /// A restore of the dossier is in progress (its `-restore-incoming` staging file exists — or
-    /// was left by an interrupted restore), or the file was swapped while a read ran.
+    /// A restore of the dossier is in progress (its `-restoring` marker names a live process), or
+    /// the file was swapped while a read ran.
     RestoreInProgress,
+    /// A restore was interrupted (a marker or staging copy left by a process that is gone): the app
+    /// clears it when it next opens the dossier (G3 N2).
+    RestoreInterrupted,
+    /// The dossier stayed locked by another connection beyond the wait (G3 N4).
+    Busy,
     /// The dossier needs the app's recovery first (a hot rollback journal left by a crash, or WAL
     /// side files a read-only connection cannot initialise).
     NeedsRecovery,
@@ -197,6 +202,8 @@ impl McpUnavailable {
             McpUnavailable::Missing => "no_dossier",
             McpUnavailable::NotADossier => "not_a_dossier",
             McpUnavailable::RestoreInProgress => "dossier_busy",
+            McpUnavailable::RestoreInterrupted => "restore_interrupted",
+            McpUnavailable::Busy => "dossier_locked",
             McpUnavailable::NeedsRecovery => "dossier_needs_recovery",
             McpUnavailable::Protected { .. } => "dossier_protected",
             McpUnavailable::IdentityUnreadable { .. } => "dossier_identity_unreadable",
@@ -210,8 +217,12 @@ impl std::fmt::Display for McpUnavailable {
             McpUnavailable::Missing => f.write_str("no file is at the dossier path"),
             McpUnavailable::NotADossier => f.write_str("the file is not a journal"),
             McpUnavailable::RestoreInProgress => {
-                f.write_str("a restore of the dossier is in progress or was interrupted")
+                f.write_str("a restore of the dossier is in progress")
             }
+            McpUnavailable::RestoreInterrupted => f.write_str(
+                "a restore of the dossier was interrupted; the app clears it when it opens the dossier",
+            ),
+            McpUnavailable::Busy => f.write_str("the dossier stayed locked by another connection"),
             McpUnavailable::NeedsRecovery => {
                 f.write_str("the dossier needs the app's recovery first")
             }
@@ -637,19 +648,28 @@ impl McpAccess {
         &self.path
     }
 
-    /// The staging file of a restore (`restore::restore_journal_file`): it exists from the copy to
-    /// the rename — or after an interrupted restore.
-    fn restore_marker(&self) -> PathBuf {
-        let mut p = self.path.as_os_str().to_os_string();
-        p.push("-restore-incoming");
-        PathBuf::from(p)
+    /// A restore running on the dossier, or one left interrupted, refuses every call (G3 N2/N4).
+    fn refuse_during_restore(&self) -> Result<()> {
+        use crate::restore::RestoreState;
+        match crate::restore::restore_state(&self.path) {
+            RestoreState::Idle => Ok(()),
+            RestoreState::Running => Err(unavailable(McpUnavailable::RestoreInProgress)),
+            RestoreState::Interrupted => Err(unavailable(McpUnavailable::RestoreInterrupted)),
+        }
     }
 
-    fn refuse_during_restore(&self) -> Result<()> {
-        if self.restore_marker().exists() {
-            return Err(unavailable(McpUnavailable::RestoreInProgress));
+    /// A lock that outlasted the wait is named (G3 N4): the restore's own when one is running, a
+    /// plain « locked » otherwise.
+    fn name_busy(&self, e: Error) -> Error {
+        let busy = matches!(&e, Error::Sqlite(rusqlite::Error::SqliteFailure(f, _))
+            if matches!(f.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked));
+        if !busy {
+            return e;
         }
-        Ok(())
+        match self.refuse_during_restore() {
+            Err(named) => named,
+            Ok(()) => unavailable(McpUnavailable::Busy),
+        }
     }
 
     /// Whether the file at the path is still the one `opened` names, and the connection's file has
@@ -780,6 +800,10 @@ impl McpAccess {
     /// it ran (a restore) makes the read [`McpUnavailable::RestoreInProgress`] — it may have read
     /// the replaced file.
     fn read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.read_inner(f).map_err(|e| self.name_busy(e))
+    }
+
+    fn read_inner<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         // Kept whole (not destructured): its fields drop in declaration order — the connection
         // before the identity (Windows: an open handle).
         let mut gated = self.open(Policy::Read, &mut || {})?;
@@ -937,7 +961,9 @@ impl McpAccess {
     ) -> std::result::Result<Uuid, SubmitError> {
         check_shape(sub)?;
         // Kept whole: the connection drops before the identity (Windows: an open handle).
-        let mut gated = self.open(Policy::Draft, hooks.after_open)?;
+        let mut gated = self
+            .open(Policy::Draft, hooks.after_open)
+            .map_err(|e| SubmitError::Failed(self.name_busy(e)))?;
         let outcome = {
             let tx = gated
                 .conn
@@ -951,7 +977,9 @@ impl McpAccess {
             }
         };
         outcome.map(|()| sub.id).map_err(|e| match e {
-            SubmitError::Failed(err) => SubmitError::Failed(lift(err, &gated.denials)),
+            SubmitError::Failed(err) => {
+                SubmitError::Failed(self.name_busy(lift(err, &gated.denials)))
+            }
             other => other,
         })
     }
@@ -2195,15 +2223,20 @@ mod tests {
         let barrier = Arc::new(Barrier::new(2));
         let (b, p, bk) = (Arc::clone(&barrier), path.clone(), backup.clone());
         let restore = std::thread::spawn(move || {
-            crate::restore::restore_journal_file_with(
+            crate::restore::restore_with(
                 &p,
                 &bk,
+                None,
                 std::time::Duration::from_secs(5),
-                &mut || {
-                    b.wait();
-                    // Best effort: give the submission time to reach the lock (the outcome is
-                    // asserted for every interleaving).
-                    std::thread::sleep(std::time::Duration::from_millis(150));
+                crate::restore::RestoreHooks {
+                    after_lock: Some(&mut || {
+                        b.wait();
+                        // Best effort: give the submission time to reach the lock (the outcome is
+                        // asserted for every interleaving).
+                        std::thread::sleep(std::time::Duration::from_millis(150));
+                    }),
+                    after_snapshot: None,
+                    after_swap: None,
                 },
             )
         });
@@ -2266,14 +2299,19 @@ mod tests {
         assert!(!reopened.is_read_only());
     }
 
-    /// G3 M4: while a restore's staging file exists (or was left by an interrupted restore), the
-    /// MCP access reads and writes nothing and says why.
+    /// G3 M4/N2: while a restore runs (its marker names a live process) the MCP access reads and
+    /// writes nothing (`dossier_busy`); a marker or staging copy left by a process that is gone is
+    /// `restore_interrupted` — until the app opens the dossier, which clears them (holding its lock).
     #[test]
-    fn a_restore_in_progress_refuses_reads_and_submissions_by_name() {
+    fn a_running_or_interrupted_restore_refuses_calls_until_the_app_clears_it() {
         let dir = TempDir::new().expect("tempdir");
         let path = dossier(&dir);
-        std::fs::write(dir.path().join("dossier.db-restore-incoming"), b"x").expect("marker");
+        let marker = dir.path().join("dossier.db-restoring");
         let access = McpAccess::at(&path);
+        // Running: the marker names this (live) process.
+        let pid = std::process::id();
+        let start = crate::journal::process_start_time(pid).unwrap_or(0);
+        std::fs::write(&marker, format!("{pid} {start}")).expect("marker");
         match access.list_studies(Page::first(1)) {
             Err(
                 e @ Error::McpUnavailable {
@@ -2286,6 +2324,137 @@ mod tests {
             .submit_draft(&submission(&path))
             .expect_err("refused");
         assert_eq!(err.code(), Some("dossier_busy"));
+        // The app does not clear a live restore's marker.
+        assert!(
+            Journal::open(&path)
+                .expect("open")
+                .cleared_restore_leftovers()
+                .is_empty()
+        );
+        assert!(marker.exists());
+        // Interrupted: a dead owner's marker, and a staging copy.
+        std::fs::write(&marker, "4294967294 1").expect("dead marker");
+        std::fs::write(dir.path().join("dossier.db-restore-incoming"), b"x").expect("staging");
+        match access.list_studies(Page::first(1)) {
+            Err(
+                e @ Error::McpUnavailable {
+                    reason: McpUnavailable::RestoreInterrupted,
+                },
+            ) => assert_eq!(e.mcp_code(), Some("restore_interrupted")),
+            other => panic!("expected restore_interrupted, got {other:?}"),
+        }
+        // The app's next open clears both (and reports them for its log); MCP works again.
+        let cleared = Journal::open(&path)
+            .expect("open")
+            .cleared_restore_leftovers()
+            .to_vec();
+        assert_eq!(cleared.len(), 2, "{cleared:?}");
+        assert_eq!(
+            access.list_studies(Page::first(1)).expect("usable").total,
+            1
+        );
+    }
+
+    /// G3 N4: a call that meets a lock beyond its wait is named — not a raw SQLite busy.
+    #[test]
+    fn a_lock_outlasting_the_wait_is_named() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dossier(&dir);
+        let holder = Connection::open(&path).expect("holder");
+        holder
+            .execute_batch("BEGIN EXCLUSIVE")
+            .expect("an exclusive lock (DELETE mode)");
+        let access = McpAccess::at(&path);
+        // The call waits its 5 s busy_timeout, then says why.
+        match access.list_studies(Page::first(1)) {
+            Err(
+                e @ Error::McpUnavailable {
+                    reason: McpUnavailable::Busy,
+                },
+            ) => assert_eq!(e.mcp_code(), Some("dossier_locked")),
+            other => panic!("expected dossier_locked, got {other:?}"),
+        }
+        holder.execute_batch("ROLLBACK").expect("end");
+    }
+
+    /// G3 N1: an MCP call in the window right after the swap (lock still held, marker still there)
+    /// is refused `dossier_busy` — it creates no side file the restore would then delete — and the
+    /// restore deletes NOTHING after the rename: a draft accepted after the restore survives.
+    #[test]
+    fn nothing_is_deleted_after_the_swap_and_calls_in_its_window_are_refused() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dossier_in(&dir, JournalMode::Wal);
+        let backup = dir.path().join("backup.db");
+        Journal::open(&path)
+            .expect("open")
+            .backup_to(&backup)
+            .expect("backup");
+        let mut in_window = None;
+        crate::restore::restore_with(
+            &path,
+            &backup,
+            None,
+            std::time::Duration::from_secs(2),
+            crate::restore::RestoreHooks {
+                after_lock: None,
+                after_snapshot: None,
+                after_swap: Some(&mut || {
+                    in_window = Some(McpAccess::at(&path).submit_draft(&submission(&path)));
+                }),
+            },
+        )
+        .expect("restored");
+        match in_window {
+            Some(Err(e)) => assert_eq!(e.code(), Some("dossier_busy"), "{e:?}"),
+            other => panic!("a call in the swap window must be refused: {other:?}"),
+        }
+        assert!(
+            !dir.path().join("dossier.db-restoring").exists(),
+            "the marker went last"
+        );
+        // After the restore: an MCP write lands, and nothing removes its side files behind it.
+        let id = McpAccess::at(&path)
+            .submit_draft(&submission(&path))
+            .expect("accepted after the restore");
+        let back = Journal::open(&path)
+            .expect("the restored dossier opens")
+            .get_draft(id)
+            .expect("read");
+        assert!(
+            back.is_some(),
+            "the draft accepted after the restore is there"
+        );
+    }
+
+    /// G3 N3: the snapshot's byte copy closes no descriptor while the restore holds its lock —
+    /// another PROCESS still cannot write once the snapshot is written (the POSIX-lock hazard).
+    #[test]
+    fn the_snapshot_copy_keeps_the_restore_lock_against_another_process() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dossier_in(&dir, JournalMode::Wal);
+        let backup = dir.path().join("backup.db");
+        Journal::open(&path)
+            .expect("open")
+            .backup_to(&backup)
+            .expect("backup");
+        let snapshot = dir.path().join("dossier.db-prerestore");
+        let mut taken = None;
+        crate::restore::restore_with(
+            &path,
+            &backup,
+            Some(&snapshot),
+            std::time::Duration::from_secs(2),
+            crate::restore::RestoreHooks {
+                after_lock: None,
+                after_snapshot: Some(&mut || {
+                    taken = Some(another_process_takes_the_write_lock(&path));
+                }),
+                after_swap: None,
+            },
+        )
+        .expect("restored");
+        assert_eq!(taken, Some(false), "the lock survived the snapshot copy");
+        assert!(snapshot.exists());
     }
 
     #[test]

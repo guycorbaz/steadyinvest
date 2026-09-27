@@ -140,6 +140,11 @@ pub enum Error {
     #[error("the backup file could not be staged: {detail}; the journal is unchanged")]
     Restore { detail: String },
 
+    /// The pre-restore snapshot could not be written under the restore lock (Story 8.3 G3 N3). The
+    /// live journal is unchanged and no partial snapshot is left.
+    #[error("the pre-restore snapshot could not be written: {detail}; the journal is unchanged")]
+    RestoreSnapshot { detail: String },
+
     /// A protected journal is read through a private copy (its unconsolidated writes cannot be
     /// read in place without creating files beside it); that copy could not be prepared. `cause`
     /// is the file-system error's kind (a full disk is named as such).
@@ -317,7 +322,8 @@ impl Error {
                 match reason {
                     U::Missing => ErrorKind::Missing,
                     U::NotADossier => ErrorKind::Corrupt,
-                    U::RestoreInProgress => ErrorKind::Replaced,
+                    U::RestoreInProgress | U::RestoreInterrupted => ErrorKind::Replaced,
+                    U::Busy => ErrorKind::Locked,
                     U::Protected { .. } => ErrorKind::WriteProtected,
                     U::NeedsRecovery | U::IdentityUnreadable { .. } => ErrorKind::Other,
                 }
@@ -489,6 +495,9 @@ mod tests {
             Error::Restore {
                 detail: "the copy failed".to_string(),
             },
+            Error::RestoreSnapshot {
+                detail: "the snapshot file could not be created".to_string(),
+            },
             Error::ReadCopy {
                 detail: "a file could not be copied".to_string(),
                 cause: std::io::ErrorKind::StorageFull,
@@ -555,6 +564,7 @@ mod tests {
                 | Error::Lock { .. }
                 | Error::HoldingHasTransactions
                 | Error::Restore { .. }
+                | Error::RestoreSnapshot { .. }
                 | Error::ReadCopy { .. }
                 | Error::ChangedDuringCopy
                 | Error::SidecarNotWritable
@@ -570,12 +580,12 @@ mod tests {
                 | Error::McpUnavailable { .. } => {}
             }
         }
-        // 30 variants (21 + the five draft-decision variants of Story 8.2b + the four MCP access
-        // variants of Story 8.3); `WriteProtected` and `WriteProtectedOutdated` are sampled for both
-        // of their causes (file, directory). 8.3 delta: 28 → 32.
+        // 31 variants (21 + the five draft-decision variants of Story 8.2b + the four MCP access
+        // variants and `RestoreSnapshot` of Story 8.3); `WriteProtected` and `WriteProtectedOutdated`
+        // are sampled for both of their causes (file, directory). 8.3 delta: 28 → 33.
         assert_eq!(
             sample_errors().len(),
-            32,
+            33,
             "one sample per variant (+2 causes)"
         );
     }

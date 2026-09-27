@@ -80,6 +80,9 @@ pub struct Journal {
     /// The single-instance lock guard (Story 5.5, ADD6). Dropping the `Journal` (close / switch /
     /// exit) drops this, releasing the lock. Declared **after** `conn` so the connection closes first.
     _lock: JournalLock,
+    /// What an interrupted restore had left beside the file (marker, staging copy) and this open
+    /// removed while holding the lock (Story 8.3 G3 N2) — for the app's log.
+    cleared_restore_leftovers: Vec<PathBuf>,
 }
 
 /// A private copy of a protected journal (its `.db` and any `-wal` / `-journal` holding content)
@@ -299,7 +302,7 @@ fn lock_path_for(path: &Path) -> PathBuf {
 /// The `(pid, start_time)` recorded in a lock sidecar, if it parses (Story 5.5). The start-time
 /// qualifies the PID against reuse: a crashed owner's PID reassigned to an unrelated process has a
 /// different start-time, so the lock is correctly seen as stale rather than "still held".
-fn read_lock(lock_path: &Path) -> Option<(u32, u64)> {
+pub(crate) fn read_lock(lock_path: &Path) -> Option<(u32, u64)> {
     let text = std::fs::read_to_string(lock_path).ok()?;
     let mut parts = text.split_whitespace();
     let pid = parts.next()?.parse::<u32>().ok()?;
@@ -310,7 +313,7 @@ fn read_lock(lock_path: &Path) -> Option<(u32, u64)> {
 /// A process's start-time in clock ticks (Linux `/proc/<pid>/stat`, field 22). `None` when the process
 /// does not exist (or `/proc` is unreadable). The `comm` field (field 2) may contain spaces/parens, so
 /// parsing starts **after the last `)`** — field 22 is then index 19 of the remaining whitespace-split.
-fn process_start_time(pid: u32) -> Option<u64> {
+pub(crate) fn process_start_time(pid: u32) -> Option<u64> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_comm = stat.rsplit_once(')')?.1;
     after_comm.split_whitespace().nth(19)?.parse::<u64>().ok()
@@ -318,7 +321,7 @@ fn process_start_time(pid: u32) -> Option<u64> {
 
 /// Whether a recorded `(pid, start_time)` names a process that is **currently alive as that same
 /// process** (PID present AND its start-time matches what the lock recorded) — defeating PID reuse.
-fn lock_owner_is_live(pid: u32, start_time: u64) -> bool {
+pub(crate) fn lock_owner_is_live(pid: u32, start_time: u64) -> bool {
     process_start_time(pid) == Some(start_time)
 }
 
@@ -509,6 +512,7 @@ impl Journal {
             read_only: None,
             _scratch: None,
             _lock: lock,
+            cleared_restore_leftovers: Vec::new(),
         })
     }
 
@@ -532,6 +536,10 @@ impl Journal {
         // Lock before touching the file — a second instance is refused up front. Any error below drops
         // this guard, releasing the lock.
         let (lock, directory_writable) = acquire_lock(path)?;
+        // G3 N2 (Story 8.3): holding the lock, clear what an INTERRUPTED restore left beside the file
+        // (its marker / staging copy) — the MCP access refuses the dossier while they exist. A
+        // restore of a live process is never touched.
+        let cleared_restore_leftovers = crate::restore::clear_interrupted_restore(path);
         // No CREATE flag: opening a missing file is an error, never a silent empty journal.
         let mut conn = Connection::open_with_flags(
             path,
@@ -560,7 +568,7 @@ impl Journal {
         }
         if let Some(cause) = protection {
             drop(conn);
-            return Self::open_write_protected(path, cause, lock);
+            return Self::open_write_protected(path, cause, lock, cleared_restore_leftovers);
         }
 
         // Version check BEFORE any pragma that mutates the file (journal_mode=WAL writes).
@@ -583,6 +591,7 @@ impl Journal {
                 }),
                 _scratch: None,
                 _lock: lock,
+                cleared_restore_leftovers,
             });
         }
 
@@ -600,6 +609,7 @@ impl Journal {
             read_only: None,
             _scratch: None,
             _lock: lock,
+            cleared_restore_leftovers,
         })
     }
 
@@ -619,7 +629,12 @@ impl Journal {
     /// the protection would not make it writable); a file OLDER than this build is refused
     /// ([`Error::WriteProtectedOutdated`]) — its migrations cannot run, and this build's queries
     /// would misread an unmigrated file.
-    fn open_write_protected(path: &Path, cause: ReadOnlyCause, lock: JournalLock) -> Result<Self> {
+    fn open_write_protected(
+        path: &Path,
+        cause: ReadOnlyCause,
+        lock: JournalLock,
+        cleared_restore_leftovers: Vec<PathBuf>,
+    ) -> Result<Self> {
         let sidecar_has_content = ["-wal", "-journal"]
             .iter()
             .any(|suffix| std::fs::metadata(with_suffix(path, suffix)).is_ok_and(|m| m.len() > 0));
@@ -667,7 +682,14 @@ impl Journal {
             read_only: Some(cause),
             _scratch: scratch,
             _lock: lock,
+            cleared_restore_leftovers,
         })
+    }
+
+    /// What an interrupted restore had left beside the file and this open removed (Story 8.3 G3 N2)
+    /// — the app logs them.
+    pub fn cleared_restore_leftovers(&self) -> &[PathBuf] {
+        &self.cleared_restore_leftovers
     }
 
     /// The journal's identity (UUID), as stored in the `journal_meta` singleton.
