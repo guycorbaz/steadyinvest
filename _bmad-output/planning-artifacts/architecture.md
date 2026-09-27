@@ -29,6 +29,9 @@ workflowType: 'architecture'
 project_name: 'steadyinvest'
 user_name: 'Guy'
 date: '2026-06-08'
+changelog:
+  - date: '2026-09-27'
+    changes: "G2 — Phase 4 [P4] AI assistance over MCP (Epic 8): added the section 'Phase 4 — AI Assistance over MCP' (decisions A1–A11 under owner decisions O1–O7: steadyinvest-mcp stdio binary + dependency boundary; per-call connection, no lock, version gate; McpAccess with engine-enforced SQLite authorizers; ai_drafts table (migration v8); study notes in the Study blob; AI origin on Provenance/Judgment; stale fingerprint; atomic decide_draft; data_version polling; dossier resolution; risks). Updated Requirements Overview (78 FRs, FR14/FR33 [P4], FR69–FR78, NFR-A1–A4), Technical Constraints, Cross-Cutting Concerns, workspace layout, Deferred Decisions, Data Architecture (two processes, lock, tables), Security & Privacy (NFR-S3), API & Communication, Infrastructure, Cross-Component Dependencies, SQLite naming, Format Patterns (export envelope IS deny_unknown_fields, #78), directory tree, Architectural Boundaries (network boundary incl. mcp closure), FR mapping, Integration Points, Validation and Readiness notes (clerk stance dropped)."
 ---
 
 # Architecture Decision Document
@@ -39,17 +42,21 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 ### Requirements Overview
 
-**Functional Requirements (66 FRs, 11 clusters; phase tags P1/P2/P3/V):**
+**Functional Requirements (78 FRs, 12 clusters; phase tags P1/P2/P3/P4/V — FR67–FR68 added
+post-v1, FR69–FR78 [P4] added by G2 on 2026-09-27):**
 - *Stock Study & Methodology Engine* (FR1-8): create/persist/reopen/update studies; deterministic
   SSG output set; native-currency calc; judgment inputs; quality flags; 5-year-floor low-confidence.
 - *Calculation Integrity & Trust* (FR9-14): golden reference + tolerance; plausibility warnings;
-  verdict traceability; testable degraded/withheld verdict; neutrality (banned-verb); AI read-only [V].
+  verdict traceability; testable degraded/withheld verdict; neutrality (banned-verb) of app outputs,
+  AI-origin text framed as third-party content; MCP surface verifiably draft-only [P4].
 - *Data Acquisition, Provenance & Providers* (FR15-29): auto-fetch; first-class manual entry/override;
   per-cell source + provenance + timestamp; coverage present/to-fill/not-available-accepted; user-set
   validated flag; manual refresh; non-destructive reconciliation; graceful provider failure (stale +
   cause); keyless + keychain keys; FX acquisition [P2]; deterministic recompute distinguishing cause.
 - *Charts & Judgment Interaction* (FR30-33): growth/valuation charts; judgment line by value +
-  direct-manipulation in sync, live recalc; undo; never auto-place/suggest.
+  direct-manipulation in sync, live recalc; undo; the app never auto-places/suggests a line — [P4]
+  exception: an AI-proposed judgment is drawn as an "AI"-annotated pending line that changes no
+  verdict/zone/alert until the owner validates it (then "placed by AI" + validation date).
 - *Watchlist & Alerts* (FR34-35) · *Portfolio/Transactions/Holdings* (FR36-41, single [P1] →
   multi-portfolio/FX/ledger/dividends [P2]) · *Risk Management* (FR42-48: trailing stop, simple
   capital-at-risk [P1]; per-currency→bank→global + concentration [P2]; neutral triggers; stop-priority;
@@ -59,6 +66,14 @@ _This document builds collaboratively through step-by-step discovery. Sections a
   empty/error; single-study + whole-journal export/import versioned+validated; restore w/ integrity +
   version checks; help + demo) · *Config/Posture* (FR63-66: no-wizard Settings; always-visible
   disclaimer; full offline; portable local store).
+- *AI assistance [P4]* (FR69-78, Epic 8): an owner-chosen AI client reads studies (cells,
+  provenance, judgments, rationale, notes, history, computed outputs) over a local MCP server — never
+  the portfolio, watchlist, keys or config; it may only submit **commented drafts** (study / note /
+  cell incl. judgment values) that the owner validates or rejects one by one in a dossier-level
+  inbox; durable draft record; provider fetches stay owner-initiated; study notes (FR78).
+  Cross-cutting NFR-A1–A4: capability asymmetry and portfolio non-exposure **by construction**, no
+  provider call reachable from MCP, 100% of drafts carry origin + timestamp + non-empty comment.
+  See §Phase 4 — AI Assistance over MCP.
 
 **Added requirements (2026-06-08, to file as FRs once the repo exists):**
 - User-selectable journal DB directory + reopen the last-used journal on launch (recent-journals).
@@ -90,7 +105,11 @@ Mechanisms it imposes:
   zoning/verdict, ±0.5% numerics); property invariants; CI-gated.
 - *Performance* — <~100 ms judgment recalc/recolor; <~1 s open/recompute; non-blocking refresh;
   <~3 s launch.
-- *Security & Privacy* — keys only in OS keychain; no telemetry; all data local.
+- *Security & Privacy* — keys only in OS keychain; no telemetry; all data local; [P4] study data
+  may leave the machine only through the owner's chosen AI client, portfolio data never (NFR-S3/S4).
+- *AI capability asymmetry [P4]* (NFR-A1–A4) — draft creation is the only MCP write; portfolio
+  non-exposure; no provider call from MCP; origin + comment on every draft — all enforced by the
+  SQLite engine and the crate graph, tested in CI.
 - *Reliability & Data Integrity* — offline; crash-safe/atomic writes; forward-safe migrations;
   non-destructive reconciliation; integrity+version checks on import/restore.
 - *Portability* — identical behaviour AND numeric results on Win/macOS/Linux; locale-aware numbers;
@@ -125,9 +144,10 @@ Mechanisms it imposes:
 
 ### Technical Constraints & Dependencies
 
-- Stack: Rust + Slint (egui removed), local SQLite via rusqlite, offline-first, no server in v1,
-  versioned serde data contract decoupled from Slint and SQLite (keeps a future read-only MCP/AI
-  façade cheap).
+- Stack: Rust + Slint (egui removed), local SQLite via rusqlite, offline-first, no network server,
+  versioned serde data contract decoupled from Slint and SQLite. [P4] adds a second, separate
+  process: a local stdio MCP server (`steadyinvest-mcp`) that reads studies and writes **drafts
+  only**, through a narrow persistence surface (`McpAccess`) — see §Phase 4.
 - **Ingestion/normalization is a first-order architectural boundary**, distinct from the calc engine:
   IFRS↔US-GAAP, split/series breaks, fiscal-period misalignment, currency-of-report — the real
   birthplace of the silent-wrong-signal — get their own normalization layer, golden recollage
@@ -155,8 +175,11 @@ Mechanisms it imposes:
   non-destructive reconciliation; divergence → auto-?.
 - Multi-currency / FX — native-currency calc; FX only at consolidation; dated, source-aware rates
   frozen at the judgment date.
-- Neutral posture — facts-not-advice, banned-verb enforcement, always-visible disclaimer, never an
-  auto/suggested line; AI read-only by construction [V].
+- Neutral posture — the app's OWN outputs stay facts-not-advice: banned-verb enforcement,
+  always-visible disclaimer, the app never auto-places or suggests a line. [P4] exception (FR33): an
+  AI-proposed judgment appears as an AI-annotated pending line; AI text is third-party content shown
+  only inside the AI frame (label + disclaimer), never restyled as an app signal; the MCP surface is
+  draft-only by construction (NFR-A1).
 - Versioned data contract & schema migrations (three version axes) — forward-safe; journal survives
   version bumps.
 - **Journal identity** — a `journal_id` (UUID) + monotonic logical version written INTO the DB at
@@ -274,13 +297,16 @@ cargo add keyring@3 --no-default-features          --package app         # Story
 - `core/`      — pure SSG calculation engine (deterministic, `rust_decimal` w/ `maths`, no I/O, no
   UI). Golden + property + metamorphic tests live here. Stamps `method_version`.
 - `contract/`  — versioned serde data contract (`schema_version`), journal/judgment types, decoupled
-  from Slint and SQLite. The boundary the future read-only MCP/AI façade will sit on.
+  from Slint and SQLite. The vocabulary the [P4] MCP server speaks (studies, notes, drafts).
 - `ingestion/` — provider-agnostic acquisition + **normalization** layer (IFRS/GAAP, split/series,
   fiscal-period, currency-of-report), `MarketDataProvider` trait + adapters. Its own golden fixtures.
 - `persistence/` — rusqlite storage (journal_id, logical version, migrations, `PRAGMA user_version`),
   export/import/backup. Local DB; sync-path detection.
 - `app/`       — thin Slint UI (forms, dense grid, native charts via `Path`/`TouchArea`), app-config
   via `directories`, secrets via `keyring`, theme tokens single-source.
+- `mcp/`       — [P4, G2] `steadyinvest-mcp`: separate stdio binary launched by the AI client; reads
+  studies and submits drafts through `persistence::McpAccess`; its dependency closure excludes
+  `ingestion`, `reqwest`, `keyring`, `slint` and `app` (see §Phase 4).
 
 **Architectural Decisions Provided / Implied by this Foundation:**
 
@@ -329,7 +355,9 @@ against this skeleton as the principal go/no-go before committing UI work.
   below).
 
 **Deferred Decisions (Post-MVP):**
-- Read-only MCP/AI façade over the data contract [V]; provider fallback-chain & rate-limit batching
+- ~~Read-only MCP/AI façade over the data contract [V]~~ — no longer deferred: decided 2026-09-27
+  (G2) as Phase 4 [P4], a draft-writing MCP process (§Phase 4); a self-hosted local model stays [V].
+- Provider fallback-chain & rate-limit batching
   [P2]; multi-portfolio/FX consolidation depth, transaction ledger, dividends [P2]; PDF of the other
   forms [P2/P3]; configurable "diversify-by-company-size" table (from `change-request_guy.md`) [P2].
 
@@ -338,20 +366,30 @@ against this skeleton as the principal go/no-go before committing UI work.
 - **Store:** rusqlite 0.40 `bundled` SQLite, single local file (the journal). `WAL` +
   `synchronous=NORMAL` + `busy_timeout` for local use; **auto-switch to `DELETE/TRUNCATE` + warn**
   when the DB path is detected on a sync folder (Synology/Dropbox/OneDrive/iCloud). Single
-  mutex-guarded write connection (WAL allows concurrent readers + one writer).
+  mutex-guarded write connection (WAL allows concurrent readers + one writer). **[P4] two
+  processes on one file:** the app keeps its long-lived write connection; `steadyinvest-mcp` opens
+  **short-lived per-call connections** (one per tool call, closed at its end) and never sets
+  `journal_mode` or migrates. SQLite serialises the two writers; both sides set `busy_timeout` so a
+  brief contention waits instead of failing, and MCP transactions are kept short (one read
+  transaction or one draft insert) so the app's writes are never held up noticeably (§Phase 4, A2).
 - **Hybrid model (decided):**
   - *Normalized tables* for what we aggregate/query: `portfolio`, `holding`, `transaction`, `fx_rate`,
     `watchlist_item`, plus index columns. This is where consolidation (per-currency→per-bank→global),
     concentration and capital-at-risk run — SQL-friendly.
   - *Versioned serde JSON blob* (`payload TEXT` + `schema_version` column) for what we replay in bulk:
     `study` and its `judgment` snapshots. Append-mostly, read whole, never queried by inner field →
-    no SQL migration when the judgment model evolves.
+    no SQL migration when the judgment model evolves. [P4] study notes live inside the `Study` blob;
+    `ai_drafts` (migration v8) follows the same hybrid pattern — indexed columns + versioned JSON
+    payload (§Phase 4, A4/A5).
   - Indexed columns alongside blobs: `journal_id`, `security_ticker`, `created_at`, `status`,
     `schema_version`, `method_version`.
 - **Identity & integrity:** `journal_id` (UUID) + monotonic logical version written INTO the DB at
   creation; the app-config "last-used" pointer references `(journal_id, last-seen-version)`, not a
   path; backups/exports carry `(journal_id, version, hash)`; a single-instance file lock guards the
-  open journal.
+  open journal **against a second app instance** — the [P4] MCP process never takes it (it must work
+  while the app is open or closed, O2); concurrency with MCP is left to SQLite's own locking. A draft
+  insert bumps `logical_version`, so a reopened journal whose version is higher than last seen is
+  normal, not an anomaly (only a lower version signals a stale restore).
 - **Validation:** strong typing at the ingestion boundary (`serde` + domain newtypes, e.g.
   `CurrencyCode`); `unknown/insufficient` is a first-class state, never coerced to 0; the raw↔derived
   boundary is a wall (no derived value persisted as if entered; cached derived values carry their
@@ -377,16 +415,26 @@ against this skeleton as the principal go/no-go before committing UI work.
 - **Secrets:** provider API keys only in the OS secret store via `keyring` 3.x (platform backends
   chosen explicitly, `default-features = false`; **not** keyring 4.0 — see Tech Stack note; Linux
   secret-service needs a D-Bus agent). Never in repo/config/logs/exports.
-- **Privacy:** no telemetry; the only network calls are user-initiated provider/FX fetches under the
-  user's own key; all data local.
-- **AI [V]:** read-only by construction over the data contract; never a write path (capability
-  asymmetry enforced structurally, not by prompt).
+- **Privacy:** no telemetry; the only network calls the app makes are user-initiated provider/FX
+  fetches under the user's own key; all data stored locally. [P4] (NFR-S3): study data may leave the
+  machine only through the AI client the owner chooses and registers (it reads over MCP and may send
+  what it reads to a remote model); **portfolio data never leaves it** — the MCP surface cannot read
+  it (NFR-S4/A2).
+- **AI [P4] (NFR-A1–A4):** capability asymmetry enforced **by the SQLite engine, not by prompt**:
+  the MCP process holds only a `persistence::McpAccess` handle whose read connection has an
+  authorizer denying every portfolio table, and whose draft connection has an authorizer allowing
+  only `INSERT` into `ai_drafts` (+ the `logical_version` bump); every other read/write is denied at
+  statement preparation and logged. Drafts carry origin + non-empty comment (DB `NOT NULL` +
+  `CHECK`). No provider call is reachable (the crate graph excludes it). Details: §Phase 4, A1/A3.
 
 ### API & Communication Patterns
 
-- **No server / no public API in v1.** The "API" is the **versioned serde data contract** (clean
-  types, `schema_version`), decoupled from Slint and rusqlite — the boundary a future **read-only MCP**
-  façade [V] will sit on at near-zero cost.
+- **No network server / no public network API.** Internally, the "API" is the **versioned serde
+  data contract** (clean types, `schema_version`), decoupled from Slint and rusqlite. [P4] adds the
+  **only external interface**: a **local stdio MCP server** (`steadyinvest-mcp`, JSON-RPC over the
+  stdin/stdout of a child process spawned by the owner's AI client), not network-exposed (NFR-S2).
+  Its tools: list/get studies (with computed outputs), judgment history, notes, the drafts record;
+  submit draft study / note / cell. Every response names the dossier it read (`journal_id` + path).
 - **Provider acquisition:** `MarketDataProvider` trait; first adapter **EODHD** (CH/EU+US coverage);
   keyless adapters supported. HTTP via **reqwest 0.13** with **`rustls-no-provider` + the `ring`
   provider** (pure-Rust, no system OpenSSL, no cmake → portable single binary; see §Tech Stack
@@ -420,7 +468,9 @@ against this skeleton as the principal go/no-go before committing UI work.
 ### Infrastructure & Deployment
 
 - **No cloud, no containers, no server.** Distribution = a native binary per OS (Win/macOS/Linux),
-  built from the Cargo workspace; updates manual in v1 (git pull/rebuild or replace binary).
+  built from the Cargo workspace; updates manual in v1 (git pull/rebuild or replace binary). [P4]
+  a second binary, `steadyinvest-mcp`, ships beside the app; it is a stdio child process of the AI
+  client (not a daemon, not a network service), registered by the owner in that client.
 - **CI:** `cargo test` gates (engine golden/property/metamorphic, versioned-journal corpus,
   marker-confusability snapshot) and the trust quality-gates block merges. **Linux-only for now**
   (decision 2026-06-09): cross-OS numeric identity is asserted by pinned determinism hashes
@@ -453,8 +503,9 @@ against this skeleton as the principal go/no-go before committing UI work.
 
 **Cross-Component Dependencies:**
 - `core` depends on nothing UI/IO — the assurance that makes the GUI choice reversible.
-- `contract` is consumed by `persistence`, `app`, and (future) the MCP/AI façade — its `schema_version`
-  + `method_version` discipline gates migrations.
+- `contract` is consumed by `persistence`, `app`, and [P4] `mcp` (the draft-writing MCP process,
+  over the narrow `McpAccess` persistence surface) — its `schema_version` + `method_version`
+  discipline gates migrations.
 - The Foundational Invariant cuts across `core` (content-addressed verdict), `persistence` (frozen
   judgments + identity), `ingestion` (provenance/freshness), and `app` (no incoherent frame).
 - FX consolidation sits only at the `persistence`/portfolio aggregation layer, never in `core`'s
@@ -472,7 +523,8 @@ view-model boundary, the time/ID source, and the i18n-vs-label-set split.
 ### Naming Patterns
 
 **Workspace & crates:** package names `steadyinvest-core`, `steadyinvest-contract`,
-`steadyinvest-ingestion`, `steadyinvest-persistence`, `steadyinvest-app`; directory names short
+`steadyinvest-ingestion`, `steadyinvest-persistence`, `steadyinvest-report`, `steadyinvest-app`,
+[P4] `steadyinvest-mcp`; directory names short
 (`core/`, `contract/`, …); internal refs via `[workspace.dependencies]` (single source of versions).
 
 **Rust code (rustfmt + clippy enforced):** types/traits `PascalCase`; fns/vars/modules/files
@@ -480,7 +532,8 @@ view-model boundary, the time/ID source, and the i18n-vs-label-set split.
 domain** (no `utils.rs` grab-bag — shared helpers in a named module).
 
 **SQLite (persistence crate):** tables `snake_case` **plural** (`portfolios`, `holdings`,
-`transactions`, `fx_rates`, `watchlist_items`, `studies`, `judgments`); columns `snake_case`; PK
+`transactions`, `fx_rates`, `watchlist_items`, `studies`, `judgments`, `price_history`, [P4]
+`ai_drafts`); columns `snake_case`; PK
 `id`; FKs `<entity>_id`; indexes `idx_<table>_<cols>`; timestamps `TEXT` RFC3339 UTC; **monetary/
 decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rust_decimal` exactness;
 `REAL` would silently lose precision and breach the no-float rule).
@@ -501,9 +554,15 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
 
 ### Format Patterns
 
-- **Data contract = serde JSON, `snake_case` field names** (Rust default; the future read-only
-  MCP/AI consumer is also Rust-side). `#[serde(default)]` on every new field; **never
-  `deny_unknown_fields`** on the journal (forward-compat).
+- **Data contract = serde JSON, `snake_case` field names** (Rust default; the [P4] MCP process is
+  also Rust-side and reuses the contract types). `#[serde(default)]` on every new field; **never
+  `deny_unknown_fields`** on the `Study` blob or on per-entity export items (forward-compat: an
+  unknown field is tolerated). **Exception, recorded as built:** the export **envelope**
+  (`JournalSnapshot`, `StudyRecord` — `persistence/src/export.rs:39-66`) **IS**
+  `deny_unknown_fields`, deliberately and at envelope level only (#78, 2026-07-08): a newer file
+  adding a whole entity **array** is rejected loudly by an older build rather than partially
+  imported. [P4] `ai_drafts` rides this additive-array route (`#[serde(default,
+  skip_serializing_if = "Vec::is_empty")]`): an older build rejects an export that carries drafts.
 - **Versions:** `schema_version` = integer; `method_version` = string (semver-like).
 - **Decimal in JSON:** serialized as a **string** (exact), parsed to `rust_decimal::Decimal`.
 - **Dates/times:** RFC3339 UTC strings everywhere (storage, export, logs).
@@ -667,12 +726,19 @@ steadyinvest/
 │   │   ├── export_import.rs       # JSON export/import + integrity/version checks; restore (FR59-61)
 │   │   ├── backup.rs              # versioned backup to configurable target (carries id,version,hash)
 │   │   ├── sync_guard.rs          # sync-path detection; WAL↔DELETE journal_mode; single-instance lock
+│   │   ├── drafts.rs              # [P4] ai_drafts (v8) + decide_draft (study upsert + draft status, one tx)
+│   │   ├── mcp_access.rs          # [P4] McpAccess: per-call read-only + draft connections, SQLite authorizers
 │   │   └── error.rs
 │   └── tests/corpus/              # frozen versioned-journal corpus v{N}.db (append-only)
 │
 ├── report/                        # steadyinvest-report — PDF/print (UI-independent, does I/O) (FR52-53)
 │   ├── Cargo.toml                 # deps: genpdf/printpdf, core, contract
 │   └── src/lib.rs                 # faithful SSG layout, neutral labels, grayscale-safe
+│
+├── mcp/                           # [P4] steadyinvest-mcp — stdio MCP server binary (G2, §Phase 4)
+│   ├── Cargo.toml                 # deps: contract, persistence (McpAccess only), core, report (form::build_snapshot), MCP SDK; NEVER ingestion/reqwest/keyring/slint/app
+│   ├── src/main.rs                # stdio JSON-RPC loop; dossier resolution (--dossier | config journal_path)
+│   └── tests/                     # whole-surface non-exposure, rejected writes, dependency-closure (cargo metadata)
 │
 └── app/                           # steadyinvest-app — thin Slint UI (binary)
     ├── Cargo.toml                 # deps: slint, tokio, directories, keyring, tracing, core, contract, ingestion, persistence, report
@@ -719,14 +785,21 @@ drift appears.
 - **Calc boundary (Cardinal Rule):** `core` has zero I/O/UI/SQL/net deps — all SSG/risk math lives
   here and nowhere else. Guarantees the GUI choice stays reversible and the math is auditable.
 - **Contract boundary:** `contract` is the only shared vocabulary across `ingestion`, `persistence`,
-  `report`, `app` (and the future MCP/AI façade). Its `schema_version`/`method_version` gate migrations.
+  `report`, `app` and [P4] `mcp`. Its `schema_version`/`method_version` gate migrations.
 - **Persistence boundary:** only `persistence` touches SQLite. Decimal arithmetic for consolidation is
-  done in Rust (pull rows → compute with `core`), never via SQL on TEXT money columns.
+  done in Rust (pull rows → compute with `core`), never via SQL on TEXT money columns. [P4] `mcp`
+  reaches SQLite only through `persistence::McpAccess`, never `Journal` (clippy `disallowed-types`
+  in the `mcp` crate).
 - **UI boundary:** `app` is the only crate depending on Slint; domain types cross into `.slint` solely
   through the `viewmodel/` adapter (money as formatted strings, no floats, no domain structs leaked).
 - **Network boundary:** only `ingestion` makes network calls (reqwest/tokio); keys are injected by
-  `app` (from keyring), never read inside `ingestion` — keeps it testable offline.
-- **No server / no public API boundary in v1** — the contract is the seam for a later read-only MCP.
+  `app` (from keyring), never read inside `ingestion` — keeps it testable offline. [P4] the `mcp`
+  crate's dependency closure **excludes** `ingestion`, `reqwest`, `keyring`, `slint` and `app` —
+  asserted by a CI test over `cargo metadata` (NFR-A3 by construction: no provider call, no key is
+  even linkable from the MCP binary).
+- **External-interface boundary:** no network server, no public network API. [P4] the **only
+  external interface** is the local stdio MCP server (`steadyinvest-mcp`), not network-exposed,
+  spawned by the owner's AI client; the contract is its vocabulary.
 
 ### Requirements to Structure Mapping
 
@@ -744,6 +817,8 @@ drift appears.
 | FR54-62 App shell & data mgmt | `app/ui/screens/dashboard.slint`, `persistence/export_import.rs`, `app/config.rs` |
 | FR63-66 Config/posture | `app/{config,keychain,labels,i18n}.rs`, `app/ui/screens/settings.slint` |
 | Added: DB location + recent journals | `app/config.rs`, `persistence/{journal,sync_guard}.rs` |
+| FR69-77 AI assistance [P4] (+FR14, FR33) | `mcp/`, `persistence/{mcp_access,drafts}.rs`, `contract` (Draft/AiOrigin/DraftTarget, `Provenance.ai_origin`, `Judgment.ai_placed`), `app` draft inbox + AI frame + AI-annotated chart line |
+| FR78 Study notes [P4] | `contract/study.rs` (`Study.notes`), `app` study screen |
 
 ### Integration Points
 
@@ -751,7 +826,9 @@ drift appears.
   `ingestion`; renders PDF via `report`. All data shapes are `contract` types. Cross-thread results
   return through `invoke_from_event_loop`.
 - **External:** market-data providers (HTTP, user's key) via `ingestion` adapters only; OS secret
-  store via `keyring`; OS config dirs via `directories`; external backup target (NAS) via file export.
+  store via `keyring`; OS config dirs via `directories`; external backup target (NAS) via file export;
+  [P4] the owner's AI client via the local stdio MCP server (`mcp` → `persistence::McpAccess`) — the
+  only external interface, reads of studies + draft inserts only.
 - **Data flow:** provider → `ingestion` normalize/reconcile → `contract` types (provenance stamped) →
   `persistence` (journal) → `core` recompute (native currency) → `app` viewmodel → Slint render;
   consolidation/FX applied only at the `persistence`/portfolio layer.
@@ -765,6 +842,177 @@ drift appears.
   3-OS matrix returns later, determinism meanwhile asserted via pinned hashes); distribution =
   the per-OS binary (manual update in v1).
 
+## Phase 4 — AI Assistance over MCP (G2, 2026-09-27)
+
+_Scope: Epic 8 [P4], PRD FR14, FR33 [P4], FR69–FR78, NFR-S2–S4, NFR-R2, NFR-A1–A4. No AI runs inside
+the app: the owner's AI client (currently Claude Code on the workstation) reads studies and submits
+drafts through a local MCP server; the owner validates or rejects each draft in the UI. Owner
+decisions O1–O7 and architecture decisions A1–A11 below are final (G2 round 2)._
+
+### Owner decisions this section implements
+
+- **O1** — the AI also reads each study's **computed outputs** (zones, upside/downside ratio, 5-year
+  potential, verdict and its state), needed for search objectives such as U/D.
+- **O2** — the MCP server works while the app is **closed**; drafts wait and appear at the next opening.
+- **O3** — the "active dossier" is the **last-used** dossier from the app config, even with the app
+  closed; every MCP response names the dossier (`journal_id` + path) it read.
+- **O4** — a **stale** draft can still be validated after an explicit confirmation, or rejected.
+- **O5** — validating a draft on a validated (✓) cell needs no prior un-validation; the cell moves to `?`.
+- **O6** — deleting a note removes it from the study; it remains in the study history (FR51).
+- **O7** — deleting a study deletes its drafts too (like its judgment history).
+
+### A1 — Separate binary crate, and its dependency boundary
+
+- **Decision:** the MCP server is a separate binary crate **`steadyinvest-mcp`** (`mcp/`), speaking
+  MCP over **stdio**, launched by the AI client as a child process. Allowed dependencies:
+  `contract`, `persistence` (through `McpAccess` only), `core` and `report` (for computed outputs,
+  see O1 below), the MCP SDK, serde/tracing. Its **dependency closure excludes** `ingestion`,
+  `reqwest`, `keyring`, `slint` and `app` — a CI test walks `cargo metadata` and fails on any of them.
+- **Rationale:** NFR-A3 ("no provider call reachable from MCP") and NFR-S1 (keys never in MCP
+  responses) then hold **by construction**: the code that could fetch or read a key is not linkable.
+  A separate process also keeps the GUI free of any server loop and lets the MCP server run with the
+  app closed (O2).
+- **Computed outputs (O1):** the `Study → StudySnapshot` construction is **not in `core`** (which
+  deliberately does not depend on `contract`) but in `report::form::build_snapshot` (the single
+  construction shared by the live form and the PDF since Story 5.6). `mcp` therefore depends on
+  `report` + `core` and calls that same `build_snapshot` — one construction, no drift from the
+  screen. Checked 2026-09-27: `core` depends only on `rust_decimal`, `serde`, `sha2`; `report` adds
+  `contract`, `rust_decimal`, `pdf-writer` — no network, no keychain, no GUI. Presentation formatting
+  (`app::viewmodel::engine`) is **not** reused: MCP returns raw decimals as strings plus the verdict
+  state, and must never re-derive a value (Cardinal Rule).
+
+### A2 — Per-call connection, no lock, version gate
+
+- **Decision:** each tool call opens the dossier, does its work, and closes it. The MCP process
+  **never takes the app's single-instance lock** (the `-lock` sidecar), **never migrates**, never sets
+  `journal_mode`, and sets only `busy_timeout`. It **refuses to run** unless the file's
+  `PRAGMA user_version` **equals** its build's latest migration (older file → "open it in the app
+  first"; newer file → "this MCP build is older than the dossier"). Reads run in **one short read
+  transaction** on a `SQLITE_OPEN_READ_ONLY` connection (a WAL snapshot, or a brief shared lock in
+  DELETE mode on sync paths).
+- **Rationale:** the lock exists to stop a second *app* instance, and taking it would make MCP
+  unusable while the app is open (and the app unusable while MCP runs). SQLite's own locking already
+  serialises the two writers; per-call connections hold nothing between calls, so the app's writes,
+  migrations and backups are never blocked for longer than one short transaction. The equality gate
+  means an MCP build never interprets a schema it does not know, and never upgrades a file behind
+  the owner's back.
+
+### A3 — `McpAccess`: capability asymmetry enforced by the SQLite engine
+
+- **Decision:** a persistence-level type **`McpAccess`** (not `Journal`) is the only handle `mcp`
+  gets. It exposes (i) a **read-only connection** whose SQLite **authorizer** returns `SQLITE_DENY`
+  on any read of the portfolio tables — `holdings`, `transactions`, `portfolios`,
+  `watchlist_items`, `fx_rates`, `price_history` — and (ii) a **draft connection** whose authorizer
+  allows only `INSERT` into `ai_drafts` plus the `UPDATE journal_meta SET logical_version` bump
+  (and the reads a draft needs — same denylist); every other write (UPDATE/DELETE on any other table,
+  DDL, `ATTACH`, `PRAGMA` after setup) is **denied at statement preparation and logged**. `Journal` is
+  a clippy `disallowed-types` entry inside the `mcp` crate. The authorizer needs rusqlite's `hooks`
+  feature. Deny, never `SQLITE_IGNORE` (which would silently read NULLs — no silent `.ok()`).
+- **Rationale:** NFR-A1/A2 demand "by construction, not by prompt". Filtering at the query-writing
+  layer would be one missed `WHERE` away from a leak; the authorizer is enforced by the engine on
+  every statement, including ones written later by someone who never read this section.
+- **Test suites (CI):** whole-surface non-exposure (every tool, every resource: no portfolio,
+  watchlist, key or config data in any response); rejected writes (each forbidden statement fails
+  and is logged); 100% of drafts carry comment + origin (backed by DB `CHECK` + `NOT NULL`);
+  metamorphic — every engine output is identical with and without pending drafts, and the engine
+  never reads `ai_drafts`.
+
+### A4 — Drafts: `ai_drafts` table (migration v8)
+
+- **Decision:** a new table `ai_drafts` in the **same SQLite file**, migration **v8** (current
+  latest: v7), hybrid pattern. Indexed columns: `id`, `kind` (`study|note|cell`), `study_id`
+  (NULL for a draft study), `security_ticker`, `status` (`pending|validated|rejected`),
+  `created_at`, `decided_at`. Versioned JSON `payload`: `DraftTarget { Cell { fiscal_year, field } |
+  Judgment { field } }`, proposed value or text, `comment`, `AiOrigin { client, model }`,
+  `base_fingerprint`. The comment and origin also get DB guards: `comment` `NOT NULL` with a
+  `CHECK (length(trim(comment)) > 0)`, `origin` `NOT NULL` (NFR-A4). **All enum variants are
+  defined up front** — adding a variant later costs a `SCHEMA_VERSION` bump.
+- **Backup/export:** included in the `VACUUM INTO` backup automatically. The JSON export gains an
+  additive `ai_drafts` array (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`) — the
+  #78 route: because the envelope is `deny_unknown_fields` (§Format Patterns), an older build rejects
+  such an export loudly instead of dropping the drafts. Frozen corpus gains `v8.db`.
+- **Rationale:** the same file keeps drafts inside the dossier's identity, backup and export (FR77:
+  durable record); a separate table keeps pending proposals physically outside the `Study` blob the
+  engine reads, which is what makes "a pending draft changes nothing" true by construction.
+- **Cascade (O7):** `delete_study` also deletes the study's drafts in the same transaction (as it
+  already deletes `judgments`).
+
+### A5 — Study notes in the `Study` blob (FR78)
+
+- **Decision:** `#[serde(default)] notes: Vec<Note { id, text, created_at, updated_at, ai_origin:
+  Option<AiOrigin> }>` inside `Study`. Additive; no `user_version` or `SCHEMA_VERSION` bump.
+- **Rationale:** export, MCP read and history snapshots come for free (O6: a deleted note stays in
+  the study history). A note is study content, not an aggregated/queried entity.
+
+### A6 — AI origin after validation: no new `Source` variant
+
+- **Decision:** a validated draft **is an owner entry**: `Source::Manual`, review `?`, reconciled as
+  manual (FR22/FR74; O5: also on a formerly ✓ cell). Its AI origin is carried by
+  `#[serde(default)] ai_origin: Option<AiOrigin { draft_id, client, model, validated_at }>` on
+  `Provenance` — cleared naturally by the next owner edit, which replaces the provenance — and by
+  `#[serde(default)] ai_placed` on `Judgment` (per field; cleared on the next owner edit of that
+  field), which drives the chart's "placed by AI" + validation-date annotation (FR33). All additive.
+- **Rationale:** a new `Source` variant would ripple through reconciliation, the review tri-state
+  and every exhaustive `match`, and an older build would fail to parse it; the owner's validation is
+  what makes the value authoritative, so it reconciles exactly as a manual entry.
+
+### A7 — Stale detection by fingerprint
+
+- **Decision:** `base_fingerprint` = hash of the target's value + provenance (cell) or the field's
+  value (judgment) at submission. A draft is **stale** when the current fingerprint differs; computed
+  on read, stored at decision time. Normalise decimals before hashing (the `Money` scale caveat in
+  `contract/src/provenance.rs`). O4: the inbox allows validation after an explicit confirmation.
+- **Rationale:** catches both owner edits and refreshes (FR72) without any trigger or bookkeeping on
+  the app's write paths.
+
+### A8 — Applying a decision atomically
+
+- **Decision:** `persistence::decide_draft(...)` performs the study upsert (with its history
+  snapshot) **and** the draft's status/`decided_at` update in **one transaction** with one
+  `logical_version` bump. Rejection updates only the draft.
+- **Rationale:** NFR-R2 — a crash can never leave a value applied with its draft still pending, or a
+  draft marked validated with nothing applied.
+
+### A9 — The open app discovers new drafts by polling `PRAGMA data_version`
+
+- **Decision:** the app polls `PRAGMA data_version` on its own connection every ~2–3 s (a Slint
+  `Timer`), plus on window focus and on opening the inbox; a change triggers a re-read of pending
+  drafts. No file watcher.
+- **Rationale:** `data_version` changes only when **another** connection commits, so the app's own
+  writes do not trigger it; it costs one pragma, works identically in WAL and DELETE mode and on every
+  OS, whereas file watchers are unreliable on synced paths.
+
+### A10 — Dossier resolution
+
+- **Decision:** `--dossier <path>` when given (development, tests), else `journal_path` from the
+  app config (the last-used dossier, O3). The config-path helper moves out of `app/src/config.rs`
+  into a small shared module (depending only on `directories` + serde) so `mcp` does not depend on
+  `app`; it reads `journal_path` tolerantly (the config is append-only `#[serde(default)]`). Every
+  response names the dossier: `journal_id` + resolved path.
+- **Rationale:** the owner's AI client must follow the dossier the owner actually uses, and a reply
+  must never leave doubt about which universe it describes (real vs test dossier).
+
+### A11 — Risks and their handling
+
+- **Developer = client:** Claude Code is both the developer and the MCP client. Dev/test runs
+  **always** pass `--dossier` with a temporary path; registering the MCP server on the real dossier
+  is the **owner's** act (registration doc in Story 8.4), never the agent's.
+- **History noise:** note edits create study history entries; the history view gets a label/filter.
+- **AI text containment:** AI-origin text reaches the UI **only** through a dedicated AI-frame
+  component (label "AI" + disclaimer, FR13), with a test that no other component renders it.
+- **Short reads:** MCP reads stay short (in DELETE mode a long read holds a shared lock that blocks
+  the app's commit until `busy_timeout`); tool responses are paged or bounded.
+- **SDK choice:** `rmcp` vs a hand-rolled JSON-RPC loop is decided in Story 8.4; the choice must pass
+  `cargo deny` (licence + advisories) and must not pull `reqwest`/network features into the closure
+  (A1 test).
+
+### Stories (Epic 8, ordered)
+
+8.1 study notes (A5) · 8.2 draft & AI-origin data model, migration v8, `decide_draft`, export/backup,
+cascade (A4, A6–A8) · 8.3 `McpAccess` + authorizers + suites (A2, A3, O1) · 8.4 `steadyinvest-mcp`
+binary, dossier resolution, dependency-closure test (A1, A10, A11) · 8.5 draft inbox UI, polling, AI
+frame (A7, A9, O4, O5) · 8.6 AI judgment lines (FR33/72) · 8.7 draft-study end-to-end + record view.
+
 ## Architecture Validation Results
 
 ### Coherence Validation ✅
@@ -774,7 +1022,8 @@ drift appears.
 reqwest 0.13 (pure-Rust TLS, exact feature decided in Story 3.1) + tokio 1.52 · thiserror 2.0 · proptest 1.9 · keyring 3.x (NOT 4.0) · directories ·
 tracing. The **Slint GPLv3 licence is compatible with the project's GPL-3.0** (the PRD's "Slint
 licensing tier" risk is closed, pending the `cargo deny` dependency audit). No contradictory
-decisions remain (egui fully removed; no web; no server).
+decisions remain (egui fully removed; no web; no network server — the [P4] MCP server is a local
+stdio child process, not network-exposed, and the only external interface).
 
 **Pattern Consistency:** Patterns support the decisions — exact-decimal numerics + named rounding
 back the deterministic-engine decision; the immutable-snapshot/content-addressed-verdict pattern
@@ -782,15 +1031,16 @@ realizes the Foundational Invariant; the Slint view-model adapter + "money as fo
 enforce the UI boundary; injected Clock/IdGen back determinism and testability; the two-axis i18n
 (`@tr()` vs runtime label set) matches the neutral-posture/label-swap requirement.
 
-**Structure Alignment:** The 6-crate workspace enforces the boundaries: `core` (no I/O) holds the
-Cardinal Rule; `contract` is the shared seam (and future MCP boundary); only `persistence` touches
-SQLite; only `ingestion` touches the network; only `app` touches Slint; `report` isolates PDF I/O.
+**Structure Alignment:** The 6-crate workspace (7 with the [P4] `mcp` binary) enforces the
+boundaries: `core` (no I/O) holds the Cardinal Rule; `contract` is the shared seam (and the MCP
+vocabulary); only `persistence` touches SQLite (`mcp` only via `McpAccess`); only `ingestion`
+touches the network (absent from `mcp`'s closure); only `app` touches Slint; `report` isolates PDF I/O.
 Every boundary in the decisions maps to a crate.
 
 ### Requirements Coverage Validation
 
-**Functional Requirements Coverage ✅:** All 66 FRs map to a crate/module (see Requirements-to-
-Structure table). Phase tags preserved (P1 in MVP scope; P2/P3/V located but deferred). Two coverage
+**Functional Requirements Coverage ✅:** All 66 FRs (2026-06-08) map to a crate/module (see
+Requirements-to-Structure table); FR69–FR78 [P4] (G2, 2026-09-27) are mapped there and in §Phase 4. Phase tags preserved (P1 in MVP scope; P2/P3/V located but deferred). Two coverage
 clarifications added during validation:
 - **FR9 (golden self-check) is a user-facing runtime feature, not just CI fixtures:** bundled golden
   reference studies live as **app assets** (`app/assets/golden/`) and are runnable from the UI via a
@@ -890,12 +1140,15 @@ Medium until the Week-1 spike proves the `<100 ms` recolor (with a defined fallb
   verdict coherence and backup integrity — and is also the product differentiator.
 - Exact-decimal core kills the silent-wrong-signal float risk AND cross-OS determinism in one move.
 - UI-independent tested core + versioned contract make the GUI choice reversible and the math
-  auditable; the future read-only MCP/AI façade is near-free.
+  auditable; the [P4] draft-writing MCP process sits on the contract and a narrow, engine-enforced
+  persistence surface (`McpAccess`) rather than a new data path.
 - Slint-only (no web, no egui embedding) removes the entire dual-render-paradigm risk class.
 
 **Areas for Future Enhancement:**
 - P2/P3/V features (multi-portfolio/FX depth, transaction ledger, dividends, Company Comparison,
-  Portfolio Health Review, screening, read-only AI clerk, other-form PDFs) — located, deferred.
+  Portfolio Health Review, screening, other-form PDFs) — located, deferred. The "read-only AI clerk"
+  stance is dropped (G2, 2026-09-27): AI assistance is Phase 4 — the AI may propose drafts under a
+  human gate (§Phase 4); a self-hosted local model stays [V].
 - Provider fallback-chain + rate-limit batching; configurable diversify-by-size table.
 
 ### Implementation Handoff

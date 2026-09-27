@@ -44,7 +44,7 @@ discoveryDecisions:
   - "Strategic reframe (accepted): product is a durable PERSONAL SYSTEM OF INVESTMENT DISCIPLINE with cumulative MEMORY of judgments (a revisitable journal), not merely a time-saving study tool. Design the data model 'journal-ready' (timestamped judgment snapshots) from the start, even if full history/versioning UI lands later"
   - "Differentiation: durable edge is CH/EU coverage incumbents ignore, but only if SSG is ADAPTED to EU reality (multi-currency, dividend taxation by jurisdiction, IFRS vs US-GAAP, exchange fragmentation), not merely translated. Faithful form clone = table stake, not the moat"
   - "UX: TWO REGIMES sharing one data truth - (1) faithful paper-form grid for contemplation/judgment, (2) high-throughput entry/reconciliation surface (keyboard nav, paste a column of years, undo) for filling CH/EU gaps. Provenance shown by ATTENTION HIERARCHY not equal signposting: missing = the only state that shouts, stale = a discreet uniform murmur, auto-vs-manual = revealed on demand; strong colors reserved for judgment zones, never for provenance"
-  - "UX: judgment lines = gesture+value duality (drag for intuition, type exact value for rigor, always synced), reversible (moving a line never destroys a saved input; undo + scenario compare), never auto-moved on a provider refresh, and NEVER a 'suggested line' (suggesting = recommending = breaks neutral posture)"
+  - "['NEVER a suggested line' part SUPERSEDED 2026-09-27 by G2 for AI lines — see last entry and FR33 [P4]; the app itself still never suggests a line] UX: judgment lines = gesture+value duality (drag for intuition, type exact value for rigor, always synced), reversible (moving a line never destroys a saved input; undo + scenario compare), never auto-moved on a provider refresh, and NEVER a 'suggested line' (suggesting = recommending = breaks neutral posture)"
   - "[SUPERSEDED 2026-09-27 by G2 — see last entry] AI interaction (the 'touch of madness'): AI is a GREFFIER OF MEMORY, not an advisor of the future. It makes PROPOSALS and CRITIQUES (coherence checks, discipline-drift detection, pre-mortem on past misses, fill candidates for missing/stale cells) but NEVER mutates data or judgments. Read-only on journal+engine; any AI output is a draft stamped source:ai-suggested requiring human validation in the UI (a 4th cell source alongside provider/manual/derived). AI must never suggest/place a judgment line (the future is the user's sovereign territory). Purity test for any API endpoint: if an AI response could replace the user's gesture on the line, it is forbidden; if it can only force him to look at his past gesture, it is allowed"
   - "[SUPERSEDED 2026-09-27 by G2 — see last entry] AI runs 100% LOCALLY by default (consistent with offline/private), via a pluggable 'AI provider' abstraction (same pattern as MarketDataProvider) that allows an optional REMOTE AI later"
   - "Portfolio RISK MANAGEMENT is a deliberate overlay BEYOND canonical NAIC (NAIC is strong on stock selection, weak on portfolio risk). Keep it as a SEPARATE, optional, decoupled subsystem so it never weighs down the pure SSG engine. Includes: (a) position-sizing / concentration limits (avoid one holding being a majority of invested capital; thresholds must account for early-stage portfolios being naturally concentrated; extends diversification by holding/sector/size/currency, NAIC-aligned), and (b) trailing stop-loss protection"
@@ -62,8 +62,8 @@ discoveryDecisions:
   - "TRANSACTION LEDGER: portfolio positions are built from a buy/sell transaction journal (partial sells included). Each transaction = {date, type buy/sell, quantity, unit execution price, fees, currency}. Cost basis = weighted-average (derived from transactions); the per-transaction execution price is also stored"
   - "CAPITAL-AT-RISK consolidation hierarchy: computed PER CURRENCY in native currency (no FX mixing), then consolidated PER BANK and as a GLOBAL TOTAL, all expressed in ONE single global app reference currency. FX is applied ONLY at these consolidation points (per-currency buckets stay FX-free)"
   - "DIVIDENDS: the SSG/study return projection (Section 5) uses the GROSS dividend (method fidelity). The portfolio's reinvestable cash uses the NET dividend (gross minus withholding; Swiss pattern = 35% impot anticipe, refundable at tax declaration; withholding rate is per-jurisdiction). v1 simply reduces reinvestable cash to net; tracking the withholding as a recoverable receivable / refund = ROADMAP"
-  - "Locale-aware number entry (decimal comma, thousands separators for CH/EU) to prevent input errors; decision RATIONALE (the 'why' of a buy/sell) is a first-class field of the journal (fuel for cumulative memory and the AI-greffier)"
-  - "REPLACEMENT / capital-redeployment workflow: selling a holding is not an end - it triggers finding what to replace it with (freed cash should be redeployed, NAIC-aligned 'sell only for a better opportunity, stay invested'). On a sell / stop-trigger / Sell-zone entry, the app surfaces replacement candidates from the watchlist (e.g. nearest to / inside their Buy zone, best upside/downside), supports side-by-side Company Comparison, and launches a new Stock Study. The replacement flow must respect portfolio rules (preserve diversification, not re-concentrate by sector/currency; respect capital-at-risk). Neutral posture: surfaces candidates & comparisons (facts), never says 'buy this one'. Cumulative memory records 'sold X -> replaced by Y, date, rationale' for the AI-greffier to later interrogate replacement quality"
+  - "[AI-greffier part SUPERSEDED 2026-09-27 by G2 — see last entry] Locale-aware number entry (decimal comma, thousands separators for CH/EU) to prevent input errors; decision RATIONALE (the 'why' of a buy/sell) is a first-class field of the journal (fuel for cumulative memory and the AI-greffier)"
+  - "[AI-greffier part SUPERSEDED 2026-09-27 by G2 — see last entry] REPLACEMENT / capital-redeployment workflow: selling a holding is not an end - it triggers finding what to replace it with (freed cash should be redeployed, NAIC-aligned 'sell only for a better opportunity, stay invested'). On a sell / stop-trigger / Sell-zone entry, the app surfaces replacement candidates from the watchlist (e.g. nearest to / inside their Buy zone, best upside/downside), supports side-by-side Company Comparison, and launches a new Stock Study. The replacement flow must respect portfolio rules (preserve diversification, not re-concentrate by sector/currency; respect capital-at-risk). Neutral posture: surfaces candidates & comparisons (facts), never says 'buy this one'. Cumulative memory records 'sold X -> replaced by Y, date, rationale' for the AI-greffier to later interrogate replacement quality"
   - "2026-09-27 (G2, supersedes the AI parts of the 'AI interaction', 'AI runs 100% LOCALLY' and 'API posture' entries above): NO AI inside the app — it exposes an MCP server; current client = Claude Code on the owner's workstation (local, not network-exposed); a remote model is accepted for now; a self-hosted local model on a dedicated host stays Vision (topology undecided). Exposed to the AI: studies with their data, provenance, judgments, rationale, notes and judgment history — NEVER the portfolio (holdings, transactions, dividends), the watchlist, keys or config. The AI may PROPOSE, only as DRAFTS with a mandatory comment entering the dossier marked draft until the owner validates them in the UI: (a) new studies (tickers it found), (b) notes attached to a study, (c) cell values including judgment values; never a direct write to studies/cells/judgments/verdicts/notes/transactions/portfolio. The owner may give the AI search objectives (market, potential growth, upside/downside ratio…), held in the AI client session only. Ticker search uses the AI's own means; the AI never triggers provider calls — after validating a draft study the owner fetches as usual and the AI then reads the data via MCP. STANCE REVISED: the AI is no longer a read-only 'clerk of memory' that never recommends; it may propose tickers, notes and judgment values; the app's OWN outputs stay neutral. An AI-proposed judgment appears on the chart as an 'AI'-annotated line beside the owner's, counts for nothing while pending, and once validated becomes the study's judgment keeping 'placed by AI' + validation date. New study notes (FR78) are a prerequisite for AI note drafts. Epic 8 = Phase 4 [P4] 'AI assistance'. The AI-greffier interrogation of replacement quality (entries on rationale and replacement workflow) is dropped while the portfolio is not exposed"
 workflowType: 'prd'
 lastEdited: '2026-09-27'
@@ -71,6 +71,8 @@ editStepsCompleted: ['step-e-01-discovery', 'step-e-02-review', 'step-e-03-edit'
 editHistory:
   - date: '2026-09-27'
     changes: "G2 — AI assistance (Epic 8) re-scoped as Phase 4 [P4]: external owner-directed AI client over a local MCP server; studies exposed, portfolio/watchlist/keys/config never; AI proposals (draft studies, notes, cell/judgment values) enter only as commented drafts validated or rejected one by one in the UI; product stance revised (AI may propose; app outputs stay neutral). Updated Executive Summary, Classification, Success Criteria, Product Scope, Journey 6 and summary, Domain requirements and risks, Innovation, Desktop-specific, Scoping, FR13/14/15/17/20/21/22/33/49/51/55/60/64/65/67/68, NFR-S1–S4/R2, Constraints, Appendix A; added FR69–FR78 and NFR-A1–A4"
+  - date: '2026-09-27'
+    changes: "G2 round 2: validation fixes + owner decisions O1–O7. One AI-exclusion list everywhere (portfolio — holdings, transactions, dividends — watchlist, keys, configuration); MCP scope adds computed outputs, study rationale and the drafts record; validated AI value = owner entry (manual, `?`) with AI origin shown until next owner edit (FR17/FR20/FR22/FR33/FR74); notes are [P4] in P1 wording (FR49/FR51, Success, Journey 5); stale drafts validatable after confirmation, ✓ target moves to `?` without un-validation (FR72/FR74); ≤ 2 actions in FR74; MCP serves the last-used dossier also while the app is closed, names the dossier in every response (FR69/FR73); note deletion kept in history (FR78); study deletion deletes its drafts (FR55/FR77); privacy residue of free text (NFR-S3); remote-model caveat (Security & privacy, Constraints); « dossier » = journal file (Appendix A); frontmatter 'suggested line' and AI-greffier entries marked superseded"
 ---
 
 # Product Requirements Document - steadyinvest
@@ -157,12 +159,12 @@ independence comes from owning both the process and its record.
 **AI assistance (Epic 8, Phase 4).** No AI runs inside the app. steadyinvest exposes a local MCP
 server to an AI client of the owner's choice (today Claude Code on his workstation, not
 network-exposed; a remote model is accepted; a self-hosted local model is Vision). The AI reads
-studies — data, provenance, judgments, rationale, notes, judgment history — never the portfolio,
-the watchlist, keys or configuration. Given search objectives in its own session, it may propose
-new studies, study notes and cell values including judgment values, each as a commented draft the
-owner validates or rejects in the UI; it never writes directly and never triggers a provider
-fetch. This **revises the earlier stance** of a read-only "clerk of memory" that never recommends:
-the AI may now propose, while the app itself stays neutral.
+studies — data, provenance, judgments, computed outputs, rationale, notes, judgment history — never
+the portfolio, the watchlist, keys or configuration. Given search objectives in its own session, it
+may propose new studies, study notes and cell values including judgment values, each as a commented
+draft the owner validates or rejects in the UI; it never writes directly and never triggers a
+provider fetch. This **revises the earlier stance** of a read-only "clerk of memory" that never
+recommends: the AI may now propose, while the app itself stays neutral.
 
 **Definition of success (primary).** The author uses steadyinvest for **every** buy/hold/sell
 decision over a sustained period and can, at any later date, **replay the full reasoning** behind
@@ -214,7 +216,8 @@ Portfolio Health Review, AI assistance (Phase 4), legacy study import, export/sh
 - Every study yields **correct buy/hold/sell zoning, upside/downside ratio, and a 5-year return
   projection**; quality flags (declining margins, high debt, weak ROE) surface automatically.
 - Can, at **any later date, replay the full reasoning** behind a past decision — judgment lines,
-  inputs, per-cell provenance, and notes — confronting it against real outcomes.
+  inputs, per-cell provenance, and decision rationale (plus study notes from Phase 4) — confronting
+  it against real outcomes.
 - Sees the portfolio's **capital-at-risk at a glance**, and receives **neutral alerts** when a
   holding enters its buy zone or crosses the stop the user set.
 - "Aha" moments: dragging a judgment line and watching the zones **recolor live**; reopening a
@@ -256,8 +259,8 @@ Portfolio Health Review, AI assistance (Phase 4), legacy study import, export/sh
 ### AI Assistance Outcomes (Epic 8, Phase 4)
 
 - **100%** of MCP write attempts outside the draft inbox are rejected and logged (CI suite).
-- **No** MCP resource or tool returns portfolio data (holdings, transactions, dividends), watchlist
-  or secrets — verified by a test over the whole MCP surface.
+- **No** MCP resource or tool returns the portfolio (holdings, transactions, dividends), the
+  watchlist, keys or configuration — verified by a test over the whole MCP surface.
 - **No** provider call is reachable from MCP (tested).
 - A pending draft changes **no** computed output — metamorphic test: every output is identical with
   and without pending drafts.
@@ -291,12 +294,12 @@ data-provider adapters; PDF/print export of a study; optional OS-native notifica
 
 ### Phase 4 — AI assistance (MCP)
 
-A **local MCP server over studies** (data, provenance, judgments, rationale, notes, judgment
-history; portfolio, watchlist, keys and configuration excluded); a **draft inbox** for AI-proposed
-studies, notes and cell values including judgment values, each with a mandatory comment, validated
-or rejected in the UI; **study notes** (create/edit/delete). Client: Claude Code on the owner's
-workstation, MCP server not network-exposed; a remote model is accepted. Search objectives are
-given in the AI client session, not stored in the dossier.
+A **local MCP server over studies** (data, provenance, judgments, computed outputs, rationale,
+notes, judgment history; portfolio, watchlist, keys and configuration excluded); a **draft inbox**
+for AI-proposed studies, notes and cell values including judgment values, each with a mandatory
+comment, validated or rejected in the UI; **study notes** (create/edit/delete). Client: Claude Code
+on the owner's workstation, MCP server not network-exposed; a remote model is accepted. Search
+objectives are given in the AI client session, not stored in the dossier.
 
 ### Vision (Future)
 
@@ -306,10 +309,11 @@ release** after IP/data-licensing review.
 
 ## User Journeys
 
-**Persona — "Guy", the self-directed investor.** Experienced across CH/EU/US markets, knows the
-SSG method by heart, has done studies by hand in spreadsheets for years. Wants a fast,
-independent, offline tool he fully owns — that never decides for him (tools and AI may propose;
-only he validates), and holds the memory of why he decided what he decided. He is the primary and, in v1, the only user.
+**Persona — "Guy", the self-directed investor.** Experienced across CH/EU/US markets, knows the SSG
+method by heart, has done studies by hand in spreadsheets for years. Wants a fast, independent,
+offline tool he fully owns — that never decides for him (an owner-directed AI may propose; the app
+never does; only he validates), and holds the memory of why he decided what he decided. He is the
+primary and, in v1, the only user.
 
 **Setup & configuration (no wizard).** Because several data providers are usable — and some need
 no API key — there is no forced onboarding wizard. Configuration is done as needed in **Settings**:
@@ -406,13 +410,14 @@ checks, hand-off into a new Study; the "sold X → replaced by Y, date, rational
 ### Journey 5 — Confronting a past judgment (cumulative memory)
 
 Two years on, the Swiss mid-cap has roughly doubled. Guy reopens the original study. There are his
-judgment lines, his inputs with their provenance and validation, his decision rationale and notes —
-exactly the reasoning he committed to back then. He compares his projected zone to what actually
-happened, and learns something about his own optimism. *New reality:* his studies are not throwaway
-events but a journal that makes him a better investor over time.
+judgment lines, his inputs with their provenance and validation, his decision rationale (and, from
+Phase 4, his study notes) — exactly the reasoning he committed to back then. He compares his
+projected zone to what actually happened, and learns something about his own optimism. *New
+reality:* his studies are not throwaway events but a journal that makes him a better investor over
+time.
 **Reveals:** durable, reopenable studies; journal-ready versioned data model preserving judgment +
-provenance + validation + rationale + notes over time; before/after comparison against real
-outcomes.
+provenance + validation + rationale (+ study notes [P4]) over time; before/after comparison against
+real outcomes.
 
 ### Journey 6 — An AI scout under a human gate (Phase 4)
 
@@ -463,7 +468,7 @@ outcomes.
 - **Data safety:** journal kept as a single copy-friendly local file; backup/restore delegated to an
   external system (e.g. NAS sync), manual or automatic.
 - **Journal:** durable studies; transactions; per-cell provenance + validated flag; **decision
-  rationale (first-class)**; notes; versioned, journal-ready data model.
+  rationale (first-class)**; study notes [P4]; versioned, journal-ready data model.
 - **Neutral posture (cross-cutting):** facts not recommendations, footer disclaimer, user sole
   decider.
 - **AI assistance [P4] (Journey 6 → FR69–FR78, Epic 8):** local MCP server over studies (portfolio,
@@ -526,9 +531,11 @@ outcomes.
 
 - **API keys in the OS keychain**, never in version control.
 - **Local-first, single-user, offline**: no cloud, no accounts, no third-party PII → minimal
-  privacy surface; the only sensitive material is the user's own keys and journal.
+  privacy surface; the only sensitive material is the user's own keys and journal. From Phase 4 the
+  one exception is study data reaching a remote AI model the owner chooses (below).
 - **AI exposure:** study data may reach a remote model the owner chooses; portfolio data never; the
-  MCP server is not network-exposed in the current setup.
+  MCP server is not network-exposed in the current setup. Accepted residue: free text (study
+  rationale, notes) may mention positions and so partially reveal the portfolio (NFR-S3).
 - **Data safety:** the journal is a single, copy-friendly local file; backup/restore delegated to
   an external system (e.g. NAS sync).
 
@@ -537,7 +544,8 @@ outcomes.
 - Per-cell **source + provenance + validated + timestamp**, **decision rationale**, and a
   **versioned data contract** give a natural, durable audit trail of how each judgment was formed —
   serving the cumulative memory. AI drafts record their origin (client + model), timestamp, comment
-  and outcome, and a validated value keeps its AI origin and validation date.
+  and outcome, and a validated value shows its AI origin and validation date until the owner next
+  edits it.
 
 ### Domain risk mitigations (summary)
 
@@ -632,8 +640,9 @@ system, locale and, from Phase 4, a local MCP endpoint for an owner-chosen AI cl
   configurable — preventing manual-entry errors.
 - **Notifications:** **in-app only** in v1 (alerts surface on manual refresh); OS-native
   notifications are a later nice-to-have.
-- **AI client integration [P4]:** a local MCP server serving the active dossier to an AI client the
-  owner chooses; not network-exposed in the current setup; no AI model bundled with the app.
+- **AI client integration [P4]:** a local MCP server serving the last-used dossier to an AI client
+  the owner chooses, also while the app is closed (FR69); not network-exposed in the current setup;
+  no AI model bundled with the app.
 
 ### Update Strategy
 
@@ -761,15 +770,18 @@ withholding-refund tracking, export/share, eventual public release.
 - FR15 **[P1]:** The user can auto-fetch a security's fundamentals, prices and estimates from a
   configured provider. A fetch is user-initiated only, never through MCP.
 - FR16 **[P1]:** The user can enter, override and later correct any data field by hand.
-- FR17 **[P1]:** Each data cell carries an independently queryable **source** (provider/manual/derived;
-  **ai-suggested** from [P4]); after validation of an AI draft the AI origin remains visible.
+- FR17 **[P1]:** Each data cell carries an independently queryable **source** (provider/manual/derived).
+  **[P4]:** a validated AI draft is an owner entry — source manual, reconciled as manual (FR22), review
+  tag `?` (FR74) — and shows its AI origin (client, model, validation date) until the owner next edits
+  the value; the AI origin is not a separate source.
 - FR18 **[P1]:** Each data cell carries an independently queryable **provenance and timestamp**.
 - FR19 **[P1]:** Per-cell coverage is represented as **present / to-fill / not-available-accepted**.
 - FR20 **[P1]:** Each cell (and the study as a whole) carries a **tri-state review tag** —
   `none` / `? to-review` / `✓ validated` — with a **soft-lock**: a `✓` cell must be explicitly
   un-validated (→ `?`) before its value can be edited, and a refresh that diverges from a validated
   value auto-tags it `✓→?`. (Supersedes the original binary auto-reset wording; see GitHub issue #1.)
-  A validated AI value [P4] enters with review tag `?`.
+  A validated AI value [P4] enters with review tag `?`, also on a `✓` cell without prior
+  un-validation (FR74).
 - FR21 **[P1]:** The user can trigger a **manual refresh** of provider data; a refresh is
   user-initiated only, never through MCP.
 - FR22 **[P1]:** On refresh, a **manual value takes precedence** over a fetched value while the fetched
@@ -798,7 +810,7 @@ withholding-refund tracking, export/share, eventual public release.
 - FR33 **[P1]:** The system never auto-places or suggests a judgment line. **[P4]:** an AI-proposed
   judgment (FR72) is shown on the chart as a line annotated "AI" beside the owner's; while pending it
   changes no verdict, zone or alert. Once validated it becomes the study's judgment and keeps the
-  annotation "placed by AI" with its validation date.
+  annotation "placed by AI" with its validation date until the owner next moves or edits it.
 
 ### Watchlist & Alerts
 - FR34 **[P1]:** The user can maintain a watchlist (add, edit, remove, reorder).
@@ -833,11 +845,12 @@ withholding-refund tracking, export/share, eventual public release.
 
 ### Cumulative Memory & Journal
 - FR49 **[P1]:** The user can capture a **decision rationale** as a first-class field on studies and
-  transactions; study notes (FR78) and processed AI drafts [P4] are preserved in the study history.
+  transactions. **[P4]:** study notes (FR78) and processed AI drafts are preserved in the study
+  history.
 - FR50 **[P1]:** The user can reopen a past study and **visually compare** its recorded projection to
   the security's actual trajectory since.
-- FR51 **[P1]:** The system durably preserves the **time-series** of judgments, provenance, validation,
-  rationale and notes, including study notes (FR78) and processed AI drafts [P4].
+- FR51 **[P1]:** The system durably preserves the **time-series** of judgments, provenance, validation
+  and rationale. **[P4]:** it also preserves study notes (FR78) and processed AI drafts.
 
 ### Reporting & Printing
 - FR52 **[P1]:** The user can **print / export to PDF a Stock Study** in a layout close to the original
@@ -849,7 +862,8 @@ withholding-refund tracking, export/share, eventual public release.
 - FR54 **[P1]:** The user can **list, search, sort and filter** saved studies and open them from a home
   dashboard.
 - FR55 **[P1]:** The user can **delete or archive** a study (with confirmation); deletions never corrupt
-  the journal time-series.
+  the journal time-series. **[P4]:** deleting a study also deletes its AI drafts, as it does its
+  judgment history.
 - FR56 **[P1]:** The user can switch a study between an **entry regime** (dense editing) and a
   **contemplation regime** (reading/judgment), with the active regime clearly indicated.
 - FR57 **[P1]:** The user can view a consistent **legend** for freshness/provenance/coverage/confidence
@@ -860,7 +874,7 @@ withholding-refund tracking, export/share, eventual public release.
   preserves identity), enabling golden-study and seeding.
 - FR60 **[P1]:** The user can **export/import the whole journal** in a versioned format, validated on
   import (reject/migrate on version mismatch); the export and backups include AI drafts [P4]
-  (pending, validated, rejected, stale).
+  (pending, validated, rejected).
 - FR61 **[P1]:** The user can **restore from a backup** with integrity and version-compatibility checks
   before overwrite.
 - FR62 **[P1]:** The user can access **non-blocking contextual help / glossary** and a read-only
@@ -894,31 +908,40 @@ withholding-refund tracking, export/share, eventual public release.
 > Traceability: Journey 6 → FR69–FR78 (with FR13, FR14, FR33, FR64) → Epic 8.
 
 - FR69 **[P4]:** An AI client can read, through MCP, the dossier's studies — data cells, provenance,
-  judgments, rationale, notes and judgment history; the portfolio (holdings, transactions,
-  dividends), the watchlist, keys and configuration are never exposed.
+  judgments, study rationale, notes, judgment history and computed outputs (zones, upside/downside
+  ratio, 5-year potential, verdict and its state) — and the record of drafts (FR77); the portfolio
+  (holdings, transactions, dividends), the watchlist, keys and configuration are never exposed. The
+  MCP server serves the last-used dossier, also while the app is closed, and every response names
+  the dossier (identity and location) it read.
 - FR70 **[P4]:** An AI client can submit a **draft study** (security identifier + mandatory comment) to
   the draft inbox; it creates no study until validated, and is refused if the security is already
-  studied in the dossier.
+  studied in the dossier or already has a pending draft study.
 - FR71 **[P4]:** An AI client can submit a **draft note** on an existing study, with a mandatory comment.
 - FR72 **[P4]:** An AI client can submit a **draft cell value**, judgment values included, with a
   mandatory comment. While pending it changes no value, line, zone, alert or verdict; a judgment draft
   is shown on the chart as an AI-annotated line beside the owner's (FR33). A pending draft whose
-  target changed meanwhile (owner edit or refresh) is marked **stale**.
+  target changed meanwhile (owner edit or refresh) is marked **stale**; the owner can still validate
+  it after an explicit confirmation, or reject it.
 - FR73 **[P4]:** The owner can review pending drafts in a **dossier-level inbox**, with a reminder in
   each concerned study, showing for each draft its AI origin (client + model), comment, target, and
-  current vs proposed value side by side.
-- FR74 **[P4]:** The owner can **validate or reject each draft individually** (no bulk action).
-  Validation applies the draft as an owner entry with review tag `?` and visible AI origin; editing a
-  draft before validation makes it the owner's own entry; validating a draft study does not add it to
-  the watchlist.
+  current vs proposed value side by side. Drafts submitted while the app is closed appear at its
+  next opening.
+- FR74 **[P4]:** The owner can **validate or reject each draft individually** (no bulk action), in
+  **≤ 2 actions**, with current and proposed values side by side. Validation applies the draft as an
+  owner entry (FR17) with review tag `?` and visible AI origin; on a validated (`✓`) cell it needs no
+  prior un-validation and moves the cell to `?`; a stale draft needs an explicit confirmation (FR72).
+  Editing a draft before validation makes it the owner's own entry; validating a draft study does not
+  add it to the watchlist.
 - FR75 **[P4] (scope note):** Search objectives (market, potential growth, upside/downside ratio…) are
   given to the AI in its client session; the dossier does not store them in Phase 4.
 - FR76 **[P4]:** Provider data is fetched only on the owner's action: after validating a draft study
   the owner fetches it as for any study, and the fetched data then becomes readable through MCP; no
   MCP request can trigger a provider call.
 - FR77 **[P4]:** The system keeps a durable **record of every draft** (origin, comment, content,
-  timestamps, outcome) that the owner can view and the AI can read.
-- FR78 **[P4]:** The owner can **create, edit and delete notes** attached to a study.
+  timestamps, outcome) that the owner can view and the AI can read; the drafts of a deleted study
+  are deleted with it (FR55).
+- FR78 **[P4]:** The owner can **create, edit and delete notes** attached to a study; a deleted note
+  leaves the study but remains in its history (FR51).
 
 > **Definitions referenced by these FRs** (SSG output set, quality-flag thresholds, "usable year"
 > & low-confidence rule, plausibility rules, "load-bearing input", neutrality banned-verb list,
@@ -955,13 +978,14 @@ withholding-refund tracking, export/share, eventual public release.
 
 - **NFR-S1:** Provider API keys live **only in the OS secret store** — never in the repo, plaintext
   config, logs, exports, backups or MCP responses.
-- **NFR-S2:** **No telemetry/analytics**; the only network calls are user-initiated provider/FX
+- **NFR-S2:** **No telemetry/analytics**; the app's only network calls are user-initiated provider/FX
   fetches. The MCP server is not network-exposed in the current setup.
 - **NFR-S3:** All persistent data is **local**. Beyond the chosen provider (under the user's own key),
   study data may leave the machine only through the AI client the owner chooses; portfolio data
-  never leaves it.
-- **NFR-S4:** The MCP surface never returns portfolio data (holdings, transactions, dividends), keys
-  or configuration secrets — verified by tests over every MCP resource and tool.
+  never leaves it through MCP. Accepted residue: free text (study rationale, notes) may mention
+  positions and so partially reveal the portfolio to the AI.
+- **NFR-S4:** The MCP surface never returns the portfolio (holdings, transactions, dividends), the
+  watchlist, keys or configuration — verified by tests over every MCP resource and tool.
 
 ### Reliability & Data Integrity
 
@@ -1004,8 +1028,9 @@ withholding-refund tracking, export/share, eventual public release.
 
 - **NFR-A1:** Capability asymmetry holds **by construction**, not by prompt: the only write the MCP
   surface offers is draft creation; every other write is rejected and logged (CI suite).
-- **NFR-A2:** Portfolio non-exposure holds **by construction**: holdings, transactions, dividends and
-  watchlist are absent from the MCP surface (whole-surface test).
+- **NFR-A2:** Portfolio non-exposure holds **by construction**: the portfolio (holdings, transactions,
+  dividends), the watchlist, keys and configuration are absent from the MCP surface (whole-surface
+  test).
 - **NFR-A3:** No provider call is reachable from MCP (tested).
 - **NFR-A4:** Every draft carries its origin (client + model), a timestamp and a non-empty comment
   (100% of drafts; tested).
@@ -1013,10 +1038,10 @@ withholding-refund tracking, export/share, eventual public release.
 ### Constraints (technical & legal/IP)
 
 - **Technical:** Rust + Slint, chart drawn **natively in Slint** (`Path`/`TouchArea`); local embedded
-  database (SQLite); offline-first; no network server — a local MCP server for the owner's AI client
-  is the only external interface. *(The 2026-06-08 Architecture decision removed egui
-  entirely; the charting fallback is a dedicated Slint canvas or `plotters`→`SharedPixelBuffer` +
-  `TouchArea`, not egui.)*
+  database (SQLite); offline-first; no network server — the only external interface is a local MCP
+  server for the owner's AI client, not network-exposed (NFR-S2). *(The 2026-06-08 Architecture
+  decision removed egui entirely; the charting fallback is a dedicated Slint canvas or
+  `plotters`→`SharedPixelBuffer` + `TouchArea`, not egui.)*
 - **Legal / IP:** **GPL-3.0**, subject to a dependency-license audit (Slint tier; one-way
   Apache-2.0 ↔ GPL-3.0 compatibility). **No vendor market data** shipped (synthetic fixtures only).
   **Neutral labels — no NAIC marks/logos or verbatim instructional text.** "Educational, not
@@ -1044,11 +1069,16 @@ withholding-refund tracking, export/share, eventual public release.
   Scope rule: AI-origin text is outside the banned-verb gate; it is always shown inside a frame
   labelled "AI" with the disclaimer and never presented as an app signal.
 - **AI draft (FR70–FR74):** a proposal from an AI client with a mandatory comment, an origin (client
-  + model), a timestamp and a status — pending / validated / rejected / stale; it has no effect while
-  pending.
+  + model), a timestamp and a status — pending / validated / rejected — and, while pending, a derived
+  **stale** state (its target changed since submission); it has no effect while pending. A stale draft can still be validated after confirmation; once validated it is an owner
+  entry whose AI origin shows until the owner next edits the value (FR17).
 - **Search objectives (FR75):** criteria the owner gives the AI in its client session (e.g. market,
   potential growth, upside/downside ratio); not stored in the dossier.
-- **MCP-exposed scope (FR69, NFR-S4):** studies, their data cells with provenance, judgments, rationale,
-  notes and judgment history. Excluded: holdings, transactions, dividends, watchlist, keys, configuration.
+- **MCP-exposed scope (FR69, NFR-S4):** studies, their data cells with provenance, judgments, study
+  rationale, notes, judgment history and computed outputs (zones, upside/downside ratio, 5-year
+  potential, verdict and its state); the record of drafts (FR77). Excluded: the portfolio (holdings,
+  transactions, dividends), the watchlist, keys and configuration.
+- **Dossier (FR69–FR78):** the user-facing term for the journal file — the single local store the app
+  opens (FR66, FR67).
 - **SSG output set (FR4), plausibility rules (FR10), load-bearing input (FR12), golden tolerance
   (FR9):** finalized in Architecture.
