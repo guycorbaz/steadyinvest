@@ -697,7 +697,8 @@ development_status:
   # 2026-09-27: 8-0 spec drafted (ux-ai-assistance-surfaces.md) → in-progress until Guy validates it
   #             in its own PR (like PR #206); open questions Q1–Q16 are his (rev. 3 after G3).
   epic-8: in-progress
-  8-0-ux-pass-ai-assistance-surfaces: in-progress
+  # 2026-09-27: Guy validated the spec (« défauts partout », Q1–Q16) → done with PR #256.
+  8-0-ux-pass-ai-assistance-surfaces: done
   8-1-study-notes: backlog
   8-2a-drafts-table: backlog
   8-2b-ai-origin-staleness-and-decisions: backlog

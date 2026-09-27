@@ -1,6 +1,6 @@
 # UX pass — AI-assistance surfaces (Story 8.0)
 
-**Status:** spec for review (Guy) — no code yet. **Origin:** G2 (PR #255, merged 2026-09-27):
+**Status:** validated by Guy 2026-09-27 (« défauts partout »: every default of §9, Q1–Q16, adopted) — no code yet. **Origin:** G2 (PR #255, merged 2026-09-27):
 PRD Phase 4 (FR13, FR17, FR33, FR64, FR68, FR69–FR78), architecture §Phase 4 (A1–A13), owner
 decisions O1–O7 and D1–D11. **Placement:** Story 8.0, before any Epic 8 UI story (8.1, 8.5a, 8.5b,
 8.6, 8.7, 8.8) — the same role the 7.0 pass (PR #206) played for Epic 7. `app` crate
@@ -424,7 +424,7 @@ frozen verdict prints with its comparison (• markers) when it differs; the com
 
 **Given** the keyboard only **Then** every surface above is reachable and operable (§6).
 
-## 9. Open questions (defaults proposed — Guy decides)
+## 9. Open questions — decided 2026-09-27: every default below is adopted (Guy: « défauts partout »)
 - **Q1** « IA » or « AI »? **Default: « IA »** (French UI, UX-DR29). Alt: « AI ».
 - **Q2** « proposition » or « brouillon »? **Default: « proposition »** (from the owner's side it is
   a proposal; « brouillon » reads as the owner's own unfinished work). Alt: « brouillon ».

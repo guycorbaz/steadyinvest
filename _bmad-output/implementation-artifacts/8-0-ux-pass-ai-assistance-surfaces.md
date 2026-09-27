@@ -1,6 +1,6 @@
 # Story 8.0 — UX pass: AI-assistance surfaces
 
-Status: in-progress — spec revision 3 (after two G3 rounds), ready for Guy's review (spec PR, like PR #206)
+Status: done — spec validated by Guy 2026-09-27 (« défauts partout »: Q1–Q16 defaults adopted); stories 8.3 (`identifier_invalid`) and 8.6 (Q13 chart lines) amended in epics.md; closes with PR #256
 
 ## Story
 
