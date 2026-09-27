@@ -127,14 +127,17 @@ impl Journal {
                 |r| r.get(0),
             )
             .optional()?;
-        // Compared STRUCTURALLY, not as raw strings (Story 8.1, T2.3): a snapshot written before an
-        // additive `#[serde(default)]` field (e.g. `notes`) lacks its key, so a value-identical
-        // re-save would otherwise append a phantom « autres champs modifiés » entry. An unparsable
-        // latest payload counts as different (the new snapshot is recorded, never skipped).
+        // The latest payload is RE-SERIALIZED through today's `Study` before the comparison (Story
+        // 8.1, T2.3): a snapshot written before an additive `#[serde(default)]` field (e.g. `notes`)
+        // lacks its key, so a raw-string comparison would append a phantom « autres champs
+        // modifiés » entry on a value-identical re-save. The comparison stays on the serialized
+        // STRING, not on `Study` equality, so a change `PartialEq` ignores (a `Money` scale, "3.0"
+        // → "3.00") is still recorded. An unparsable latest payload counts as different.
         let redundant = latest
             .as_deref()
             .and_then(|p| serde_json::from_str::<Study>(p).ok())
-            .is_some_and(|prev| prev == *study);
+            .and_then(|prev| serde_json::to_string(&prev).ok())
+            .is_some_and(|prev| prev == payload);
         if !redundant {
             let ordinal: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",

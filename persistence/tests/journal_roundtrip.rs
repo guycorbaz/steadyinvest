@@ -617,6 +617,28 @@ fn a_snapshot_written_before_an_additive_field_does_not_force_a_phantom_entry() 
 }
 
 #[test]
+fn a_money_scale_change_is_recorded_although_the_values_compare_equal() {
+    // Story 8.1 G3 (B2): the dedup compares serialized strings, so "104.0" → "104.00" (equal as
+    // decimals) still appends a snapshot — the stored figure did change.
+    let dir = TempDir::new().expect("tempdir");
+    let jid = Uuid::from_u128(0x82);
+    let mut journal =
+        Journal::create(dir.path().join("journal.db"), jid, &ts(JOURNAL_TS)).expect("create");
+    let mut first = study(0x821, jid, "NESN");
+    first.judgment.current_price = Some(serde_json::from_str("\"104.0\"").unwrap());
+    journal
+        .put_study_with_history(&first, &ts("2026-09-27T08:00:00Z"))
+        .expect("first save");
+    let mut rescaled = first.clone();
+    rescaled.judgment.current_price = Some(serde_json::from_str("\"104.00\"").unwrap());
+    assert_eq!(first, rescaled, "equal as values");
+    journal
+        .put_study_with_history(&rescaled, &ts("2026-09-27T08:01:00Z"))
+        .expect("rescaled save");
+    assert_eq!(journal.list_judgment_snapshots(first.id).unwrap().len(), 2);
+}
+
+#[test]
 fn put_study_with_history_appends_deduplicated_snapshots_that_round_trip() {
     let dir = TempDir::new().expect("tempdir");
     let jid = Uuid::from_u128(0x34);
