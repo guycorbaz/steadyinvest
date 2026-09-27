@@ -263,7 +263,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - UX-DR29 [P1]: French-first UI via Slint @tr() (i18n-ready), distinct from the runtime NAIC↔neutral label set.
 
 **AI assistance [P4]**
-- UX-DR30 [P4]: AI-assistance surfaces — draft inbox and per-study reminder, AI frame (label + disclaimer), AI-annotated chart line and "placed by AI" annotation, AI-origin cell mark (confusability-gated with UX-DR15), study notes, drafts record — and their French wording, specified by the Story 8.0 UX addendum.
+- UX-DR30 [P4]: AI-assistance surfaces — draft inbox and per-study reminder, AI frame (label + disclaimer), AI-annotated chart line and "placed by AI" annotation, AI-origin cell mark (confusability-gated with UX-DR15), study notes, drafts record — and their French wording, specified by the Story 8.0 UX addendum (`ux-ai-assistance-surfaces.md`).
 
 ### FR Coverage Map
 
@@ -1105,7 +1105,7 @@ So that the inbox, the AI marks and the notes fit the app as the 7.0 pass made E
 **Then** it specifies, with layouts and states (empty, loading, « indisponible », refused):
 - the **draft inbox**: where it lives (nav-rail entry and/or badge, pending count), its list, and the side-by-side current vs proposed view;
 - the **reminder** in a study with pending drafts, and where a pending draft *study* is signalled;
-- the **AI frame**: label, disclaimer, layout; how a pending judgment draft that is not a chart line (e.g. a forecast P/E) shows on the study;
+- the **AI frame**: label, disclaimer, layout; how a pending judgment draft that is not a chart line shows on the study;
 - the **AI judgment line** on the chart: style, label, non-colour cue (NFR-U1), and the "placed by AI" annotation after validation;
 - the **AI-origin mark** on a validated cell (visible origin, cleared by the next owner edit) and its confusability-gate entry (UX-DR15);
 - **study notes**: place relative to the rationale (`RationaleNote`), entry through a titled dialog (7.0 AC1), deletion confirmation;
@@ -1209,6 +1209,7 @@ So that capability asymmetry and portfolio non-exposure are enforced by the SQLi
 **Then** the checks and the insert run in one `BEGIN IMMEDIATE` transaction, and it is refused with a named reason, nothing written, when (arch A3):
 - the `journal_id` or path it carries differs from the dossier resolved for the call (owner decision D10);
 - its target study does not exist, its comment is empty or its origin missing (FR71, FR72, NFR-A4);
+- a draft study's identifier or currency is not valid (`identifier_invalid`: ticker `[A-Z0-9.\-]{1,20}`, currency ISO 4217 — 8.0 spec §3), so they can be shown as app text;
 - its field is not a draftable field, its fiscal year is not a year of the study, or its value does not parse in the field's unit or enum (owner decision D6);
 - the target already has a pending draft (owner decision D4);
 - it is a draft study whose security is already studied, or pending as a draft study, in the same currency, identifier compared case-insensitively (FR70, owner decisions D2, D8);
@@ -1304,8 +1305,8 @@ So that the AI can challenge my numbers without ever moving my verdict.
 
 **Given** a pending judgment draft on a study
 **When** I view the study's chart
-**Then** the proposed line is drawn beside mine as specified in 8.0, annotated with the AI label (AI frame + disclaimer on its comment), distinguishable without colour alone (FR33, FR72, FR64, NFR-U1); a judgment draft that is not a chart line (e.g. a forecast P/E) shows as specified in 8.0
-**And** a target holds at most one pending draft (refused at submission, owner decision D4), so the chart shows at most one AI line per judgment field
+**Then** the proposed line is drawn beside mine as specified in 8.0, annotated with the AI label (AI frame + disclaimer on its comment), distinguishable without colour alone (FR33, FR72, FR64, NFR-U1); every judgment the owner can drag on a chart gets its AI line there — §1 estimated high / low EPS (a projected EPS-growth draft drawn as the estimated-high line it implies) and §3 judged high / low P/E (#115) — dotted, hollow endpoint, « IA {valeur} » label; the other judgment drafts get an action chip, and `forecast_low_option` a chip naming the option (8.0 spec, Q13)
+**And** a target holds at most one pending draft (refused at submission, owner decision D4), so a chart shows at most one AI line per judgment field, with one action chip per pending field under its legend
 **And** while pending it changes **no** zone, U/D, verdict, alert or saved value — the zone bar and verdict bar are identical with and without it (FR72)
 **And** I can validate or reject it from the chart or from the inbox, with the same one-by-one rules as Story 8.5b, keyboard-operable (FR74, NFR-U2)
 **When** I validate it
