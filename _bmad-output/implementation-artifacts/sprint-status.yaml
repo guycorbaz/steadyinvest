@@ -705,7 +705,9 @@ development_status:
   #             PR #257 merged (b7f1def) → done.
   8-1-study-notes: done
   # 2026-09-27: 8-2a story file created → ready-for-dev; branch feat/8-2a-drafts-table after #257.
-  8-2a-drafts-table: ready-for-dev
+  # 2026-09-27: 8-2a dev complete (1179 tests; v8 migration, drafts read/export/import, O7 cascade,
+  #             v8.db corpus) → review.
+  8-2a-drafts-table: review
   8-2b-ai-origin-staleness-and-decisions: backlog
   8-3-mcp-access-gated-access-surface: backlog
   8-4-steadyinvest-mcp-stdio-server: backlog

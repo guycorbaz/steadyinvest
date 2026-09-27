@@ -1,6 +1,6 @@
 # Story 8.2a: Drafts table (headless)
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created 2026-09-27 by the create-story workflow. Branches from main AFTER 8.1 (PR #257) merges:
      8.1 adds contract/src/ai.rs (AiOrigin) and Note, which this story's contract module sits beside. -->
@@ -54,25 +54,25 @@ no `SCHEMA_VERSION` bump, no compat work; the migration harness stays for NEW ta
 
 ## Tasks / Subtasks
 
-- [ ] **T1 — Contract types (AC 2)** — new `contract/src/draft.rs`, re-exported from `lib.rs`
-  - [ ] 1.1 `DraftKind`, `DraftStatus` (`#[serde(rename_all = "snake_case")]`), each with
+- [x] **T1 — Contract types (AC 2)** — new `contract/src/draft.rs`, re-exported from `lib.rs`
+  - [x] 1.1 `DraftKind`, `DraftStatus` (`#[serde(rename_all = "snake_case")]`), each with
         `as_str()` / `FromStr` returning the exact DB spellings (used by persistence; one mapping).
-  - [ ] 1.2 `DraftTarget` — `#[serde(tag = "target", rename_all = "snake_case")]`:
+  - [x] 1.2 `DraftTarget` — `#[serde(tag = "target", rename_all = "snake_case")]`:
         `Cell { fiscal_year: i32, field: String }`, `Judgment { field: String }`. `field` stays a
         `String` here; the enumerated draftable fields + units are **8.2b's** (epics 8.2b AC 2).
-  - [ ] 1.3 `DraftPayload { version: u32, target: Option<DraftTarget>, proposed_value:
+  - [x] 1.3 `DraftPayload { version: u32, target: Option<DraftTarget>, proposed_value:
         Option<String>, note_text: Option<String>, company_name: Option<String>,
         base_fingerprint: Option<String> }` — options `#[serde(default, skip_serializing_if =
         "Option::is_none")]`; `pub const DRAFT_PAYLOAD_VERSION: u32 = 1`.
-  - [ ] 1.4 Pure `DraftPayload::fits(kind) -> bool` (shape rule, Dev Notes §3) + unit tests for
+  - [x] 1.4 Pure `DraftPayload::fits(kind) -> bool` (shape rule, Dev Notes §3) + unit tests for
         every kind × shape; used by the persistence insert helper of tests and by 8.3 later.
-  - [ ] 1.5 Serde unit tests: exact JSON of each variant (pinned strings), round-trip, an unknown
+  - [x] 1.5 Serde unit tests: exact JSON of each variant (pinned strings), round-trip, an unknown
         `target`/`kind` value fails to parse (fail-loud policy).
-- [ ] **T2 — Migration v8 (AC 1, 3, 4)** — `persistence/src/schema.rs` + `migrations.rs`
-  - [ ] 2.1 `migrate_to_v8` with the DDL of Dev Notes §2 (table, 3 indexes, trigger) — a
+- [x] **T2 — Migration v8 (AC 1, 3, 4)** — `persistence/src/schema.rs` + `migrations.rs`
+  - [x] 2.1 `migrate_to_v8` with the DDL of Dev Notes §2 (table, 3 indexes, trigger) — a
         `CREATE TABLE` step like v5; doc comment in the file's style (story, FRs, why each CHECK).
-  - [ ] 2.2 Append `(8, crate::schema::migrate_to_v8)` to `REGISTRY` and its doc list.
-  - [ ] 2.3 Update every hard-coded "latest = 7": `migrations.rs` tests (`latest_version == 8`,
+  - [x] 2.2 Append `(8, crate::schema::migrate_to_v8)` to `REGISTRY` and its doc list.
+  - [x] 2.3 Update every hard-coded "latest = 7": `migrations.rs` tests (`latest_version == 8`,
         `fresh_database_migrates_to_latest`, `rerun_is_idempotent…`), the fake future step
         **`fake_v8` → `fake_v9`** with `NINE_STEP_REGISTRY` and marker `migration-marker-v9`,
         `newer_file_is_refused_not_migrated` (`file_user_version: 9, supported: 8`),
@@ -80,57 +80,57 @@ no `SCHEMA_VERSION` bump, no compat work; the migration harness stays for NEW ta
         `schema.rs` `v2_adds…` message/assert (8), `the_registry_creates_exactly_the_architecture_tables`
         (add `"ai_drafts"` → 10 tables), `persistence/tests/readonly_newer.rs` (`supported: 8`; the
         hand-bumped 9 stays "newer").
-  - [ ] 2.4 `naming_conventions_hold` passes unchanged (`ai_drafts` plural; `idx_ai_drafts_*`);
+  - [x] 2.4 `naming_conventions_hold` passes unchanged (`ai_drafts` plural; `idx_ai_drafts_*`);
         extend it: every trigger name starts with `trg_<table>_`.
-  - [ ] 2.5 CHECK tests by direct insert (Dev Notes §5 list), each asserting a constraint error and
+  - [x] 2.5 CHECK tests by direct insert (Dev Notes §5 list), each asserting a constraint error and
         zero rows; the happy insert of each kind succeeds and bumps `logical_version` by exactly 1.
-- [ ] **T3 — Read API + export/import (AC 7)** — new `persistence/src/drafts.rs` (arch tree), `export.rs`
-  - [ ] 3.1 `pub struct DraftRecord` (serde, no `deny_unknown_fields` — #78 per-entity rule) with one
+- [x] **T3 — Read API + export/import (AC 7)** — new `persistence/src/drafts.rs` (arch tree), `export.rs`
+  - [x] 3.1 `pub struct DraftRecord` (serde, no `deny_unknown_fields` — #78 per-entity rule) with one
         field per column: typed `DraftKind`/`DraftStatus`, `Uuid`s, `Timestamp`s, `Option<bool>` for
         the two nullable booleans, `payload: String` **raw** (byte-faithful like
         `JudgmentSnapshotRecord`).
-  - [ ] 3.2 `Journal::list_drafts() -> Result<Vec<DraftRecord>>` ordered `created_at, id`; corrupt
+  - [x] 3.2 `Journal::list_drafts() -> Result<Vec<DraftRecord>>` ordered `created_at, id`; corrupt
         rows (bad UUID, unknown kind/status, non-0/1 boolean) → `CorruptPayload` naming the column —
         never skipped (checklist §1 « absent, never wrong »).
-  - [ ] 3.3 `JournalSnapshot.ai_drafts` (#78 rail) filled by `journal_snapshot()`; import upserts by
+  - [x] 3.3 `JournalSnapshot.ai_drafts` (#78 rail) filled by `journal_snapshot()`; import upserts by
         `id` (`INSERT … ON CONFLICT(id) DO UPDATE SET` every column) **after** studies; validates
         references (Dev Notes §4) → `ImportMalformed`; `DraftPayload` must parse and `fits(kind)`,
         else `ImportMalformed`. `ImportSummary.ai_drafts: usize`; `applied` includes it.
-  - [ ] 3.4 Tests: round-trip of drafts in every kind × status with every column set/unset
+  - [x] 3.4 Tests: round-trip of drafts in every kind × status with every column set/unset
         (compare `list_drafts()` before/after, payload strings equal); an old file without the
         array imports; an empty draft set exports **without** the key; dangling reference refused
         with nothing applied (all-or-nothing).
-- [ ] **T4 — Cascade (AC 8)** — `studies.rs::delete_study`
-  - [ ] 4.1 `DELETE FROM ai_drafts WHERE study_id = ?1 OR created_study_id = ?1` **before** the
+- [x] **T4 — Cascade (AC 8)** — `studies.rs::delete_study`
+  - [x] 4.1 `DELETE FROM ai_drafts WHERE study_id = ?1 OR created_study_id = ?1` **before** the
         study row (FK order, like `judgments`); include `removed_drafts > 0` in the bump condition;
         update the doc comment (O7).
-  - [ ] 4.2 Tests: drafts on A (note/cell/judgment, every status) + a validated draft study whose
+  - [x] 4.2 Tests: drafts on A (note/cell/judgment, every status) + a validated draft study whose
         `created_study_id` = A + a pending draft study + drafts on B → delete A removes exactly A's,
         keeps the pending draft study and B's; deleting an absent id stays a no-op (no bump).
-- [ ] **T5 — Backup (AC 6)**: test in `journal_roundtrip.rs` or a new `persistence/tests/drafts.rs`:
+- [x] **T5 — Backup (AC 6)**: test in `journal_roundtrip.rs` or a new `persistence/tests/drafts.rs`:
       `backup_to` → open the backup read-only/raw → rows equal, `sqlite_master` has the trigger.
-- [ ] **T6 — Migration & corpus (AC 5)**
-  - [ ] 6.1 Unit test (in `migrations.rs`, where `REGISTRY` is visible): apply `REGISTRY[..7]`,
+- [x] **T6 — Migration & corpus (AC 5)**
+  - [x] 6.1 Unit test (in `migrations.rs`, where `REGISTRY` is visible): apply `REGISTRY[..7]`,
         seed every table (journal_meta, a study + judgment, portfolio/holding/transaction, fx rate,
         watchlist item, price_history row), run the full registry, assert every row intact,
         `ai_drafts` empty, trigger present, `user_version` 8.
-  - [ ] 6.2 `corpus_gate.rs`: `#[ignore]`d `generate_corpus_v8` (refuses to overwrite) — canonical
+  - [x] 6.2 `corpus_gate.rs`: `#[ignore]`d `generate_corpus_v8` (refuses to overwrite) — canonical
         study + one draft per kind and per status inserted **by raw SQL** on the closed-then-reopened
         file (no public insert API exists before 8.3), fixed ids/times; run once; `git add
         persistence/tests/corpus/v8.db` (the `.gitignore` exception covers it — check `git status`).
-  - [ ] 6.3 Gate test `frozen_corpus_v8_opens_and_reads_back`: copy to TempDir, `user_version` 8,
+  - [x] 6.3 Gate test `frozen_corpus_v8_opens_and_reads_back`: copy to TempDir, `user_version` 8,
         `get_study` equals `canonical_study()`, `list_drafts()` equals the pinned expectation.
         Keep the v1 gate unchanged. Update `tests/corpus/README.md` table (v8 row; note the v2–v7
         gap as found, not back-filled — app not in production).
-- [ ] **T7 — Computation isolation (AC 9)**: `persistence/tests/drafts.rs` (or `core`-side) test:
+- [x] **T7 — Computation isolation (AC 9)**: `persistence/tests/drafts.rs` (or `core`-side) test:
       parse `core/Cargo.toml` and `report/Cargo.toml` — no `steadyinvest-persistence` dependency;
       scan `core/src/**`, `report/src/**`, `app/src/viewmodel/engine*` for `ai_drafts` /
       `list_drafts` → none. Paths via `env!("CARGO_MANIFEST_DIR")/..`.
-- [ ] **T8 — Invariant doc** (`persistence/src/util.rs`): amend the « exactly once » doc — the v8
+- [x] **T8 — Invariant doc** (`persistence/src/util.rs`): amend the « exactly once » doc — the v8
       trigger bumps once **per inserted draft row**; an import carrying N drafts therefore raises the
       counter by 1 + N. The counter's contract is **monotonic** (stale-restore detection, sync),
       which holds. Name the trigger at the site (checklist §3).
-- [ ] **T9 — Gates**: `CARGO_BUILD_JOBS=4 cargo test --workspace`, `cargo clippy --workspace
+- [x] **T9 — Gates**: `CARGO_BUILD_JOBS=4 cargo test --workspace`, `cargo clippy --workspace
       --all-targets -- -D warnings`, `cargo fmt --check`, `cargo deny check` unchanged. Story record
       + sprint-status → review.
 
@@ -279,7 +279,7 @@ Matches the architecture tree (`persistence/src/drafts.rs` « ai_drafts (v8) + d
 - [Source: docs/review-checklist.md]
 - [Source: commit 8ca94bc (not in production)]
 
-## Questions for Guy (defaults applied unless he objects)
+## Questions for Guy — both defaults accepted by the owner (2026-09-27)
 
 1. **Version counter with drafts**: the v8 trigger bumps `logical_version` once per inserted draft,
    so an import of N drafts raises it by 1 + N (monotonic, not an exact mutation count). Default:
@@ -291,10 +291,63 @@ Matches the architecture tree (`persistence/src/drafts.rs` « ai_drafts (v8) + d
 
 ### Agent Model Used
 
+claude-opus-5-5 (worker fork, bmad-dev-story)
+
 ### Debug Log References
+
+- Clippy `type_complexity` on the test's edit list → a `SnapshotEdit` alias.
+- `posture::sibling_crates_hand_the_app_typed_errors_only` refused a `Result<(), String>` in
+  `persistence` (`check_payload`) → typed `PayloadProblem` (its Display feeds the English
+  technical detail of `CorruptPayload` / `ImportMalformed`, as every other persistence error).
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed — comprehensive developer guide created.
+- T1: `contract/src/draft.rs` — `DraftKind`, `DraftStatus` (`as_str` / `FromStr`, `ALL`),
+  `DraftTarget` (tag `target`), `DraftPayload` + `DRAFT_PAYLOAD_VERSION` + `fits`; 6 unit tests
+  (pinned JSON per kind, round-trip, fail-loud unknowns, kind × shape matrix, missing fields and
+  foreign version).
+- T2: `migrate_to_v8` with the exact DDL of Dev Notes §2 (+ `edited_before_validation` CHECK 0/1);
+  `REGISTRY` v8; every "latest = 7" test moved to 8, fake step v8 → v9 (`NINE_STEP_REGISTRY`,
+  `migration-marker-v9`), failing step now v8 (stays 7); schema table set 10; naming test covers
+  `trg_<table>_`; `readonly_newer` `supported: 8`.
+- T3: `persistence/src/drafts.rs` — `DraftRecord` (one field per column, raw payload),
+  `Journal::list_drafts` ordered `(created_at, id)`, corruption named per column (payload checked
+  to parse and fit its kind); export array (#78 rail) + import upsert after studies with the
+  reference rule (file OR dossier), payload rule, CHECK violations mapped to `ImportMalformed`;
+  `ImportSummary.ai_drafts` (app test literal updated; the app's import message is unchanged —
+  drafts are not listed, to revisit in 8.5a).
+- T4: `delete_study` deletes `study_id OR created_study_id` drafts first; one bump.
+- T5–T7: `persistence/tests/drafts.rs` (12 tests): 17 CHECK/FK refusals with zero rows, one bump
+  per insert for every kind, typed read, corrupt payload named, round-trip of every kind × status
+  (+ idempotent re-import), no array when empty, dangling reference refused with nothing applied
+  and no bump, reference to a dossier study accepted (upsert by id), rule-breaking rows refused,
+  cascade, backup (rows + trigger), computation isolation (`core`/`report` manifests + sources +
+  `app/src/viewmodel/engine.rs`). `migrations.rs`: v7 dossier with all nine tables seeded
+  migrates intact. Corpus: `generate_corpus_v8` run once, `v8.db` committed (126 976 bytes), gate
+  `frozen_corpus_v8_opens_and_reads_back_the_study_and_its_drafts` (logical_version 6 = 1 + 5
+  trigger bumps); README row + the v2–v7 gap noted.
+- T8: `util.rs` documents the trigger exception (1 + N on import; monotonic contract).
+- T9: `cargo test --workspace` 1179 passed, 0 failed (2 ignored = the two corpus generators);
+  `cargo clippy --workspace --all-targets -D warnings` clean; `cargo fmt --check` clean. No
+  dependency change (cargo deny unaffected). No UI, no user-facing string, no posture delta.
+- Deviation: none of substance. `PayloadProblem` (typed, crate-private) added for the posture rule.
 
 ### File List
+
+- contract/src/draft.rs (new)
+- contract/src/lib.rs
+- persistence/src/drafts.rs (new)
+- persistence/src/lib.rs
+- persistence/src/schema.rs
+- persistence/src/migrations.rs
+- persistence/src/export.rs
+- persistence/src/studies.rs
+- persistence/src/util.rs
+- persistence/tests/drafts.rs (new)
+- persistence/tests/export.rs
+- persistence/tests/corpus_gate.rs
+- persistence/tests/corpus/README.md
+- persistence/tests/corpus/v8.db (new)
+- persistence/tests/readonly_newer.rs
+- app/src/state/tests.rs
