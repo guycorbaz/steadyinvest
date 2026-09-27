@@ -876,7 +876,7 @@ withholding-refund tracking, export/share, eventual public release.
   preserves identity), enabling golden-study and seeding.
 - FR60 **[P1]:** The user can **export/import the whole journal** in a versioned format, validated on
   import (reject/migrate on version mismatch); the export and backups include AI drafts [P4]
-  (pending, validated, rejected); an export carrying notes, AI origins or drafts is refused by an
+  (pending, validated, validated then undone, rejected); an export carrying notes, AI origins or drafts is refused by an
   older build, never imported with them silently dropped.
 - FR61 **[P1]:** The user can **restore from a backup** with integrity and version-compatibility checks
   before overwrite.
@@ -939,7 +939,8 @@ withholding-refund tracking, export/share, eventual public release.
   owner entry (FR17) with review tag `?` in every case — also on an untagged cell or when the value is
   unchanged — and visible AI origin; on a validated (`✓`) cell it needs no prior un-validation and
   moves the cell to `?`; a stale draft needs an explicit confirmation (FR72). A validation is
-  undoable like any owner edit (FR32), and an undone validation is recorded as such (FR77). Editing
+  undoable like any owner edit (FR32), and an undone validation is recorded as such (FR77); a
+  validated draft study is reversed by deleting the study it created (FR55). Editing
   a draft before validation makes it the owner's own entry; validating a draft study does not add it
   to the watchlist.
 - FR75 **[P4] (scope note):** Search objectives (market, potential growth, upside/downside ratio…) are

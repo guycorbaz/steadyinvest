@@ -112,7 +112,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - FR57 [P1]: The user can view a consistent legend for freshness/provenance/coverage/confidence states.
 - FR58 [P1]: Every main surface presents an actionable empty state and clear neutral error/feedback messages.
 - FR59 [P1]: The user can export/import a single study to a portable versioned file (round-trip preserves identity).
-- FR60 [P1]: The user can export/import the whole journal in a versioned format, validated on import (reject/migrate on version mismatch); the export and backups include AI drafts [P4] (pending, validated, rejected); an export carrying notes, AI origins or drafts is refused by an older build, never imported with them silently dropped.
+- FR60 [P1]: The user can export/import the whole journal in a versioned format, validated on import (reject/migrate on version mismatch); the export and backups include AI drafts [P4] (pending, validated, validated then undone, rejected); an export carrying notes, AI origins or drafts is refused by an older build, never imported with them silently dropped.
 - FR61 [P1]: The user can restore from a backup with integrity and version-compatibility checks before overwrite.
 - FR62 [P1]: The user can access non-blocking contextual help / glossary and a read-only demonstration study.
 
@@ -130,7 +130,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - FR71 [P4]: An AI client can submit a draft note on an existing study, with a mandatory comment.
 - FR72 [P4]: An AI client can submit a draft cell value, judgment values included, with a mandatory comment. While pending it changes no value, line, zone, alert or verdict; a judgment draft is shown on the chart as an AI-annotated line beside the owner's (FR33). A target holds at most one pending draft: a second one is refused. Market facts written by the provider (current price, TTM EPS) are not draftable. A pending draft whose target changed meanwhile (owner edit or refresh) is marked stale; the owner can still validate it after an explicit confirmation, or reject it; a draft whose target no longer exists cannot be validated.
 - FR73 [P4]: The owner can review pending drafts in a dossier-level inbox, with a reminder in each concerned study, showing for each draft its AI origin (client + model), comment, target, and current vs proposed value side by side. Drafts submitted while the app is closed appear at its next opening.
-- FR74 [P4]: The owner can validate or reject each draft individually (no bulk action), in ≤ 2 actions, with current and proposed values side by side. Validation applies the draft as an owner entry (FR17) with review tag `?` in every case — also on an untagged cell or when the value is unchanged — and visible AI origin; on a validated (`✓`) cell it needs no prior un-validation and moves the cell to `?`; a stale draft needs an explicit confirmation (FR72). A validation is undoable like any owner edit (FR32), and an undone validation is recorded as such (FR77). Editing a draft before validation makes it the owner's own entry; validating a draft study does not add it to the watchlist.
+- FR74 [P4]: The owner can validate or reject each draft individually (no bulk action), in ≤ 2 actions, with current and proposed values side by side. Validation applies the draft as an owner entry (FR17) with review tag `?` in every case — also on an untagged cell or when the value is unchanged — and visible AI origin; on a validated (`✓`) cell it needs no prior un-validation and moves the cell to `?`; a stale draft needs an explicit confirmation (FR72). A validation is undoable like any owner edit (FR32), and an undone validation is recorded as such (FR77); a validated draft study is reversed by deleting the study it created (FR55). Editing a draft before validation makes it the owner's own entry; validating a draft study does not add it to the watchlist.
 - FR75 [P4] (scope note): Search objectives (market, potential growth, upside/downside ratio…) are given to the AI in its client session; the dossier does not store them in Phase 4.
 - FR76 [P4]: Provider data is fetched only on the owner's action: after validating a draft study the owner fetches it as for any study, and the fetched data then becomes readable through MCP; no MCP request can trigger a provider call.
 - FR77 [P4]: The system keeps a durable record of every draft (origin, comment, content, timestamps, outcome — pending, validated, validated then undone, rejected — and, at decision time, whether it was stale or edited before validation) that the owner can view and the AI can read; the drafts of a deleted study are deleted with it (FR55).
@@ -140,7 +140,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 
 **Correctness & Calculation Integrity (top priority)**
 - NFR-C1: The calculation engine is deterministic — identical inputs always produce identical outputs, bit-stable across runs and platforms.
-- NFR-C2: Engine output matches every bundled golden reference study (exact zoning/verdict; within ±0.5% on derived numerics, tolerance configurable).
+- NFR-C2: Engine output matches every bundled golden reference study (exact zoning/verdict; within ±0.5% on derived numerics — a fixed method default; the PRD marks "tolerance configurable" as superseded).
 - NFR-C3: Property-based invariants hold (zones ordered low<buy<hold<sell<high; U/D ≥ 0; capital-at-risk ≥ 0; FX round-trip A→B→A within 1e-6).
 - NFR-C4: FX is applied only at consolidation; per-currency study results are independent of the chosen reference currency.
 - NFR-C5: Engine + risk crate are gated in CI by golden-fixture and property tests (≥95% coverage of calc paths); a failing test blocks merge.
@@ -1089,7 +1089,7 @@ headless data model and access surface (8.2a–8.3) precede the binary (8.4) and
 > 8.0 wording list; new terms get a glossary entry; no new app output uses a banned verb (FR13); IO
 > failures render « indisponible » with their cause, never an empty-looking surface (checklist §1); a
 > refused action opens « Action refusée » (7.0 AC1); visual verification (DoD) on a temp dossier
-> copy seeded with `just mcp-seed` (Story 8.4).
+> copy — from 8.5a on, seeded with `just mcp-seed` (Story 8.4).
 
 ### Story 8.0: UX pass — AI-assistance surfaces
 
@@ -1125,9 +1125,13 @@ So that my thinking around a study lives beside it (and an AI note draft later h
 **Given** an open study
 **When** I add, edit or delete a note, through the dialog specified in 8.0
 **Then** the note is stored inside the study blob as `notes: Vec<Note{id, text, created_at, updated_at, ai_origin: Option<AiOrigin>}>` with `#[serde(default)]` — additive, no `user_version` migration; a study saved before this story opens unchanged with an empty note list (FR78, NFR-R3, arch A5)
+**And** this story defines the contract type `AiOrigin{draft_id, client, model, validated_at}` (arch A6), used by 8.2b
 **And** each note change is saved through the normal study upsert and appears in the study's history; a deleted note disappears from the study but remains readable in the study history (FR49, FR51, owner decision O6)
 **And** note-only history entries — identified by comparing consecutive snapshots with `notes` ignored (history rows carry no cause column) — are labelled as such and can be filtered out of the history view, so judgment changes stay readable (arch A12)
-**And** the contract `SCHEMA_VERSION` goes 1 → 2; the import accepts versions ≤ 2 (a v1 file reads with an empty note list) instead of strict equality; a build of version 1 refuses a version-2 export loudly; a single-study and a whole-dossier export/import round-trip preserves notes byte-identically, including their ids and timestamps (FR59, FR60, NFR-R5, arch A5)
+**And** the contract `SCHEMA_VERSION` goes 1 → 2, and every study save (so every history row) re-stamps `study.schema_version` to the current version, so both export envelopes carry it (arch A5)
+**And** the import accepts versions ≤ 2 (a v1 file reads with an empty note list) at every strict check that exists today — the single-study envelope (`contract/src/export.rs`), the journal envelope and each study record (`persistence/src/export.rs`) — and keeps the "newer than supported" rule on judgment rows; the new build re-imports its own whole-dossier export, including studies not saved since the bump
+**And** a test takes a study created before the bump, adds a note, exports it as a single study and as a dossier, and shows that a version-1 reader refuses both loudly; a re-stamped row is refused by an older build (`NewerRowSchema`), as intended
+**And** a single-study and a whole-dossier export/import round-trip preserves notes byte-identically, including their ids and timestamps (FR59, FR60, NFR-R5)
 **And** deleting a note asks for confirmation (UX-DR25) and is undoable within the session; notes are keyboard-operable (NFR-U2)
 **And** this story contains **no AI**: no MCP code, no draft, no AI label; `ai_origin` exists in the type but is always `None` here
 **And** a note text is plain owner text, not subject to the banned-verb gate (FR13 covers app-generated signals only)
@@ -1153,7 +1157,7 @@ So that every later story writes and reads drafts through one proven, versioned 
 **Then** the backup carries `ai_drafts` as-is, and the JSON export carries an additive `ai_drafts` array; the round-trip preserves every draft and every column (FR60, FR61, NFR-R5)
 **When** a study is deleted
 **Then** the drafts whose `study_id` or `created_study_id` is that study are deleted in the same transaction, like its judgment history; a pending draft *study* is untouched (FR55, owner decision O7)
-**And** a test asserts that no `core` or view-model code path reads `ai_drafts` (the engine-level metamorphic suite follows in 8.3).
+**And** a test asserts that no computation path — `core`, `report::form::build_snapshot`, zone and verdict derivation — reads `ai_drafts` (the metamorphic suite follows in 8.3); the inbox, reminder and record view models of 8.5a–8.7 read it by design.
 
 ### Story 8.2b: AI origin, staleness and decisions (headless)
 
@@ -1165,9 +1169,9 @@ So that a decision can never be half-applied, lost by a later save, or confused 
 
 **Given** the contract types
 **When** they are defined
-**Then** `DraftOrigin{client, model}` (a draft's submitter) and `AiOrigin{draft_id, client, model, validated_at}` (a validated value's origin) are distinct types; `Provenance` gains `#[serde(default)] ai_origin: Option<AiOrigin>` — **no new `Source` variant** — and each draftable `Judgment` field gains `#[serde(default)] ai_placed: Option<AiOrigin>`; `Note.ai_origin` is an `Option<AiOrigin>` (arch A6)
+**Then** `DraftOrigin{client, model}` (a draft's submitter) is added, distinct from `AiOrigin{draft_id, client, model, validated_at}` (a validated value's origin, defined in 8.1); `Provenance` gains `#[serde(default)] ai_origin: Option<AiOrigin>` — **no new `Source` variant** — and each draftable `Judgment` field gains `#[serde(default)] ai_placed: Option<AiOrigin>`; `Note.ai_origin` is an `Option<AiOrigin>` (arch A6)
 **And** the draftable fields are enumerated in one place: the study-grid cell fields, and the judgment fields except `current_price` and `ttm_eps` (owner decision D6), with each field's unit (percent fields as percent) and, for enum fields such as `forecast_low_option`, their variant names
-**And** the contract `SCHEMA_VERSION` goes 2 → 3 with the import accepting versions ≤ 3; an older build refuses an export carrying AI marks (owner decision D9)
+**And** the contract `SCHEMA_VERSION` goes 2 → 3 through the same re-stamp and relaxed checks as 8.1, with the import accepting versions ≤ 3; an older build refuses an export carrying AI marks, tested like 8.1 (owner decision D9)
 **When** a validated draft is applied
 **Then** it is an owner entry: `Source::Manual`, review tag `?` **set explicitly** in every case — also on an untagged cell, on a `✓` cell, and when the value is unchanged (owner decisions O5, D5) — reconciled exactly as a manual value (manual wins, provider preserved), covered by the reconciliation tests extended with an AI-origin case (FR17, FR20, FR22, FR74, NFR-R4)
 **And** the next owner edit of that cell clears `ai_origin`; **any** write to a judgment field clears its `ai_placed` (arch A6)
@@ -1176,9 +1180,9 @@ So that a decision can never be half-applied, lost by a later save, or confused 
 **Then** the draft reads as **stale** (computed on read); the fingerprint uses the explicit encoding of arch A7 — cell: normalised value, source, pending provider value (not timestamp or digest); judgment: field value + load-bearing inputs + `METHOD_VERSION` — and tests show that a refresh of the EPS history or a method change marks a judgment draft stale, a parked divergent provider value marks a cell draft stale, and a value-identical re-stamp does not (FR72)
 **And** a draft whose target no longer exists reads **target gone** and cannot be validated
 **When** the owner validates or rejects a draft
-**Then** the decision goes through the app's study state (owner decision D3): the draft is applied to the in-memory study (loaded if not open) and pushed on its undo stack; `persistence::decide_draft(study, draft_id, decision)` then writes the study upsert (with its history entry) and the draft's `status`, `decided_at`, `stale_at_decision`, `edited_before_validation` in **one** transaction, re-checking the fingerprint the owner confirmed inside it (a change since → refused, nothing written); the open study is reloaded; a crash injected between the writes leaves both unchanged (NFR-R2, arch A7, A8)
+**Then** the decision goes through the app's study state (owner decision D3): the target study is the open study — deciding a draft of another study opens it first, as the app has one undo history for the open study, reset on open — and the draft is applied to it and pushed on its undo stack; `persistence::decide_draft(study, draft_id, decision)` then writes the study upsert (with its history entry) and the draft's `status`, `decided_at`, `stale_at_decision`, `edited_before_validation` in **one** transaction, re-checking the fingerprint the owner confirmed inside it (a change since → refused, nothing written); the open study is refreshed from the dossier without resetting its undo history; a crash injected between the writes leaves both unchanged (NFR-R2, arch A7, A8)
 **And** a save of the in-memory study after a decision can never overwrite the applied value (lost-update test)
-**And** undoing a validation restores the prior study and sets the draft to `validated_undone` in one transaction (FR32, FR77)
+**And** undoing a validation restores the prior study and sets the draft to `validated_undone` in one transaction; redoing it re-applies the value and sets the draft back to `validated`, in one transaction too; the validation stays undoable while its study remains open (FR32, FR77, arch A8)
 **And** a validated, undone or rejected draft stays in `ai_drafts` with its outcome and decision facts (FR77).
 
 ### Story 8.3: `McpAccess` — the gated access surface (headless)
@@ -1209,7 +1213,7 @@ So that capability asymmetry and portfolio non-exposure are enforced by the SQLi
 **And** a test races a submission with `delete_study` and never leaves an orphan pending draft
 **Given** a restore of the dossier file
 **When** an MCP write runs at the same time
-**Then** restore first takes an exclusive SQLite lock on the live file and holds it until the rename, and the MCP write re-checks the file identity (device + inode) and `journal_id` inside its transaction and aborts on mismatch — no draft is lost silently and the restored file's sidecars are never deleted (NFR-R2, arch A11)
+**Then** restore first takes an exclusive SQLite lock on the live file and holds it until the rename, and the MCP write re-checks the file identity (the `same-file` crate's cross-platform `Handle`, NFR-X1) inside its transaction and aborts on mismatch — no draft is lost silently and the restored file's sidecars are never deleted (NFR-R2, arch A11)
 **And** the following CI suites pass (NFR-A1–A4):
 - **whole-surface non-exposure** — every `McpAccess` read, over a fixture dossier seeded with holdings, transactions, dividends and watchlist items carrying unique marker strings, returns none of those markers, no key and no configuration value — the resolved dossier identity (`journal_id` + path) excepted (NFR-A2, NFR-S3, NFR-S4);
 - **rejected writes** — every write path other than draft insert (study, cell, judgment, verdict, note, transaction, portfolio, watchlist, `UPDATE`/`DELETE` on `ai_drafts`, direct `journal_meta` update) is denied by the engine and logged; the dossier's bytes are unchanged (FR14, FR68 [P4], NFR-A1);
@@ -1227,7 +1231,7 @@ So that the AI can read my studies and drop drafts into my inbox — and nothing
 
 **Given** a separate binary crate `steadyinvest-mcp` (stdio, launched by the AI client, not network-exposed)
 **When** it serves a call
-**Then** it resolves the dossier **per call**: `--dossier <path>` if given, else the app config's `last_opened_path` (written by the app each time it opens a dossier — this story adds it), else the app's default dossier path — even when the app is closed; the path helper lives in a small shared module so the crate does not depend on `app` (owner decisions O3, D10, arch A10, NFR-S2)
+**Then** it resolves the dossier **per call**: `--dossier <path>` if given, else the app config's `last_opened_path` (written by the app each time it opens a dossier — this story adds it), else `journal_path` (an install not yet opened with the new build), else the app's default dossier path (`default_journal_path`, moved with the config-path helper into the shared module) — even when the app is closed; the path helper lives in a small shared module so the crate does not depend on `app` (owner decisions O3, D10, arch A10, NFR-S2)
 **And** a test shows that after a configured dossier is refused by name and the app runs on the default one, MCP serves the default one (the one the owner sees)
 **And** every MCP response names the dossier it read (`journal_id` + path), and every submit tool requires them back (O3, D10)
 **And** with no resolvable dossier, or a schema mismatch, it answers with a clear error and touches nothing
@@ -1278,12 +1282,13 @@ So that nothing enters my dossier without me.
 **Then** it takes **≤ 2 actions** and acts on that item only — there is **no bulk action** (FR74)
 **And** a validated value enters through `decide_draft` (8.2b) as an owner entry with review tag `?` and a visible AI origin; on a `✓` target it does **not** require un-validating first — the cell moves to `?` (FR74, FR17, FR20, owner decisions O5, D5)
 **And** the study grid shows the AI-origin mark on that cell as specified in 8.0 (client, model, validation date), my next edit of the cell clears it, and the history keeps it (FR17, FR51)
-**And** editing the proposed value before validating makes it my own entry: it is saved without AI origin, and the draft is recorded as validated with `edited_before_validation` (FR74, FR77)
+**And** editing the proposed value before validating makes it my own entry: it is saved without AI origin, with review tag `?` like any decision (owner decision D5, no un-validation needed on a `✓` cell), and the draft is recorded as validated with `edited_before_validation` (FR74, FR77)
+**And** deciding a draft of a study other than the open one opens that study first, and the inbox says so before the action (arch A8)
 **And** a stale draft can be rejected, or validated only after an explicit confirmation that names the changed target; if the target changes again after the confirmation, the decision is refused and the draft shown again (FR72, owner decision O4, arch A7)
 **And** a target-gone draft can only be rejected
 **And** a validated draft note becomes a study note carrying its AI origin (FR71, FR78)
 **And** a validated judgment draft writes `ai_placed` on its field; its chart rendering arrives in 8.6
-**And** undo after a validation restores the prior value and records the draft as `validated_undone` (FR32, FR77)
+**And** undo after a validation restores the prior value and records the draft as `validated_undone`; redo records it `validated` again (FR32, FR77)
 **And** a refused decision — dossier open read-only, write failure, study deleted or archived since the inbox was listed — opens « Action refusée » with the cause and changes nothing (7.0 AC1, FR58)
 **And** the Epic 8 posture AC holds.
 
@@ -1322,6 +1327,7 @@ So that the AI widens my search without a special path, and I can look back on w
 **Then** the ordinary create-study dialog opens prefilled with the proposal, and confirming it creates a new, empty study — 2 actions: *Valider* → *Créer* — which is **not** added to the watchlist; the draft is recorded `validated` with `created_study_id` in the same transaction (FR70, FR74, owner decision D2, arch A8)
 **And** the duplicate check runs again at that moment: if I created the same study (same identifier case-insensitively, same currency) by hand since, validation is refused with the existing study named (FR70)
 **And** cancelling the dialog leaves the draft pending
+**And** a draft-study validation is not on the undo stack: I reverse it by deleting the created study (with confirmation), which deletes its drafts, the draft study included (FR55, FR74, owner decision O7)
 **And** no provider call happens on validation; I fetch its data myself as for any study, and only then does its data become readable through MCP — an end-to-end test on a temp dossier covers submit → validate → (stubbed) owner fetch → MCP read, with no special step (FR76, NFR-A3)
 **And** a second draft study for the same security and currency is refused by MCP once the study exists (FR70)
 **Given** drafts in every status

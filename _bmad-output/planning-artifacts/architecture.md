@@ -1010,9 +1010,15 @@ and architecture decisions A1–A12 below are final._
 - **Export compatibility (D9):** `Study` tolerates unknown fields, so without a version change an
   older build would import notes and drop them silently (the #78 rule: "a field whose ABSENCE would
   be unsafe needs its own guard"). Story 8.1 therefore bumps the contract **`SCHEMA_VERSION` 1 → 2**:
-  an older build refuses the export loudly; the new build's import accepts versions **≤ current**
-  (a v1 file reads with the new fields defaulted) instead of today's strict equality, and study
-  blobs keep their own `schema_version`.
+  every study save (and so every history row) re-stamps `study.schema_version = SCHEMA_VERSION`
+  (today it is set only by `Study::new`), and both export envelopes carry the current version — so a
+  study created before the bump and given a note after it can no longer export, or sit in the
+  dossier, as version 1. An older build refuses such an export loudly, and refuses a re-stamped row
+  in the dossier (`NewerRowSchema`) — the intended outcome. The new build's import accepts versions
+  **≤ current** (a v1 file reads with the new fields defaulted) at every strict check that exists
+  today — the single-study envelope (`contract/src/export.rs`), the journal envelope and each
+  study record (`persistence/src/export.rs`) — and keeps the existing "newer than supported" rule on
+  judgment rows. `AiOrigin` (A6) is defined in Story 8.1, with the note type.
 - **Rationale:** export, MCP read and history snapshots come for free (O6: a deleted note stays in
   the study history). A note is study content, not an aggregated/queried entity.
 
@@ -1060,14 +1066,19 @@ and architecture decisions A1–A12 below are final._
 ### A8 — Applying a decision through the app state, atomically
 
 - **Decision (D3):** validation goes through the app's study state, never behind it. The draft is
-  applied to the in-memory study (loading it if it is not open) and pushed on its **undo stack**, then
+  applied to the in-memory study and pushed on its **undo stack** — the app keeps one undo history,
+  for the open study, reset when a study is opened, so validating a draft of another study first
+  **opens that study** (the inbox says so), and the validation stays undoable while it remains open;
+  then
   `persistence::decide_draft(study, draft_id, decision)` performs the study upsert (with its history
   snapshot) **and** the draft's status / `decided_at` / `stale_at_decision` /
   `edited_before_validation` update in **one transaction** with one `logical_version` bump; the open
-  study is then reloaded from the dossier. Undoing a validation restores the prior study and sets
-  the draft to `validated_undone` in one transaction. Rejection updates only the draft. A draft
+  study is then refreshed from the dossier **without** resetting its undo history. Undoing a
+  validation restores the prior study and sets the draft to `validated_undone` in one transaction;
+  redoing it re-applies the value and sets the draft back to `validated`, in one transaction too. Rejection updates only the draft. A draft
   study's validation opens the create-study dialog prefilled (D2); its confirmation creates the study
-  and sets `created_study_id` + `validated` in one transaction.
+  and sets `created_study_id` + `validated` in one transaction; it is not on the undo stack — the
+  owner reverses it by deleting the study, which deletes its drafts (O7).
 - **Rationale:** NFR-R2 — a crash can never leave a value applied with its draft still pending, or a
   draft marked validated with nothing applied; and no later save of a stale in-memory copy can
   silently overwrite an applied draft (lost update).
@@ -1092,12 +1103,15 @@ and architecture decisions A1–A12 below are final._
   **actually opened** — a `last_opened_path` the app writes to its config each time it opens a
   dossier. This differs from `journal_path` when a configured dossier was refused by name and the
   app runs on the default one (G3 M4 keeps `journal_path` on the refused dossier): MCP must follow
-  the dossier the owner sees. With neither, MCP uses the app's `default_journal_path`, like the app.
+  the dossier the owner sees. Until the app has written `last_opened_path` (an install not yet
+  opened with the new build), MCP falls back to `journal_path`, then to the app's default dossier
+  path (`default_journal_path`, `app/src/state/mod.rs`), like the app.
   Resolution happens **per call**, so a dossier switch in the app is followed without restarting the
   server; every response names the dossier (`journal_id` + resolved path), and every submission
   carries both and is refused on mismatch (D10) — the path tells a copy from its original, which the
   `journal_id` alone does not (`VACUUM INTO` backups and test copies keep it). The config-path helper
-  moves out of `app/src/config.rs` into a small shared module (depending only on `directories` +
+  (`app/src/config.rs`) and `default_journal_path` (`app/src/state/mod.rs`) move into a small shared
+  module (depending only on `directories` +
   serde) so `mcp` does not depend on `app`; it reads the config tolerantly (append-only
   `#[serde(default)]`).
 - **Rationale:** the owner's AI client must follow the dossier the owner actually uses, and a reply
@@ -1108,8 +1122,10 @@ and architecture decisions A1–A12 below are final._
 - **Decision:** `restore_journal_file` assumes every connection to the live file is closed — which
   only the single-instance lock guaranteed, and MCP does not take it. Restore therefore first takes an
   **exclusive SQLite lock** on the live file (`BEGIN EXCLUSIVE` with a busy wait) and holds it until
-  the rename; and every MCP write re-checks, inside its write transaction, that the file (device +
-  inode) and `journal_id` are the ones it opened, aborting otherwise.
+  the rename; and every MCP write re-checks, inside its write transaction, that the file at the
+  resolved path is still the one it opened — a cross-platform file identity (the `same-file` crate's
+  `Handle`: device + inode on Unix, volume serial + file index on Windows, NFR-X1), since the
+  `journal_id` alone does not tell a restored backup from the live file — aborting otherwise.
 - **Rationale:** otherwise a draft committed during a restore lands in the unlinked old file (lost
   silently), and its connection's close can delete the restored file's `-wal` by path.
 
