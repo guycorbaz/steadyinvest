@@ -442,6 +442,59 @@ Claude Opus 5.5 (claude-opus-5-5), 2026-09-27.
   6. The decision module is `#[cfg_attr(not(test), allow(dead_code))]` until its UI callers land
      (8.5a / 8.5b) — the `list_notice.rs` precedent. No `try_list_drafts` app wrapper yet (8.5a).
 
+### G3 review follow-up (2026-09-27)
+
+Three layers, no high. Applied (16 items):
+
+1. **Owner's edit (E1/F3)** — `Decision::ValidateEdited` carries an `EditedValue` already read by
+   `owner_edit`: the owner's number format (`typed_entry`: « 7,25 » under comma, « 1'234.5 » under
+   point), the grid's units (sales / pre-tax profit entered in millions, stored absolute — #117),
+   an option by name with its own refusal `MSG_VALUE_NOT_AN_OPTION`, a note normalized. A blank
+   edit is refused (emptying a proposal is a rejection). `parse_value` stays for AI text only.
+2. **Edit == proposal (E2)** — value equality (`7.50` = `7.5`, same option, same normalized note
+   text) → a plain validation: AI origin kept, `edited_before_validation = 0`.
+3. **History owner (B1/E3/F5)** — `push_step` drops a step of another study than the owner (a late
+   fetch result); `step()` refuses a step whose study is not the one asked; closing a study resets
+   the history (no owner); decisions check against the owner.
+4. **Refusal naming (F1/F2/E4/E5/B4)** — no study open → `MSG_NO_STUDY_OPEN`; another study open →
+   `MSG_DECISION_OTHER_STUDY` (« La proposition porte sur l'étude {ticker}, qui n'est pas ouverte
+   ; … »); a vanished draft → `MSG_DECISION_DRAFT_GONE`, or `MSG_DECISION_STUDY_GONE` with the
+   ticker when its study is gone. `decide_draft` now takes a `DraftRef { draft_id, study_id,
+   ticker }` so the ticker is known even then. A reference whose study disagrees with the stored
+   draft is internal (logged, plain save failure).
+5. **Wedged undo step (B2/E7)** — a draft step failing with `DraftStatusMismatch` /
+   `DraftNotFound` is dropped (not pushed back) with `MSG_UNDO_DRAFT_STEP_DROPPED`
+   (owner-pending); `DraftNotFound`'s kind is `Other`, never « introuvable ».
+6. **stale_at_decision (B3/E6)** — stale = base absent, target gone, or fingerprint differs (one
+   `is_stale`, used by the classifier and the rejection).
+7. **Third gone reason (F4)** — « le champ proposé ne peut pas faire l'objet d'une proposition »
+   (owner-pending), the raw key never echoed; covers non-draftable keys such as `current_price`.
+8. **ai_placed on a same-value write (F7) — lead default, owner-pending:** a write clears the mark
+   only when the value changes, so a no-op stays a no-op (no undo step, no snapshot). Arch A6 and
+   epics 8.2b say « any write that changes the field ».
+9. **F9** — `Journal::decide_draft` / `step_draft_decision` refuse a study other than the draft's
+   (`Error::DraftStudyMismatch`).
+10. **F6** — fingerprint test: a parked pending re-stamped with the same value is not stale.
+11. **B5** — the writer guard now scans app, persistence, report and ingestion for field
+    assignments, `&mut` borrows and `Judgment { .. }` functional updates.
+12. **F8 (owner-pending)** — a draft shown fresh whose target changed, or a study written meanwhile:
+    « L'étude a changé depuis la lecture de la proposition ; rien n'a été enregistré. »
+    (`MSG_DECISION_STUDY_CHANGED`); the §3.3 « encore changé » refusal stays for a confirmed stale draft.
+13. **E9** — `parse_value` bounds AI numbers: `|value| < 10^15`, at most 10 decimals (trailing zeros
+    free) → `DraftValueProblem::OutOfRange`. No owner-entry bound exists to align with. Imported AI
+    marks may carry a `draft_id` absent from the dossier — accepted (not in production).
+14. **E8** — accepted (not in production).
+15. **Dead code** — `#[cfg_attr(not(test), expect(dead_code))]` / `expect(unused_imports)` on the
+    module and the re-export, `expect(dead_code)` on `DRAFT_GONE_REASONS`.
+16. **F10** — arch A6 / epics 8.2b describe the `AiPlaced` sidecar (nine slots).
+
+**Posture deltas (G3):** `USER_FACING_MESSAGES` 236 → 241 (+5: other study, draft gone, study
+changed, not an option, undo step dropped); `DRAFT_GONE_REASONS` 3 (reworded, count unchanged);
+persistence error samples 27 → 28 (`DraftStudyMismatch`). Tests: 1258 passed, 0 failed, 2 ignored.
+
+**Owner-pending (lead defaults, for Guy):** the five story questions; item 5 wording; item 7
+wording; item 8 (mark kept on a same-value write); item 12 wording; the « déjà traitée » refusal.
+
 ### File List
 
 - `contract/src/ai.rs` — `DraftOrigin`.
@@ -476,3 +529,4 @@ Claude Opus 5.5 (claude-opus-5-5), 2026-09-27.
 
 - 2026-09-27 — Story 8.2b implemented (commits 47984ee contract, 82b514d persistence, 8ff4700 app,
   + tests/record); status → review.
+- 2026-09-27 — G3 review follow-up applied (16 items); status stays review.

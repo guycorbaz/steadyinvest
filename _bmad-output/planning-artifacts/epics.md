@@ -1169,11 +1169,11 @@ So that a decision can never be half-applied, lost by a later save, or confused 
 
 **Given** the contract types
 **When** they are defined
-**Then** `DraftOrigin{client, model}` (a draft's submitter) is added, distinct from `AiOrigin{draft_id, client, model, validated_at}` (a validated value's origin, defined in 8.1); `Provenance` gains `#[serde(default)] ai_origin: Option<AiOrigin>` — **no new `Source` variant** — and each draftable `Judgment` field gains `#[serde(default)] ai_placed: Option<AiOrigin>`; `Note.ai_origin` is an `Option<AiOrigin>` (arch A6)
+**Then** `DraftOrigin{client, model}` (a draft's submitter) is added, distinct from `AiOrigin{draft_id, client, model, validated_at}` (a validated value's origin, defined in 8.1); `Provenance` gains `#[serde(default)] ai_origin: Option<AiOrigin>` — **no new `Source` variant** — and `Judgment` gains one additive sidecar `ai_placed: AiPlaced` holding an `Option<AiOrigin>` slot per draftable judgment field (nine slots); `Note.ai_origin` is an `Option<AiOrigin>` (arch A6)
 **And** the draftable fields are enumerated in one place: the study-grid cell fields, and the judgment fields except `current_price` and `ttm_eps` (owner decision D6), with each field's unit (percent fields as percent) and, for enum fields such as `forecast_low_option`, their variant names
 **When** a validated draft is applied
 **Then** it is an owner entry: `Source::Manual`, review tag `?` **set explicitly** in every case — also on an untagged cell, on a `✓` cell, and when the value is unchanged (owner decisions O5, D5) — reconciled exactly as a manual value (manual wins, provider preserved), covered by the reconciliation tests extended with an AI-origin case (FR17, FR20, FR22, FR74, NFR-R4)
-**And** the next owner edit of that cell clears `ai_origin`; **any** write to a judgment field clears its `ai_placed` (arch A6)
+**And** the next owner edit of that cell clears `ai_origin`; **any** write that changes a judgment field clears its `ai_placed` slot — a value-identical write stays a no-op (arch A6; Story 8.2b G3, owner-pending)
 **Given** a pending cell or judgment draft
 **When** `contract::draft_fingerprint(study, target)` no longer matches `base_fingerprint`
 **Then** the draft reads as **stale** (computed on read); the fingerprint uses the explicit encoding of arch A7 — cell: normalised value, source, pending provider value (not timestamp or digest); judgment: field value + load-bearing inputs + `METHOD_VERSION` — and tests show that a refresh of the EPS history or a method change marks a judgment draft stale, a parked divergent provider value marks a cell draft stale, and a value-identical re-stamp does not (FR72)

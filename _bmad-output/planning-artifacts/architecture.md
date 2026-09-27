@@ -1025,9 +1025,12 @@ and architecture decisions A1–A13 below are final._
   explicitly** by the decision (D5 — a documented exception to the manual-edit rail, which keeps `✓`
   on an unchanged value and never promotes `None`), reconciled as manual (FR22/FR74; O5). Its AI
   origin is carried by `#[serde(default)] ai_origin: Option<AiOrigin>` on `Provenance` — cleared by
-  the next owner edit, which replaces the provenance — and by `#[serde(default)] ai_placed:
-  Option<AiOrigin>` on each draftable `Judgment` field, which drives the chart's "placed by AI" +
-  validation-date annotation (FR33) and is cleared by **any** write to that field. Refresh never
+  the next owner edit, which replaces the provenance — and by one sidecar on `Judgment`,
+  `#[serde(default, skip_serializing_if = "AiPlaced::is_empty")] ai_placed: AiPlaced`, holding one
+  `Option<AiOrigin>` slot per draftable judgment field (nine slots — not `current_price` /
+  `ttm_eps`), which drives the chart's "placed by AI" + validation-date annotation (FR33); a slot is
+  cleared by **any write that changes** its field (a value-identical write stays a no-op — Story 8.2b
+  G3, owner-pending). Refresh never
   writes a draftable judgment field (D6), so the mark cannot survive a provider overwrite.
 - **Compatibility:** additive fields only, as A5 (D9 withdrawn).
 - **Rationale:** a new `Source` variant would ripple through reconciliation, the review tri-state
