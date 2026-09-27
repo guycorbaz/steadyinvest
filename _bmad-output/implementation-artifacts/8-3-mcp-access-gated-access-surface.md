@@ -1,6 +1,6 @@
 # Story 8.3: `McpAccess` — the gated access surface (headless)
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -106,83 +106,83 @@ rule (no compatibility work — memory 2026-09-27).
 
 ## Tasks / Subtasks
 
-- [ ] **T1 — Dependencies (AC 5, 9, 13)**
-  - [ ] T1.1 Workspace `Cargo.toml`: `rusqlite = { version = "0.40", features = ["bundled", "hooks"] }`
+- [x] **T1 — Dependencies (AC 5, 9, 13)**
+  - [x] T1.1 Workspace `Cargo.toml`: `rusqlite = { version = "0.40", features = ["bundled", "hooks"] }`
         (the authorizer is behind `hooks` in 0.40.1). Confirm the lockfile changes only by features.
-  - [ ] T1.2 `persistence/Cargo.toml`: add `same-file = "1.0.6"` (already in `Cargo.lock` via
+  - [x] T1.2 `persistence/Cargo.toml`: add `same-file = "1.0.6"` (already in `Cargo.lock` via
         `walkdir`; licence `Unlicense/MIT`, both allowed by `deny.toml`). Add `steadyinvest-report`
         and `steadyinvest-core` as **dev-dependencies** only (AC 12), never `[dependencies]`.
-  - [ ] T1.3 `cargo deny check` green.
-- [ ] **T2 — Module skeleton (AC 1, 3, 11)**
-  - [ ] T2.1 New `persistence/src/mcp_access.rs`; `lib.rs` exports `McpAccess` and its public types
+  - [x] T1.3 `cargo deny check` green.
+- [x] **T2 — Module skeleton (AC 1, 3, 11)**
+  - [x] T2.1 New `persistence/src/mcp_access.rs`; `lib.rs` exports `McpAccess` and its public types
         (`DossierIdentity`, `McpStudyRead`, `Page`, `DraftSubmission`, `SubmissionRefusal`,
         `McpDenial`) — no connection type in any public signature.
-  - [ ] T2.2 `McpAccess::at(path)` stores the **resolved** path (`journal::resolved_path`) and nothing
+  - [x] T2.2 `McpAccess::at(path)` stores the **resolved** path (`journal::resolved_path`) and nothing
         else; every method opens its own connection(s) and drops them before returning.
-  - [ ] T2.3 Open helper: `Connection::open_with_flags(path, READ_ONLY | NO_MUTEX)` for reads,
+  - [x] T2.3 Open helper: `Connection::open_with_flags(path, READ_ONLY | NO_MUTEX)` for reads,
         `READ_WRITE | NO_MUTEX` (never `CREATE`) for the draft connection; then `busy_timeout = 5000`
         and `foreign_keys = ON`; then the version gate (`migrations::user_version` vs
         `migrations::latest_version(REGISTRY)`) → `Error::McpSchemaMismatch { file, supported }`;
         then install the authorizer. Never `journal_mode`, never `migrations::run_pending`, never
         `acquire_lock`.
-- [ ] **T3 — Authorizers (AC 4, 5)**
-  - [ ] T3.1 One `fn read_policy(ctx: AuthContext) -> Authorization` and one `draft_policy`, pure and
+- [x] **T3 — Authorizers (AC 4, 5)**
+  - [x] T3.1 One `fn read_policy(ctx: AuthContext) -> Authorization` and one `draft_policy`, pure and
         unit-tested on synthetic `AuthContext`s (every `AuthAction` variant; `#[non_exhaustive]` →
         the wildcard arm is **Deny**).
-  - [ ] T3.2 Table sets as `const` slices beside the schema: `MCP_READABLE_TABLES` (`studies`,
+  - [x] T3.2 Table sets as `const` slices beside the schema: `MCP_READABLE_TABLES` (`studies`,
         `judgments`, `journal_meta`, `ai_drafts`), `MCP_DENIED_TABLES` (the six portfolio / cache
         tables), SQLite internals by name (`sqlite_master`, `sqlite_schema`, `sqlite_sequence`,
         `sqlite_temp_master`). Export the trigger name from `schema.rs` as
         `pub(crate) const DRAFT_TRIGGER: &str = "trg_ai_drafts_bump_logical_version"` and use it in
         both the DDL doc and the policy (no second spelling).
-  - [ ] T3.3 Draft policy: `Insert { table_name: "ai_drafts" }` → Allow; `Update { table_name:
+  - [x] T3.3 Draft policy: `Insert { table_name: "ai_drafts" }` → Allow; `Update { table_name:
         "journal_meta", column_name: "logical_version" }` with `ctx.accessor == Some(DRAFT_TRIGGER)`
         → Allow; `Read` on the allowlist (the trigger's own read of `journal_meta` included) → Allow;
         `Select`, `Function`, `Transaction` (BEGIN / COMMIT / ROLLBACK), `Savepoint`, `Recursive` →
         Allow; everything else → Deny.
-  - [ ] T3.4 Denials are recorded: the authorizer closure pushes an `McpDenial { action, object }`
+  - [x] T3.4 Denials are recorded: the authorizer closure pushes an `McpDenial { action, object }`
         into an `Arc<Mutex<Vec<_>>>` owned by the call; a statement that fails preparation with
         `SQLITE_AUTH` is mapped to `Error::McpDenied { denials }` (typed, carrying the list).
-- [ ] **T4 — Read methods (AC 2, 6)**
-  - [ ] T4.1 `identity() -> DossierIdentity { journal_id, path }`.
-  - [ ] T4.2 `list_studies(page) -> Paged<StudySummary>` (reuse the existing summary shape; add
+- [x] **T4 — Read methods (AC 2, 6)**
+  - [x] T4.1 `identity() -> DossierIdentity { journal_id, path }`.
+  - [x] T4.2 `list_studies(page) -> Paged<StudySummary>` (reuse the existing summary shape; add
         `LIMIT/OFFSET`, a hard cap such as 200 per page).
-  - [ ] T4.3 `read_study(id) -> Option<McpStudyRead { study, status }>`; `read_history(id, page)`
+  - [x] T4.3 `read_study(id) -> Option<McpStudyRead { study, status }>`; `read_history(id, page)`
         (snapshots, newest first, bounded); `list_drafts(filter, page)` (by study / status).
-  - [ ] T4.4 Each read method runs in one `BEGIN DEFERRED` … `COMMIT` and parses through the same
+  - [x] T4.4 Each read method runs in one `BEGIN DEFERRED` … `COMMIT` and parses through the same
         row mappers as `Journal` (share the private helpers; do not duplicate SQL).
-- [ ] **T5 — Submission (AC 7, 8, 9, 11)**
-  - [ ] T5.1 `DraftSubmission { id, created_at, kind, study_id, security_ticker, native_currency,
+- [x] **T5 — Submission (AC 7, 8, 9, 11)**
+  - [x] T5.1 `DraftSubmission { id, created_at, kind, study_id, security_ticker, native_currency,
         company_name, target, proposed_value, note_text, comment, origin: DraftOrigin, dossier:
         DossierIdentity, method_version }`.
-  - [ ] T5.2 `submit_draft(sub) -> Result<Uuid, SubmitError>` where `SubmitError` is
+  - [x] T5.2 `submit_draft(sub) -> Result<Uuid, SubmitError>` where `SubmitError` is
         `Refused(SubmissionRefusal)` or `Failed(Error)`. `SubmissionRefusal` is an enum, one variant
         per code of AC 7 plus `DossierReplaced`, each carrying the data its message needs (8.4 renders
         the French text); `code(&self) -> &'static str` returns the stable snake_case code.
-  - [ ] T5.3 Order inside the `IMMEDIATE` transaction: file identity (`same_file::Handle::from_path`
+  - [x] T5.3 Order inside the `IMMEDIATE` transaction: file identity (`same_file::Handle::from_path`
         vs the handle taken before `BEGIN`) → dossier identity → blanks → identifier → study exists →
         field / year / value → pending target → duplicate study → build `DraftPayload` (version 1,
         `base_fingerprint` for cell / judgment) → `check_payload` → `INSERT` → `COMMIT`.
-  - [ ] T5.4 Duplicate study: `SELECT id, payload FROM studies WHERE lower(security_ticker) =
+  - [x] T5.4 Duplicate study: `SELECT id, payload FROM studies WHERE lower(security_ticker) =
         lower(?1)`, then compare `native_currency` in Rust; pending draft studies: `SELECT … FROM
         ai_drafts WHERE kind = 'study' AND status = 'pending' AND lower(security_ticker) = lower(?1)
         AND native_currency = ?2`. Archived studies count as existing (question 1, default).
-  - [ ] T5.5 Pending target (D4): parse the payloads of the study's pending cell / judgment drafts and
+  - [x] T5.5 Pending target (D4): parse the payloads of the study's pending cell / judgment drafts and
         compare `(field, fiscal_year)`; note drafts are exempt (each creates a new note — question
         2, default).
-  - [ ] T5.6 Blank rule: move the 8.1 "whitespace or Unicode Cf only" predicate from
+  - [x] T5.6 Blank rule: move the 8.1 "whitespace or Unicode Cf only" predicate from
         `app/src/state/notes.rs` into `contract` (e.g. `contract::text::is_blank`) and use it in both
         places — one rule, no copy.
-- [ ] **T6 — Restore lock (AC 9)**
-  - [ ] T6.1 `restore_journal_file`: before the copy, open the live file read-write (if it exists),
+- [x] **T6 — Restore lock (AC 9)**
+  - [x] T6.1 `restore_journal_file`: before the copy, open the live file read-write (if it exists),
         `busy_timeout`, `BEGIN EXCLUSIVE`; keep that connection until after the rename; then drop it
         and remove the live sidecars as today. Unix: rename while holding the lock. Windows: a file
         open by our own connection cannot be replaced — release just before the rename and rely on the
         MCP identity re-check (document the residual window, Dev Notes §4).
-  - [ ] T6.2 Test: a draft submission blocked behind the restore's exclusive lock completes after the
+  - [x] T6.2 Test: a draft submission blocked behind the restore's exclusive lock completes after the
         swap with `dossier_replaced`, and the restored file carries no draft from it.
-- [ ] **T7 — Suites (AC 4, 5, 8, 10, 12)** — see Testing requirements.
-- [ ] **T8 — Record & posture (AC 13)** — new `Error` variants added to the persistence error-sample
+- [x] **T7 — Suites (AC 4, 5, 8, 10, 12)** — see Testing requirements.
+- [x] **T8 — Record & posture (AC 13)** — new `Error` variants added to the persistence error-sample
       inventory with the delta stated; story record; sprint-status → review.
 
 ## Dev Notes
@@ -340,10 +340,104 @@ the data** of each refusal; 8.4 owns the French rendering, its posture scan and 
 
 ### Agent Model Used
 
+Claude Opus 5.5 (claude-opus-5-5)
+
 ### Debug Log References
+
+- `VACUUM INTO` passes statement **preparation**: the ATTACH behind it is authorized when the
+  statement runs. The rejected-writes suite therefore EXECUTES each statement (not only prepares
+  it); `VACUUM` and `VACUUM INTO` are then denied by the engine and no file is written. The module
+  doc says "at preparation (or, for the ATTACH behind `VACUUM`, when it runs)".
+- The bundled SQLite enables foreign keys by default: the marker seeding of the non-exposure suite
+  turns them off on its raw connection (marker rows, not a coherent portfolio).
+- The 8.2b judgment-writer guard matched `DraftTarget::Judgment { .. }` (a `matches!` pattern) as a
+  functional `Judgment { .. }` update — the pattern spells `{ field: _ }` instead.
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed — comprehensive developer guide created.
+- `McpAccess` (`persistence/src/mcp_access.rs`): typed methods only (`at`, `path`, `identity`,
+  `list_studies`, `read_study`, `read_history`, `list_drafts`, `submit_draft`); no public
+  signature yields a `Connection` or a `Journal`. Per-call gated connections: flags (never
+  `CREATE`), `busy_timeout` + `foreign_keys` (the journal's own helper), the `user_version`
+  equality gate (`Error::McpSchemaMismatch`, newer = `NewerData`), THEN the authorizer.
+- Authorizers: `read_policy` (allowlist `MCP_READABLE_TABLES` + SQLite catalogue; `Select`,
+  `Function`, `Transaction`, `Recursive`) and `draft_policy` (+ top-level `INSERT` into
+  `ai_drafts`, + `UPDATE journal_meta.logical_version` only with accessor `DRAFT_TRIGGER`);
+  wildcard = Deny, never Ignore. Denials are recorded per call and returned as
+  `Error::McpDenied { denials }` (action + object) for the 8.4 log.
+- `schema.rs`: `DRAFT_TRIGGER` (the v8 DDL now formats it — same text), `MCP_READABLE_TABLES`,
+  `MCP_DENIED_TABLES`, `SQLITE_INTERNAL_TABLES`; a test classifies every table of the latest
+  schema.
+- Reads: one short `DEFERRED` transaction per call; lists paged (`Page`, `Paged`, `MAX_PAGE` 200).
+  `studies.rs` gained connection-level readers (`parse_study_row`, `read_study_in`,
+  `study_status_in`, `list_studies_in`) that `Journal` now delegates to — one parse, one SQL.
+- Submissions: one `BEGIN IMMEDIATE`; order: file identity (`same_file::Handle` taken at open vs
+  the path now → `dossier_replaced`) → dossier identity (D10) → blank comment / origin
+  (`contract::is_blank`) → per kind: draft study (identifier rule, D2 duplicate incl. archived
+  studies, D8 pending draft study, both compared with the app's `same_ticker` rule), note (study
+  exists, blank text), cell / judgment (study exists, `DraftField::of_target` + kind match, year in
+  study, `parse_value`, D4 one pending per target, `draft_fingerprint` with the caller's method
+  version) → `check_payload` (shape rule) → INSERT. The row's `security_ticker` for a note / cell /
+  judgment draft is the stored study's, never the AI's spelling. Ids, times and method version are
+  the caller's (ADD15).
+- Restore (A11): `restore_journal_file` takes an exclusive SQLite lock on the live file (5 s busy
+  wait) held across the copy and the rename (Unix; released just before the rename on Windows —
+  documented residual window); a lock still held refuses the restore by name, the live file
+  untouched. Nothing to lock (no file, not a database, write-protected) → the swap proceeds as
+  before.
+- Metamorphic suite (AC 12) lives in the app crate (`viewmodel/verify.rs`), where every golden
+  fixture converts to a contract `Study` (`study_from_golden`, factored out of `demo_study`): 11
+  fixtures × pending drafts of every kind → identical `build_snapshot`.
+- Tests: 9 unit (policies, rejected writes on both connections with bytes unchanged, table
+  classification, counter bumped only by the trigger, restore races) + 14 integration + 1 app
+  metamorphic + 2 contract (`is_blank`). Workspace: 1284 passed, 0 failed, 2 ignored (the corpus
+  generators). clippy `-D warnings`, `fmt --check`, `cargo deny check` green.
+- Posture: persistence error samples 28 → 31 (+3: `McpSchemaMismatch`, `McpDenied`,
+  `McpInvalidCall`). No `@tr` / `MSG_*` change, no `SCHEMA_VERSION` bump, no migration.
+
+### Deviations
+
+- **T1.2 dev-dependencies**: `persistence` did NOT gain `report` / `core` dev-dependencies — the
+  golden fixtures convert to a `Study` only in the app crate, so the metamorphic suite (AC 12) runs
+  there (the story allowed it: "if no mapping exists, … state it").
+- **Two refusal codes beyond §3.3**: `value_out_of_range` (the 8.2b proposal bounds) and
+  `empty_note_text` (a blank note draft) — 8.4 renders their French messages.
+- **`Error::McpInvalidCall`**: a malformed call (a kind without the data it needs, extraneous
+  fields, a `created_at` that is not RFC3339 UTC, a target missing) is a caller (MCP server)
+  failure, not an AI refusal.
+
+### Decisions for Guy (owner-pending; defaults applied)
+
+1. Archived studies count as existing for a draft study (`study_exists`). Default: yes.
+2. Several pending note drafts on one study are allowed (D4 is per cell / judgment target).
+   Default: allowed.
+3. Windows restore window (A11): the lock is released just before the rename; documented, not
+   closed. Default: accept.
+4. New codes `value_out_of_range`, `empty_note_text` (French messages in 8.4).
+5. A note / cell / judgment draft on an **archived** study is accepted at submission (the decision
+   rail refuses archived studies by name — 8.2b); a blank proposed company name is stored as
+   absent.
+6. Restore skips the lock when the live file is not a database or is write-protected (no MCP write
+   can be in flight there), and refuses by name when a write holds it past 5 s.
 
 ### File List
+
+- `Cargo.toml` (rusqlite `hooks`; `same-file` workspace dep), `Cargo.lock`
+- `contract/src/text.rs` (new), `contract/src/lib.rs`
+- `app/src/state/notes.rs` (blank rule from the contract)
+- `app/src/viewmodel/verify.rs` (`study_from_golden`; metamorphic suite)
+- `persistence/Cargo.toml`, `persistence/src/lib.rs`
+- `persistence/src/mcp_access.rs` (new)
+- `persistence/src/schema.rs` (`DRAFT_TRIGGER`, table sets)
+- `persistence/src/studies.rs` (connection-level readers)
+- `persistence/src/drafts.rs` (row mappers `pub(crate)`; `study_status` delegates)
+- `persistence/src/journal.rs` (two helpers `pub(crate)`)
+- `persistence/src/restore.rs` (exclusive lock across the swap)
+- `persistence/src/error.rs` (3 variants, posture inventory 31)
+- `persistence/tests/mcp_access.rs` (new)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+
+### Change Log
+
+- 2026-09-28 — Story 8.3 implemented (dev-story); status → review.
