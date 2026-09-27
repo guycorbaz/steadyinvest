@@ -8679,3 +8679,1002 @@ fn note_text_is_normalised_and_invisible_only_text_is_empty() {
         "ligne 1\nligne 2"
     );
 }
+
+// ── Story 8.2b — AI-draft decisions through the app state ──
+
+mod drafts_8_2b {
+    use super::*;
+    use steadyinvest_contract::{DraftKind, DraftPayload, DraftTarget, draft_fingerprint};
+
+    const TS: &str = "2026-09-27T10:00:00Z";
+
+    /// A state with one study (grid 2022–2024 from a provider fetch) whose undo history it owns.
+    fn decision_state(dir: &TempDir) -> (JournalState, Uuid) {
+        let mut state = undo_state(dir, 0x82B, TS);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_for(&[2022, 2023, 2024]))
+            .unwrap();
+        state.reset_undo_for(id);
+        (state, id)
+    }
+
+    fn raw(state: &JournalState) -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open(state.path().unwrap()).unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        conn
+    }
+
+    fn fp(state: &JournalState, id: Uuid, target: &DraftTarget) -> Option<String> {
+        draft_fingerprint(
+            &state.get_study(id).unwrap(),
+            target,
+            steadyinvest_core::METHOD_VERSION,
+        )
+    }
+
+    /// Plant one pending draft by raw SQL (the MCP inserter is Story 8.3's).
+    fn plant(
+        state: &JournalState,
+        n: u128,
+        kind: &str,
+        study: Option<Uuid>,
+        payload: &DraftPayload,
+    ) -> Uuid {
+        let id = Uuid::from_u128(n);
+        raw(state)
+            .execute(
+                "INSERT INTO ai_drafts
+                     (id, kind, study_id, security_ticker, native_currency, status, created_at,
+                      decided_at, comment, origin_client, origin_model, stale_at_decision,
+                      edited_before_validation, created_study_id, payload)
+                 VALUES (?1, ?2, ?3, 'NESN', ?4, 'pending', '2026-09-27T09:00:00Z', NULL,
+                         'Un commentaire.', 'claude-code', 'claude-opus-5-5', NULL, NULL, NULL,
+                         ?5)",
+                rusqlite::params![
+                    id.to_string(),
+                    kind,
+                    study.map(|s| s.to_string()),
+                    (kind == "study").then_some("CHF"),
+                    serde_json::to_string(payload).unwrap()
+                ],
+            )
+            .unwrap();
+        id
+    }
+
+    fn cell_target(year: i32, field: &str) -> DraftTarget {
+        DraftTarget::Cell {
+            fiscal_year: year,
+            field: field.to_string(),
+        }
+    }
+
+    fn judgment_target(field: &str) -> DraftTarget {
+        DraftTarget::Judgment {
+            field: field.to_string(),
+        }
+    }
+
+    fn value_payload(target: DraftTarget, value: &str, base: Option<String>) -> DraftPayload {
+        DraftPayload {
+            version: steadyinvest_contract::DRAFT_PAYLOAD_VERSION,
+            target: Some(target),
+            proposed_value: Some(value.to_string()),
+            note_text: None,
+            company_name: None,
+            base_fingerprint: base,
+        }
+    }
+
+    fn note_payload(text: &str) -> DraftPayload {
+        DraftPayload {
+            version: steadyinvest_contract::DRAFT_PAYLOAD_VERSION,
+            target: None,
+            proposed_value: None,
+            note_text: Some(text.to_string()),
+            company_name: None,
+            base_fingerprint: None,
+        }
+    }
+
+    /// Plant a fresh cell / judgment draft against the study as stored now.
+    fn plant_value(
+        state: &JournalState,
+        n: u128,
+        id: Uuid,
+        target: DraftTarget,
+        value: &str,
+    ) -> Uuid {
+        let kind = match target {
+            DraftTarget::Cell { .. } => "cell",
+            DraftTarget::Judgment { .. } => "judgment",
+        };
+        let base = fp(state, id, &target);
+        plant(
+            state,
+            n,
+            kind,
+            Some(id),
+            &value_payload(target, value, base),
+        )
+    }
+
+    type Facts = (String, Option<i64>, Option<i64>);
+
+    fn facts(state: &JournalState, draft: Uuid) -> Facts {
+        raw(state)
+            .query_row(
+                "SELECT status, stale_at_decision, edited_before_validation FROM ai_drafts
+                  WHERE id = ?1",
+                rusqlite::params![draft.to_string()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap()
+    }
+
+    fn money(s: &str) -> Money {
+        Money::from(Decimal::from_str_exact(s).unwrap())
+    }
+
+    fn dref(id: Uuid, draft: Uuid) -> DraftRef {
+        DraftRef {
+            draft_id: draft,
+            study_id: Some(id),
+            ticker: "NESN".to_string(),
+        }
+    }
+
+    fn validate() -> Decision {
+        Decision::Validate {
+            seen_fingerprint: None,
+        }
+    }
+
+    // AC 3 — a cell validation is an owner entry, `?` in every case, with a visible AI origin.
+    #[test]
+    fn a_cell_validation_on_a_validated_cell_with_the_same_value_lands_on_to_review() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let eps_now = state.get_study(id).unwrap().years[2].eps.value;
+        state
+            .set_review(id, 2, entry::FIELD_EPS, Review::Validated)
+            .unwrap();
+        state.reset_undo_for(id);
+        let draft = plant_value(
+            &state,
+            1,
+            id,
+            cell_target(2024, "eps"),
+            &eps_now.unwrap().to_string(),
+        );
+        state
+            .decide_draft(&dref(id, draft), validate())
+            .expect("validates");
+        let cell = state.get_study(id).unwrap().years[2].eps.clone();
+        assert_eq!(cell.value, eps_now);
+        assert_eq!(cell.source, Source::Manual);
+        assert_eq!(cell.review, Review::ToReview, "D5: never ✓ from a draft");
+        let origin = cell.provenance.ai_origin.expect("AI origin visible");
+        assert_eq!(origin.draft_id, draft);
+        assert_eq!(origin.client, "claude-code");
+        assert_eq!(origin.validated_at.0, TS);
+        assert_eq!(facts(&state, draft), ("validated".into(), Some(0), Some(0)));
+        assert_eq!(state.undo_depth(), 1, "a validation is undoable");
+    }
+
+    #[test]
+    fn a_cell_validation_materializes_an_untouched_optional_slot() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        assert!(
+            state.get_study(id).unwrap().years[1]
+                .dividend_per_share
+                .is_none()
+        );
+        let draft = plant_value(
+            &state,
+            2,
+            id,
+            cell_target(2023, "dividend_per_share"),
+            "1.25",
+        );
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        let cell = state.get_study(id).unwrap().years[1]
+            .dividend_per_share
+            .clone()
+            .expect("materialized");
+        assert_eq!(cell.value, Some(money("1.25")));
+        assert_eq!(cell.review, Review::ToReview);
+        assert_eq!(cell.coverage, Coverage::Present);
+        assert!(cell.provenance.ai_origin.is_some());
+    }
+
+    // AC 4 — the owner's next value edit clears the cell's AI origin; a ✓ toggle keeps it.
+    #[test]
+    fn the_owner_s_next_edit_clears_a_cell_s_ai_origin_but_a_review_toggle_keeps_it() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 3, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        state
+            .set_review(id, 2, entry::FIELD_EPS, Review::Validated)
+            .unwrap();
+        assert!(
+            state.get_study(id).unwrap().years[2]
+                .eps
+                .provenance
+                .ai_origin
+                .is_some()
+        );
+        state
+            .set_review(id, 2, entry::FIELD_EPS, Review::ToReview)
+            .unwrap();
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("8")))
+            .unwrap();
+        assert!(
+            state.get_study(id).unwrap().years[2]
+                .eps
+                .provenance
+                .ai_origin
+                .is_none()
+        );
+    }
+
+    // AC 3 / 4 — a judgment validation sets the field and its mark; any write clears the mark.
+    #[test]
+    fn a_judgment_validation_places_the_field_and_any_write_clears_its_mark() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 4, id, judgment_target("judged_avg_low_pe"), "11.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        let j = state.get_study(id).unwrap().judgment;
+        assert_eq!(j.judged_avg_low_pe, Some(money("11.5")));
+        assert_eq!(j.ai_placed.judged_avg_low_pe.unwrap().draft_id, draft);
+        // G3 F7 (lead default): a value-identical write keeps the mark and stays a no-op.
+        let depth = state.undo_depth();
+        state
+            .set_judgment_field(id, "low_pe", Some(money("11.50")))
+            .unwrap();
+        assert!(!state.get_study(id).unwrap().judgment.ai_placed.is_empty());
+        assert_eq!(state.undo_depth(), depth, "no phantom undo step");
+        state
+            .set_judgment_field(id, "low_pe", Some(money("12")))
+            .unwrap();
+        assert!(state.get_study(id).unwrap().judgment.ai_placed.is_empty());
+
+        let opt = plant_value(
+            &state,
+            5,
+            id,
+            judgment_target("forecast_low_option"),
+            "recent_severe_low",
+        );
+        state.decide_draft(&dref(id, opt), validate()).unwrap();
+        let j = state.get_study(id).unwrap().judgment;
+        assert_eq!(j.forecast_low_option, ForecastLowOption::RecentSevereLow);
+        assert!(j.ai_placed.forecast_low_option.is_some());
+        state
+            .set_forecast_low_option(id, ForecastLowOption::RecentSevereLow)
+            .unwrap();
+        assert!(
+            state
+                .get_study(id)
+                .unwrap()
+                .judgment
+                .ai_placed
+                .forecast_low_option
+                .is_some(),
+            "re-selecting the same option keeps the mark"
+        );
+        state
+            .set_forecast_low_option(id, ForecastLowOption::DividendSupported)
+            .unwrap();
+        assert!(state.get_study(id).unwrap().judgment.ai_placed.is_empty());
+    }
+
+    // AC 3 / 9 — a note draft appends a note with its origin; edited, it is the owner's own.
+    #[test]
+    fn a_note_validation_appends_a_note_and_an_edited_one_carries_no_origin() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let a = plant(
+            &state,
+            6,
+            "note",
+            Some(id),
+            &note_payload("Marge en hausse."),
+        );
+        state.decide_draft(&dref(id, a), validate()).unwrap();
+        let b = plant(&state, 7, "note", Some(id), &note_payload("Texte IA."));
+        state
+            .decide_draft(
+                &dref(id, b),
+                Decision::ValidateEdited {
+                    seen_fingerprint: None,
+                    value: EditedValue::Note("Mon texte à moi.".into()),
+                },
+            )
+            .unwrap();
+        let notes = state.get_study(id).unwrap().notes;
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0].text, "Marge en hausse.");
+        assert_eq!(notes[0].ai_origin.as_ref().unwrap().draft_id, a);
+        assert_eq!(notes[1].text, "Mon texte à moi.");
+        assert!(notes[1].ai_origin.is_none());
+        assert_eq!(facts(&state, a), ("validated".into(), None, Some(0)));
+        assert_eq!(facts(&state, b), ("validated".into(), None, Some(1)));
+    }
+
+    // AC 9 — an edited cell value is the owner's entry: no AI origin, still `?`.
+    #[test]
+    fn an_edited_cell_value_is_saved_without_ai_origin_and_marked_edited() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 8, id, cell_target(2024, "eps"), "7.5");
+        state
+            .decide_draft(
+                &dref(id, draft),
+                Decision::ValidateEdited {
+                    seen_fingerprint: None,
+                    value: EditedValue::Number(money("7.25")),
+                },
+            )
+            .unwrap();
+        let cell = state.get_study(id).unwrap().years[2].eps.clone();
+        assert_eq!(cell.value, Some(money("7.25")));
+        assert_eq!(cell.review, Review::ToReview);
+        assert!(cell.provenance.ai_origin.is_none());
+        assert_eq!(facts(&state, draft), ("validated".into(), Some(0), Some(1)));
+    }
+
+    // G3 E1 — the owner's edit is read under the owner's number format, in the grid's units.
+    #[test]
+    fn the_owner_s_edit_is_read_with_the_owner_s_number_format_and_units() {
+        use crate::viewmodel::format::NumberFormat;
+        let eps = value_payload(cell_target(2024, "eps"), "7.5", None);
+        let sales = value_payload(cell_target(2024, "sales"), "1000000", None);
+        let opt = value_payload(
+            judgment_target("forecast_low_option"),
+            "recent_severe_low",
+            None,
+        );
+        let note = note_payload("x");
+        let read =
+            |p: &DraftPayload, k: DraftKind, t: &str, f: NumberFormat| owner_edit(k, p, t, f);
+        assert_eq!(
+            read(&eps, DraftKind::Cell, "7,25", NumberFormat::Comma),
+            Ok(EditedValue::Number(money("7.25")))
+        );
+        assert_eq!(
+            read(&eps, DraftKind::Cell, "1'234.5", NumberFormat::Point),
+            Ok(EditedValue::Number(money("1234.5")))
+        );
+        // Sales are entered in millions and stored absolute (#117).
+        assert_eq!(
+            read(&sales, DraftKind::Cell, "1,5", NumberFormat::Comma),
+            Ok(EditedValue::Number(money("1500000")))
+        );
+        assert_eq!(
+            read(&eps, DraftKind::Cell, "abc", NumberFormat::Comma),
+            Err(MSG_VALUE_NOT_A_NUMBER.to_string())
+        );
+        assert_eq!(
+            read(&eps, DraftKind::Cell, "  ", NumberFormat::Comma),
+            Err(MSG_VALUE_NOT_A_NUMBER.to_string()),
+            "emptying a proposal is a rejection, not a validation"
+        );
+        assert_eq!(
+            read(
+                &opt,
+                DraftKind::Judgment,
+                "dividend_supported",
+                NumberFormat::Comma
+            ),
+            Ok(EditedValue::Option(ForecastLowOption::DividendSupported))
+        );
+        assert_eq!(
+            read(&opt, DraftKind::Judgment, "12", NumberFormat::Comma),
+            Err(MSG_VALUE_NOT_AN_OPTION.to_string())
+        );
+        assert_eq!(
+            read(&note, DraftKind::Note, "   ", NumberFormat::Comma),
+            Err(MSG_NOTE_EMPTY.to_string())
+        );
+    }
+
+    // G3 E2 — an edit equal to the proposal is a plain validation (AI origin kept).
+    #[test]
+    fn an_edit_equal_to_the_proposal_is_a_plain_validation() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 21, id, cell_target(2024, "eps"), "7.5");
+        state
+            .decide_draft(
+                &dref(id, draft),
+                Decision::ValidateEdited {
+                    seen_fingerprint: None,
+                    value: EditedValue::Number(money("7.50")),
+                },
+            )
+            .unwrap();
+        let cell = state.get_study(id).unwrap().years[2].eps.clone();
+        assert_eq!(cell.provenance.ai_origin.unwrap().draft_id, draft);
+        assert_eq!(facts(&state, draft), ("validated".into(), Some(0), Some(0)));
+
+        let note = plant(
+            &state,
+            22,
+            "note",
+            Some(id),
+            &note_payload("Marge en hausse."),
+        );
+        state
+            .decide_draft(
+                &dref(id, note),
+                Decision::ValidateEdited {
+                    seen_fingerprint: None,
+                    value: EditedValue::Note("Marge en hausse.".into()),
+                },
+            )
+            .unwrap();
+        assert!(state.get_study(id).unwrap().notes[0].ai_origin.is_some());
+        assert_eq!(facts(&state, note), ("validated".into(), None, Some(0)));
+    }
+
+    // G3 E1 — an edited option that is another option is the owner's own choice.
+    #[test]
+    fn an_edited_option_is_saved_without_ai_origin() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(
+            &state,
+            23,
+            id,
+            judgment_target("forecast_low_option"),
+            "recent_severe_low",
+        );
+        state
+            .decide_draft(
+                &dref(id, draft),
+                Decision::ValidateEdited {
+                    seen_fingerprint: None,
+                    value: EditedValue::Option(ForecastLowOption::DividendSupported),
+                },
+            )
+            .unwrap();
+        let j = state.get_study(id).unwrap().judgment;
+        assert_eq!(j.forecast_low_option, ForecastLowOption::DividendSupported);
+        assert!(j.ai_placed.is_empty());
+        assert_eq!(facts(&state, draft).2, Some(1));
+    }
+
+    // AC 8 — a stale draft needs the fingerprint the owner saw; a later change is refused.
+    #[test]
+    fn a_stale_draft_validates_only_against_the_fingerprint_the_owner_saw() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let target = cell_target(2024, "eps");
+        let draft = plant_value(&state, 10, id, target.clone(), "7.5");
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("6")))
+            .unwrap();
+        // Shown fresh (no confirmation): the target changed → refused, nothing written (G3 F8).
+        let err = state
+            .decide_draft(&dref(id, draft), validate())
+            .unwrap_err();
+        assert_eq!(err, MSG_DECISION_STUDY_CHANGED);
+        // Confirmed on an older state → still refused.
+        let err = state
+            .decide_draft(
+                &dref(id, draft),
+                Decision::Validate {
+                    seen_fingerprint: Some("fp1:old".into()),
+                },
+            )
+            .unwrap_err();
+        assert_eq!(err, MSG_DECISION_CHANGED);
+        assert_eq!(facts(&state, draft).0, "pending");
+        // Confirmed on today's state → validated, recorded stale.
+        let seen = fp(&state, id, &target);
+        state
+            .decide_draft(
+                &dref(id, draft),
+                Decision::Validate {
+                    seen_fingerprint: seen,
+                },
+            )
+            .unwrap();
+        assert_eq!(facts(&state, draft), ("validated".into(), Some(1), Some(0)));
+    }
+
+    // AC 6 — target gone: rejection only.
+    #[test]
+    fn a_draft_whose_year_is_gone_can_only_be_rejected() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let payload = value_payload(cell_target(2019, "eps"), "3", Some("fp1:x".into()));
+        let draft = plant(&state, 11, "cell", Some(id), &payload);
+        assert_eq!(
+            draft_freshness(state.get_study(id).as_ref(), DraftKind::Cell, &payload),
+            DraftFreshness::TargetGone(GoneReason::YearRemoved(2019))
+        );
+        let err = state
+            .decide_draft(&dref(id, draft), validate())
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "Cible disparue : l'année 2019 n'existe plus dans l'étude ; la proposition ne peut \
+             qu'être rejetée."
+        );
+        state
+            .decide_draft(&dref(id, draft), Decision::Reject)
+            .unwrap();
+        assert_eq!(facts(&state, draft), ("rejected".into(), Some(1), None));
+    }
+
+    // AC 7 / 12 — a rejection writes only the draft row and is not on the undo stack.
+    #[test]
+    fn a_rejection_changes_no_study_and_records_no_undo_step() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 12, id, cell_target(2024, "eps"), "7.5");
+        let before = state.get_study(id).unwrap();
+        state
+            .decide_draft(&dref(id, draft), Decision::Reject)
+            .unwrap();
+        assert_eq!(state.get_study(id).unwrap(), before);
+        assert_eq!(state.undo_depth(), 0);
+        assert_eq!(facts(&state, draft), ("rejected".into(), Some(0), None));
+    }
+
+    // AC 14 — refusals, each named, nothing written.
+    #[test]
+    fn a_draft_decided_meanwhile_is_refused_by_name() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 13, id, cell_target(2024, "eps"), "7.5");
+        state
+            .decide_draft(&dref(id, draft), Decision::Reject)
+            .unwrap();
+        assert_eq!(
+            state
+                .decide_draft(&dref(id, draft), validate())
+                .unwrap_err(),
+            MSG_DECISION_ALREADY_DECIDED
+        );
+    }
+
+    #[test]
+    fn a_read_only_dossier_refuses_every_decision() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 14, id, cell_target(2024, "eps"), "7.5");
+        state.read_only = Some(NEWER_SCHEMA);
+        for d in [validate(), Decision::Reject] {
+            assert_eq!(
+                state.decide_draft(&dref(id, draft), d).unwrap_err(),
+                MSG_DECISION_READ_ONLY
+            );
+        }
+    }
+
+    #[test]
+    fn a_decision_on_a_study_that_is_not_the_open_one_is_refused() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 15, id, cell_target(2024, "eps"), "7.5");
+        state.reset_undo(); // no study open
+        assert_eq!(
+            state
+                .decide_draft(&dref(id, draft), validate())
+                .unwrap_err(),
+            MSG_NO_STUDY_OPEN
+        );
+        state.reset_undo_for(Uuid::from_u128(0xFFFF)); // another study open
+        assert_eq!(
+            state
+                .decide_draft(&dref(id, draft), validate())
+                .unwrap_err(),
+            "La proposition porte sur l'étude NESN, qui n'est pas ouverte ; aucune décision n'a \
+             été enregistrée."
+        );
+        assert_eq!(facts(&state, draft).0, "pending");
+    }
+
+    #[test]
+    fn an_archived_study_refuses_a_decision_by_name() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 16, id, cell_target(2024, "eps"), "7.5");
+        state
+            .journal
+            .as_mut()
+            .unwrap()
+            .set_study_status(id, "archived")
+            .unwrap();
+        assert_eq!(
+            state
+                .decide_draft(&dref(id, draft), validate())
+                .unwrap_err(),
+            "L'étude NESN est archivée ; aucune décision n'a été enregistrée."
+        );
+    }
+
+    #[test]
+    fn a_draft_study_can_be_rejected_here_but_not_validated() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let payload = DraftPayload {
+            version: steadyinvest_contract::DRAFT_PAYLOAD_VERSION,
+            target: None,
+            proposed_value: None,
+            note_text: None,
+            company_name: Some("ASML Holding".into()),
+            base_fingerprint: None,
+        };
+        let draft = plant(&state, 17, "study", None, &payload);
+        let reference = DraftRef {
+            draft_id: draft,
+            study_id: None,
+            ticker: "NESN".into(),
+        };
+        assert!(
+            state.decide_draft(&reference, validate()).is_err(),
+            "8.7 owns the creation"
+        );
+        assert_eq!(facts(&state, draft).0, "pending");
+        // A reference that names a study for a draft study is internal, refused.
+        assert_eq!(
+            state
+                .decide_draft(&dref(id, draft), Decision::Reject)
+                .unwrap_err(),
+            MSG_DECISION_SAVE_FAILED
+        );
+        state.decide_draft(&reference, Decision::Reject).unwrap();
+        assert_eq!(facts(&state, draft), ("rejected".into(), None, None));
+    }
+
+    // AC 14 — a write failure is named, the study and the draft unchanged, no undo step.
+    #[test]
+    fn a_failed_decision_write_is_named_and_changes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 20, id, cell_target(2024, "eps"), "7.5");
+        let before = state.get_study(id).unwrap();
+        raw(&state)
+            .execute_batch(
+                "CREATE TRIGGER inject BEFORE UPDATE ON ai_drafts \
+                 BEGIN SELECT RAISE(ABORT, 'injected'); END",
+            )
+            .unwrap();
+        let err = state
+            .decide_draft(&dref(id, draft), validate())
+            .unwrap_err();
+        assert_eq!(err, MSG_DECISION_SAVE_FAILED);
+        assert_eq!(state.get_study(id).unwrap(), before);
+        assert_eq!(facts(&state, draft).0, "pending");
+        assert_eq!(state.undo_depth(), 0);
+    }
+
+    // G3 E4 — a vanished draft is named; if its study is gone, the study is named.
+    #[test]
+    fn a_vanished_draft_names_itself_or_its_gone_study() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let ghost = Uuid::from_u128(0x9999);
+        assert_eq!(
+            state
+                .decide_draft(&dref(id, ghost), validate())
+                .unwrap_err(),
+            MSG_DECISION_DRAFT_GONE
+        );
+        let draft = plant_value(&state, 24, id, cell_target(2024, "eps"), "7.5");
+        state.delete_study(id).unwrap(); // the O7 cascade takes the draft
+        assert_eq!(
+            state
+                .decide_draft(&dref(id, draft), validate())
+                .unwrap_err(),
+            "L'étude NESN n'existe plus ; aucune décision n'a été enregistrée."
+        );
+    }
+
+    // G3 B3/E6 — a rejection records whether the target had changed: an absent base is stale.
+    #[test]
+    fn a_rejection_without_a_base_fingerprint_is_recorded_stale() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let payload = value_payload(cell_target(2024, "eps"), "7.5", None);
+        let draft = plant(&state, 25, "cell", Some(id), &payload);
+        state
+            .decide_draft(&dref(id, draft), Decision::Reject)
+            .unwrap();
+        assert_eq!(facts(&state, draft), ("rejected".into(), Some(1), None));
+    }
+
+    // G3 F4 — a non-draftable key is target gone, and the raw key is never echoed.
+    #[test]
+    fn a_non_draftable_key_reads_gone_without_echoing_the_key() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let payload = value_payload(judgment_target("current_price"), "1", None);
+        let draft = plant(&state, 26, "judgment", Some(id), &payload);
+        let err = state
+            .decide_draft(&dref(id, draft), validate())
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "Cible disparue : le champ proposé ne peut pas faire l'objet d'une proposition ; la \
+             proposition ne peut qu'être rejetée."
+        );
+        assert!(!err.contains("current_price"));
+    }
+
+    // G3 B1 — a late write to another study never lands in the open study's undo history.
+    #[test]
+    fn a_late_fetch_on_another_study_leaves_the_open_study_s_history_alone() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, a) = decision_state(&dir);
+        // B has its own id (the fixed id generator would give it A's).
+        let mut other = state.get_study(a).unwrap();
+        other.id = Uuid::from_u128(0xB0B);
+        other.security_ticker = "ROG".into();
+        other.years.clear();
+        state.journal.as_mut().unwrap().put_study(&other).unwrap();
+        let b = other.id;
+        state.reset_undo_for(a); // A is open
+        state
+            .edit_cell(a, 2, entry::FIELD_EPS, Some(money("6")))
+            .unwrap();
+        assert_eq!(state.undo_depth(), 1);
+        // A fetch result for B arrives while A is open.
+        state
+            .apply_provider_refresh(b, &fetched_for(&[2022, 2023, 2024]))
+            .unwrap();
+        assert_eq!(
+            state.undo_depth(),
+            1,
+            "B's step was not recorded in A's history"
+        );
+        let before_undo_b = state.get_study(b).unwrap();
+        assert!(state.undo(a).unwrap());
+        assert_eq!(
+            state.get_study(b).unwrap(),
+            before_undo_b,
+            "B untouched by A's undo"
+        );
+        assert_eq!(
+            state.get_study(a).unwrap().years[2].eps.value,
+            Some(money("5"))
+        );
+        // A step is never written into another study.
+        state.reset_undo_for(a);
+        state
+            .edit_cell(a, 2, entry::FIELD_EPS, Some(money("6")))
+            .unwrap();
+        assert_eq!(state.undo(b).unwrap_err(), MSG_SAVE_FAILED);
+        assert_eq!(state.undo_depth(), 1, "the step is kept for its own study");
+    }
+
+    // G3 B2/E7 — an undo step over a draft decided elsewhere is dropped, named, not wedged.
+    #[test]
+    fn an_undo_step_over_a_draft_changed_elsewhere_is_dropped() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 27, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        raw(&state)
+            .execute(
+                "UPDATE ai_drafts SET status = 'validated_undone' WHERE id = ?1",
+                rusqlite::params![draft.to_string()],
+            )
+            .unwrap();
+        let before = state.get_study(id).unwrap();
+        assert_eq!(state.undo(id).unwrap_err(), MSG_UNDO_DRAFT_STEP_DROPPED);
+        assert_eq!(state.undo_depth(), 0, "dropped, never pushed back");
+        assert!(!state.can_redo());
+        assert_eq!(state.get_study(id).unwrap(), before, "nothing written");
+    }
+
+    // AC 12 — undo / redo move the draft with the study; a new edit after an undo clears redo.
+    #[test]
+    fn undo_and_redo_of_a_validation_move_the_draft_status() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let before = state.get_study(id).unwrap();
+        let draft = plant_value(&state, 18, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        let after = state.get_study(id).unwrap();
+
+        assert!(state.undo(id).unwrap());
+        assert_eq!(state.get_study(id).unwrap(), before);
+        assert_eq!(facts(&state, draft).0, "validated_undone");
+
+        assert!(state.redo(id).unwrap());
+        assert_eq!(state.get_study(id).unwrap(), after);
+        assert_eq!(facts(&state, draft).0, "validated");
+
+        assert!(state.undo(id).unwrap());
+        state
+            .set_judgment_field(id, "low_pe", Some(money("10")))
+            .unwrap();
+        assert!(!state.can_redo(), "a new edit clears redo");
+        assert_eq!(
+            facts(&state, draft).0,
+            "validated_undone",
+            "the draft stays undone"
+        );
+    }
+
+    // AC 11 — no lost update: every later app write re-reads the study.
+    #[test]
+    fn a_validated_value_survives_every_later_write() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 19, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        state
+            .edit_cell(id, 1, entry::FIELD_EPS, Some(money("4")))
+            .unwrap();
+        state
+            .set_judgment_field(id, "high_pe", Some(money("22")))
+            .unwrap();
+        state.add_note(id, "Une note.").unwrap();
+        // A refresh brings a divergent provider EPS for 2024: manual wins, the value survives.
+        state
+            .apply_provider_refresh(
+                id,
+                &fetched_custom(&[2022, 2023, 2024], 1000, 9, 100, 50, "ff"),
+            )
+            .unwrap();
+        let cell = state.get_study(id).unwrap().years[2].eps.clone();
+        assert_eq!(cell.value, Some(money("7.5")));
+        assert!(cell.provenance.ai_origin.is_some());
+        assert!(
+            cell.pending.is_some(),
+            "the provider value is parked beside it"
+        );
+    }
+
+    // AC 6 — the pure classifier.
+    #[test]
+    fn draft_freshness_classifies_fresh_stale_and_gone() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let target = judgment_target("judged_avg_low_pe");
+        let payload = value_payload(target.clone(), "11", fp(&state, id, &target));
+        let study = state.get_study(id).unwrap();
+        assert_eq!(
+            draft_freshness(Some(&study), DraftKind::Judgment, &payload),
+            DraftFreshness::Fresh
+        );
+        state
+            .set_judgment_field(id, "low_pe", Some(money("9")))
+            .unwrap();
+        let study = state.get_study(id).unwrap();
+        assert_eq!(
+            draft_freshness(Some(&study), DraftKind::Judgment, &payload),
+            DraftFreshness::Stale
+        );
+        assert_eq!(
+            draft_freshness(None, DraftKind::Judgment, &payload),
+            DraftFreshness::TargetGone(GoneReason::StudyDeleted)
+        );
+        assert_eq!(
+            draft_freshness(Some(&study), DraftKind::Note, &note_payload("x")),
+            DraftFreshness::Fresh
+        );
+        let unknown = value_payload(judgment_target("current_price"), "1", None);
+        assert_eq!(
+            draft_freshness(Some(&study), DraftKind::Judgment, &unknown),
+            DraftFreshness::TargetGone(GoneReason::FieldUnknown("current_price".into()))
+        );
+        let no_base = value_payload(target, "11", None);
+        assert_eq!(
+            draft_freshness(Some(&study), DraftKind::Judgment, &no_base),
+            DraftFreshness::Stale,
+            "an absent base cannot prove freshness"
+        );
+    }
+
+    // AC 4 (T4.2, widened by G3 B5) — every writer of a draftable judgment field lives in
+    // state/cells.rs (which clears the field's mark on a change) or contract::draftable (the
+    // decision setter). Scanned in app, persistence, report and ingestion production code: field
+    // assignments, `&mut` borrows of a field, and `Judgment { .. }` functional updates. Refresh
+    // writes only the non-draftable market facts.
+    #[test]
+    fn every_writer_of_a_draftable_judgment_field_is_in_the_cells_rail() {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut files = Vec::new();
+        for krate in ["app", "persistence", "report", "ingestion"] {
+            walk(&workspace.join(krate).join("src"), &mut files);
+        }
+        assert!(files.len() > 60, "scan broken: {} files", files.len());
+        let fields: Vec<&str> = steadyinvest_contract::DraftField::ALL
+            .iter()
+            .filter(|f| f.kind() == steadyinvest_contract::DraftFieldKind::Judgment)
+            .map(|f| f.key())
+            .collect();
+        let mut offenders = Vec::new();
+        for file in files {
+            let rel = file
+                .strip_prefix(&workspace)
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            if rel.ends_with("tests.rs") || rel == "app/src/state/cells.rs" {
+                continue;
+            }
+            let text = std::fs::read_to_string(&file).unwrap();
+            // Production code only: stop at the first test module.
+            let prod = text.split("#[cfg(test)]").next().unwrap();
+            for (i, line) in prod.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for field in &fields {
+                    let assign = format!(".{field} =");
+                    if let Some(pos) = line.find(&assign)
+                        && !line[pos + assign.len()..].starts_with('=')
+                    {
+                        offenders.push(format!("{rel}:{} assigns {field}", i + 1));
+                    }
+                    if line.contains("&mut ") && line.contains(&format!(".{field}")) {
+                        let after = &line[line.find("&mut ").unwrap()..];
+                        if after.contains(&format!(".{field}")) {
+                            offenders.push(format!("{rel}:{} borrows {field} mutably", i + 1));
+                        }
+                    }
+                }
+            }
+            // A `Judgment { …, ..base }` functional update rewrites fields of an existing judgment.
+            for (pos, _) in prod.match_indices("Judgment {") {
+                let block = &prod[pos..];
+                let end = block.find('}').unwrap_or(block.len());
+                if block[..end].contains("..") {
+                    let line = prod[..pos].lines().count();
+                    offenders.push(format!("{rel}:{line} updates a Judgment functionally"));
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "{offenders:#?}");
+        assert!(steadyinvest_contract::DraftField::from_key("current_price").is_none());
+        assert!(steadyinvest_contract::DraftField::from_key("ttm_eps").is_none());
+    }
+
+    #[test]
+    fn every_numeric_judgment_wire_key_but_the_price_maps_to_its_draftable_field() {
+        let mut j = empty_judgment();
+        for wire in [
+            "sales_growth",
+            "eps_growth",
+            "est_high_eps",
+            "est_low_eps",
+            "high_pe",
+            "low_pe",
+            "recent_severe_low",
+            "dividend",
+        ] {
+            let f = judgment_draft_field(wire).expect(wire);
+            assert!(apply_judgment_field(&mut j, wire, Some(money("1.5"))));
+            assert_eq!(
+                f.judgment_value(&j),
+                Some(steadyinvest_contract::DraftValue::Number(money("1.5"))),
+                "{wire} writes {}",
+                f.key()
+            );
+        }
+        assert_eq!(judgment_draft_field("current_price"), None);
+    }
+}

@@ -674,10 +674,14 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let ui_weak = ui.as_weak();
         let current_study = Rc::clone(current_study);
         let compare_study = Rc::clone(compare_study);
+        let journal_state = Rc::clone(journal_state);
         ui.global::<Studies>().on_close_study(move || {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
             *current_study.borrow_mut() = None;
+            // Story 8.2b (G3 B1): the undo history leaves with its study — no owner study while
+            // none is open, so no decision and no stray step lands in a closed study's history.
+            journal_state.borrow_mut().reset_undo();
             studies.set_study_open(false);
             studies.set_demo_active(false);
             reset_study_overlays(&ui, &compare_study);
@@ -705,8 +709,9 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             // Story 2.9 — a freshly-opened study starts with an empty undo/redo history (the edit
             // history is per open study, in-memory, never carried across reopen). Reset BEFORE
-            // push_form so the mirrored can-undo/can-redo flags read empty.
-            journal_state.borrow_mut().reset_undo();
+            // push_form so the mirrored can-undo/can-redo flags read empty. The opened study owns
+            // the history — the only study a draft decision is taken on (Story 8.2b).
+            journal_state.borrow_mut().reset_undo_for(id);
             // Also discard any scenario-compare state from a previous study (review P3) — its overlay
             // and cached baseline must never survive into a different study; nor its traceability
             // panel (G1 final review M3).

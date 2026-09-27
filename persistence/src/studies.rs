@@ -73,7 +73,92 @@ fn upsert_study_row(tx: &rusqlite::Transaction<'_>, study: &Study, payload: &str
     Ok(())
 }
 
+/// The study upsert **plus the FR51 snapshot**, inside the caller's transaction — the body shared by
+/// [`Journal::put_study_with_history`] and the draft decisions (Story 8.2b), so the dedup rule lives
+/// in one place. Does NOT bump the logical version (the caller bumps once per transaction).
+pub(crate) fn write_study_with_snapshot(
+    tx: &rusqlite::Transaction<'_>,
+    study: &Study,
+    payload: &str,
+    now: &Timestamp,
+) -> Result<()> {
+    upsert_study_row(tx, study, payload)?;
+    // Dedup against the LATEST snapshot only (rowid breaks a same-instant tie — insertion
+    // order): an A→B→A history keeps all three states; only a truly redundant re-save skips.
+    let latest: Option<String> = tx
+        .query_row(
+            "SELECT payload FROM judgments WHERE study_id = ?1
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            rusqlite::params![study.id.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    // The latest payload is RE-SERIALIZED through today's `Study` before the comparison (Story
+    // 8.1, T2.3): a snapshot written before an additive `#[serde(default)]` field (e.g. `notes`)
+    // lacks its key, so a raw-string comparison would append a phantom « autres champs
+    // modifiés » entry on a value-identical re-save. The comparison stays on the serialized
+    // STRING, not on `Study` equality, so a change `PartialEq` ignores (a `Money` scale, "3.0"
+    // → "3.00") is still recorded. An unparsable latest payload counts as different.
+    let redundant = latest
+        .as_deref()
+        .and_then(|p| serde_json::from_str::<Study>(p).ok())
+        .and_then(|prev| serde_json::to_string(&prev).ok())
+        .is_some_and(|prev| prev == *payload);
+    if !redundant {
+        let ordinal: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",
+            rusqlite::params![study.id.to_string()],
+            |r| r.get(0),
+        )?;
+        tx.execute(
+            "INSERT INTO judgments (id, study_id, created_at, schema_version, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                snapshot_id_for(study.id, ordinal).to_string(),
+                study.id.to_string(),
+                now.0,
+                study.schema_version,
+                payload
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Whether the stored payload of `study_id` is, re-serialized through today's [`Study`], the same
+/// string as `expected` serialized — the comparison the draft decisions use to prove nothing else
+/// was written since the decision was prepared (Story 8.2b, arch A7/A8). The same technique as the
+/// snapshot dedup: a legacy payload lacking an additive key compares equal; a `Money` scale change
+/// does not. A missing or unparsable row counts as changed.
+pub(crate) fn stored_study_is(tx: &rusqlite::Transaction<'_>, expected: &Study) -> Result<bool> {
+    let stored: Option<String> = tx
+        .query_row(
+            "SELECT payload FROM studies WHERE id = ?1",
+            rusqlite::params![expected.id.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let expected = serde_json::to_string(expected)?;
+    Ok(stored
+        .as_deref()
+        .and_then(|p| serde_json::from_str::<Study>(p).ok())
+        .and_then(|prev| serde_json::to_string(&prev).ok())
+        .is_some_and(|prev| prev == expected))
+}
+
 impl Journal {
+    /// Refuse a study stamped with another journal's identity — a study from journal A is never
+    /// written into journal B (the guard of every study write).
+    pub(crate) fn check_study_identity(&self, study: &Study) -> Result<()> {
+        if study.journal_id != self.id() {
+            return Err(Error::JournalIdentityMismatch {
+                study_journal_id: study.journal_id,
+                journal_id: self.id(),
+            });
+        }
+        Ok(())
+    }
+
     /// Insert or update a study, atomically bumping the journal's logical version.
     ///
     /// Upsert is `INSERT … ON CONFLICT(id) DO UPDATE` — NOT `INSERT OR REPLACE`, whose implicit
@@ -116,46 +201,7 @@ impl Journal {
         }
         let payload = serde_json::to_string(study)?;
         let tx = self.conn.transaction()?;
-        upsert_study_row(&tx, study, &payload)?;
-        // Dedup against the LATEST snapshot only (rowid breaks a same-instant tie — insertion
-        // order): an A→B→A history keeps all three states; only a truly redundant re-save skips.
-        let latest: Option<String> = tx
-            .query_row(
-                "SELECT payload FROM judgments WHERE study_id = ?1
-                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
-                rusqlite::params![study.id.to_string()],
-                |r| r.get(0),
-            )
-            .optional()?;
-        // The latest payload is RE-SERIALIZED through today's `Study` before the comparison (Story
-        // 8.1, T2.3): a snapshot written before an additive `#[serde(default)]` field (e.g. `notes`)
-        // lacks its key, so a raw-string comparison would append a phantom « autres champs
-        // modifiés » entry on a value-identical re-save. The comparison stays on the serialized
-        // STRING, not on `Study` equality, so a change `PartialEq` ignores (a `Money` scale, "3.0"
-        // → "3.00") is still recorded. An unparsable latest payload counts as different.
-        let redundant = latest
-            .as_deref()
-            .and_then(|p| serde_json::from_str::<Study>(p).ok())
-            .and_then(|prev| serde_json::to_string(&prev).ok())
-            .is_some_and(|prev| prev == payload);
-        if !redundant {
-            let ordinal: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",
-                rusqlite::params![study.id.to_string()],
-                |r| r.get(0),
-            )?;
-            tx.execute(
-                "INSERT INTO judgments (id, study_id, created_at, schema_version, payload)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![
-                    snapshot_id_for(study.id, ordinal).to_string(),
-                    study.id.to_string(),
-                    now.0,
-                    study.schema_version,
-                    payload
-                ],
-            )?;
-        }
+        write_study_with_snapshot(&tx, study, &payload, now)?;
         bump_logical_version(&tx)?;
         tx.commit()?;
         Ok(())

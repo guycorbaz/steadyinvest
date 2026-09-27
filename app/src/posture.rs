@@ -329,6 +329,7 @@ mod tests {
             .into_iter()
             .map(|source| {
                 let provenance = Provenance {
+                    ai_origin: None,
                     source,
                     logical_version: 1,
                     timestamp: Timestamp("2026-01-01T00:00:00Z".to_string()),
@@ -788,6 +789,20 @@ mod tests {
         );
     }
 
+    /// Story 8.2b: the target-gone reason fragments of a draft decision, scanned and counted.
+    #[test]
+    fn draft_gone_reasons_are_neutral_no_banned_verb() {
+        for reason in crate::state::DRAFT_GONE_REASONS {
+            assert_neutral(reason, "state/messages.rs (draft target-gone reasons)");
+        }
+        assert_eq!(
+            crate::state::DRAFT_GONE_REASONS.len(),
+            // 8.2b: year removed, study deleted, unknown field: 0 + 3 = 3.
+            3,
+            "draft target-gone reason inventory changed — register the new reason"
+        );
+    }
+
     #[test]
     fn label_table_strings_are_neutral_no_banned_verb() {
         for entry in &crate::labels::LABELS {
@@ -894,8 +909,15 @@ mod tests {
             // 8.1: the empty note (MSG_NOTE_EMPTY) and the vanished note (MSG_NOTE_GONE):
             // 224 + 2 = 226, measured. Its G3 review names a study deleted meanwhile
             // (MSG_STUDY_GONE) and a note gesture with no study open (MSG_NO_STUDY_OPEN):
-            // 226 + 2 = 228, measured.
-            228,
+            // 226 + 2 = 228, measured. 8.2b: the draft decision refusals of the 8.0 spec §3.3 —
+            // read-only, study gone, study archived, save failure (plain + with its cause),
+            // changed since confirmation, target gone — and the already-decided refusal (an
+            // owner-pending default): 228 + 8 = 236, measured. Its G3 review names the draft of
+            // another study (MSG_DECISION_OTHER_STUDY), a vanished draft (MSG_DECISION_DRAFT_GONE),
+            // a study changed since the proposal was read (MSG_DECISION_STUDY_CHANGED), an edited
+            // option that is none (MSG_VALUE_NOT_AN_OPTION) and a dropped undo step
+            // (MSG_UNDO_DRAFT_STEP_DROPPED): 236 + 5 = 241, measured.
+            241,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export

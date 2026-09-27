@@ -20,6 +20,7 @@ fn cell(value: &str) -> Cell {
         review: Review::Validated,
         coverage: Coverage::Present,
         provenance: Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 1,
             timestamp: Timestamp("2026-03-09T00:00:00Z".to_string()),
@@ -31,6 +32,7 @@ fn cell(value: &str) -> Cell {
 
 fn main() {
     let judgment = Judgment {
+        ai_placed: Default::default(),
         estimated_high_eps: Some(money("9")),
         estimated_low_eps: Some(money("4")),
         projected_sales_growth_pct: None,

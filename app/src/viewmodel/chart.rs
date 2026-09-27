@@ -731,6 +731,7 @@ mod tests {
 
     fn prov() -> Provenance {
         Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 1,
             timestamp: Timestamp("2026-03-09T00:00:00Z".to_string()),
@@ -781,6 +782,7 @@ mod tests {
 
     fn judgment(est_high_eps: Option<Money>) -> Judgment {
         Judgment {
+            ai_placed: Default::default(),
             estimated_high_eps: est_high_eps,
             estimated_low_eps: Some(money("3")),
             projected_sales_growth_pct: None,

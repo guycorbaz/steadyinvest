@@ -123,6 +123,63 @@ pub const MSG_NOTE_GONE: &str = "Cette note n'existe plus dans l'étude ; rien n
 pub const MSG_STUDY_GONE: &str = "L'étude n'existe plus dans le dossier ; rien n'a été enregistré.";
 /// Story 8.1: a note gesture with no study open (a stale callback) — named, never a silent no-op.
 pub const MSG_NO_STUDY_OPEN: &str = "Aucune étude n'est ouverte ; rien n'a été enregistré.";
+/// Story 8.2b (8.0 spec §3.3): a draft decision on a read-only dossier — nothing is written.
+pub const MSG_DECISION_READ_ONLY: &str =
+    "Le dossier est en lecture seule ; aucune décision n'a été enregistrée.";
+/// Story 8.2b: the draft's study was deleted meanwhile. `{ticker}` is the draft's security.
+pub const MSG_DECISION_STUDY_GONE: &str =
+    "L'étude {ticker} n'existe plus ; aucune décision n'a été enregistrée.";
+/// Story 8.2b: the draft's study is archived — no decision is taken on it.
+pub const MSG_DECISION_STUDY_ARCHIVED: &str =
+    "L'étude {ticker} est archivée ; aucune décision n'a été enregistrée.";
+/// Story 8.2b: the decision write failed with no named cause (the detail is logged).
+pub const MSG_DECISION_SAVE_FAILED: &str =
+    "La décision n'a pas pu être enregistrée ; rien n'a été modifié.";
+/// Story 8.2b: the decision write failed for a named `{cause}`.
+pub const MSG_DECISION_SAVE_FAILED_CAUSE: &str =
+    "La décision n'a pas pu être enregistrée ({cause}) ; rien n'a été modifié.";
+/// Story 8.2b (arch A7): the target changed again after the owner confirmed (a refresh landed in
+/// between) — refused; the inbox shows the draft again.
+pub const MSG_DECISION_CHANGED: &str = "La cible a encore changé depuis votre confirmation ; rien n'a été enregistré. La proposition est affichée de nouveau.";
+/// Story 8.2b: the draft's target is gone — it can only be rejected. `{reason}` is one of
+/// [`DRAFT_GONE_REASONS`].
+pub const MSG_DECISION_TARGET_GONE: &str =
+    "Cible disparue : {reason} ; la proposition ne peut qu'être rejetée.";
+/// Story 8.2b (owner-pending default): the draft was decided meanwhile (another window).
+pub const MSG_DECISION_ALREADY_DECIDED: &str =
+    "Cette proposition a déjà été traitée ; rien n'a été enregistré.";
+/// Story 8.2b (G3 F2): the draft's study is not the open study — the inbox opens it first.
+pub const MSG_DECISION_OTHER_STUDY: &str = "La proposition porte sur l'étude {ticker}, qui n'est pas ouverte ; aucune décision n'a été enregistrée.";
+/// Story 8.2b (G3 E4): the draft is no longer in the dossier (its study still is).
+pub const MSG_DECISION_DRAFT_GONE: &str =
+    "Cette proposition n'existe plus dans le dossier ; rien n'a été enregistré.";
+/// Story 8.2b (G3 F8, owner-pending): a draft shown fresh whose target changed before the decision
+/// (no confirmation was given on a changed target), or the study written meanwhile.
+pub const MSG_DECISION_STUDY_CHANGED: &str =
+    "L'étude a changé depuis la lecture de la proposition ; rien n'a été enregistré.";
+/// Story 8.2b (G3 E1): the owner's edit of a forecast-low option names none of its options.
+pub const MSG_VALUE_NOT_AN_OPTION: &str =
+    "Ce choix ne fait pas partie des options ; la valeur est inchangée.";
+/// Story 8.2b (G3 B2/E7, owner-pending): an undo / redo step over a draft whose draft was decided or
+/// removed elsewhere — the step is dropped from the history, nothing is written.
+pub const MSG_UNDO_DRAFT_STEP_DROPPED: &str = "Cette étape portait sur une proposition qui n'est plus dans l'état attendu ; elle a été retirée de l'historique d'annulation, rien n'a été modifié.";
+/// Story 8.2b target-gone reason: the draft's fiscal year left the study (`{year}`).
+pub const MSG_GONE_REASON_YEAR: &str = "l'année {year} n'existe plus dans l'étude";
+/// Story 8.2b target-gone reason: the draft's study was deleted.
+pub const MSG_GONE_REASON_STUDY: &str = "l'étude a été supprimée";
+/// Story 8.2b target-gone reason: the draft names no draftable field (a key unknown to this build,
+/// or a provider market fact such as the current price — D6); only reachable through a malformed
+/// import (MCP submissions are checked, Story 8.3). The raw key is never echoed (G3 F4;
+/// owner-pending wording).
+pub const MSG_GONE_REASON_FIELD: &str =
+    "le champ proposé ne peut pas faire l'objet d'une proposition";
+/// The target-gone reason fragments — scanned and counted by the posture gate (Story 8.2b).
+#[cfg_attr(not(test), expect(dead_code))] // read by the posture gate only
+pub const DRAFT_GONE_REASONS: &[&str] = &[
+    MSG_GONE_REASON_YEAR,
+    MSG_GONE_REASON_STUDY,
+    MSG_GONE_REASON_FIELD,
+];
 /// The system clipboard could not be read for a paste-a-column (Story 2.4).
 pub const MSG_CLIPBOARD_UNAVAILABLE: &str =
     "Le presse-papiers est indisponible ; aucune colonne n'a été collée.";
@@ -1087,6 +1144,19 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_NOTE_GONE,
     MSG_STUDY_GONE,
     MSG_NO_STUDY_OPEN,
+    MSG_DECISION_READ_ONLY,
+    MSG_DECISION_STUDY_GONE,
+    MSG_DECISION_STUDY_ARCHIVED,
+    MSG_DECISION_SAVE_FAILED,
+    MSG_DECISION_SAVE_FAILED_CAUSE,
+    MSG_DECISION_CHANGED,
+    MSG_DECISION_TARGET_GONE,
+    MSG_DECISION_ALREADY_DECIDED,
+    MSG_DECISION_OTHER_STUDY,
+    MSG_DECISION_DRAFT_GONE,
+    MSG_DECISION_STUDY_CHANGED,
+    MSG_VALUE_NOT_AN_OPTION,
+    MSG_UNDO_DRAFT_STEP_DROPPED,
     MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,

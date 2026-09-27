@@ -178,6 +178,7 @@ fn deleting_a_linked_study_clears_the_watchlist_link() {
         native_currency: "CHF".to_string(),
         years: Vec::new(),
         judgment: Judgment {
+            ai_placed: Default::default(),
             estimated_high_eps: None,
             estimated_low_eps: None,
             projected_sales_growth_pct: None,

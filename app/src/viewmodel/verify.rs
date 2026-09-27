@@ -184,6 +184,7 @@ pub fn demo_study() -> Result<Study, String> {
     // A fixed, deterministic identity — the demo is in-memory only, so its id need not be unique in
     // any journal. Cells carry a provider provenance (reference data), Present coverage, Current.
     let provenance = Provenance {
+        ai_origin: None,
         source: Source::Provider,
         logical_version: 0,
         timestamp: Timestamp("2026-01-01T00:00:00Z".to_string()),
@@ -248,6 +249,7 @@ fn year_to_data(y: &FixtureYear, provenance: &Provenance) -> YearData {
 /// Map the fixture judgment → `contract::Judgment` (fields match one-for-one).
 fn judgment_from(j: &FixtureJudgment) -> Judgment {
     Judgment {
+        ai_placed: Default::default(),
         estimated_high_eps: j.estimated_high_eps.map(Money::from),
         estimated_low_eps: j.estimated_low_eps.map(Money::from),
         projected_sales_growth_pct: j.projected_sales_growth_pct.map(Money::from),

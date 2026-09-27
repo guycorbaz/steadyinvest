@@ -29,6 +29,7 @@ fn minimal_study(id: u128, journal_id: Uuid) -> Study {
         native_currency: "CHF".to_string(),
         years: Vec::new(),
         judgment: Judgment {
+            ai_placed: Default::default(),
             estimated_high_eps: None,
             estimated_low_eps: None,
             projected_sales_growth_pct: None,

@@ -32,6 +32,7 @@ mod tests {
 
     fn provenance(source: Source) -> Provenance {
         Provenance {
+            ai_origin: None,
             source,
             logical_version: 1,
             timestamp: Timestamp("2026-06-15T00:00:00Z".to_string()),
@@ -88,6 +89,7 @@ mod tests {
             })
             .collect();
         study.judgment = Judgment {
+            ai_placed: Default::default(),
             estimated_high_eps: Some(money("2.00")),
             estimated_low_eps: Some(money("1.50")),
             projected_sales_growth_pct: None,

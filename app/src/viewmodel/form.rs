@@ -79,6 +79,7 @@ fn provenance_date(cell: Option<&Cell>) -> String {
 /// A display-only sentinel provenance for the view-side skeleton (never persisted from here).
 fn view_provenance() -> Provenance {
     Provenance {
+        ai_origin: None,
         source: Source::Manual,
         logical_version: 0,
         timestamp: Timestamp(String::new()),
@@ -260,6 +261,7 @@ mod tests {
 
     fn provenance() -> Provenance {
         Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 1,
             timestamp: Timestamp("2026-06-13T00:00:00Z".to_string()),
@@ -285,6 +287,7 @@ mod tests {
 
     fn empty_judgment() -> Judgment {
         Judgment {
+            ai_placed: Default::default(),
             estimated_high_eps: None,
             estimated_low_eps: None,
             projected_sales_growth_pct: None,

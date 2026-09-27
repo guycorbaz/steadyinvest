@@ -63,6 +63,7 @@ fn forecast_low_option() -> impl Strategy<Value = ForecastLowOption> {
 
 fn provenance() -> impl Strategy<Value = Provenance> {
     (source(), any::<u64>(), token(), token()).prop_map(|(source, lv, ts, hash)| Provenance {
+        ai_origin: None,
         source,
         logical_version: lv,
         timestamp: Timestamp(ts),
@@ -131,6 +132,7 @@ fn judgment() -> impl Strategy<Value = Judgment> {
         .prop_map(
             |(hi, lo, sales_growth, eps_growth, php, plp, opt, severe_low, cur, dividend)| {
                 Judgment {
+                    ai_placed: Default::default(),
                     estimated_high_eps: hi,
                     estimated_low_eps: lo,
                     projected_sales_growth_pct: sales_growth,

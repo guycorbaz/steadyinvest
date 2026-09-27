@@ -8,7 +8,8 @@
 //! change.
 
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Judgment, Money, PendingProvider, Provenance, Review, Study,
+    Cell, Coverage, DraftField, ForecastLowOption, Judgment, Money, PendingProvider, Provenance,
+    Review, Study,
 };
 use uuid::Uuid;
 
@@ -460,6 +461,11 @@ impl JournalState {
         option: ForecastLowOption,
     ) -> Result<(), String> {
         self.mutate_judgment(study_id, |judgment| {
+            // A write that CHANGES a draftable judgment field clears its "placed by AI" mark (arch
+            // A6); re-selecting the same option stays a no-op (no undo step, no snapshot).
+            if judgment.forecast_low_option != option {
+                judgment.ai_placed.forecast_low_option = None;
+            }
             judgment.forecast_low_option = option;
             true
         })
@@ -634,6 +640,8 @@ pub(crate) fn apply_judgment_field(
     field: &str,
     value: Option<Money>,
 ) -> bool {
+    let draft_field = judgment_draft_field(field);
+    let before = draft_field.and_then(|f| f.judgment_value(judgment));
     match field {
         "sales_growth" => judgment.projected_sales_growth_pct = value,
         "eps_growth" => judgment.projected_eps_growth_pct = value,
@@ -646,5 +654,36 @@ pub(crate) fn apply_judgment_field(
         "dividend" => judgment.present_full_year_dividend = value,
         _ => return false,
     }
+    // Story 8.2b (arch A6): a write that CHANGES a draftable judgment field clears its "placed by
+    // AI" mark; a value-identical write keeps it, so a no-op stays a no-op (G3 F7, lead default).
+    // `current_price` is a provider market fact — not draftable, no mark.
+    if let Some(f) = draft_field
+        && f.judgment_value(judgment) != before
+        && let Some(slot) = f.ai_slot_mut(&mut judgment.ai_placed)
+    {
+        *slot = None;
+    }
     true
+}
+
+/// The Slint wire keys of the numeric judgment fields ([`apply_judgment_field`]) paired with their
+/// draftable field (Story 8.2b). `current_price` is absent on purpose (D6: a provider market fact);
+/// the forecast-low option has its own rail ([`JournalState::set_forecast_low_option`]).
+const JUDGMENT_WIRE_KEYS: [(&str, DraftField); 8] = [
+    ("sales_growth", DraftField::ProjectedSalesGrowthPct),
+    ("eps_growth", DraftField::ProjectedEpsGrowthPct),
+    ("est_high_eps", DraftField::EstimatedHighEps),
+    ("est_low_eps", DraftField::EstimatedLowEps),
+    ("high_pe", DraftField::JudgedAvgHighPe),
+    ("low_pe", DraftField::JudgedAvgLowPe),
+    ("recent_severe_low", DraftField::RecentSevereLow),
+    ("dividend", DraftField::PresentFullYearDividend),
+];
+
+/// The draftable field a judgment wire key writes, or `None` (unknown, or `current_price`).
+pub(crate) fn judgment_draft_field(wire: &str) -> Option<DraftField> {
+    JUDGMENT_WIRE_KEYS
+        .iter()
+        .find(|(w, _)| *w == wire)
+        .map(|(_, f)| *f)
 }

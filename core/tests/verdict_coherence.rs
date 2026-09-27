@@ -34,6 +34,7 @@ fn money(s: &str) -> Money {
 
 fn manual_provenance(logical_version: u64) -> Provenance {
     Provenance {
+        ai_origin: None,
         source: Source::Manual,
         logical_version,
         timestamp: Timestamp("2026-06-12T08:00:00Z".to_string()),
@@ -49,6 +50,7 @@ fn validated_cell(value: &str) -> Cell {
         review: Review::Validated,
         coverage: Coverage::Present,
         provenance: Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 1,
             timestamp: Timestamp("2026-06-10T00:00:00Z".to_string()),
@@ -90,6 +92,7 @@ fn all_green_study() -> Study {
         })
         .collect();
     study.judgment = Judgment {
+        ai_placed: Default::default(),
         estimated_high_eps: Some(money("2.00")),
         estimated_low_eps: Some(money("1.50")),
         // The four fields added to `contract::Judgment` in Story 2.2 (issue #14). This glue
@@ -330,6 +333,7 @@ fn withdrawing_a_judgment_input_withholds_the_verdict() {
 
 fn provider_provenance(logical_version: u64) -> Provenance {
     Provenance {
+        ai_origin: None,
         source: Source::Provider,
         logical_version,
         timestamp: Timestamp("2026-06-12T09:00:00Z".to_string()),
