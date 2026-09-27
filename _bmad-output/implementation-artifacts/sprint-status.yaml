@@ -699,7 +699,9 @@ development_status:
   epic-8: in-progress
   # 2026-09-27: Guy validated the spec (« défauts partout », Q1–Q16) → done with PR #256.
   8-0-ux-pass-ai-assistance-surfaces: done
-  8-1-study-notes: backlog
+  # 2026-09-27: 8-1 story file created (create-story) → ready-for-dev. Owner decision: no migration /
+  #             no SCHEMA_VERSION bump (not in production) — notes are a plain additive field.
+  8-1-study-notes: ready-for-dev
   8-2a-drafts-table: backlog
   8-2b-ai-origin-staleness-and-decisions: backlog
   8-3-mcp-access-gated-access-surface: backlog
