@@ -468,48 +468,55 @@ impl Journal {
                 },
                 other => malformed(other.to_string()),
             })?;
-            tx.execute(
-                "INSERT INTO ai_drafts
-                     (id, kind, study_id, security_ticker, native_currency, status, created_at,
-                      decided_at, comment, origin_client, origin_model, stale_at_decision,
-                      edited_before_validation, created_study_id, payload)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-                 ON CONFLICT(id) DO UPDATE SET
-                     kind = excluded.kind,
-                     study_id = excluded.study_id,
-                     security_ticker = excluded.security_ticker,
-                     native_currency = excluded.native_currency,
-                     status = excluded.status,
-                     created_at = excluded.created_at,
-                     decided_at = excluded.decided_at,
-                     comment = excluded.comment,
-                     origin_client = excluded.origin_client,
-                     origin_model = excluded.origin_model,
-                     stale_at_decision = excluded.stale_at_decision,
-                     edited_before_validation = excluded.edited_before_validation,
-                     created_study_id = excluded.created_study_id,
-                     payload = excluded.payload
-                 WHERE (ai_drafts.status = 'pending' OR excluded.status <> 'pending')
-                   AND NOT (ai_drafts.created_study_id IS NOT NULL
-                            AND excluded.created_study_id IS NULL)",
-                rusqlite::params![
-                    d.id.to_string(),
-                    d.kind.as_str(),
-                    d.study_id.map(|u| u.to_string()),
-                    d.security_ticker,
-                    d.native_currency,
-                    d.status.as_str(),
-                    d.created_at.0,
-                    d.decided_at.as_ref().map(|t| t.0.clone()),
-                    d.comment,
-                    d.origin_client,
-                    d.origin_model,
-                    d.stale_at_decision,
-                    d.edited_before_validation,
-                    d.created_study_id.map(|u| u.to_string()),
-                    d.payload,
-                ],
-            )
+            // An existing draft is UPDATED (never upserted: the v9 id guard aborts any insert whose
+            // id exists — Story 8.3 G3), under the same no-regression rule as before: a decided
+            // draft never goes back to pending, and a created study is never unlinked.
+            let exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM ai_drafts WHERE id = ?1)",
+                    rusqlite::params![d.id.to_string()],
+                    |r| r.get(0),
+                )
+                .map_err(Error::Sqlite)?;
+            let params = rusqlite::params![
+                d.id.to_string(),
+                d.kind.as_str(),
+                d.study_id.map(|u| u.to_string()),
+                d.security_ticker,
+                d.native_currency,
+                d.status.as_str(),
+                d.created_at.0,
+                d.decided_at.as_ref().map(|t| t.0.clone()),
+                d.comment,
+                d.origin_client,
+                d.origin_model,
+                d.stale_at_decision,
+                d.edited_before_validation,
+                d.created_study_id.map(|u| u.to_string()),
+                d.payload,
+            ];
+            if exists {
+                tx.execute(
+                    "UPDATE ai_drafts SET
+                         kind = ?2, study_id = ?3, security_ticker = ?4, native_currency = ?5,
+                         status = ?6, created_at = ?7, decided_at = ?8, comment = ?9,
+                         origin_client = ?10, origin_model = ?11, stale_at_decision = ?12,
+                         edited_before_validation = ?13, created_study_id = ?14, payload = ?15
+                     WHERE id = ?1
+                       AND (status = 'pending' OR ?6 <> 'pending')
+                       AND NOT (created_study_id IS NOT NULL AND ?14 IS NULL)",
+                    params,
+                )
+            } else {
+                tx.execute(
+                    "INSERT INTO ai_drafts
+                         (id, kind, study_id, security_ticker, native_currency, status, created_at,
+                          decided_at, comment, origin_client, origin_model, stale_at_decision,
+                          edited_before_validation, created_study_id, payload)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    params,
+                )
+            }
             .map_err(|e| match e {
                 // A CHECK the file violates (e.g. a pending draft with a decision date) is a
                 // malformed snapshot, named as such — never a raw SQLite error to the user.

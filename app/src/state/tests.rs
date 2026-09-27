@@ -756,25 +756,48 @@ fn a_restore_never_replaces_nor_deletes_an_earlier_prerestore_copy() {
 }
 
 #[test]
-fn the_snapshot_is_never_written_over_an_existing_file_nor_removed() {
-    // G1 P review (L-a / L-g): create_new refuses an existing file, reports it did NOT create it
-    // (so it is never removed), and the file is intact.
+fn a_snapshot_path_taken_after_the_request_refuses_the_restore_and_nothing_is_lost() {
+    // Story 8.3 G3 N3: the snapshot is written by persistence under the restore lock (its
+    // create-new / permissions / cleanup rules are tested there). Here, the TOCTOU twin: the
+    // snapshot path is taken between the request and the confirm — refused by name, the live
+    // dossier reopened and intact, the occupying path untouched.
     let dir = TempDir::new().unwrap();
-    let live = dir.path().join("live.db");
-    let snapshot = dir.path().join("live.db-prerestore");
-    std::fs::write(&live, b"live").unwrap();
-    std::fs::write(&snapshot, b"earlier").unwrap();
-    let failure = super::restore::write_snapshot(&live, &snapshot).unwrap_err();
-    assert!(!failure.created);
-    assert_eq!(failure.error.kind(), std::io::ErrorKind::AlreadyExists);
-    assert_eq!(std::fs::read(&snapshot).unwrap(), b"earlier");
-    // A fresh one is written with the dossier's permissions (L-b).
-    std::fs::remove_file(&snapshot).unwrap();
-    super::restore::write_snapshot(&live, &snapshot).unwrap();
-    assert_eq!(std::fs::read(&snapshot).unwrap(), b"live");
+    let mut state = watch_state(&dir, 0x549);
+    make_backup(&dir, "src.db", 0xBEEF, true);
+    state
+        .request_restore(dir.path().join("src.db").to_str().unwrap())
+        .unwrap();
+    let occupied = dir.path().join("journal.db-prerestore");
+    std::fs::write(&occupied, b"earlier").unwrap();
     assert_eq!(
-        std::fs::metadata(&snapshot).unwrap().permissions(),
-        std::fs::metadata(&live).unwrap().permissions()
+        state.confirm_restore(),
+        Err(restore_snapshot_exists_message(&occupied))
+    );
+    assert_eq!(std::fs::read(&occupied).unwrap(), b"earlier");
+    assert_eq!(
+        state.journal_id(),
+        Some(Uuid::from_u128(0xC0FFEE)),
+        "the live dossier is back"
+    );
+}
+
+#[test]
+fn the_app_clears_an_interrupted_restore_when_it_opens_the_dossier() {
+    // Story 8.3 G3 N2: a restore's marker / staging copy left by a crash makes the MCP access refuse
+    // the dossier; the app, opening it under its instance lock, removes them (and logs it).
+    let dir = TempDir::new().unwrap();
+    drop(watch_state(&dir, 0x54C));
+    let marker = dir.path().join("journal.db-restoring");
+    let staging = dir.path().join("journal.db-restore-incoming");
+    std::fs::write(&marker, "4294967294 1").unwrap(); // a process that is gone
+    std::fs::write(&staging, b"partial").unwrap();
+    let (clock, idgen) = fixed(0x54D, "2026-06-14T09:00:00Z");
+    let (state, _notice) =
+        JournalState::open_or_create(Some(&dir.path().join("journal.db")), clock, idgen);
+    assert!(state.journal_id().is_some(), "the dossier opened");
+    assert!(
+        !marker.exists() && !staging.exists(),
+        "the leftovers are gone"
     );
 }
 

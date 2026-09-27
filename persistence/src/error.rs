@@ -140,6 +140,11 @@ pub enum Error {
     #[error("the backup file could not be staged: {detail}; the journal is unchanged")]
     Restore { detail: String },
 
+    /// The pre-restore snapshot could not be written under the restore lock (Story 8.3 G3 N3). The
+    /// live journal is unchanged and no partial snapshot is left.
+    #[error("the pre-restore snapshot could not be written: {detail}; the journal is unchanged")]
+    RestoreSnapshot { detail: String },
+
     /// A protected journal is read through a private copy (its unconsolidated writes cannot be
     /// read in place without creating files beside it); that copy could not be prepared. `cause`
     /// is the file-system error's kind (a full disk is named as such).
@@ -192,6 +197,41 @@ pub enum Error {
     /// internal inconsistency of the caller. Nothing was written.
     #[error("the decision's study {study_id} is not the draft's study; nothing was written")]
     DraftStudyMismatch { study_id: Uuid },
+
+    /// The MCP access surface met a dossier whose SQL schema is not exactly this build's (Story 8.3,
+    /// arch A2): it never migrates and never reads a schema it does not know. Nothing was read or
+    /// written. `file_user_version` above `supported` = a newer dossier; below = an older one.
+    #[error(
+        "the dossier schema (file user_version {file_user_version}) differs from this MCP \
+         access build's ({supported}); nothing was read or written"
+    )]
+    McpSchemaMismatch {
+        file_user_version: i64,
+        supported: u32,
+    },
+
+    /// The SQLite authorizer of the MCP access surface denied a statement (Story 8.3, arch A3):
+    /// only study reads and draft inserts pass. `denials` names each denied action and its object,
+    /// for the MCP server's log. Nothing was written.
+    #[error("the MCP access surface denied {}; nothing was written", crate::mcp_access::denials_text(.denials))]
+    McpDenied {
+        denials: Vec<crate::mcp_access::McpDenial>,
+    },
+
+    /// A call to the MCP access surface was not well formed — a caller (MCP server) defect, never
+    /// an AI proposal's fault (those are typed refusals): e.g. a draft kind without the data it
+    /// needs, or a timestamp that is not RFC3339 UTC. Nothing was written.
+    #[error("the MCP access call is not well formed: {detail}; nothing was written")]
+    McpInvalidCall { detail: String },
+
+    /// The MCP access surface cannot use the dossier at all (Story 8.3 G3): missing, not a journal,
+    /// being restored, needing the app's recovery, protected, or of unreadable identity — each named
+    /// by its [`McpUnavailable`](crate::mcp_access::McpUnavailable) reason. Nothing was read or
+    /// written.
+    #[error("the MCP access surface cannot use the dossier: {reason}; nothing was read or written")]
+    McpUnavailable {
+        reason: crate::mcp_access::McpUnavailable,
+    },
 }
 
 /// The KIND of a failure, for a caller that names causes in its own language (the app speaks
@@ -273,8 +313,35 @@ impl Error {
             Error::LockHeld { .. } => ErrorKind::Locked,
             Error::CorruptPayload { .. } | Error::CorruptJournalMeta { .. } => ErrorKind::Corrupt,
             Error::NewerJournalSchema { .. } | Error::NewerRowSchema { .. } => ErrorKind::NewerData,
+            Error::McpSchemaMismatch {
+                file_user_version,
+                supported,
+            } if *file_user_version > i64::from(*supported) => ErrorKind::NewerData,
+            Error::McpUnavailable { reason } => {
+                use crate::mcp_access::McpUnavailable as U;
+                match reason {
+                    U::Missing => ErrorKind::Missing,
+                    U::NotADossier => ErrorKind::Corrupt,
+                    U::RestoreInProgress | U::RestoreInterrupted => ErrorKind::Replaced,
+                    U::Busy => ErrorKind::Locked,
+                    U::Protected { .. } => ErrorKind::WriteProtected,
+                    U::NeedsRecovery | U::IdentityUnreadable { .. } => ErrorKind::Other,
+                }
+            }
             Error::Migration { .. } => ErrorKind::Migration,
             _ => ErrorKind::Other,
+        }
+    }
+
+    /// The stable MCP code of this failure (Story 8.3 G3 F5; Story 8.0 §3.3), `None` when it has no
+    /// named MCP cause (the MCP server logs it and answers a generic failure).
+    pub fn mcp_code(&self) -> Option<&'static str> {
+        match self {
+            Error::McpSchemaMismatch { .. } => Some("schema_mismatch"),
+            Error::McpDenied { .. } => Some("write_denied"),
+            Error::McpInvalidCall { .. } => Some("invalid_call"),
+            Error::McpUnavailable { reason } => Some(reason.code()),
+            _ => None,
         }
     }
 
@@ -428,6 +495,9 @@ mod tests {
             Error::Restore {
                 detail: "the copy failed".to_string(),
             },
+            Error::RestoreSnapshot {
+                detail: "the snapshot file could not be created".to_string(),
+            },
             Error::ReadCopy {
                 detail: "a file could not be copied".to_string(),
                 cause: std::io::ErrorKind::StorageFull,
@@ -451,6 +521,22 @@ mod tests {
             Error::StudyChangedSinceRead,
             Error::DraftStudyMismatch {
                 study_id: Uuid::from_u128(4),
+            },
+            Error::McpSchemaMismatch {
+                file_user_version: 9,
+                supported: 8,
+            },
+            Error::McpDenied {
+                denials: vec![crate::mcp_access::McpDenial {
+                    action: "update".to_string(),
+                    object: "studies.payload".to_string(),
+                }],
+            },
+            Error::McpInvalidCall {
+                detail: "a note draft carries no study".to_string(),
+            },
+            Error::McpUnavailable {
+                reason: crate::mcp_access::McpUnavailable::Protected { directory: true },
             },
         ]
     }
@@ -478,6 +564,7 @@ mod tests {
                 | Error::Lock { .. }
                 | Error::HoldingHasTransactions
                 | Error::Restore { .. }
+                | Error::RestoreSnapshot { .. }
                 | Error::ReadCopy { .. }
                 | Error::ChangedDuringCopy
                 | Error::SidecarNotWritable
@@ -486,14 +573,19 @@ mod tests {
                 | Error::DraftNotPending { .. }
                 | Error::DraftStatusMismatch { .. }
                 | Error::StudyChangedSinceRead
-                | Error::DraftStudyMismatch { .. } => {}
+                | Error::DraftStudyMismatch { .. }
+                | Error::McpSchemaMismatch { .. }
+                | Error::McpDenied { .. }
+                | Error::McpInvalidCall { .. }
+                | Error::McpUnavailable { .. } => {}
             }
         }
-        // 26 variants (21 + the five draft-decision variants of Story 8.2b); `WriteProtected` and
-        // `WriteProtectedOutdated` are sampled for both of their causes (file, directory).
+        // 31 variants (21 + the five draft-decision variants of Story 8.2b + the four MCP access
+        // variants and `RestoreSnapshot` of Story 8.3); `WriteProtected` and `WriteProtectedOutdated`
+        // are sampled for both of their causes (file, directory). 8.3 delta: 28 → 33.
         assert_eq!(
             sample_errors().len(),
-            28,
+            33,
             "one sample per variant (+2 causes)"
         );
     }
@@ -578,6 +670,42 @@ mod tests {
             .kind(),
             ErrorKind::ProtectedOutdated { directory: true }
         );
+        // Story 8.3: a newer dossier met by the MCP access surface is newer data; an older one has
+        // no named kind (the MCP server names it « open it in the app first »).
+        let mcp_schema = |file_user_version| Error::McpSchemaMismatch {
+            file_user_version,
+            supported: 8,
+        };
+        assert_eq!(mcp_schema(9).kind(), ErrorKind::NewerData);
+        assert_eq!(mcp_schema(7).kind(), ErrorKind::Other);
+        assert_eq!(
+            Error::McpDenied { denials: vec![] }.kind(),
+            ErrorKind::Other
+        );
+        use crate::mcp_access::McpUnavailable as U;
+        let unavailable = |reason| Error::McpUnavailable { reason };
+        assert_eq!(unavailable(U::Missing).kind(), ErrorKind::Missing);
+        assert_eq!(unavailable(U::NotADossier).kind(), ErrorKind::Corrupt);
+        assert_eq!(
+            unavailable(U::RestoreInProgress).kind(),
+            ErrorKind::Replaced
+        );
+        assert_eq!(
+            unavailable(U::Protected { directory: false }).kind(),
+            ErrorKind::WriteProtected
+        );
+        // F5: the MCP code of every MCP failure; none for the others.
+        assert_eq!(mcp_schema(9).mcp_code(), Some("schema_mismatch"));
+        assert_eq!(
+            Error::McpDenied { denials: vec![] }.mcp_code(),
+            Some("write_denied")
+        );
+        assert_eq!(
+            unavailable(U::RestoreInProgress).mcp_code(),
+            Some("dossier_busy")
+        );
+        assert_eq!(unavailable(U::Missing).mcp_code(), Some("no_dossier"));
+        assert_eq!(Error::StudyChangedSinceRead.mcp_code(), None);
     }
 
     #[test]

@@ -712,8 +712,13 @@ development_status:
   8-2a-drafts-table: done
   # 2026-09-27: 8-2b story file created (create-story) → ready-for-dev; branch feat/8-2b-ai-origin-decisions.
   # 2026-09-27: 8-2b dev complete (contract, persistence, app state; 1249 tests) → review.
-  8-2b-ai-origin-staleness-and-decisions: review
-  8-3-mcp-access-gated-access-surface: backlog
+  # 2026-09-28: 8-2b dev + G3 (3 layers, 16 fixes) → PR #259 merged → done; owner-pending defaults in the story record.
+  8-2b-ai-origin-staleness-and-decisions: done
+  # 2026-09-28: 8-3 story file created → ready-for-dev (McpAccess in persistence; O1 assembly and the
+  #             clippy boundary land with the mcp crate in 8.4; rusqlite `hooks` feature).
+  # 2026-09-28: 8-3 dev complete (1284 tests; clippy/fmt/deny green) → review.
+  # 2026-09-28: 8-3 G3 applied (2 critical/high + mediums/lows; v9 id guard) → 1303 tests → review.
+  8-3-mcp-access-gated-access-surface: review
   8-4-steadyinvest-mcp-stdio-server: backlog
   8-5a-ai-frame-and-draft-inbox: backlog
   8-5b-deciding-drafts: backlog

@@ -13,44 +13,16 @@ use steadyinvest_contract::{Note, Study};
 
 /// A note's text as stored: line breaks normalised to `\n` (a pasted CRLF or lone CR never
 /// survives), then trimmed; `None` when nothing visible remains — whitespace and invisible format
-/// characters (Unicode Cf: zero-width spaces, bidi marks, BOM…) alone make an empty note.
+/// characters (Unicode Cf: zero-width spaces, bidi marks, BOM…) alone make an empty note — the one
+/// rule [`steadyinvest_contract::is_blank`], shared with the MCP submission checks (Story 8.3).
 pub(crate) fn normalized_note_text(raw: &str) -> Option<String> {
     let text = raw.replace("\r\n", "\n").replace('\r', "\n");
     let text = text.trim();
-    if text.chars().all(|c| c.is_whitespace() || is_format_char(c)) {
+    if steadyinvest_contract::is_blank(text) {
         None
     } else {
         Some(text.to_string())
     }
-}
-
-/// Unicode general category Cf (format characters), the ranges that can appear in typed or pasted
-/// text — std has no category table.
-fn is_format_char(c: char) -> bool {
-    matches!(
-        c as u32,
-        0x00AD
-            | 0x0600..=0x0605
-            | 0x061C
-            | 0x06DD
-            | 0x070F
-            | 0x0890..=0x0891
-            | 0x08E2
-            | 0x180E
-            | 0x200B..=0x200F
-            | 0x202A..=0x202E
-            | 0x2060..=0x2064
-            | 0x2066..=0x206F
-            | 0xFEFF
-            | 0xFFF9..=0xFFFB
-            | 0x110BD
-            | 0x110CD
-            | 0x13430..=0x1343F
-            | 0x1BCA0..=0x1BCA3
-            | 0x1D173..=0x1D17A
-            | 0xE0001
-            | 0xE0020..=0xE007F
-    )
 }
 
 impl JournalState {

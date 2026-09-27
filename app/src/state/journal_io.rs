@@ -51,6 +51,23 @@ pub fn is_sync_folder(path: &Path) -> bool {
 
 /// The [`JournalMode`] to open a journal at `path` with (Story 5.5): the sync-safe `Delete` in a
 /// detected sync folder (no `-wal` to corrupt under file-level sync), else the default `Wal`.
+/// Open a journal — the app's one open call — and log what an interrupted restore had left beside it
+/// and the open cleared under the instance lock (Story 8.3 G3 N2: the MCP access refuses a dossier
+/// while its marker or staging copy exists).
+pub(crate) fn open_journal(
+    path: &Path,
+    mode: JournalMode,
+) -> Result<steadyinvest_persistence::Journal, steadyinvest_persistence::Error> {
+    let journal = steadyinvest_persistence::Journal::open_with_mode(path, mode)?;
+    for leftover in journal.cleared_restore_leftovers() {
+        tracing::info!(
+            leftover = %leftover.display(),
+            "an interrupted restore's leftover was removed on open"
+        );
+    }
+    Ok(journal)
+}
+
 pub(crate) fn sync_mode_for(path: &Path) -> JournalMode {
     if is_sync_folder(path) {
         JournalMode::Delete
@@ -134,7 +151,7 @@ impl JournalState {
     /// journal (Story 5.5). Records identity/version, resets undo. Maps the lock/open failures to
     /// neutral notices. The caller is responsible for having closed/saved the previous journal.
     fn adopt_open(&mut self, path: &Path, mode: JournalMode) -> Result<OpenOutcome, String> {
-        match Journal::open_with_mode(path, mode) {
+        match open_journal(path, mode) {
             Ok(journal) => {
                 let logical_version = journal.logical_version().map_err(super::open_error)?;
                 let outcome = OpenOutcome {

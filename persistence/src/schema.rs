@@ -147,7 +147,7 @@ pub(crate) fn migrate_to_v7(tx: &Transaction<'_>) -> Result<()> {
 ///   it). It fires on INSERT only: an import upsert that updates an existing row fires nothing, and
 ///   the import's own bump covers it (see `util::bump_logical_version`).
 pub(crate) fn migrate_to_v8(tx: &Transaction<'_>) -> Result<()> {
-    tx.execute_batch(
+    tx.execute_batch(&format!(
         "CREATE TABLE ai_drafts (
              id                       TEXT PRIMARY KEY CHECK (id = lower(id) AND length(id) = 36),
              kind                     TEXT NOT NULL
@@ -188,13 +188,70 @@ pub(crate) fn migrate_to_v8(tx: &Transaction<'_>) -> Result<()> {
          CREATE INDEX idx_ai_drafts_status ON ai_drafts(status);
          CREATE INDEX idx_ai_drafts_study_id ON ai_drafts(study_id);
          CREATE INDEX idx_ai_drafts_created_study_id ON ai_drafts(created_study_id);
-         CREATE TRIGGER trg_ai_drafts_bump_logical_version AFTER INSERT ON ai_drafts
+         CREATE TRIGGER {DRAFT_TRIGGER} AFTER INSERT ON ai_drafts
          BEGIN
              UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1;
-         END;",
-    )?;
+         END;"
+    ))?;
     Ok(())
 }
+
+/// Migration step 9 (Story 8.3 G3): an insert NEVER overwrites a draft. The MCP draft connection's
+/// authorizer allows `INSERT INTO ai_drafts` — and an `INSERT OR REPLACE` / `REPLACE INTO` is an
+/// insert whose conflict clause the authorizer cannot see: it would DELETE a decided draft and
+/// write another in its place. `trg_ai_drafts_refuse_existing_id` aborts any insert whose id is
+/// already in the table, whatever its conflict clause (a `BEFORE INSERT` trigger runs before the
+/// conflict is resolved). The v8 DDL is frozen (shipped), hence a step of its own. The import
+/// updates an existing draft with an `UPDATE`, never an upsert (`export.rs`).
+pub(crate) fn migrate_to_v9(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(&format!(
+        "CREATE TRIGGER {DRAFT_ID_GUARD_TRIGGER} BEFORE INSERT ON ai_drafts
+         WHEN EXISTS (SELECT 1 FROM ai_drafts WHERE id = NEW.id)
+         BEGIN
+             SELECT RAISE(ABORT, 'ai_drafts: a draft with this id already exists');
+         END;"
+    ))?;
+    Ok(())
+}
+
+/// The name of the v9 trigger that refuses an insert over an existing draft id (Story 8.3 G3).
+pub(crate) const DRAFT_ID_GUARD_TRIGGER: &str = "trg_ai_drafts_refuse_existing_id";
+
+/// The name of the v8 trigger that bumps `logical_version` on every inserted draft — ONE spelling,
+/// used by the DDL above and by the MCP draft connection's authorizer (Story 8.3, arch A3: it allows
+/// `UPDATE journal_meta` only when this trigger is the accessor). Never rename it: the name is in
+/// every v8 dossier.
+pub(crate) const DRAFT_TRIGGER: &str = "trg_ai_drafts_bump_logical_version";
+
+/// The tables the MCP access surface may READ (Story 8.3, arch A3, NFR-A2): the studies, their FR51
+/// history, the journal identity / version, and the drafts. The allowlist is the security boundary —
+/// every other table, today's and any later one, is denied (and the classification test below fails
+/// until a new table is put in one of the two lists on purpose).
+pub(crate) const MCP_READABLE_TABLES: &[&str] =
+    &["studies", "judgments", "journal_meta", "ai_drafts"];
+
+/// The tables the MCP access surface may never read (the portfolio, the watchlist and the local
+/// caches — NFR-A2 / NFR-S4). Listed so that the classification is explicit; the authorizer denies
+/// anything not in [`MCP_READABLE_TABLES`] whether or not it is listed here.
+#[cfg_attr(not(test), expect(dead_code))] // the classification test's explicit list
+pub(crate) const MCP_DENIED_TABLES: &[&str] = &[
+    "holdings",
+    "transactions",
+    "portfolios",
+    "watchlist_items",
+    "fx_rates",
+    "price_history",
+];
+
+/// SQLite's own catalogue tables, readable by the MCP connections (statement preparation reads the
+/// schema through them).
+pub(crate) const SQLITE_INTERNAL_TABLES: &[&str] = &[
+    "sqlite_master",
+    "sqlite_schema",
+    "sqlite_temp_master",
+    "sqlite_temp_schema",
+    "sqlite_sequence",
+];
 
 /// The complete v1 DDL. Frozen once shipped — schema changes go through new migration steps.
 const DDL_V1: &str = "
@@ -351,8 +408,8 @@ mod tests {
         let conn = v1_connection();
         assert_eq!(
             migrations::user_version(&conn).expect("user_version reads"),
-            8,
-            "the registry migrates a fresh DB to the latest version (v8)"
+            9,
+            "the registry migrates a fresh DB to the latest version (v9)"
         );
         assert!(
             column_names(&conn, "watchlist_items").contains(&"study_id".to_string()),
@@ -531,6 +588,12 @@ mod tests {
                 .iter()
                 .any(|(n, _)| n == "trg_ai_drafts_bump_logical_version"),
             "the v8 trigger exists under the name 8.3's authorizer relies on"
+        );
+        assert!(
+            triggers
+                .iter()
+                .any(|(n, _)| n == super::DRAFT_ID_GUARD_TRIGGER),
+            "the v9 id guard exists (Story 8.3 G3)"
         );
     }
 }

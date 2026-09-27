@@ -1,6 +1,6 @@
 # Story 8.2b: AI origin, staleness and decisions (headless)
 
-Status: review
+Status: done
 
 <!-- Created 2026-09-27 by create-story (ultimate context engine). Branch: feat/8-2b-ai-origin-decisions
      (main with 8.1 #257 and 8.2a #258 merged). No UI in this story — the inbox is 8.5a/8.5b. -->

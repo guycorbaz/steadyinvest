@@ -25,7 +25,11 @@ steadyinvest-report = { path = "report", version = "0.1.0" }
 # ── External (pinned; latest stable verified 2026-06) ──
 slint = "1.16"
 slint-build = "1.16"
-rusqlite = { version = "0.40", features = ["bundled"] }       # SQLite compiled into the binary
+rusqlite = { version = "0.40", features = ["bundled", "hooks"] }       # SQLite compiled into the binary
+# `hooks` (Story 8.3): the SQLite authorizer that gates the MCP access surface (arch §Phase 4 A3).
+# The dossier file identity on Windows (Story 8.3, arch A11): the MCP write re-checks the dossier was
+# not replaced by a restore. Already in the tree via walkdir; Unlicense/MIT.
+same-file = "1.0.6"
 rust_decimal = { version = "1.42", features = ["maths"] }     # exact decimal + powd/exp/ln (no f64)
 # reqwest TLS backend deferred to Story 3.1 (first HTTP). REVALIDATED 2026-06-15 (#5/B5): in 0.13 the
 # TLS feature names have CHANGED — the old `rustls-tls`/`rustls-tls-webpki-roots` are GONE. Current

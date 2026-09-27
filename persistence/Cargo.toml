@@ -17,5 +17,10 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 
+# The dossier file identity on Windows (Story 8.3 A11): an open handle is safe there. On Unix the
+# identity is a stat(2) — no descriptor, which would release this process's SQLite locks.
+[target.'cfg(not(unix))'.dependencies]
+same-file = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use steadyinvest_persistence::{
     Error as PersistError, Journal, inspect_backup, restore_journal_file,
+    restore_journal_file_keeping,
 };
 use uuid::Uuid;
 
@@ -224,34 +225,33 @@ impl JournalState {
             return Err(restore_snapshot_exists_message(&snapshot));
         }
         self.journal = None;
-        if let Err(failure) = write_snapshot(&live, &snapshot) {
-            tracing::warn!(
-                "restore refused: the safety snapshot could not be written: {}",
-                failure.error
-            );
-            // G1 P review (L-a): a partial copy is no snapshot — removed only when THIS restore
-            // created the file; one that appeared meanwhile (AlreadyExists) is not ours.
-            if failure.created {
-                remove_snapshot(&snapshot);
-            }
+        // Snapshot + atomic swap in ONE persistence call (Story 8.3 G3 N3): the snapshot is copied
+        // under the restore's exclusive lock, so an MCP writer can neither tear it nor slip a write
+        // between it and the swap. The snapshot is a NEW file (never over an existing one — G1 P
+        // L-a/L-g) with the dossier's permissions (L-b); on any failure persistence removes the
+        // snapshot it created and the live file is untouched. The persistence error's (English)
+        // text is logged, never appended to the French refusal (G1 final review, L13).
+        if let Err(error) = restore_journal_file_keeping(&live, &pending.backup_path, &snapshot) {
+            let message = match error {
+                PersistError::RestoreSnapshot { .. } => {
+                    tracing::warn!(
+                        "restore refused: the safety snapshot could not be written: {error}"
+                    );
+                    MSG_RESTORE_SNAPSHOT_FAILED
+                }
+                _ => {
+                    tracing::warn!("restore swap failed: {error}");
+                    MSG_RESTORE_FAILED
+                }
+            };
             self.reopen_live(&live);
-            return Err(MSG_RESTORE_SNAPSHOT_FAILED.to_string());
-        }
-
-        // Atomic swap — a failure leaves the live file untouched, so the original survives. The
-        // persistence error's (English) text is logged, never appended to the French refusal
-        // (G1 final review, L13).
-        if let Err(error) = restore_journal_file(&live, &pending.backup_path) {
-            tracing::warn!("restore swap failed: {error}");
-            remove_snapshot(&snapshot);
-            self.reopen_live(&live);
-            return Err(MSG_RESTORE_FAILED.to_string());
+            return Err(message.to_string());
         }
 
         self.open_swapped(
             &live,
             &snapshot,
-            |path| Journal::open_with_mode(path, sync_mode_for(path)),
+            |path| super::journal_io::open_journal(path, sync_mode_for(path)),
             restore_journal_file,
         )
     }
@@ -311,7 +311,7 @@ impl JournalState {
     /// Best-effort reopen of the live journal at `path` (used to recover after a failed restore swap so
     /// the app is never left journal-less).
     fn reopen_live(&mut self, path: &Path) {
-        match Journal::open_with_mode(path, sync_mode_for(path)) {
+        match super::journal_io::open_journal(path, sync_mode_for(path)) {
             Ok(journal) => {
                 self.read_only = journal.read_only_cause();
                 self.journal = Some(journal);
@@ -326,38 +326,6 @@ impl JournalState {
             }
         }
     }
-}
-
-/// Why the snapshot could not be written, and whether THIS call created the file (so only then
-/// may a partial copy be removed — G1 P review L-a).
-#[derive(Debug)]
-pub(super) struct SnapshotFailure {
-    pub(super) created: bool,
-    pub(super) error: std::io::Error,
-}
-
-/// Write the pre-restore snapshot as a NEW file (never over an existing one — the TOCTOU twin of
-/// the `-prerestore` existence refusal above), carrying the dossier's permissions (G1 P review
-/// L-b: the copy of a private dossier stays private).
-pub(super) fn write_snapshot(live: &Path, snapshot: &Path) -> Result<(), SnapshotFailure> {
-    let not_created = |error| SnapshotFailure {
-        created: false,
-        error,
-    };
-    let created = |error| SnapshotFailure {
-        created: true,
-        error,
-    };
-    let mut source = std::fs::File::open(live).map_err(not_created)?;
-    let permissions = source.metadata().map_err(not_created)?.permissions();
-    let mut target = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(snapshot)
-        .map_err(not_created)?;
-    target.set_permissions(permissions).map_err(created)?;
-    std::io::copy(&mut source, &mut target).map_err(created)?;
-    target.sync_all().map_err(created)
 }
 
 /// Remove this restore's own snapshot; a failure is logged with the path (G1 P review M2) — the
