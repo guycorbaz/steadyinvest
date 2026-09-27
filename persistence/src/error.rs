@@ -192,6 +192,32 @@ pub enum Error {
     /// internal inconsistency of the caller. Nothing was written.
     #[error("the decision's study {study_id} is not the draft's study; nothing was written")]
     DraftStudyMismatch { study_id: Uuid },
+
+    /// The MCP access surface met a dossier whose SQL schema is not exactly this build's (Story 8.3,
+    /// arch A2): it never migrates and never reads a schema it does not know. Nothing was read or
+    /// written. `file_user_version` above `supported` = a newer dossier; below = an older one.
+    #[error(
+        "the dossier schema (file user_version {file_user_version}) differs from this MCP \
+         access build's ({supported}); nothing was read or written"
+    )]
+    McpSchemaMismatch {
+        file_user_version: i64,
+        supported: u32,
+    },
+
+    /// The SQLite authorizer of the MCP access surface denied a statement (Story 8.3, arch A3):
+    /// only study reads and draft inserts pass. `denials` names each denied action and its object,
+    /// for the MCP server's log. Nothing was written.
+    #[error("the MCP access surface denied {}; nothing was written", crate::mcp_access::denials_text(.denials))]
+    McpDenied {
+        denials: Vec<crate::mcp_access::McpDenial>,
+    },
+
+    /// A call to the MCP access surface was not well formed — a caller (MCP server) defect, never
+    /// an AI proposal's fault (those are typed refusals): e.g. a draft kind without the data it
+    /// needs, or a timestamp that is not RFC3339 UTC. Nothing was written.
+    #[error("the MCP access call is not well formed: {detail}; nothing was written")]
+    McpInvalidCall { detail: String },
 }
 
 /// The KIND of a failure, for a caller that names causes in its own language (the app speaks
@@ -273,6 +299,10 @@ impl Error {
             Error::LockHeld { .. } => ErrorKind::Locked,
             Error::CorruptPayload { .. } | Error::CorruptJournalMeta { .. } => ErrorKind::Corrupt,
             Error::NewerJournalSchema { .. } | Error::NewerRowSchema { .. } => ErrorKind::NewerData,
+            Error::McpSchemaMismatch {
+                file_user_version,
+                supported,
+            } if *file_user_version > i64::from(*supported) => ErrorKind::NewerData,
             Error::Migration { .. } => ErrorKind::Migration,
             _ => ErrorKind::Other,
         }
@@ -452,6 +482,19 @@ mod tests {
             Error::DraftStudyMismatch {
                 study_id: Uuid::from_u128(4),
             },
+            Error::McpSchemaMismatch {
+                file_user_version: 9,
+                supported: 8,
+            },
+            Error::McpDenied {
+                denials: vec![crate::mcp_access::McpDenial {
+                    action: "update".to_string(),
+                    object: "studies.payload".to_string(),
+                }],
+            },
+            Error::McpInvalidCall {
+                detail: "a note draft carries no study".to_string(),
+            },
         ]
     }
 
@@ -486,14 +529,18 @@ mod tests {
                 | Error::DraftNotPending { .. }
                 | Error::DraftStatusMismatch { .. }
                 | Error::StudyChangedSinceRead
-                | Error::DraftStudyMismatch { .. } => {}
+                | Error::DraftStudyMismatch { .. }
+                | Error::McpSchemaMismatch { .. }
+                | Error::McpDenied { .. }
+                | Error::McpInvalidCall { .. } => {}
             }
         }
-        // 26 variants (21 + the five draft-decision variants of Story 8.2b); `WriteProtected` and
-        // `WriteProtectedOutdated` are sampled for both of their causes (file, directory).
+        // 29 variants (21 + the five draft-decision variants of Story 8.2b + the three MCP access
+        // variants of Story 8.3); `WriteProtected` and `WriteProtectedOutdated` are sampled for both
+        // of their causes (file, directory). 8.3 delta: 28 → 31.
         assert_eq!(
             sample_errors().len(),
-            28,
+            31,
             "one sample per variant (+2 causes)"
         );
     }
@@ -577,6 +624,18 @@ mod tests {
             }
             .kind(),
             ErrorKind::ProtectedOutdated { directory: true }
+        );
+        // Story 8.3: a newer dossier met by the MCP access surface is newer data; an older one has
+        // no named kind (the MCP server names it « open it in the app first »).
+        let mcp_schema = |file_user_version| Error::McpSchemaMismatch {
+            file_user_version,
+            supported: 8,
+        };
+        assert_eq!(mcp_schema(9).kind(), ErrorKind::NewerData);
+        assert_eq!(mcp_schema(7).kind(), ErrorKind::Other);
+        assert_eq!(
+            Error::McpDenied { denials: vec![] }.kind(),
+            ErrorKind::Other
         );
     }
 

@@ -11,6 +11,7 @@ description = "Local SQLite journal (hybrid model). The only crate that touches 
 [dependencies]
 steadyinvest-contract = { workspace = true }
 rusqlite = { workspace = true }
+same-file = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

@@ -156,6 +156,68 @@ fn map_missing_meta(e: rusqlite::Error) -> Error {
 /// next open). Sidecar/temp removal is best-effort. The restored file is migrated forward (if older) by
 /// the caller's subsequent `Journal::open`.
 pub fn restore_journal_file(live_path: &Path, backup_path: &Path) -> Result<()> {
+    restore_journal_file_with_wait(live_path, backup_path, RESTORE_LOCK_WAIT)
+}
+
+/// How long the restore waits for a write in progress on the live file (an MCP draft insert —
+/// Story 8.3, arch A11) to finish before refusing.
+const RESTORE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(5000);
+
+/// Take an EXCLUSIVE SQLite lock on the live journal (Story 8.3, arch A11): the app's handles are
+/// dropped (the precondition), but an MCP draft connection takes no instance lock and may be
+/// mid-write. Holding the lock across the swap means no MCP write is in flight on the old file when
+/// it is replaced, and an MCP write that starts after the swap finds another file at the path (its
+/// identity re-check refuses it — `dossier_replaced`). `None` when there is nothing to lock: no live
+/// file, a file SQLite cannot lock as a database (not a journal — nothing can be writing it), or a
+/// write-protected one (no MCP write can land in it). A lock still held after `wait` refuses the
+/// restore by name — the live journal untouched.
+fn lock_live_journal(live_path: &Path, wait: std::time::Duration) -> Result<Option<Connection>> {
+    if !live_path.exists() {
+        return Ok(None);
+    }
+    let conn = match Connection::open_with_flags(
+        live_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(conn) => conn,
+        Err(_) => return Ok(None), // not openable as a database: nothing can be writing it
+    };
+    if conn.is_readonly(rusqlite::MAIN_DB).unwrap_or(true) {
+        return Ok(None);
+    }
+    conn.busy_timeout(wait)?;
+    match conn.execute_batch("BEGIN EXCLUSIVE") {
+        Ok(()) => Ok(Some(conn)),
+        Err(rusqlite::Error::SqliteFailure(code, _))
+            if matches!(
+                code.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            ) =>
+        {
+            Err(Error::Restore {
+                detail: "a write in progress on the live journal did not end in time".to_string(),
+            })
+        }
+        Err(rusqlite::Error::SqliteFailure(code, _))
+            if matches!(
+                code.code,
+                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::ReadOnly
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(Error::Sqlite(e)),
+    }
+}
+
+/// [`restore_journal_file`] with a chosen wait for the live file's lock (tests use a short one).
+pub(crate) fn restore_journal_file_with_wait(
+    live_path: &Path,
+    backup_path: &Path,
+    wait: std::time::Duration,
+) -> Result<()> {
+    // A11 — the exclusive lock first: a failure here leaves the live file untouched.
+    let lock = lock_live_journal(live_path, wait)?;
     let mut incoming = live_path.as_os_str().to_os_string();
     incoming.push("-restore-incoming");
     let incoming = std::path::PathBuf::from(incoming);
@@ -167,6 +229,11 @@ pub fn restore_journal_file(live_path: &Path, backup_path: &Path) -> Result<()> 
             detail: format!("the copy did not complete: {e}"),
         });
     }
+    // Windows cannot replace a file this process holds open: the lock is released just before the
+    // rename there — the residual window between an MCP write's identity check and its commit is
+    // documented (Story 8.3 Dev Notes §4). On Unix the lock is held across the rename.
+    #[cfg(windows)]
+    drop(lock);
     // Atomic replace. (No explicit fsync of the temp before the rename: on a crash between the two,
     // ext4's rename heuristics flush the data; the worst case on other filesystems is an empty/short
     // live file, recovered by re-running the restore — the validated backup itself is never touched.)
@@ -176,6 +243,11 @@ pub fn restore_journal_file(live_path: &Path, backup_path: &Path) -> Result<()> 
             detail: format!("the staged file did not replace the journal: {e}"),
         });
     }
+    // The lock's connection belongs to the REPLACED file: close it before the live sidecars go (its
+    // close may checkpoint and remove the old file's `-wal` / `-shm` by name — the restored file has
+    // none yet, and they are removed below anyway).
+    #[cfg(not(windows))]
+    drop(lock);
     for suffix in ["-wal", "-shm"] {
         let mut sidecar = live_path.as_os_str().to_os_string();
         sidecar.push(suffix);

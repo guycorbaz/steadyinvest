@@ -17,7 +17,7 @@
 
 use crate::error::{Error, Result};
 use crate::journal::Journal;
-use crate::studies::{stored_study_is, write_study_with_snapshot};
+use crate::studies::{stored_study_is, study_status_in, write_study_with_snapshot};
 use crate::util::{bump_logical_version, parse_uuid};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -97,7 +97,7 @@ pub struct DraftDecisionWrite<'a> {
     pub study: Option<StudyWrite<'a>>,
 }
 
-type DraftRow = (
+pub(crate) type DraftRow = (
     String,
     String,
     Option<String>,
@@ -120,7 +120,7 @@ pub(crate) const DRAFT_COLUMNS: &str = "id, kind, study_id, security_ticker, nat
      status, created_at, decided_at, comment, origin_client, origin_model, stale_at_decision, \
      edited_before_validation, created_study_id, payload";
 
-fn row_tuple(r: &rusqlite::Row<'_>) -> rusqlite::Result<DraftRow> {
+pub(crate) fn row_tuple(r: &rusqlite::Row<'_>) -> rusqlite::Result<DraftRow> {
     Ok((
         r.get(0)?,
         r.get(1)?,
@@ -243,7 +243,7 @@ pub(crate) fn is_rfc3339_utc(text: &str) -> bool {
     shape && fraction_ok
 }
 
-fn record_from_row(row: DraftRow) -> Result<DraftRecord> {
+pub(crate) fn record_from_row(row: DraftRow) -> Result<DraftRecord> {
     let (
         id,
         kind,
@@ -336,14 +336,7 @@ impl Journal {
     /// A study's lifecycle status (`"active"` / `"archived"`), or `None` when the study is gone —
     /// the decision rail refuses a draft of an archived study by name (Story 8.2b).
     pub fn study_status(&self, id: Uuid) -> Result<Option<String>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT status FROM studies WHERE id = ?1",
-                rusqlite::params![id.to_string()],
-                |r| r.get(0),
-            )
-            .optional()?)
+        study_status_in(&self.conn, id)
     }
 
     /// Write the owner's decision on a pending draft (Story 8.2b, arch A8, NFR-R2): in **one**

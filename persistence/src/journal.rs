@@ -876,7 +876,7 @@ fn add_owner_write(path: &Path, mut permissions: std::fs::Permissions) -> bool {
 }
 
 /// Pragmas that only affect this connection — safe on a read-only handle.
-fn apply_connection_local_pragmas(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_connection_local_pragmas(conn: &Connection) -> Result<()> {
     conn.pragma_update(None, "busy_timeout", 5000)?;
     conn.pragma_update(None, "foreign_keys", true)?;
     Ok(())
@@ -897,7 +897,7 @@ fn apply_read_write_pragmas(conn: &Connection, mode: JournalMode) -> Result<()> 
 }
 
 /// Read and parse the journal identity from the `journal_meta` singleton row.
-fn read_journal_id(conn: &Connection) -> Result<Uuid> {
+pub(crate) fn read_journal_id(conn: &Connection) -> Result<Uuid> {
     let text: String = conn
         .query_row(
             "SELECT journal_id FROM journal_meta WHERE id = 1",

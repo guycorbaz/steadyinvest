@@ -146,6 +146,80 @@ pub(crate) fn stored_study_is(tx: &rusqlite::Transaction<'_>, expected: &Study) 
         .is_some_and(|prev| prev == expected))
 }
 
+/// Parse a stored study payload behind the newer-row gate — the ONE parse of a `studies` /
+/// `judgments` row (the journal reads and the MCP access surface, Story 8.3): a row whose
+/// `schema_version` is newer than this build's contract fails loudly, never a silent partial parse.
+pub(crate) fn parse_study_row(row_schema_version: i64, payload: &str) -> Result<Study> {
+    if row_schema_version > i64::from(SCHEMA_VERSION) {
+        return Err(Error::NewerRowSchema {
+            row_schema_version,
+            supported: SCHEMA_VERSION,
+        });
+    }
+    Ok(serde_json::from_str(payload)?)
+}
+
+/// Read a study by id on any connection (the journal's, or a gated MCP connection — Story 8.3).
+pub(crate) fn read_study_in(conn: &rusqlite::Connection, id: Uuid) -> Result<Option<Study>> {
+    let row: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT schema_version, payload FROM studies WHERE id = ?1",
+            rusqlite::params![id.to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    row.map(|(v, payload)| parse_study_row(v, &payload))
+        .transpose()
+}
+
+/// A study's lifecycle status on any connection, `None` when the study is gone.
+pub(crate) fn study_status_in(conn: &rusqlite::Connection, id: Uuid) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT status FROM studies WHERE id = ?1",
+            rusqlite::params![id.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// The study summaries on any connection, ordered by `(created_at, id)`; `page` = `(limit,
+/// offset)` bounds the read (the MCP lists are paged, Story 8.3), `None` reads them all.
+pub(crate) fn list_studies_in(
+    conn: &rusqlite::Connection,
+    page: Option<(u32, u64)>,
+) -> Result<Vec<StudySummary>> {
+    let (limit, offset) = page.map_or((-1_i64, 0_i64), |(l, o)| {
+        (i64::from(l), i64::try_from(o).unwrap_or(i64::MAX))
+    });
+    let mut stmt = conn.prepare(
+        "SELECT id, security_ticker, created_at, status
+         FROM studies ORDER BY created_at, id LIMIT ?1 OFFSET ?2",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![limit, offset], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (id_text, security_ticker, created_at, status) = row?;
+        let id = Uuid::parse_str(&id_text).map_err(|e| Error::CorruptPayload {
+            detail: format!("studies.id {id_text:?} is not a valid UUID: {e}"),
+        })?;
+        out.push(StudySummary {
+            id,
+            security_ticker,
+            created_at: Timestamp(created_at),
+            status,
+        });
+    }
+    Ok(out)
+}
+
 impl Journal {
     /// Refuse a study stamped with another journal's identity — a study from journal A is never
     /// written into journal B (the guard of every study write).
@@ -248,17 +322,8 @@ impl Journal {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let Some((row_schema_version, payload)) = row else {
-            return Ok(None);
-        };
-        if row_schema_version > i64::from(SCHEMA_VERSION) {
-            return Err(Error::NewerRowSchema {
-                row_schema_version,
-                supported: SCHEMA_VERSION,
-            });
-        }
-        let study: Study = serde_json::from_str(&payload)?;
-        Ok(Some(study))
+        row.map(|(v, payload)| parse_study_row(v, &payload))
+            .transpose()
     }
 
     /// Read a study back by id, parsing the stored payload. `Ok(None)` when the id is absent.
@@ -267,56 +332,13 @@ impl Journal {
     /// with a clear typed error — never a silent partial parse. (Unknown *fields* within a
     /// known-version payload are tolerated by design — the contract's forward-compat rail.)
     pub fn get_study(&self, id: Uuid) -> Result<Option<Study>> {
-        let row: Option<(i64, String)> = self
-            .conn
-            .query_row(
-                "SELECT schema_version, payload FROM studies WHERE id = ?1",
-                rusqlite::params![id.to_string()],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        let Some((row_schema_version, payload)) = row else {
-            return Ok(None);
-        };
-        if row_schema_version > i64::from(SCHEMA_VERSION) {
-            return Err(Error::NewerRowSchema {
-                row_schema_version,
-                supported: SCHEMA_VERSION,
-            });
-        }
-        let study: Study = serde_json::from_str(&payload)?;
-        Ok(Some(study))
+        read_study_in(&self.conn, id)
     }
 
     /// List the indexed columns of every study — no payload parse (the Epic 2 dashboard's
     /// building block). Ordered by `created_at` then `id` for a deterministic listing.
     pub fn list_studies(&self) -> Result<Vec<StudySummary>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, security_ticker, created_at, status
-             FROM studies ORDER BY created_at, id",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-            ))
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (id_text, security_ticker, created_at, status) = row?;
-            let id = Uuid::parse_str(&id_text).map_err(|e| Error::CorruptPayload {
-                detail: format!("studies.id {id_text:?} is not a valid UUID: {e}"),
-            })?;
-            out.push(StudySummary {
-                id,
-                security_ticker,
-                created_at: Timestamp(created_at),
-                status,
-            });
-        }
-        Ok(out)
+        list_studies_in(&self.conn, None)
     }
 
     /// Set a study's lifecycle `status` (Story 2.12, FR54/FR55): `"archived"` hides it from the

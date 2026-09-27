@@ -12,7 +12,8 @@
 //! raw-file backup/restore (`restore`), the sync-folder guard + single-instance lock
 //! (`journal`), and the local price-history cache (`price_history`). Epic 6 added the dated,
 //! source-aware FX-rate store (`fx`, Story 6.5, FR28). Epic 8 adds the AI drafts table
-//! (`drafts`, migration v8, Story 8.2a).
+//! (`drafts`, migration v8, Story 8.2a) and the gated MCP access surface (`mcp_access`, Story 8.3):
+//! typed study reads and draft inserts behind a SQLite authorizer — never a connection.
 
 mod drafts;
 mod error;
@@ -20,6 +21,7 @@ mod export;
 mod fx;
 mod holdings;
 mod journal;
+mod mcp_access;
 mod migrations;
 mod price_history;
 mod restore;
@@ -40,6 +42,10 @@ pub use holdings::{DeletePortfolioOutcome, HoldingItem, PortfolioItem};
 pub use journal::{
     Journal, JournalMode, ReadOnlyCause, clear_lock, lock_is_stale, resolved_path,
     sweep_stale_read_copies,
+};
+pub use mcp_access::{
+    DossierIdentity, DraftFilter, DraftSubmission, MAX_PAGE, McpAccess, McpDenial, McpSnapshot,
+    McpStudyRead, Page, Paged, SubmissionRefusal, SubmitError,
 };
 pub use restore::{BackupInfo, inspect_backup, restore_journal_file};
 pub use studies::{JudgmentSnapshotSummary, StudySummary};
