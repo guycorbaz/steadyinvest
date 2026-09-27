@@ -95,8 +95,10 @@ component LabeledDropdown inherits VerticalLayout {
 }
 
 // Story 8.1 (UX 8.0 §4.3): a multi-line labelled text area for the note forms — the `RationaleNote`
-// box (3 rows, growing to 8, then it scrolls). Enter inserts a newline; Ctrl+Enter validates
-// (`accepted`); Esc is not handled here, so it reaches the card's cancel.
+// box (3 rows, growing to 8, then it scrolls, the caret kept in view). Enter inserts a newline;
+// Ctrl+Enter (Cmd+Enter on macOS) validates (`accepted`); Esc is not handled here, so it reaches
+// the card's cancel. A mouse drag selects text (the Flickable is not interactive; the wheel still
+// scrolls it).
 component LabeledTextArea inherits VerticalLayout {
     in property <string> label;
     in property <string> placeholder;
@@ -130,7 +132,7 @@ component LabeledTextArea inherits VerticalLayout {
         // Seen BEFORE the text input: Ctrl+Enter validates; a plain Enter goes on to the input
         // (a newline).
         capture-key-pressed(event) => {
-            if (event.text == Key.Return && event.modifiers.control) {
+            if (event.text == Key.Return && (event.modifiers.control || event.modifiers.meta)) {
                 root.accepted();
                 return accept;
             }
@@ -153,12 +155,13 @@ component LabeledTextArea inherits VerticalLayout {
                 y: Tokens.space-8;
                 visible: input.text == "";
             }
-            Flickable {
+            flick := Flickable {
                 x: Tokens.space-8;
                 y: Tokens.space-8;
                 width: parent.width - Tokens.space-8 * 2;
                 height: parent.height - Tokens.space-8 * 2;
                 viewport-height: Math.max(self.height, input.preferred-height);
+                interactive: false;
                 input := TextInput {
                     color: Tokens.text-high;
                     selection-background-color: Tokens.focus;
@@ -167,6 +170,15 @@ component LabeledTextArea inherits VerticalLayout {
                     single-line: false;
                     wrap: word-wrap;
                     width: parent.width;
+                    // Keep the caret's line inside the visible box (G3 B1).
+                    cursor-position-changed(pos) => {
+                        let line = self.font-size * 1.5;
+                        if (pos.y + flick.viewport-y < 0) {
+                            flick.viewport-y = -pos.y;
+                        } else if (pos.y + line + flick.viewport-y > flick.height) {
+                            flick.viewport-y = flick.height - pos.y - line;
+                        }
+                    }
                 }
             }
         }
@@ -260,12 +272,39 @@ export component ModalDialog inherits Rectangle {
 
     // ── Cancel: the confirms Rust parked keep a pending action on their side — tell them. ──
     function cancel() {
+        // Story 8.1 (G3 E2, owner default): a note being written is never lost on a reflex — Esc
+        // or « Annuler » with a text that differs from its seed asks first; the text is kept.
+        if (Dialog.kind == "form" && root.is-note-form() && Dialog.draft-text != Dialog.seed-text) {
+            Dialog.resume-title = Dialog.title;
+            Dialog.resume-body = Dialog.body;
+            Dialog.confirm(@tr("Abandonner la note en cours ?"), "", @tr("Abandonner"), "discard-note", Dialog.target-id);
+            return;
+        }
+        // …and « Annuler » on that question goes back to the note, text intact.
+        if (Dialog.kind == "confirm" && Dialog.action == "discard-note") {
+            Dialog.title = Dialog.resume-title;
+            Dialog.body = Dialog.resume-body;
+            Dialog.action = "";
+            Dialog.verb = "";
+            Dialog.kind = "form";
+            return;
+        }
         if (Dialog.kind == "confirm") {
             if (Dialog.action == "study-action") { Studies.cancel-study-action(); }
             else if (Dialog.action == "confirm-import") { Prefs.cancel-import(); }
             else if (Dialog.action == "confirm-restore") { Prefs.cancel-restore(); }
         }
         Dialog.close();
+    }
+
+    function is-note-form() -> bool {
+        return Dialog.form-id == "note-add" || Dialog.form-id == "note-edit";
+    }
+    // A click on the scrim: ignored while a note is being written (G3 E2) — Esc or « Annuler »
+    // still leave; anything else cancels as before.
+    function scrim-clicked() {
+        if (Dialog.kind == "form" && root.is-note-form()) { return; }
+        root.cancel();
     }
 
     // The confirm title and verb, derived from the action when Rust parked it (the strings stay
@@ -296,6 +335,8 @@ export component ModalDialog inherits Rectangle {
     // G1 review (Guy's decision 5): every confirm verb writes the dossier — on a read-only one it
     // stays blocked, and the dialog SAYS why instead of greying the verb in silence.
     function confirm-enabled() -> bool {
+        // Abandoning a draft writes nothing.
+        if (Dialog.action == "discard-note") { return true; }
         return !Holdings.read-only;
     }
     function confirm-verb() -> string {
@@ -365,7 +406,7 @@ export component ModalDialog inherits Rectangle {
         }
 
         scrim := TouchArea {
-            clicked => { root.cancel(); }
+            clicked => { root.scrim-clicked(); }
         }
 
         // The card — its own TouchArea swallows clicks so they never reach the scrim behind it.

@@ -120,8 +120,12 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_add_note(move |text| {
             let ui = ui_weak.unwrap();
-            let Some(id) = current_study_id(&current_study) else {
-                return false;
+            let id = match current_study_id(&current_study) {
+                Ok(id) => id,
+                Err(message) => {
+                    crate::wiring::dialog::refuse(&ui, &message);
+                    return false;
+                }
             };
             let result = journal_state.borrow_mut().add_note(id, &text).map(|_| ());
             note_outcome(
@@ -140,10 +144,15 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_edit_note(move |note_id, text| {
             let ui = ui_weak.unwrap();
-            let Some(id) = current_study_id(&current_study) else {
-                return false;
+            let id = match current_study_id(&current_study) {
+                Ok(id) => id,
+                Err(message) => {
+                    crate::wiring::dialog::refuse(&ui, &message);
+                    return false;
+                }
             };
             let Ok(note_id) = Uuid::parse_str(&note_id) else {
+                crate::wiring::dialog::refuse(&ui, state::MSG_NOTE_GONE);
                 return false;
             };
             let result = journal_state.borrow_mut().edit_note(id, note_id, &text);
@@ -163,10 +172,15 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_delete_note(move |note_id| {
             let ui = ui_weak.unwrap();
-            let Some(id) = current_study_id(&current_study) else {
-                return;
+            let id = match current_study_id(&current_study) {
+                Ok(id) => id,
+                Err(message) => {
+                    crate::wiring::dialog::refuse(&ui, &message);
+                    return;
+                }
             };
             let Ok(note_id) = Uuid::parse_str(&note_id) else {
+                crate::wiring::dialog::refuse(&ui, state::MSG_NOTE_GONE);
                 return;
             };
             let result = journal_state.borrow_mut().delete_note(id, note_id);
@@ -178,6 +192,24 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 result,
             );
         });
+    }
+
+    // Story 8.1 (G3 B4): « Afficher tout » / « Réduire » flips the row in place, so the choice
+    // survives every re-push of the form.
+    {
+        let ui_weak = ui.as_weak();
+        ui.global::<Studies>()
+            .on_toggle_note_expanded(move |note_id| {
+                use slint::Model;
+                let ui = ui_weak.unwrap();
+                let notes = ui.global::<Studies>().get_notes();
+                if let Some(index) = notes.iter().position(|row| row.id == note_id)
+                    && let Some(mut row) = notes.row_data(index)
+                {
+                    row.expanded = !row.expanded;
+                    notes.set_row_data(index, row);
+                }
+            });
     }
 
     // ── 2026-07-12 — commit the header card's company name. Exact mirror of `on_set_rationale`:
@@ -580,12 +612,14 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
     }
 }
 
-/// The open study's id, when one is open and well-formed (Story 8.1 note rails).
-fn current_study_id(current_study: &Rc<RefCell<Option<String>>>) -> Option<Uuid> {
+/// The open study's id for a note rail (Story 8.1): with none open (a stale callback — the demo,
+/// a closed study) the gesture is refused by name, never dropped in silence (G3 E9).
+fn current_study_id(current_study: &Rc<RefCell<Option<String>>>) -> Result<Uuid, String> {
     current_study
         .borrow()
         .as_deref()
         .and_then(|id| Uuid::parse_str(id).ok())
+        .ok_or_else(|| state::MSG_NO_STUDY_OPEN.to_string())
 }
 
 /// Settle a note rail's result (Story 8.1): on success clear the edit notice and re-push the form
@@ -605,7 +639,22 @@ fn note_outcome(
             let reread = journal_state.borrow().try_get_study(id);
             match reread {
                 Ok(Some(study)) => push_form(ui, &journal_state.borrow(), &study, format),
-                _ => ui.global::<Studies>().set_notes_unavailable(true),
+                _ => {
+                    // The write happened but the form cannot be rebuilt: say the notes are
+                    // unavailable, keep undo / redo in step with the stacks (the write pushed a
+                    // step), and an open « Historique » cannot be trusted either (G3 E3, #95).
+                    let studies = ui.global::<Studies>();
+                    let state = journal_state.borrow();
+                    studies.set_notes_unavailable(true);
+                    studies.set_can_undo(state.can_undo());
+                    studies.set_can_redo(state.can_redo());
+                    if studies.get_history_open() {
+                        studies.set_history_unavailable(true);
+                        studies.set_history_rows(slint::ModelRc::new(slint::VecModel::from(
+                            Vec::<crate::HistoryEntryRow>::new(),
+                        )));
+                    }
+                }
             }
             true
         }

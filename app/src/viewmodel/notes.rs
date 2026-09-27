@@ -9,6 +9,10 @@ use uuid::Uuid;
 /// « · modifiée le » — the meta suffix of an edited note (UX 8.0 §3.3 « Notes »).
 pub const NOTE_EDITED_ON: &str = "modifiée le";
 
+/// Every app string of the notes card built in Rust, scanned by the posture gate (FR13).
+#[cfg(test)]
+pub const NOTES_USER_FACING_LABELS: &[&str] = &[NOTE_EDITED_ON];
+
 /// One row of the « Notes » card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteRowView {
@@ -18,13 +22,21 @@ pub struct NoteRowView {
     pub text: String,
 }
 
-/// `JJ/MM/AAAA` from an RFC3339 stamp (the spec's note wording); the raw stamp when malformed —
-/// display only, never a hard error.
+/// `JJ/MM/AAAA` of an RFC3339 UTC stamp in the machine's LOCAL time zone (a note written at
+/// 00:30 in Zurich reads that day, not the day before); the raw stamp when malformed — display
+/// only, never a hard error. The history's day headers stay UTC (app-wide, unchanged).
 pub fn date_fr(stamp: &Timestamp) -> String {
-    let s = stamp.0.as_str();
-    match (s.get(0..4), s.get(5..7), s.get(8..10)) {
-        (Some(y), Some(m), Some(d)) => format!("{d}/{m}/{y}"),
-        _ => s.to_string(),
+    date_fr_in(stamp, &chrono::Local)
+}
+
+/// [`date_fr`] in a given zone — the pure core, tested with fixed offsets.
+fn date_fr_in<Tz: chrono::TimeZone>(stamp: &Timestamp, zone: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    match chrono::DateTime::parse_from_rfc3339(&stamp.0) {
+        Ok(at) => at.with_timezone(zone).format("%d/%m/%Y").to_string(),
+        Err(_) => stamp.0.clone(),
     }
 }
 
@@ -93,14 +105,28 @@ mod tests {
 
     #[test]
     fn rows_are_newest_first_with_the_edit_date_when_edited() {
+        // Midday stamps: the same calendar day in any real time zone.
         let rows = note_rows(&study_with(vec![
-            note(1, "2026-09-20T08:00:00Z", "2026-09-20T08:00:00Z"),
-            note(2, "2026-09-27T08:00:00Z", "2026-09-28T10:00:00Z"),
+            note(1, "2026-09-20T12:00:00Z", "2026-09-20T12:00:00Z"),
+            note(2, "2026-09-27T12:00:00Z", "2026-09-28T12:00:00Z"),
         ]));
         assert_eq!(rows[0].id, Uuid::from_u128(2));
         assert_eq!(rows[0].meta, "27/09/2026 · modifiée le 28/09/2026");
         assert_eq!(rows[1].meta, "20/09/2026");
         assert_eq!(rows[1].text, "note 1");
+    }
+
+    #[test]
+    fn a_note_date_is_the_local_calendar_day() {
+        let late = Timestamp("2026-09-26T22:30:00Z".to_string());
+        let zurich = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let new_york = chrono::FixedOffset::west_opt(4 * 3600).unwrap();
+        assert_eq!(
+            date_fr_in(&late, &zurich),
+            "27/09/2026",
+            "00:30 in Zurich is the 27th"
+        );
+        assert_eq!(date_fr_in(&late, &new_york), "26/09/2026");
     }
 
     #[test]

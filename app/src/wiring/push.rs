@@ -66,13 +66,28 @@ pub(crate) fn push_form(
     // (the note re-seeds from this only while it does NOT have focus, the keep-input discipline).
     studies.set_rationale(study.rationale.clone().unwrap_or_default().into());
     // Story 8.1 (FR78) — the study's notes, newest first (the card's rows); a successful read.
+    // A note the owner expanded stays expanded across the re-push (G3 B4): the previous model is
+    // the only place that state lives.
+    let expanded: std::collections::HashSet<SharedString> = {
+        use slint::Model;
+        studies
+            .get_notes()
+            .iter()
+            .filter(|row| row.expanded)
+            .map(|row| row.id)
+            .collect()
+    };
     studies.set_notes(ModelRc::new(VecModel::from(
         viewmodel::notes::note_rows(study)
             .into_iter()
-            .map(|n| crate::NoteRow {
-                id: n.id.to_string().into(),
-                meta: n.meta.into(),
-                text: n.text.into(),
+            .map(|n| {
+                let id: SharedString = n.id.to_string().into();
+                crate::NoteRow {
+                    expanded: expanded.contains(&id),
+                    id,
+                    meta: n.meta.into(),
+                    text: n.text.into(),
+                }
             })
             .collect::<Vec<_>>(),
     )));

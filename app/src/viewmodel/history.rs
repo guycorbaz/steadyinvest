@@ -28,10 +28,12 @@ pub const HIST_RATIONALE_CHANGED: &str = "raison consignée modifiée";
 pub const HIST_YEAR_ADDED: &str = "année ajoutée";
 pub const HIST_OTHER: &str = "autres champs modifiés";
 pub const HIST_CELLS_CHANGED: &str = "cellule(s) modifiée(s)";
-/// Story 8.1 — note changes (UX 8.0 §3.3 « History »), each keyed by the note's id.
-pub const HIST_NOTE_ADDED: &str = "Note ajoutée";
-pub const HIST_NOTE_EDITED: &str = "Note modifiée";
-pub const HIST_NOTE_DELETED: &str = "Note supprimée";
+/// Story 8.1 — note changes, each keyed by the note's id. Lower-case like every other history clause
+/// (« année ajoutée », « raison consignée modifiée ») — a wording adjustment of the 8.0 §3.3 list
+/// (« Note ajoutée… »), submitted to Guy.
+pub const HIST_NOTE_ADDED: &str = "note ajoutée";
+pub const HIST_NOTE_EDITED: &str = "note modifiée";
+pub const HIST_NOTE_DELETED: &str = "note supprimée";
 /// The empty display slot — the same faithful em-dash the form uses for an absent figure.
 pub const HIST_EMPTY_SLOT: &str = "—";
 pub const LBL_DIVIDEND_PS: &str = "Dividende par action";
@@ -357,16 +359,11 @@ fn summary_of(diff: &Diff, created: bool) -> String {
     if diff.rationale_changed {
         parts.push(HIST_RATIONALE_CHANGED.to_string());
     }
+    // One clause per kind of change (the detail lists each note); the app writes one note per
+    // snapshot, so a count would never show.
     for label in [HIST_NOTE_EDITED, HIST_NOTE_DELETED, HIST_NOTE_ADDED] {
-        let count = diff
-            .notes
-            .iter()
-            .filter(|c| note_change_label(c) == label)
-            .count();
-        match count {
-            0 => {}
-            1 => parts.push(label.to_string()),
-            n => parts.push(format!("{label} ({n})")),
+        if diff.notes.iter().any(|c| note_change_label(c) == label) {
+            parts.push(label.to_string());
         }
     }
     if diff.other || parts.is_empty() {

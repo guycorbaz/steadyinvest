@@ -316,7 +316,7 @@ component CompanyNameField inherits Rectangle {
 component NoteItem inherits VerticalLayout {
     in property <NoteRow> note;
     in property <bool> writable;
-    property <bool> expanded: false;
+    property <bool> expanded: root.note.expanded;
     // The height of three lines of body text, measured on the same font (never a guessed px).
     property <length> three-lines: probe.preferred-height;
     property <bool> long: body.preferred-height > root.three-lines + 1px;
@@ -346,6 +346,7 @@ component NoteItem inherits VerticalLayout {
                     @tr("Une note reste dans l'historique de l'étude, même supprimée. Ctrl+Entrée enregistre."),
                     root.note.id, "");
                 Dialog.draft-text = root.note.text;
+                Dialog.seed-text = root.note.text;
             }
         }
         ActionButton {
@@ -376,8 +377,10 @@ component NoteItem inherits VerticalLayout {
         height: root.long ? self.preferred-height : 0;
         toggle := ActionButton {
             visible: root.long;
+            // Hidden on a short note — and then no Tab stop either (G3 F4).
+            enabled: root.long;
             label: root.expanded ? @tr("Réduire") : @tr("Afficher tout");
-            clicked => { root.expanded = !root.expanded; }
+            clicked => { Studies.toggle-note-expanded(root.note.id); }
         }
     }
 }

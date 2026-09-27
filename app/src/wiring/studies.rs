@@ -313,6 +313,9 @@ fn reset_study_overlays(
     // G3 #9: the study's « Historique » panel too (through its own close path).
     studies.invoke_close_history();
     studies.set_history_unavailable(false);
+    // Story 8.1 (G3 F8/E5, owner default): « Masquer les notes » starts shown for every study
+    // opened — and on a dossier switch, which closes the study through here.
+    studies.set_history_hide_notes(false);
 }
 
 /// Wire the studies domain: create / open (with per-study view-state restore) / fold / regime,

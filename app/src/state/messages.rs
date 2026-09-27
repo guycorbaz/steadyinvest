@@ -119,6 +119,10 @@ pub const MSG_READ_FAILED: &str = "Le dossier n'a pas pu être lu ; rien n'a ét
 pub const MSG_NOTE_EMPTY: &str = "La note est vide ; rien n'a été enregistré.";
 /// Story 8.1: the note to edit or delete is no longer in the study (e.g. removed by an undo).
 pub const MSG_NOTE_GONE: &str = "Cette note n'existe plus dans l'étude ; rien n'a été enregistré.";
+/// Story 8.1: the open study was deleted meanwhile (another window, an import) — a note rail names it.
+pub const MSG_STUDY_GONE: &str = "L'étude n'existe plus dans le dossier ; rien n'a été enregistré.";
+/// Story 8.1: a note gesture with no study open (a stale callback) — named, never a silent no-op.
+pub const MSG_NO_STUDY_OPEN: &str = "Aucune étude n'est ouverte ; rien n'a été enregistré.";
 /// The system clipboard could not be read for a paste-a-column (Story 2.4).
 pub const MSG_CLIPBOARD_UNAVAILABLE: &str =
     "Le presse-papiers est indisponible ; aucune colonne n'a été collée.";
@@ -1081,6 +1085,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SAVE_FAILED,
     MSG_NOTE_EMPTY,
     MSG_NOTE_GONE,
+    MSG_STUDY_GONE,
+    MSG_NO_STUDY_OPEN,
     MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,

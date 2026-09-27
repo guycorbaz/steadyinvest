@@ -50,6 +50,8 @@ mod journal_io;
 mod ledger;
 mod messages;
 mod notes;
+#[cfg(test)]
+pub(crate) use notes::normalized_note_text as notes_text_for_tests;
 mod refresh;
 mod replacement;
 mod restore;

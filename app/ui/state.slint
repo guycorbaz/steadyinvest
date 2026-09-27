@@ -555,6 +555,7 @@ export struct NoteRow {
     id: string,
     meta: string,
     text: string,
+    expanded: bool,  // « Afficher tout » — kept by Rust across re-pushes (G3 B4)
 }
 
 export global Studies {
@@ -808,6 +809,7 @@ export global Studies {
     callback add-note(string) -> bool;           // text
     callback edit-note(string, string) -> bool;  // note id, text
     callback delete-note(string);                // note id
+    callback toggle-note-expanded(string);       // note id → « Afficher tout » / « Réduire »
     // 2026-07-12: commit the header card's company name (free text; empty → cleared to absence).
     callback set-company-name(string);
 
@@ -1077,6 +1079,9 @@ export global Dialog {
     in-out property <string> draft-sector;
     in-out property <string> draft-name;
     in-out property <string> draft-text;      // Story 8.1: the note forms' multi-line text
+    in-out property <string> seed-text;       // Story 8.1: the text the note form opened with
+    in-out property <string> resume-title;    // Story 8.1: the note form behind « Abandonner… ? »
+    in-out property <string> resume-body;
 
     public function close() {
         self.kind = "";
@@ -1107,6 +1112,7 @@ export global Dialog {
         self.draft-sector = "";
         self.draft-name = "";
         self.draft-text = "";
+        self.seed-text = "";
         self.flag = false;
         self.field-error = "";
         self.form-id = id;

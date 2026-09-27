@@ -8607,9 +8607,74 @@ fn a_note_rail_names_a_read_failure_never_a_vanished_note() {
     let id = state.create_study("NESN", "CHF").unwrap();
     let note = state.add_note(id, "Texte.").unwrap();
     make_study_unreadable(&mut state, id);
-    let refusal = state.delete_note(id, note).unwrap_err();
-    assert_ne!(
-        refusal, MSG_NOTE_GONE,
+    assert_eq!(
+        state.delete_note(id, note),
+        Err(MSG_READ_FAILED.to_string()),
         "a read failure is not passed off as absence"
+    );
+    assert_eq!(
+        state.edit_note(id, note, "X"),
+        Err(MSG_READ_FAILED.to_string())
+    );
+    assert_eq!(state.add_note(id, "X"), Err(MSG_READ_FAILED.to_string()));
+}
+
+#[test]
+fn a_note_rail_on_a_deleted_study_names_the_study_not_the_note() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8160);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let note = state.add_note(id, "Texte.").unwrap();
+    state.journal.as_mut().unwrap().delete_study(id).unwrap();
+    assert_eq!(state.add_note(id, "X"), Err(MSG_STUDY_GONE.to_string()));
+    assert_eq!(
+        state.edit_note(id, note, "X"),
+        Err(MSG_STUDY_GONE.to_string())
+    );
+    assert_eq!(state.delete_note(id, note), Err(MSG_STUDY_GONE.to_string()));
+}
+
+#[test]
+fn an_identical_edit_writes_nothing_not_even_a_version_bump() {
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8170);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    let note = state.add_note(id, "Texte.").unwrap();
+    let version = state.logical_version_or_zero();
+    state.edit_note(id, note, " Texte.\r\n").unwrap();
+    assert_eq!(state.logical_version_or_zero(), version, "no write at all");
+}
+
+#[test]
+fn note_text_is_normalised_and_invisible_only_text_is_empty() {
+    use crate::state::notes_text_for_tests as norm;
+    assert_eq!(
+        norm("a\r\nb\rc"),
+        Some("a\nb\nc".to_string()),
+        "CRLF and lone CR → LF"
+    );
+    assert_eq!(norm("  a  "), Some("a".to_string()));
+    assert_eq!(
+        norm("\u{200B}\u{FEFF} \u{2060}\n"),
+        None,
+        "zero-width / BOM / word joiner only"
+    );
+    assert_eq!(
+        norm("\u{200E}x"),
+        Some("\u{200E}x".to_string()),
+        "a visible char keeps the note"
+    );
+
+    let dir = TempDir::new().unwrap();
+    let mut state = watch_state(&dir, 0x8180);
+    let id = state.create_study("NESN", "CHF").unwrap();
+    assert_eq!(
+        state.add_note(id, "\u{200B}"),
+        Err(MSG_NOTE_EMPTY.to_string())
+    );
+    state.add_note(id, "ligne 1\r\nligne 2").unwrap();
+    assert_eq!(
+        state.get_study(id).unwrap().notes[0].text,
+        "ligne 1\nligne 2"
     );
 }
