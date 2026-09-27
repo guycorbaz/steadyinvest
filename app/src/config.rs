@@ -230,6 +230,14 @@ pub struct AppConfig {
     pub fundamentals_fallback_provider: Option<String>,
     #[serde(default)]
     pub fx_fallback_provider: Option<String>,
+    /// The dossier the app last **actually opened** (Story 8.4, arch §Phase 4 A10) — set by
+    /// [`AppConfig::record_recent`] on every successful open (startup, switch, create, restore
+    /// reopen). It differs from `journal_path` when a configured dossier was refused by name and the
+    /// default stands in (G3 M4 keeps `journal_path` on the refused one): the MCP server follows
+    /// THIS one, the dossier the owner sees. Append-only `#[serde(default)]`: an older config loads
+    /// with `None` (the MCP server then falls back to `journal_path`).
+    #[serde(default)]
+    pub last_opened_path: Option<PathBuf>,
 }
 
 /// Whether `s` is a well-formed trailing-stop percentage: an exact decimal strictly inside `(0, 100)`
@@ -293,6 +301,7 @@ impl Default for AppConfig {
             price_fallback_provider: None,
             fundamentals_fallback_provider: None,
             fx_fallback_provider: None,
+            last_opened_path: None,
         }
     }
 }
@@ -331,6 +340,9 @@ impl AppConfig {
         );
         self.recent_journals.truncate(RECENT_JOURNALS_CAP);
         self.journal_path = Some(path.to_path_buf());
+        // Story 8.4: the dossier actually opened — the MCP server's first pointer (A10). The G3 M4
+        // callers re-point `journal_path` after this call; this one stays on the opened dossier.
+        self.last_opened_path = Some(path.to_path_buf());
     }
 
     /// The `(journal_id, last_seen_version)` recorded for the journal at `path` (Story 5.5), if any —
@@ -514,8 +526,8 @@ pub struct Loaded {
 /// `~/.config/steadyinvest/config.json` (per-platform via `ProjectDirs`). `None` only when the
 /// OS exposes no home/config directory at all.
 pub fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "steadyinvest")
-        .map(|dirs| dirs.config_dir().join("config.json"))
+    // Story 8.4: one definition, shared with the MCP server (`steadyinvest-paths`).
+    steadyinvest_paths::config_file_path()
 }
 
 /// Load with fallback-to-defaults. Never panics, never blocks launch, never destroys the file:
@@ -626,6 +638,7 @@ mod tests {
             size_target_small_pct: Some("30".to_string()),
             size_target_medium_pct: Some("40".to_string()),
             size_target_large_pct: Some("30".to_string()),
+            last_opened_path: Some(PathBuf::from("/tmp/steadyinvest/journal.db")),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
@@ -940,6 +953,30 @@ mod tests {
             PathBuf::from("/x19/journal.db"),
             "most recent first"
         );
+    }
+
+    /// Story 8.4 AC 4: every recorded open names the dossier actually opened; an older config
+    /// without the field loads with `None`, and the field round-trips.
+    #[test]
+    fn record_recent_sets_last_opened_path_which_round_trips_and_defaults_to_none() {
+        let mut c = AppConfig::default();
+        assert_eq!(c.last_opened_path, None);
+        c.record_recent(Path::new("/a/journal.db"), "id-a", 1);
+        c.record_recent(Path::new("/b/journal.db"), "id-b", 2);
+        assert_eq!(c.last_opened_path, Some(PathBuf::from("/b/journal.db")));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_config_path(&dir);
+        save(&path, &c).unwrap();
+        let loaded = load(&path);
+        assert!(loaded.warning.is_none());
+        assert_eq!(loaded.config, c);
+
+        std::fs::write(&path, r#"{"journal_path":"/old.db"}"#).unwrap();
+        let old = load(&path);
+        assert!(old.warning.is_none());
+        assert_eq!(old.config.journal_path, Some(PathBuf::from("/old.db")));
+        assert_eq!(old.config.last_opened_path, None);
     }
 
     #[test]

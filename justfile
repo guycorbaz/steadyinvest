@@ -27,3 +27,13 @@ spike-a:
 # Headless (no display needed); the measured deviations print to stderr.
 spike-c:
     cargo test -p steadyinvest-core --test spike_c_cagr_precision -- --nocapture
+
+# Build the MCP stdio server (Story 8.4): target/release/steadyinvest-mcp.
+mcp-build:
+    cargo build --release -p steadyinvest-mcp
+
+# Seed a THROW-AWAY dossier copy with propositions of every kind through the real MCP binary
+# (Story 8.4, for the Epic 8 UI checks). Refuses the real dossier. Usage: just mcp-seed <copy.db>
+mcp-seed copy:
+    cargo build -p steadyinvest-mcp
+    cargo run -p steadyinvest-mcp --example seed -- {{copy}}

@@ -1,0 +1,43 @@
+[package]
+name = "steadyinvest-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "The local MCP stdio server: the owner's AI client reads studies and deposits drafts — nothing else."
+
+[lib]
+name = "steadyinvest_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "steadyinvest-mcp"
+path = "src/main.rs"
+
+# The dependency BOUNDARY of the MCP server (Story 8.4 AC 1, arch §Phase 4 A1): no provider/network
+# crate (`ingestion`, any HTTP client), no keychain, no GUI (`slint`, `rfd`, `app`) — so no provider
+# call and no key read is even linkable. `tests/closure.rs` walks the resolved graph and fails the
+# build if one ever enters. `persistence` is used ONLY through `McpAccess` (clippy.toml).
+[dependencies]
+steadyinvest-contract = { workspace = true }
+steadyinvest-persistence = { workspace = true }
+steadyinvest-core = { workspace = true }
+steadyinvest-report = { workspace = true }
+steadyinvest-paths = { workspace = true }
+rmcp = { workspace = true }
+tokio = { workspace = true, features = ["io-std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+rust_decimal = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# Test fixtures only: marker rows seeded straight into the portfolio tables (the non-exposure suite).
+rusqlite = { workspace = true }

@@ -1,0 +1,19 @@
+[package]
+name = "steadyinvest-paths"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Per-machine locations (config file, default dossier, log dir) shared by the app and the MCP server."
+
+[dependencies]
+# Story 8.4 (arch §Phase 4 A10): the ONE definition of the OS locations — the app and the
+# `steadyinvest-mcp` binary both read them here, so the MCP server never depends on `app`.
+directories = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

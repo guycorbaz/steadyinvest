@@ -5374,15 +5374,28 @@ fn blank_ticker_is_refused_with_a_neutral_message_and_writes_nothing() {
 #[test]
 fn missing_configured_file_falls_through_to_a_created_default_or_none() {
     // A configured path that does NOT exist must not be opened as an empty journal; the code
-    // falls through to the default. In a sandbox the data dir may be unavailable — either a
-    // created default (Some path) or a clean no-journal state is acceptable, never a panic.
+    // falls through to the default. Story 8.4 (dev safety, arch A12): the default is a TEMP path
+    // — this test used the real `default_journal_path()` and so created an empty dossier in the
+    // owner's real data dir on every run.
+    let dir = TempDir::new().unwrap();
+    let default = dir.path().join("default.db");
     let (clock, idgen) = fixed(0x2, "2026-06-13T09:00:00Z");
     let missing = PathBuf::from("/nonexistent/steadyinvest/journal.db");
-    let (state, _notice) = JournalState::open_or_create(Some(&missing), clock, idgen);
+    let (state, _notice) = JournalState::open_or_create_with_default(
+        Some(&missing),
+        Some(default.clone()),
+        clock,
+        idgen,
+    );
     assert_ne!(
         state.path(),
         Some(missing.as_path()),
         "a missing configured file is never adopted as-is"
+    );
+    assert_eq!(
+        state.path(),
+        Some(default.as_path()),
+        "the default is created"
     );
 }
 
@@ -8479,6 +8492,49 @@ fn reselecting_the_stand_in_ends_the_kept_configured_dossier() {
     let outcome = state.open_journal(&default).expect("reselect the stand-in");
     assert!(outcome.unchanged);
     assert_eq!(state.kept_configured_path(), None);
+}
+
+/// Story 8.4 AC 4 / AC 5: while the stand-in runs for a configured dossier refused by name, the
+/// app-config keeps `journal_path` on the refused dossier (G3 M4) and `last_opened_path` names the
+/// stand-in — the one the owner sees, which the MCP server resolves first.
+#[test]
+fn the_stand_in_is_the_last_opened_dossier_while_journal_path_keeps_the_refused_one() {
+    let dir = TempDir::new().unwrap();
+    let configured = dir.path().join("mine.db");
+    let default = dir.path().join("default.db");
+    fresh_journal(&configured);
+    if !held_by_another_instance(&configured) {
+        return;
+    }
+    let (clock, idgen) = fixed(0x55, "2026-09-28T10:00:00Z");
+    let (state, _) = JournalState::open_or_create_with_default(
+        Some(&configured),
+        Some(default.clone()),
+        clock,
+        idgen,
+    );
+    assert_eq!(state.kept_configured_path(), Some(configured.as_path()));
+    assert_eq!(
+        state.path(),
+        Some(default.as_path()),
+        "the stand-in is open"
+    );
+    let config_path = Some(dir.path().join("config.json"));
+    let config = std::rc::Rc::new(std::cell::RefCell::new(crate::config::AppConfig {
+        journal_path: Some(configured.clone()),
+        ..crate::config::AppConfig::default()
+    }));
+    let state = std::rc::Rc::new(std::cell::RefCell::new(state));
+    crate::wiring::journal::record_current_pointer(&state, &config, &config_path);
+    assert_eq!(config.borrow().journal_path, Some(configured.clone()));
+    assert_eq!(config.borrow().last_opened_path, Some(default.clone()));
+    // The persisted file resolves, for the MCP server, to the stand-in.
+    let pointers =
+        steadyinvest_paths::read_dossier_pointers(config_path.as_deref().expect("a path"));
+    assert_eq!(
+        steadyinvest_paths::resolve_dossier_with(None, pointers, None),
+        Ok(default)
+    );
 }
 
 #[test]

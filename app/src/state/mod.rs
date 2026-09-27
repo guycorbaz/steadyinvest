@@ -89,8 +89,8 @@ pub(crate) use watchlist::same_ticker;
 /// Synology-Drive SQLite-corruption risk, project memory). The location picker / sync-safety switch
 /// is Story 5-5; this is the safe default only.
 pub fn default_journal_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "steadyinvest")
-        .map(|dirs| dirs.data_dir().join("journal.db"))
+    // Story 8.4: one definition, shared with the MCP server (`steadyinvest-paths`).
+    steadyinvest_paths::default_journal_path()
 }
 
 /// The all-`None` judgment a freshly-created study starts with (every optional `None`, plus the

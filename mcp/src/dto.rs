@@ -1,0 +1,216 @@
+//! The JSON the MCP tools return (Story 8.4 AC 6–8): the dossier identity, studies, history
+//! snapshots, notes, the drafts record — and each study's **computed outputs** (owner decision O1),
+//! built with the app's own construction `report::form::build_snapshot` and mapped field by field.
+//!
+//! Numbers are the **raw decimals as strings** (`normalize()`d), `null` when unknown — never a
+//! presentation format, never a value re-derived here (Cardinal Rule). Zones are **neutral codes**
+//! (`low` / `middle` / `high` — the app's neutral label set), never buy / hold / sell (FR13: this
+//! is app-generated output).
+
+use rust_decimal::Decimal;
+use serde_json::{Value, json};
+use steadyinvest_contract::Study;
+use steadyinvest_core::ssg::{CriterionFact, UpsideDownside, Zone};
+use steadyinvest_core::verdict::{GateState, GatedInput, StudySnapshot, Verdict};
+use steadyinvest_persistence::{
+    DossierIdentity, DraftRecord, McpSnapshot, McpStudyRead, Paged, StudySummary,
+};
+
+/// The dossier a call read (O3): `journal_id` + resolved path.
+pub fn dossier(id: &DossierIdentity) -> Value {
+    json!({
+        "journal_id": id.journal_id.to_string(),
+        "path": id.path.display().to_string(),
+    })
+}
+
+fn dec(d: Option<Decimal>) -> Value {
+    match d {
+        Some(d) => Value::String(d.normalize().to_string()),
+        None => Value::Null,
+    }
+}
+
+fn zone_code(z: Zone) -> &'static str {
+    match z {
+        Zone::Buy => "low",
+        Zone::Neutral => "middle",
+        Zone::Sell => "high",
+    }
+}
+
+fn criterion(c: CriterionFact) -> &'static str {
+    match c {
+        CriterionFact::Met => "met",
+        CriterionFact::Unmet => "unmet",
+        CriterionFact::UnmetByInsufficiency => "unknown",
+    }
+}
+
+fn gate_state(s: GateState) -> &'static str {
+    match s {
+        GateState::Missing => "missing",
+        GateState::NotValidated => "not_validated",
+        GateState::Stale => "stale",
+        GateState::ValidatedFresh => "validated_fresh",
+    }
+}
+
+fn gated_input(i: GatedInput) -> Value {
+    match i {
+        GatedInput::YearField { year, field } => json!({ "year": year, "field": field }),
+        GatedInput::JudgmentInput { name } => json!({ "field": name }),
+    }
+}
+
+/// The computed outputs of one snapshot (Story 8.4 AC 8).
+pub fn computed(snapshot: &StudySnapshot) -> Value {
+    let verdict = snapshot.verdict();
+    let state = match verdict {
+        Verdict::Full(_) => "full",
+        Verdict::Provisional(_) => "provisional",
+        Verdict::Withheld(_) => "withheld",
+    };
+    let facts = verdict.facts();
+    let out = snapshot.outputs();
+    let rr = &out.risk_reward;
+    let (ud, ud_state) = match rr.upside_downside {
+        UpsideDownside::Ratio(r) => (dec(Some(r)), "ratio"),
+        UpsideDownside::Undefined => (Value::Null, "undefined"),
+        UpsideDownside::Unknown => (Value::Null, "unknown"),
+    };
+    let zones = match &rr.zones {
+        Some(z) => json!({
+            "forecast_low": dec(Some(z.forecast_low)),
+            "low_zone_top": dec(Some(z.buy_top)),
+            "middle_zone_top": dec(Some(z.neutral_top)),
+            "forecast_high": dec(Some(z.forecast_high)),
+        }),
+        None => Value::Null,
+    };
+    json!({
+        "verdict_state": state,
+        "low_confidence": verdict.low_confidence(),
+        "open_gates": verdict.open_gates().iter().map(|g| json!({
+            "input": gated_input(g.input),
+            "state": gate_state(g.state),
+        })).collect::<Vec<_>>(),
+        "method_version": verdict.method_version(),
+        "inputs_hash": verdict.inputs_hash(),
+        "verdict_facts": {
+            "present_price_zone": facts.present_price_zone.map(zone_code),
+            "ud_at_or_above_target": criterion(facts.ud_at_or_above_target),
+            "relative_value_below_ceiling": criterion(facts.relative_value_below_ceiling),
+            "present_price_in_low_zone": criterion(facts.present_price_in_buy_zone),
+            "appreciation_at_or_above_double": criterion(facts.appreciation_at_or_above_double),
+            "quality_value_candidate": facts.quality_value_candidate,
+        },
+        "forecast_high": dec(rr.forecast_high),
+        "forecast_low": dec(rr.forecast_low),
+        "zones": zones,
+        "upside_downside": ud,
+        "upside_downside_state": ud_state,
+        "relative_value_pct": dec(out.valuation.relative_value_pct),
+        "projected_appreciation_pct": dec(out.returns.projected_appreciation_pct),
+        "projected_annualized_appreciation_pct":
+            dec(out.returns.projected_annualized_appreciation_pct),
+        "projected_total_annualized_return_pct":
+            dec(out.returns.projected_total_annualized_return_pct),
+        "sales_cagr_pct": dec(out.growth.sales_cagr_pct),
+        "eps_cagr_pct": dec(out.growth.eps_cagr_pct),
+        "quality_flags": out.quality_flags.iter().map(|f| f.as_str()).collect::<Vec<_>>(),
+    })
+}
+
+/// A study as the contract serializes it (cells with provenance, judgments, rationale, notes).
+fn study_json(study: &Study) -> Value {
+    serde_json::to_value(study).unwrap_or_else(|e| json!({ "unserializable": e.to_string() }))
+}
+
+/// `get_study`: the study, its status and its computed outputs. A study the engine cannot
+/// normalize still returns its data, with `computed: null` and the reason.
+pub fn study_read(read: &McpStudyRead) -> Value {
+    let mut v = json!({
+        "status": read.status,
+        "study": study_json(&read.study),
+    });
+    match steadyinvest_report::form::build_snapshot(&read.study) {
+        Ok(snapshot) => {
+            v["computed"] = computed(&snapshot);
+        }
+        Err(e) => {
+            v["computed"] = Value::Null;
+            v["computed_unavailable"] = Value::String(e.to_string());
+        }
+    }
+    v
+}
+
+/// `get_notes`: the study's notes.
+pub fn notes(read: &McpStudyRead) -> Value {
+    json!({
+        "study_id": read.study.id.to_string(),
+        "security_ticker": read.study.security_ticker,
+        "notes": serde_json::to_value(&read.study.notes).unwrap_or(Value::Null),
+    })
+}
+
+/// One page of study summaries.
+pub fn study_list(page: &Paged<StudySummary>) -> Value {
+    json!({
+        "offset": page.offset,
+        "total": page.total,
+        "studies": page.items.iter().map(|s| json!({
+            "id": s.id.to_string(),
+            "security_ticker": s.security_ticker,
+            "created_at": s.created_at.0,
+            "status": s.status,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// One page of FR51 history snapshots, newest first.
+pub fn history(study_id: uuid::Uuid, page: &Paged<McpSnapshot>) -> Value {
+    json!({
+        "study_id": study_id.to_string(),
+        "offset": page.offset,
+        "total": page.total,
+        "snapshots": page.items.iter().map(|s| json!({
+            "id": s.id.to_string(),
+            "created_at": s.created_at.0,
+            "study": study_json(&s.study),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// One draft of the record (FR77), with its outcome.
+pub fn draft(d: &DraftRecord) -> Value {
+    let payload =
+        serde_json::from_str::<Value>(&d.payload).unwrap_or(Value::String(d.payload.clone()));
+    json!({
+        "id": d.id.to_string(),
+        "kind": d.kind.as_str(),
+        "study_id": d.study_id.map(|s| s.to_string()),
+        "security_ticker": d.security_ticker,
+        "native_currency": d.native_currency,
+        "status": d.status.as_str(),
+        "created_at": d.created_at.0,
+        "decided_at": d.decided_at.as_ref().map(|t| t.0.clone()),
+        "comment": d.comment,
+        "origin_client": d.origin_client,
+        "origin_model": d.origin_model,
+        "stale_at_decision": d.stale_at_decision,
+        "edited_before_validation": d.edited_before_validation,
+        "created_study_id": d.created_study_id.map(|s| s.to_string()),
+        "payload": payload,
+    })
+}
+
+/// One page of the drafts record.
+pub fn draft_list(page: &Paged<DraftRecord>) -> Value {
+    json!({
+        "offset": page.offset,
+        "total": page.total,
+        "drafts": page.items.iter().map(draft).collect::<Vec<_>>(),
+    })
+}

@@ -17,8 +17,8 @@ use std::path::PathBuf;
 /// work that might log or panic). Returns the log directory when one was set up (for a startup
 /// notice); `None` when no OS data directory exists or the directory could not be created.
 pub fn init() -> Option<PathBuf> {
-    let log_dir = directories::ProjectDirs::from("", "", "steadyinvest")
-        .map(|dirs| dirs.data_dir().join("logs"))?;
+    // Story 8.4: one definition, shared with the MCP server's own log (`steadyinvest-paths`).
+    let log_dir = steadyinvest_paths::log_dir()?;
     if let Err(error) = std::fs::create_dir_all(&log_dir) {
         eprintln!(
             "steadyinvest: log directory {} not created: {error}",
