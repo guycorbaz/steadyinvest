@@ -119,10 +119,13 @@ so that my thinking around a study lives beside it (and an AI note draft later h
   - [x] T6.1 Glossary/help entry « Notes » (where « Justification de la décision » is glossed): a note is dated, stays in the history when deleted, is not printed.
   - [x] T6.2 Probe and set the `@tr` floor (`posture.rs:747`, `total >= N`) and the exact `USER_FACING_MESSAGES` count (`posture.rs:867`, currently 224), and extend the running-tally comment with the delta (checklist §6).
 - [x] **T7 — Tests** (all ACs; see Dev Notes § Tests)
-- [x] **T8 — Verification (DoD)**:
-  - headless walk (`.claude/skills/verify`) on a **plain temp copy** of Guy's test dossier: add, edit and delete a note, undo/redo, the history toggle, the empty-note refusal, the read-only and demo states, the PDF unchanged;
-  - window resized to the Xvfb screen and X focus given (7.0 headless lessons);
-  - Guy's on-display check of the Notes card and dialogs.
+- [x] **T8a — Headless verification (done)**: temp copies of the test dossier, provider « none »:
+  add / edit / delete, empty-note refusal, history labels + « Masquer les notes » + deleted text in
+  the detail, a >8-line note (caret kept in view), Esc / « Annuler » → « Abandonner la note en
+  cours ? » and back, unchanged text closes directly, scrim click ignored, Tab leaves the text area
+  (no tab character), mouse drag selects, « Afficher tout » kept across a re-push, the read-only
+  dossier (write-protected copy: add / edit / delete disabled) and the demo study (add disabled).
+- [ ] **T8b — Guy's on-display check** of the Notes card and dialogs (pending).
 
 ## Dev Notes
 
@@ -271,6 +274,28 @@ Claude Opus 5.5 (claude-opus-5-5), fork of the G2 session, 2026-09-27.
   (`study_notice::clear(Source::Edit)` path, pre-existing).
 - Guy's on-display check of the Notes card and dialogs still to do (DoD).
 
+- **G3 review (3 layers, no high) — all 17 items applied (2026-09-27):**
+  - rails: CRLF/CR → LF; whitespace + Unicode Cf only = empty; read failure → `MSG_READ_FAILED` and
+    deleted study → new `MSG_STUDY_GONE` before any write (add included); identical edit writes
+    nothing (no version bump); no study open → new `MSG_NO_STUDY_OPEN` through `dialog::refuse`;
+  - dedup: the latest payload re-serialized, compared as a string (a Money scale change recorded);
+  - history: « note ajoutée / modifiée / supprimée » **lower-cased** like every other history clause
+    — a wording adjustment of the 8.0 §3.3 list (« Note ajoutée… »), **for Guy**; no « (n) » count;
+  - notes card: note dates in the machine's **local** time (history day headers stay UTC,
+    app-wide, out of scope); « modifiée le » in a counted posture inventory; « Afficher tout »
+    kept across re-pushes (a row flag in the model) and no Tab stop on a short note;
+  - a failed re-read after a write mirrors undo/redo and marks an open history unavailable;
+  - « Masquer les notes » resets to shown on study open and dossier switch (owner default);
+  - text areas (note form + rationale): caret kept in view, the offset clamped when the box grows,
+    mouse drag selects (Flickable not interactive, wheel still scrolls); Cmd+Enter = Ctrl+Enter;
+  - note forms: scrim click ignored; Esc / « Annuler » with a changed text asks « Abandonner la note
+    en cours ? » (« Annuler » returns to the text, « Abandonner » leaves) — owner default;
+  - posture: `@tr` 1031 → 1033 (+2), `USER_FACING_MESSAGES` 226 → 228 (+2), notes labels 0 → 1.
+  - Deviations D-a (« Enregistrer » always enabled) and D-b (`MSG_NOTE_GONE`) kept, accepted
+    pending Guy.
+- Headless note: fast `xdotool` typing can leave the software renderer a frame behind under Xvfb (a
+  blank box until the next event) — a capture artefact, the state after any event is correct.
+
 ### File List
 
 - contract/src/ai.rs (new), contract/src/lib.rs, contract/src/study.rs, contract/tests/roundtrip.rs
@@ -279,9 +304,10 @@ Claude Opus 5.5 (claude-opus-5-5), fork of the G2 session, 2026-09-27.
 - app/src/viewmodel/notes.rs (new), app/src/viewmodel/{mod,history}.rs
 - app/src/wiring/{judgment,push,studies}.rs
 - app/src/posture.rs
-- app/ui/state.slint, app/ui/components/modal_dialog.slint, app/ui/screens/study_screen.slint, app/ui/screens/settings.slint
+- app/ui/state.slint, app/ui/components/modal_dialog.slint, app/ui/components/rationale_note.slint, app/ui/screens/study_screen.slint, app/ui/screens/settings.slint
 - report/src/pdf.rs
 
 ### Change Log
 
-- 2026-09-27: implemented (commits 0f67a4b, 65e2a93, fix commit for the text-area height); status → review.
+- 2026-09-27: implemented (commits 0f67a4b, 65e2a93, 460378b); status → review.
+- 2026-09-27: G3 review applied (06a02f2, 0a60129, text-area clamp commit); headless re-check; T8 split (8b pending).
