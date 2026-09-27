@@ -461,9 +461,12 @@ impl JournalState {
         option: ForecastLowOption,
     ) -> Result<(), String> {
         self.mutate_judgment(study_id, |judgment| {
+            // A write that CHANGES a draftable judgment field clears its "placed by AI" mark (arch
+            // A6); re-selecting the same option stays a no-op (no undo step, no snapshot).
+            if judgment.forecast_low_option != option {
+                judgment.ai_placed.forecast_low_option = None;
+            }
             judgment.forecast_low_option = option;
-            // Any write to a draftable judgment field clears its "placed by AI" mark (arch A6).
-            judgment.ai_placed.forecast_low_option = None;
             true
         })
     }
@@ -637,6 +640,8 @@ pub(crate) fn apply_judgment_field(
     field: &str,
     value: Option<Money>,
 ) -> bool {
+    let draft_field = judgment_draft_field(field);
+    let before = draft_field.and_then(|f| f.judgment_value(judgment));
     match field {
         "sales_growth" => judgment.projected_sales_growth_pct = value,
         "eps_growth" => judgment.projected_eps_growth_pct = value,
@@ -649,10 +654,12 @@ pub(crate) fn apply_judgment_field(
         "dividend" => judgment.present_full_year_dividend = value,
         _ => return false,
     }
-    // Story 8.2b (arch A6): ANY write to a draftable judgment field clears its "placed by AI" mark
-    // (`current_price` is a provider market fact — not draftable, no mark).
-    if let Some(slot) =
-        judgment_draft_field(field).and_then(|f| f.ai_slot_mut(&mut judgment.ai_placed))
+    // Story 8.2b (arch A6): a write that CHANGES a draftable judgment field clears its "placed by
+    // AI" mark; a value-identical write keeps it, so a no-op stays a no-op (G3 F7, lead default).
+    // `current_price` is a provider market fact — not draftable, no mark.
+    if let Some(f) = draft_field
+        && f.judgment_value(judgment) != before
+        && let Some(slot) = f.ai_slot_mut(&mut judgment.ai_placed)
     {
         *slot = None;
     }

@@ -148,15 +148,33 @@ pub const MSG_DECISION_TARGET_GONE: &str =
 /// Story 8.2b (owner-pending default): the draft was decided meanwhile (another window).
 pub const MSG_DECISION_ALREADY_DECIDED: &str =
     "Cette proposition a déjà été traitée ; rien n'a été enregistré.";
+/// Story 8.2b (G3 F2): the draft's study is not the open study — the inbox opens it first.
+pub const MSG_DECISION_OTHER_STUDY: &str = "La proposition porte sur l'étude {ticker}, qui n'est pas ouverte ; aucune décision n'a été enregistrée.";
+/// Story 8.2b (G3 E4): the draft is no longer in the dossier (its study still is).
+pub const MSG_DECISION_DRAFT_GONE: &str =
+    "Cette proposition n'existe plus dans le dossier ; rien n'a été enregistré.";
+/// Story 8.2b (G3 F8, owner-pending): a draft shown fresh whose target changed before the decision
+/// (no confirmation was given on a changed target), or the study written meanwhile.
+pub const MSG_DECISION_STUDY_CHANGED: &str =
+    "L'étude a changé depuis la lecture de la proposition ; rien n'a été enregistré.";
+/// Story 8.2b (G3 E1): the owner's edit of a forecast-low option names none of its options.
+pub const MSG_VALUE_NOT_AN_OPTION: &str =
+    "Ce choix ne fait pas partie des options ; la valeur est inchangée.";
+/// Story 8.2b (G3 B2/E7, owner-pending): an undo / redo step over a draft whose draft was decided or
+/// removed elsewhere — the step is dropped from the history, nothing is written.
+pub const MSG_UNDO_DRAFT_STEP_DROPPED: &str = "Cette étape portait sur une proposition qui n'est plus dans l'état attendu ; elle a été retirée de l'historique d'annulation, rien n'a été modifié.";
 /// Story 8.2b target-gone reason: the draft's fiscal year left the study (`{year}`).
 pub const MSG_GONE_REASON_YEAR: &str = "l'année {year} n'existe plus dans l'étude";
 /// Story 8.2b target-gone reason: the draft's study was deleted.
 pub const MSG_GONE_REASON_STUDY: &str = "l'étude a été supprimée";
-/// Story 8.2b target-gone reason: the draft names a field the study has no draftable slot for
-/// (only reachable through a malformed import — MCP submissions are checked, Story 8.3).
-pub const MSG_GONE_REASON_FIELD: &str = "le champ {field} n'existe pas dans l'étude";
+/// Story 8.2b target-gone reason: the draft names no draftable field (a key unknown to this build,
+/// or a provider market fact such as the current price — D6); only reachable through a malformed
+/// import (MCP submissions are checked, Story 8.3). The raw key is never echoed (G3 F4;
+/// owner-pending wording).
+pub const MSG_GONE_REASON_FIELD: &str =
+    "le champ proposé ne peut pas faire l'objet d'une proposition";
 /// The target-gone reason fragments — scanned and counted by the posture gate (Story 8.2b).
-#[cfg_attr(not(test), allow(dead_code))] // read by the posture gate only
+#[cfg_attr(not(test), expect(dead_code))] // read by the posture gate only
 pub const DRAFT_GONE_REASONS: &[&str] = &[
     MSG_GONE_REASON_YEAR,
     MSG_GONE_REASON_STUDY,
@@ -1134,6 +1152,11 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_DECISION_CHANGED,
     MSG_DECISION_TARGET_GONE,
     MSG_DECISION_ALREADY_DECIDED,
+    MSG_DECISION_OTHER_STUDY,
+    MSG_DECISION_DRAFT_GONE,
+    MSG_DECISION_STUDY_CHANGED,
+    MSG_VALUE_NOT_AN_OPTION,
+    MSG_UNDO_DRAFT_STEP_DROPPED,
     MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,

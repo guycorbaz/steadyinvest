@@ -912,8 +912,12 @@ mod tests {
             // 226 + 2 = 228, measured. 8.2b: the draft decision refusals of the 8.0 spec §3.3 —
             // read-only, study gone, study archived, save failure (plain + with its cause),
             // changed since confirmation, target gone — and the already-decided refusal (an
-            // owner-pending default): 228 + 8 = 236, measured.
-            236,
+            // owner-pending default): 228 + 8 = 236, measured. Its G3 review names the draft of
+            // another study (MSG_DECISION_OTHER_STUDY), a vanished draft (MSG_DECISION_DRAFT_GONE),
+            // a study changed since the proposal was read (MSG_DECISION_STUDY_CHANGED), an edited
+            // option that is none (MSG_VALUE_NOT_AN_OPTION) and a dropped undo step
+            // (MSG_UNDO_DRAFT_STEP_DROPPED): 236 + 5 = 241, measured.
+            241,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export

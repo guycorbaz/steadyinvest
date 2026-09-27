@@ -14,7 +14,9 @@ use steadyinvest_contract::Study;
 use steadyinvest_persistence::DraftStep;
 use uuid::Uuid;
 
-use super::{JournalState, MSG_NO_JOURNAL, MSG_SAVE_FAILED, save_error};
+use super::{
+    JournalState, MSG_NO_JOURNAL, MSG_SAVE_FAILED, MSG_UNDO_DRAFT_STEP_DROPPED, save_error,
+};
 
 /// The maximum number of undo steps kept in memory (oldest dropped past this). `Study` clones are
 /// small but not free; a long session does not grow the history unboundedly (Story 2.9).
@@ -69,7 +71,21 @@ impl UndoHistory {
         });
     }
 
+    /// Push a step — unless the history has an owner study and the step belongs to another one
+    /// (Story 8.2b G3 B1: a late fetch result for a study that is no longer open writes that study
+    /// through the ordinary rails; its snapshot must never land in the open study's history, where
+    /// an undo would write it back as the open study's state). Such a step is dropped and logged;
+    /// the redo branch is left as it is (the open study was not edited).
     fn push_step(&mut self, step: UndoStep) {
+        if let Some(owner) = self.owner
+            && step.study.id != owner
+        {
+            tracing::warn!(
+                "an undo step of study {} was not recorded in the history of the open study {owner}",
+                step.study.id
+            );
+            return;
+        }
         self.undo.push(step);
         if self.undo.len() > UNDO_CAP {
             self.undo.remove(0);
@@ -166,6 +182,15 @@ impl JournalState {
                 Direction::Redo => history.redo.push(step),
             }
         };
+        if restored.id != study_id {
+            // G3 F5: a step is only ever written back into its own study.
+            tracing::warn!(
+                "an undo step of study {} was asked for study {study_id}",
+                restored.id
+            );
+            push_back(&mut self.history, restored);
+            return Err(MSG_SAVE_FAILED.to_string());
+        }
         let Some(current) = self.get_study(study_id) else {
             push_back(&mut self.history, restored);
             return Err(MSG_SAVE_FAILED.to_string());
@@ -203,6 +228,16 @@ impl JournalState {
                     Direction::Redo => self.history.undo.push(step),
                 }
                 Ok(true)
+            }
+            // G3 B2/E7: a draft step whose draft is no longer in the state the step expects (decided
+            // or removed elsewhere) can never succeed — pushing it back would wedge the history on
+            // it. It is dropped and named; nothing was written.
+            Err(
+                error @ (steadyinvest_persistence::Error::DraftStatusMismatch { .. }
+                | steadyinvest_persistence::Error::DraftNotFound { .. }),
+            ) => {
+                tracing::warn!("an undo step over a draft was dropped: {error}");
+                Err(MSG_UNDO_DRAFT_STEP_DROPPED.to_string())
             }
             Err(error) => {
                 push_back(&mut self.history, restored);
