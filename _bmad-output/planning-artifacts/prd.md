@@ -73,6 +73,8 @@ editHistory:
     changes: "G2 — AI assistance (Epic 8) re-scoped as Phase 4 [P4]: external owner-directed AI client over a local MCP server; studies exposed, portfolio/watchlist/keys/config never; AI proposals (draft studies, notes, cell/judgment values) enter only as commented drafts validated or rejected one by one in the UI; product stance revised (AI may propose; app outputs stay neutral). Updated Executive Summary, Classification, Success Criteria, Product Scope, Journey 6 and summary, Domain requirements and risks, Innovation, Desktop-specific, Scoping, FR13/14/15/17/20/21/22/33/49/51/55/60/64/65/67/68, NFR-S1–S4/R2, Constraints, Appendix A; added FR69–FR78 and NFR-A1–A4"
   - date: '2026-09-27'
     changes: "G2 round 2: validation fixes + owner decisions O1–O7. One AI-exclusion list everywhere (portfolio — holdings, transactions, dividends — watchlist, keys, configuration); MCP scope adds computed outputs, study rationale and the drafts record; validated AI value = owner entry (manual, `?`) with AI origin shown until next owner edit (FR17/FR20/FR22/FR33/FR74); notes are [P4] in P1 wording (FR49/FR51, Success, Journey 5); stale drafts validatable after confirmation, ✓ target moves to `?` without un-validation (FR72/FR74); ≤ 2 actions in FR74; MCP serves the last-used dossier also while the app is closed, names the dossier in every response (FR69/FR73); note deletion kept in history (FR78); study deletion deletes its drafts (FR55/FR77); privacy residue of free text (NFR-S3); remote-model caveat (Security & privacy, Constraints); « dossier » = journal file (Appendix A); frontmatter 'suggested line' and AI-greffier entries marked superseded"
+  - date: '2026-09-27'
+    changes: "G2 round 3 (G3 review of PR #255, owner decisions D1–D10): draft study carries a proposed currency and optional name, duplicates keyed by identifier + currency, validation through the prefilled create dialog (FR70); one pending draft per target, provider market facts not draftable, missing target not validatable (FR72); `?` in every case, validation undoable and recorded (FR74, FR77); older builds refuse exports carrying notes/AI marks/drafts (FR60); dossier identity is not configuration (NFR-S4, Appendix A); CLI/AI façade wording updated"
 ---
 
 # Product Requirements Document - steadyinvest
@@ -664,8 +666,8 @@ system, locale and, from Phase 4, a local MCP endpoint for an owner-chosen AI cl
 ### Implementation Considerations
 
 - **Thin UI over a tested calculation crate**; a `MarketDataProvider` trait for vendor adapters;
-  a **versioned serde data contract decoupled from Slint and SQLite** (so CLI/AI façades can be
-  added later at near-zero cost).
+  a **versioned serde data contract decoupled from Slint and SQLite** (so a CLI or the [P4] MCP
+  server can be added cheaply).
 - **GPL-3.0** dependency-license audit (notably Slint's licensing tier and Apache-2.0 ↔ GPL-3.0
   one-way compatibility across the crate tree).
 
@@ -874,7 +876,8 @@ withholding-refund tracking, export/share, eventual public release.
   preserves identity), enabling golden-study and seeding.
 - FR60 **[P1]:** The user can **export/import the whole journal** in a versioned format, validated on
   import (reject/migrate on version mismatch); the export and backups include AI drafts [P4]
-  (pending, validated, rejected).
+  (pending, validated, rejected); an export carrying notes, AI origins or drafts is refused by an
+  older build, never imported with them silently dropped.
 - FR61 **[P1]:** The user can **restore from a backup** with integrity and version-compatibility checks
   before overwrite.
 - FR62 **[P1]:** The user can access **non-blocking contextual help / glossary** and a read-only
@@ -913,33 +916,41 @@ withholding-refund tracking, export/share, eventual public release.
   (holdings, transactions, dividends), the watchlist, keys and configuration are never exposed. The
   MCP server serves the last-used dossier, also while the app is closed, and every response names
   the dossier (identity and location) it read.
-- FR70 **[P4]:** An AI client can submit a **draft study** (security identifier + mandatory comment) to
-  the draft inbox; it creates no study until validated, and is refused if the security is already
-  studied in the dossier or already has a pending draft study.
+- FR70 **[P4]:** An AI client can submit a **draft study** (security identifier, proposed native
+  currency, optional company name, mandatory comment) to the draft inbox; it creates no study until
+  validated, and is refused if the dossier already holds a study, or a pending draft study, for the
+  same security in the same currency (identifier compared case-insensitively). Validating it opens
+  the ordinary create-study dialog prefilled with the proposal, which the owner confirms; the
+  duplicate check runs again at that moment.
 - FR71 **[P4]:** An AI client can submit a **draft note** on an existing study, with a mandatory comment.
 - FR72 **[P4]:** An AI client can submit a **draft cell value**, judgment values included, with a
   mandatory comment. While pending it changes no value, line, zone, alert or verdict; a judgment draft
-  is shown on the chart as an AI-annotated line beside the owner's (FR33). A pending draft whose
-  target changed meanwhile (owner edit or refresh) is marked **stale**; the owner can still validate
-  it after an explicit confirmation, or reject it.
+  is shown on the chart as an AI-annotated line beside the owner's (FR33). A target holds at most
+  **one pending draft**: a second one is refused. Market facts written by the provider (current
+  price, TTM EPS) are not draftable. A pending draft whose target changed meanwhile (owner edit or
+  refresh) is marked **stale**; the owner can still validate it after an explicit confirmation, or
+  reject it; a draft whose target no longer exists cannot be validated.
 - FR73 **[P4]:** The owner can review pending drafts in a **dossier-level inbox**, with a reminder in
   each concerned study, showing for each draft its AI origin (client + model), comment, target, and
   current vs proposed value side by side. Drafts submitted while the app is closed appear at its
   next opening.
 - FR74 **[P4]:** The owner can **validate or reject each draft individually** (no bulk action), in
   **≤ 2 actions**, with current and proposed values side by side. Validation applies the draft as an
-  owner entry (FR17) with review tag `?` and visible AI origin; on a validated (`✓`) cell it needs no
-  prior un-validation and moves the cell to `?`; a stale draft needs an explicit confirmation (FR72).
-  Editing a draft before validation makes it the owner's own entry; validating a draft study does not
-  add it to the watchlist.
+  owner entry (FR17) with review tag `?` in every case — also on an untagged cell or when the value is
+  unchanged — and visible AI origin; on a validated (`✓`) cell it needs no prior un-validation and
+  moves the cell to `?`; a stale draft needs an explicit confirmation (FR72). A validation is
+  undoable like any owner edit (FR32), and an undone validation is recorded as such (FR77). Editing
+  a draft before validation makes it the owner's own entry; validating a draft study does not add it
+  to the watchlist.
 - FR75 **[P4] (scope note):** Search objectives (market, potential growth, upside/downside ratio…) are
   given to the AI in its client session; the dossier does not store them in Phase 4.
 - FR76 **[P4]:** Provider data is fetched only on the owner's action: after validating a draft study
   the owner fetches it as for any study, and the fetched data then becomes readable through MCP; no
   MCP request can trigger a provider call.
 - FR77 **[P4]:** The system keeps a durable **record of every draft** (origin, comment, content,
-  timestamps, outcome) that the owner can view and the AI can read; the drafts of a deleted study
-  are deleted with it (FR55).
+  timestamps, outcome — pending, validated, validated then undone, rejected — and, at decision time,
+  whether it was stale or edited before validation) that the owner can view and the AI can read; the
+  drafts of a deleted study are deleted with it (FR55).
 - FR78 **[P4]:** The owner can **create, edit and delete notes** attached to a study; a deleted note
   leaves the study but remains in its history (FR51).
 
@@ -985,7 +996,9 @@ withholding-refund tracking, export/share, eventual public release.
   never leaves it through MCP. Accepted residue: free text (study rationale, notes) may mention
   positions and so partially reveal the portfolio to the AI.
 - **NFR-S4:** The MCP surface never returns the portfolio (holdings, transactions, dividends), the
-  watchlist, keys or configuration — verified by tests over every MCP resource and tool.
+  watchlist, keys or configuration — verified by tests over every MCP resource and tool. The
+  dossier's identity (its `journal_id` and path), which every response names (FR69), is not
+  configuration.
 
 ### Reliability & Data Integrity
 
@@ -1069,14 +1082,15 @@ withholding-refund tracking, export/share, eventual public release.
   Scope rule: AI-origin text is outside the banned-verb gate; it is always shown inside a frame
   labelled "AI" with the disclaimer and never presented as an app signal.
 - **AI draft (FR70–FR74):** a proposal from an AI client with a mandatory comment, an origin (client
-  + model), a timestamp and a status — pending / validated / rejected — and, while pending, a derived
+  + model), a timestamp and a status — pending / validated / validated then undone / rejected — and, while pending, a derived
   **stale** state (its target changed since submission); it has no effect while pending. A stale draft can still be validated after confirmation; once validated it is an owner
   entry whose AI origin shows until the owner next edits the value (FR17).
 - **Search objectives (FR75):** criteria the owner gives the AI in its client session (e.g. market,
   potential growth, upside/downside ratio); not stored in the dossier.
 - **MCP-exposed scope (FR69, NFR-S4):** studies, their data cells with provenance, judgments, study
   rationale, notes, judgment history and computed outputs (zones, upside/downside ratio, 5-year
-  potential, verdict and its state); the record of drafts (FR77). Excluded: the portfolio (holdings,
+  potential, verdict and its state); the record of drafts (FR77); the identity of the dossier read
+  (`journal_id` and path). Excluded: the portfolio (holdings,
   transactions, dividends), the watchlist, keys and configuration.
 - **Dossier (FR69–FR78):** the user-facing term for the journal file — the single local store the app
   opens (FR66, FR67).

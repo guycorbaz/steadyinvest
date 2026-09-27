@@ -32,6 +32,8 @@ date: '2026-06-08'
 changelog:
   - date: '2026-09-27'
     changes: "G2 — Phase 4 [P4] AI assistance over MCP (Epic 8): added the section 'Phase 4 — AI Assistance over MCP' (decisions A1–A11 under owner decisions O1–O7: steadyinvest-mcp stdio binary + dependency boundary; per-call connection, no lock, version gate; McpAccess with engine-enforced SQLite authorizers; ai_drafts table (migration v8); study notes in the Study blob; AI origin on Provenance/Judgment; stale fingerprint; atomic decide_draft; data_version polling; dossier resolution; risks). Updated Requirements Overview (78 FRs, FR14/FR33 [P4], FR69–FR78, NFR-A1–A4), Technical Constraints, Cross-Cutting Concerns, workspace layout, Deferred Decisions, Data Architecture (two processes, lock, tables), Security & Privacy (NFR-S3), API & Communication, Infrastructure, Cross-Component Dependencies, SQLite naming, Format Patterns (export envelope IS deny_unknown_fields, #78), directory tree, Architectural Boundaries (network boundary incl. mcp closure), FR mapping, Integration Points, Validation and Readiness notes (clerk stance dropped)."
+  - date: '2026-09-27'
+    changes: "G2 round 3 (G3 review of PR #255, owner decisions D1–D10): §Phase 4 revised — McpAccess typed methods only, table allowlist + classification test, logical_version bumped by a v8 trigger, submission checks in one IMMEDIATE transaction, ai_drafts decision columns, DraftOrigin vs AiOrigin, explicit `?`, SCHEMA_VERSION bumps for notes/AI marks, canonical fingerprint, validation through app state + undo, per-call dossier resolution on last_opened_path, restore vs MCP (new A11), risks renumbered A12; Security, Format Patterns and NFR coverage lines updated."
 ---
 
 # Architecture Decision Document
@@ -421,10 +423,11 @@ against this skeleton as the principal go/no-go before committing UI work.
   what it reads to a remote model); **portfolio data never leaves it** — the MCP surface cannot read
   it (NFR-S4/A2).
 - **AI [P4] (NFR-A1–A4):** capability asymmetry enforced **by the SQLite engine, not by prompt**:
-  the MCP process holds only a `persistence::McpAccess` handle whose read connection has an
-  authorizer denying every portfolio table, and whose draft connection has an authorizer allowing
-  only `INSERT` into `ai_drafts` (+ the `logical_version` bump); every other read/write is denied at
-  statement preparation and logged. Drafts carry origin + non-empty comment (DB `NOT NULL` +
+  the MCP process holds only a `persistence::McpAccess` handle with typed methods (never a
+  connection); its read connection's authorizer allows only an allowlist of tables (studies,
+  judgments, journal metadata, drafts) and its draft connection's authorizer allows only `INSERT`
+  into `ai_drafts` (the `logical_version` bump runs from a v8 trigger); every other read/write is
+  denied at statement preparation and logged. Drafts carry origin + non-empty comment (DB `NOT NULL` +
   `CHECK`). No provider call is reachable (the crate graph excludes it). Details: §Phase 4, A1/A3.
 
 ### API & Communication Patterns
@@ -561,8 +564,10 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
   (`JournalSnapshot`, `StudyRecord` — `persistence/src/export.rs:39-66`) **IS**
   `deny_unknown_fields`, deliberately and at envelope level only (#78, 2026-07-08): a newer file
   adding a whole entity **array** is rejected loudly by an older build rather than partially
-  imported. [P4] `ai_drafts` rides this additive-array route (`#[serde(default,
-  skip_serializing_if = "Vec::is_empty")]`): an older build rejects an export that carries drafts.
+  imported. [P4] `ai_drafts` is an additive array (`#[serde(default, skip_serializing_if =
+  "Vec::is_empty")]`); because notes and AI marks are **fields** inside `Study` (which tolerates
+  unknown fields), Epic 8 bumps the contract `SCHEMA_VERSION` (8.1: 1 → 2, 8.2b: 2 → 3) and the
+  import accepts versions ≤ current — an older build rejects such an export (§Phase 4, A5/A6).
 - **Versions:** `schema_version` = integer; `method_version` = string (semver-like).
 - **Decimal in JSON:** serialized as a **string** (exact), parsed to `rust_decimal::Decimal`.
 - **Dates/times:** RFC3339 UTC strings everywhere (storage, export, logs).
@@ -844,30 +849,50 @@ drift appears.
 
 ## Phase 4 — AI Assistance over MCP (G2, 2026-09-27)
 
-_Scope: Epic 8 [P4], PRD FR14, FR33 [P4], FR69–FR78, NFR-S2–S4, NFR-R2, NFR-A1–A4. No AI runs inside
-the app: the owner's AI client (currently Claude Code on the workstation) reads studies and submits
-drafts through a local MCP server; the owner validates or rejects each draft in the UI. Owner
-decisions O1–O7 and architecture decisions A1–A11 below are final (G2 round 2)._
+_Scope: Epic 8 [P4], PRD FR14, FR33 [P4], FR67/FR68 [P4], FR69–FR78, NFR-S1–S4, NFR-R2, NFR-A1–A4.
+No AI runs inside the app: the owner's AI client (currently Claude Code on the workstation) reads
+studies and submits drafts through a local MCP server; the owner validates or rejects each draft in
+the UI. Owner decisions O1–O7 (G2 round 2) and D1–D10 (G2 round 3, after the G3 review of PR #255)
+and architecture decisions A1–A12 below are final._
 
 ### Owner decisions this section implements
 
 - **O1** — the AI also reads each study's **computed outputs** (zones, upside/downside ratio, 5-year
   potential, verdict and its state), needed for search objectives such as U/D.
 - **O2** — the MCP server works while the app is **closed**; drafts wait and appear at the next opening.
-- **O3** — the "active dossier" is the **last-used** dossier from the app config, even with the app
-  closed; every MCP response names the dossier (`journal_id` + path) it read.
+- **O3** — the "active dossier" is the **last-used** dossier, even with the app closed; every MCP
+  response names the dossier (`journal_id` + path) it read.
 - **O4** — a **stale** draft can still be validated after an explicit confirmation, or rejected.
 - **O5** — validating a draft on a validated (✓) cell needs no prior un-validation; the cell moves to `?`.
 - **O6** — deleting a note removes it from the study; it remains in the study history (FR51).
 - **O7** — deleting a study deletes its drafts too (like its judgment history).
+- **D1** — a UX pass (Story 8.0) specifies every Epic 8 surface and its French wording before the UI
+  stories.
+- **D2** — a draft study carries a proposed native currency and an optional company name; duplicates
+  are keyed by (identifier, currency), identifier compared case-insensitively, re-checked at
+  validation; validating opens the ordinary create-study dialog prefilled (2 actions: *Valider* →
+  *Créer*).
+- **D3** — a validation goes through the app's study state and its undo stack; an undone validation
+  is recorded as « validé puis annulé ».
+- **D4** — one pending draft per target; a second is refused at submission.
+- **D5** — a validated value always gets review tag `?` (also on an untagged cell, also when the value
+  is unchanged).
+- **D6** — provider market facts (`current_price`, `ttm_eps`) are not draftable judgment fields.
+- **D7** — stories 8.2 and 8.5 are split in two (8.2a/8.2b, 8.5a/8.5b).
+- **D8** — a second draft study for a security already pending is refused (confirmed).
+- **D9** — an export carrying notes, AI marks or drafts is refused by an older build: the contract
+  `SCHEMA_VERSION` is bumped (A5, A6).
+- **D10** — the dossier is resolved **per call**; each submission carries the `journal_id` + path the
+  AI read and is refused on mismatch.
 
 ### A1 — Separate binary crate, and its dependency boundary
 
 - **Decision:** the MCP server is a separate binary crate **`steadyinvest-mcp`** (`mcp/`), speaking
   MCP over **stdio**, launched by the AI client as a child process. Allowed dependencies:
-  `contract`, `persistence` (through `McpAccess` only), `core` and `report` (for computed outputs,
-  see O1 below), the MCP SDK, serde/tracing. Its **dependency closure excludes** `ingestion`,
-  `reqwest`, `keyring`, `slint` and `app` — a CI test walks `cargo metadata` and fails on any of them.
+  `contract`, `persistence` (through `McpAccess` only, A3), `core` and `report` (for computed
+  outputs, O1), the MCP SDK, serde/tracing. Its **dependency closure excludes** `ingestion`,
+  `reqwest` (and any HTTP client), `keyring`, `slint` and `app` — a CI test walks `cargo metadata`
+  and fails on any of them.
 - **Rationale:** NFR-A3 ("no provider call reachable from MCP") and NFR-S1 (keys never in MCP
   responses) then hold **by construction**: the code that could fetch or read a key is not linkable.
   A separate process also keeps the GUI free of any server loop and lets the MCP server run with the
@@ -885,11 +910,14 @@ decisions O1–O7 and architecture decisions A1–A11 below are final (G2 round 
 
 - **Decision:** each tool call opens the dossier, does its work, and closes it. The MCP process
   **never takes the app's single-instance lock** (the `-lock` sidecar), **never migrates**, never sets
-  `journal_mode`, and sets only `busy_timeout`. It **refuses to run** unless the file's
-  `PRAGMA user_version` **equals** its build's latest migration (older file → "open it in the app
-  first"; newer file → "this MCP build is older than the dossier"). Reads run in **one short read
-  transaction** on a `SQLITE_OPEN_READ_ONLY` connection (a WAL snapshot, or a brief shared lock in
-  DELETE mode on sync paths).
+  `journal_mode`, and sets only `busy_timeout` and `foreign_keys = ON`. It **refuses to run** unless
+  the file's `PRAGMA user_version` **equals** its build's latest migration (older file → "open it in
+  the app first"; newer file → "this MCP build is older than the dossier"). Reads run in **one short
+  read transaction** on a `SQLITE_OPEN_READ_ONLY` connection (a WAL snapshot, or a brief shared lock
+  in DELETE mode on sync paths); responses are bounded (lists paged) so no read holds a lock long.
+- **Sidecars:** on a closed WAL dossier, a read-only open creates an empty `-wal` and a `-shm` it
+  cannot remove. This is expected and harmless; the app's sidecar and write-protection diagnostics
+  (#67, `SidecarNotWritable`) must treat an empty `-wal` left by a reader as normal.
 - **Rationale:** the lock exists to stop a second *app* instance, and taking it would make MCP
   unusable while the app is open (and the app unusable while MCP runs). SQLite's own locking already
   serialises the two writers; per-call connections hold nothing between calls, so the app's writes,
@@ -899,119 +927,223 @@ decisions O1–O7 and architecture decisions A1–A11 below are final (G2 round 
 
 ### A3 — `McpAccess`: capability asymmetry enforced by the SQLite engine
 
-- **Decision:** a persistence-level type **`McpAccess`** (not `Journal`) is the only handle `mcp`
-  gets. It exposes (i) a **read-only connection** whose SQLite **authorizer** returns `SQLITE_DENY`
-  on any read of the portfolio tables — `holdings`, `transactions`, `portfolios`,
-  `watchlist_items`, `fx_rates`, `price_history` — and (ii) a **draft connection** whose authorizer
-  allows only `INSERT` into `ai_drafts` plus the `UPDATE journal_meta SET logical_version` bump
-  (and the reads a draft needs — same denylist); every other write (UPDATE/DELETE on any other table,
-  DDL, `ATTACH`, `PRAGMA` after setup) is **denied at statement preparation and logged**. `Journal` is
-  a clippy `disallowed-types` entry inside the `mcp` crate. The authorizer needs rusqlite's `hooks`
-  feature. Deny, never `SQLITE_IGNORE` (which would silently read NULLs — no silent `.ok()`).
+- **Decision:** a persistence-level type **`McpAccess`** (not `Journal`) is the only persistence
+  entry point `mcp` gets, and it exposes **typed methods only** (`list_studies`, `read_study`,
+  `read_history`, `list_drafts`, `insert_draft`…) — **never a connection**: whoever holds a
+  `rusqlite::Connection` can remove its authorizer. Inside, it uses (i) a **read-only connection**
+  and (ii) a **draft connection**, each with a SQLite **authorizer**:
+  - **reads — allowlist:** only `studies`, `judgments`, `journal_meta`, `ai_drafts` and SQLite's
+    internal tables may be read; every other table — today `holdings`, `transactions`, `portfolios`,
+    `watchlist_items`, `fx_rates`, `price_history`, and any table a later migration adds — is
+    `SQLITE_DENY`. A CI test lists every table in `sqlite_master` of the latest schema and fails if
+    one is not classified (allowed or denied on purpose), so a new table can never be readable by
+    default;
+  - **writes:** the draft connection allows only `INSERT` into `ai_drafts`. The dossier's
+    `logical_version` is bumped by a trigger created in migration v8 (`AFTER INSERT ON ai_drafts`);
+    the authorizer allows `UPDATE journal_meta` **only** when its trigger-name argument is that
+    trigger, so no direct `UPDATE` can set the counter to an arbitrary value (the stale-restore
+    signals depend on it). Every other write (UPDATE/DELETE on any table, DDL, `ATTACH` — which
+    also covers `VACUUM INTO` — and `PRAGMA` after setup) is **denied at statement preparation and
+    logged**.
+  Deny, never `SQLITE_IGNORE` (which would silently read NULLs — no silent `.ok()`). The authorizer
+  needs rusqlite's `hooks` feature.
+- **Crate boundary:** in the `mcp` crate, clippy `disallowed-types` forbids `Journal` and
+  `disallowed-methods` forbids `persistence`'s free functions that touch the file
+  (`restore_journal_file`, `clear_lock`, `inspect_backup`). A crate-level `mcp/clippy.toml`
+  **replaces** the workspace `clippy.toml` rather than merging with it, so it repeats the workspace
+  settings.
+- **Submission checks:** `insert_draft` runs its checks and the insert in **one `BEGIN IMMEDIATE`
+  transaction**, so a concurrent `delete_study` cannot leave an orphan draft. It refuses, with a
+  named reason and nothing written:
+  - a dossier identity mismatch — the submission carries the `journal_id` and path the AI read (D10);
+  - a missing target study; an empty comment; a missing origin (NFR-A4);
+  - an invalid target: the `field` must be one of the enumerated draftable fields (cell fields of the
+    study grid; judgment fields except `current_price` and `ttm_eps`, D6), the fiscal year must be a
+    year of the study (a draft never adds a year row), and the value must parse as a decimal in the
+    field's unit (percent fields as percent, e.g. `12` for 12 %) or, for an enum field such as
+    `forecast_low_option`, as one of its variant names — the tool schema lists fields and units;
+  - a second pending draft on the same target (D4), or a draft study for a security already studied
+    or pending in the same currency (D2, D8).
 - **Rationale:** NFR-A1/A2 demand "by construction, not by prompt". Filtering at the query-writing
   layer would be one missed `WHERE` away from a leak; the authorizer is enforced by the engine on
-  every statement, including ones written later by someone who never read this section.
-- **Test suites (CI):** whole-surface non-exposure (every tool, every resource: no portfolio,
-  watchlist, key or config data in any response); rejected writes (each forbidden statement fails
-  and is logged); 100% of drafts carry comment + origin (backed by DB `CHECK` + `NOT NULL`);
-  metamorphic — every engine output is identical with and without pending drafts, and the engine
-  never reads `ai_drafts`.
+  every statement, including ones written later by someone who never read this section, and the
+  allowlist fails closed.
+- **Test suites (CI):** whole-surface non-exposure (every tool response over stdio: no portfolio,
+  watchlist, key or config data — the dossier identity excepted, NFR-S4); table classification
+  (above); rejected writes (each forbidden statement fails and is logged, including a direct
+  `logical_version` update); submission refusals (each case above); 100% of drafts carry comment +
+  origin (backed by DB `CHECK` + `NOT NULL`); metamorphic — every engine output is identical with and
+  without pending drafts, and the engine never reads `ai_drafts`.
 
 ### A4 — Drafts: `ai_drafts` table (migration v8)
 
 - **Decision:** a new table `ai_drafts` in the **same SQLite file**, migration **v8** (current
-  latest: v7), hybrid pattern. Indexed columns: `id`, `kind` (`study|note|cell`), `study_id`
-  (NULL for a draft study), `security_ticker`, `status` (`pending|validated|rejected`),
-  `created_at`, `decided_at`. Versioned JSON `payload`: `DraftTarget { Cell { fiscal_year, field } |
-  Judgment { field } }`, proposed value or text, `comment`, `AiOrigin { client, model }`,
-  `base_fingerprint`. The comment and origin also get DB guards: `comment` `NOT NULL` with a
-  `CHECK (length(trim(comment)) > 0)`, `origin` `NOT NULL` (NFR-A4). **All enum variants are
-  defined up front** — adding a variant later costs a `SCHEMA_VERSION` bump.
+  latest: v7), hybrid pattern. Columns:
+  - `id`, `kind` (`study|note|cell|judgment`), `study_id` (NULL for a draft study),
+    `security_ticker`, `native_currency` (draft study), `status`
+    (`pending|validated|validated_undone|rejected`), `created_at`, `decided_at`;
+  - `comment` `NOT NULL CHECK (length(trim(comment)) > 0)`, `origin_client` and `origin_model`
+    `NOT NULL` (NFR-A4);
+  - decision-time facts: `stale_at_decision`, `edited_before_validation` (both nullable booleans),
+    `created_study_id` (the study a validated draft study became — for the O7 cascade and the
+    history view);
+  - a versioned JSON `payload`: `DraftTarget { Cell { fiscal_year, field } | Judgment { field } }`,
+    the proposed value or note text, the draft study's optional company name, and
+    `base_fingerprint`.
+  Indexes on `status`, `study_id`, `created_study_id`. **All enum variants are defined up front** —
+  adding a variant later costs a `SCHEMA_VERSION` bump.
 - **Backup/export:** included in the `VACUUM INTO` backup automatically. The JSON export gains an
-  additive `ai_drafts` array (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`) — the
-  #78 route: because the envelope is `deny_unknown_fields` (§Format Patterns), an older build rejects
-  such an export loudly instead of dropping the drafts. Frozen corpus gains `v8.db`.
+  `ai_drafts` array (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`); older builds
+  refuse such a file through the `SCHEMA_VERSION` bump (A6). Frozen corpus gains `v8.db`.
 - **Rationale:** the same file keeps drafts inside the dossier's identity, backup and export (FR77:
   durable record); a separate table keeps pending proposals physically outside the `Study` blob the
   engine reads, which is what makes "a pending draft changes nothing" true by construction.
-- **Cascade (O7):** `delete_study` also deletes the study's drafts in the same transaction (as it
-  already deletes `judgments`).
+- **Cascade (O7):** `delete_study` also deletes the drafts whose `study_id` **or**
+  `created_study_id` is that study, in the same transaction (as it already deletes `judgments`); a
+  pending draft study is untouched.
 
 ### A5 — Study notes in the `Study` blob (FR78)
 
 - **Decision:** `#[serde(default)] notes: Vec<Note { id, text, created_at, updated_at, ai_origin:
-  Option<AiOrigin> }>` inside `Study`. Additive; no `user_version` or `SCHEMA_VERSION` bump.
+  Option<AiOrigin> }>` inside `Study` (`AiOrigin` as defined in A6). Additive in storage — no
+  `user_version` migration.
+- **Export compatibility (D9):** `Study` tolerates unknown fields, so without a version change an
+  older build would import notes and drop them silently (the #78 rule: "a field whose ABSENCE would
+  be unsafe needs its own guard"). Story 8.1 therefore bumps the contract **`SCHEMA_VERSION` 1 → 2**:
+  an older build refuses the export loudly; the new build's import accepts versions **≤ current**
+  (a v1 file reads with the new fields defaulted) instead of today's strict equality, and study
+  blobs keep their own `schema_version`.
 - **Rationale:** export, MCP read and history snapshots come for free (O6: a deleted note stays in
   the study history). A note is study content, not an aggregated/queried entity.
 
 ### A6 — AI origin after validation: no new `Source` variant
 
-- **Decision:** a validated draft **is an owner entry**: `Source::Manual`, review `?`, reconciled as
-  manual (FR22/FR74; O5: also on a formerly ✓ cell). Its AI origin is carried by
-  `#[serde(default)] ai_origin: Option<AiOrigin { draft_id, client, model, validated_at }>` on
-  `Provenance` — cleared naturally by the next owner edit, which replaces the provenance — and by
-  `#[serde(default)] ai_placed` on `Judgment` (per field; cleared on the next owner edit of that
-  field), which drives the chart's "placed by AI" + validation-date annotation (FR33). All additive.
+- **Types:** two distinct types in `contract`:
+  - `DraftOrigin { client, model }` — who submitted a draft (A4 columns);
+  - `AiOrigin { draft_id, client, model, validated_at }` — carried by a value, a judgment field or a
+    note once validated.
+- **Decision:** a validated draft **is an owner entry**: `Source::Manual`, review `?` **set
+  explicitly** by the decision (D5 — a documented exception to the manual-edit rail, which keeps `✓`
+  on an unchanged value and never promotes `None`), reconciled as manual (FR22/FR74; O5). Its AI
+  origin is carried by `#[serde(default)] ai_origin: Option<AiOrigin>` on `Provenance` — cleared by
+  the next owner edit, which replaces the provenance — and by `#[serde(default)] ai_placed:
+  Option<AiOrigin>` on each draftable `Judgment` field, which drives the chart's "placed by AI" +
+  validation-date annotation (FR33) and is cleared by **any** write to that field. Refresh never
+  writes a draftable judgment field (D6), so the mark cannot survive a provider overwrite.
+- **Export compatibility (D9):** Story 8.2b bumps `SCHEMA_VERSION` again (2 → 3), for the same reason
+  as A5.
 - **Rationale:** a new `Source` variant would ripple through reconciliation, the review tri-state
   and every exhaustive `match`, and an older build would fail to parse it; the owner's validation is
   what makes the value authoritative, so it reconciles exactly as a manual entry.
 
 ### A7 — Stale detection by fingerprint
 
-- **Decision:** `base_fingerprint` = hash of the target's value + provenance (cell) or the field's
-  value (judgment) at submission. A draft is **stale** when the current fingerprint differs; computed
-  on read, stored at decision time. Normalise decimals before hashing (the `Money` scale caveat in
-  `contract/src/provenance.rs`). O4: the inbox allows validation after an explicit confirmation.
-- **Rationale:** catches both owner edits and refreshes (FR72) without any trigger or bookkeeping on
-  the app's write paths.
+- **Decision:** one canonical function in `contract`, `draft_fingerprint(study, target)`, with an
+  explicit, documented field encoding (never the serde form, which changes when types gain fields):
+  - **cell draft:** the normalised value, its source and its pending (divergent provider) value —
+    **not** its timestamp or digest, which a value-identical re-stamp (`restamp_if_predated`) changes
+    without any real change;
+  - **judgment draft:** the field's value **plus** the study's load-bearing inputs (historical
+    series and the market facts the judgment is read against) **and** `METHOD_VERSION`, so a refresh
+    or a method change marks it stale.
+  Decimals are normalised before hashing (the `Money` scale caveat in `contract/src/provenance.rs`).
+  A draft is **stale** when the current fingerprint differs — computed on read, recorded in
+  `stale_at_decision` when decided. A draft whose target no longer exists (study deleted before the
+  cascade, fiscal year dropped by a refresh) reads **target gone** and cannot be validated.
+  `decide_draft` re-checks the fingerprint **inside** its transaction against the one the owner
+  confirmed: if a refresh landed after the confirmation dialog, the decision is refused and the draft
+  is shown again.
+- **Draft study:** no fingerprint; the duplicate check runs again at validation (D2).
+- **Rationale:** catches owner edits, refreshes and method changes (FR72) without any trigger or
+  bookkeeping on the app's write paths, and without false stale marks.
 
-### A8 — Applying a decision atomically
+### A8 — Applying a decision through the app state, atomically
 
-- **Decision:** `persistence::decide_draft(...)` performs the study upsert (with its history
-  snapshot) **and** the draft's status/`decided_at` update in **one transaction** with one
-  `logical_version` bump. Rejection updates only the draft.
+- **Decision (D3):** validation goes through the app's study state, never behind it. The draft is
+  applied to the in-memory study (loading it if it is not open) and pushed on its **undo stack**, then
+  `persistence::decide_draft(study, draft_id, decision)` performs the study upsert (with its history
+  snapshot) **and** the draft's status / `decided_at` / `stale_at_decision` /
+  `edited_before_validation` update in **one transaction** with one `logical_version` bump; the open
+  study is then reloaded from the dossier. Undoing a validation restores the prior study and sets
+  the draft to `validated_undone` in one transaction. Rejection updates only the draft. A draft
+  study's validation opens the create-study dialog prefilled (D2); its confirmation creates the study
+  and sets `created_study_id` + `validated` in one transaction.
 - **Rationale:** NFR-R2 — a crash can never leave a value applied with its draft still pending, or a
-  draft marked validated with nothing applied.
+  draft marked validated with nothing applied; and no later save of a stale in-memory copy can
+  silently overwrite an applied draft (lost update).
 
 ### A9 — The open app discovers new drafts by polling `PRAGMA data_version`
 
 - **Decision:** the app polls `PRAGMA data_version` on its own connection every ~2–3 s (a Slint
   `Timer`), plus on window focus and on opening the inbox; a change triggers a re-read of pending
-  drafts. No file watcher.
+  drafts. No file watcher. A failed poll or inbox read shows the inbox as « indisponible » with its
+  cause — never as an empty inbox.
+- **Concurrency case to test:** in DELETE mode, an MCP read holding a shared lock makes the app's
+  commit wait (app `busy_timeout` 5000 ms, `persistence/src/journal.rs`); MCP reads are short and
+  bounded (A2), so the app's commit succeeds — a test holds a read transaction open while the app
+  commits.
 - **Rationale:** `data_version` changes only when **another** connection commits, so the app's own
   writes do not trigger it; it costs one pragma, works identically in WAL and DELETE mode and on every
   OS, whereas file watchers are unreliable on synced paths.
 
-### A10 — Dossier resolution
+### A10 — Dossier resolution, per call
 
-- **Decision:** `--dossier <path>` when given (development, tests), else `journal_path` from the
-  app config (the last-used dossier, O3). The config-path helper moves out of `app/src/config.rs`
-  into a small shared module (depending only on `directories` + serde) so `mcp` does not depend on
-  `app`; it reads `journal_path` tolerantly (the config is append-only `#[serde(default)]`). Every
-  response names the dossier: `journal_id` + resolved path.
+- **Decision:** `--dossier <path>` when given (development, tests); else the dossier the app last
+  **actually opened** — a `last_opened_path` the app writes to its config each time it opens a
+  dossier. This differs from `journal_path` when a configured dossier was refused by name and the
+  app runs on the default one (G3 M4 keeps `journal_path` on the refused dossier): MCP must follow
+  the dossier the owner sees. With neither, MCP uses the app's `default_journal_path`, like the app.
+  Resolution happens **per call**, so a dossier switch in the app is followed without restarting the
+  server; every response names the dossier (`journal_id` + resolved path), and every submission
+  carries both and is refused on mismatch (D10) — the path tells a copy from its original, which the
+  `journal_id` alone does not (`VACUUM INTO` backups and test copies keep it). The config-path helper
+  moves out of `app/src/config.rs` into a small shared module (depending only on `directories` +
+  serde) so `mcp` does not depend on `app`; it reads the config tolerantly (append-only
+  `#[serde(default)]`).
 - **Rationale:** the owner's AI client must follow the dossier the owner actually uses, and a reply
   must never leave doubt about which universe it describes (real vs test dossier).
 
-### A11 — Risks and their handling
+### A11 — Restore while MCP runs
+
+- **Decision:** `restore_journal_file` assumes every connection to the live file is closed — which
+  only the single-instance lock guaranteed, and MCP does not take it. Restore therefore first takes an
+  **exclusive SQLite lock** on the live file (`BEGIN EXCLUSIVE` with a busy wait) and holds it until
+  the rename; and every MCP write re-checks, inside its write transaction, that the file (device +
+  inode) and `journal_id` are the ones it opened, aborting otherwise.
+- **Rationale:** otherwise a draft committed during a restore lands in the unlinked old file (lost
+  silently), and its connection's close can delete the restored file's `-wal` by path.
+
+### A12 — Risks and their handling
 
 - **Developer = client:** Claude Code is both the developer and the MCP client. Dev/test runs
-  **always** pass `--dossier` with a temporary path; registering the MCP server on the real dossier
-  is the **owner's** act (registration doc in Story 8.4), never the agent's.
-- **History noise:** note edits create study history entries; the history view gets a label/filter.
+  **always** pass `--dossier` with a temporary path, and the test harness sets `XDG_CONFIG_HOME` /
+  `XDG_DATA_HOME` to a temporary directory so the fallback resolution (A10) can never reach the real
+  config (a CI test asserts it). Registering the MCP server on the real dossier is the **owner's**
+  act, following the registration doc (Story 8.4), at a Claude Code scope **not active in the
+  steadyinvest repository**, so development sessions never see the real dossier's tools.
+- **Logs:** the MCP binary writes its own rotating log file (`steadyinvest-mcp.log`, beside the app's
+  log directory), never the app's file.
+- **History noise:** history entries are full-study snapshots with no cause column. Note-only
+  entries are identified by comparing consecutive snapshots with `notes` ignored; the history view
+  labels them and can filter them out. Processed drafts are merged into a study's timeline by joining
+  `ai_drafts` on `study_id` / `created_study_id` and `decided_at` (a rejected draft writes no
+  snapshot).
 - **AI text containment:** AI-origin text reaches the UI **only** through a dedicated AI-frame
-  component (label "AI" + disclaimer, FR13), with a test that no other component renders it.
-- **Short reads:** MCP reads stay short (in DELETE mode a long read holds a shared lock that blocks
-  the app's commit until `busy_timeout`); tool responses are paged or bounded.
+  component (label + disclaimer, FR13); a structural test scans the `.slint` sources and fails if an
+  AI-origin property is bound outside that component.
 - **SDK choice:** `rmcp` vs a hand-rolled JSON-RPC loop is decided in Story 8.4; the choice must pass
   `cargo deny` (licence + advisories) and must not pull `reqwest`/network features into the closure
   (A1 test).
 
 ### Stories (Epic 8, ordered)
 
-8.1 study notes (A5) · 8.2 draft & AI-origin data model, migration v8, `decide_draft`, export/backup,
-cascade (A4, A6–A8) · 8.3 `McpAccess` + authorizers + suites (A2, A3, O1) · 8.4 `steadyinvest-mcp`
-binary, dossier resolution, dependency-closure test (A1, A10, A11) · 8.5 draft inbox UI, polling, AI
-frame (A7, A9, O4, O5) · 8.6 AI judgment lines (FR33/72) · 8.7 draft-study end-to-end + record view.
+8.0 UX pass: inbox, AI frame, reminders, AI line, AI-origin marks, notes, drafts record, French
+wording, PDF impact (D1) · 8.1 study notes (A5) · 8.2a drafts table, migration v8, export/backup,
+cascade (A4) · 8.2b AI origin, fingerprint, `decide_draft` (A6–A8) · 8.3 `McpAccess` + authorizers +
+suites + restore safety (A2, A3, A11, O1) · 8.4 `steadyinvest-mcp` binary, dossier resolution,
+dependency-closure test, registration doc (A1, A10, A12) · 8.5a AI frame, inbox (read), polling
+(A9) · 8.5b decisions (A7, A8, O4, O5) · 8.6 AI judgment lines (FR33/72) · 8.7 draft-study end-to-end
++ record view.
 
 ## Architecture Validation Results
 
@@ -1058,7 +1190,9 @@ on-demand recompute) are located and flagged **to be filed as FRs once the repo 
 - *Performance* — `<~1 s` recompute and `<~3 s` launch within reach; **`<100 ms` judgment-line
   recolor targeted but NOT yet proven** in native Slint (see Gap). ⚠️
 - *Security/Privacy* — keychain-only secrets, no telemetry, all-local, keys injected not stored in
-  `ingestion`. ✅
+  `ingestion`. ✅ [P4] study data may leave only through the owner's AI client (NFR-S3/S4). ✅
+- *AI asymmetry [P4]* — NFR-A1–A4: draft-only writes, allowlisted reads, no provider call reachable,
+  origin + comment on every draft — by construction (§Phase 4, A1/A3/A4) and CI suites. ✅
 - *Reliability* — offline workflow; multi-statement writes in a single SQLite transaction + WAL for
   crash-safety; forward-safe migrations + frozen corpus; non-destructive reconciliation;
   integrity/version checks on import/restore. ✅
