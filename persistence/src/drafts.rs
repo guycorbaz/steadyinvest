@@ -358,7 +358,14 @@ impl Journal {
             self.check_study_identity(w.after)?;
         }
         let tx = self.conn.transaction()?;
-        let status = draft_status_in(&tx, d.draft_id)?;
+        let (status, draft_study) = draft_status_in(&tx, d.draft_id)?;
+        if let Some(w) = &d.study
+            && Some(w.after.id) != draft_study
+        {
+            return Err(Error::DraftStudyMismatch {
+                study_id: w.after.id,
+            });
+        }
         if status != DraftStatus::Pending {
             return Err(Error::DraftNotPending {
                 status: status.as_str().to_string(),
@@ -417,7 +424,10 @@ impl Journal {
             DraftStep::Redo => (DraftStatus::ValidatedUndone, DraftStatus::Validated),
         };
         let tx = self.conn.transaction()?;
-        let found = draft_status_in(&tx, draft_id)?;
+        let (found, draft_study) = draft_status_in(&tx, draft_id)?;
+        if draft_study != Some(study.id) {
+            return Err(Error::DraftStudyMismatch { study_id: study.id });
+        }
         if found != from {
             return Err(Error::DraftStatusMismatch {
                 expected: from.as_str().to_string(),
@@ -436,18 +446,26 @@ impl Journal {
     }
 }
 
-/// The stored status of a draft inside a decision transaction ([`Error::DraftNotFound`] when the
-/// dossier holds no such draft; an unknown spelling is corrupt, never guessed).
-fn draft_status_in(tx: &rusqlite::Transaction<'_>, id: Uuid) -> Result<DraftStatus> {
-    let status: Option<String> = tx
+/// The stored status and study of a draft inside a decision transaction ([`Error::DraftNotFound`]
+/// when the dossier holds no such draft; an unknown spelling is corrupt, never guessed).
+fn draft_status_in(
+    tx: &rusqlite::Transaction<'_>,
+    id: Uuid,
+) -> Result<(DraftStatus, Option<Uuid>)> {
+    let row: Option<(String, Option<String>)> = tx
         .query_row(
-            "SELECT status FROM ai_drafts WHERE id = ?1",
+            "SELECT status, study_id FROM ai_drafts WHERE id = ?1",
             rusqlite::params![id.to_string()],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
-    let status = status.ok_or(Error::DraftNotFound { id })?;
-    status
+    let (status, study) = row.ok_or(Error::DraftNotFound { id })?;
+    let status = status
         .parse()
-        .map_err(|e| corrupt(format!("ai_drafts.status of draft {id}: {e}")))
+        .map_err(|e| corrupt(format!("ai_drafts.status of draft {id}: {e}")))?;
+    let study = study
+        .as_deref()
+        .map(|s| parse_uuid(s, "ai_drafts.study_id"))
+        .transpose()?;
+    Ok((status, study))
 }

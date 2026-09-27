@@ -168,6 +168,7 @@ pub enum Error {
     },
 
     /// A draft decision named a draft the dossier does not hold (Story 8.2b). Nothing was written.
+    /// Its kind is `Other` — a missing draft row is never « file not found » (G3 B2/E7).
     #[error("draft {id} is not in the journal; nothing was written")]
     DraftNotFound { id: Uuid },
 
@@ -186,6 +187,11 @@ pub enum Error {
     /// was written.
     #[error("the study changed since the decision was prepared; nothing was written")]
     StudyChangedSinceRead,
+
+    /// A decision tried to write a study other than the draft's own (Story 8.2b G3 F9) — an
+    /// internal inconsistency of the caller. Nothing was written.
+    #[error("the decision's study {study_id} is not the draft's study; nothing was written")]
+    DraftStudyMismatch { study_id: Uuid },
 }
 
 /// The KIND of a failure, for a caller that names causes in its own language (the app speaks
@@ -265,7 +271,6 @@ impl Error {
                 _ => ErrorKind::Other,
             },
             Error::LockHeld { .. } => ErrorKind::Locked,
-            Error::DraftNotFound { .. } => ErrorKind::Missing,
             Error::CorruptPayload { .. } | Error::CorruptJournalMeta { .. } => ErrorKind::Corrupt,
             Error::NewerJournalSchema { .. } | Error::NewerRowSchema { .. } => ErrorKind::NewerData,
             Error::Migration { .. } => ErrorKind::Migration,
@@ -444,6 +449,9 @@ mod tests {
                 found: "rejected".to_string(),
             },
             Error::StudyChangedSinceRead,
+            Error::DraftStudyMismatch {
+                study_id: Uuid::from_u128(4),
+            },
         ]
     }
 
@@ -477,14 +485,15 @@ mod tests {
                 | Error::DraftNotFound { .. }
                 | Error::DraftNotPending { .. }
                 | Error::DraftStatusMismatch { .. }
-                | Error::StudyChangedSinceRead => {}
+                | Error::StudyChangedSinceRead
+                | Error::DraftStudyMismatch { .. } => {}
             }
         }
-        // 25 variants (21 + the four draft-decision variants of Story 8.2b); `WriteProtected` and
+        // 26 variants (21 + the five draft-decision variants of Story 8.2b); `WriteProtected` and
         // `WriteProtectedOutdated` are sampled for both of their causes (file, directory).
         assert_eq!(
             sample_errors().len(),
-            27,
+            28,
             "one sample per variant (+2 causes)"
         );
     }

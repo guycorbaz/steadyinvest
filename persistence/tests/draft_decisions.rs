@@ -241,7 +241,11 @@ fn an_unknown_draft_is_named_missing() {
         })
         .expect_err("refused");
     assert!(matches!(err, Error::DraftNotFound { .. }), "{err:?}");
-    assert_eq!(err.kind(), steadyinvest_persistence::ErrorKind::Missing);
+    assert_eq!(
+        err.kind(),
+        steadyinvest_persistence::ErrorKind::Other,
+        "a missing draft row is never « fichier introuvable »"
+    );
 }
 
 #[test]
@@ -433,4 +437,27 @@ fn study_status_names_an_archived_study_and_a_gone_one() {
     );
     assert_eq!(journal.study_status(Uuid::from_u128(0xBAD)).unwrap(), None);
     assert!(journal.get_draft(Uuid::from_u128(0xBAD)).unwrap().is_none());
+}
+
+#[test]
+fn a_decision_writing_another_study_than_the_draft_s_is_refused() {
+    // G3 F9: the study written must be the draft's own.
+    let (_dir, path, mut journal) = dossier();
+    plant(&path, "pending", None);
+    let mut other = study("12");
+    other.id = Uuid::from_u128(0xB2);
+    journal.put_study(&other).unwrap();
+    let before = journal.get_study(other.id).unwrap().unwrap();
+    let mut after = before.clone();
+    after.judgment.judged_avg_low_pe = Some(money("11.5"));
+    let now = ts("2026-09-27T10:00:00Z");
+    let err = journal
+        .decide_draft(validation(&before, &after, &now, false))
+        .expect_err("refused");
+    assert!(matches!(err, Error::DraftStudyMismatch { .. }), "{err:?}");
+    assert_eq!(draft_facts(&path).0, "pending");
+    let err = journal
+        .step_draft_decision(&after, Uuid::from_u128(DRAFT), DraftStep::Undo, &now)
+        .expect_err("refused");
+    assert!(matches!(err, Error::DraftStudyMismatch { .. }), "{err:?}");
 }

@@ -35,7 +35,7 @@ pub use draft::{
 };
 pub use draftable::{
     DraftField, DraftFieldKind, DraftUnit, DraftValue, DraftValueProblem, FINGERPRINT_VERSION,
-    draft_fingerprint, option_name,
+    MAX_PROPOSAL_ABS, MAX_PROPOSAL_DECIMALS, draft_fingerprint, option_name,
 };
 pub use export::{ImportError, StudyExport, from_export_json, sha256_hex, to_export_json};
 pub use money::Money;

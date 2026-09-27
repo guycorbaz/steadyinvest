@@ -101,13 +101,25 @@ pub enum DraftValueProblem {
     NotANumber,
     /// The field wants one of its option names and the text is none of them.
     NotAnOption,
+    /// A plain decimal outside the proposal bounds (|value| ≥ 10^15, or more than 10 decimals) —
+    /// see [`MAX_PROPOSAL_ABS`].
+    OutOfRange,
 }
+
+/// The magnitude bound of a proposed (AI-written) number: `|value| < 10^15` — far above any share
+/// price, per-share figure, percent or absolute company amount the study form holds, and well
+/// inside `Decimal`'s range (Story 8.2b G3 E9). Owner entries are not bounded by this.
+pub const MAX_PROPOSAL_ABS: i64 = 1_000_000_000_000_000;
+
+/// The most decimals a proposed number may carry (Story 8.2b G3 E9).
+pub const MAX_PROPOSAL_DECIMALS: u32 = 10;
 
 impl fmt::Display for DraftValueProblem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DraftValueProblem::NotANumber => f.write_str("not a plain decimal number"),
             DraftValueProblem::NotAnOption => f.write_str("not one of the field's options"),
+            DraftValueProblem::OutOfRange => f.write_str("outside the proposal bounds"),
         }
     }
 }
@@ -222,7 +234,8 @@ impl DraftField {
         }
     }
 
-    /// Parse a proposed text into a value for this field. Numbers: **plain notation only** —
+    /// Parse a proposed (AI-written) text into a value for this field — never the owner's typed
+    /// entry, which the app reads under the owner's number format. Numbers: **plain notation only** —
     /// optional leading `-`, digits, optional `.` and digits (no exponent, no `+`, no locale or
     /// thousands separators); `-0` reads `0`. Options: the exact snake name.
     pub fn parse_value(self, text: &str) -> Result<DraftValue, DraftValueProblem> {
@@ -238,6 +251,11 @@ impl DraftField {
             return Err(DraftValueProblem::NotANumber);
         }
         let d = Decimal::from_str_exact(t).map_err(|_| DraftValueProblem::NotANumber)?;
+        if d.abs() >= Decimal::from(MAX_PROPOSAL_ABS)
+            || d.normalize().scale() > MAX_PROPOSAL_DECIMALS
+        {
+            return Err(DraftValueProblem::OutOfRange);
+        }
         let d = if d.is_zero() { Decimal::ZERO } else { d };
         Ok(DraftValue::Number(Money::from(d)))
     }

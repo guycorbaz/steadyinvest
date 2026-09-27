@@ -249,3 +249,20 @@ fn a_cell_draft_ignores_other_cells_and_the_judgment() {
     other.judgment.current_price = Some(m("1"));
     assert_eq!(fp(&s, &eps_2024()), fp(&other, &eps_2024()));
 }
+
+#[test]
+fn a_parked_pending_re_stamped_with_the_same_value_is_not_stale() {
+    // G3 F6: a refresh re-parks the SAME divergent provider value with a new provenance — the
+    // fingerprint encodes the pending's value only.
+    let mut parked = study();
+    parked.years[1].eps.pending = Some(PendingProvider {
+        value: Some(m("2.7")),
+        provenance: prov(Source::Provider, "2026-09-20T00:00:00Z", "h9"),
+    });
+    let mut restamped = parked.clone();
+    restamped.years[1].eps.pending = Some(PendingProvider {
+        value: Some(m("2.70")),
+        provenance: prov(Source::Provider, "2026-09-27T12:00:00Z", "other"),
+    });
+    assert_eq!(fp(&parked, &eps_2024()), fp(&restamped, &eps_2024()));
+}
