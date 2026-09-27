@@ -1,5 +1,5 @@
 # generated: 2026-06-09
-# last_updated: 2026-07-02
+# last_updated: 2026-09-27
 # project: steadyinvest
 # project_key: NOKEY
 # tracking_system: file-system
@@ -686,10 +686,24 @@ development_status:
   #             Guy; findings written to the 7.0–7.3 records (7.5 under 7.3), defers to deferred-work.md.
   #             Stories stay done (epic closed at the retro); the fixes land as themed reviewed PRs under #237.
 
-  # ── Epic 8: Read-only AI clerk-of-memory & MCP façade [V] (story outlines) ──
+  # 2026-09-26: G1 closed (#237). 2026-09-27: G2 closed — PR #255 merged (bffbcf7): PRD Phase 4,
+  #             architecture §Phase 4 (A1–A13), Epic 8 re-scoped with owner decisions O1–O7, D1–D11.
+
+  # ── Epic 8: AI assistance over MCP (human-gated drafts) [P4] ──
+  # Order: 8.0 UX pass (own PR, validated by Guy) before any UI story; 8.1 notes; 8.2a/8.2b/8.3
+  # headless; 8.4 binary; 8.5a/8.5b/8.6/8.7 UI; 8.8 frozen verdict (FR68, D11).
+  # Dev-safety rule (arch A12): every MCP run on a temp --dossier copy; registration on the real
+  # dossier is Guy's act only.
   epic-8: backlog
-  8-1-read-only-mcp-facade: backlog
-  8-2-local-first-read-only-ai-provider-abstraction: backlog
-  8-3-past-interrogation-prompts: backlog
-  8-4-capability-asymmetry-tests: backlog
+  8-0-ux-pass-ai-assistance-surfaces: backlog
+  8-1-study-notes: backlog
+  8-2a-drafts-table: backlog
+  8-2b-ai-origin-staleness-and-decisions: backlog
+  8-3-mcp-access-gated-access-surface: backlog
+  8-4-steadyinvest-mcp-stdio-server: backlog
+  8-5a-ai-frame-and-draft-inbox: backlog
+  8-5b-deciding-drafts: backlog
+  8-6-ai-judgment-lines: backlog
+  8-7-draft-study-end-to-end-and-drafts-record: backlog
+  8-8-frozen-decision-time-verdict: backlog
   epic-8-retrospective: optional
