@@ -18,6 +18,7 @@
 
 pub mod ai;
 pub mod cell;
+pub mod draft;
 pub mod export;
 pub mod money;
 pub mod provenance;
@@ -28,6 +29,9 @@ pub mod versioning;
 
 pub use ai::AiOrigin;
 pub use cell::{Cell, Coverage, Freshness, PendingProvider, Review, Source};
+pub use draft::{
+    DRAFT_PAYLOAD_VERSION, DraftKind, DraftPayload, DraftStatus, DraftTarget, UnknownDraftValue,
+};
 pub use export::{ImportError, StudyExport, from_export_json, sha256_hex, to_export_json};
 pub use money::Money;
 pub use provenance::{Provenance, Timestamp};
