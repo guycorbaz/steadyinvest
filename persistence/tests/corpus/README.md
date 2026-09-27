@@ -25,6 +25,11 @@ builds persisted.
    last match wins). If `git status` does not show a new corpus file, fix the ignore rules before
    anything else: an untracked corpus passes locally and silently never reaches CI.
 
+**v9 (Story 8.3 G3) adds no file.** Its step only creates the trigger `trg_ai_drafts_refuse_existing_id`:
+no stored shape changes, so a `v9.db` would hold nothing `v8.db` does not. The v8 gate opens a copy
+under the current build — migrating it to v9 — and checks the trigger is there; the next step that
+changes a stored shape adds its file again.
+
 **Gap v2–v7, as found (Story 8.2a, 2026-09-27).** The practice lapsed between v1 and v8: the
 migrations v2–v7 shipped without their corpus file. They are **not** back-filled — a file written
 today by current code would not be evidence of what those builds wrote, and the app is not in

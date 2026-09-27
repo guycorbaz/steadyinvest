@@ -55,7 +55,7 @@ fn newer_file_with_one_study(dir: &TempDir, jid: Uuid) -> (std::path::PathBuf, S
         journal.put_study(&s).expect("study writes");
     }
     let conn = Connection::open(&path).expect("raw open");
-    conn.pragma_update(None, "user_version", 9)
+    conn.pragma_update(None, "user_version", 10)
         .expect("user_version bumps");
     drop(conn);
     (path, s)
@@ -94,15 +94,15 @@ fn newer_file_opens_read_only_reads_work_writes_fail() {
         matches!(
             err,
             Error::NewerJournalSchema {
-                file_user_version: 9,
-                supported: 8,
+                file_user_version: 10,
+                supported: 9,
             }
         ),
         "got {err:?}"
     );
     let msg = err.to_string();
     assert!(
-        msg.contains("user_version 9") && msg.contains("read-only"),
+        msg.contains("user_version 10") && msg.contains("read-only"),
         "the message states the facts: {msg:?}"
     );
 
@@ -119,7 +119,7 @@ fn newer_file_open_does_not_run_migrations_or_mutate() {
     let v: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .expect("pragma reads");
-    assert_eq!(v, 9, "the read-only open left user_version untouched");
+    assert_eq!(v, 10, "the read-only open left user_version untouched");
 }
 
 // ── Gate 2: a single row's schema_version > contract::SCHEMA_VERSION ──

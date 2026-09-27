@@ -405,4 +405,22 @@ fn frozen_corpus_v8_opens_and_reads_back_the_study_and_its_drafts() {
         canonical_drafts(),
         "the drafts written at v8 no longer read back equal — a drafts shape changed"
     );
+    drop(journal);
+    // Opened under this build, the copy was migrated to the latest step: v9 (Story 8.3 G3) adds
+    // the id guard of the drafts — no stored shape changed, hence no v9.db (README).
+    let conn = rusqlite::Connection::open(&work).expect("raw open of the migrated copy");
+    let (version, guard): (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT user_version FROM pragma_user_version),
+                    (SELECT count(*) FROM sqlite_master
+                      WHERE type = 'trigger' AND name = 'trg_ai_drafts_refuse_existing_id')",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("reads");
+    assert_eq!(
+        (version, guard),
+        (9, 1),
+        "the v8 copy migrates to v9 with its id guard"
+    );
 }
