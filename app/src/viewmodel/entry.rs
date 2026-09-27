@@ -288,6 +288,7 @@ mod tests {
 
     fn prov() -> Provenance {
         Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 1,
             timestamp: Timestamp("2026-06-13T00:00:00Z".to_string()),

@@ -329,6 +329,7 @@ mod tests {
             .into_iter()
             .map(|source| {
                 let provenance = Provenance {
+                    ai_origin: None,
                     source,
                     logical_version: 1,
                     timestamp: Timestamp("2026-01-01T00:00:00Z".to_string()),

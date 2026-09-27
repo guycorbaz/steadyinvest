@@ -5,8 +5,8 @@
 //! defined up front** (arch A4): a later variant would be a contract change, and — per the enum
 //! policy of this crate — an unknown value fails to parse on purpose (no `serde(other)`).
 //!
-//! The draftable field enumeration, units and the fingerprint are Story 8.2b's; here `field` is a
-//! plain string and `base_fingerprint` an optional opaque text.
+//! Here `field` is a plain string and `base_fingerprint` an optional opaque text; the draftable
+//! field enumeration, units, parser and fingerprint live in [`crate::draftable`] (Story 8.2b).
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

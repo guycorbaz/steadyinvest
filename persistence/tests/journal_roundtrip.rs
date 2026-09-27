@@ -34,6 +34,7 @@ fn cell(value: Option<&str>) -> Cell {
             Coverage::ToFill
         },
         provenance: Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 0,
             timestamp: ts("2026-06-12T08:00:00Z"),
@@ -45,6 +46,7 @@ fn cell(value: Option<&str>) -> Cell {
 
 fn judgment() -> Judgment {
     Judgment {
+        ai_placed: Default::default(),
         estimated_high_eps: Some(money("5.20")),
         estimated_low_eps: Some(money("2.10")),
         // The four issue-#14 fields, all populated — so the round-trip tests below prove they
@@ -186,6 +188,7 @@ fn varied_studies_round_trip_exactly() {
     let mut bare_judgment = study(3, jid, "AAPL");
     bare_judgment.native_currency = "USD".to_string();
     bare_judgment.judgment = Judgment {
+        ai_placed: Default::default(),
         estimated_high_eps: None,
         estimated_low_eps: None,
         projected_sales_growth_pct: None,

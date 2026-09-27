@@ -8,6 +8,7 @@
 //! job is only to carry the canonical strings. (Validating constructors / `TryFrom` may be added when
 //! those layers land — see deferred-work.)
 
+use crate::ai::AiOrigin;
 use crate::cell::Source;
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +32,13 @@ pub struct Provenance {
     /// values first — `Money` equality is by value but its serialization preserves scale
     /// (`"3.0"` ≠ `"3"`), so value-equal inputs can otherwise produce different digests.
     pub hash_of_dependencies: String,
+    /// The AI origin of a value the owner validated from an AI draft (Story 8.2b, arch A6). A
+    /// validated draft is an owner entry — `source` stays [`Source::Manual`], there is **no** AI
+    /// `Source` variant — and this mark shows where it came from until the owner's next edit, which
+    /// replaces the provenance. Additive and skipped when `None`, so a provenance without it
+    /// serializes byte-identically to before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_origin: Option<AiOrigin>,
 }
 
 #[cfg(test)]
@@ -44,6 +52,7 @@ mod tests {
             logical_version: 42,
             timestamp: Timestamp("2026-06-09T14:30:00Z".to_string()),
             hash_of_dependencies: "abc123".to_string(),
+            ai_origin: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         assert_eq!(serde_json::from_str::<Provenance>(&json).unwrap(), p);

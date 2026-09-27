@@ -97,6 +97,53 @@ pub struct Judgment {
     /// Added in Story 2.2 (issue #14).
     #[serde(default)]
     pub present_full_year_dividend: Option<Money>,
+    /// Which judgment fields were placed by an owner-validated AI draft (Story 8.2b, arch A6):
+    /// one [`AiOrigin`] slot per draftable judgment field. **Any** write to a field clears its
+    /// slot. Additive and skipped when empty, so a judgment without AI marks serializes
+    /// byte-identically to before.
+    #[serde(default, skip_serializing_if = "AiPlaced::is_empty")]
+    pub ai_placed: AiPlaced,
+}
+
+/// The "placed by AI" marks of a [`Judgment`] — exactly the nine draftable judgment fields
+/// (`current_price` and `ttm_eps` are provider market facts, not draftable — owner decision D6).
+/// Each slot is `Some` from the owner's validation of an AI draft until the next write to that field.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiPlaced {
+    /// Mark on [`Judgment::estimated_high_eps`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_high_eps: Option<AiOrigin>,
+    /// Mark on [`Judgment::estimated_low_eps`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_low_eps: Option<AiOrigin>,
+    /// Mark on [`Judgment::projected_sales_growth_pct`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected_sales_growth_pct: Option<AiOrigin>,
+    /// Mark on [`Judgment::projected_eps_growth_pct`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected_eps_growth_pct: Option<AiOrigin>,
+    /// Mark on [`Judgment::judged_avg_high_pe`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judged_avg_high_pe: Option<AiOrigin>,
+    /// Mark on [`Judgment::judged_avg_low_pe`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judged_avg_low_pe: Option<AiOrigin>,
+    /// Mark on [`Judgment::forecast_low_option`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forecast_low_option: Option<AiOrigin>,
+    /// Mark on [`Judgment::recent_severe_low`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recent_severe_low: Option<AiOrigin>,
+    /// Mark on [`Judgment::present_full_year_dividend`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub present_full_year_dividend: Option<AiOrigin>,
+}
+
+impl AiPlaced {
+    /// `true` when no field carries a mark (the serialized form then omits the whole object).
+    pub fn is_empty(&self) -> bool {
+        *self == AiPlaced::default()
+    }
 }
 
 /// A durable stock study (one row of the journal). Carries the `schema_version` it was written under.
@@ -185,6 +232,7 @@ mod tests {
 
     fn empty_judgment() -> Judgment {
         Judgment {
+            ai_placed: Default::default(),
             estimated_high_eps: None,
             estimated_low_eps: None,
             projected_sales_growth_pct: None,

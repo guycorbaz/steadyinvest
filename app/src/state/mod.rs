@@ -91,6 +91,7 @@ pub fn default_journal_path() -> Option<PathBuf> {
 /// default forecast-low option). 2.2 creates a study with no judgment inputs yet — those are 2.6.
 fn empty_judgment() -> Judgment {
     Judgment {
+        ai_placed: Default::default(),
         estimated_high_eps: None,
         estimated_low_eps: None,
         projected_sales_growth_pct: None,

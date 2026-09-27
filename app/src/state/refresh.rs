@@ -26,6 +26,7 @@ impl JournalState {
     /// (`Provenance` performs no validation on these strings — `contract` module doc.)
     pub(crate) fn manual_provenance(&self) -> Provenance {
         Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 1,
             timestamp: self.clock.now(),
@@ -44,6 +45,7 @@ impl JournalState {
     /// (review checklist §5, the 6.9 precedent); the provider tag stays the first `:` segment.
     fn provider_provenance(&self, digest: String) -> Provenance {
         Provenance {
+            ai_origin: None,
             source: Source::Provider,
             logical_version: 1,
             timestamp: self.clock.now(),

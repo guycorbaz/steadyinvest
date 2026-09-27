@@ -134,6 +134,21 @@ impl Cell {
         }
     }
 
+    /// The **AI-draft validation** rail (Story 8.2b, arch A6, owner decisions O5 / D5) — the one
+    /// documented exception to invariant 2b's "review is never promoted" rule. A validated AI draft
+    /// is an owner entry: it goes through [`Cell::edited`] (value, source from the provenance —
+    /// [`Source::Manual`] — freshness current, coverage, pending cleared) and then the review is set
+    /// to [`Review::ToReview`] **in every case**: an untagged cell, a `✓` cell (no soft-lock
+    /// refusal — O5) and an unchanged value all come out `?`, so an AI-proposed value is never
+    /// silently accepted as reviewed. The caller's `provenance` carries the
+    /// [`crate::AiOrigin`] (or none, for a draft the owner edited before validating).
+    pub fn validated_from_draft(&self, value: Option<Money>, provenance: Provenance) -> Cell {
+        Cell {
+            review: Review::ToReview,
+            ..self.edited(value, provenance)
+        }
+    }
+
     /// The **non-destructive reconciliation** rail (Story 3.4, FR22 / NFR-R4) — returns a NEW cell,
     /// snapshot semantics, never in-place. Used when a refresh brings a provider value for a cell
     /// whose live value is **manual** (must not be overwritten):
@@ -226,6 +241,7 @@ mod tests {
 
     fn sample_provenance() -> Provenance {
         Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 1,
             timestamp: Timestamp("2026-06-09T00:00:00Z".to_string()),
@@ -298,6 +314,7 @@ mod tests {
 
     fn edit_provenance() -> Provenance {
         Provenance {
+            ai_origin: None,
             source: Source::Manual,
             logical_version: 7,
             timestamp: Timestamp("2026-06-12T08:00:00Z".to_string()),
@@ -403,6 +420,7 @@ mod tests {
 
     fn provider_prov() -> Provenance {
         Provenance {
+            ai_origin: None,
             source: Source::Provider,
             logical_version: 2,
             timestamp: Timestamp("2026-06-27T00:00:00Z".to_string()),

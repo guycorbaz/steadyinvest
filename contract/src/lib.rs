@@ -19,6 +19,7 @@
 pub mod ai;
 pub mod cell;
 pub mod draft;
+pub mod draftable;
 pub mod export;
 pub mod money;
 pub mod provenance;
@@ -27,13 +28,17 @@ pub mod versioning;
 
 // Portfolio / FX types arrive with their epics (Epic 4/6 portfolio & FX).
 
-pub use ai::AiOrigin;
+pub use ai::{AiOrigin, DraftOrigin};
 pub use cell::{Cell, Coverage, Freshness, PendingProvider, Review, Source};
 pub use draft::{
     DRAFT_PAYLOAD_VERSION, DraftKind, DraftPayload, DraftStatus, DraftTarget, UnknownDraftValue,
 };
+pub use draftable::{
+    DraftField, DraftFieldKind, DraftUnit, DraftValue, DraftValueProblem, FINGERPRINT_VERSION,
+    draft_fingerprint, option_name,
+};
 pub use export::{ImportError, StudyExport, from_export_json, sha256_hex, to_export_json};
 pub use money::Money;
 pub use provenance::{Provenance, Timestamp};
-pub use study::{ForecastLowOption, Judgment, Note, Study, YearData};
+pub use study::{AiPlaced, ForecastLowOption, Judgment, Note, Study, YearData};
 pub use versioning::SCHEMA_VERSION;
