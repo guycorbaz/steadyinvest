@@ -705,8 +705,9 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             // Story 2.9 — a freshly-opened study starts with an empty undo/redo history (the edit
             // history is per open study, in-memory, never carried across reopen). Reset BEFORE
-            // push_form so the mirrored can-undo/can-redo flags read empty.
-            journal_state.borrow_mut().reset_undo();
+            // push_form so the mirrored can-undo/can-redo flags read empty. The opened study owns
+            // the history — the only study a draft decision is taken on (Story 8.2b).
+            journal_state.borrow_mut().reset_undo_for(id);
             // Also discard any scenario-compare state from a previous study (review P3) — its overlay
             // and cached baseline must never survive into a different study; nor its traceability
             // panel (G1 final review M3).

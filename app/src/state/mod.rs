@@ -43,6 +43,10 @@ use steadyinvest_contract::Money;
 mod cells;
 mod concentration;
 mod confront;
+// Story 8.2b: the headless draft-decision API. Its callers — the inbox — arrive with Stories
+// 8.5a / 8.5b; until then only the tests call it.
+#[cfg_attr(not(test), allow(dead_code))]
+mod drafts;
 mod export_import;
 mod fx;
 mod holdings;
@@ -66,6 +70,8 @@ mod tests;
 pub use cells::*;
 pub use concentration::*;
 pub use confront::*;
+#[cfg_attr(not(test), allow(unused_imports))] // see `mod drafts` above
+pub use drafts::*;
 pub use export_import::ImportRequest;
 pub use holdings::StudyChoice;
 pub(crate) use holdings::{StopBasis, effective_currency, stop_basis};
