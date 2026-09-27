@@ -125,6 +125,8 @@ component LabeledTextArea inherits VerticalLayout {
     keys := FocusScope {
         focus-on-tab-navigation: false;
         focus-on-click: false;
+        // A FocusScope is no layout: it takes the box's height so the form sizes around it.
+        height: box.height;
         // Seen BEFORE the text input: Ctrl+Enter validates; a plain Enter goes on to the input
         // (a newline).
         capture-key-pressed(event) => {
@@ -135,6 +137,7 @@ component LabeledTextArea inherits VerticalLayout {
             reject
         }
         box := Rectangle {
+            width: parent.width;
             height: Math.max(Tokens.row-height * 3, Math.min(Tokens.row-height * 8, input.preferred-height + Tokens.space-8 * 2));
             border-radius: Tokens.radius;
             background: Tokens.surface-alt;
