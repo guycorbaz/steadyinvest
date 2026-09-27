@@ -1,6 +1,6 @@
 # Story 8.0 — UX pass: AI-assistance surfaces
 
-Status: in-progress — spec revision 2 (after G3), ready for Guy's review (spec PR, like PR #206)
+Status: in-progress — spec revision 3 (after two G3 rounds), ready for Guy's review (spec PR, like PR #206)
 
 ## Story
 
@@ -18,17 +18,17 @@ no code). Origin: G2 (PR #255, merged 2026-09-27), owner decisions O1–O7, D1�
    refused): the Propositions destination with its « À traiter » and « Registre » views (spec
    §5.1–5.2), the pinned-area order (§5.3), the study reminder and the draft-study signal (§5.4),
    the `AiFrame` and its exemptions (§4.1), chart lines and action chips for judgment drafts (§5.5),
-   notes (§5.6), history (§5.7), the ✦ cell mark and its confusability entry (§5.8), « Valider
+   notes (§5.6), history (§5.7), the ★ cell mark and its confusability entry (§5.8), « Valider
    l'étude » and the frozen/current comparison (§5.9), keyboard (§6).
 2. **AC2 — French wording** fixed as one list (§3.3) incl. MCP refusal reasons and their language
-   (French message + English code); open choices listed with defaults (§9 Q1–Q15).
+   (French message + English code); open choices listed with defaults (§9 Q1–Q16).
 3. **AC3 — Report impact decided** (§7): study PDF (Helvetica/WinAnsi only) — notes not printed,
    AI-origin figures « † » with a legend, frozen verdict block with « • » markers; comparison and
    review unchanged by decision.
 4. **AC4 — UX spec updated:** the "margin voice"/"clerk of memory" passages marked superseded; the
    "no suggested line" statements qualified with the [P4] labelled, dotted, inert AI line; UX-DR30
    in `epics.md` points to the addendum.
-5. **AC5 — Validated by Guy** in the spec PR (answers to Q1–Q15 folded into §3.3 before merge).
+5. **AC5 — Validated by Guy** in the spec PR (answers to Q1–Q16 folded into §3.3 before merge).
 
 ## Tasks / Subtasks
 
@@ -41,12 +41,15 @@ no code). Origin: G2 (PR #255, merged 2026-09-27), owner decisions O1–O7, D1�
   `ux-entry-dialogs-refusals-cards.md`).
 - [x] Task 3 — Mark superseded / qualify passages in `ux-design-specification.md` (7 edits, each
   tagged G2 2026-09-27); point UX-DR30 to the addendum.
-- [x] Task 3b — G3 review of the draft (e7afcd9) applied as revision 2: glyph « ✦ » (« ◆ » is the
+- [x] Task 3b — G3 review of the draft (e7afcd9) applied as revision 2: glyph « ★ » (« ◆ » is the
   app's alert glyph), AI-text containment + exemptions, cause-neutral stale wording, frozen/current
   table rows, WinAnsi PDF markers, dotted AI line + per-field action chips, StatusBand action slot,
   missing strings, one Propositions card with « À traiter » / « Registre » views, pinned-area
   order; Q12–Q15 added.
-- [ ] Task 4 — Guy's review of the spec PR; fold his answers to Q1–Q15 into §3.3; merge.
+- [x] Task 3c — re-review of rev. 2 (7e2da76) applied as rev. 3: glyph « ★ » (Inter covers it;
+  « ✦ » is in no bundled font), PDF substitutes for « → »/« ≥ », AiFrame in the draft-study create
+  form, missing strings, « Verdict » row, stale confirm names its target; Q16 added.
+- [ ] Task 4 — Guy's review of the spec PR; fold his answers to Q1–Q16 into §3.3; merge.
 - [ ] Task 5 — After merge: status → done; the UI stories (8.1, 8.5a, 8.5b, 8.6, 8.7, 8.8) copy
   §3.3 verbatim. If Q13's default holds, amend Story 8.6 (a forecast P/E becomes a chart line).
 
@@ -58,17 +61,18 @@ no code). Origin: G2 (PR #255, merged 2026-09-27), owner decisions O1–O7, D1�
 - `StatusBand` gains an optional action slot (8.5a; reused by 8.8).
 - 8.3 must add the ticker/currency identifier check (`identifier_invalid`) that the AiFrame
   exemption for draft-study identifiers relies on.
-- The ✦ cell mark shares the trailing-bottom slot with the stale « ◦ »; exclusive because a
+- The ★ cell mark shares the trailing-bottom slot with the stale « ◦ »; exclusive because a
   validated AI value is manual (freshness `Current`) — 8.5b verifies against `contract/src/cell.rs`.
-  8.5a checks the bundled fonts' coverage of « ✦ ».
+  « ★ » (U+2605) is covered by the bundled Inter (fontTools check); « ✦ » was not (Q16).
 - PDF: Helvetica / WinAnsi only (`winansi_byte`) → « † » (0x86) and « • » (0x95).
 - Slint `Path` has no dash attribute → the dotted AI line is built as segments in
-  `viewmodel/chart.rs` (dashes are already the est-LOW line and the seeds).
+  `viewmodel/chart.rs` (§1 lines and seeds are solid; the §3 judged-low P/E is dashed — dots are free on both).
 
 ## Dev Agent Record
 
 - 2026-09-27: spec drafted by Claude (fork of the G2 session); no code.
 - 2026-09-27: revision 2 after the G3 review of e7afcd9.
+- 2026-09-27: revision 3 after the re-review of 7e2da76.
 
 ### File List
 - `_bmad-output/planning-artifacts/ux-ai-assistance-surfaces.md` (new)
