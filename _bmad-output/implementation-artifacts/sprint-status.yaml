@@ -695,7 +695,7 @@ development_status:
   # Dev-safety rule (arch A12): every MCP run on a temp --dossier copy; registration on the real
   # dossier is Guy's act only.
   # 2026-09-27: 8-0 spec drafted (ux-ai-assistance-surfaces.md) → in-progress until Guy validates it
-  #             in its own PR (like PR #206); open questions Q1–Q11 (wording) are his.
+  #             in its own PR (like PR #206); open questions Q1–Q15 are his (rev. 2 after G3).
   epic-8: in-progress
   8-0-ux-pass-ai-assistance-surfaces: in-progress
   8-1-study-notes: backlog
