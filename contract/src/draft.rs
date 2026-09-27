@@ -116,8 +116,11 @@ impl FromStr for DraftStatus {
 
 /// The target of a cell or judgment draft (arch A4). `field` is validated against the draftable
 /// fields by Story 8.2b / 8.3.
+///
+/// Unknown keys are refused (`deny_unknown_fields`): a draft is AI-written input, and a key this
+/// build does not know is never silently dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "target", rename_all = "snake_case")]
+#[serde(tag = "target", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DraftTarget {
     /// A data cell of one fiscal year.
     Cell { fiscal_year: i32, field: String },
@@ -125,13 +128,20 @@ pub enum DraftTarget {
     Judgment { field: String },
 }
 
-/// The version of [`DraftPayload`] this build writes and reads. A payload of another version is a
-/// fail-loud refusal (corrupt on read, malformed on import).
+/// The version of [`DraftPayload`] this build writes. A payload of a **higher** version was written
+/// by a newer build: the read refuses it as newer data, the import as an unsupported version —
+/// never a silent partial parse. Version 0 or an unparsable payload is corrupt.
+///
+/// **A bump must keep reading every older version** (a draft is a durable record, FR77): the
+/// reader then dispatches on `version` instead of refusing anything below the constant.
 pub const DRAFT_PAYLOAD_VERSION: u32 = 1;
 
 /// The versioned JSON stored in `ai_drafts.payload` (arch A4). Which fields a kind carries is the
-/// shape rule of [`DraftPayload::fits`].
+/// shape rule of [`DraftPayload::fits`]. Unknown keys are refused (`deny_unknown_fields`) — an
+/// exception to this crate's tolerant-fields rule, because a draft payload is AI-written input
+/// and its version, not tolerance, carries its evolution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DraftPayload {
     /// Always [`DRAFT_PAYLOAD_VERSION`] when written by this build.
     pub version: u32,
@@ -162,9 +172,20 @@ impl DraftPayload {
     /// | cell | `Cell` | required | — | — |
     /// | judgment | `Judgment` | required | — | — |
     ///
-    /// `base_fingerprint` is tolerated on cell / judgment drafts only.
+    /// `base_fingerprint` is tolerated on cell / judgment drafts only. A note text, a target field
+    /// and a proposed value must not be blank.
     pub fn fits(&self, kind: DraftKind) -> bool {
         if self.version != DRAFT_PAYLOAD_VERSION {
+            return false;
+        }
+        let filled = |t: &Option<String>| t.as_deref().is_some_and(|t| !t.trim().is_empty());
+        let target_field_filled = match &self.target {
+            Some(DraftTarget::Cell { field, .. } | DraftTarget::Judgment { field }) => {
+                !field.trim().is_empty()
+            }
+            None => true,
+        };
+        if !target_field_filled {
             return false;
         }
         match kind {
@@ -177,19 +198,19 @@ impl DraftPayload {
             DraftKind::Note => {
                 self.target.is_none()
                     && self.proposed_value.is_none()
-                    && self.note_text.is_some()
+                    && filled(&self.note_text)
                     && self.company_name.is_none()
                     && self.base_fingerprint.is_none()
             }
             DraftKind::Cell => {
                 matches!(self.target, Some(DraftTarget::Cell { .. }))
-                    && self.proposed_value.is_some()
+                    && filled(&self.proposed_value)
                     && self.note_text.is_none()
                     && self.company_name.is_none()
             }
             DraftKind::Judgment => {
                 matches!(self.target, Some(DraftTarget::Judgment { .. }))
-                    && self.proposed_value.is_some()
+                    && filled(&self.proposed_value)
                     && self.note_text.is_none()
                     && self.company_name.is_none()
             }
@@ -353,5 +374,53 @@ mod tests {
             ..note()
         };
         assert!(!v2.fits(DraftKind::Note), "a foreign version never fits");
+        let blank_note = DraftPayload {
+            note_text: Some(" \n ".to_string()),
+            ..note()
+        };
+        assert!(!blank_note.fits(DraftKind::Note), "a blank note text");
+        let blank_field = DraftPayload {
+            target: Some(DraftTarget::Cell {
+                fiscal_year: 2024,
+                field: " ".to_string(),
+            }),
+            ..cell()
+        };
+        assert!(!blank_field.fits(DraftKind::Cell), "a blank target field");
+        let blank_value = DraftPayload {
+            proposed_value: Some(String::new()),
+            ..judgment()
+        };
+        assert!(
+            !blank_value.fits(DraftKind::Judgment),
+            "a blank proposed value"
+        );
+    }
+
+    #[test]
+    fn unknown_keys_are_refused_in_the_payload_and_the_target() {
+        assert!(
+            serde_json::from_str::<DraftPayload>(r#"{"version":1,"note_text":"x","extra":1}"#)
+                .is_err()
+        );
+        assert!(
+            serde_json::from_str::<DraftTarget>(
+                r#"{"target":"judgment","field":"x","fiscal_year":2024}"#
+            )
+            .is_err(),
+            "a judgment target carrying a year is refused, not trimmed"
+        );
+        assert!(
+            serde_json::from_str::<DraftTarget>(
+                r#"{"target":"cell","fiscal_year":2024,"field":"eps","unit":"%"}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<DraftTarget>(
+                r#"{"target":"cell","fiscal_year":2024,"field":"eps"}"#
+            )
+            .is_ok()
+        );
     }
 }

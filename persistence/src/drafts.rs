@@ -18,7 +18,9 @@ use crate::error::{Error, Result};
 use crate::journal::Journal;
 use crate::util::parse_uuid;
 use serde::{Deserialize, Serialize};
-use steadyinvest_contract::{DraftKind, DraftPayload, DraftStatus, Timestamp};
+use steadyinvest_contract::{
+    DRAFT_PAYLOAD_VERSION, DraftKind, DraftPayload, DraftStatus, Timestamp,
+};
 use uuid::Uuid;
 
 /// One `ai_drafts` row, one field per column (Story 8.2a). `payload` is the **raw** stored JSON —
@@ -105,12 +107,15 @@ fn parse_bool(value: Option<i64>, column: &str, id: &str) -> Result<Option<bool>
     }
 }
 
-/// Why a stored payload is not a valid draft payload — the technical detail the read and the
-/// import put into their typed errors ([`Error::CorruptPayload`] / [`Error::ImportMalformed`]).
+/// Why a stored payload is not a valid draft payload. [`PayloadProblem::Newer`] is data from a
+/// newer build (named as such by the read and the import); every other case is corrupt / malformed.
+/// The Display is the English technical detail of the typed persistence error.
 #[derive(Debug)]
 pub(crate) enum PayloadProblem {
-    /// The JSON does not parse as a [`DraftPayload`].
-    Unparsable(serde_json::Error),
+    /// The payload's `version` is above [`DRAFT_PAYLOAD_VERSION`]: a newer build wrote it.
+    Newer { version: u64 },
+    /// The JSON does not parse as a [`DraftPayload`] (or carries no usable `version`).
+    Unparsable(String),
     /// It parses but carries another version or the shape of another kind.
     Misfit { version: u32, kind: DraftKind },
 }
@@ -118,6 +123,10 @@ pub(crate) enum PayloadProblem {
 impl std::fmt::Display for PayloadProblem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            PayloadProblem::Newer { version } => write!(
+                f,
+                "payload version {version} is newer than this build's {DRAFT_PAYLOAD_VERSION}"
+            ),
             PayloadProblem::Unparsable(e) => write!(f, "payload does not parse: {e}"),
             PayloadProblem::Misfit { version, kind } => write!(
                 f,
@@ -129,12 +138,23 @@ impl std::fmt::Display for PayloadProblem {
 }
 
 /// Check that a stored payload parses, carries this build's version and fits its kind — the one
-/// payload rule shared by the read and the import.
+/// payload rule shared by the read and the import. The `version` is read first, so a newer
+/// build's payload (whose shape this build cannot know) is named newer, never corrupt.
 pub(crate) fn check_payload(
     payload: &str,
     kind: DraftKind,
 ) -> std::result::Result<(), PayloadProblem> {
-    let parsed: DraftPayload = serde_json::from_str(payload).map_err(PayloadProblem::Unparsable)?;
+    let value: serde_json::Value =
+        serde_json::from_str(payload).map_err(|e| PayloadProblem::Unparsable(e.to_string()))?;
+    let version = value
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| PayloadProblem::Unparsable("no numeric version".to_string()))?;
+    if version > u64::from(DRAFT_PAYLOAD_VERSION) {
+        return Err(PayloadProblem::Newer { version });
+    }
+    let parsed: DraftPayload =
+        serde_json::from_value(value).map_err(|e| PayloadProblem::Unparsable(e.to_string()))?;
     if !parsed.fits(kind) {
         return Err(PayloadProblem::Misfit {
             version: parsed.version,
@@ -142,6 +162,37 @@ pub(crate) fn check_payload(
         });
     }
     Ok(())
+}
+
+/// A currency code as the app writes it (the 8.0 spec's `identifier_invalid` rule): three ASCII
+/// upper-case letters (ISO 4217 form).
+pub(crate) fn is_currency_code(code: &str) -> bool {
+    code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase())
+}
+
+/// A timestamp as the app writes it: RFC3339 UTC, `AAAA-MM-JJTHH:MM:SS[.fraction]Z` — a shape
+/// check (this crate has no date library; the app's clock is the only writer).
+pub(crate) fn is_rfc3339_utc(text: &str) -> bool {
+    let b = text.as_bytes();
+    let digits = |r: std::ops::Range<usize>| b[r].iter().all(u8::is_ascii_digit);
+    if b.len() < 20 || b[b.len() - 1] != b'Z' {
+        return false;
+    }
+    let shape = digits(0..4)
+        && b[4] == b'-'
+        && digits(5..7)
+        && b[7] == b'-'
+        && digits(8..10)
+        && b[10] == b'T'
+        && digits(11..13)
+        && b[13] == b':'
+        && digits(14..16)
+        && b[16] == b':'
+        && digits(17..19);
+    let rest = &b[19..b.len() - 1];
+    let fraction_ok = rest.is_empty()
+        || (rest[0] == b'.' && rest.len() > 1 && rest[1..].iter().all(u8::is_ascii_digit));
+    shape && fraction_ok
 }
 
 fn record_from_row(row: DraftRow) -> Result<DraftRecord> {
@@ -168,8 +219,13 @@ fn record_from_row(row: DraftRow) -> Result<DraftRecord> {
     let status: DraftStatus = status
         .parse()
         .map_err(|e| corrupt(format!("ai_drafts.status of draft {id}: {e}")))?;
-    check_payload(&payload, kind)
-        .map_err(|e| corrupt(format!("ai_drafts.payload of draft {id}: {e}")))?;
+    check_payload(&payload, kind).map_err(|e| match e {
+        PayloadProblem::Newer { version } => Error::NewerRowSchema {
+            row_schema_version: i64::try_from(version).unwrap_or(i64::MAX),
+            supported: DRAFT_PAYLOAD_VERSION,
+        },
+        other => corrupt(format!("ai_drafts.payload of draft {id}: {other}")),
+    })?;
     Ok(DraftRecord {
         id: parse_uuid(&id, "ai_drafts.id")?,
         kind,

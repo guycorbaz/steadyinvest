@@ -23,7 +23,7 @@
 //! drafts (`ai_drafts`) with Story 8.2a. The
 //! CURRENT judgment still travels inside each [`Study`] blob; the time-series carries the past.
 
-use crate::drafts::{DraftRecord, check_payload};
+use crate::drafts::{DraftRecord, PayloadProblem, check_payload, is_currency_code, is_rfc3339_utc};
 use crate::error::{Error, Result};
 use crate::fx::FxRateItem;
 use crate::holdings::{HoldingItem, PortfolioItem};
@@ -33,7 +33,9 @@ use crate::util::bump_logical_version;
 use crate::watchlist::WatchItem;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use steadyinvest_contract::{ImportError, SCHEMA_VERSION, Study, Timestamp, sha256_hex};
+use steadyinvest_contract::{
+    DRAFT_PAYLOAD_VERSION, ImportError, SCHEMA_VERSION, Study, Timestamp, sha256_hex,
+};
 use uuid::Uuid;
 
 /// One study plus its lifecycle `status` (the indexed column, not part of the [`Study`] blob — so it
@@ -396,15 +398,24 @@ impl Journal {
             )?;
         }
 
-        // AI drafts (Story 8.2a) — after studies (the `study_id` / `created_study_id` FKs). A draft
-        // must reference a study carried by the file OR already in this dossier (a draft about an
-        // existing study can travel without it); anything else is a **malformed** snapshot and
-        // the whole import rolls back. The payload must parse at this build's version and fit its
-        // kind — the same rule as the read, so an import never plants a row the read refuses.
-        // Upsert by id, every column (byte-faithful, idempotent). An upsert that updates an
-        // existing row fires no INSERT trigger; an inserted one bumps the version through
-        // `trg_ai_drafts_bump_logical_version` (see `util::bump_logical_version`).
+        // AI drafts (Story 8.2a) — after studies (the `study_id` / `created_study_id` FKs). Every
+        // draft is validated before its write, and any failure is a **malformed** (or newer-
+        // version) snapshot naming the draft — the whole import rolls back:
+        // - references: a study carried by the file OR already in this dossier (a draft about an
+        //   existing study can travel without it);
+        // - fields: comment and origin not blank (Unicode whitespace, beyond the table's ASCII
+        //   `trim`), a ticker, a draft study's currency in ISO form, timestamps in RFC3339 UTC;
+        // - payload: parses at this build's version and fits its kind (the read's rule) — a newer
+        //   payload version is an unsupported version, never "corrupt";
+        // - the table's CHECKs (named, with SQLite's message, never a raw error).
+        // Upsert by id, byte-faithful — but **never backwards**: an already-decided draft is kept
+        // as it is when the file carries it pending (an older export re-imported after a
+        // decision), and a recorded `created_study_id` is never erased. An inserted row bumps the
+        // version through `trg_ai_drafts_bump_logical_version` (see `util::bump_logical_version`).
         for d in &snapshot.ai_drafts {
+            let malformed = |what: String| Error::ImportMalformed {
+                detail: format!("draft {}: {what}", d.id),
+            };
             for referenced in [d.study_id, d.created_study_id].into_iter().flatten() {
                 let in_dossier = tx
                     .query_row(
@@ -415,15 +426,47 @@ impl Journal {
                     .optional()?
                     .is_some();
                 if !study_ids.contains(&referenced) && !in_dossier {
-                    return Err(Error::ImportMalformed {
-                        detail:
-                            "a draft references a study absent from the snapshot and the dossier"
-                                .to_string(),
-                    });
+                    return Err(malformed(format!(
+                        "references study {referenced}, absent from the snapshot and the dossier"
+                    )));
                 }
             }
-            check_payload(&d.payload, d.kind).map_err(|e| Error::ImportMalformed {
-                detail: format!("a draft is not valid: {e}"),
+            for (column, text) in [
+                ("comment", &d.comment),
+                ("origin_client", &d.origin_client),
+                ("origin_model", &d.origin_model),
+                ("security_ticker", &d.security_ticker),
+            ] {
+                if text.trim().is_empty() {
+                    return Err(malformed(format!("{column} is blank")));
+                }
+            }
+            if let Some(currency) = &d.native_currency
+                && !is_currency_code(currency)
+            {
+                return Err(malformed(format!(
+                    "native_currency {currency:?} is not a three-letter code"
+                )));
+            }
+            for (column, stamp) in [
+                ("created_at", Some(&d.created_at)),
+                ("decided_at", d.decided_at.as_ref()),
+            ] {
+                if let Some(stamp) = stamp
+                    && !is_rfc3339_utc(&stamp.0)
+                {
+                    return Err(malformed(format!(
+                        "{column} {:?} is not an RFC3339 UTC time",
+                        stamp.0
+                    )));
+                }
+            }
+            check_payload(&d.payload, d.kind).map_err(|e| match e {
+                PayloadProblem::Newer { version } => Error::ImportVersion {
+                    found: u32::try_from(version).unwrap_or(u32::MAX),
+                    supported: DRAFT_PAYLOAD_VERSION,
+                },
+                other => malformed(other.to_string()),
             })?;
             tx.execute(
                 "INSERT INTO ai_drafts
@@ -445,7 +488,10 @@ impl Journal {
                      stale_at_decision = excluded.stale_at_decision,
                      edited_before_validation = excluded.edited_before_validation,
                      created_study_id = excluded.created_study_id,
-                     payload = excluded.payload",
+                     payload = excluded.payload
+                 WHERE (ai_drafts.status = 'pending' OR excluded.status <> 'pending')
+                   AND NOT (ai_drafts.created_study_id IS NOT NULL
+                            AND excluded.created_study_id IS NULL)",
                 rusqlite::params![
                     d.id.to_string(),
                     d.kind.as_str(),
@@ -467,12 +513,13 @@ impl Journal {
             .map_err(|e| match e {
                 // A CHECK the file violates (e.g. a pending draft with a decision date) is a
                 // malformed snapshot, named as such — never a raw SQLite error to the user.
-                rusqlite::Error::SqliteFailure(f, _)
+                rusqlite::Error::SqliteFailure(f, message)
                     if f.code == rusqlite::ErrorCode::ConstraintViolation =>
                 {
-                    Error::ImportMalformed {
-                        detail: "a draft row violates the drafts table's rules".to_string(),
-                    }
+                    malformed(format!(
+                        "violates the drafts table's rules ({})",
+                        message.unwrap_or_else(|| f.to_string())
+                    ))
                 }
                 other => Error::from(other),
             })?;

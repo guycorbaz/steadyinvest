@@ -311,6 +311,72 @@ fn every_check_refuses_its_row_and_writes_nothing() {
             },
         ),
         (
+            "validated draft study without created_study_id",
+            decided(study_row(18)),
+        ),
+        (
+            "validated_undone draft study (not undoable, arch A8)",
+            Row {
+                status: "validated_undone",
+                decided_at: Some("2026-09-27T10:00:00Z"),
+                created_study_id: Some(uuid_text(STUDY_B)),
+                ..study_row(19)
+            },
+        ),
+        (
+            "rejected draft study with created_study_id",
+            Row {
+                status: "rejected",
+                decided_at: Some("2026-09-27T10:00:00Z"),
+                created_study_id: Some(uuid_text(STUDY_B)),
+                ..study_row(20)
+            },
+        ),
+        (
+            "pending with stale_at_decision",
+            Row {
+                stale: Some(0),
+                ..note_row(21)
+            },
+        ),
+        (
+            "pending with edited_before_validation",
+            Row {
+                edited: Some(1),
+                ..note_row(22)
+            },
+        ),
+        (
+            "rejected with edited_before_validation",
+            Row {
+                status: "rejected",
+                decided_at: Some("2026-09-27T10:00:00Z"),
+                edited: Some(0),
+                ..note_row(23)
+            },
+        ),
+        (
+            "upper-case id",
+            Row {
+                id: uuid_text(0xABC24).to_uppercase(),
+                ..note_row(24)
+            },
+        ),
+        (
+            "short id",
+            Row {
+                id: "draft-25".to_string(),
+                ..note_row(25)
+            },
+        ),
+        (
+            "upper-case study_id",
+            Row {
+                study_id: Some(uuid_text(STUDY_A).to_uppercase()),
+                ..note_row(26)
+            },
+        ),
+        (
             "study_id of an absent study (FK)",
             Row {
                 study_id: Some(uuid_text(0xDEAD)),
@@ -365,7 +431,7 @@ fn list_drafts_reads_every_column_typed() {
     let (_dir, path, journal) = dossier();
     let conn = raw(&path);
     let rejected = Row {
-        status: "rejected",
+        status: "validated",
         decided_at: Some("2026-09-27T11:00:00Z"),
         stale: Some(1),
         edited: Some(0),
@@ -384,7 +450,7 @@ fn list_drafts_reads_every_column_typed() {
             study_id: Some(Uuid::from_u128(STUDY_A)),
             security_ticker: "NESN".to_string(),
             native_currency: None,
-            status: DraftStatus::Rejected,
+            status: DraftStatus::Validated,
             created_at: ts("2026-09-27T09:30:00Z"),
             decided_at: Some(ts("2026-09-27T11:00:00Z")),
             comment: "La marge progresse depuis trois ans.".to_string(),
@@ -401,11 +467,12 @@ fn list_drafts_reads_every_column_typed() {
 
 #[test]
 fn a_draft_whose_payload_does_not_fit_fails_the_read_by_name() {
-    // The table's CHECKs cannot see inside the JSON: a foreign-version or wrong-shape payload is
+    // The table's CHECKs cannot see inside the JSON: a version-0, wrong-shape or unknown-key payload is
     // caught at the read, loudly — never skipped.
     for payload in [
-        r#"{"version":2,"note_text":"x"}"#.to_string(),
+        r#"{"version":0,"note_text":"x"}"#.to_string(),
         CELL_PAYLOAD.to_string(), // a cell-shaped payload on a note row
+        r#"{"version":1,"note_text":"x","extra":1}"#.to_string(), // an unknown key
         "not json".to_string(),
     ] {
         let (_dir, path, journal) = dossier();
@@ -448,8 +515,8 @@ fn plant_every_draft(path: &Path) {
             ..decided(study_row(0x102), "validated")
         },
         Row {
-            created_study_id: Some(uuid_text(STUDY_B)),
-            ..decided(study_row(0x103), "validated_undone")
+            edited: Some(0),
+            ..decided(note_row(0x203), "validated_undone")
         },
         decided(study_row(0x104), "rejected"),
         note_row(0x201),
@@ -605,8 +672,8 @@ fn an_imported_draft_that_breaks_a_rule_is_malformed_and_nothing_is_applied() {
     )
     .expect("creates");
     let edits: Vec<Box<SnapshotEdit>> = vec![
-        // A payload of another version.
-        Box::new(|s| s["ai_drafts"][0]["payload"] = serde_json::json!(r#"{"version":2}"#)),
+        // A payload of an unusable version (0 — corrupt, not newer).
+        Box::new(|s| s["ai_drafts"][0]["payload"] = serde_json::json!(r#"{"version":0}"#)),
         // A pending draft with a decision date (a table CHECK).
         Box::new(|s| s["ai_drafts"][0]["decided_at"] = serde_json::json!("2026-09-27T12:00:00Z")),
         // A blank comment (a table CHECK).
@@ -665,7 +732,7 @@ fn deleting_a_study_deletes_exactly_its_drafts() {
         &conn,
         &Row {
             created_study_id: Some(uuid_text(STUDY_B)),
-            ..decided(study_row(0xB2), "validated_undone")
+            ..decided(study_row(0xB2), "validated")
         },
     )
     .expect("plants");
@@ -755,8 +822,10 @@ fn no_computation_path_reads_the_drafts() {
     for krate in ["core", "report"] {
         let manifest =
             std::fs::read_to_string(root.join(krate).join("Cargo.toml")).expect("manifest reads");
+        // The package name covers a renamed dependency too (`x = { package = "steadyinvest-
+        // persistence" }`); the path covers a dependency declared by path under any name.
         assert!(
-            !manifest.contains("steadyinvest-persistence"),
+            !manifest.contains("steadyinvest-persistence") && !manifest.contains("../persistence"),
             "{krate} must not depend on persistence — a pending draft changes no computed output"
         );
     }
@@ -785,6 +854,321 @@ fn no_computation_path_reads_the_drafts() {
                 "{} names {needle} — a computation path must never read drafts (FR72)",
                 path.display()
             );
+        }
+    }
+}
+
+// ── G3 follow-ups ──
+
+#[test]
+fn the_table_columns_and_indexes_are_pinned() {
+    let (_dir, path, _journal) = dossier();
+    let conn = raw(&path);
+    let columns: Vec<String> = conn
+        .prepare("PRAGMA table_info(ai_drafts)")
+        .expect("table_info")
+        .query_map([], |r| r.get::<_, String>(1))
+        .expect("reads")
+        .collect::<Result<_, _>>()
+        .expect("collects");
+    assert_eq!(
+        columns,
+        [
+            "id",
+            "kind",
+            "study_id",
+            "security_ticker",
+            "native_currency",
+            "status",
+            "created_at",
+            "decided_at",
+            "comment",
+            "origin_client",
+            "origin_model",
+            "stale_at_decision",
+            "edited_before_validation",
+            "created_study_id",
+            "payload",
+        ],
+        "the ai_drafts column set (arch A4) drifted"
+    );
+    let indexes: Vec<String> = conn
+        .prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'index' AND tbl_name = 'ai_drafts' AND name NOT LIKE 'sqlite_%'
+             ORDER BY name",
+        )
+        .expect("prepares")
+        .query_map([], |r| r.get::<_, String>(0))
+        .expect("reads")
+        .collect::<Result<_, _>>()
+        .expect("collects");
+    assert_eq!(
+        indexes,
+        [
+            "idx_ai_drafts_created_study_id",
+            "idx_ai_drafts_status",
+            "idx_ai_drafts_study_id",
+        ]
+    );
+}
+
+fn fresh_target() -> (TempDir, Journal) {
+    let dir = TempDir::new().expect("tempdir");
+    let target = Journal::create(
+        dir.path().join("target.db"),
+        Uuid::from_u128(0x9999),
+        &ts("2026-09-27T07:00:00Z"),
+    )
+    .expect("creates");
+    (dir, target)
+}
+
+#[test]
+fn a_dangling_created_study_id_refuses_the_whole_import_naming_both_ids() {
+    let (_dir, path, journal) = dossier();
+    insert(
+        &raw(&path),
+        &Row {
+            status: "validated",
+            decided_at: Some("2026-09-27T10:00:00Z"),
+            created_study_id: Some(uuid_text(STUDY_B)),
+            ..study_row(0x50)
+        },
+    )
+    .expect("plants");
+    // Keep only study A in the file: B (the created study) is in neither the file nor the target.
+    let exported = edited_export(&journal.export_journal().expect("exports"), |s| {
+        let a = s["studies"]
+            .as_array()
+            .expect("studies")
+            .iter()
+            .find(|r| r["study"]["id"] == serde_json::json!(uuid_text(STUDY_A)))
+            .cloned()
+            .expect("A is exported");
+        s["studies"] = serde_json::json!([a]);
+    });
+    let (_d, mut target) = fresh_target();
+    let version = target.logical_version().expect("reads");
+    match target.import_journal(&exported) {
+        Err(Error::ImportMalformed { detail }) => {
+            assert!(
+                detail.contains(&uuid_text(0x50)),
+                "names the draft: {detail}"
+            );
+            assert!(
+                detail.contains(&uuid_text(STUDY_B)),
+                "names the study: {detail}"
+            );
+        }
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(
+        target.list_studies().expect("reads").is_empty(),
+        "nothing applied"
+    );
+    assert_eq!(target.logical_version().expect("reads"), version);
+}
+
+#[test]
+fn an_import_bumps_once_plus_once_per_new_draft_and_a_reimport_once() {
+    let (_dir, path, journal) = dossier();
+    plant_every_draft(&path);
+    let exported = journal.export_journal().expect("exports");
+    let (_d, mut target) = fresh_target();
+    let v0 = target.logical_version().expect("reads");
+    target.import_journal(&exported).expect("imports");
+    assert_eq!(
+        target.logical_version().expect("reads"),
+        v0 + 1 + 10,
+        "the import's own bump + one trigger bump per inserted draft (util.rs)"
+    );
+    let v1 = target.logical_version().expect("reads");
+    target.import_journal(&exported).expect("re-imports");
+    assert_eq!(
+        target.logical_version().expect("reads"),
+        v1 + 1,
+        "an update-in-place fires no insert trigger"
+    );
+}
+
+#[test]
+fn an_older_export_never_moves_a_decided_draft_back() {
+    // An export taken while the draft was pending, re-imported after the owner validated it:
+    // the decision and the created study stay (keep-existing, never backwards).
+    let (_dir, path, mut journal) = dossier();
+    let conn = raw(&path);
+    insert(&conn, &study_row(0x50)).expect("plants the pending draft study");
+    insert(&conn, &note_row(0x51)).expect("plants a pending note draft");
+    let older = journal.export_journal().expect("exports while pending");
+    conn.execute(
+        "UPDATE ai_drafts SET status = 'validated', decided_at = '2026-09-27T12:00:00Z',
+             created_study_id = ?1 WHERE id = ?2",
+        params![uuid_text(STUDY_B), uuid_text(0x50)],
+    )
+    .expect("the owner validates the draft study");
+    conn.execute(
+        "UPDATE ai_drafts SET status = 'rejected', decided_at = '2026-09-27T12:00:00Z'
+             WHERE id = ?1",
+        params![uuid_text(0x51)],
+    )
+    .expect("the owner rejects the note draft");
+    let decided = journal.list_drafts().expect("reads");
+
+    journal
+        .import_journal(&older)
+        .expect("the older export imports");
+    assert_eq!(
+        journal.list_drafts().expect("reads"),
+        decided,
+        "no decided draft went back to pending, no created_study_id was erased"
+    );
+}
+
+#[test]
+fn a_newer_payload_version_is_named_newer_on_read_and_on_import() {
+    let newer = r#"{"version":2,"note_text":"x","future":true}"#;
+    let (_dir, path, journal) = dossier();
+    insert(
+        &raw(&path),
+        &Row {
+            payload: newer.to_string(),
+            ..note_row(0x20)
+        },
+    )
+    .expect("the table accepts the text");
+    match journal.list_drafts() {
+        Err(Error::NewerRowSchema {
+            row_schema_version: 2,
+            supported: 1,
+        }) => {}
+        other => panic!("expected NewerRowSchema, got {other:?}"),
+    }
+
+    let (_dir2, path2, journal2) = dossier();
+    insert(&raw(&path2), &note_row(0x20)).expect("plants");
+    let file = edited_export(&journal2.export_journal().expect("exports"), |s| {
+        s["ai_drafts"][0]["payload"] = serde_json::json!(newer);
+    });
+    let (_d, mut target) = fresh_target();
+    match target.import_journal(&file) {
+        Err(Error::ImportVersion {
+            found: 2,
+            supported: 1,
+        }) => {}
+        other => panic!("expected ImportVersion, got {other:?}"),
+    }
+    // Version 0 is corrupt, not newer.
+    let (_dir3, path3, journal3) = dossier();
+    insert(
+        &raw(&path3),
+        &Row {
+            payload: r#"{"version":0,"note_text":"x"}"#.to_string(),
+            ..note_row(0x20)
+        },
+    )
+    .expect("plants");
+    assert!(matches!(
+        journal3.list_drafts(),
+        Err(Error::CorruptPayload { .. })
+    ));
+}
+
+#[test]
+fn an_imported_draft_with_invalid_fields_is_malformed_naming_it() {
+    let (_dir, path, journal) = dossier();
+    insert(&raw(&path), &study_row(0x50)).expect("plants");
+    let exported = journal.export_journal().expect("exports");
+    let edits: Vec<(&str, Box<SnapshotEdit>)> = vec![
+        (
+            "comment",
+            Box::new(|s| s["ai_drafts"][0]["comment"] = serde_json::json!("\u{00A0}\u{2003}")),
+        ),
+        (
+            "origin_model",
+            Box::new(|s| s["ai_drafts"][0]["origin_model"] = serde_json::json!("\u{3000}")),
+        ),
+        (
+            "security_ticker",
+            Box::new(|s| s["ai_drafts"][0]["security_ticker"] = serde_json::json!(" ")),
+        ),
+        (
+            "native_currency",
+            Box::new(|s| s["ai_drafts"][0]["native_currency"] = serde_json::json!("euro")),
+        ),
+        (
+            "created_at",
+            Box::new(|s| s["ai_drafts"][0]["created_at"] = serde_json::json!("hier")),
+        ),
+    ];
+    for (column, edit) in edits {
+        let file = edited_export(&exported, |s| edit(s));
+        let (_d, mut target) = fresh_target();
+        match target.import_journal(&file) {
+            Err(Error::ImportMalformed { detail }) => {
+                assert!(detail.contains(column), "{column}: {detail}");
+                assert!(
+                    detail.contains(&uuid_text(0x50)),
+                    "names the draft: {detail}"
+                );
+            }
+            other => panic!("{column}: expected ImportMalformed, got {other:?}"),
+        }
+        assert!(
+            target.list_studies().expect("reads").is_empty(),
+            "all-or-nothing"
+        );
+    }
+}
+
+/// One damage done to a planted row.
+type RowDamage = dyn Fn(Row) -> Row;
+
+#[test]
+fn a_planted_corrupt_column_fails_the_read_naming_it() {
+    // Rows the CHECKs would refuse, planted with the checks off (a damaged file): the read names
+    // the column, never skips the row.
+    let cases: Vec<(&str, Box<RowDamage>)> = vec![
+        (
+            "ai_drafts.id",
+            Box::new(|r| Row {
+                id: "not-a-uuid".to_string(),
+                ..r
+            }),
+        ),
+        (
+            "ai_drafts.kind",
+            Box::new(|r| Row {
+                kind: "proposal",
+                ..r
+            }),
+        ),
+        (
+            "ai_drafts.status",
+            Box::new(|r| Row {
+                status: "stale",
+                ..r
+            }),
+        ),
+        (
+            "ai_drafts.stale_at_decision",
+            Box::new(|r| Row {
+                stale: Some(7),
+                ..r
+            }),
+        ),
+    ];
+    for (column, damage) in cases {
+        let (_dir, path, journal) = dossier();
+        let conn = raw(&path);
+        conn.pragma_update(None, "ignore_check_constraints", true)
+            .expect("checks off");
+        insert(&conn, &damage(note_row(0x20))).expect("planted despite the checks");
+        match journal.list_drafts() {
+            Err(Error::CorruptPayload { detail }) => {
+                assert!(detail.contains(column), "{column}: {detail}")
+            }
+            other => panic!("{column}: expected CorruptPayload, got {other:?}"),
         }
     }
 }
