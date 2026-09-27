@@ -300,7 +300,7 @@ fn canonical_drafts() -> Vec<DraftRecord> {
         DraftRecord {
             status: DraftStatus::Rejected,
             decided_at: Some(ts("2026-09-27T10:00:05Z")),
-            edited_before_validation: Some(false),
+            stale_at_decision: Some(false),
             payload: r#"{"version":1,"target":{"target":"judgment","field":"judged_avg_low_pe"},"proposed_value":"10.5"}"#.to_string(),
             ..base(5, DraftKind::Judgment, "2026-09-27T09:00:05Z")
         },

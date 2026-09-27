@@ -130,8 +130,15 @@ pub(crate) fn migrate_to_v7(tx: &Transaction<'_>) -> Result<()> {
 ///   `trim()` strips spaces only — the full Unicode-blank refusal, with a named reason, is 8.3's.
 /// - **Shape rules** (defence in depth — 8.3 refuses earlier with a named reason): a draft study
 ///   has no `study_id` and carries its proposed `native_currency`, every other kind targets a study
-///   and carries no currency; `created_study_id` exists only on a validated (or validated-then-
-///   undone) draft study; a pending draft has no `decided_at` and a decided one has it.
+///   and carries no currency; a pending draft has no `decided_at` and a decided one has it.
+/// - **Decision facts**: a pending draft carries no `stale_at_decision` / `edited_before_validation`;
+///   `edited_before_validation` exists only on a validated (or validated-then-undone) draft.
+/// - **Draft studies** (arch A8, Story 8.7): their validation is **not undoable** — it is reversed
+///   by deleting the created study, which deletes its drafts (O7) — so a draft study is never
+///   `validated_undone`, and it carries `created_study_id` exactly when `validated`; no other kind
+///   ever carries it.
+/// - **Ids are canonical UUID text** (lower-case, 36 chars — how the app writes them): the TEXT
+///   comparisons of the cascade and the reference checks cannot miss a differently spelled id.
 /// - **FKs to `studies`** (RESTRICT, `foreign_keys=ON` on every read-write open): no orphan draft;
 ///   `delete_study` deletes a study's drafts first (O7).
 /// - **The trigger `trg_ai_drafts_bump_logical_version`** bumps `journal_meta.logical_version` on
@@ -142,10 +149,13 @@ pub(crate) fn migrate_to_v7(tx: &Transaction<'_>) -> Result<()> {
 pub(crate) fn migrate_to_v8(tx: &Transaction<'_>) -> Result<()> {
     tx.execute_batch(
         "CREATE TABLE ai_drafts (
-             id                       TEXT PRIMARY KEY,
+             id                       TEXT PRIMARY KEY CHECK (id = lower(id) AND length(id) = 36),
              kind                     TEXT NOT NULL
                                       CHECK (kind IN ('study','note','cell','judgment')),
-             study_id                 TEXT REFERENCES studies(id),
+             study_id                 TEXT REFERENCES studies(id)
+                                      CHECK (study_id IS NULL
+                                             OR (study_id = lower(study_id)
+                                                 AND length(study_id) = 36)),
              security_ticker          TEXT NOT NULL,
              native_currency          TEXT,
              status                   TEXT NOT NULL DEFAULT 'pending'
@@ -158,13 +168,22 @@ pub(crate) fn migrate_to_v8(tx: &Transaction<'_>) -> Result<()> {
              origin_model             TEXT NOT NULL CHECK (length(trim(origin_model)) > 0),
              stale_at_decision        INTEGER CHECK (stale_at_decision IN (0,1)),
              edited_before_validation INTEGER CHECK (edited_before_validation IN (0,1)),
-             created_study_id         TEXT REFERENCES studies(id),
+             created_study_id         TEXT REFERENCES studies(id)
+                                      CHECK (created_study_id IS NULL
+                                             OR (created_study_id = lower(created_study_id)
+                                                 AND length(created_study_id) = 36)),
              payload                  TEXT NOT NULL,
              CHECK ((kind = 'study') = (study_id IS NULL)),
              CHECK ((kind = 'study') = (native_currency IS NOT NULL)),
-             CHECK (created_study_id IS NULL
-                    OR (kind = 'study' AND status IN ('validated','validated_undone'))),
-             CHECK ((status = 'pending') = (decided_at IS NULL))
+             CHECK (created_study_id IS NULL OR kind = 'study'),
+             CHECK (kind <> 'study'
+                    OR (status <> 'validated_undone'
+                        AND ((status = 'validated') = (created_study_id IS NOT NULL)))),
+             CHECK ((status = 'pending') = (decided_at IS NULL)),
+             CHECK (status <> 'pending'
+                    OR (stale_at_decision IS NULL AND edited_before_validation IS NULL)),
+             CHECK (edited_before_validation IS NULL
+                    OR status IN ('validated','validated_undone'))
          );
          CREATE INDEX idx_ai_drafts_status ON ai_drafts(status);
          CREATE INDEX idx_ai_drafts_study_id ON ai_drafts(study_id);

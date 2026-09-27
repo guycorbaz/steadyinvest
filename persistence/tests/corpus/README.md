@@ -42,3 +42,5 @@ closed cleanly (WAL checkpointed), then copied here as a plain closed file.
 
 `v8.db` the same way (`-- --ignored generate_corpus_v8`): the canonical study through the API,
 then the five drafts by raw SQL (no draft writer exists before Story 8.3), closed, copied.
+`v8.db` is a **WAL** journal (the `journal_mode` persists in the file): copy it before inspecting
+it with `sqlite3`, or the tool leaves `-wal`/`-shm` sidecars in the repo tree (rule 3).

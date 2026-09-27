@@ -305,7 +305,8 @@ impl Journal {
     /// `study_id` (a note / cell / judgment draft about it) **or** `created_study_id` (the validated
     /// draft study it came from) is this study are deleted first, in the same transaction (the two
     /// columns are FKs to `studies`). A pending draft study has neither and is untouched. One
-    /// `logical_version` bump for the whole act — deletes fire no draft trigger (INSERT only).
+    /// `logical_version` bump for the whole act — deletes fire no
+    /// `trg_ai_drafts_bump_logical_version` (it fires on INSERT only).
     pub fn delete_study(&mut self, id: Uuid) -> Result<()> {
         self.check_writable()?;
         let id_text = id.to_string();
