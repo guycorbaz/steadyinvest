@@ -67,6 +67,15 @@ export component RationaleNote inherits VerticalLayout {
             viewport-height: Math.max(self.height, input.preferred-height);
             // A mouse drag selects text; the wheel still scrolls (Story 8.1 G3 B1).
             interactive: false;
+            // The box grows with the text AFTER a caret move may have scrolled it: keep the
+            // offset inside the content whenever either size changes (seen on screen with fast
+            // typing — the text scrolled out of a box that then grew).
+            changed height => {
+                self.viewport-y = Math.max(Math.min(self.viewport-y, 0), Math.min(0, self.height - self.viewport-height));
+            }
+            changed viewport-height => {
+                self.viewport-y = Math.max(Math.min(self.viewport-y, 0), Math.min(0, self.height - self.viewport-height));
+            }
             input := TextInput {
                 color: Tokens.text-high;
                 selection-background-color: Tokens.focus;
