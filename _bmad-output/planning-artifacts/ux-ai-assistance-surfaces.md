@@ -187,7 +187,9 @@ A stable English `snake_case` code (never shown in the UI) + a French message:
 - `empty_note_text` — « Le texte de la note est vide ; rien n'a été enregistré. »
 - `text_too_long` — « Le texte {champ} dépasse {max} caractères ({n}) ; rien n'a été enregistré. » ({champ} : le commentaire / le texte de la note / le nom de la société / le client / le modèle)
 - `draft_id_conflict` — « Une autre proposition porte déjà l'identifiant {id} ; rien n'a été enregistré. » (the same proposition sent again is accepted once, without a second write)
-- `dossier_busy` — « Une restauration du dossier est en cours (ou a été interrompue) ; rien n'a été lu ni enregistré. »
+- `dossier_busy` — « Une restauration du dossier est en cours ; rien n'a été lu ni enregistré. »
+- `restore_interrupted` — « Une restauration du dossier a été interrompue ; ouvrez le dossier dans l'application, qui la termine ; rien n'a été lu ni enregistré. »
+- `dossier_locked` — « Le dossier est resté occupé par une autre écriture au-delà du délai d'attente ; rien n'a été lu ni enregistré. »
 - `dossier_needs_recovery` — « Le dossier doit d'abord être ouvert dans l'application (reprise après une interruption) ; rien n'a été lu. »
 - `dossier_protected` — « Le fichier du dossier est protégé en écriture » / « Le dossier qui contient le fichier est protégé en écriture » + « ; il ne peut pas être lu sans y créer de fichiers, ou rien ne peut y être enregistré. »
 - `not_a_dossier` — « Le fichier {chemin} n'est pas un dossier SteadyInvest ; rien n'a été lu. »

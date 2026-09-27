@@ -451,6 +451,33 @@ Gates after the review: workspace **1303 passed**, 0 failed, 2 ignored; clippy `
 `cfg(not(unix))` (Windows) code path — no Windows target installed; it is type-simple (a
 `same_file::Handle` newtype) and CI builds Linux only.
 
+### Security re-review (2026-09-28) — applied
+
+All five original holes confirmed closed; one new medium + three lows, applied:
+
+- **N1 (medium, reproduced)** — the restore deleted `-wal` / `-shm` after the rename and the lock
+  release: an MCP call in that window created them on the restored file, then lost them (an
+  acknowledged draft lost, two WAL indexes). Side files now go **under the exclusive lock, before
+  the rename**; nothing is deleted after it; the marker stays until the last step. Test with a seam
+  after the rename.
+- **N2 (low)** — a leftover marker / staging copy (dead owner) reads `restore_interrupted`, and
+  `Journal::open`, holding the instance lock, removes them (`cleared_restore_leftovers`, logged by
+  the app's single `open_journal`). A live restore's marker is never touched. Tests (persistence and
+  app).
+- **N3 (low)** — the app's rollback snapshot was a raw copy taken before the restore lock. Now
+  `restore_journal_file_keeping` copies it **under the exclusive lock** (DELETE mode after leaving
+  WAL: consistent, holds every write up to the swap). SQLite's backup API cannot read through a
+  connection holding a write transaction, so it is a byte copy whose descriptor is **kept open until
+  the lock is released** (closing it would drop the POSIX lock); a cross-process test proves the lock
+  survives the copy. Failure → `Error::RestoreSnapshot`, snapshot removed.
+- **N4 (low)** — the `-restoring` marker (owner pid + start time) is written FIRST, so new MCP calls
+  are refused up front (`dossier_busy`); a lock that outlasts the 5 s busy wait is named
+  (`dossier_locked`, or the restore's own reason), never a raw SQLite busy.
+
+Gates: workspace **1310 passed**, 0 failed, 2 ignored; clippy, fmt, `cargo deny` green. Posture:
+persistence error samples → **33** (+`RestoreSnapshot`). New codes in the 8.0 spec §3.3:
+`restore_interrupted`, `dossier_locked` (`dossier_busy` reworded: a running restore only).
+
 ### Decisions for Guy (owner-pending; defaults applied)
 
 1. Archived studies count as existing for a draft study (`study_exists`). Default: yes.
@@ -466,8 +493,13 @@ Gates after the review: workspace **1303 passed**, 0 failed, 2 ignored; clippy `
 6. Restore skips the lock only when the live file is not a database or is write-protected, and
    refuses by name when a reader or a write holds it past 5 s (it now leaves WAL first).
 7. (G3) Migration v9 for the id guard; no `v9.db` corpus file (no stored shape changed).
-8. (G3) A `-restore-incoming` file left by an interrupted restore makes the MCP access refuse
-   (`dossier_busy`) until it is removed — safer than guessing it is stale.
+8. (G3, revised by the security re-review) A restore marker / staging copy left by a process that
+   is gone makes the MCP access refuse (`restore_interrupted`) until the app next opens the dossier,
+   which removes them under its instance lock and logs it.
+13. (Re-review) The pre-restore snapshot is a byte copy under the restore lock (not SQLite's backup
+    API, which cannot read through the lock's write transaction).
+14. (Re-review) A lock outlasting the 5 s wait is `dossier_locked` (MCP returns; the AI client may
+    call again later).
 9. (G3) A protected directory is detected coarsely (no write bit on it); a hot rollback journal is
    named `dossier_needs_recovery` on the read path, while the draft connection lets SQLite recover it
    as any read-write connection would.
@@ -504,3 +536,5 @@ Gates after the review: workspace **1303 passed**, 0 failed, 2 ignored; clippy `
 - 2026-09-28 — Story 8.3 implemented (dev-story); status → review.
 - 2026-09-28 — G3 review applied (v9 id guard, POSIX-lock-safe identity, restore safety, named
   dossier states, archived refusal, caps, idempotency); status stays review.
+- 2026-09-28 — security re-review applied (N1 swap window, N2 leftovers, N3 locked snapshot, N4
+  marker first + named busy); status stays review.
