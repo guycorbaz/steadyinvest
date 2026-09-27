@@ -7,7 +7,8 @@
 //! the honest level for these tests.
 
 use steadyinvest_contract::{
-    ForecastLowOption, Judgment, SCHEMA_VERSION, Study, Timestamp, sha256_hex,
+    ForecastLowOption, Judgment, Note, SCHEMA_VERSION, Study, Timestamp, from_export_json,
+    sha256_hex, to_export_json,
 };
 use steadyinvest_persistence::{
     Error, HoldingItem, Journal, JournalExport, JournalSnapshot, LedgerEntry, PortfolioItem,
@@ -807,5 +808,63 @@ fn a_newer_schema_history_row_is_rejected_up_front() {
             Err(Error::ImportVersion { .. })
         ),
         "a row this build could never read back must not poison the timeline"
+    );
+}
+
+fn with_notes(mut s: Study) -> Study {
+    s.notes = vec![
+        Note {
+            id: Uuid::from_u128(0x7001),
+            text: "Première note.\nSur deux lignes.".to_string(),
+            created_at: ts("2026-09-27T08:00:00Z"),
+            updated_at: ts("2026-09-27T09:30:00Z"),
+            ai_origin: None,
+        },
+        Note {
+            id: Uuid::from_u128(0x7002),
+            text: "Seconde note.".to_string(),
+            created_at: ts("2026-09-27T10:00:00Z"),
+            updated_at: ts("2026-09-27T10:00:00Z"),
+            ai_origin: None,
+        },
+    ];
+    s
+}
+
+#[test]
+fn notes_round_trip_byte_identically_through_single_study_and_journal_export() {
+    // Story 8.1 AC 8: ids, texts and both timestamps survive, and the re-export is byte-identical.
+    let (_da, mut a) = empty_journal("a.db", 0x81A);
+    let noted = with_notes(study(a.id(), 0x8101, "NESN"));
+    a.put_study(&noted).unwrap();
+
+    // Single study.
+    let single = to_export_json(&noted);
+    let back = from_export_json(&single).unwrap();
+    assert_eq!(back, noted);
+    assert_eq!(
+        to_export_json(&back),
+        single,
+        "single-study re-export is byte-identical"
+    );
+
+    // Whole journal.
+    let envelope = a.export_journal().unwrap();
+    let (_db, mut b) = empty_journal("b.db", 0x81B);
+    b.import_journal(&envelope).unwrap();
+    let imported = b.get_study(noted.id).unwrap().unwrap();
+    assert_eq!(
+        imported.notes, noted.notes,
+        "notes preserved, ids and timestamps included"
+    );
+    let mut rebound = noted.clone();
+    rebound.journal_id = b.id();
+    assert_eq!(imported, rebound);
+    let a_payload = serde_json::to_string(&snapshot_of(&a).studies[0].study).unwrap();
+    let b_payload = serde_json::to_string(&snapshot_of(&b).studies[0].study).unwrap();
+    assert_eq!(
+        a_payload.replace(&a.id().to_string(), "J"),
+        b_payload.replace(&b.id().to_string(), "J"),
+        "the study payload re-exports byte-identically (journal id rebound aside)"
     );
 }

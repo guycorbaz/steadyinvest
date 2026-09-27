@@ -3,8 +3,8 @@
 use proptest::prelude::*;
 use rust_decimal::Decimal;
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review, Source,
-    Study, Timestamp, YearData,
+    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Note, Provenance, Review,
+    Source, Study, Timestamp, YearData,
 };
 use uuid::Uuid;
 
@@ -147,6 +147,16 @@ fn judgment() -> impl Strategy<Value = Judgment> {
         )
 }
 
+fn note() -> impl Strategy<Value = Note> {
+    (any::<u128>(), token(), token(), token()).prop_map(|(id, text, created, updated)| Note {
+        id: Uuid::from_u128(id),
+        text,
+        created_at: Timestamp(created),
+        updated_at: Timestamp(updated),
+        ai_origin: None,
+    })
+}
+
 fn study() -> impl Strategy<Value = Study> {
     (
         any::<u128>(),
@@ -159,19 +169,23 @@ fn study() -> impl Strategy<Value = Study> {
         proptest::option::of(token()),
         token(),
         any::<u32>(),
+        proptest::collection::vec(note(), 0..3),
     )
         .prop_map(
-            |(id, jid, ticker, cur, years, judgment, rationale, company_name, ts, sv)| Study {
-                id: Uuid::from_u128(id),
-                journal_id: Uuid::from_u128(jid),
-                security_ticker: ticker,
-                native_currency: cur,
-                years,
-                judgment,
-                rationale,
-                company_name,
-                created_at: Timestamp(ts),
-                schema_version: sv,
+            |(id, jid, ticker, cur, years, judgment, rationale, company_name, ts, sv, notes)| {
+                Study {
+                    id: Uuid::from_u128(id),
+                    journal_id: Uuid::from_u128(jid),
+                    security_ticker: ticker,
+                    native_currency: cur,
+                    years,
+                    judgment,
+                    rationale,
+                    company_name,
+                    notes,
+                    created_at: Timestamp(ts),
+                    schema_version: sv,
+                }
             },
         )
 }

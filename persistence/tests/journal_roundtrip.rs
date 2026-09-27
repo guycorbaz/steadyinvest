@@ -94,6 +94,7 @@ fn study(id: u128, journal_id: Uuid, ticker: &str) -> Study {
         judgment: judgment(),
         rationale: Some("Margin trend noted; demand steady.".to_string()),
         company_name: None,
+        notes: Vec::new(),
         created_at: ts("2026-06-12T08:30:00Z"),
         schema_version: steadyinvest_contract::SCHEMA_VERSION,
     }
@@ -582,6 +583,38 @@ fn delete_study_of_an_absent_id_is_a_noop_success() {
 }
 
 // ── Issue #34 (FR51) — the durable judgment-snapshot time-series ──
+
+#[test]
+fn a_snapshot_written_before_an_additive_field_does_not_force_a_phantom_entry() {
+    // Story 8.1 (T2.3): the latest snapshot of a study saved before `notes` existed has no
+    // "notes" key. A value-identical re-save compares structurally, so it records nothing.
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.db");
+    let jid = Uuid::from_u128(0x81);
+    let mut journal = Journal::create(&path, jid, &ts(JOURNAL_TS)).expect("create");
+    let original = study(0x811, jid, "NESN");
+    journal
+        .put_study_with_history(&original, &ts("2026-09-27T08:00:00Z"))
+        .expect("first save");
+    let mut legacy: serde_json::Value = serde_json::to_value(&original).unwrap();
+    legacy.as_object_mut().unwrap().remove("notes");
+    let conn = rusqlite::Connection::open(&path).expect("open raw");
+    conn.execute(
+        "UPDATE judgments SET payload = ?1 WHERE study_id = ?2",
+        rusqlite::params![legacy.to_string(), original.id.to_string()],
+    )
+    .expect("rewrite the snapshot as a pre-notes payload");
+    drop(conn);
+
+    journal
+        .put_study_with_history(&original, &ts("2026-09-27T08:01:00Z"))
+        .expect("value-identical re-save");
+    assert_eq!(
+        journal.list_judgment_snapshots(original.id).unwrap().len(),
+        1,
+        "a value-identical re-save over a pre-notes snapshot records no phantom entry"
+    );
+}
 
 #[test]
 fn put_study_with_history_appends_deduplicated_snapshots_that_round_trip() {

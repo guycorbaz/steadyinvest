@@ -16,6 +16,7 @@
 //! data-correctness problem, not something to silently coerce to a fallback). Hence no
 //! `non_exhaustive` / `serde(other)` on the domain enums.
 
+pub mod ai;
 pub mod cell;
 pub mod export;
 pub mod money;
@@ -25,9 +26,10 @@ pub mod versioning;
 
 // Portfolio / FX types arrive with their epics (Epic 4/6 portfolio & FX).
 
+pub use ai::AiOrigin;
 pub use cell::{Cell, Coverage, Freshness, PendingProvider, Review, Source};
 pub use export::{ImportError, StudyExport, from_export_json, sha256_hex, to_export_json};
 pub use money::Money;
 pub use provenance::{Provenance, Timestamp};
-pub use study::{ForecastLowOption, Judgment, Study, YearData};
+pub use study::{ForecastLowOption, Judgment, Note, Study, YearData};
 pub use versioning::SCHEMA_VERSION;

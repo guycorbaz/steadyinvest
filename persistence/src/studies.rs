@@ -127,7 +127,15 @@ impl Journal {
                 |r| r.get(0),
             )
             .optional()?;
-        if latest.as_deref() != Some(payload.as_str()) {
+        // Compared STRUCTURALLY, not as raw strings (Story 8.1, T2.3): a snapshot written before an
+        // additive `#[serde(default)]` field (e.g. `notes`) lacks its key, so a value-identical
+        // re-save would otherwise append a phantom « autres champs modifiés » entry. An unparsable
+        // latest payload counts as different (the new snapshot is recorded, never skipped).
+        let redundant = latest
+            .as_deref()
+            .and_then(|p| serde_json::from_str::<Study>(p).ok())
+            .is_some_and(|prev| prev == *study);
+        if !redundant {
             let ordinal: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",
                 rusqlite::params![study.id.to_string()],
