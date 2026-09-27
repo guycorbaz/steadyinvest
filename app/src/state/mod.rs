@@ -49,6 +49,7 @@ mod holdings;
 mod journal_io;
 mod ledger;
 mod messages;
+mod notes;
 mod refresh;
 mod replacement;
 mod restore;

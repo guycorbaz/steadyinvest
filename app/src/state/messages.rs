@@ -115,6 +115,10 @@ pub const MSG_NO_DATA_DIR: &str =
 pub const MSG_SAVE_FAILED: &str = "L'enregistrement a échoué.";
 /// G1 P: a write rail's preliminary READ failed — the write was never attempted.
 pub const MSG_READ_FAILED: &str = "Le dossier n'a pas pu être lu ; rien n'a été enregistré.";
+/// Story 8.1: a note with no text (or only spaces) is refused inside its form; nothing is written.
+pub const MSG_NOTE_EMPTY: &str = "La note est vide ; rien n'a été enregistré.";
+/// Story 8.1: the note to edit or delete is no longer in the study (e.g. removed by an undo).
+pub const MSG_NOTE_GONE: &str = "Cette note n'existe plus dans l'étude ; rien n'a été enregistré.";
 /// The system clipboard could not be read for a paste-a-column (Story 2.4).
 pub const MSG_CLIPBOARD_UNAVAILABLE: &str =
     "Le presse-papiers est indisponible ; aucune colonne n'a été collée.";
@@ -1075,6 +1079,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,
+    MSG_NOTE_EMPTY,
+    MSG_NOTE_GONE,
     MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,

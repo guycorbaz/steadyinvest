@@ -13,7 +13,7 @@
 // formula captions (`A÷C`, …) are static display text, not computed.
 
 import { Tokens } from "../tokens.slint";
-import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen } from "../state.slint";
+import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen, Dialog, NoteRow } from "../state.slint";
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
@@ -25,6 +25,7 @@ import { GrowthChart } from "../components/growth_chart.slint";
 import { PeHistoryChart } from "../components/pe_history_chart.slint";
 import { ScenarioCompare } from "../components/scenario_compare.slint";
 import { RationaleNote } from "../components/rationale_note.slint";
+import { PanelCard } from "../components/panel_card.slint";
 
 // The faithful em-dash slot, in one place (mirrors `viewmodel::form::EMPTY_SLOT`). A gap, never `0`.
 global FormConst {
@@ -310,6 +311,77 @@ component CompanyNameField inherits Rectangle {
 }
 
 
+// Story 8.1 (UX 8.0 §5.6): one row of the « Notes » card — date line, the owner's text (three
+// lines, then « Afficher tout » / « Réduire »), « Modifier… » and « Supprimer ». Ink only.
+component NoteItem inherits VerticalLayout {
+    in property <NoteRow> note;
+    in property <bool> writable;
+    property <bool> expanded: false;
+    // The height of three lines of body text, measured on the same font (never a guessed px).
+    property <length> three-lines: probe.preferred-height;
+    property <bool> long: body.preferred-height > root.three-lines + 1px;
+
+    spacing: Tokens.space-4;
+    probe := Text {
+        text: "0\n0\n0"; // a measuring probe, never shown
+        font-size: Tokens.font-body;
+        visible: false;
+        height: 0;
+    }
+    HorizontalLayout {
+        spacing: Tokens.space-8;
+        Text {
+            text: root.note.meta;
+            color: Tokens.text-mid;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        ActionButton {
+            label: @tr("Modifier…");
+            enabled: root.writable;
+            clicked => {
+                Dialog.form("note-edit", @tr("Modifier la note"),
+                    @tr("Une note reste dans l'historique de l'étude, même supprimée. Ctrl+Entrée enregistre."),
+                    root.note.id, "");
+                Dialog.draft-text = root.note.text;
+            }
+        }
+        ActionButton {
+            label: @tr("Supprimer");
+            enabled: root.writable;
+            clicked => {
+                Dialog.confirm("", "", "", "delete-note", root.note.id);
+            }
+        }
+    }
+    Rectangle {
+        height: root.expanded || !root.long ? body.preferred-height : root.three-lines;
+        clip: true;
+        body := Text {
+            y: 0;
+            width: parent.width;
+            text: root.note.text;
+            color: Tokens.text-high;
+            font-size: Tokens.font-body;
+            wrap: word-wrap;
+            vertical-alignment: top;
+        }
+    }
+    // Always present (an `if` here would feed the text's wrap width back into the horizontal
+    // layout — a binding loop); a short note collapses it to nothing.
+    HorizontalLayout {
+        alignment: start;
+        height: root.long ? self.preferred-height : 0;
+        toggle := ActionButton {
+            visible: root.long;
+            label: root.expanded ? @tr("Réduire") : @tr("Afficher tout");
+            clicked => { root.expanded = !root.expanded; }
+        }
+    }
+}
+
 export component StudyScreen inherits Rectangle {
     // Issue #213: a §4 candidate's absence names its missing input (the key comes from Rust).
     pure function low-why(key: string) -> string {
@@ -483,11 +555,22 @@ export component StudyScreen inherits Rectangle {
                 VerticalLayout {
                     padding: Tokens.space-12;
                     spacing: Tokens.space-8;
-                    Text {
-                        text: @tr("Historique de l'étude");
-                        color: Tokens.text-high;
-                        font-size: Tokens.font-body;
-                        font-weight: Tokens.weight-semibold;
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        Text {
+                            text: @tr("Historique de l'étude");
+                            color: Tokens.text-high;
+                            font-size: Tokens.font-body;
+                            font-weight: Tokens.weight-semibold;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        // Story 8.1 (arch A12): hide the note-only entries so judgment changes
+                        // stay readable (default: shown).
+                        ActionButton {
+                            label: Studies.history-hide-notes ? @tr("Afficher les notes") : @tr("Masquer les notes");
+                            clicked => { Studies.toggle-history-notes(); }
+                        }
                     }
                     if Studies.history-unavailable: Text {
                         text: @tr("L'historique n'a pas pu être lu ; il est indisponible.");
@@ -1189,6 +1272,45 @@ export component StudyScreen inherits Rectangle {
                 label: @tr("Justification de la décision");
                 placeholder: @tr("Pourquoi cette conclusion");
                 value: Studies.rationale;
+            }
+
+            // ── Story 8.1 (FR78, UX 8.0 §5.6) — the owner's dated notes, newest first, below the
+            //    rationale (which stays the single « why »). Add / edit in titled forms, delete
+            //    confirmed; blocked on the demo and on a read-only dossier. A read failure says
+            //    « indisponible », never an empty card (#95). The note texts are the owner's own
+            //    words — never posture-scanned. ──
+            PanelCard {
+                title: @tr("Notes");
+                HorizontalLayout {
+                    alignment: start;
+                    ActionButton {
+                        label: @tr("Ajouter une note…");
+                        enabled: !Studies.demo-active && !Studies.read-only && !Studies.notes-unavailable;
+                        clicked => {
+                            Dialog.form("note-add", @tr("Ajouter une note"),
+                                @tr("Une note reste dans l'historique de l'étude, même supprimée. Ctrl+Entrée enregistre."),
+                                "", "");
+                        }
+                    }
+                }
+                if Studies.notes-unavailable: Text {
+                    text: @tr("Les notes n'ont pas pu être lues ; elles sont indisponibles.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+                if !Studies.notes-unavailable && Studies.notes.length == 0: Text {
+                    text: @tr("Aucune note pour cette étude.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                }
+                if !Studies.notes-unavailable: VerticalLayout {
+                    spacing: Tokens.space-12;
+                    for note in Studies.notes: NoteItem {
+                        note: note;
+                        writable: !Studies.demo-active && !Studies.read-only;
+                    }
+                }
             }
         }
         }

@@ -186,6 +186,9 @@ mod tests {
         // modal_dialog: the variant glyphs — a refusal to acknowledge, a form to fill
         "⚠",
         "✎",
+        // study_screen (8.1): the invisible probe measuring three lines of note text (the
+        // extractor drops the `\n` escapes); digits only, never shown
+        "0n0n0",
         // single-space and punctuation-only separators (no prose, no verb)
         " ",
         " · ",
@@ -743,8 +746,13 @@ mod tests {
         // year definitions are reworded in place): 1008 + 2 = 1010, measured. The real fetch of
         // 2026-09-27: the glossary's « Cours haut et bas (EODHD) » term and definition (EODHD's
         // month-end dating told to the user): 1010 + 2 = 1012, measured.
+        // 8.1 (study notes): the « Notes » card (title, « Ajouter une note… », empty and
+        // unreadable texts, row « Modifier… » / « Supprimer », « Afficher tout » / « Réduire »),
+        // the two note forms (titles, sentence, field « Note »), the delete confirm (title, body),
+        // the history chip (« Masquer / Afficher les notes ») and the glossary's « Notes »:
+        // 1012 + 19 = 1031, measured.
         assert!(
-            total >= 1012,
+            total >= 1031,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -758,7 +766,8 @@ mod tests {
         }
         assert_eq!(
             crate::viewmodel::history::HISTORY_USER_FACING_LABELS.len(),
-            17,
+            // 8.1: +3 (« Note ajoutée / modifiée / supprimée »).
+            20,
             "history.rs label inventory changed — register the new label"
         );
     }
@@ -866,7 +875,9 @@ mod tests {
         // (MSG_PASTE_LINES_KEPT): +4.
         assert_eq!(
             crate::state::USER_FACING_MESSAGES.len(),
-            224,
+            // 8.1: the empty note (MSG_NOTE_EMPTY) and the vanished note (MSG_NOTE_GONE):
+            // 224 + 2 = 226, measured.
+            226,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export

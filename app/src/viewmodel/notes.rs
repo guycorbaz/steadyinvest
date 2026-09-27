@@ -1,0 +1,110 @@
+//! Study notes card (Story 8.1, UX 8.0 §5.6): the rows the « Notes » card shows, newest first.
+//!
+//! Pure view logic over the already-loaded [`Study`]: no IO. The note texts are the owner's own
+//! words and cross as data; the only app strings are the meta line's date wording (UX §3.3).
+
+use steadyinvest_contract::{Study, Timestamp};
+use uuid::Uuid;
+
+/// « · modifiée le » — the meta suffix of an edited note (UX 8.0 §3.3 « Notes »).
+pub const NOTE_EDITED_ON: &str = "modifiée le";
+
+/// One row of the « Notes » card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteRowView {
+    pub id: Uuid,
+    /// « JJ/MM/AAAA », plus « · modifiée le JJ/MM/AAAA » once the text was edited.
+    pub meta: String,
+    pub text: String,
+}
+
+/// `JJ/MM/AAAA` from an RFC3339 stamp (the spec's note wording); the raw stamp when malformed —
+/// display only, never a hard error.
+pub fn date_fr(stamp: &Timestamp) -> String {
+    let s = stamp.0.as_str();
+    match (s.get(0..4), s.get(5..7), s.get(8..10)) {
+        (Some(y), Some(m), Some(d)) => format!("{d}/{m}/{y}"),
+        _ => s.to_string(),
+    }
+}
+
+/// The card's rows, newest first (by `created_at`, then id — a stable order for equal stamps);
+/// the stored order stays insertion order.
+pub fn note_rows(study: &Study) -> Vec<NoteRowView> {
+    let mut notes: Vec<_> = study.notes.iter().collect();
+    notes.sort_by(|a, b| b.created_at.0.cmp(&a.created_at.0).then(b.id.cmp(&a.id)));
+    notes
+        .into_iter()
+        .map(|n| {
+            let created = date_fr(&n.created_at);
+            let meta = if n.updated_at != n.created_at {
+                format!("{created} · {NOTE_EDITED_ON} {}", date_fr(&n.updated_at))
+            } else {
+                created
+            };
+            NoteRowView {
+                id: n.id,
+                meta,
+                text: n.text.clone(),
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use steadyinvest_contract::{ForecastLowOption, Judgment, Note};
+
+    fn study_with(notes: Vec<Note>) -> Study {
+        let mut s = Study::new(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            "NESN",
+            "CHF",
+            Judgment {
+                estimated_high_eps: None,
+                estimated_low_eps: None,
+                projected_sales_growth_pct: None,
+                projected_eps_growth_pct: None,
+                judged_avg_high_pe: None,
+                judged_avg_low_pe: None,
+                forecast_low_option: ForecastLowOption::AvgLowPeTimesEps,
+                recent_severe_low: None,
+                current_price: None,
+                present_full_year_dividend: None,
+                ttm_eps: None,
+            },
+            Timestamp("2026-09-01T00:00:00Z".to_string()),
+        );
+        s.notes = notes;
+        s
+    }
+
+    fn note(id: u128, created: &str, updated: &str) -> Note {
+        Note {
+            id: Uuid::from_u128(id),
+            text: format!("note {id}"),
+            created_at: Timestamp(created.to_string()),
+            updated_at: Timestamp(updated.to_string()),
+            ai_origin: None,
+        }
+    }
+
+    #[test]
+    fn rows_are_newest_first_with_the_edit_date_when_edited() {
+        let rows = note_rows(&study_with(vec![
+            note(1, "2026-09-20T08:00:00Z", "2026-09-20T08:00:00Z"),
+            note(2, "2026-09-27T08:00:00Z", "2026-09-28T10:00:00Z"),
+        ]));
+        assert_eq!(rows[0].id, Uuid::from_u128(2));
+        assert_eq!(rows[0].meta, "27/09/2026 · modifiée le 28/09/2026");
+        assert_eq!(rows[1].meta, "20/09/2026");
+        assert_eq!(rows[1].text, "note 1");
+    }
+
+    #[test]
+    fn a_malformed_stamp_shows_raw_never_panics() {
+        assert_eq!(date_fr(&Timestamp("x".to_string())), "x");
+    }
+}

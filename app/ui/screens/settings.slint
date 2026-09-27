@@ -947,6 +947,11 @@ export component SettingsScreen inherits Rectangle {
                     term: @tr("Fraîcheur");
                     definition: @tr("Indique si une donnée est récente ou périmée.");
                 }
+                // Story 8.1 (FR78).
+                GlossaryRow {
+                    term: @tr("Notes");
+                    definition: @tr("Remarques datées sur une étude, à côté de la justification de la décision. Une note supprimée reste lisible dans l'historique de l'étude ; les notes ne sont pas imprimées.");
+                }
             }
 
             // ── Story 2.13 — Vérifier le moteur (FR9): replay the bundled golden studies on demand. ──

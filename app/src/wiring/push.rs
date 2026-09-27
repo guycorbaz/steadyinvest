@@ -65,6 +65,18 @@ pub(crate) fn push_form(
     // Story 2.10 — the study-level decision rationale (FR49), restored on reopen; "" when unset
     // (the note re-seeds from this only while it does NOT have focus, the keep-input discipline).
     studies.set_rationale(study.rationale.clone().unwrap_or_default().into());
+    // Story 8.1 (FR78) — the study's notes, newest first (the card's rows); a successful read.
+    studies.set_notes(ModelRc::new(VecModel::from(
+        viewmodel::notes::note_rows(study)
+            .into_iter()
+            .map(|n| crate::NoteRow {
+                id: n.id.to_string().into(),
+                meta: n.meta.into(),
+                text: n.text.into(),
+            })
+            .collect::<Vec<_>>(),
+    )));
+    studies.set_notes_unavailable(false);
 
     let years = viewmodel::form::materialized_year_numbers(study);
     match engine::build_frame(study) {
@@ -195,17 +207,22 @@ pub(crate) fn push_history(
     })();
     match loaded {
         Ok(loaded) => {
-            let rows: Vec<crate::HistoryEntryRow> =
-                viewmodel::history::history_entries(&loaded, format)
-                    .into_iter()
-                    .map(|e| crate::HistoryEntryRow {
-                        id: e.id.to_string().into(),
-                        day: e.day.into(),
-                        first_of_day: e.first_of_day,
-                        time: e.time.into(),
-                        summary: e.summary.into(),
-                    })
-                    .collect();
+            // Story 8.1 (arch A12): « Masquer les notes » drops the note-only entries and the day
+            // headers are recomputed on what remains; the detail still diffs against the TRUE
+            // predecessor (`toggle-history-entry` reads the unfiltered listing).
+            let rows: Vec<crate::HistoryEntryRow> = viewmodel::history::visible_history(
+                viewmodel::history::history_entries(&loaded, format),
+                studies.get_history_hide_notes(),
+            )
+            .into_iter()
+            .map(|e| crate::HistoryEntryRow {
+                id: e.id.to_string().into(),
+                day: e.day.into(),
+                first_of_day: e.first_of_day,
+                time: e.time.into(),
+                summary: e.summary.into(),
+            })
+            .collect();
             studies.set_history_unavailable(false);
             studies.set_history_rows(ModelRc::new(VecModel::from(rows)));
         }
