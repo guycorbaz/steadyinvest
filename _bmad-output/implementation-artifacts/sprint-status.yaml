@@ -708,7 +708,8 @@ development_status:
   # 2026-09-27: 8-2a dev complete (1179 tests; v8 migration, drafts read/export/import, O7 cascade,
   #             v8.db corpus) → review.
   # 2026-09-27: 8-2a G3 review applied (tighter checks, newer vs corrupt, safe import; 1187 tests).
-  8-2a-drafts-table: review
+  # 2026-09-27: 8-2a dev + G3 (3 layers, 11 fixes) → PR #258 merged → done.
+  8-2a-drafts-table: done
   8-2b-ai-origin-staleness-and-decisions: backlog
   8-3-mcp-access-gated-access-surface: backlog
   8-4-steadyinvest-mcp-stdio-server: backlog

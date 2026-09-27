@@ -1,6 +1,6 @@
 # Story 8.2a: Drafts table (headless)
 
-Status: review
+Status: done
 
 <!-- Created 2026-09-27 by the create-story workflow. Branches from main AFTER 8.1 (PR #257) merges:
      8.1 adds contract/src/ai.rs (AiOrigin) and Note, which this story's contract module sits beside. -->
