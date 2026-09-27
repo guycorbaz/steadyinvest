@@ -26,6 +26,7 @@ pub(crate) type MigrationStep = fn(&Transaction<'_>) -> Result<()>;
 /// v5 (Story 5.1): `price_history` — the post-decision close cache (FR50/ADD13).
 /// v6 (Story 6.2): `holdings.currency` — the per-holding denomination currency (FR38).
 /// v7 (issue #98): `holdings.sector` — provider-reported + manual override (FR48).
+/// v8 (Story 8.2a): `ai_drafts` — the AI drafts table + its version-bump trigger (FR70–FR72, FR77).
 pub(crate) const REGISTRY: &[(u32, MigrationStep)] = &[
     (1, crate::schema::migrate_to_v1),
     (2, crate::schema::migrate_to_v2),
@@ -34,6 +35,7 @@ pub(crate) const REGISTRY: &[(u32, MigrationStep)] = &[
     (5, crate::schema::migrate_to_v5),
     (6, crate::schema::migrate_to_v6),
     (7, crate::schema::migrate_to_v7),
+    (8, crate::schema::migrate_to_v8),
 ];
 
 /// The newest schema version this build knows how to produce.
@@ -114,8 +116,8 @@ mod tests {
         }
         assert_eq!(
             latest_version(REGISTRY),
-            7,
-            "v1 (1.10) + v2 (4.1 watchlist study_id) + v3 (4.5 holdings trailing_stop_level) + v4 (4.7 transactions kind/rationale) + v5 (5.1 price_history) + v6 (6.2 holdings currency) + v7 (#98 holdings sector)"
+            8,
+            "v1 (1.10) + v2 (4.1 watchlist study_id) + v3 (4.5 holdings trailing_stop_level) + v4 (4.7 transactions kind/rationale) + v5 (5.1 price_history) + v6 (6.2 holdings currency) + v7 (#98 holdings sector) + v8 (8.2a ai_drafts)"
         );
     }
 
@@ -123,10 +125,10 @@ mod tests {
     fn fresh_database_migrates_to_latest() {
         let mut conn = mem();
         assert_eq!(user_version(&conn).expect("pragma reads"), 0);
-        run_pending(&mut conn, REGISTRY).expect("v1 … v7 apply");
+        run_pending(&mut conn, REGISTRY).expect("v1 … v8 apply");
         assert_eq!(
             user_version(&conn).expect("pragma reads"),
-            7,
+            8,
             "a fresh DB migrates to the latest known version"
         );
     }
@@ -186,11 +188,11 @@ mod tests {
     #[test]
     fn rerun_is_idempotent_no_step_reruns() {
         let mut conn = mem();
-        run_pending(&mut conn, REGISTRY).expect("first run applies v1 … v7");
+        run_pending(&mut conn, REGISTRY).expect("first run applies v1 … v8");
         // A second run re-executing migrate_to_v1 would fail on CREATE TABLE (tables exist), and the
         // ALTER steps would fail on a duplicate ADD COLUMN: success here proves no step re-ran.
         run_pending(&mut conn, REGISTRY).expect("second run is a no-op");
-        assert_eq!(user_version(&conn).expect("pragma reads"), 7);
+        assert_eq!(user_version(&conn).expect("pragma reads"), 8);
     }
 
     #[test]
@@ -225,19 +227,101 @@ mod tests {
         .expect("holdings.sold_at exists after v4");
     }
 
-    // ── A fake FUTURE step (v8) on top of the real registry (latest = v7): ordering + per-step
-    // stamping. The fake step shifts up by one each time a real migration lands (was v7 before #98). ──
+    #[test]
+    fn a_v7_dossier_migrates_to_v8_with_every_row_intact() {
+        // Story 8.2a (NFR-R3): a real v7 file (every table seeded) gains `ai_drafts` + its trigger
+        // and loses nothing.
+        let mut conn = mem();
+        run_pending(&mut conn, &REGISTRY[..7]).expect("v1 … v7 apply");
+        assert_eq!(user_version(&conn).expect("pragma reads"), 7);
+        conn.execute_batch(
+            "INSERT INTO journal_meta VALUES (1, 'j', 5, '2026-01-01T00:00:00Z');
+             INSERT INTO studies (id, journal_id, security_ticker, created_at, schema_version,
+                                  payload)
+                 VALUES ('s', 'j', 'NESN', '2026-01-01T00:00:00Z', 1, '{}');
+             INSERT INTO judgments VALUES ('h', 's', '2026-01-01T00:00:00Z', 1, '{}');
+             INSERT INTO portfolios VALUES ('p', 'Banque', '2026-01-01T00:00:00Z');
+             INSERT INTO holdings (id, portfolio_id, security_ticker, quantity, purchase_price,
+                                   created_at, currency, sector)
+                 VALUES ('ho', 'p', 'NESN', '3', '98.5', '2026-01-01T00:00:00Z', 'CHF', 'Food');
+             INSERT INTO transactions (id, holding_id, occurred_at, quantity, unit_price, fees,
+                                       currency, created_at, kind)
+                 VALUES ('t', 'ho', '2026-01-01', '3', '98.5', '0', 'CHF',
+                         '2026-01-01T00:00:00Z', 'buy');
+             INSERT INTO fx_rates VALUES ('f', 'USD', 'CHF', '0.9', '2026-01-01', 'manuel',
+                                          '2026-01-01T00:00:00Z');
+             INSERT INTO watchlist_items (id, security_ticker, position, created_at, study_id)
+                 VALUES ('w', 'NESN', 0, '2026-01-01T00:00:00Z', 's');
+             INSERT INTO price_history VALUES ('ph', 'NESN', '2026-01-01', '99', 'eodhd',
+                                               '2026-01-01T00:00:00Z');",
+        )
+        .expect("the v7 file is seeded");
+        let dump = |conn: &Connection| -> Vec<String> {
+            let mut out = Vec::new();
+            for table in [
+                "journal_meta",
+                "studies",
+                "judgments",
+                "portfolios",
+                "holdings",
+                "transactions",
+                "fx_rates",
+                "watchlist_items",
+                "price_history",
+            ] {
+                let mut stmt = conn
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                    .expect("table reads");
+                let width = stmt.column_count();
+                let rows = stmt
+                    .query_map([], |r| {
+                        let mut cells = Vec::new();
+                        for i in 0..width {
+                            cells.push(format!("{:?}", r.get_ref(i)?));
+                        }
+                        Ok(format!("{table}: {}", cells.join(" | ")))
+                    })
+                    .expect("rows read")
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .expect("rows collect");
+                assert!(!rows.is_empty(), "{table} was seeded");
+                out.extend(rows);
+            }
+            out
+        };
+        let before = dump(&conn);
 
-    fn fake_v8(tx: &Transaction<'_>) -> Result<()> {
+        run_pending(&mut conn, REGISTRY).expect("v8 applies on the v7 file");
+        assert_eq!(user_version(&conn).expect("pragma reads"), 8);
+        assert_eq!(dump(&conn), before, "every v7 row is intact");
+        let drafts: i64 = conn
+            .query_row("SELECT count(*) FROM ai_drafts", [], |r| r.get(0))
+            .expect("ai_drafts exists");
+        assert_eq!(drafts, 0, "the new table starts empty");
+        let trigger: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master
+                 WHERE type = 'trigger' AND name = 'trg_ai_drafts_bump_logical_version'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("sqlite_master reads");
+        assert_eq!(trigger, 1, "the trigger is created with the table");
+    }
+
+    // ── A fake FUTURE step (v9) on top of the real registry (latest = v8): ordering + per-step
+    // stamping. The fake step shifts up by one each time a real migration lands (was v8 before 8.2a). ──
+
+    fn fake_v9(tx: &Transaction<'_>) -> Result<()> {
         // Writes into a table created by step 1 — fails loudly if steps ran out of order.
         tx.execute_batch(
             "INSERT INTO watchlist_items (id, security_ticker, position, created_at)
-             VALUES ('migration-marker-v8', 'TEST', 0, '2026-01-01T00:00:00Z')",
+             VALUES ('migration-marker-v9', 'TEST', 0, '2026-01-01T00:00:00Z')",
         )?;
         Ok(())
     }
 
-    const EIGHT_STEP_REGISTRY: &[(u32, MigrationStep)] = &[
+    const NINE_STEP_REGISTRY: &[(u32, MigrationStep)] = &[
         (1, crate::schema::migrate_to_v1),
         (2, crate::schema::migrate_to_v2),
         (3, crate::schema::migrate_to_v3),
@@ -245,12 +329,13 @@ mod tests {
         (5, crate::schema::migrate_to_v5),
         (6, crate::schema::migrate_to_v6),
         (7, crate::schema::migrate_to_v7),
-        (8, fake_v8),
+        (8, crate::schema::migrate_to_v8),
+        (9, fake_v9),
     ];
 
     fn marker_rows(conn: &Connection) -> i64 {
         conn.query_row(
-            "SELECT COUNT(*) FROM watchlist_items WHERE id = 'migration-marker-v8'",
+            "SELECT COUNT(*) FROM watchlist_items WHERE id = 'migration-marker-v9'",
             [],
             |r| r.get(0),
         )
@@ -260,50 +345,50 @@ mod tests {
     #[test]
     fn steps_apply_in_order_from_zero() {
         let mut conn = mem();
-        run_pending(&mut conn, EIGHT_STEP_REGISTRY).expect("v1 → … → v7 → v8 apply in order");
-        assert_eq!(user_version(&conn).expect("pragma reads"), 8);
+        run_pending(&mut conn, NINE_STEP_REGISTRY).expect("v1 → … → v8 → v9 apply in order");
+        assert_eq!(user_version(&conn).expect("pragma reads"), 9);
         assert_eq!(marker_rows(&conn), 1);
     }
 
     #[test]
     fn only_pending_steps_apply_from_latest() {
         let mut conn = mem();
-        run_pending(&mut conn, REGISTRY).expect("v1 … v7 apply");
-        run_pending(&mut conn, EIGHT_STEP_REGISTRY).expect("only v8 applies on top");
-        assert_eq!(user_version(&conn).expect("pragma reads"), 8);
+        run_pending(&mut conn, REGISTRY).expect("v1 … v8 apply");
+        run_pending(&mut conn, NINE_STEP_REGISTRY).expect("only v9 applies on top");
+        assert_eq!(user_version(&conn).expect("pragma reads"), 9);
         assert_eq!(
             marker_rows(&conn),
             1,
-            "v8 ran exactly once; v1–v7 did not re-run (CREATE TABLE / duplicate ADD COLUMN would fail)"
+            "v9 ran exactly once; v1–v8 did not re-run (CREATE TABLE / duplicate ADD COLUMN would fail)"
         );
         // Idempotence at the new latest too.
-        run_pending(&mut conn, EIGHT_STEP_REGISTRY).expect("no-op at latest");
+        run_pending(&mut conn, NINE_STEP_REGISTRY).expect("no-op at latest");
         assert_eq!(marker_rows(&conn), 1, "no step re-ran");
     }
 
     #[test]
     fn newer_file_is_refused_not_migrated() {
         let mut conn = mem();
-        run_pending(&mut conn, EIGHT_STEP_REGISTRY).expect("file at v8");
+        run_pending(&mut conn, NINE_STEP_REGISTRY).expect("file at v9");
         let err = run_pending(&mut conn, REGISTRY)
-            .expect_err("a build knowing only v1–v7 refuses a v8 file");
+            .expect_err("a build knowing only v1–v8 refuses a v9 file");
         match err {
             Error::NewerJournalSchema {
-                file_user_version: 8,
-                supported: 7,
+                file_user_version: 9,
+                supported: 8,
             } => {}
             other => panic!("expected NewerJournalSchema, got {other:?}"),
         }
         assert_eq!(
             user_version(&conn).expect("pragma reads"),
-            8,
+            9,
             "refusal leaves the file untouched"
         );
     }
 
     #[test]
     fn failed_step_leaves_user_version_at_previous_step() {
-        fn failing_v7(tx: &Transaction<'_>) -> Result<()> {
+        fn failing_v8(tx: &Transaction<'_>) -> Result<()> {
             tx.execute_batch("INSERT INTO no_such_table VALUES (1)")?;
             Ok(())
         }
@@ -314,17 +399,18 @@ mod tests {
             (4, crate::schema::migrate_to_v4),
             (5, crate::schema::migrate_to_v5),
             (6, crate::schema::migrate_to_v6),
-            (7, failing_v7),
+            (7, crate::schema::migrate_to_v7),
+            (8, failing_v8),
         ];
         let mut conn = mem();
-        let err = run_pending(&mut conn, FAILING).expect_err("v7 step fails");
+        let err = run_pending(&mut conn, FAILING).expect_err("v8 step fails");
         match err {
-            Error::Migration { version: 7, .. } => {}
-            other => panic!("expected Migration {{ version: 7 }}, got {other:?}"),
+            Error::Migration { version: 8, .. } => {}
+            other => panic!("expected Migration {{ version: 8 }}, got {other:?}"),
         }
         assert_eq!(
             user_version(&conn).expect("pragma reads"),
-            6,
+            7,
             "v1–v7 committed, the failing v8 rolled back wholly (own-transaction rule)"
         );
     }
