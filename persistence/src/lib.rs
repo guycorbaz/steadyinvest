@@ -29,7 +29,7 @@ mod transactions;
 mod util;
 mod watchlist;
 
-pub use drafts::DraftRecord;
+pub use drafts::{DraftDecisionWrite, DraftRecord, DraftStep, DraftVerdict, StudyWrite};
 pub use error::{Error, ErrorKind, Result};
 pub use export::{
     ImportSummary, JournalExport, JournalSnapshot, JudgmentSnapshotRecord, StudyRecord,

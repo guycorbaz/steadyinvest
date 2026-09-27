@@ -1,10 +1,11 @@
 //! AI drafts — the `ai_drafts` table (migration v8, Story 8.2a; arch §Phase 4 A4).
 //!
 //! A draft is an AI client's proposal (a new study, a note, a cell or judgment value), inserted by
-//! the MCP access surface (Story 8.3) and decided by the owner (Story 8.2b). This module is the
-//! **read side** of 8.2a: [`Journal::list_drafts`] returns every row, typed, for the export and for
-//! the later inbox / record views. There is no writer here on purpose — inserts are `McpAccess`'s,
-//! decisions are `decide_draft`'s.
+//! the MCP access surface (Story 8.3) and decided by the owner (Story 8.2b). [`Journal::list_drafts`]
+//! / [`Journal::get_draft`] return rows, typed, for the export and the inbox / record views; the
+//! owner's decisions are written by [`Journal::decide_draft`] and their undo/redo by
+//! [`Journal::step_draft_decision`] — each ONE transaction with the study write and its FR51
+//! snapshot (NFR-R2). There is no insert here on purpose — inserts are `McpAccess`'s (Story 8.3).
 //!
 //! Corruption is never skipped (review checklist §1): an unreadable id, an unknown `kind`/`status`,
 //! a boolean outside 0/1 or a payload that does not parse or does not fit its kind is a
@@ -16,10 +17,12 @@
 
 use crate::error::{Error, Result};
 use crate::journal::Journal;
-use crate::util::parse_uuid;
+use crate::studies::{stored_study_is, write_study_with_snapshot};
+use crate::util::{bump_logical_version, parse_uuid};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use steadyinvest_contract::{
-    DRAFT_PAYLOAD_VERSION, DraftKind, DraftPayload, DraftStatus, Timestamp,
+    DRAFT_PAYLOAD_VERSION, DraftKind, DraftPayload, DraftStatus, Study, Timestamp,
 };
 use uuid::Uuid;
 
@@ -47,6 +50,51 @@ pub struct DraftRecord {
     pub created_study_id: Option<Uuid>,
     /// The versioned [`DraftPayload`] JSON, as stored.
     pub payload: String,
+}
+
+/// The owner's decision on a pending draft (Story 8.2b) — only these two; `validated_undone` is
+/// reached by an undo step ([`DraftStep`]), never decided directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftVerdict {
+    /// The owner accepted the draft (as proposed, or edited before validation).
+    Validated,
+    /// The owner refused the draft; nothing else is written.
+    Rejected,
+}
+
+/// An undo/redo step over a validated draft (Story 8.2b, FR32 / FR77).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftStep {
+    /// `validated → validated_undone` (the study goes back to its pre-decision snapshot).
+    Undo,
+    /// `validated_undone → validated` (the decided study is written again).
+    Redo,
+}
+
+/// The study side of a validation: the study as the decision read it (`expected_before`) and as it
+/// is to be written (`after`), with the app's clock for its FR51 snapshot.
+#[derive(Debug, Clone, Copy)]
+pub struct StudyWrite<'a> {
+    /// The study the decision was computed from — the stored one must still be it.
+    pub expected_before: &'a Study,
+    /// The study with the draft applied.
+    pub after: &'a Study,
+    /// The injected clock's now, for the FR51 snapshot row.
+    pub now: &'a Timestamp,
+}
+
+/// One decision write (Story 8.2b Dev Notes §5). The facts obey the 8.2a CHECKs by construction of
+/// the caller: `stale_at_decision` is `None` for note / study drafts, `edited_before_validation` is
+/// `Some` only for a validation, and a rejection carries no study write.
+#[derive(Debug, Clone, Copy)]
+pub struct DraftDecisionWrite<'a> {
+    pub draft_id: Uuid,
+    pub verdict: DraftVerdict,
+    pub decided_at: &'a Timestamp,
+    pub stale_at_decision: Option<bool>,
+    pub edited_before_validation: Option<bool>,
+    /// `Some` for a validation that changes a study; `None` for a rejection.
+    pub study: Option<StudyWrite<'a>>,
 }
 
 type DraftRow = (
@@ -270,4 +318,136 @@ impl Journal {
         }
         Ok(out)
     }
+
+    /// One draft by id, or `None` when the dossier holds no such draft — the same corruption rule
+    /// as [`Self::list_drafts`] (a corrupt row is an error, never `None`).
+    pub fn get_draft(&self, id: Uuid) -> Result<Option<DraftRecord>> {
+        let row = self
+            .conn
+            .query_row(
+                &format!("SELECT {DRAFT_COLUMNS} FROM ai_drafts WHERE id = ?1"),
+                rusqlite::params![id.to_string()],
+                row_tuple,
+            )
+            .optional()?;
+        row.map(record_from_row).transpose()
+    }
+
+    /// A study's lifecycle status (`"active"` / `"archived"`), or `None` when the study is gone —
+    /// the decision rail refuses a draft of an archived study by name (Story 8.2b).
+    pub fn study_status(&self, id: Uuid) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT status FROM studies WHERE id = ?1",
+                rusqlite::params![id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Write the owner's decision on a pending draft (Story 8.2b, arch A8, NFR-R2): in **one**
+    /// transaction, re-check that the draft is still `pending` ([`Error::DraftNotPending`]) and, for
+    /// a validation, that the stored study is still the one the decision was computed from
+    /// ([`Error::StudyChangedSinceRead`]); then write the study (upsert + FR51 snapshot) and the
+    /// draft's `status` / `decided_at` / decision facts, and bump the logical version **once** (the
+    /// `ai_drafts` trigger fires on INSERT only). Any failure rolls the whole transaction back.
+    pub fn decide_draft(&mut self, d: DraftDecisionWrite<'_>) -> Result<()> {
+        self.check_writable()?;
+        if let Some(w) = &d.study {
+            self.check_study_identity(w.after)?;
+        }
+        let tx = self.conn.transaction()?;
+        let status = draft_status_in(&tx, d.draft_id)?;
+        if status != DraftStatus::Pending {
+            return Err(Error::DraftNotPending {
+                status: status.as_str().to_string(),
+            });
+        }
+        if let Some(w) = &d.study {
+            if !stored_study_is(&tx, w.expected_before)? {
+                return Err(Error::StudyChangedSinceRead);
+            }
+            let payload = serde_json::to_string(w.after)?;
+            write_study_with_snapshot(&tx, w.after, &payload, w.now)?;
+        }
+        let to = match d.verdict {
+            DraftVerdict::Validated => DraftStatus::Validated,
+            DraftVerdict::Rejected => DraftStatus::Rejected,
+        };
+        let updated = tx.execute(
+            "UPDATE ai_drafts
+                 SET status = ?1, decided_at = ?2, stale_at_decision = ?3,
+                     edited_before_validation = ?4
+               WHERE id = ?5 AND status = 'pending'",
+            rusqlite::params![
+                to.as_str(),
+                d.decided_at.0,
+                d.stale_at_decision.map(i64::from),
+                d.edited_before_validation.map(i64::from),
+                d.draft_id.to_string()
+            ],
+        )?;
+        if updated != 1 {
+            return Err(Error::DraftNotPending {
+                status: status.as_str().to_string(),
+            });
+        }
+        bump_logical_version(&tx)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Undo or redo a validated draft (Story 8.2b, FR32 / FR77): in **one** transaction, check the
+    /// draft is in the step's `from` status ([`Error::DraftStatusMismatch`]), write `study` (upsert +
+    /// FR51 snapshot) and move the draft to the step's `to` status with `decided_at = now` (the time
+    /// of the latest transition — the validation time lives in the study's `AiOrigin`); the decision
+    /// facts are kept as decided. One logical-version bump.
+    pub fn step_draft_decision(
+        &mut self,
+        study: &Study,
+        draft_id: Uuid,
+        step: DraftStep,
+        now: &Timestamp,
+    ) -> Result<()> {
+        self.check_writable()?;
+        self.check_study_identity(study)?;
+        let (from, to) = match step {
+            DraftStep::Undo => (DraftStatus::Validated, DraftStatus::ValidatedUndone),
+            DraftStep::Redo => (DraftStatus::ValidatedUndone, DraftStatus::Validated),
+        };
+        let tx = self.conn.transaction()?;
+        let found = draft_status_in(&tx, draft_id)?;
+        if found != from {
+            return Err(Error::DraftStatusMismatch {
+                expected: from.as_str().to_string(),
+                found: found.as_str().to_string(),
+            });
+        }
+        let payload = serde_json::to_string(study)?;
+        write_study_with_snapshot(&tx, study, &payload, now)?;
+        tx.execute(
+            "UPDATE ai_drafts SET status = ?1, decided_at = ?2 WHERE id = ?3 AND status = ?4",
+            rusqlite::params![to.as_str(), now.0, draft_id.to_string(), from.as_str()],
+        )?;
+        bump_logical_version(&tx)?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+/// The stored status of a draft inside a decision transaction ([`Error::DraftNotFound`] when the
+/// dossier holds no such draft; an unknown spelling is corrupt, never guessed).
+fn draft_status_in(tx: &rusqlite::Transaction<'_>, id: Uuid) -> Result<DraftStatus> {
+    let status: Option<String> = tx
+        .query_row(
+            "SELECT status FROM ai_drafts WHERE id = ?1",
+            rusqlite::params![id.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let status = status.ok_or(Error::DraftNotFound { id })?;
+    status
+        .parse()
+        .map_err(|e| corrupt(format!("ai_drafts.status of draft {id}: {e}")))
 }

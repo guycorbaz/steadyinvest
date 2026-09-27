@@ -166,6 +166,26 @@ pub enum Error {
         detail: String,
         cause: std::io::ErrorKind,
     },
+
+    /// A draft decision named a draft the dossier does not hold (Story 8.2b). Nothing was written.
+    #[error("draft {id} is not in the journal; nothing was written")]
+    DraftNotFound { id: Uuid },
+
+    /// A decision was asked for a draft that is no longer pending — it was decided meanwhile
+    /// (Story 8.2b). `status` is the stored status (its snake-case spelling). Nothing was written.
+    #[error("draft is already {status}, not pending; nothing was written")]
+    DraftNotPending { status: String },
+
+    /// An undo/redo step of a decision found the draft in another status than the step expects
+    /// (Story 8.2b). Nothing was written.
+    #[error("draft status is {found}, the step expected {expected}; nothing was written")]
+    DraftStatusMismatch { expected: String, found: String },
+
+    /// The stored study is no longer the one a decision was computed from — another write landed
+    /// in between (Story 8.2b, arch A7/A8: the re-check inside the decision transaction). Nothing
+    /// was written.
+    #[error("the study changed since the decision was prepared; nothing was written")]
+    StudyChangedSinceRead,
 }
 
 /// The KIND of a failure, for a caller that names causes in its own language (the app speaks
@@ -245,6 +265,7 @@ impl Error {
                 _ => ErrorKind::Other,
             },
             Error::LockHeld { .. } => ErrorKind::Locked,
+            Error::DraftNotFound { .. } => ErrorKind::Missing,
             Error::CorruptPayload { .. } | Error::CorruptJournalMeta { .. } => ErrorKind::Corrupt,
             Error::NewerJournalSchema { .. } | Error::NewerRowSchema { .. } => ErrorKind::NewerData,
             Error::Migration { .. } => ErrorKind::Migration,
@@ -412,6 +433,17 @@ mod tests {
                 detail: "the partial file: exists".to_string(),
                 cause: std::io::ErrorKind::AlreadyExists,
             },
+            Error::DraftNotFound {
+                id: Uuid::from_u128(3),
+            },
+            Error::DraftNotPending {
+                status: "validated".to_string(),
+            },
+            Error::DraftStatusMismatch {
+                expected: "validated".to_string(),
+                found: "rejected".to_string(),
+            },
+            Error::StudyChangedSinceRead,
         ]
     }
 
@@ -441,14 +473,18 @@ mod tests {
                 | Error::ReadCopy { .. }
                 | Error::ChangedDuringCopy
                 | Error::SidecarNotWritable
-                | Error::Backup { .. } => {}
+                | Error::Backup { .. }
+                | Error::DraftNotFound { .. }
+                | Error::DraftNotPending { .. }
+                | Error::DraftStatusMismatch { .. }
+                | Error::StudyChangedSinceRead => {}
             }
         }
-        // 21 variants; `WriteProtected` and `WriteProtectedOutdated` are sampled for both of
-        // their causes (file, directory).
+        // 25 variants (21 + the four draft-decision variants of Story 8.2b); `WriteProtected` and
+        // `WriteProtectedOutdated` are sampled for both of their causes (file, directory).
         assert_eq!(
             sample_errors().len(),
-            23,
+            27,
             "one sample per variant (+2 causes)"
         );
     }
