@@ -195,6 +195,9 @@ A stable English `snake_case` code (never shown in the UI) + a French message:
 - `not_a_dossier` — « Le fichier {chemin} n'est pas un dossier SteadyInvest ; rien n'a été lu. »
 - `dossier_identity_unreadable` — « L'identité du fichier du dossier n'a pas pu être lue ; rien n'a été enregistré. »
 - `invalid_call` — « L'appel au serveur MCP est mal formé ({détail}) ; rien n'a été enregistré. » (a server defect, logged — never an AI proposal's fault)
+- *Added by Story 8.4 (2026-09-28, owner-pending):*
+- `config_unreadable` — « La configuration de l'application ({chemin}) n'a pas pu être lue ; aucun dossier n'a été déterminé, rien n'a été lu. » (an invalid `config.json` is refused, never guessed around — the app moves it aside on its next launch)
+- `dossier_error` — « Le dossier n'a pas pu être lu ou écrit ({cause}) ; rien n'a été enregistré. » (a failure with no named MCP cause, e.g. an SQLite I/O error — logged)
 
 ## 4. Shared components (`app/ui/components/`)
 
