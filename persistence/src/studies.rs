@@ -300,10 +300,21 @@ impl Journal {
     /// `PRAGMA foreign_keys = true`) is never violated and **no orphan** is left behind; every other
     /// study's rows are untouched. Bumps the logical version. An absent id is a no-op success
     /// (idempotent — nothing to delete is not an error).
+    ///
+    /// **Its AI drafts go with it** (Story 8.2a, owner decision O7, FR55): the drafts whose
+    /// `study_id` (a note / cell / judgment draft about it) **or** `created_study_id` (the validated
+    /// draft study it came from) is this study are deleted first, in the same transaction (the two
+    /// columns are FKs to `studies`). A pending draft study has neither and is untouched. One
+    /// `logical_version` bump for the whole act — deletes fire no
+    /// `trg_ai_drafts_bump_logical_version` (it fires on INSERT only).
     pub fn delete_study(&mut self, id: Uuid) -> Result<()> {
         self.check_writable()?;
         let id_text = id.to_string();
         let tx = self.conn.transaction()?;
+        let removed_drafts = tx.execute(
+            "DELETE FROM ai_drafts WHERE study_id = ?1 OR created_study_id = ?1",
+            rusqlite::params![id_text],
+        )?;
         let removed_judgments = tx.execute(
             "DELETE FROM judgments WHERE study_id = ?1",
             rusqlite::params![id_text],
@@ -321,7 +332,7 @@ impl Journal {
         )?;
         // Only a real removal bumps the heartbeat — deleting an absent id is a true no-op (no phantom
         // version drift for the stale-restore detection / external sync to see).
-        if removed_study > 0 || removed_judgments > 0 || cleared_links > 0 {
+        if removed_study > 0 || removed_judgments > 0 || cleared_links > 0 || removed_drafts > 0 {
             bump_logical_version(&tx)?;
         }
         tx.commit()?;

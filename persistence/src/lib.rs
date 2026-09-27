@@ -11,8 +11,10 @@
 //! cause-named error on writes (NFR-R3). Epic 5 added whole-journal export/import (`export`),
 //! raw-file backup/restore (`restore`), the sync-folder guard + single-instance lock
 //! (`journal`), and the local price-history cache (`price_history`). Epic 6 added the dated,
-//! source-aware FX-rate store (`fx`, Story 6.5, FR28).
+//! source-aware FX-rate store (`fx`, Story 6.5, FR28). Epic 8 adds the AI drafts table
+//! (`drafts`, migration v8, Story 8.2a).
 
+mod drafts;
 mod error;
 mod export;
 mod fx;
@@ -27,6 +29,7 @@ mod transactions;
 mod util;
 mod watchlist;
 
+pub use drafts::DraftRecord;
 pub use error::{Error, ErrorKind, Result};
 pub use export::{
     ImportSummary, JournalExport, JournalSnapshot, JudgmentSnapshotRecord, StudyRecord,

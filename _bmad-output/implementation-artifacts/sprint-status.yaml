@@ -701,9 +701,14 @@ development_status:
   8-0-ux-pass-ai-assistance-surfaces: done
   # 2026-09-27: 8-1 story file created (create-story) → ready-for-dev. Owner decision: no migration /
   #             no SCHEMA_VERSION bump (not in production) — notes are a plain additive field.
-  # 2026-09-27: 8-1 dev complete (headless check done) → review; Guy's on-display check pending.
-  8-1-study-notes: review
-  8-2a-drafts-table: backlog
+  # 2026-09-27: 8-1 dev complete (headless check done) → review; G3 3 layers, 17 fixes; Guy's go →
+  #             PR #257 merged (b7f1def) → done.
+  8-1-study-notes: done
+  # 2026-09-27: 8-2a story file created → ready-for-dev; branch feat/8-2a-drafts-table after #257.
+  # 2026-09-27: 8-2a dev complete (1179 tests; v8 migration, drafts read/export/import, O7 cascade,
+  #             v8.db corpus) → review.
+  # 2026-09-27: 8-2a G3 review applied (tighter checks, newer vs corrupt, safe import; 1187 tests).
+  8-2a-drafts-table: review
   8-2b-ai-origin-staleness-and-decisions: backlog
   8-3-mcp-access-gated-access-surface: backlog
   8-4-steadyinvest-mcp-stdio-server: backlog

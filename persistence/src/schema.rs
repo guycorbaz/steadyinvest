@@ -118,6 +118,84 @@ pub(crate) fn migrate_to_v7(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Migration step 8 (Story 8.2a, Epic 8 [P4] — arch §Phase 4 A3/A4; FR70–FR72, FR77): the **AI
+/// drafts** table. A draft is a proposal an AI client submits through MCP (Story 8.3); it waits here,
+/// physically outside the `Study` blob the engine reads — which is what makes "a pending draft
+/// changes nothing" true by construction — until the owner decides it (Story 8.2b). A `CREATE
+/// TABLE` step like v5; `DDL_V1` stays frozen.
+///
+/// - **Every enum spelling is closed by a CHECK** (`kind`, `status`, the two 0/1 booleans): the
+///   contract's fail-loud enum policy, enforced by the engine too.
+/// - **Comment and origin are mandatory** (NFR-A4): `NOT NULL` + a non-blank CHECK. SQLite's
+///   `trim()` strips spaces only — the full Unicode-blank refusal, with a named reason, is 8.3's.
+/// - **Shape rules** (defence in depth — 8.3 refuses earlier with a named reason): a draft study
+///   has no `study_id` and carries its proposed `native_currency`, every other kind targets a study
+///   and carries no currency; a pending draft has no `decided_at` and a decided one has it.
+/// - **Decision facts**: a pending draft carries no `stale_at_decision` / `edited_before_validation`;
+///   `edited_before_validation` exists only on a validated (or validated-then-undone) draft.
+/// - **Draft studies** (arch A8, Story 8.7): their validation is **not undoable** — it is reversed
+///   by deleting the created study, which deletes its drafts (O7) — so a draft study is never
+///   `validated_undone`, and it carries `created_study_id` exactly when `validated`; no other kind
+///   ever carries it.
+/// - **Ids are canonical UUID text** (lower-case, 36 chars — how the app writes them): the TEXT
+///   comparisons of the cascade and the reference checks cannot miss a differently spelled id.
+/// - **FKs to `studies`** (RESTRICT, `foreign_keys=ON` on every read-write open): no orphan draft;
+///   `delete_study` deletes a study's drafts first (O7).
+/// - **The trigger `trg_ai_drafts_bump_logical_version`** bumps `journal_meta.logical_version` on
+///   every inserted draft — the MCP draft connection's only write besides the insert itself (arch
+///   A3: its authorizer allows `UPDATE journal_meta` only from THIS trigger's name — never rename
+///   it). It fires on INSERT only: an import upsert that updates an existing row fires nothing, and
+///   the import's own bump covers it (see `util::bump_logical_version`).
+pub(crate) fn migrate_to_v8(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE ai_drafts (
+             id                       TEXT PRIMARY KEY CHECK (id = lower(id) AND length(id) = 36),
+             kind                     TEXT NOT NULL
+                                      CHECK (kind IN ('study','note','cell','judgment')),
+             study_id                 TEXT REFERENCES studies(id)
+                                      CHECK (study_id IS NULL
+                                             OR (study_id = lower(study_id)
+                                                 AND length(study_id) = 36)),
+             security_ticker          TEXT NOT NULL,
+             native_currency          TEXT,
+             status                   TEXT NOT NULL DEFAULT 'pending'
+                                      CHECK (status IN
+                                          ('pending','validated','validated_undone','rejected')),
+             created_at               TEXT NOT NULL,
+             decided_at               TEXT,
+             comment                  TEXT NOT NULL CHECK (length(trim(comment)) > 0),
+             origin_client            TEXT NOT NULL CHECK (length(trim(origin_client)) > 0),
+             origin_model             TEXT NOT NULL CHECK (length(trim(origin_model)) > 0),
+             stale_at_decision        INTEGER CHECK (stale_at_decision IN (0,1)),
+             edited_before_validation INTEGER CHECK (edited_before_validation IN (0,1)),
+             created_study_id         TEXT REFERENCES studies(id)
+                                      CHECK (created_study_id IS NULL
+                                             OR (created_study_id = lower(created_study_id)
+                                                 AND length(created_study_id) = 36)),
+             payload                  TEXT NOT NULL,
+             CHECK ((kind = 'study') = (study_id IS NULL)),
+             CHECK ((kind = 'study') = (native_currency IS NOT NULL)),
+             CHECK (created_study_id IS NULL OR kind = 'study'),
+             CHECK (kind <> 'study'
+                    OR (status <> 'validated_undone'
+                        AND ((status = 'validated') = (created_study_id IS NOT NULL)))),
+             CHECK ((status = 'pending') = (decided_at IS NULL)),
+             CHECK (status <> 'pending'
+                    OR (stale_at_decision IS NULL AND edited_before_validation IS NULL)),
+             CHECK (edited_before_validation IS NULL
+                    OR status IN ('validated','validated_undone'))
+         );
+         CREATE INDEX idx_ai_drafts_status ON ai_drafts(status);
+         CREATE INDEX idx_ai_drafts_study_id ON ai_drafts(study_id);
+         CREATE INDEX idx_ai_drafts_created_study_id ON ai_drafts(created_study_id);
+         CREATE TRIGGER trg_ai_drafts_bump_logical_version AFTER INSERT ON ai_drafts
+         BEGIN
+             UPDATE journal_meta SET logical_version = logical_version + 1 WHERE id = 1;
+         END;",
+    )?;
+    Ok(())
+}
+
 /// The complete v1 DDL. Frozen once shipped — schema changes go through new migration steps.
 const DDL_V1: &str = "
     -- Journal identity (ADD6): one row, journal_id (UUID) + monotonic logical_version.
@@ -235,12 +313,14 @@ mod tests {
 
     #[test]
     fn the_registry_creates_exactly_the_architecture_tables() {
-        // v1 froze 8 tables; Story 5.1 (v5) adds `price_history` (the first NEW table since v1). The
-        // full registry therefore yields 9. A drift here is a migration-step change, not an edit.
+        // v1 froze 8 tables; Story 5.1 (v5) adds `price_history` (the first NEW table since v1) and
+        // Story 8.2a (v8) `ai_drafts`. The full registry therefore yields 10. A drift here is a
+        // migration-step change, not an edit.
         let conn = v1_connection();
         assert_eq!(
             table_names(&conn),
             vec![
+                "ai_drafts",
                 "fx_rates",
                 "holdings",
                 "journal_meta",
@@ -271,8 +351,8 @@ mod tests {
         let conn = v1_connection();
         assert_eq!(
             migrations::user_version(&conn).expect("user_version reads"),
-            7,
-            "the registry migrates a fresh DB to the latest version (v7)"
+            8,
+            "the registry migrates a fresh DB to the latest version (v8)"
         );
         assert!(
             column_names(&conn, "watchlist_items").contains(&"study_id".to_string()),
@@ -428,5 +508,29 @@ mod tests {
         let names: Vec<&str> = indexes.iter().map(|(n, _)| n.as_str()).collect();
         assert!(names.contains(&"idx_studies_security_ticker"));
         assert!(names.contains(&"idx_studies_status"));
+
+        // Triggers follow trg_<table>_<purpose> (Story 8.2a — the first trigger in the schema).
+        let mut stmt = conn
+            .prepare(
+                "SELECT name, tbl_name FROM sqlite_master WHERE type = 'trigger' ORDER BY name",
+            )
+            .expect("trigger names queryable");
+        let triggers: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .expect("trigger names read")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("trigger names collect");
+        for (name, tbl) in &triggers {
+            assert!(
+                name.starts_with(&format!("trg_{tbl}_")),
+                "trigger {name} on {tbl} does not follow trg_<table>_<purpose>"
+            );
+        }
+        assert!(
+            triggers
+                .iter()
+                .any(|(n, _)| n == "trg_ai_drafts_bump_logical_version"),
+            "the v8 trigger exists under the name 8.3's authorizer relies on"
+        );
     }
 }

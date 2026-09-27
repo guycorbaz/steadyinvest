@@ -19,9 +19,11 @@
 //!   the file. (Destructive restore-from-backup is Story 5.4.)
 //!
 //! Post-v1 additions ride the #78 additive rail (`#[serde(default)]` + `skip_serializing_if`):
-//! `fx_rates` landed with Epic 6, the FR51 `judgments` time-series with issue #34 (PR 3). The
+//! `fx_rates` landed with Epic 6, the FR51 `judgments` time-series with issue #34 (PR 3), the AI
+//! drafts (`ai_drafts`) with Story 8.2a. The
 //! CURRENT judgment still travels inside each [`Study`] blob; the time-series carries the past.
 
+use crate::drafts::{DraftRecord, PayloadProblem, check_payload, is_currency_code, is_rfc3339_utc};
 use crate::error::{Error, Result};
 use crate::fx::FxRateItem;
 use crate::holdings::{HoldingItem, PortfolioItem};
@@ -31,7 +33,9 @@ use crate::util::bump_logical_version;
 use crate::watchlist::WatchItem;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use steadyinvest_contract::{ImportError, SCHEMA_VERSION, Study, Timestamp, sha256_hex};
+use steadyinvest_contract::{
+    DRAFT_PAYLOAD_VERSION, ImportError, SCHEMA_VERSION, Study, Timestamp, sha256_hex,
+};
 use uuid::Uuid;
 
 /// One study plus its lifecycle `status` (the indexed column, not part of the [`Study`] blob — so it
@@ -85,6 +89,12 @@ pub struct JournalSnapshot {
     /// rejection on an old build — never a silent drop of the time-series.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub judgment_snapshots: Vec<JudgmentSnapshotRecord>,
+    /// The AI drafts (Story 8.2a, FR60/FR77) — the same #78 additive rail: an OLD file (no array)
+    /// imports fine; a draft-less dossier exports WITHOUT the array; a file that DOES carry drafts
+    /// is a typed rejection on an older build (`deny_unknown_fields` above) — never a silent drop.
+    /// Every column crosses byte-faithfully (the payload as its stored string).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ai_drafts: Vec<DraftRecord>,
 }
 
 /// One FR51 snapshot row, exported **byte-faithfully** (issue #34, PR 3): `payload` is the RAW
@@ -129,6 +139,8 @@ pub struct ImportSummary {
     pub fx_rates: usize,
     /// The FR51 history snapshots the file carried (issue #34, PR 3; `0` for a pre-#34 file).
     pub judgment_snapshots: usize,
+    /// The AI drafts the file carried (Story 8.2a; `0` for a pre-8.2a file).
+    pub ai_drafts: usize,
 }
 
 /// Serialize a snapshot into its envelope JSON. The hash is taken over the **payload** (the snapshot
@@ -219,6 +231,7 @@ impl Journal {
             transactions: self.list_all_transactions()?,
             fx_rates: self.list_fx_rates()?,
             judgment_snapshots: self.all_judgment_snapshot_rows()?,
+            ai_drafts: self.list_drafts()?,
         })
     }
 
@@ -383,6 +396,133 @@ impl Journal {
                     js.payload
                 ],
             )?;
+        }
+
+        // AI drafts (Story 8.2a) — after studies (the `study_id` / `created_study_id` FKs). Every
+        // draft is validated before its write, and any failure is a **malformed** (or newer-
+        // version) snapshot naming the draft — the whole import rolls back:
+        // - references: a study carried by the file OR already in this dossier (a draft about an
+        //   existing study can travel without it);
+        // - fields: comment and origin not blank (Unicode whitespace, beyond the table's ASCII
+        //   `trim`), a ticker, a draft study's currency in ISO form, timestamps in RFC3339 UTC;
+        // - payload: parses at this build's version and fits its kind (the read's rule) — a newer
+        //   payload version is an unsupported version, never "corrupt";
+        // - the table's CHECKs (named, with SQLite's message, never a raw error).
+        // Upsert by id, byte-faithful — but **never backwards**: an already-decided draft is kept
+        // as it is when the file carries it pending (an older export re-imported after a
+        // decision), and a recorded `created_study_id` is never erased. An inserted row bumps the
+        // version through `trg_ai_drafts_bump_logical_version` (see `util::bump_logical_version`).
+        for d in &snapshot.ai_drafts {
+            let malformed = |what: String| Error::ImportMalformed {
+                detail: format!("draft {}: {what}", d.id),
+            };
+            for referenced in [d.study_id, d.created_study_id].into_iter().flatten() {
+                let in_dossier = tx
+                    .query_row(
+                        "SELECT 1 FROM studies WHERE id = ?1",
+                        rusqlite::params![referenced.to_string()],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if !study_ids.contains(&referenced) && !in_dossier {
+                    return Err(malformed(format!(
+                        "references study {referenced}, absent from the snapshot and the dossier"
+                    )));
+                }
+            }
+            for (column, text) in [
+                ("comment", &d.comment),
+                ("origin_client", &d.origin_client),
+                ("origin_model", &d.origin_model),
+                ("security_ticker", &d.security_ticker),
+            ] {
+                if text.trim().is_empty() {
+                    return Err(malformed(format!("{column} is blank")));
+                }
+            }
+            if let Some(currency) = &d.native_currency
+                && !is_currency_code(currency)
+            {
+                return Err(malformed(format!(
+                    "native_currency {currency:?} is not a three-letter code"
+                )));
+            }
+            for (column, stamp) in [
+                ("created_at", Some(&d.created_at)),
+                ("decided_at", d.decided_at.as_ref()),
+            ] {
+                if let Some(stamp) = stamp
+                    && !is_rfc3339_utc(&stamp.0)
+                {
+                    return Err(malformed(format!(
+                        "{column} {:?} is not an RFC3339 UTC time",
+                        stamp.0
+                    )));
+                }
+            }
+            check_payload(&d.payload, d.kind).map_err(|e| match e {
+                PayloadProblem::Newer { version } => Error::ImportVersion {
+                    found: u32::try_from(version).unwrap_or(u32::MAX),
+                    supported: DRAFT_PAYLOAD_VERSION,
+                },
+                other => malformed(other.to_string()),
+            })?;
+            tx.execute(
+                "INSERT INTO ai_drafts
+                     (id, kind, study_id, security_ticker, native_currency, status, created_at,
+                      decided_at, comment, origin_client, origin_model, stale_at_decision,
+                      edited_before_validation, created_study_id, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                 ON CONFLICT(id) DO UPDATE SET
+                     kind = excluded.kind,
+                     study_id = excluded.study_id,
+                     security_ticker = excluded.security_ticker,
+                     native_currency = excluded.native_currency,
+                     status = excluded.status,
+                     created_at = excluded.created_at,
+                     decided_at = excluded.decided_at,
+                     comment = excluded.comment,
+                     origin_client = excluded.origin_client,
+                     origin_model = excluded.origin_model,
+                     stale_at_decision = excluded.stale_at_decision,
+                     edited_before_validation = excluded.edited_before_validation,
+                     created_study_id = excluded.created_study_id,
+                     payload = excluded.payload
+                 WHERE (ai_drafts.status = 'pending' OR excluded.status <> 'pending')
+                   AND NOT (ai_drafts.created_study_id IS NOT NULL
+                            AND excluded.created_study_id IS NULL)",
+                rusqlite::params![
+                    d.id.to_string(),
+                    d.kind.as_str(),
+                    d.study_id.map(|u| u.to_string()),
+                    d.security_ticker,
+                    d.native_currency,
+                    d.status.as_str(),
+                    d.created_at.0,
+                    d.decided_at.as_ref().map(|t| t.0.clone()),
+                    d.comment,
+                    d.origin_client,
+                    d.origin_model,
+                    d.stale_at_decision,
+                    d.edited_before_validation,
+                    d.created_study_id.map(|u| u.to_string()),
+                    d.payload,
+                ],
+            )
+            .map_err(|e| match e {
+                // A CHECK the file violates (e.g. a pending draft with a decision date) is a
+                // malformed snapshot, named as such — never a raw SQLite error to the user.
+                rusqlite::Error::SqliteFailure(f, message)
+                    if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+                {
+                    malformed(format!(
+                        "violates the drafts table's rules ({})",
+                        message.unwrap_or_else(|| f.to_string())
+                    ))
+                }
+                other => Error::from(other),
+            })?;
         }
 
         // Holdings — attach to their OWN portfolio (Story 6.1, FR37). The set of portfolio ids just
@@ -574,7 +714,8 @@ impl Journal {
             || !snapshot.transactions.is_empty()
             || !snapshot.portfolios.is_empty()
             || !snapshot.fx_rates.is_empty()
-            || !snapshot.judgment_snapshots.is_empty();
+            || !snapshot.judgment_snapshots.is_empty()
+            || !snapshot.ai_drafts.is_empty();
         if applied {
             bump_logical_version(&tx)?;
         }
@@ -592,6 +733,7 @@ impl Journal {
             holdings: snapshot.holdings.len(),
             transactions: snapshot.transactions.len(),
             judgment_snapshots: snapshot.judgment_snapshots.len(),
+            ai_drafts: snapshot.ai_drafts.len(),
         })
     }
 }
