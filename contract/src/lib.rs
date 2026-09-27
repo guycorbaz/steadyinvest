@@ -24,6 +24,7 @@ pub mod export;
 pub mod money;
 pub mod provenance;
 pub mod study;
+pub mod text;
 pub mod versioning;
 
 // Portfolio / FX types arrive with their epics (Epic 4/6 portfolio & FX).
@@ -41,4 +42,5 @@ pub use export::{ImportError, StudyExport, from_export_json, sha256_hex, to_expo
 pub use money::Money;
 pub use provenance::{Provenance, Timestamp};
 pub use study::{AiPlaced, ForecastLowOption, Judgment, Note, Study, YearData};
+pub use text::is_blank;
 pub use versioning::SCHEMA_VERSION;
