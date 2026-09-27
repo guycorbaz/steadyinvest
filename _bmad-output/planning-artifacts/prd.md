@@ -74,7 +74,7 @@ editHistory:
   - date: '2026-09-27'
     changes: "G2 round 2: validation fixes + owner decisions O1–O7. One AI-exclusion list everywhere (portfolio — holdings, transactions, dividends — watchlist, keys, configuration); MCP scope adds computed outputs, study rationale and the drafts record; validated AI value = owner entry (manual, `?`) with AI origin shown until next owner edit (FR17/FR20/FR22/FR33/FR74); notes are [P4] in P1 wording (FR49/FR51, Success, Journey 5); stale drafts validatable after confirmation, ✓ target moves to `?` without un-validation (FR72/FR74); ≤ 2 actions in FR74; MCP serves the last-used dossier also while the app is closed, names the dossier in every response (FR69/FR73); note deletion kept in history (FR78); study deletion deletes its drafts (FR55/FR77); privacy residue of free text (NFR-S3); remote-model caveat (Security & privacy, Constraints); « dossier » = journal file (Appendix A); frontmatter 'suggested line' and AI-greffier entries marked superseded"
   - date: '2026-09-27'
-    changes: "G2 round 3 (G3 review of PR #255, owner decisions D1–D10): draft study carries a proposed currency and optional name, duplicates keyed by identifier + currency, validation through the prefilled create dialog (FR70); one pending draft per target, provider market facts not draftable, missing target not validatable (FR72); `?` in every case, validation undoable and recorded (FR74, FR77); older builds refuse exports carrying notes/AI marks/drafts (FR60); dossier identity is not configuration (NFR-S4, Appendix A); CLI/AI façade wording updated"
+    changes: "G2 round 3 (G3 review of PR #255, owner decisions D1–D10; D11 FR68 decision time = explicit « Valider l'étude » on a full verdict, differences highlighted, delivered in Story 8.8): draft study carries a proposed currency and optional name, duplicates keyed by identifier + currency, validation through the prefilled create dialog (FR70); one pending draft per target, provider market facts not draftable, missing target not validatable (FR72); `?` in every case, validation undoable and recorded (FR74, FR77); older builds refuse exports carrying notes/AI marks/drafts (FR60); dossier identity is not configuration (NFR-S4, Appendix A); CLI/AI façade wording updated"
 ---
 
 # Product Requirements Document - steadyinvest
@@ -905,7 +905,13 @@ withholding-refund tracking, export/share, eventual public release.
   method" verdict is produced **on demand** for comparison/debug, **never persisted and never
   automatic**. On a `method_version` change the UI offers a labelled
   **"frozen (vNN, DD/MM) vs recomputed (vMM, today)"** compare. (New requirement; arch ADD10; GitHub
-  issue #3.) **[P4]:** no verdict is frozen or changed through MCP.
+  issue #3.) **Decision time (owner, 2026-09-27):** the verdict is frozen when the owner **validates
+  the study** with an explicit action, available only when the verdict is full (every load-bearing
+  input `✓`); validating again later replaces the frozen verdict, the previous one stays in the study
+  history (FR51). Whenever the current verdict later differs from the frozen one — after a refresh,
+  an owner edit or a method change — the difference is **highlighted**, naming what changed and why
+  where known (FR29), neutrally. **[P4]:** no verdict is frozen or changed through MCP; the MCP read
+  returns the frozen verdict beside the current one. (Delivered in Epic 8, Story 8.8.)
 
 ### AI Assistance (MCP)
 > Traceability: Journey 6 → FR69–FR78 (with FR13, FR14, FR33, FR64) → Epic 8.

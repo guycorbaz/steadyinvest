@@ -852,8 +852,8 @@ drift appears.
 _Scope: Epic 8 [P4], PRD FR14, FR33 [P4], FR67/FR68 [P4], FR69–FR78, NFR-S1–S4, NFR-R2, NFR-A1–A4.
 No AI runs inside the app: the owner's AI client (currently Claude Code on the workstation) reads
 studies and submits drafts through a local MCP server; the owner validates or rejects each draft in
-the UI. Owner decisions O1–O7 (G2 round 2) and D1–D10 (G2 round 3, after the G3 review of PR #255)
-and architecture decisions A1–A12 below are final._
+the UI. Owner decisions O1–O7 (G2 round 2) and D1–D11 (G2 round 3, after the G3 review of PR #255)
+and architecture decisions A1–A13 below are final._
 
 ### Owner decisions this section implements
 
@@ -884,6 +884,8 @@ and architecture decisions A1–A12 below are final._
   `SCHEMA_VERSION` is bumped (A5, A6).
 - **D10** — the dossier is resolved **per call**; each submission carries the `journal_id` + path the
   AI read and is refused on mismatch.
+- **D11** — FR68: the verdict is frozen by an explicit « Valider l'étude » on a full verdict; any
+  later difference between frozen and current verdict is highlighted (A13, Story 8.8).
 
 ### A1 — Separate binary crate, and its dependency boundary
 
@@ -1151,6 +1153,27 @@ and architecture decisions A1–A12 below are final._
   `cargo deny` (licence + advisories) and must not pull `reqwest`/network features into the closure
   (A1 test).
 
+### A13 — Frozen decision-time verdict (FR68, owner decision D11)
+
+- **Decision:** an explicit study action « Valider l'étude », enabled only when the verdict is
+  `Full`, stores `#[serde(default)] frozen_verdict: Option<FrozenVerdict>` in the `Study` blob:
+  the verdict facts (verdict, zones, upside/downside ratio, 5-year potential), the `inputs_hash`
+  and `method_version` already carried by `core::verdict::FullVerdict`, the load-bearing input
+  values it was computed from, and `frozen_at`. A study verdict involves no FX (NFR-C4), so "dated
+  FX" in FR68 applies only where a consolidated figure is later frozen — none in this story.
+  Validating again replaces it; the previous one stays in the study history (FR51). The freeze is
+  an ordinary study upsert, undoable in the session (FR32).
+- **Difference:** the current verdict is always computed live (never persisted); when it differs
+  from the frozen one — facts, `inputs_hash` or `method_version` — the study shows both, labelled
+  « figé (vNN, JJ/MM) » and « actuel (vMM, aujourd'hui) », naming the changed items and the cause
+  where known (refresh, owner edit, method change — FR29, the #252 method stamp). Neutral wording
+  only (FR13).
+- **Export compatibility:** same rule as A5 — `SCHEMA_VERSION` bump with re-stamp, so an older build
+  refuses an export or row carrying a frozen verdict instead of dropping it.
+- **MCP:** the study read returns the frozen verdict beside the current one; `frozen_verdict` is not a
+  draftable field, and the 8.3 rejected-writes suite covers it (FR68 [P4]). A validated AI draft
+  changes the current verdict only, so the difference is highlighted like any other change.
+
 ### Stories (Epic 8, ordered)
 
 8.0 UX pass: inbox, AI frame, reminders, AI line, AI-origin marks, notes, drafts record, French
@@ -1159,7 +1182,7 @@ cascade (A4) · 8.2b AI origin, fingerprint, `decide_draft` (A6–A8) · 8.3 `Mc
 suites + restore safety (A2, A3, A11, O1) · 8.4 `steadyinvest-mcp` binary, dossier resolution,
 dependency-closure test, registration doc (A1, A10, A12) · 8.5a AI frame, inbox (read), polling
 (A9) · 8.5b decisions (A7, A8, O4, O5) · 8.6 AI judgment lines (FR33/72) · 8.7 draft-study end-to-end
-+ record view.
++ record view · 8.8 frozen decision-time verdict (FR68, A13).
 
 ## Architecture Validation Results
 

@@ -122,7 +122,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - FR65 [P1]: The user can run the full study and portfolio-risk workflow offline; the only online action is a user-initiated refresh. AI assistance [P4] is optional; no workflow requires it.
 - FR66 [P1]: The journal is kept in a portable local store an external system (e.g. file sync) can back up.
 - FR67 [P1]: The user can choose the journal directory; the app remembers recent journals and reopens the last-used journal on launch. The pointer `(journal_id, last-seen-version)` lives in per-machine app-config (via `directories`), never inside the journal. A single-instance lock guards the open journal. The app detects a sync folder (Synology/Dropbox/OneDrive/iCloud) and warns, keeping the live DB local with versioned backups to the sync folder (SQLite `journal_mode=DELETE/TRUNCATE`). (New requirement; arch ADD7/ADD8; GitHub issue #2.) [P4]: draft writes arriving through MCP never corrupt or race the open session.
-- FR68 [P1]: The decision-time verdict is frozen and immutable — stamped with `method_version`, dated FX and the exact inputs — and is the only verdict persisted. A "recompute with today's method" verdict is produced on demand for comparison/debug, never persisted and never automatic. On a `method_version` change the UI offers a labelled "frozen (vNN, DD/MM) vs recomputed (vMM, today)" compare. (New requirement; arch ADD10; GitHub issue #3.) [P4]: no verdict is frozen or changed through MCP.
+- FR68 [P1]: The decision-time verdict is frozen and immutable — stamped with `method_version`, dated FX and the exact inputs — and is the only verdict persisted. A "recompute with today's method" verdict is produced on demand for comparison/debug, never persisted and never automatic. On a `method_version` change the UI offers a labelled "frozen (vNN, DD/MM) vs recomputed (vMM, today)" compare. (New requirement; arch ADD10; GitHub issue #3.) Decision time (owner, 2026-09-27): the verdict is frozen when the owner validates the study with an explicit action, available only when the verdict is full (every load-bearing input `✓`); validating again later replaces the frozen verdict, the previous one stays in the study history (FR51). Whenever the current verdict later differs from the frozen one — after a refresh, an owner edit or a method change — the difference is highlighted, naming what changed and why where known (FR29), neutrally. [P4]: no verdict is frozen or changed through MCP; the MCP read returns the frozen verdict beside the current one. (Delivered in Epic 8, Story 8.8.)
 
 **AI Assistance (MCP) [P4]**
 - FR69 [P4]: An AI client can read, through MCP, the dossier's studies — data cells, provenance, judgments, study rationale, notes, judgment history and computed outputs (zones, upside/downside ratio, 5-year potential, verdict and its state) — and the record of drafts (FR77); the portfolio (holdings, transactions, dividends), the watchlist, keys and configuration are never exposed. The MCP server serves the last-used dossier, also while the app is closed, and every response names the dossier (identity and location) it read.
@@ -288,7 +288,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - FR59/FR60/FR61 → Epic 5 (export/import study + journal, restore with integrity)
 - FR63 → Epic 2 (labels/locale) + Epic 3 (provider/key) + Epic 4 (currency/thresholds) + Epic 5 (DB location) — incremental, no-wizard
 - FR64 → Epic 2 (always-visible disclaimer) + Epic 8 [P4] (inbox & AI-item disclaimer) · FR65 → Epic 1/Epic 2 (offline operation) · FR66 → Epic 1 (portable store) + Epic 5 (backup/restore)
-- FR67 → Epic 5 (journal directory, recent journals, single-instance lock, sync-folder warning) · FR68 → ADD10 (verdict versioning; no epic names it as covered — a pre-G2 gap, left as found)
+- FR67 → Epic 5 (journal directory, recent journals, single-instance lock, sync-folder warning) · FR68 → Epic 8, Story 8.8 (frozen decision-time verdict on « Valider l'étude », frozen vs current highlighted — owner decision D11, 2026-09-27)
 - FR15/FR17/FR20/FR21/FR22/FR49/FR51/FR55/FR60/FR65/FR67/FR68 [P4 additions] → Epic 8 (owner-only fetch/refresh, AI origin on validated values, `?` on validation, manual-rule reconciliation, notes & drafts in history, draft cascade on delete, drafts in export/backup, AI optional, MCP never races the session, no verdict changed through MCP)
 - FR69–FR78 → Epic 8 [P4] (MCP read, draft studies/notes/cells, inbox, one-by-one decision, owner-only fetch, draft record, study notes)
 - NFR-A1–A4, NFR-S1–S4, NFR-R2 [P4 additions] → Epic 8 [P4] (asymmetry, non-exposure, no provider call, draft origin, keys never in MCP responses, no network exposure, atomic draft writes — CI suites)
@@ -382,11 +382,12 @@ watchlist, keys or configuration — and **propose** new studies, notes and cell
 **only as commented drafts**. Drafts wait in a dossier-level inbox and take effect only when the
 owner validates them one by one in the UI; a pending draft changes no output. Capability asymmetry
 and non-exposure are enforced **by the SQLite engine and the crate dependency closure**, not by
-prompt. A UX pass (8.0) and study notes (8.1, AI-free) land first. The app's own outputs stay neutral; AI
+prompt. A UX pass (8.0) and study notes (8.1, AI-free) land first. The epic also delivers the
+frozen decision-time verdict (FR68, Story 8.8), which the MCP read exposes beside the current one. The app's own outputs stay neutral; AI
 text is always framed and labelled.
 **FRs covered:** FR13 (AI-text framing), FR14, FR17 (AI origin), FR33 (AI line), FR64 (inbox
-disclaimer), FR69–FR78 (+ P4 additions to FR15, FR20, FR21, FR22, FR49, FR51, FR55, FR60, FR65, FR67,
-FR68); NFR-S1–S4, NFR-R2, NFR-A1–A4.
+disclaimer), FR68 (frozen decision-time verdict, Story 8.8), FR69–FR78 (+ P4 additions to FR15, FR20, FR21,
+FR22, FR49, FR51, FR55, FR60, FR65, FR67); NFR-S1–S4, NFR-R2, NFR-A1–A4.
 
 ## Epic 1: Proven SSG core & data foundation (headless)
 
@@ -1109,6 +1110,7 @@ So that the inbox, the AI marks and the notes fit the app as the 7.0 pass made E
 - the **AI-origin mark** on a validated cell (visible origin, cleared by the next owner edit) and its confusability-gate entry (UX-DR15);
 - **study notes**: place relative to the rationale (`RationaleNote`), entry through a titled dialog (7.0 AC1), deletion confirmation;
 - the **drafts record** view and its filters, and how processed drafts appear in a study's history;
+- the **« Valider l'étude »** action (Story 8.8): where it sits, its disabled state with the reason when the verdict is not full, and how the frozen and current verdicts are shown side by side when they differ (labels, highlighted items, cause), on screen and in the study PDF;
 - keyboard operation of every one of these surfaces (NFR-U2);
 **And** it fixes the French wording (« IA » or « AI », « brouillon » or « proposition », « périmé », « validé puis annulé »…) as a list the UI stories copy verbatim, and the language of MCP refusal reasons
 **And** it decides the report impact: whether the study PDF (5.6) and the comparison (7.1) show notes, AI-origin marks and the "placed by AI" annotation — "unchanged, by decision" is an acceptable answer, but it is written down
@@ -1337,4 +1339,28 @@ So that the AI widens my search without a special path, and I can look back on w
 **And** a study's history shows its processed drafts, merged by joining `ai_drafts` on `study_id` / `created_study_id` and `decided_at` — a rejected draft appears although it wrote no snapshot (FR49, FR51, arch A12)
 **And** Journey 6 is walked end-to-end on a temp dossier (draft studies, a note, a lower forecast P/E, growth-judgment lines; one rejected, others validated) and the AI-assistance success criteria of the PRD are checked off
 **And** the app remains fully usable with no MCP server registered — AI assistance is optional (FR65)
+**And** the Epic 8 posture AC holds.
+
+### Story 8.8: Frozen decision-time verdict (FR68)
+
+As Guy,
+I want to validate a study and have its verdict frozen at that moment, then see plainly when today's verdict differs,
+So that my decision stays on record and a later refresh never silently rewrites what I decided on.
+
+**Acceptance Criteria:**
+
+**Given** an open study whose verdict is `Full` (every load-bearing input `✓`)
+**When** I choose « Valider l'étude » (placed and worded as specified in 8.0)
+**Then** the study stores `frozen_verdict: Option<FrozenVerdict>` (`#[serde(default)]`) in its blob: the verdict facts (verdict, zones, upside/downside ratio, 5-year potential), the `inputs_hash` and `method_version` of `core::verdict::FullVerdict`, the load-bearing input values it was computed from, and `frozen_at` — through the normal study upsert, with its history entry (FR68, FR51, owner decision D11, arch A13)
+**And** the action is unavailable while the verdict is provisional or withheld, and says why, naming the inputs still open (FR12)
+**And** validating again later replaces the frozen verdict; the previous one stays readable in the study history (FR51); the freeze is undoable in the session like any owner edit (FR32)
+**Given** a study with a frozen verdict
+**When** its current verdict — always computed live, never persisted — differs from the frozen one in its facts, `inputs_hash` or `method_version`, after a refresh, an owner edit, a validated AI draft or a method change
+**Then** the study shows both, labelled « figé (vNN, JJ/MM) » and « actuel (vMM, aujourd'hui) », highlights each item that changed (verdict, zone, U/D, 5-year potential), and names the cause where known (refresh, owner edit, method change via the #252 method stamp) (FR68, FR29)
+**And** when nothing differs, only the verdict and « validée le JJ/MM » are shown
+**And** the wording is neutral — facts only, no banned verb (FR13); the highlight is distinguishable without colour alone (NFR-U1)
+**And** the study PDF shows the frozen verdict and, when it differs, the current one, as decided in 8.0 (FR52)
+**And** the contract `SCHEMA_VERSION` is bumped with the re-stamp and relaxed import checks of arch A5, so an older build refuses an export or row carrying a frozen verdict instead of dropping it; an export/import round-trip preserves it (FR59, FR60, NFR-R5)
+**And** the MCP study read returns the frozen verdict beside the current one; `frozen_verdict` is not a draftable field, and the 8.3 rejected-writes and 8.4 non-exposure suites are extended to it — no verdict is frozen or changed through MCP (FR68 [P4], FR69)
+**And** a test: freeze, refresh with a changed EPS series, and check that the frozen verdict is byte-identical while the current one differs and the difference is shown; the same with a `METHOD_VERSION` change
 **And** the Epic 8 posture AC holds.
