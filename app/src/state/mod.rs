@@ -243,7 +243,7 @@ impl JournalState {
             if lock_is_stale(path) {
                 let _ = clear_lock(path);
             }
-            match Journal::open_with_mode(path, sync_mode_for(path)) {
+            match journal_io::open_journal(path, sync_mode_for(path)) {
                 Ok(journal) => {
                     let read_only = journal.read_only_cause();
                     return (
@@ -357,7 +357,7 @@ impl JournalState {
         };
 
         let result = if path.exists() {
-            Journal::open_with_mode(&path, sync_mode_for(&path))
+            journal_io::open_journal(&path, sync_mode_for(&path))
         } else {
             if let Some(parent) = path.parent()
                 && let Err(error) = std::fs::create_dir_all(parent)
