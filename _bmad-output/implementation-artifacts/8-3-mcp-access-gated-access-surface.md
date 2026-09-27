@@ -1,6 +1,6 @@
 # Story 8.3: `McpAccess` — the gated access surface (headless)
 
-Status: review
+Status: done
 
 ## Story
 
