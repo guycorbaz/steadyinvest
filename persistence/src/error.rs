@@ -218,6 +218,15 @@ pub enum Error {
     /// needs, or a timestamp that is not RFC3339 UTC. Nothing was written.
     #[error("the MCP access call is not well formed: {detail}; nothing was written")]
     McpInvalidCall { detail: String },
+
+    /// The MCP access surface cannot use the dossier at all (Story 8.3 G3): missing, not a journal,
+    /// being restored, needing the app's recovery, protected, or of unreadable identity — each named
+    /// by its [`McpUnavailable`](crate::mcp_access::McpUnavailable) reason. Nothing was read or
+    /// written.
+    #[error("the MCP access surface cannot use the dossier: {reason}; nothing was read or written")]
+    McpUnavailable {
+        reason: crate::mcp_access::McpUnavailable,
+    },
 }
 
 /// The KIND of a failure, for a caller that names causes in its own language (the app speaks
@@ -303,8 +312,30 @@ impl Error {
                 file_user_version,
                 supported,
             } if *file_user_version > i64::from(*supported) => ErrorKind::NewerData,
+            Error::McpUnavailable { reason } => {
+                use crate::mcp_access::McpUnavailable as U;
+                match reason {
+                    U::Missing => ErrorKind::Missing,
+                    U::NotADossier => ErrorKind::Corrupt,
+                    U::RestoreInProgress => ErrorKind::Replaced,
+                    U::Protected { .. } => ErrorKind::WriteProtected,
+                    U::NeedsRecovery | U::IdentityUnreadable { .. } => ErrorKind::Other,
+                }
+            }
             Error::Migration { .. } => ErrorKind::Migration,
             _ => ErrorKind::Other,
+        }
+    }
+
+    /// The stable MCP code of this failure (Story 8.3 G3 F5; Story 8.0 §3.3), `None` when it has no
+    /// named MCP cause (the MCP server logs it and answers a generic failure).
+    pub fn mcp_code(&self) -> Option<&'static str> {
+        match self {
+            Error::McpSchemaMismatch { .. } => Some("schema_mismatch"),
+            Error::McpDenied { .. } => Some("write_denied"),
+            Error::McpInvalidCall { .. } => Some("invalid_call"),
+            Error::McpUnavailable { reason } => Some(reason.code()),
+            _ => None,
         }
     }
 
@@ -495,6 +526,9 @@ mod tests {
             Error::McpInvalidCall {
                 detail: "a note draft carries no study".to_string(),
             },
+            Error::McpUnavailable {
+                reason: crate::mcp_access::McpUnavailable::Protected { directory: true },
+            },
         ]
     }
 
@@ -532,15 +566,16 @@ mod tests {
                 | Error::DraftStudyMismatch { .. }
                 | Error::McpSchemaMismatch { .. }
                 | Error::McpDenied { .. }
-                | Error::McpInvalidCall { .. } => {}
+                | Error::McpInvalidCall { .. }
+                | Error::McpUnavailable { .. } => {}
             }
         }
-        // 29 variants (21 + the five draft-decision variants of Story 8.2b + the three MCP access
+        // 30 variants (21 + the five draft-decision variants of Story 8.2b + the four MCP access
         // variants of Story 8.3); `WriteProtected` and `WriteProtectedOutdated` are sampled for both
-        // of their causes (file, directory). 8.3 delta: 28 → 31.
+        // of their causes (file, directory). 8.3 delta: 28 → 32.
         assert_eq!(
             sample_errors().len(),
-            31,
+            32,
             "one sample per variant (+2 causes)"
         );
     }
@@ -637,6 +672,30 @@ mod tests {
             Error::McpDenied { denials: vec![] }.kind(),
             ErrorKind::Other
         );
+        use crate::mcp_access::McpUnavailable as U;
+        let unavailable = |reason| Error::McpUnavailable { reason };
+        assert_eq!(unavailable(U::Missing).kind(), ErrorKind::Missing);
+        assert_eq!(unavailable(U::NotADossier).kind(), ErrorKind::Corrupt);
+        assert_eq!(
+            unavailable(U::RestoreInProgress).kind(),
+            ErrorKind::Replaced
+        );
+        assert_eq!(
+            unavailable(U::Protected { directory: false }).kind(),
+            ErrorKind::WriteProtected
+        );
+        // F5: the MCP code of every MCP failure; none for the others.
+        assert_eq!(mcp_schema(9).mcp_code(), Some("schema_mismatch"));
+        assert_eq!(
+            Error::McpDenied { denials: vec![] }.mcp_code(),
+            Some("write_denied")
+        );
+        assert_eq!(
+            unavailable(U::RestoreInProgress).mcp_code(),
+            Some("dossier_busy")
+        );
+        assert_eq!(unavailable(U::Missing).mcp_code(), Some("no_dossier"));
+        assert_eq!(Error::StudyChangedSinceRead.mcp_code(), None);
     }
 
     #[test]

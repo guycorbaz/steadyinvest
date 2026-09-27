@@ -163,50 +163,90 @@ pub fn restore_journal_file(live_path: &Path, backup_path: &Path) -> Result<()> 
 /// Story 8.3, arch A11) to finish before refusing.
 const RESTORE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(5000);
 
-/// Take an EXCLUSIVE SQLite lock on the live journal (Story 8.3, arch A11): the app's handles are
-/// dropped (the precondition), but an MCP draft connection takes no instance lock and may be
-/// mid-write. Holding the lock across the swap means no MCP write is in flight on the old file when
-/// it is replaced, and an MCP write that starts after the swap finds another file at the path (its
-/// identity re-check refuses it — `dossier_replaced`). `None` when there is nothing to lock: no live
-/// file, a file SQLite cannot lock as a database (not a journal — nothing can be writing it), or a
-/// write-protected one (no MCP write can land in it). A lock still held after `wait` refuses the
-/// restore by name — the live journal untouched.
+/// Take the live journal out of the way of every other connection before it is replaced (Story
+/// 8.3, arch A11): the app's handles are dropped (the precondition), but an MCP connection takes no
+/// instance lock and may be reading or writing.
+///
+/// 1. **Leave WAL** (`wal_checkpoint(TRUNCATE)` + `journal_mode = DELETE`): SQLite grants it only
+///    when no other connection has the file open in WAL — so after it, no connection holds the old
+///    file's `-wal` / `-shm`, which would otherwise alias the restored file's side files of the same
+///    names. Retried while readers finish, until `wait`; then refused by name. (The app sets its own
+///    journal mode again when it opens the restored file.)
+/// 2. **`BEGIN EXCLUSIVE`** (DELETE mode: it blocks readers and writers) held across the swap: no MCP
+///    call is in flight on the old file when it is replaced, and one that opened the old file meanwhile
+///    finds another file at the path (its identity re-check — `dossier_replaced`).
+///
+/// `None` when there is nothing to lock: no live file, a file that is not a database (nothing can
+/// be writing it), or a write-protected one (no write can land in it). Any other failure refuses the
+/// restore by name ([`Error::Restore`]) — the live journal untouched.
 fn lock_live_journal(live_path: &Path, wait: std::time::Duration) -> Result<Option<Connection>> {
+    use rusqlite::ErrorCode as C;
     if !live_path.exists() {
         return Ok(None);
     }
-    let conn = match Connection::open_with_flags(
+    let named = |what: &str, e: &dyn std::fmt::Display| Error::Restore {
+        detail: format!("{what}: {e}"),
+    };
+    let skip = |e: &rusqlite::Error| {
+        matches!(e, rusqlite::Error::SqliteFailure(f, _)
+            if matches!(f.code, C::NotADatabase | C::ReadOnly))
+    };
+    let busy = |e: &rusqlite::Error| {
+        matches!(e, rusqlite::Error::SqliteFailure(f, _)
+            if matches!(f.code, C::DatabaseBusy | C::DatabaseLocked))
+    };
+    let conn = Connection::open_with_flags(
         live_path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
-        Ok(conn) => conn,
-        Err(_) => return Ok(None), // not openable as a database: nothing can be writing it
-    };
-    if conn.is_readonly(rusqlite::MAIN_DB).unwrap_or(true) {
-        return Ok(None);
+    )
+    .map_err(|e| named("the live journal could not be opened for its lock", &e))?;
+    match conn.is_readonly(rusqlite::MAIN_DB) {
+        Ok(true) => return Ok(None),
+        Ok(false) => {}
+        Err(e) => {
+            return Err(named(
+                "the live journal could not be opened for its lock",
+                &e,
+            ));
+        }
     }
-    conn.busy_timeout(wait)?;
+    let deadline = std::time::Instant::now() + wait;
+    conn.busy_timeout(std::time::Duration::from_millis(50))
+        .map_err(|e| named("the live journal lock could not be set up", &e))?;
+    // 1. Leave WAL — only possible once no other connection holds the file.
+    loop {
+        let left = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+            .and_then(|()| {
+                conn.query_row("PRAGMA journal_mode = DELETE", [], |r| {
+                    r.get::<_, String>(0)
+                })
+            });
+        match left {
+            Ok(mode) if mode.eq_ignore_ascii_case("delete") => break,
+            Ok(_) => {}
+            Err(e) if skip(&e) => return Ok(None),
+            Err(e) if busy(&e) => {}
+            Err(e) => return Err(named("the live journal could not leave WAL mode", &e)),
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Restore {
+                detail: "another connection still uses the live journal".to_string(),
+            });
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // 2. The exclusive lock, for what is left of the wait.
+    let left = deadline.saturating_duration_since(std::time::Instant::now());
+    conn.busy_timeout(left.max(std::time::Duration::from_millis(1)))
+        .map_err(|e| named("the live journal lock could not be set up", &e))?;
     match conn.execute_batch("BEGIN EXCLUSIVE") {
         Ok(()) => Ok(Some(conn)),
-        Err(rusqlite::Error::SqliteFailure(code, _))
-            if matches!(
-                code.code,
-                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
-            ) =>
-        {
-            Err(Error::Restore {
-                detail: "a write in progress on the live journal did not end in time".to_string(),
-            })
-        }
-        Err(rusqlite::Error::SqliteFailure(code, _))
-            if matches!(
-                code.code,
-                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::ReadOnly
-            ) =>
-        {
-            Ok(None)
-        }
-        Err(e) => Err(Error::Sqlite(e)),
+        Err(e) if busy(&e) => Err(Error::Restore {
+            detail: "a write in progress on the live journal did not end in time".to_string(),
+        }),
+        Err(e) if skip(&e) => Ok(None),
+        Err(e) => Err(named("the live journal could not be locked", &e)),
     }
 }
 
@@ -216,8 +256,20 @@ pub(crate) fn restore_journal_file_with_wait(
     backup_path: &Path,
     wait: std::time::Duration,
 ) -> Result<()> {
-    // A11 — the exclusive lock first: a failure here leaves the live file untouched.
+    restore_journal_file_with(live_path, backup_path, wait, &mut || {})
+}
+
+/// [`restore_journal_file_with_wait`] with a test seam once the live file is locked (a test lets
+/// an MCP call wait on the lock there).
+pub(crate) fn restore_journal_file_with(
+    live_path: &Path,
+    backup_path: &Path,
+    wait: std::time::Duration,
+    after_lock: &mut dyn FnMut(),
+) -> Result<()> {
+    // A11 — out of WAL and the exclusive lock first: a failure here leaves the live file untouched.
     let lock = lock_live_journal(live_path, wait)?;
+    after_lock();
     let mut incoming = live_path.as_os_str().to_os_string();
     incoming.push("-restore-incoming");
     let incoming = std::path::PathBuf::from(incoming);

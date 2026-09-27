@@ -15,7 +15,7 @@ use steadyinvest_contract::{
 };
 use steadyinvest_persistence::{
     DossierIdentity, DraftFilter, DraftSubmission, Error, Journal, JournalMode, MAX_PAGE,
-    McpAccess, Page, SubmissionRefusal, SubmitError,
+    McpAccess, McpUnavailable, Page, SubmissionRefusal, SubmitError,
 };
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -234,7 +234,7 @@ fn a_delete_mode_dossier_is_read_and_written_the_same_way() {
 
 #[test]
 fn a_dossier_of_another_schema_version_is_refused_both_ways_and_left_untouched() {
-    for (label, version) in [("newer", 9_i64), ("older", 7)] {
+    for (label, version) in [("newer", 10_i64), ("older", 8)] {
         let dir = TempDir::new().expect("tempdir");
         let path = dossier(&dir, JournalMode::Delete);
         Connection::open(&path)
@@ -249,7 +249,7 @@ fn a_dossier_of_another_schema_version_is_refused_both_ways_and_left_untouched()
                 supported,
             }) => {
                 assert_eq!(file_user_version, version, "{label}");
-                assert_eq!(supported, 8, "{label}");
+                assert_eq!(supported, 9, "{label}");
             }
             other => panic!("{label}: expected a schema mismatch, got {other:?}"),
         }
@@ -269,10 +269,20 @@ fn a_dossier_of_another_schema_version_is_refused_both_ways_and_left_untouched()
 fn the_sidecars_a_read_leaves_beside_a_closed_wal_dossier_are_accepted_by_the_app() {
     let dir = TempDir::new().expect("tempdir");
     let path = dossier(&dir, JournalMode::Wal);
-    // The app closed and checkpointed (its drop): nothing beside the file, or empty sidecars.
+    // The app closed and checkpointed (its drop): nothing beside the file.
     McpAccess::at(&path)
         .list_studies(Page::first(10))
         .expect("read");
+    // F7: the read left its WAL side files — writable (the file's own mode), the WAL empty.
+    for suffix in ["-wal", "-shm"] {
+        let side = dir.path().join(format!("dossier.db{suffix}"));
+        let meta = std::fs::metadata(&side)
+            .unwrap_or_else(|_| panic!("an MCP read of a WAL dossier leaves {suffix}"));
+        assert!(!meta.permissions().readonly(), "{suffix} is writable");
+        if suffix == "-wal" {
+            assert_eq!(meta.len(), 0, "the -wal a reader leaves is empty");
+        }
+    }
     let app = Journal::open(&path).expect("the app opens after an MCP read");
     assert!(
         !app.is_read_only(),
@@ -740,29 +750,34 @@ fn a_call_that_is_not_well_formed_is_a_failure_not_a_refusal() {
 }
 
 #[test]
-fn a_missing_dossier_is_a_failure_and_creates_nothing() {
+fn a_missing_dossier_is_named_and_nothing_is_created() {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("absent.db");
     let access = McpAccess::at(&path);
-    assert!(matches!(
-        access.list_studies(Page::first(1)),
-        Err(Error::Sqlite(_))
-    ));
-    assert!(matches!(
-        access.submit_draft(&note(&path, 1)),
-        Err(SubmitError::Failed(Error::Sqlite(_)))
-    ));
+    match access.list_studies(Page::first(1)) {
+        Err(Error::McpUnavailable {
+            reason: McpUnavailable::Missing,
+        }) => {}
+        other => panic!("expected no_dossier, got {other:?}"),
+    }
+    match access.submit_draft(&note(&path, 1)) {
+        Err(e) => assert_eq!(e.code(), Some("no_dossier")),
+        Ok(id) => panic!("accepted {id} without a dossier"),
+    }
     assert!(!path.exists(), "the MCP access never creates a dossier");
 }
 
 /// AC 8 — a submission races the app's `delete_study` on the same study, many times: the check and
 /// the insert are one `IMMEDIATE` transaction (and `foreign_keys = ON` backs it), so no pending
-/// draft ever outlives its study.
+/// draft ever outlives its study. **Best effort on the interleaving** (F11): a barrier starts both
+/// threads together, but which transaction wins each round is the scheduler's; both outcomes are
+/// counted, and the invariant (no orphan) is asserted whatever the split.
 #[test]
 fn a_submission_racing_the_deletion_of_its_study_never_leaves_an_orphan() {
     let dir = TempDir::new().expect("tempdir");
     let path = dossier(&dir, JournalMode::Wal);
     const ROUNDS: u128 = 40;
+    let (mut accepted, mut refused_gone) = (0_u32, 0_u32);
     for round in 0..ROUNDS {
         let study_id = 0x9000 + round;
         {
@@ -792,11 +807,17 @@ fn a_submission_racing_the_deletion_of_its_study_never_leaves_an_orphan() {
             .expect("delete thread")
             .expect("the delete succeeds");
         match submitted {
-            Ok(_) => {}
-            Err(SubmitError::Refused(SubmissionRefusal::StudyNotFound { .. })) => {}
+            Ok(_) => accepted += 1,
+            Err(SubmitError::Refused(SubmissionRefusal::StudyNotFound { .. })) => refused_gone += 1,
             other => panic!("round {round}: unexpected outcome {other:?}"),
         }
     }
+    eprintln!("delete_study race: {accepted} submissions first, {refused_gone} deletions first");
+    assert_eq!(
+        u128::from(accepted + refused_gone),
+        ROUNDS,
+        "every round counted"
+    );
     let conn = Connection::open(&path).expect("raw");
     let orphans: i64 = conn
         .query_row(
@@ -807,4 +828,416 @@ fn a_submission_racing_the_deletion_of_its_study_never_leaves_an_orphan() {
         )
         .expect("count");
     assert_eq!(orphans, 0, "no draft outlived its study");
+}
+
+#[test]
+fn a_blank_client_and_a_missing_study_of_a_value_draft_are_refused_by_code() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    let access = McpAccess::at(&path);
+    let blank_client = DraftSubmission {
+        origin: DraftOrigin {
+            client: "\u{200B} ".to_string(),
+            model: "test-model".to_string(),
+        },
+        ..note(&path, 1)
+    };
+    assert_eq!(
+        refused(access.submit_draft(&blank_client)).code(),
+        "missing_origin"
+    );
+    let gone = Some(Uuid::from_u128(0x404));
+    for sub in [
+        DraftSubmission {
+            study_id: gone,
+            ..cell_draft(&path, 2, 2025, "eps", "4")
+        },
+        DraftSubmission {
+            study_id: gone,
+            ..judgment_draft(&path, 3, "judged_avg_low_pe", "10")
+        },
+    ] {
+        assert_eq!(refused(access.submit_draft(&sub)).code(), "study_not_found");
+    }
+    assert_eq!(draft_count(&path), 0);
+}
+
+/// Story 8.3 G3 (conservative): a note, cell or judgment draft on an ARCHIVED study is refused; a
+/// draft study for its security still meets `study_exists`.
+#[test]
+fn drafts_on_an_archived_study_are_refused() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    Journal::open(&path)
+        .expect("open")
+        .set_study_status(Uuid::from_u128(STUDY_A), "archived")
+        .expect("archive");
+    let access = McpAccess::at(&path);
+    for sub in [
+        note(&path, 1),
+        cell_draft(&path, 2, 2025, "eps", "4.2"),
+        judgment_draft(&path, 3, "judged_avg_high_pe", "20"),
+    ] {
+        match refused(access.submit_draft(&sub)) {
+            SubmissionRefusal::StudyArchived { ticker } => assert_eq!(ticker, "NESN.SW"),
+            other => panic!("expected study_archived, got {other:?}"),
+        }
+    }
+    assert_eq!(draft_count(&path), 0);
+}
+
+#[test]
+fn texts_longer_than_their_cap_are_refused_by_name() {
+    use steadyinvest_persistence::{
+        MAX_COMMENT_CHARS, MAX_COMPANY_NAME_CHARS, MAX_NOTE_CHARS, MAX_ORIGIN_CHARS,
+    };
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    let access = McpAccess::at(&path);
+    let long = |n: usize| "é".repeat(n + 1);
+    let cases = [
+        (
+            "comment",
+            DraftSubmission {
+                comment: long(MAX_COMMENT_CHARS),
+                ..note(&path, 1)
+            },
+        ),
+        (
+            "note_text",
+            DraftSubmission {
+                note_text: Some(long(MAX_NOTE_CHARS)),
+                ..note(&path, 2)
+            },
+        ),
+        (
+            "origin_client",
+            DraftSubmission {
+                origin: DraftOrigin {
+                    client: long(MAX_ORIGIN_CHARS),
+                    model: "m".to_string(),
+                },
+                ..note(&path, 3)
+            },
+        ),
+        (
+            "origin_model",
+            DraftSubmission {
+                origin: DraftOrigin {
+                    client: "c".to_string(),
+                    model: long(MAX_ORIGIN_CHARS),
+                },
+                ..note(&path, 4)
+            },
+        ),
+        (
+            "company_name",
+            DraftSubmission {
+                company_name: Some(long(MAX_COMPANY_NAME_CHARS)),
+                ..study_draft(&path, 5, "ROG.SW", "CHF")
+            },
+        ),
+    ];
+    for (field, sub) in cases {
+        match refused(access.submit_draft(&sub)) {
+            SubmissionRefusal::TextTooLong { field: f, len, max } => {
+                assert_eq!(f, field);
+                assert_eq!(len, max + 1, "counted in characters, not bytes");
+            }
+            other => panic!("{field}: expected text_too_long, got {other:?}"),
+        }
+    }
+    // Exactly at the cap is accepted.
+    access
+        .submit_draft(&DraftSubmission {
+            comment: "é".repeat(MAX_COMMENT_CHARS),
+            ..note(&path, 6)
+        })
+        .expect("a comment of exactly the cap");
+}
+
+/// E9: the same draft submitted twice (a lost reply) is idempotent; the same id with another
+/// content is refused and the stored draft stays as it was.
+#[test]
+fn a_resubmitted_draft_is_idempotent_and_a_reused_id_is_refused() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    let access = McpAccess::at(&path);
+    for sub in [
+        note(&path, 1),
+        cell_draft(&path, 2, 2025, "eps", " 4.35 "),
+        study_draft(&path, 3, "ROG.SW", "CHF"),
+    ] {
+        let id = access.submit_draft(&sub).expect("first");
+        let before = Journal::open(&path)
+            .expect("open")
+            .logical_version()
+            .expect("v");
+        assert_eq!(
+            access.submit_draft(&sub).expect("again"),
+            id,
+            "{:?}",
+            sub.kind
+        );
+        let after = Journal::open(&path)
+            .expect("open")
+            .logical_version()
+            .expect("v");
+        assert_eq!(after, before, "an idempotent re-submission writes nothing");
+    }
+    assert_eq!(draft_count(&path), 3);
+    let conflicting = DraftSubmission {
+        note_text: Some("un autre texte".to_string()),
+        ..note(&path, 1)
+    };
+    match refused(access.submit_draft(&conflicting)) {
+        SubmissionRefusal::DraftIdConflict { id } => assert_eq!(id, Uuid::from_u128(0x83_d001)),
+        other => panic!("expected draft_id_conflict, got {other:?}"),
+    }
+    let stored = Journal::open(&path)
+        .expect("open")
+        .get_draft(Uuid::from_u128(0x83_d001))
+        .expect("read")
+        .expect("present");
+    assert!(
+        stored.payload.contains("Marge en hausse"),
+        "the stored draft is untouched"
+    );
+}
+
+/// E6: a duplicate is recognised whatever the stored spelling of the ticker and the currency.
+#[test]
+fn a_duplicate_study_is_found_whatever_its_stored_case_and_spaces() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    Journal::open(&path)
+        .expect("open")
+        .put_study(&study(0x83c, " roG.sw ", "chf ", "2026-09-28T08:20:00Z"))
+        .expect("a hand-typed study");
+    let refusal =
+        refused(McpAccess::at(&path).submit_draft(&study_draft(&path, 1, "ROG.SW", "CHF")));
+    match refusal {
+        SubmissionRefusal::StudyExists { study_id, .. } => {
+            assert_eq!(study_id, Uuid::from_u128(0x83c))
+        }
+        other => panic!("expected study_exists, got {other:?}"),
+    }
+}
+
+/// L1: a submission carrying the fields of another kind is a caller defect, refused before the
+/// dossier is opened.
+#[test]
+fn fields_of_another_kind_are_an_invalid_call() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    let access = McpAccess::at(&path);
+    for sub in [
+        DraftSubmission {
+            proposed_value: Some("1".to_string()),
+            ..study_draft(&path, 1, "ROG.SW", "CHF")
+        },
+        DraftSubmission {
+            native_currency: Some("CHF".to_string()),
+            ..note(&path, 2)
+        },
+        DraftSubmission {
+            company_name: Some("X".to_string()),
+            ..note(&path, 3)
+        },
+        DraftSubmission {
+            native_currency: Some("CHF".to_string()),
+            ..cell_draft(&path, 4, 2025, "eps", "4")
+        },
+        DraftSubmission {
+            security_ticker: None,
+            ..study_draft(&path, 5, "ROG.SW", "CHF")
+        },
+    ] {
+        match access.submit_draft(&sub) {
+            Err(e @ SubmitError::Failed(Error::McpInvalidCall { .. })) => {
+                assert_eq!(e.code(), Some("invalid_call"))
+            }
+            other => panic!("expected an invalid call, got {other:?}"),
+        }
+    }
+    assert_eq!(draft_count(&path), 0);
+}
+
+/// E10: an empty file, a foreign SQLite database and a text file are named « not a dossier ».
+#[test]
+fn files_that_are_not_a_dossier_are_named() {
+    let dir = TempDir::new().expect("tempdir");
+    let empty = dir.path().join("empty.db");
+    std::fs::write(&empty, b"").expect("empty file");
+    let foreign = dir.path().join("foreign.db");
+    Connection::open(&foreign)
+        .expect("foreign")
+        .execute_batch("CREATE TABLE t (a); INSERT INTO t VALUES (1);")
+        .expect("a foreign database");
+    let text = dir.path().join("notes.db");
+    std::fs::write(
+        &text,
+        "ceci n'est pas une base de données, mais un texte assez long pour \
+        dépasser l'en-tête de cent octets qu'une base SQLite porterait à cet endroit du fichier.",
+    )
+    .expect("text");
+    for path in [&empty, &foreign, &text] {
+        match McpAccess::at(path).list_studies(Page::first(1)) {
+            Err(
+                e @ Error::McpUnavailable {
+                    reason: McpUnavailable::NotADossier,
+                },
+            ) => assert_eq!(e.mcp_code(), Some("not_a_dossier")),
+            other => panic!("{}: expected not_a_dossier, got {other:?}", path.display()),
+        }
+    }
+    assert_eq!(
+        std::fs::read(&empty).expect("bytes").len(),
+        0,
+        "never written"
+    );
+}
+
+/// E5: a dossier left with a hot rollback journal (a crash mid-write) needs the app's recovery
+/// first: a read-only MCP read cannot roll it back and says so by name.
+#[test]
+fn a_hot_rollback_journal_is_named_needs_recovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Delete);
+    let crashed = dir.path().join("crashed");
+    std::fs::create_dir(&crashed).expect("dir");
+    // A write in progress (DELETE mode: the original pages are in `-journal`), frozen by copying
+    // the file and its journal elsewhere — the copy has a journal with no lock: a hot journal.
+    let writer = Connection::open(&path).expect("writer");
+    // A tiny cache makes SQLite spill modified pages INTO the file before the commit — so the
+    // copied file is only consistent once its journal is rolled back.
+    writer
+        .execute_batch(
+            "PRAGMA cache_size = 2;
+             BEGIN IMMEDIATE;
+             UPDATE studies SET payload = payload || printf('%.200000c', ' ');",
+        )
+        .expect("a write in progress");
+    let copy = crashed.join("dossier.db");
+    std::fs::copy(&path, &copy).expect("copy db");
+    std::fs::copy(
+        dir.path().join("dossier.db-journal"),
+        crashed.join("dossier.db-journal"),
+    )
+    .expect("copy journal");
+    writer.execute_batch("ROLLBACK").expect("end");
+    drop(writer);
+    match McpAccess::at(&copy).list_studies(Page::first(1)) {
+        Err(
+            e @ Error::McpUnavailable {
+                reason: McpUnavailable::NeedsRecovery,
+            },
+        ) => assert_eq!(e.mcp_code(), Some("dossier_needs_recovery")),
+        other => panic!("expected dossier_needs_recovery, got {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+mod protected {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn set_mode(path: &Path, mode: u32) {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("chmod");
+    }
+
+    fn write_refused(path: &Path) -> bool {
+        std::fs::OpenOptions::new().write(true).open(path).is_err()
+    }
+
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .expect("list")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// E3: a protected WAL or DELETE dossier with no content side file is read in place
+    /// (`immutable`), creates nothing beside it, and refuses a submission by name.
+    #[test]
+    fn a_protected_file_is_read_in_place_and_refuses_drafts_by_name() {
+        for mode in [JournalMode::Wal, JournalMode::Delete] {
+            let dir = TempDir::new().expect("tempdir");
+            let path = dossier(&dir, mode);
+            set_mode(&path, 0o444);
+            if !write_refused(&path) {
+                return; // permissions do not bind (root) — nothing to observe
+            }
+            let before = names_in(dir.path());
+            let access = McpAccess::at(&path);
+            assert_eq!(access.list_studies(Page::first(10)).expect("read").total, 2);
+            assert_eq!(
+                names_in(dir.path()),
+                before,
+                "{mode:?}: nothing created beside it"
+            );
+            match access.submit_draft(&note(&path, 1)) {
+                Err(SubmitError::Failed(Error::McpUnavailable {
+                    reason: McpUnavailable::Protected { directory: false },
+                })) => {}
+                other => panic!("{mode:?}: expected dossier_protected, got {other:?}"),
+            }
+            assert_eq!(
+                names_in(dir.path()),
+                before,
+                "{mode:?}: nothing created by the refusal"
+            );
+            set_mode(&path, 0o644);
+        }
+    }
+
+    /// E3: a protected file whose side file holds unconsolidated writes is refused by name (a read
+    /// would create `r--r--r--` side files); a protected directory likewise, named as such.
+    #[test]
+    fn protections_a_read_would_create_side_files_for_are_refused_by_name() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dossier(&dir, JournalMode::Wal);
+        std::fs::write(dir.path().join("dossier.db-wal"), vec![1_u8; 64]).expect("content wal");
+        set_mode(&path, 0o444);
+        if write_refused(&path) {
+            match McpAccess::at(&path).list_studies(Page::first(1)) {
+                Err(Error::McpUnavailable {
+                    reason: McpUnavailable::Protected { directory: false },
+                }) => {}
+                other => panic!("expected a protected file, got {other:?}"),
+            }
+        }
+        set_mode(&path, 0o644);
+
+        let root = TempDir::new().expect("tempdir");
+        let locked = root.path().join("locked");
+        std::fs::create_dir(&locked).expect("dir");
+        let inner = TempDir::new_in(&locked).expect("inner");
+        let path = dossier(&inner, JournalMode::Wal);
+        let inner_dir = inner.path().to_path_buf();
+        set_mode(&inner_dir, 0o555);
+        let refuses_new_files = std::fs::File::create(inner_dir.join(".probe")).is_err();
+        if refuses_new_files {
+            let access = McpAccess::at(&path);
+            for outcome in [
+                access.list_studies(Page::first(1)).err(),
+                access.submit_draft(&note(&path, 1)).err().map(|e| match e {
+                    SubmitError::Failed(err) => err,
+                    SubmitError::Refused(r) => panic!("unexpected refusal {r:?}"),
+                }),
+            ] {
+                match outcome {
+                    Some(Error::McpUnavailable {
+                        reason: McpUnavailable::Protected { directory: true },
+                    }) => {}
+                    other => panic!("expected a protected directory, got {other:?}"),
+                }
+            }
+        } else {
+            let _ = std::fs::remove_file(inner_dir.join(".probe"));
+        }
+        set_mode(&inner_dir, 0o755);
+    }
 }

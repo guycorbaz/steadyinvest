@@ -823,7 +823,7 @@ impl Journal {
 /// percent-encoded, so a `?`, `#`, `%` or space in a user-chosen folder name cannot be read as URI
 /// syntax and open a different file. An absolute path carries the explicit `localhost` authority
 /// (G3 L5): `file:` + a path starting `//` would otherwise read its first segment as a host.
-fn file_uri(path: &Path) -> String {
+pub(crate) fn file_uri(path: &Path) -> String {
     use std::fmt::Write as _;
     let mut out = String::from(if path.is_absolute() {
         "file://localhost"
