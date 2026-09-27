@@ -6,14 +6,17 @@
 //! 2. **Frozen binary corpus** `tests/corpus/v1.db`: generated ONCE by the `#[ignore]`d generator
 //!    test, committed, then append-only forever (see `tests/corpus/README.md`). The gate test
 //!    opens a copy, asserts `user_version == 1` and reads back the canonical study exactly.
+//! 3. **Frozen binary corpus** `tests/corpus/v8.db` (Story 8.2a): the canonical study plus one AI
+//!    draft of every kind and every status, written at `user_version` 8; the gate reads both back
+//!    exactly.
 
 use rusqlite::Connection;
 use std::path::PathBuf;
 use steadyinvest_contract::{
-    Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review,
-    SCHEMA_VERSION, Source, Study, Timestamp, YearData,
+    Cell, Coverage, DraftKind, DraftStatus, ForecastLowOption, Freshness, Judgment, Money,
+    Provenance, Review, SCHEMA_VERSION, Source, Study, Timestamp, YearData,
 };
-use steadyinvest_persistence::Journal;
+use steadyinvest_persistence::{DraftRecord, Journal};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -237,5 +240,167 @@ fn frozen_corpus_v1_opens_and_reads_back_the_canonical_study() {
         canonical_study(),
         "the journal written at v1 no longer reads back equal — a persisted shape changed \
          without its SCHEMA_VERSION bump + migration (see tests/corpus/README.md)"
+    );
+}
+
+// ── v8 (Story 8.2a): the canonical study + one AI draft of every kind and every status ──
+
+/// The five drafts planted in `v8.db`, as the read must return them (ordered by `created_at`).
+/// Every kind (study ×2, note, cell, judgment) and every status (pending, validated,
+/// validated_undone, rejected) appear; every nullable column is exercised once set and once unset.
+fn canonical_drafts() -> Vec<DraftRecord> {
+    let study_id = Uuid::parse_str(CANONICAL_STUDY_ID).expect("canonical study UUID parses");
+    let base = |n: u128, kind: DraftKind, created: &str| DraftRecord {
+        id: Uuid::from_u128(0x8000_0000 + n),
+        kind,
+        study_id: Some(study_id),
+        security_ticker: "NESN".to_string(),
+        native_currency: None,
+        status: DraftStatus::Pending,
+        created_at: ts(created),
+        decided_at: None,
+        comment: "La marge progresse depuis trois ans.".to_string(),
+        origin_client: "claude-code".to_string(),
+        origin_model: "claude-opus-5-5".to_string(),
+        stale_at_decision: None,
+        edited_before_validation: None,
+        created_study_id: None,
+        payload: String::new(),
+    };
+    vec![
+        DraftRecord {
+            study_id: None,
+            security_ticker: "ASML".to_string(),
+            native_currency: Some("EUR".to_string()),
+            payload: r#"{"version":1,"company_name":"ASML Holding"}"#.to_string(),
+            ..base(1, DraftKind::Study, "2026-09-27T09:00:01Z")
+        },
+        DraftRecord {
+            study_id: None,
+            native_currency: Some("CHF".to_string()),
+            status: DraftStatus::Validated,
+            decided_at: Some(ts("2026-09-27T10:00:00Z")),
+            stale_at_decision: Some(false),
+            created_study_id: Some(study_id),
+            payload: r#"{"version":1}"#.to_string(),
+            ..base(2, DraftKind::Study, "2026-09-27T09:00:02Z")
+        },
+        DraftRecord {
+            payload: r#"{"version":1,"note_text":"Marge en hausse."}"#.to_string(),
+            ..base(3, DraftKind::Note, "2026-09-27T09:00:03Z")
+        },
+        DraftRecord {
+            status: DraftStatus::ValidatedUndone,
+            decided_at: Some(ts("2026-09-27T10:00:04Z")),
+            stale_at_decision: Some(true),
+            edited_before_validation: Some(true),
+            payload: r#"{"version":1,"target":{"target":"cell","fiscal_year":2022,"field":"eps"},"proposed_value":"3.20","base_fingerprint":"f00d"}"#.to_string(),
+            ..base(4, DraftKind::Cell, "2026-09-27T09:00:04Z")
+        },
+        DraftRecord {
+            status: DraftStatus::Rejected,
+            decided_at: Some(ts("2026-09-27T10:00:05Z")),
+            edited_before_validation: Some(false),
+            payload: r#"{"version":1,"target":{"target":"judgment","field":"judged_avg_low_pe"},"proposed_value":"10.5"}"#.to_string(),
+            ..base(5, DraftKind::Judgment, "2026-09-27T09:00:05Z")
+        },
+    ]
+}
+
+/// Generates `tests/corpus/v8.db`: the canonical study through the API, then the drafts by raw SQL
+/// (no draft writer exists before Story 8.3 — the raw insert also runs the table's CHECKs and
+/// trigger). `#[ignore]`d, refuses to overwrite: run once, commit, never again.
+#[test]
+#[ignore = "one-shot corpus generator — the committed v8.db is frozen"]
+fn generate_corpus_v8() {
+    let dest = corpus_path(8);
+    assert!(
+        !dest.exists(),
+        "{} already exists — corpus files are append-only, never regenerated",
+        dest.display()
+    );
+    let dir = TempDir::new().expect("tempdir");
+    let tmp_db = dir.path().join("v8.db");
+    {
+        let mut journal = Journal::create(
+            &tmp_db,
+            Uuid::parse_str(CANONICAL_JOURNAL_ID).expect("canonical journal UUID parses"),
+            &ts(CANONICAL_JOURNAL_CREATED_AT),
+        )
+        .expect("corpus journal creates");
+        journal
+            .put_study(&canonical_study())
+            .expect("canonical study writes");
+    }
+    {
+        let conn = Connection::open(&tmp_db).expect("raw open");
+        conn.pragma_update(None, "foreign_keys", true)
+            .expect("foreign keys on");
+        for d in canonical_drafts() {
+            conn.execute(
+                "INSERT INTO ai_drafts
+                     (id, kind, study_id, security_ticker, native_currency, status, created_at,
+                      decided_at, comment, origin_client, origin_model, stale_at_decision,
+                      edited_before_validation, created_study_id, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                rusqlite::params![
+                    d.id.to_string(),
+                    d.kind.as_str(),
+                    d.study_id.map(|u| u.to_string()),
+                    d.security_ticker,
+                    d.native_currency,
+                    d.status.as_str(),
+                    d.created_at.0,
+                    d.decided_at.map(|t| t.0),
+                    d.comment,
+                    d.origin_client,
+                    d.origin_model,
+                    d.stale_at_decision,
+                    d.edited_before_validation,
+                    d.created_study_id.map(|u| u.to_string()),
+                    d.payload,
+                ],
+            )
+            .expect("a canonical draft inserts");
+        }
+    } // last connection closes: WAL checkpointed, sidecars removed
+    std::fs::copy(&tmp_db, &dest).expect("closed corpus file copies into the repo");
+    eprintln!("corpus written: {} — commit it now", dest.display());
+}
+
+#[test]
+fn frozen_corpus_v8_opens_and_reads_back_the_study_and_its_drafts() {
+    let src = corpus_path(8);
+    assert!(
+        src.exists(),
+        "{} is absent — check the `!persistence/tests/corpus/*.db` .gitignore exception",
+        src.display()
+    );
+    let dir = TempDir::new().expect("tempdir");
+    let work = dir.path().join("v8.db");
+    std::fs::copy(&src, &work).expect("corpus copies to a TempDir");
+
+    let v: i64 = {
+        let conn = Connection::open(&work).expect("raw open");
+        conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("user_version reads")
+    };
+    assert_eq!(v, 8, "corpus v8.db carries user_version 8");
+
+    let journal = Journal::open(&work).expect("the frozen v8 journal opens");
+    assert_eq!(
+        journal.logical_version().expect("version reads"),
+        6,
+        "one put_study + one trigger bump per draft (5)"
+    );
+    let back = journal
+        .get_study(Uuid::parse_str(CANONICAL_STUDY_ID).expect("canonical study UUID parses"))
+        .expect("the canonical study reads")
+        .expect("the canonical study is present");
+    assert_eq!(back, canonical_study());
+    assert_eq!(
+        journal.list_drafts().expect("drafts read"),
+        canonical_drafts(),
+        "the drafts written at v8 no longer read back equal — a drafts shape changed"
     );
 }

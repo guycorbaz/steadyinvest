@@ -251,6 +251,7 @@ fn a_holdings_currency_round_trips_including_a_legacy_none() {
         transactions: Vec::new(),
         fx_rates: Vec::new(),
         judgment_snapshots: Vec::new(),
+        ai_drafts: Vec::new(),
     };
     let envelope = envelope_json(&snapshot);
 

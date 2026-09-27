@@ -7,6 +7,13 @@
 //!   `price_history` (a local, reconstructible cache excluded from the export snapshot — see
 //!   `price_history.rs`), which is why that module does not call this helper. `fx_rates` (Story
 //!   6.5) is the contrast case: an EXPORTED axis, so its writers DO bump.
+//! - **The v8 trigger exception** (Story 8.2a): `trg_ai_drafts_bump_logical_version` bumps the
+//!   counter once **per inserted `ai_drafts` row**, inside the inserting transaction — the MCP draft
+//!   connection has no other way to bump (arch A3: its authorizer allows `UPDATE journal_meta` only
+//!   from that trigger). So an import carrying N NEW drafts raises the counter by 1 + N (its own
+//!   bump plus one per inserted draft; an upsert that updates an existing draft fires nothing). The
+//!   counter's contract is **monotonic** — newer / older for stale-restore detection and sync —
+//!   which holds; it is not an exact count of mutations (owner, 2026-09-27).
 
 use crate::error::{Error, Result};
 use uuid::Uuid;
