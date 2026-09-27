@@ -181,6 +181,18 @@ A stable English `snake_case` code (never shown in the UI) + a French message:
 - `study_exists` — « L'étude {TICKER} en {DEV} existe déjà ; rien n'a été enregistré. »
 - `draft_study_pending` — « Une proposition d'étude {TICKER} en {DEV} est déjà en attente ; rien n'a été enregistré. »
 - `write_denied` — « Écriture refusée : seule la création de propositions est permise. »
+- *Added by Story 8.3 (G3 review, 2026-09-28):*
+- `study_archived` — « L'étude {TICKER} est archivée ; la proposition n'a pas été enregistrée. »
+- `value_out_of_range` — « La valeur « {texte} » de {champ} est hors des bornes d'une proposition (moins de 10¹⁵ en valeur absolue, au plus 10 décimales) ; rien n'a été enregistré. »
+- `empty_note_text` — « Le texte de la note est vide ; rien n'a été enregistré. »
+- `text_too_long` — « Le texte {champ} dépasse {max} caractères ({n}) ; rien n'a été enregistré. » ({champ} : le commentaire / le texte de la note / le nom de la société / le client / le modèle)
+- `draft_id_conflict` — « Une autre proposition porte déjà l'identifiant {id} ; rien n'a été enregistré. » (the same proposition sent again is accepted once, without a second write)
+- `dossier_busy` — « Une restauration du dossier est en cours (ou a été interrompue) ; rien n'a été lu ni enregistré. »
+- `dossier_needs_recovery` — « Le dossier doit d'abord être ouvert dans l'application (reprise après une interruption) ; rien n'a été lu. »
+- `dossier_protected` — « Le fichier du dossier est protégé en écriture » / « Le dossier qui contient le fichier est protégé en écriture » + « ; il ne peut pas être lu sans y créer de fichiers, ou rien ne peut y être enregistré. »
+- `not_a_dossier` — « Le fichier {chemin} n'est pas un dossier SteadyInvest ; rien n'a été lu. »
+- `dossier_identity_unreadable` — « L'identité du fichier du dossier n'a pas pu être lue ; rien n'a été enregistré. »
+- `invalid_call` — « L'appel au serveur MCP est mal formé ({détail}) ; rien n'a été enregistré. » (a server defect, logged — never an AI proposal's fault)
 
 ## 4. Shared components (`app/ui/components/`)
 

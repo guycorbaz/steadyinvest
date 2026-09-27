@@ -717,6 +717,7 @@ development_status:
   # 2026-09-28: 8-3 story file created → ready-for-dev (McpAccess in persistence; O1 assembly and the
   #             clippy boundary land with the mcp crate in 8.4; rusqlite `hooks` feature).
   # 2026-09-28: 8-3 dev complete (1284 tests; clippy/fmt/deny green) → review.
+  # 2026-09-28: 8-3 G3 applied (2 critical/high + mediums/lows; v9 id guard) → 1303 tests → review.
   8-3-mcp-access-gated-access-surface: review
   8-4-steadyinvest-mcp-stdio-server: backlog
   8-5a-ai-frame-and-draft-inbox: backlog

@@ -407,19 +407,77 @@ Claude Opus 5.5 (claude-opus-5-5)
   fields, a `created_at` that is not RFC3339 UTC, a target missing) is a caller (MCP server)
   failure, not an AI refusal.
 
+### G3 review (2026-09-28) — applied
+
+Three layers; two CRITICAL/HIGH reproduced cross-process by two reviewers, all findings applied
+(commits `479e074`, `c755936`, `70cc65b`):
+
+- **CRITICAL — POSIX lock loss.** `same_file::Handle::from_path` opened and closed a second
+  descriptor of the dossier inside the `IMMEDIATE` transaction; on POSIX that releases every lock
+  of the process on the file (SQLite "how to corrupt" §2.2). Now: no descriptor besides SQLite's
+  own — a `stat(2)` (dev + ino) taken BEFORE the connection opens, re-checked inside the
+  transaction with `SQLITE_FCNTL_HAS_MOVED` (unsafe FFI, one call, SAFETY-commented); Windows keeps
+  a `same_file::Handle` opened before the connection and dropped after it (`same-file` is now a
+  `cfg(not(unix))` dependency). A cross-process test (the test binary re-spawned as a probe) proves
+  another process cannot take the write lock while a submission holds its transaction (DELETE and
+  WAL); a control test shows a stray descriptor does release it.
+- **HIGH — identity TOCTOU.** Identity captured before the open; the test seam moved right after
+  `Connection::open`; WAL race test: never an accepted-and-lost draft.
+- **M3 — REPLACE bypass.** Migration **v9** (`trg_ai_drafts_refuse_existing_id`, BEFORE INSERT,
+  RAISE(ABORT) on an existing id). The import now UPDATEs an existing draft (same no-regression
+  rule) instead of upserting. No `v9.db` (no stored shape changed — corpus README); the v8 gate
+  checks the migrated copy carries the guard.
+- **M4 — restore vs WAL side files.** Restore leaves WAL under its lock (checkpoint + `journal_mode
+  = DELETE`, retried while readers finish, named refusal after the wait), then `BEGIN EXCLUSIVE`;
+  `McpAccess` refuses while `-restore-incoming` exists (`dossier_busy`), rechecked after the open; a
+  read that saw a swap is refused too.
+- **M5 — protected media.** Protected file with no content side file → read in place
+  (`immutable`); protected file with unconsolidated writes, or protected directory → refused by
+  name (`dossier_protected`, `directory` named) — never `0444` side files.
+- **M6 — archived study** → `study_archived` for note / cell / judgment drafts.
+- **M7 — new codes** added to the 8.0 spec §3.3 with French messages.
+- **Lows** — restore lock skips only NotADatabase / ReadOnly (others named); an unreadable identity
+  is its own reason, `dossier_replaced` only on a real mismatch; fields of another kind →
+  `invalid_call`; `Error::mcp_code` / `SubmitError::code` (`schema_mismatch`, `write_denied`, …);
+  hot journal → `dossier_needs_recovery`; empty / foreign / non-database file → `not_a_dossier`;
+  missing → `no_dossier`; ticker AND currency duplicates compared trimmed, case-insensitively;
+  `user_version` re-read inside the draft transaction (the read policy allows READING that one
+  pragma); length caps (`text_too_long`); a re-submitted identical draft is idempotent, a reused id
+  with other content is `draft_id_conflict`; tests F6–F11.
+
+Gates after the review: workspace **1303 passed**, 0 failed, 2 ignored; clippy `-D warnings`,
+`fmt --check`, `cargo deny check` green. Posture: persistence error samples 28 → **32** (+4:
+`McpSchemaMismatch`, `McpDenied`, `McpInvalidCall`, `McpUnavailable`). **Not checked locally:** the
+`cfg(not(unix))` (Windows) code path — no Windows target installed; it is type-simple (a
+`same_file::Handle` newtype) and CI builds Linux only.
+
 ### Decisions for Guy (owner-pending; defaults applied)
 
 1. Archived studies count as existing for a draft study (`study_exists`). Default: yes.
+   **And (G3):** a note / cell / judgment draft on an archived study is REFUSED
+   (`study_archived`) — conservative; the owner unarchives it first.
 2. Several pending note drafts on one study are allowed (D4 is per cell / judgment target).
    Default: allowed.
 3. Windows restore window (A11): the lock is released just before the rename; documented, not
    closed. Default: accept.
 4. New codes `value_out_of_range`, `empty_note_text` (French messages in 8.4).
-5. A note / cell / judgment draft on an **archived** study is accepted at submission (the decision
-   rail refuses archived studies by name — 8.2b); a blank proposed company name is stored as
-   absent.
-6. Restore skips the lock when the live file is not a database or is write-protected (no MCP write
-   can be in flight there), and refuses by name when a write holds it past 5 s.
+5. ~~A draft on an archived study is accepted at submission~~ — superseded by the G3 decision in
+   item 1. A blank proposed company name is stored as absent.
+6. Restore skips the lock only when the live file is not a database or is write-protected, and
+   refuses by name when a reader or a write holds it past 5 s (it now leaves WAL first).
+7. (G3) Migration v9 for the id guard; no `v9.db` corpus file (no stored shape changed).
+8. (G3) A `-restore-incoming` file left by an interrupted restore makes the MCP access refuse
+   (`dossier_busy`) until it is removed — safer than guessing it is stale.
+9. (G3) A protected directory is detected coarsely (no write bit on it); a hot rollback journal is
+   named `dossier_needs_recovery` on the read path, while the draft connection lets SQLite recover it
+   as any read-write connection would.
+10. (G3) Caps: comment and note text 10 000 characters, company name 200, client and model 100.
+11. (G3) Idempotency: same id + same kind, study, comment, origin, `created_at` and proposal → the
+    id is returned and nothing is written; any difference → `draft_id_conflict`.
+12. (G3) New codes beyond §3.3 of 8.0, now added to it: `study_archived`, `value_out_of_range`,
+    `empty_note_text`, `text_too_long`, `draft_id_conflict`, `dossier_busy`,
+    `dossier_needs_recovery`, `dossier_protected`, `not_a_dossier`,
+    `dossier_identity_unreadable`, `invalid_call`.
 
 ### File List
 
@@ -437,7 +495,12 @@ Claude Opus 5.5 (claude-opus-5-5)
 - `persistence/src/error.rs` (3 variants, posture inventory 31)
 - `persistence/tests/mcp_access.rs` (new)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- G3: `persistence/src/{migrations.rs, export.rs}`, `persistence/tests/{readonly_newer.rs,
+  corpus_gate.rs, corpus/README.md}`, `_bmad-output/planning-artifacts/ux-ai-assistance-surfaces.md`
+  (MCP codes)
 
 ### Change Log
 
 - 2026-09-28 — Story 8.3 implemented (dev-story); status → review.
+- 2026-09-28 — G3 review applied (v9 id guard, POSIX-lock-safe identity, restore safety, named
+  dossier states, archived refusal, caps, idempotency); status stays review.
