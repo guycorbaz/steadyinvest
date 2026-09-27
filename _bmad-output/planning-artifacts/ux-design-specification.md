@@ -67,7 +67,7 @@ was made.
    buy/hold/sell judgment zones** (no semantic collision).
 3. **Expert-grade judgment lines.** Direct manipulation **and** exact-value entry, kept in sync,
    with **live (<~100 ms) recolor**, fully reversible (undo + scenario compare), and **never an
-   auto-suggested line**.
+   auto-suggested line**. *[P4, G2 2026-09-27: the app itself still never suggests; an owner-directed AI may propose a line, shown framed « IA », dashed and inert until the owner validates it — `ux-ai-assistance-surfaces.md` §5.5.]*
 4. **Faithful form + neutral, swappable labels + color-blind-safe zones.** Recognizable layout
    without NAIC marks; decision color encoded redundantly (not color-only).
 5. **Visible trust.** Low-confidence (<5y), validated flags, plausibility warnings and the verdict's
@@ -88,8 +88,8 @@ was made.
   into a *trustworthy* experience (missing/stale/validated read at a glance).
 - **A disciplined, fact-only voice.** Neutral microcopy ("the price entered the zone you defined")
   as a consistent, distinctive tone that reinforces the user-as-sole-decider posture.
-- **Future:** the AI "clerk of memory" as a non-intrusive *margin voice* that interrogates the
-  past, never steering the future.
+- ~~**Future:** the AI "clerk of memory" as a non-intrusive *margin voice* that interrogates the
+  past, never steering the future.~~ *[SUPERSEDED by G2 / Phase 4, 2026-09-27: no AI inside the app; an owner-directed AI client proposes drafts over MCP that the owner validates one by one — PRD FR69–FR78, `ux-ai-assistance-surfaces.md`.]*
 
 ## Core User Experience
 
@@ -142,7 +142,7 @@ decide → record* — repeated per study and revisited over time.
    step ever.
 3. **Honest by default.** Every number shows its source and freshness; uncertainty (low-confidence,
    stale, unvalidated) is *visible*, never hidden.
-4. **Facts, not advice.** The app informs; the user decides. No suggested lines, no recommendations.
+4. **Facts, not advice.** The app informs; the user decides. No suggested lines, no recommendations. *[P4, G2 2026-09-27: the app itself still never suggests; an owner-directed AI may propose a line, shown framed « IA », dashed and inert until the owner validates it — `ux-ai-assistance-surfaces.md` §5.5.]*
 5. **Expert-respecting.** Density, keyboard, precision; zero hand-holding; nothing blocks the
    expert's flow.
 6. **Calm.** Strong color is reserved for the judgment zones; provenance speaks softly — the paper
@@ -188,7 +188,7 @@ decide → record* — repeated per study and revisited over time.
 - **Trustworthy calm →** honest data states (missing/stale/validated/low-confidence) always visible;
   the verdict visibly degrades when inputs are weak; strong color reserved for judgment, not chrome.
 - **Confident control →** no suggested lines, no recommendations; fact-only microcopy; the user's
-  inputs and judgments are never overwritten or auto-moved.
+  inputs and judgments are never overwritten or auto-moved. *[P4, G2 2026-09-27: the app itself still never suggests; an owner-directed AI may propose a line, shown framed « IA », dashed and inert until the owner validates it — `ux-ai-assistance-surfaces.md` §5.5.]*
 - **Flow and mastery →** sub-100 ms live recalc, keyboard-first, undo everywhere; zero modal
   "calculate" friction.
 - **Capable, not stuck →** gaps invite filling rather than block; paste-a-column entry; manual path
@@ -402,7 +402,7 @@ rest of the product follows.
 - **Reversible & explorable:** undo; compare scenarios; moving a line never destroys a saved input.
 - **Honest:** the verdict visibly degrades when inputs are unvalidated or history is thin — the user
   is never misled by a confident-looking but unsupported zone.
-- **Never advised:** no suggested line, no "optimal" hint — the placement is always the user's.
+- **Never advised:** no suggested line, no "optimal" hint — the placement is always the user's. *[P4, G2 2026-09-27: the app itself still never suggests; an owner-directed AI may propose a line, shown framed « IA », dashed and inert until the owner validates it — `ux-ai-assistance-surfaces.md` §5.5.]*
 - *Indicators:* he reaches a verdict in seconds of adjustment; he trusts the zone because he sees its
   inputs; he explores "what if" without fear of losing work.
 
@@ -413,7 +413,7 @@ rest of the product follows.
   education** for an expert.
 - **The genuinely distinctive layer is the *posture*, not the mechanic:** real-time recolor bound to
   a *neutral, never-suggesting* model, with an *honesty* overlay (validated/low-confidence/stale
-  visibly shaping the verdict). The innovation is restraint — the line is always his.
+  visibly shaping the verdict). The innovation is restraint — the line is always his. *[P4, G2 2026-09-27: the app itself still never suggests; an owner-directed AI may propose a line, shown framed « IA », dashed and inert until the owner validates it — `ux-ai-assistance-surfaces.md` §5.5.]*
 
 ### Experience Mechanics
 
@@ -927,7 +927,7 @@ domain logic — they consume the colour/alpha + metric/typo token families.
 - **Phase 2 — supporting:** multi-portfolio + FX consolidation, transaction ledger, concentration,
   dividends, replacement-candidate surfacing, richer scenario-compare.
 - **Phase 3 / Vision:** Company Comparison, Portfolio Health Review, screening, PDF/print refinements,
-  the read-only AI "margin voice" component.
+  ~~the read-only AI "margin voice" component~~ *[SUPERSEDED by G2 / Phase 4, 2026-09-27 — AI assistance over MCP is Epic 8 [P4]; its surfaces: `ux-ai-assistance-surfaces.md`.]*
 
 ## UX Consistency Patterns
 

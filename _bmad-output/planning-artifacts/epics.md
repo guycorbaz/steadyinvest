@@ -263,7 +263,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - UX-DR29 [P1]: French-first UI via Slint @tr() (i18n-ready), distinct from the runtime NAIC↔neutral label set.
 
 **AI assistance [P4]**
-- UX-DR30 [P4]: AI-assistance surfaces — draft inbox and per-study reminder, AI frame (label + disclaimer), AI-annotated chart line and "placed by AI" annotation, AI-origin cell mark (confusability-gated with UX-DR15), study notes, drafts record — and their French wording, specified by the Story 8.0 UX addendum.
+- UX-DR30 [P4]: AI-assistance surfaces — draft inbox and per-study reminder, AI frame (label + disclaimer), AI-annotated chart line and "placed by AI" annotation, AI-origin cell mark (confusability-gated with UX-DR15), study notes, drafts record — and their French wording, specified by the Story 8.0 UX addendum (`ux-ai-assistance-surfaces.md`).
 
 ### FR Coverage Map
 

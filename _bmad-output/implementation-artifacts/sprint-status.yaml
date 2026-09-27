@@ -694,8 +694,10 @@ development_status:
   # headless; 8.4 binary; 8.5a/8.5b/8.6/8.7 UI; 8.8 frozen verdict (FR68, D11).
   # Dev-safety rule (arch A12): every MCP run on a temp --dossier copy; registration on the real
   # dossier is Guy's act only.
-  epic-8: backlog
-  8-0-ux-pass-ai-assistance-surfaces: backlog
+  # 2026-09-27: 8-0 spec drafted (ux-ai-assistance-surfaces.md) → in-progress until Guy validates it
+  #             in its own PR (like PR #206); open questions Q1–Q11 (wording) are his.
+  epic-8: in-progress
+  8-0-ux-pass-ai-assistance-surfaces: in-progress
   8-1-study-notes: backlog
   8-2a-drafts-table: backlog
   8-2b-ai-origin-staleness-and-decisions: backlog
