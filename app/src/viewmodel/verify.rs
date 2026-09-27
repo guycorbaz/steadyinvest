@@ -176,13 +176,24 @@ pub fn demo_study() -> Result<Study, String> {
         .find(|(id, _)| *id == DEMO_FIXTURE_ID)
         .map(|(_, json)| *json)
         .ok_or_else(|| MSG_DEMO_MISSING.to_string())?;
-    let fixture: GoldenStudy = serde_json::from_str(json).map_err(|error| {
+    // A fixed, deterministic identity — the demo is in-memory only, so its id need not be unique in
+    // any journal.
+    study_from_golden(json, Uuid::from_u128(0x0DE_0000), Uuid::nil(), "DÉMO").map_err(|error| {
         tracing::warn!(%error, "demo study unreadable");
         MSG_DEMO_UNREADABLE.to_string()
-    })?;
+    })
+}
 
-    // A fixed, deterministic identity — the demo is in-memory only, so its id need not be unique in
-    // any journal. Cells carry a provider provenance (reference data), Present coverage, Current.
+/// Convert one bundled golden fixture into a contract [`Study`] with the given identity — the
+/// demo's conversion, and the one the Story 8.3 metamorphic suite runs over every fixture. Cells
+/// carry a provider provenance (reference data), Present coverage, Current.
+fn study_from_golden(
+    json: &str,
+    id: Uuid,
+    journal_id: Uuid,
+    ticker: &str,
+) -> Result<Study, serde_json::Error> {
+    let fixture: GoldenStudy = serde_json::from_str(json)?;
     let provenance = Provenance {
         ai_origin: None,
         source: Source::Provider,
@@ -197,9 +208,9 @@ pub fn demo_study() -> Result<Study, String> {
         .map(|y| year_to_data(y, &provenance))
         .collect();
     let mut study = Study::new(
-        Uuid::from_u128(0x0DE_0000),
-        Uuid::nil(),
-        "DÉMO",
+        id,
+        journal_id,
+        ticker,
         fixture.input.native_currency.clone(),
         judgment_from(&fixture.input.judgment),
         Timestamp("2026-01-01T00:00:00Z".to_string()),
@@ -316,5 +327,129 @@ mod tests {
             snapshot.is_ok(),
             "the demo study normalizes + computes a coherent frame"
         );
+    }
+
+    /// Story 8.3 AC 12 (FR72, "a pending draft changes no computed output"): for EVERY golden
+    /// fixture, the study read through the MCP access surface yields the same snapshot — through
+    /// the app's own `report::form::build_snapshot` — with and without pending drafts of every kind.
+    #[test]
+    fn pending_drafts_of_every_kind_change_no_computed_output_of_any_golden_study() {
+        use steadyinvest_contract::{DraftKind, DraftOrigin, DraftTarget};
+        use steadyinvest_persistence::{DraftSubmission, Journal, McpAccess, Page};
+
+        let journal_id = Uuid::from_u128(0x83_6000);
+        let now = Timestamp("2026-09-28T12:00:00Z".to_string());
+        for (n, (fixture_id, json)) in GOLDEN_FIXTURES.iter().enumerate() {
+            let n = n as u128;
+            let dir = tempfile::TempDir::new().expect("tempdir");
+            let path = dir.path().join("dossier.db");
+            let study_id = Uuid::from_u128(0x83_7000 + n);
+            let study = study_from_golden(json, study_id, journal_id, "GOLD")
+                .unwrap_or_else(|e| panic!("{fixture_id} converts: {e}"));
+            {
+                let mut j = Journal::create(&path, journal_id, &now).expect("create");
+                j.put_study_with_history(&study, &now).expect("store");
+            }
+            let access = McpAccess::at(&path);
+            let snapshot = |label: &str| {
+                let read = access
+                    .read_study(study_id)
+                    .expect("read")
+                    .unwrap_or_else(|| panic!("{fixture_id}: {label} study present"));
+                format!(
+                    "{:?}",
+                    crate::viewmodel::engine::build_snapshot(&read.study)
+                )
+            };
+            let without = snapshot("before");
+
+            let dossier = access.identity().expect("identity");
+            let base = |k: u128, kind: DraftKind| DraftSubmission {
+                id: Uuid::from_u128(0x83_8000 + n * 16 + k),
+                created_at: now.clone(),
+                kind,
+                study_id: Some(study_id),
+                security_ticker: None,
+                native_currency: None,
+                company_name: None,
+                target: None,
+                proposed_value: None,
+                note_text: None,
+                comment: "proposition de test".to_string(),
+                origin: DraftOrigin {
+                    client: "test".to_string(),
+                    model: "test".to_string(),
+                },
+                dossier: dossier.clone(),
+                method_version: METHOD_VERSION.to_string(),
+            };
+            let year = study.years.first().map(|y| y.year).expect("a year");
+            let drafts = [
+                DraftSubmission {
+                    note_text: Some("note".to_string()),
+                    ..base(1, DraftKind::Note)
+                },
+                DraftSubmission {
+                    target: Some(DraftTarget::Cell {
+                        fiscal_year: year,
+                        field: "eps".to_string(),
+                    }),
+                    proposed_value: Some("999.5".to_string()),
+                    ..base(2, DraftKind::Cell)
+                },
+                DraftSubmission {
+                    target: Some(DraftTarget::Cell {
+                        fiscal_year: year,
+                        field: "high_price".to_string(),
+                    }),
+                    proposed_value: Some("0.01".to_string()),
+                    ..base(3, DraftKind::Cell)
+                },
+                DraftSubmission {
+                    target: Some(DraftTarget::Judgment {
+                        field: "judged_avg_high_pe".to_string(),
+                    }),
+                    proposed_value: Some("80".to_string()),
+                    ..base(4, DraftKind::Judgment)
+                },
+                DraftSubmission {
+                    target: Some(DraftTarget::Judgment {
+                        field: "estimated_high_eps".to_string(),
+                    }),
+                    proposed_value: Some("-3".to_string()),
+                    ..base(5, DraftKind::Judgment)
+                },
+                DraftSubmission {
+                    target: Some(DraftTarget::Judgment {
+                        field: "forecast_low_option".to_string(),
+                    }),
+                    proposed_value: Some("dividend_supported".to_string()),
+                    ..base(6, DraftKind::Judgment)
+                },
+                DraftSubmission {
+                    study_id: None,
+                    security_ticker: Some("NEWCO".to_string()),
+                    native_currency: Some("USD".to_string()),
+                    ..base(7, DraftKind::Study)
+                },
+            ];
+            for d in &drafts {
+                access
+                    .submit_draft(d)
+                    .unwrap_or_else(|e| panic!("{fixture_id}: {:?} accepted: {e:?}", d.kind));
+            }
+            assert_eq!(
+                access
+                    .list_drafts(Default::default(), Page::first(50))
+                    .expect("drafts")
+                    .total,
+                drafts.len() as u64
+            );
+            assert_eq!(
+                snapshot("after"),
+                without,
+                "{fixture_id}: a pending draft changed a computed output"
+            );
+        }
     }
 }
