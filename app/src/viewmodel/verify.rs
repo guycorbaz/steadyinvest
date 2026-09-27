@@ -330,32 +330,68 @@ mod tests {
     }
 
     /// Story 8.3 AC 12 (FR72, "a pending draft changes no computed output"): for EVERY golden
-    /// fixture, the study read through the MCP access surface yields the same snapshot — through
-    /// the app's own `report::form::build_snapshot` — with and without pending drafts of every kind.
+    /// fixture AND every study of the frozen persistence corpus (`v1.db`, `v8.db`), the study read
+    /// through the MCP access surface yields the same snapshot — through the app's own
+    /// `report::form::build_snapshot` — with and without pending drafts of every kind.
+    ///
+    /// **The structural argument this test samples** (G3 F6): a computed output is a function of
+    /// the `Study` alone (`build_snapshot(&Study)` — no dossier, no connection); the study is read
+    /// from `studies`; drafts live in `ai_drafts`, which no study read touches and no computation
+    /// path reads (`tests/drafts.rs` isolation scan). So no draft can reach an output; the fixtures
+    /// below check it end to end on real shapes, not only on the argument.
     #[test]
-    fn pending_drafts_of_every_kind_change_no_computed_output_of_any_golden_study() {
+    fn pending_drafts_of_every_kind_change_no_computed_output_of_any_fixture_study() {
         use steadyinvest_contract::{DraftKind, DraftOrigin, DraftTarget};
         use steadyinvest_persistence::{DraftSubmission, Journal, McpAccess, Page};
 
-        let journal_id = Uuid::from_u128(0x83_6000);
         let now = Timestamp("2026-09-28T12:00:00Z".to_string());
-        for (n, (fixture_id, json)) in GOLDEN_FIXTURES.iter().enumerate() {
+        let mut fixtures: Vec<(String, Study)> = GOLDEN_FIXTURES
+            .iter()
+            .enumerate()
+            .map(|(n, (fixture_id, json))| {
+                let study = study_from_golden(
+                    json,
+                    Uuid::from_u128(0x83_7000 + n as u128),
+                    Uuid::from_u128(0x83_6000),
+                    "GOLD",
+                )
+                .unwrap_or_else(|e| panic!("{fixture_id} converts: {e}"));
+                ((*fixture_id).to_string(), study)
+            })
+            .collect();
+        // The persistence corpus: real journals written by earlier builds, migrated on a copy.
+        let corpus =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../persistence/tests/corpus");
+        for file in ["v1.db", "v8.db"] {
+            let dir = tempfile::TempDir::new().expect("tempdir");
+            let copy = dir.path().join(file);
+            std::fs::copy(corpus.join(file), &copy).expect("corpus copy");
+            let j = Journal::open(&copy).expect("the corpus journal opens");
+            for summary in j.list_studies().expect("studies") {
+                let study = j.get_study(summary.id).expect("read").expect("present");
+                fixtures.push((format!("corpus {file} {}", summary.security_ticker), study));
+            }
+        }
+        assert!(
+            fixtures.len() > GOLDEN_FIXTURES.len(),
+            "the corpus studies are included"
+        );
+
+        for (n, (label, study)) in fixtures.iter().enumerate() {
             let n = n as u128;
             let dir = tempfile::TempDir::new().expect("tempdir");
             let path = dir.path().join("dossier.db");
-            let study_id = Uuid::from_u128(0x83_7000 + n);
-            let study = study_from_golden(json, study_id, journal_id, "GOLD")
-                .unwrap_or_else(|e| panic!("{fixture_id} converts: {e}"));
+            let study_id = study.id;
             {
-                let mut j = Journal::create(&path, journal_id, &now).expect("create");
-                j.put_study_with_history(&study, &now).expect("store");
+                let mut j = Journal::create(&path, study.journal_id, &now).expect("create");
+                j.put_study_with_history(study, &now).expect("store");
             }
             let access = McpAccess::at(&path);
-            let snapshot = |label: &str| {
+            let snapshot = |when: &str| {
                 let read = access
                     .read_study(study_id)
                     .expect("read")
-                    .unwrap_or_else(|| panic!("{fixture_id}: {label} study present"));
+                    .unwrap_or_else(|| panic!("{label}: {when} study present"));
                 format!(
                     "{:?}",
                     crate::viewmodel::engine::build_snapshot(&read.study)
@@ -383,27 +419,10 @@ mod tests {
                 dossier: dossier.clone(),
                 method_version: METHOD_VERSION.to_string(),
             };
-            let year = study.years.first().map(|y| y.year).expect("a year");
-            let drafts = [
+            let mut drafts = vec![
                 DraftSubmission {
                     note_text: Some("note".to_string()),
                     ..base(1, DraftKind::Note)
-                },
-                DraftSubmission {
-                    target: Some(DraftTarget::Cell {
-                        fiscal_year: year,
-                        field: "eps".to_string(),
-                    }),
-                    proposed_value: Some("999.5".to_string()),
-                    ..base(2, DraftKind::Cell)
-                },
-                DraftSubmission {
-                    target: Some(DraftTarget::Cell {
-                        fiscal_year: year,
-                        field: "high_price".to_string(),
-                    }),
-                    proposed_value: Some("0.01".to_string()),
-                    ..base(3, DraftKind::Cell)
                 },
                 DraftSubmission {
                     target: Some(DraftTarget::Judgment {
@@ -433,10 +452,22 @@ mod tests {
                     ..base(7, DraftKind::Study)
                 },
             ];
+            if let Some(year) = study.years.first().map(|y| y.year) {
+                for (k, field, value) in [(2, "eps", "999.5"), (3, "high_price", "0.01")] {
+                    drafts.push(DraftSubmission {
+                        target: Some(DraftTarget::Cell {
+                            fiscal_year: year,
+                            field: field.to_string(),
+                        }),
+                        proposed_value: Some(value.to_string()),
+                        ..base(k, DraftKind::Cell)
+                    });
+                }
+            }
             for d in &drafts {
                 access
                     .submit_draft(d)
-                    .unwrap_or_else(|e| panic!("{fixture_id}: {:?} accepted: {e:?}", d.kind));
+                    .unwrap_or_else(|e| panic!("{label}: {:?} accepted: {e:?}", d.kind));
             }
             assert_eq!(
                 access
@@ -448,7 +479,7 @@ mod tests {
             assert_eq!(
                 snapshot("after"),
                 without,
-                "{fixture_id}: a pending draft changed a computed output"
+                "{label}: a pending draft changed a computed output"
             );
         }
     }
