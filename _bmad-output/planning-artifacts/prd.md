@@ -876,8 +876,7 @@ withholding-refund tracking, export/share, eventual public release.
   preserves identity), enabling golden-study and seeding.
 - FR60 **[P1]:** The user can **export/import the whole journal** in a versioned format, validated on
   import (reject/migrate on version mismatch); the export and backups include AI drafts [P4]
-  (pending, validated, validated then undone, rejected); an export carrying notes, AI origins or drafts is refused by an
-  older build, never imported with them silently dropped.
+  (pending, validated, validated then undone, rejected).
 - FR61 **[P1]:** The user can **restore from a backup** with integrity and version-compatibility checks
   before overwrite.
 - FR62 **[P1]:** The user can access **non-blocking contextual help / glossary** and a read-only
