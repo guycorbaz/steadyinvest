@@ -1,6 +1,6 @@
 # Story 8.1: Study notes
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created 2026-09-27 by the create-story workflow (fork of the G2 session). Source of truth for
      scope: epics.md Story 8.1 + the Epic 8 posture AC; UX: ux-ai-assistance-surfaces.md §3.3 « Notes »
@@ -70,56 +70,56 @@ so that my thinking around a study lives beside it (and an AI note draft later h
 
 ## Tasks / Subtasks
 
-- [ ] **T1 — Contract types** (AC 1, 2)
-  - [ ] T1.1 `contract/src/study.rs`: add `Note { id: Uuid, text: String, created_at: Timestamp, updated_at: Timestamp, #[serde(default)] ai_origin: Option<AiOrigin> }`; add `#[serde(default)] pub notes: Vec<Note>` on `Study` **after `company_name`, before `created_at`**; `Study::new` sets `notes: Vec::new()`.
-  - [ ] T1.2 New `AiOrigin { draft_id: Uuid, client: String, model: String, validated_at: Timestamp }` in `contract` (e.g. `contract/src/ai.rs`), re-exported from `lib.rs`; doc-comment it as a *validated* value's origin (A6; `DraftOrigin` is 8.2b's).
-  - [ ] T1.3 **`SCHEMA_VERSION` stays 1** — do not touch `versioning.rs`, `export.rs` import checks, or `upsert_study_row`.
-  - [ ] T1.4 Add `notes: Vec::new()` to every `Study { … }` struct literal — the compiler lists them (Dev Notes § Literal sites).
-- [ ] **T2 — Pinned shape (corpus gate)** (AC 1, NFR-R3)
-  - [ ] T2.1 `persistence/tests/corpus_gate.rs` gate 1: re-capture `PINNED_CANONICAL_STUDY_JSON` with the new `"notes":[]` (canonical study keeps `notes: vec![]`), and add a doc paragraph in the precedent style (Story 2.2 / 3.4 / `company_name`): an additive `#[serde(default)]` field, **not** a `SCHEMA_VERSION` bump (owner decision 2026-09-27: not in production, no migration of existing data).
-  - [ ] T2.2 Gate 2 (`v1.db`) must still read back equal via `serde(default)` — no new corpus file, the frozen file untouched.
-  - [ ] T2.3 **Phantom-history guard (small, recommended).** `put_study_with_history` dedups on the RAW payload string (`persistence/src/studies.rs:122-130`). A study last saved before this story has no `"notes"` key in its latest snapshot, so the first value-identical re-save after the upgrade (e.g. a no-change refresh) would append a snapshot that reads « autres champs modifiés ». Compare structurally instead: parse the latest payload as `Study` and skip when it equals the study being saved (A→B→A still keeps three rows). This is a one-line-of-logic change, not compatibility work; if the dev judges it out of scope, record the one-off phantom entry as accepted in the completion notes.
-- [ ] **T3 — App state: note rails** (AC 1, 3, 6, 7)
-  - [ ] T3.1 `app/src/state/cells.rs` (next to `set_rationale`) or a new `app/src/state/notes.rs`:
+- [x] **T1 — Contract types** (AC 1, 2)
+  - [x] T1.1 `contract/src/study.rs`: add `Note { id: Uuid, text: String, created_at: Timestamp, updated_at: Timestamp, #[serde(default)] ai_origin: Option<AiOrigin> }`; add `#[serde(default)] pub notes: Vec<Note>` on `Study` **after `company_name`, before `created_at`**; `Study::new` sets `notes: Vec::new()`.
+  - [x] T1.2 New `AiOrigin { draft_id: Uuid, client: String, model: String, validated_at: Timestamp }` in `contract` (e.g. `contract/src/ai.rs`), re-exported from `lib.rs`; doc-comment it as a *validated* value's origin (A6; `DraftOrigin` is 8.2b's).
+  - [x] T1.3 **`SCHEMA_VERSION` stays 1** — do not touch `versioning.rs`, `export.rs` import checks, or `upsert_study_row`.
+  - [x] T1.4 Add `notes: Vec::new()` to every `Study { … }` struct literal — the compiler lists them (Dev Notes § Literal sites).
+- [x] **T2 — Pinned shape (corpus gate)** (AC 1, NFR-R3)
+  - [x] T2.1 `persistence/tests/corpus_gate.rs` gate 1: re-capture `PINNED_CANONICAL_STUDY_JSON` with the new `"notes":[]` (canonical study keeps `notes: vec![]`), and add a doc paragraph in the precedent style (Story 2.2 / 3.4 / `company_name`): an additive `#[serde(default)]` field, **not** a `SCHEMA_VERSION` bump (owner decision 2026-09-27: not in production, no migration of existing data).
+  - [x] T2.2 Gate 2 (`v1.db`) must still read back equal via `serde(default)` — no new corpus file, the frozen file untouched.
+  - [x] T2.3 **Phantom-history guard (small, recommended).** `put_study_with_history` dedups on the RAW payload string (`persistence/src/studies.rs:122-130`). A study last saved before this story has no `"notes"` key in its latest snapshot, so the first value-identical re-save after the upgrade (e.g. a no-change refresh) would append a snapshot that reads « autres champs modifiés ». Compare structurally instead: parse the latest payload as `Study` and skip when it equals the study being saved (A→B→A still keeps three rows). This is a one-line-of-logic change, not compatibility work; if the dev judges it out of scope, record the one-off phantom entry as accepted in the completion notes.
+- [x] **T3 — App state: note rails** (AC 1, 3, 6, 7)
+  - [x] T3.1 `app/src/state/cells.rs` (next to `set_rationale`) or a new `app/src/state/notes.rs`:
     - `add_note(study_id, text) -> Result<Uuid, String>`, `edit_note(study_id, note_id, text) -> Result<(), String>`, `delete_note(study_id, note_id) -> Result<(), String>`, all through `mutate_study` (atomic, guarded, undoable-on-real-change).
     - Ids come from the injected `IdGen` and times from the injected `Clock` (ADD15 — never `Uuid::new_v4`).
     - The text is trimmed; empty → refuse with `MSG_NOTE_EMPTY`.
     - An edit that changes nothing is a no-op: no `updated_at` bump and no undo step (the `before != study` guard does this only if `updated_at` is set **after** the equality check on the text).
     - An unknown note id → `MSG_SAVE_FAILED`-class refusal, never a panic; name it (§1 "misattribution is a lie": the note is gone, e.g. after an undo).
-  - [ ] T3.2 `app/src/state/messages.rs`: `MSG_NOTE_EMPTY = "La note est vide ; rien n'a été enregistré."`, plus a named refusal for an unknown or vanished note if needed. Register them in `USER_FACING_MESSAGES`.
-  - [ ] T3.3 Newest first: order at render time (the view model sorts by `created_at` desc, then id); the stored order is insertion order.
-- [ ] **T4 — View model + push** (AC 3, 4, 6)
-  - [ ] T4.1 `app/src/viewmodel/` (new `notes.rs`): `NoteRowView { id, meta, text }`, where `meta` is « {JJ/MM/AAAA} », plus « · modifiée le {JJ/MM/AAAA} » when `updated_at != created_at`. A small `date_fr(&Timestamp) -> String` helper; the app shows AAAA-MM-JJ elsewhere, and the spec wording uses JJ/MM/AAAA — see Questions.
-  - [ ] T4.2 `app/src/wiring/push.rs` `push_form`: push `Studies.notes` (a `[NoteRow]` model) next to `rationale` (push.rs:65-67).
-  - [ ] T4.3 **History** — `app/src/viewmodel/history.rs`:
+  - [x] T3.2 `app/src/state/messages.rs`: `MSG_NOTE_EMPTY = "La note est vide ; rien n'a été enregistré."`, plus a named refusal for an unknown or vanished note if needed. Register them in `USER_FACING_MESSAGES`.
+  - [x] T3.3 Newest first: order at render time (the view model sorts by `created_at` desc, then id); the stored order is insertion order.
+- [x] **T4 — View model + push** (AC 3, 4, 6)
+  - [x] T4.1 `app/src/viewmodel/` (new `notes.rs`): `NoteRowView { id, meta, text }`, where `meta` is « {JJ/MM/AAAA} », plus « · modifiée le {JJ/MM/AAAA} » when `updated_at != created_at`. A small `date_fr(&Timestamp) -> String` helper; the app shows AAAA-MM-JJ elsewhere, and the spec wording uses JJ/MM/AAAA — see Questions.
+  - [x] T4.2 `app/src/wiring/push.rs` `push_form`: push `Studies.notes` (a `[NoteRow]` model) next to `rationale` (push.rs:65-67).
+  - [x] T4.3 **History** — `app/src/viewmodel/history.rs`:
     - add a notes facet to `Diff`: added / edited / deleted, keyed by **note id** (the §2 discriminator rule, never by position);
     - summaries « Note ajoutée » / « Note modifiée » / « Note supprimée » (new `HIST_NOTE_*` consts in `HISTORY_USER_FACING_LABELS`);
     - detail lines « Note ajoutée : {texte} », « Note modifiée : {avant} → {après} », « Note supprimée : {texte} ». These are user text, so the deleted note stays readable (O6);
     - include the notes facet in the `other` guard (a note change never reads « autres champs modifiés »);
     - `HistoryEntryView` gains `notes_only: bool`.
-  - [ ] T4.4 `push_history` (push.rs:175-221): filter out `notes_only` entries when `Studies.history-hide-notes` is true, then **recompute `first_of_day` after filtering**. Details still diff against the true predecessor (the unfiltered list) — keep `toggle-history-entry`'s lookup on the unfiltered listing (studies.rs:415+).
-- [ ] **T5 — Slint UI** (AC 6, 7, 9)
-  - [ ] T5.1 `app/ui/state.slint` `Studies`:
+  - [x] T4.4 `push_history` (push.rs:175-221): filter out `notes_only` entries when `Studies.history-hide-notes` is true, then **recompute `first_of_day` after filtering**. Details still diff against the true predecessor (the unfiltered list) — keep `toggle-history-entry`'s lookup on the unfiltered listing (studies.rs:415+).
+- [x] **T5 — Slint UI** (AC 6, 7, 9)
+  - [x] T5.1 `app/ui/state.slint` `Studies`:
     - `in-out property <[NoteRow]> notes` (struct `NoteRow { id, meta, text }`);
     - `callback add-note(string) -> bool`, `callback edit-note(string, string) -> bool`, `callback delete-note(string)`;
     - `in-out property <bool> history-hide-notes` plus `callback toggle-history-notes()`.
     - `Dialog` gains `draft-text` (reset in `form()`).
-  - [ ] T5.2 `app/ui/components/modal_dialog.slint`:
+  - [x] T5.2 `app/ui/components/modal_dialog.slint`:
     - new `LabeledTextArea` (UX §4.3): the `RationaleNote` box behaviour — 3–8 rows, then it scrolls. Enter = newline, Ctrl+Enter = `accepted()`, Esc bubbles to the card's cancel;
     - forms `note-add` / `note-edit` with `can-submit` = `Dialog.draft-text != ""`, dispatched to `Studies.add-note` / `edit-note(Dialog.target-id, …)`, closing only on `true`;
     - confirm action `delete-note` in `run-confirm`, `confirm-title` and the verb function;
     - initial focus on the text area; the focus trap as for every form.
-  - [ ] T5.3 `app/ui/screens/study_screen.slint` — a `PanelCard` « Notes » right after `RationaleNote` (line 1188):
+  - [x] T5.3 `app/ui/screens/study_screen.slint` — a `PanelCard` « Notes » right after `RationaleNote` (line 1188):
     - « Ajouter une note… » (`ActionButton`) and the empty text « Aucune note pour cette étude. »;
     - rows showing meta, text (3 lines, then « Afficher tout » / « Réduire »), « Modifier… » (opens `note-edit` prefilled via `Dialog.draft-text` + `target-id`) and « Supprimer » (confirm);
     - buttons disabled on the demo (`Studies.demo-active`) and on a read-only dossier, like the other study actions.
-  - [ ] T5.4 History panel (study_screen.slint:478-547): a `ChoiceChip`/`ActionButton` « Masquer les notes » / « Afficher les notes » under the title, bound to `toggle-history-notes`.
-  - [ ] T5.5 Wiring (`app/src/wiring/judgment.rs`, mirroring `on_set_rationale` at 83-106): the note callbacks follow `current_study` → state rail → on `Ok`, `study_notice::clear` + `push_form`, returning `true`. On `Err`, route the refusal into the form's `field-error` (the `Dialog.gesture` rule) or `dialog::refuse`, and return `false`. `toggle-history-notes` flips the property and re-runs `push_history`.
-- [ ] **T6 — Glossary & posture** (AC 11, 13)
-  - [ ] T6.1 Glossary/help entry « Notes » (where « Justification de la décision » is glossed): a note is dated, stays in the history when deleted, is not printed.
-  - [ ] T6.2 Probe and set the `@tr` floor (`posture.rs:747`, `total >= N`) and the exact `USER_FACING_MESSAGES` count (`posture.rs:867`, currently 224), and extend the running-tally comment with the delta (checklist §6).
-- [ ] **T7 — Tests** (all ACs; see Dev Notes § Tests)
-- [ ] **T8 — Verification (DoD)**:
+  - [x] T5.4 History panel (study_screen.slint:478-547): a `ChoiceChip`/`ActionButton` « Masquer les notes » / « Afficher les notes » under the title, bound to `toggle-history-notes`.
+  - [x] T5.5 Wiring (`app/src/wiring/judgment.rs`, mirroring `on_set_rationale` at 83-106): the note callbacks follow `current_study` → state rail → on `Ok`, `study_notice::clear` + `push_form`, returning `true`. On `Err`, route the refusal into the form's `field-error` (the `Dialog.gesture` rule) or `dialog::refuse`, and return `false`. `toggle-history-notes` flips the property and re-runs `push_history`.
+- [x] **T6 — Glossary & posture** (AC 11, 13)
+  - [x] T6.1 Glossary/help entry « Notes » (where « Justification de la décision » is glossed): a note is dated, stays in the history when deleted, is not printed.
+  - [x] T6.2 Probe and set the `@tr` floor (`posture.rs:747`, `total >= N`) and the exact `USER_FACING_MESSAGES` count (`posture.rs:867`, currently 224), and extend the running-tally comment with the delta (checklist §6).
+- [x] **T7 — Tests** (all ACs; see Dev Notes § Tests)
+- [x] **T8 — Verification (DoD)**:
   - headless walk (`.claude/skills/verify`) on a **plain temp copy** of Guy's test dossier: add, edit and delete a note, undo/redo, the history toggle, the empty-note refusal, the read-only and demo states, the PDF unchanged;
   - window resized to the Xvfb screen and X focus given (7.0 headless lessons);
   - Guy's on-display check of the Notes card and dialogs.
@@ -227,10 +227,61 @@ The `Study { … }` struct literals (the ones setting `schema_version:`) are in 
 
 ### Agent Model Used
 
+Claude Opus 5.5 (claude-opus-5-5), fork of the G2 session, 2026-09-27.
+
 ### Debug Log References
+
+- Slint binding loop on first build: an `if root.long:` toggle fed the note text's wrap width back
+  into the horizontal layout → the « Afficher tout » row is always present, collapsed to height 0.
+- Posture « bare literal » gate caught the invisible three-line measuring probe → digits only,
+  allow-listed (`"0n0n0"`, the extractor drops `\n`).
+- On screen: the note text area overlapped the form buttons (a `FocusScope` is no layout) → explicit
+  height (commit « fix(8.1): the note text area sizes its form »).
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created (2026-09-27).
+- Owner decisions applied: no `SCHEMA_VERSION` bump / re-stamp / import relaxation (Guy
+  2026-09-27, « pas en production »); the story's three questions took their defaults (JJ/MM/AAAA,
+  the three history detail lines, the read-failure text).
+- T2.3 taken: `put_study_with_history` dedups structurally (parse the latest payload as `Study`);
+  a pre-notes snapshot never forces a phantom entry; A→B→A still keeps three rows.
+- **Deviation (T5.2):** `can-submit` of the note forms is `true`, not `draft-text != ""` — an empty
+  note must reach Rust to be refused WITH its reason in `field-error` (AC 6); a greyed silent button
+  would hide it (checked on screen).
+- **Addition:** `MSG_NOTE_GONE` « Cette note n'existe plus dans l'étude ; rien n'a été enregistré. »
+  (not in §3.3) for an edit/delete of a note removed meanwhile (e.g. by an undo); a READ failure on
+  that check reports the read failure, never « n'existe plus ».
+- The read-failure text is a Slint `@tr` string (shown when the post-write re-read fails); no Rust
+  const needed.
+- Posture: `@tr` floor 1012 → 1031 (+19), `USER_FACING_MESSAGES` 224 → 226 (+2), history label
+  inventory 17 → 20 (+3), each with its tally comment.
+- Tests: workspace green (app 537 unit tests incl. 6 state + 3 history + 2 notes-view new; contract,
+  persistence corpus/journal/export additions; report PDF byte-identity); clippy `-D warnings` and
+  `fmt --check` clean.
+- Verification (headless, provider « none », temp copy of the test dossier): empty card, add form
+  (Enter = newline, Ctrl+Enter saves), edit form prefilled, empty-note refusal inside the form,
+  newest-first rows with « modifiée le », long note clamped with « Afficher tout », delete confirm,
+  history « Note ajoutée / modifiée / supprimée », the deleted text in the detail, « Masquer les
+  notes » hides them with the day header recomputed. Undo/redo, read-only and demo states are
+  covered by unit tests, not driven on screen.
+- Seen, not in scope: at 1600 px, opening the history makes the study's action row (« Masquer
+  l'historique ») overflow and the screen scroll sideways — the known G6 width debt, not this story.
+  Also: the #252 method-change band disappears after the first note write, as after any edit
+  (`study_notice::clear(Source::Edit)` path, pre-existing).
+- Guy's on-display check of the Notes card and dialogs still to do (DoD).
 
 ### File List
+
+- contract/src/ai.rs (new), contract/src/lib.rs, contract/src/study.rs, contract/tests/roundtrip.rs
+- persistence/src/studies.rs; persistence/tests/{corpus_gate,export,journal_roundtrip,e2e_lifecycle,readonly_newer,readonly_protected,watchlist}.rs
+- app/src/state/notes.rs (new), app/src/state/{mod,messages,tests}.rs
+- app/src/viewmodel/notes.rs (new), app/src/viewmodel/{mod,history}.rs
+- app/src/wiring/{judgment,push,studies}.rs
+- app/src/posture.rs
+- app/ui/state.slint, app/ui/components/modal_dialog.slint, app/ui/screens/study_screen.slint, app/ui/screens/settings.slint
+- report/src/pdf.rs
+
+### Change Log
+
+- 2026-09-27: implemented (commits 0f67a4b, 65e2a93, fix commit for the text-area height); status → review.

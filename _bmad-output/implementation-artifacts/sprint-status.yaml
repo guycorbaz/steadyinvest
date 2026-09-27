@@ -701,7 +701,8 @@ development_status:
   8-0-ux-pass-ai-assistance-surfaces: done
   # 2026-09-27: 8-1 story file created (create-story) → ready-for-dev. Owner decision: no migration /
   #             no SCHEMA_VERSION bump (not in production) — notes are a plain additive field.
-  8-1-study-notes: ready-for-dev
+  # 2026-09-27: 8-1 dev complete (headless check done) → review; Guy's on-display check pending.
+  8-1-study-notes: review
   8-2a-drafts-table: backlog
   8-2b-ai-origin-staleness-and-decisions: backlog
   8-3-mcp-access-gated-access-surface: backlog
