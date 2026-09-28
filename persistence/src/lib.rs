@@ -31,7 +31,10 @@ mod transactions;
 mod util;
 mod watchlist;
 
-pub use drafts::{DraftDecisionWrite, DraftRecord, DraftStep, DraftVerdict, StudyWrite};
+pub use drafts::{
+    DraftDecisionWrite, DraftRecord, DraftStep, DraftVerdict, StudyWrite, is_currency_code,
+    is_ticker,
+};
 pub use error::{Error, ErrorKind, Result};
 pub use export::{
     ImportSummary, JournalExport, JournalSnapshot, JudgmentSnapshotRecord, StudyRecord,

@@ -1173,3 +1173,76 @@ fn a_planted_corrupt_column_fails_the_read_naming_it() {
         }
     }
 }
+
+/// Story 8.5a (G3): a draft study's ticker and currency are shown as app text (UX spec §4.1 — the
+/// AiFrame exemption), so the identifier rule of 8.3 holds on import and on every read, not only at
+/// MCP submission.
+#[test]
+fn a_draft_study_breaking_the_identifier_rule_is_refused_on_import_and_corrupt_on_read() {
+    let (_dir, path, journal) = dossier();
+    insert(&raw(&path), &study_row(0x51)).expect("plants");
+    let exported = journal.export_journal().expect("exports");
+    for bad in ["asml", "AS ML", "ASML\u{202E}", "ABCDEFGHIJKLMNOPQRSTU"] {
+        let file = edited_export(&exported, |s| {
+            s["ai_drafts"][0]["security_ticker"] = serde_json::json!(bad)
+        });
+        let (_d, mut target) = fresh_target();
+        match target.import_journal(&file) {
+            Err(Error::ImportMalformed { detail }) => {
+                assert!(detail.contains("identifier rule"), "{bad:?}: {detail}")
+            }
+            other => panic!("{bad:?}: expected ImportMalformed, got {other:?}"),
+        }
+        assert!(target.list_studies().expect("reads").is_empty());
+    }
+
+    // Planted behind the app's back (the CHECKs do not know the rule): the read names it.
+    let (_dir2, path2, journal2) = dossier();
+    insert(
+        &raw(&path2),
+        &Row {
+            ticker: "asml",
+            ..study_row(0x52)
+        },
+    )
+    .expect("the schema lets it in");
+    match journal2.list_drafts() {
+        Err(Error::CorruptPayload { detail }) => {
+            assert!(detail.contains("identifier rule"), "{detail}")
+        }
+        other => panic!("expected CorruptPayload, got {other:?}"),
+    }
+    assert!(
+        journal2.list_pending_drafts().is_err(),
+        "the inbox read refuses it too"
+    );
+}
+
+/// A note / cell / judgment draft copies its study's ticker (app data, maybe hand-typed): it is not
+/// held to the draft-study rule, and the pending read returns pending drafts only.
+#[test]
+fn other_kinds_keep_their_studys_spelling_and_the_pending_read_skips_decided_drafts() {
+    let (_dir, path, journal) = dossier();
+    let conn = raw(&path);
+    insert(
+        &conn,
+        &Row {
+            ticker: "nesn.sw",
+            ..note_row(0x53)
+        },
+    )
+    .expect("plants");
+    insert(
+        &conn,
+        &Row {
+            status: "rejected",
+            decided_at: Some("2026-09-27T10:00:00Z"),
+            ..cell_row(0x54)
+        },
+    )
+    .expect("plants");
+    assert_eq!(journal.list_drafts().expect("reads").len(), 2);
+    let pending = journal.list_pending_drafts().expect("reads");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].security_ticker, "nesn.sw");
+}
