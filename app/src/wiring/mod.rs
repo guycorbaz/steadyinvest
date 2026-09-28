@@ -9,6 +9,7 @@
 pub(crate) mod cells;
 pub(crate) mod comparison;
 pub(crate) mod dialog;
+pub(crate) mod drafts;
 pub(crate) mod fetch;
 pub(crate) mod fx;
 pub(crate) mod holdings;
@@ -185,6 +186,13 @@ pub(crate) fn wire_navigation(ui: &crate::MainWindow, s: &Session) {
                     &holding_dismissed.borrow(),
                     &config.borrow(),
                 );
+            }
+            // Propositions (Story 8.5a): the inbox re-reads on arrival (arch A9: « on opening the
+            // inbox »). Réglages (5) falls through.
+            // From the rail the filters start over (G3); the bands' path keeps the ones it sets.
+            4 => {
+                crate::wiring::drafts::reset_filters(&ui);
+                crate::wiring::drafts::push_drafts(&ui, &journal_state.borrow());
             }
             _ => {}
         }

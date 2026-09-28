@@ -14,6 +14,9 @@ export component ActionButton inherits Rectangle {
     // Take the focus whenever this counter changes (the modal's focus trap — G1 review). A
     // disabled button cannot take it; the trap then asks another one.
     in property <int> focus-request;
+    // Story 8.5a (G3): a compact variant (caption text, 32 px) — the action inside a StatusBand, so
+    // the band stays one line high.
+    in property <bool> compact: false;
     callback clicked();
 
     changed focus-request => {
@@ -33,12 +36,13 @@ export component ActionButton inherits Rectangle {
         }
     }
 
-    height: Tokens.row-height + Tokens.space-4;
+    height: root.compact ? 32px : Tokens.row-height + Tokens.space-4;
     forward-focus: fs;
     horizontal-stretch: 0;
     // Never narrower than its own label (on-screen check, 2026-09-25: a crowded row clipped
     // « Transactions » to « Transactior »): the label plus its padding, with the old floor.
-    min-width: max(Tokens.space-48 * 2, label-text.preferred-width + 2 * Tokens.space-16);
+    min-width: root.compact ? label-text.preferred-width + 2 * Tokens.space-12
+        : max(Tokens.space-48 * 2, label-text.preferred-width + 2 * Tokens.space-16);
     border-radius: Tokens.radius;
     opacity: root.enabled ? 1.0 : 0.5;
     background: touch.pressed ? Tokens.surface : Tokens.surface-alt;
@@ -74,13 +78,13 @@ export component ActionButton inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: Tokens.space-16;
-        padding-right: Tokens.space-16;
+        padding-left: root.compact ? Tokens.space-12 : Tokens.space-16;
+        padding-right: root.compact ? Tokens.space-12 : Tokens.space-16;
 
         label-text := Text {
             text: root.label;
             color: Tokens.text-high;
-            font-size: Tokens.font-body;
+            font-size: root.compact ? Tokens.font-caption : Tokens.font-body;
             font-weight: Tokens.weight-medium;
             vertical-alignment: center;
             horizontal-alignment: center;

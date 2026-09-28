@@ -105,6 +105,8 @@ pub const MSG_SUBJECT_FX: &str = "les taux de change";
 pub const MSG_SUBJECT_PORTFOLIOS: &str = "les portefeuilles";
 pub const MSG_SUBJECT_HOLDINGS: &str = "les positions";
 pub const MSG_SUBJECT_TRANSACTIONS: &str = "les transactions";
+/// Story 8.5a — the draft inbox « Propositions » (the drafts and their studies, read together).
+pub const MSG_SUBJECT_DRAFTS: &str = "la liste des propositions";
 /// Startup: the configured journal file was unreadable, so the default journal is in use instead.
 pub const MSG_CONFIGURED_UNREADABLE: &str =
     "Le dossier configuré est illisible ; le dossier par défaut est utilisé.";
@@ -683,7 +685,7 @@ pub const MSG_JOURNAL_EXPORTED: &str = "Le dossier a été exporté.";
 /// Substitution template (the const is posture-scanned; [`journal_imported_message`] fills it). The
 /// trailing `(source : journal {jid}, version {ver})` clause surfaces the imported file's identity so
 /// the user sees whether it is the **same** journal (an update) or a **foreign** seed (AC3).
-pub const MSG_JOURNAL_IMPORTED: &str = "Le dossier a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s). (source : dossier {jid}, version {ver})";
+pub const MSG_JOURNAL_IMPORTED: &str = "Le dossier a été importé : {studies} étude(s), {watch} valeur(s) suivie(s), {holdings} ligne(s) de portefeuille, {txns} mouvement(s), {drafts} proposition(s). (source : dossier {jid}, version {ver})";
 /// Issue #65: the arbitration prompt for an OLDER same-journal envelope (a `{n}`-substitution
 /// template; [`import_confirm_message`] fills it). The merge would snap shared entities back to
 /// their old state — never applied silently.
@@ -798,6 +800,8 @@ pub fn journal_imported_message(summary: &ImportSummary) -> String {
         .replace("{watch}", &summary.watch_items.to_string())
         .replace("{holdings}", &summary.holdings.to_string())
         .replace("{txns}", &summary.transactions.to_string())
+        // Story 8.5a (the 8.2a deferral): the AI drafts the file carried.
+        .replace("{drafts}", &summary.ai_drafts.to_string())
         .replace("{jid}", &summary.source_journal_id.to_string())
         .replace("{ver}", &summary.source_logical_version.to_string())
 }
@@ -1137,6 +1141,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SUBJECT_PORTFOLIOS,
     MSG_SUBJECT_HOLDINGS,
     MSG_SUBJECT_TRANSACTIONS,
+    MSG_SUBJECT_DRAFTS,
     MSG_CONFIGURED_UNREADABLE,
     MSG_NO_DATA_DIR,
     MSG_SAVE_FAILED,

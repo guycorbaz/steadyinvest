@@ -69,6 +69,9 @@ pub fn to_row(
         incomplete,
         zone: zone.into(),
         company_name: company_name.into(),
+        // Story 8.5a: filled after curation from the draft inbox's counts
+        // (`wiring::drafts::apply_row_counts`).
+        pending_drafts: 0,
     }
 }
 

@@ -115,7 +115,7 @@ struct Diff {
 }
 
 /// The canonical + optional cell fields, with their display labels — the diff walks these.
-const CELL_FIELDS: [(&str, &str); 7] = [
+pub(crate) const CELL_FIELDS: [(&str, &str); 7] = [
     (entry::FIELD_SALES, LBL_SALES),
     (entry::FIELD_EPS, LBL_EPS),
     (entry::FIELD_HIGH, LBL_HIGH_PRICE),
@@ -127,7 +127,11 @@ const CELL_FIELDS: [(&str, &str); 7] = [
 
 /// A cell value's display spelling: the grid's own path (millions scaling + locale grouping);
 /// the faithful em-dash for an absent figure.
-fn cell_value_display(value: Option<Money>, field: &str, format: NumberFormat) -> String {
+pub(crate) fn cell_value_display(
+    value: Option<Money>,
+    field: &str,
+    format: NumberFormat,
+) -> String {
     match value {
         Some(money) => format_amount(&entry::stored_to_display(money, field).to_string(), format),
         None => HIST_EMPTY_SLOT.to_string(),
@@ -135,7 +139,7 @@ fn cell_value_display(value: Option<Money>, field: &str, format: NumberFormat) -
 }
 
 /// A judgment value's display spelling (the `judgment_fields` scales), em-dash when unset.
-fn judgment_value_display(
+pub(crate) fn judgment_value_display(
     value: Option<Money>,
     display: DisplayField,
     format: NumberFormat,

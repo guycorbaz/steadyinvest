@@ -325,6 +325,7 @@ fn main() -> Result<(), slint::PlatformError> {
     wiring::quick_screen::wire_quick_screen(&ui, &session);
     wiring::screening::wire_screening(&ui, &session);
     wiring::wire_navigation(&ui, &session);
+    wiring::drafts::wire_drafts(&ui, &session);
     wiring::cells::wire_cells(&ui, &session);
     wiring::judgment::wire_judgment(&ui, &session);
     wiring::prefs::wire_prefs(&ui, &session);
@@ -362,7 +363,10 @@ fn main() -> Result<(), slint::PlatformError> {
             },
         );
     }
+    // Story 8.5a (arch A9): the draft inbox's `data_version` poller — kept alive for the loop.
+    let drafts_poller = wiring::drafts::start_poller(&ui, &session);
     slint::run_event_loop()?;
+    drafts_poller.stop();
     restore_timer.stop();
     ui.hide()?;
 

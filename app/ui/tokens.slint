@@ -118,6 +118,11 @@ export global Tokens {
     // Drawn in neutral ink (`gap-ink`/`text-high`), NEVER a judgment hue. Quasi-static, so a theme/
     // regime swap never re-lays-out the glyph.
     out property <string> warn-glyph: "△";
+    // Story 8.5a (UX spec §4.4) — the AI glyph: U+2605 (black star), text presentation, in ink, on
+    // every AI mark (bands, row markers, the AiFrame header). Covered by the bundled Inter (no system
+    // fallback); unused anywhere else in the UI — « ◆ » is the zone/stop alert, « ◦ » the stale dot,
+    // « △ » plausibility (the confusability-gate pairs, UX-DR15). Never a hue.
+    out property <string> ai-glyph: "★";
     // Trust-marker outline weight (Story 2.5): the heavier ring on the `?` to-review glyph — the
     // second non-colour channel that keeps it unmistakably distinct from the hollow `◦` stale dot.
     // Quasi-static (a metric), so a theme/regime swap never re-lays-out the marker.

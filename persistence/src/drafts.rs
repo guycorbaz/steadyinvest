@@ -214,8 +214,19 @@ pub(crate) fn check_payload(
 
 /// A currency code as the app writes it (the 8.0 spec's `identifier_invalid` rule): three ASCII
 /// upper-case letters (ISO 4217 form).
-pub(crate) fn is_currency_code(code: &str) -> bool {
+pub fn is_currency_code(code: &str) -> bool {
     code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase())
+}
+
+/// A ticker as a draft study must spell it (the 8.0 spec's `identifier_invalid` rule, Story 8.3):
+/// 1–20 of `A–Z 0–9 . -`. The condition of the AiFrame exemption (UX spec §4.1): a draft study's
+/// ticker and currency are shown as app text because nothing else can pass — enforced at MCP
+/// submission, at import and on every read (Story 8.5a, G3).
+pub fn is_ticker(ticker: &str) -> bool {
+    (1..=20).contains(&ticker.len())
+        && ticker
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
 }
 
 /// A timestamp as the app writes it: RFC3339 UTC, `AAAA-MM-JJTHH:MM:SS[.fraction]Z` — a shape
@@ -267,6 +278,17 @@ pub(crate) fn record_from_row(row: DraftRow) -> Result<DraftRecord> {
     let status: DraftStatus = status
         .parse()
         .map_err(|e| corrupt(format!("ai_drafts.status of draft {id}: {e}")))?;
+    // A draft study's ticker and currency read as app text (UX spec §4.1): a row that breaks the
+    // identifier rule is corrupt, never shown (Story 8.5a, G3). Other kinds copy their study's
+    // ticker at submission (app data, possibly hand-typed) and are not held to it.
+    if kind == DraftKind::Study
+        && (!is_ticker(&security_ticker)
+            || !native_currency.as_deref().is_some_and(is_currency_code))
+    {
+        return Err(corrupt(format!(
+            "ai_drafts.security_ticker / native_currency of draft study {id} break the identifier rule"
+        )));
+    }
     check_payload(&payload, kind).map_err(|e| match e {
         PayloadProblem::Newer { version } => Error::NewerRowSchema {
             row_schema_version: i64::try_from(version).unwrap_or(i64::MAX),
@@ -310,6 +332,20 @@ impl Journal {
     pub fn list_drafts(&self) -> Result<Vec<DraftRecord>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {DRAFT_COLUMNS} FROM ai_drafts ORDER BY created_at, id"
+        ))?;
+        let rows = stmt.query_map([], row_tuple)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(record_from_row(row?)?);
+        }
+        Ok(out)
+    }
+
+    /// The PENDING drafts only, same order and corruption rule as [`Self::list_drafts`] — the app's
+    /// inbox reads these (Story 8.5a, G3: the decided record is 8.7's, never read on every poll).
+    pub fn list_pending_drafts(&self) -> Result<Vec<DraftRecord>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {DRAFT_COLUMNS} FROM ai_drafts WHERE status = 'pending' ORDER BY created_at, id"
         ))?;
         let rows = stmt.query_map([], row_tuple)?;
         let mut out = Vec::new();

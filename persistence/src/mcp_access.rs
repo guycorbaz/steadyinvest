@@ -56,8 +56,8 @@
 //! same draft (same id, same content) is idempotent; the same id with other content is refused.
 
 use crate::drafts::{
-    DRAFT_COLUMNS, DraftRecord, check_payload, is_currency_code, is_rfc3339_utc, record_from_row,
-    row_tuple,
+    DRAFT_COLUMNS, DraftRecord, check_payload, is_currency_code, is_rfc3339_utc, is_ticker,
+    record_from_row, row_tuple,
 };
 use crate::error::{Error, Result};
 use crate::journal::{apply_connection_local_pragmas, file_uri, read_journal_id, resolved_path};
@@ -637,14 +637,6 @@ fn denial_of(action: &AuthAction<'_>) -> McpDenial {
         action: action.to_string(),
         object,
     }
-}
-
-/// A ticker as the 8.0 spec's `identifier_invalid` rule has it: `[A-Z0-9.\-]{1,20}`.
-fn is_ticker(ticker: &str) -> bool {
-    (1..=20).contains(&ticker.len())
-        && ticker
-            .bytes()
-            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
 }
 
 /// Two identifiers (tickers, currencies) name the same thing: compared ignoring ASCII case and

@@ -1,0 +1,129 @@
+// AiFrame — the ONLY home of AI-written text (Story 8.5a; UX spec §4.1; FR13, FR64, arch A12).
+// The comment, a proposed note text, a proposed company name, the origin client and model reach the
+// UI through the `ai-*` properties below and nowhere else — a structural test in `posture.rs` fails
+// if an `ai-*` property or model field is read outside this file or an `AiFrame { … }` element.
+//
+// Its non-colour signature: `surface-alt`, a `separator` border and a 3 px left rule in `text-mid`
+// (distinct from PanelCard and StatusBand). Rows: the header « ★ IA — Proposée par {client}
+// ({modèle}) le {JJ/MM/AAAA} », the AI text (plain, never styled as an app signal, never
+// posture-scanned: third-party content), `@children` (a prefilled edit field, 8.5b), and the
+// disclaimer on every instance. `compact` (list rows): the text on one elided line, the disclaimer
+// kept.
+
+import { Tokens } from "../tokens.slint";
+
+export component AiFrame inherits Rectangle {
+    // AI-written (from the draft, never produced by the app).
+    in property <string> ai-client;
+    in property <string> ai-model;
+    in property <string> ai-text;
+    // AI-written: what the draft proposes, before its comment — a proposed note text, a proposed
+    // company name ("" = none). In a compact row it is ELIDED FIRST, so the comment stays readable
+    // (G3); the view model collapses line breaks and tabs to spaces for compact rows.
+    in property <string> ai-lead;
+    // App text: the submission date, JJ/MM/AAAA.
+    in property <string> submitted;
+    in property <bool> compact: false;
+
+    background: Tokens.surface-alt;
+    border-width: Tokens.border;
+    border-color: Tokens.separator;
+    border-radius: Tokens.radius;
+    height: body.preferred-height;
+
+    HorizontalLayout {
+        // The 3 px left rule — the frame's signature, in ink.
+        Rectangle {
+            width: 3px;
+            background: Tokens.text-mid;
+        }
+        body := VerticalLayout {
+            horizontal-stretch: 1;
+            padding-left: Tokens.space-12;
+            padding-right: Tokens.space-12;
+            padding-top: Tokens.space-8;
+            padding-bottom: Tokens.space-8;
+            spacing: Tokens.space-4;
+
+            HorizontalLayout {
+                spacing: Tokens.space-4;
+                alignment: start;
+                Text {
+                    text: Tokens.ai-glyph;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: @tr("IA");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    font-weight: Tokens.weight-semibold;
+                    vertical-alignment: center;
+                }
+                // The origin (AI-written) elides; the date (app text) never does (G3).
+                Text {
+                    text: @tr("— Proposée par {} ({})", root.ai-client, root.ai-model);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    min-width: 0px;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: @tr("le {}", root.submitted);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
+            }
+            // Compact (list rows): one line — the lead elided first, then the comment.
+            if root.compact: HorizontalLayout {
+                spacing: Tokens.space-4;
+                if root.ai-lead != "": Text {
+                    text: root.ai-lead;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-body;
+                    overflow: elide;
+                    min-width: 0px;
+                    horizontal-stretch: 1;
+                }
+                if root.ai-lead != "": Text {
+                    text: "—";
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-body;
+                }
+                Text {
+                    text: root.ai-text;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-body;
+                    overflow: elide;
+                    // The comment keeps up to 360 px before it elides itself (a width-relative bound
+                    // would loop through the layout).
+                    min-width: min(self.preferred-width, 360px);
+                    horizontal-stretch: root.ai-lead != "" ? 0 : 1;
+                }
+            }
+            if !root.compact && root.ai-lead != "": Text {
+                text: root.ai-lead;
+                color: Tokens.text-high;
+                font-size: Tokens.font-body;
+                wrap: word-wrap;
+            }
+            if !root.compact: Text {
+                text: root.ai-text;
+                color: Tokens.text-high;
+                font-size: Tokens.font-body;
+                wrap: word-wrap;
+            }
+            @children
+            Text {
+                text: @tr("Texte rédigé par une IA, non vérifié — ne constitue pas un conseil financier.");
+                color: Tokens.text-low;
+                font-size: Tokens.font-caption;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

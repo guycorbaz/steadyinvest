@@ -23,7 +23,9 @@
 //! drafts (`ai_drafts`) with Story 8.2a. The
 //! CURRENT judgment still travels inside each [`Study`] blob; the time-series carries the past.
 
-use crate::drafts::{DraftRecord, PayloadProblem, check_payload, is_currency_code, is_rfc3339_utc};
+use crate::drafts::{
+    DraftRecord, PayloadProblem, check_payload, is_currency_code, is_rfc3339_utc, is_ticker,
+};
 use crate::error::{Error, Result};
 use crate::fx::FxRateItem;
 use crate::holdings::{HoldingItem, PortfolioItem};
@@ -446,6 +448,16 @@ impl Journal {
             {
                 return Err(malformed(format!(
                     "native_currency {currency:?} is not a three-letter code"
+                )));
+            }
+            // A draft study's ticker is shown as app text (UX spec §4.1): it must pass the
+            // identifier rule (Story 8.5a, G3), and so must its currency, which it must carry.
+            if d.kind == steadyinvest_contract::DraftKind::Study
+                && (!is_ticker(&d.security_ticker) || d.native_currency.is_none())
+            {
+                return Err(malformed(format!(
+                    "draft study {} ticker {:?} breaks the identifier rule",
+                    d.id, d.security_ticker
                 )));
             }
             for (column, stamp) in [
