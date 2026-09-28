@@ -1,6 +1,6 @@
 # Story 8.5a: AI frame and draft inbox (read)
 
-Status: review
+Status: done
 
 <!-- Epic 8 [P4] — AI assistance over MCP (human-gated drafts). First UI story reading drafts.
      Branch: feat/8-5a-draft-inbox (main with 8.1, 8.2a, 8.2b, 8.3, 8.4 merged). -->
