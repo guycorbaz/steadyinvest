@@ -214,3 +214,138 @@ pub fn draft_list(page: &Paged<DraftRecord>) -> Value {
         "drafts": page.items.iter().map(draft).collect::<Vec<_>>(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use steadyinvest_contract::{
+        Cell, Coverage, ForecastLowOption, Freshness, Judgment, Money, Provenance, Review, Source,
+        Timestamp, YearData,
+    };
+    use steadyinvest_core::verdict::Verdict;
+    use uuid::Uuid;
+
+    fn money(s: &str) -> Money {
+        Money::from(Decimal::from_str_exact(s).unwrap())
+    }
+
+    fn cell(value: &str) -> Cell {
+        Cell {
+            value: Some(money(value)),
+            source: Source::Manual,
+            freshness: Freshness::Current,
+            review: Review::Validated,
+            coverage: Coverage::Present,
+            provenance: Provenance {
+                ai_origin: None,
+                source: Source::Manual,
+                logical_version: 1,
+                timestamp: Timestamp("2026-03-09T00:00:00Z".to_string()),
+                hash_of_dependencies: "manual".to_string(),
+            },
+            pending: None,
+        }
+    }
+
+    /// The report crate's fully-validated 5-year study (a Full verdict).
+    fn full_study() -> Study {
+        let judgment = Judgment {
+            ai_placed: Default::default(),
+            estimated_high_eps: Some(money("9")),
+            estimated_low_eps: Some(money("4")),
+            projected_sales_growth_pct: None,
+            projected_eps_growth_pct: None,
+            judged_avg_high_pe: Some(money("18")),
+            judged_avg_low_pe: Some(money("10")),
+            forecast_low_option: ForecastLowOption::AvgLowPeTimesEps,
+            recent_severe_low: None,
+            current_price: Some(money("80")),
+            present_full_year_dividend: Some(money("2")),
+            ttm_eps: None,
+        };
+        let mut s = Study::new(
+            Uuid::from_u128(0x56),
+            Uuid::from_u128(0x1),
+            "NESN",
+            "CHF",
+            judgment,
+            Timestamp("2026-03-09T09:30:00Z".to_string()),
+        );
+        s.years = (2021..=2025)
+            .map(|y| YearData {
+                year: y,
+                sales: cell("1000"),
+                eps: cell("5"),
+                high_price: cell("100"),
+                low_price: cell("50"),
+                dividend_per_share: Some(cell("2")),
+                pre_tax_profit: Some(cell("200")),
+                book_value_per_share: Some(cell("40")),
+            })
+            .collect();
+        s
+    }
+
+    #[test]
+    fn a_full_verdict_maps_zone_and_criteria_to_neutral_codes() {
+        let study = full_study();
+        let snapshot = steadyinvest_report::form::build_snapshot(&study).unwrap();
+        assert!(matches!(snapshot.verdict(), Verdict::Full(_)));
+        let v = computed(&snapshot);
+        assert_eq!(v["verdict_state"], json!("full"));
+        assert_eq!(v["open_gates"], json!([]));
+        let facts = snapshot.verdict().facts();
+        let expected_zone = facts.present_price_zone.map(zone_code);
+        assert_eq!(
+            v["verdict_facts"]["present_price_zone"],
+            json!(expected_zone)
+        );
+        assert_eq!(
+            expected_zone,
+            Some("low"),
+            "80 sits in the lower third of 40..162"
+        );
+        for (key, fact) in [
+            ("ud_at_or_above_target", facts.ud_at_or_above_target),
+            (
+                "relative_value_below_ceiling",
+                facts.relative_value_below_ceiling,
+            ),
+            ("present_price_in_low_zone", facts.present_price_in_buy_zone),
+            (
+                "appreciation_at_or_above_double",
+                facts.appreciation_at_or_above_double,
+            ),
+        ] {
+            assert_eq!(v["verdict_facts"][key], json!(criterion(fact)), "{key}");
+        }
+        assert_eq!(v["forecast_high"], json!("162"));
+        assert_eq!(v["forecast_low"], json!("40"));
+        assert!(v["zones"]["low_zone_top"].is_string());
+        for word in ["buy", "sell", "hold"] {
+            assert!(!v.to_string().to_lowercase().contains(word), "{word}");
+        }
+        // Every zone and criterion value maps to a neutral code.
+        assert_eq!(zone_code(Zone::Buy), "low");
+        assert_eq!(zone_code(Zone::Neutral), "middle");
+        assert_eq!(zone_code(Zone::Sell), "high");
+        assert_eq!(criterion(CriterionFact::Met), "met");
+        assert_eq!(criterion(CriterionFact::Unmet), "unmet");
+        assert_eq!(criterion(CriterionFact::UnmetByInsufficiency), "unknown");
+    }
+
+    #[test]
+    fn a_study_the_engine_cannot_normalize_still_serves_its_data() {
+        let mut study = full_study();
+        let first = study.years[0].clone();
+        study.years.push(first); // a duplicated year: the engine refuses to normalize
+        let read = McpStudyRead {
+            study,
+            status: "active".to_string(),
+        };
+        let v = study_read(&read);
+        assert_eq!(v["computed"], Value::Null);
+        assert!(v["computed_unavailable"].is_string(), "{v}");
+        assert_eq!(v["study"]["security_ticker"], json!("NESN"));
+    }
+}

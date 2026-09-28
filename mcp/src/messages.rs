@@ -56,6 +56,25 @@ pub fn options_list(field: DraftField) -> String {
 pub const IDENTIFIER_RULE_FR: &str = "symbole : 1 à 20 caractères parmi les lettres majuscules A-Z, \
      les chiffres, « . » et « - » ; devise : trois lettres majuscules";
 
+/// How much of a client- or AI-written text a message echoes (G3): at most this many characters.
+pub const ECHO_MAX_CHARS: usize = 40;
+
+/// A client- or AI-written text as a message echoes it (G3): control characters (newlines, tabs…)
+/// replaced by a space, and cut to [`ECHO_MAX_CHARS`] with « … ».
+pub fn echo(text: &str) -> String {
+    let clean: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let mut chars = clean.chars();
+    let head: String = chars.by_ref().take(ECHO_MAX_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
+    }
+}
+
 /// The French noun phrase of a capped text (the `{champ}` placeholder of `text_too_long`).
 fn capped_text_fr(field: &str) -> &'static str {
     match field {
@@ -64,6 +83,7 @@ fn capped_text_fr(field: &str) -> &'static str {
         "company_name" => "du nom de la société",
         "origin_client" => "du client",
         "origin_model" => "du modèle",
+        "proposed_value" => "de la valeur proposée",
         _ => "proposé",
     }
 }
@@ -72,9 +92,16 @@ fn capped_text_fr(field: &str) -> &'static str {
 pub fn refusal(r: &SubmissionRefusal) -> Rendered {
     let code = r.code();
     let message = match r {
+        // Equal paths (a restored or replaced file) name the journal ids instead (G3 decision).
+        SubmissionRefusal::DossierMismatch { read, current } if read.path == current.path => {
+            format!(
+                "Le dossier a changé depuis la lecture ({} ≠ {}) ; rien n'a été enregistré.",
+                read.journal_id, current.journal_id
+            )
+        }
         SubmissionRefusal::DossierMismatch { read, current } => format!(
             "Le dossier a changé depuis la lecture ({} ≠ {}) ; rien n'a été enregistré.",
-            read.path.display(),
+            echo(&read.path.display().to_string()),
             current.path.display()
         ),
         SubmissionRefusal::DossierReplaced => "Le fichier du dossier a été remplacé pendant \
@@ -101,27 +128,31 @@ pub fn refusal(r: &SubmissionRefusal) -> Rendered {
              n'a été enregistré."
         ),
         SubmissionRefusal::FieldNotDraftable { field } => format!(
-            "Le champ {field} ne peut pas être proposé (voir la liste des champs du schéma de \
-             l'outil) ; rien n'a été enregistré."
+            "Le champ {} ne peut pas être proposé (voir la liste des champs du schéma de \
+             l'outil) ; rien n'a été enregistré.",
+            echo(field)
         ),
         SubmissionRefusal::YearNotInStudy { year, ticker } => format!(
             "L'année {year} n'existe pas dans l'étude {ticker} ; une proposition n'ajoute jamais \
              d'année."
         ),
         SubmissionRefusal::ValueUnparsable { text, field } => format!(
-            "La valeur « {text} » n'est pas un nombre dans l'unité de {} ({}) ; rien n'a été \
+            "La valeur « {} » n'est pas un nombre dans l'unité de {} ({}) ; rien n'a été \
              enregistré.",
+            echo(text),
             field.key(),
             unit_fr(*field)
         ),
         SubmissionRefusal::ValueNotAnOption { text, field } => format!(
-            "La valeur « {text} » n'est pas une option de {} ({}) ; rien n'a été enregistré.",
+            "La valeur « {} » n'est pas une option de {} ({}) ; rien n'a été enregistré.",
+            echo(text),
             field.key(),
             options_list(*field)
         ),
         SubmissionRefusal::ValueOutOfRange { text, field } => format!(
-            "La valeur « {text} » de {} est hors des bornes d'une proposition (moins de 10¹⁵ en \
+            "La valeur « {} » de {} est hors des bornes d'une proposition (moins de 10¹⁵ en \
              valeur absolue, au plus 10 décimales) ; rien n'a été enregistré.",
+            echo(text),
             field.key()
         ),
         SubmissionRefusal::EmptyNoteText => {
@@ -245,19 +276,29 @@ pub fn submit_error(e: &SubmitError, path: &Path) -> Rendered {
     match e {
         SubmitError::Refused(r) => refusal(r),
         SubmitError::Failed(f) => failure(f, path),
+        SubmitError::Cancelled => Rendered::new(
+            "cancelled",
+            "L'appel a été annulé par le client ; rien n'a été enregistré.",
+        ),
     }
+}
+
+/// `dossier_path_unusable` (G3): the resolved dossier path is not valid UTF-8.
+pub fn path_unusable() -> Rendered {
+    Rendered::new(
+        "dossier_path_unusable",
+        "Le chemin du dossier contient des caractères non pris en charge ; rien n'a été lu.",
+    )
 }
 
 /// Why no dossier could be determined for the call (Story 8.4 AC 5 / 11).
 pub fn resolve_error(e: &ResolveError) -> Rendered {
     match e {
-        ResolveError::ConfigUnreadable(p) => Rendered::new(
+        // The config path and the parse detail go to the server's log only (G3).
+        ResolveError::ConfigUnreadable(_) => Rendered::new(
             "config_unreadable",
-            format!(
-                "La configuration de l'application ({}) n'a pas pu être lue ; aucun dossier n'a \
-                 été déterminé, rien n'a été lu.",
-                p.path().display()
-            ),
+            "La configuration de l'application n'a pas pu être lue ; aucun dossier n'a été \
+             déterminé, rien n'a été lu.",
         ),
         ResolveError::NoLocation => Rendered::new(
             "no_dossier",
@@ -386,6 +427,13 @@ mod tests {
         )));
         out.push(resolve_error(&ResolveError::NoLocation));
         out.push(invalid_call("x"));
+        out.push(submit_error(&SubmitError::Cancelled, &path));
+        out.push(path_unusable());
+        out.push(refusal(&SubmissionRefusal::TextTooLong {
+            field: "proposed_value",
+            max: 100,
+            len: 101,
+        }));
         out
     }
 
@@ -425,6 +473,8 @@ mod tests {
             "invalid_call",
             "config_unreadable",
             "dossier_error",
+            "cancelled",
+            "dossier_path_unusable",
         ] {
             assert!(codes.contains(code), "no message for {code}");
         }
@@ -480,5 +530,46 @@ mod tests {
         );
         let r = unavailable(&McpUnavailable::NotADossier, Path::new("/x/y.db"));
         assert!(r.message.contains("/x/y.db"), "{}", r.message);
+    }
+
+    #[test]
+    fn echoes_are_cut_and_carry_no_control_character() {
+        let long = format!("1\nFORGED {}", "9".repeat(200));
+        let r = refusal(&SubmissionRefusal::ValueUnparsable {
+            text: long,
+            field: DraftField::Eps,
+        });
+        assert!(!r.message.contains('\n'), "{}", r.message);
+        assert!(r.message.contains("…"), "{}", r.message);
+        assert!(r.message.chars().count() < 250, "{}", r.message);
+        assert_eq!(echo("a\tb"), "a b");
+    }
+
+    #[test]
+    fn a_mismatch_on_the_same_path_names_the_journal_ids_and_config_paths_stay_out() {
+        let path = PathBuf::from("/d/dossier.db");
+        let r = refusal(&SubmissionRefusal::DossierMismatch {
+            read: DossierIdentity {
+                journal_id: Uuid::from_u128(1),
+                path: path.clone(),
+            },
+            current: DossierIdentity {
+                journal_id: Uuid::from_u128(2),
+                path,
+            },
+        });
+        assert_eq!(
+            r.message,
+            format!(
+                "Le dossier a changé depuis la lecture ({} ≠ {}) ; rien n'a été enregistré.",
+                Uuid::from_u128(1),
+                Uuid::from_u128(2)
+            )
+        );
+        let r = resolve_error(&ResolveError::ConfigUnreadable(PointerError::Invalid {
+            path: PathBuf::from("/secret/home/config.json"),
+            detail: "x".into(),
+        }));
+        assert!(!r.message.contains("/secret"), "{}", r.message);
     }
 }

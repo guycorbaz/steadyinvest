@@ -36,4 +36,4 @@ mcp-build:
 # (Story 8.4, for the Epic 8 UI checks). Refuses the real dossier. Usage: just mcp-seed <copy.db>
 mcp-seed copy:
     cargo build -p steadyinvest-mcp
-    cargo run -p steadyinvest-mcp --example seed -- {{copy}}
+    cargo run -p steadyinvest-mcp --example seed -- "{{copy}}"

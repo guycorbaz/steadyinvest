@@ -96,7 +96,8 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(message) => {
-            tracing::error!("{message}");
+            // The detail (possibly from client input) goes to stderr only, not to the log (G3).
+            tracing::error!("steadyinvest-mcp stopped with an error");
             warn_stderr(&format!("steadyinvest-mcp: {message}"));
             ExitCode::FAILURE
         }

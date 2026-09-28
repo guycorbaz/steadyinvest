@@ -120,9 +120,19 @@ fn main() -> Result<(), slint::PlatformError> {
             .or(journal_state.path())
             .map(Path::to_path_buf);
         let mut cfg = config.borrow_mut();
+        let mut changed = false;
         if cfg.journal_path != resolved {
             cfg.journal_path = resolved;
-            drop(cfg);
+            changed = true;
+        }
+        // Story 8.4 G3: no dossier open at startup → the MCP server must not follow a pointer to
+        // a dossier the owner does not see (it falls back to `journal_path`, then the default).
+        if journal_state.path().is_none() && cfg.last_opened_path.is_some() {
+            cfg.last_opened_path = None;
+            changed = true;
+        }
+        drop(cfg);
+        if changed {
             persist(config_path.as_ref(), &config.borrow());
         }
     }

@@ -183,6 +183,11 @@ pub struct Server {
 
 /// Spawn the binary with `args`, `HOME` / `XDG_CONFIG_HOME` / `XDG_DATA_HOME` under `home`.
 pub fn spawn(args: &[&str], home: &Path) -> Server {
+    spawn_env(args, home, &[])
+}
+
+/// [`spawn`] with extra environment variables.
+pub fn spawn_env(args: &[&str], home: &Path, extra_env: &[(&str, &str)]) -> Server {
     let config = home.join("config");
     let data = home.join("data");
     std::fs::create_dir_all(&config).expect("config dir");
@@ -192,6 +197,7 @@ pub fn spawn(args: &[&str], home: &Path) -> Server {
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", &config)
         .env("XDG_DATA_HOME", &data)
+        .envs(extra_env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -220,7 +226,7 @@ pub fn spawn(args: &[&str], home: &Path) -> Server {
 }
 
 impl Server {
-    fn send(&mut self, message: &Value) {
+    pub fn send(&mut self, message: &Value) {
         let mut line = message.to_string();
         line.push('\n');
         self.stdin.write_all(line.as_bytes()).expect("write");
@@ -300,6 +306,28 @@ impl Server {
         let (is_error, body) = self.call(tool, arguments);
         assert!(is_error, "{tool} was not refused: {body}");
         body
+    }
+}
+
+/// Everything the server logged under `home` (its log directory), as one string.
+pub fn log_text(home: &Path) -> String {
+    let dir = home.join("data").join("steadyinvest").join("logs");
+    let mut out = String::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            if let Ok(t) = std::fs::read_to_string(e.path()) {
+                out.push_str(&t);
+            }
+        }
+    }
+    out
+}
+
+impl Server {
+    /// Close stdin and wait for the process to end (its log is then flushed).
+    pub fn stop(mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 

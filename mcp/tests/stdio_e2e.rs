@@ -166,10 +166,24 @@ fn the_eight_tools_read_and_record_propositions_without_touching_the_studies() {
         json!({ "study_id": study_id(STUDY_B), "note_text": "Retry", "draft_id": retry_id }),
     );
     let first = s.ok("submit_draft_note", args.clone());
-    let second = s.ok("submit_draft_note", args);
+    let second = s.ok("submit_draft_note", args.clone());
     assert_eq!(first["draft_id"], json!(retry_id));
     assert_eq!(second["draft_id"], json!(retry_id));
+    assert_eq!(second["status"], json!("pending"));
     assert_eq!(s.ok("get_drafts_record", json!({}))["total"], json!(6));
+    // The owner validates it (in the table, as the decision rail's outcome); a late retry answers
+    // the STORED status, not « pending » (G3).
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute(
+        "UPDATE ai_drafts SET status = 'validated', decided_at = '2026-09-28T12:00:00Z' \
+         WHERE id = ?1",
+        [&retry_id],
+    )
+    .unwrap();
+    drop(conn);
+    let late = s.ok("submit_draft_note", args);
+    assert_eq!(late["draft_id"], json!(retry_id));
+    assert_eq!(late["status"], json!("validated"));
 }
 
 #[test]
@@ -191,12 +205,14 @@ fn each_refusal_family_returns_its_code_and_the_spec_message() {
         ),
     );
     assert_eq!(body["code"], json!("dossier_mismatch"));
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap()
-            .starts_with("Le dossier a changé depuis la lecture"),
-        "{body}"
+    // Same path, another journal: the message names the two journal ids (G3 decision).
+    assert_eq!(
+        body["message"],
+        json!(format!(
+            "Le dossier a changé depuis la lecture ({} ≠ {}) ; rien n'a été enregistré.",
+            Uuid::from_u128(1),
+            Uuid::from_u128(JID)
+        ))
     );
     assert_eq!(body["dossier"], dossier, "a refusal names the dossier too");
 
@@ -304,4 +320,139 @@ fn a_dossier_of_another_schema_is_refused_by_name_and_left_as_it_was() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(version, 7, "never migrated");
+}
+
+#[test]
+fn the_server_advertises_tools_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture_dossier(dir.path());
+    let home = dir.path().join("home");
+    let mut s = spawn(&["--dossier", path.to_str().unwrap()], &home);
+    let r = s.request(
+        "initialize",
+        json!({ "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": { "name": "t", "version": "0" } }),
+    );
+    let caps = r["result"]["capabilities"]
+        .as_object()
+        .unwrap_or_else(|| panic!("{r}"));
+    let keys: Vec<&String> = caps.keys().collect();
+    assert_eq!(keys, vec!["tools"], "{r}");
+}
+
+#[test]
+fn bounds_unknown_studies_and_long_values_are_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture_dossier(dir.path());
+    let home = dir.path().join("home");
+    let mut s = spawn(&["--dossier", path.to_str().unwrap()], &home);
+    let dossier = s.ok("list_studies", json!({}))["dossier"].clone();
+    for (tool, args) in [
+        ("list_studies", json!({ "limit": 201 })),
+        ("get_drafts_record", json!({ "limit": 0 })),
+        (
+            "get_judgment_history",
+            json!({ "study_id": study_id(STUDY_A), "limit": 51 }),
+        ),
+    ] {
+        assert_eq!(
+            s.refused(tool, args)["code"],
+            json!("invalid_call"),
+            "{tool}"
+        );
+    }
+    s.ok(
+        "get_judgment_history",
+        json!({ "study_id": study_id(STUDY_A), "limit": 50 }),
+    );
+    let unknown = Uuid::from_u128(0xdead).to_string();
+    for (tool, args) in [
+        ("get_judgment_history", json!({ "study_id": unknown })),
+        ("get_drafts_record", json!({ "study_id": unknown })),
+        ("get_notes", json!({ "study_id": unknown })),
+    ] {
+        let body = s.refused(tool, args);
+        assert_eq!(body["code"], json!("study_not_found"), "{tool}");
+        assert_eq!(body["dossier"], dossier, "{tool} names the dossier");
+    }
+    let body = s.refused(
+        "submit_draft_value",
+        submit_args(
+            &dossier,
+            json!({ "study_id": study_id(STUDY_A), "field": "estimated_low_eps",
+                    "proposed_value": "9".repeat(101) }),
+        ),
+    );
+    assert_eq!(body["code"], json!("text_too_long"));
+    assert_eq!(
+        body["message"],
+        json!(
+            "Le texte de la valeur proposée dépasse 100 caractères (101) ; rien n'a été enregistré."
+        )
+    );
+}
+
+/// G3: AI-written text never reaches the log raw (a newline would forge a line); neither does a
+/// client-sent method or tool name (the SDK's own events are kept to errors).
+#[test]
+fn no_ai_or_client_text_reaches_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture_dossier(dir.path());
+    let home = dir.path().join("home");
+    let mut s = spawn(&["--dossier", path.to_str().unwrap()], &home);
+    let dossier = s.ok("list_studies", json!({}))["dossier"].clone();
+    let forged = "x\nFORGED-LOG-LINE level=ERROR";
+    let mut args = submit_args(
+        &dossier,
+        json!({ "study_id": study_id(STUDY_A), "field": "estimated_low_eps",
+                "proposed_value": forged }),
+    );
+    args["comment"] = json!(forged);
+    let refused = s.refused("submit_draft_value", args);
+    assert_eq!(refused["code"], json!("value_unparsable"));
+    let mut note = submit_args(
+        &dossier,
+        json!({ "study_id": study_id(STUDY_A), "note_text": forged }),
+    );
+    note["comment"] = json!(forged);
+    note["origin_model"] = json!(forged);
+    s.ok("submit_draft_note", note);
+    s.send(&json!({ "jsonrpc": "2.0", "method": "notifications/CLIENT-MARKER-METHOD" }));
+    let r = s.request(
+        "tools/call",
+        json!({ "name": "CLIENT-MARKER-TOOL", "arguments": {} }),
+    );
+    assert!(r["error"].is_object(), "{r}");
+    assert!(
+        !r.to_string().contains("CLIENT-MARKER"),
+        "the name is echoed: {r}"
+    );
+    s.ok("list_studies", json!({}));
+    s.stop();
+    let log = log_text(&home);
+    assert!(log.contains("tool call"), "the log is written: {log}");
+    assert!(!log.contains("FORGED"), "AI text reached the log:\n{log}");
+    assert!(
+        !log.contains("CLIENT-MARKER"),
+        "a client name reached the log:\n{log}"
+    );
+}
+
+/// G3: a log directory the server cannot write → it runs without a file and still serves.
+#[cfg(unix)]
+#[test]
+fn an_unwritable_log_directory_does_not_stop_the_server() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture_dossier(dir.path());
+    let home = dir.path().join("home");
+    let logs = home.join("data").join("steadyinvest").join("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let writable = std::fs::File::create(logs.join(".probe")).is_ok();
+    if !writable {
+        let mut s = spawn(&["--dossier", path.to_str().unwrap()], &home);
+        assert_eq!(s.ok("list_studies", json!({}))["total"], json!(2));
+    }
+    std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o755)).unwrap();
 }

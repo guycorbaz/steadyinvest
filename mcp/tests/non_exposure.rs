@@ -104,3 +104,52 @@ fn no_tool_on_any_page_exposes_portfolio_watchlist_cache_or_config_data() {
         assert!(!transcript.contains(needle), "{needle} over stdio");
     }
 }
+
+/// G3: the same, WITHOUT `--dossier` — the dossier comes from a marked app-config that also holds
+/// a fake key, and a fake key sits in the environment: neither ever reaches stdout.
+#[test]
+fn without_dossier_argument_no_config_value_or_key_reaches_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture_dossier(dir.path());
+    let markers = seed_markers(&path);
+    let home = dir.path().join("home");
+    let config_dir = home.join("config").join("steadyinvest");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.json"),
+        json!({
+            "last_opened_path": path,
+            "reference_currency": "CONFIG-MARKER-CUR",
+            "eodhd_api_key": "FAKE-KEY-MARKER-CONFIG",
+            "active_portfolio_id": "CONFIG-MARKER-PF",
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut s = spawn_env(
+        &[],
+        &home,
+        &[
+            ("STEADYINVEST_EODHD_KEY", "FAKE-KEY-MARKER-ENV"),
+            ("EODHD_API_KEY", "FAKE-KEY-MARKER-ENV"),
+        ],
+    );
+    let list = s.ok("list_studies", json!({}));
+    assert_eq!(list["total"], json!(2), "the config pointer is followed");
+    for id in [STUDY_A, STUDY_B] {
+        let id = Uuid::from_u128(id).to_string();
+        s.ok("get_study", json!({ "study_id": id }));
+        s.ok("get_judgment_history", json!({ "study_id": id }));
+    }
+    s.ok("get_drafts_record", json!({}));
+    s.refused("list_studies", json!({ "limit": 999 }));
+    let transcript = s.transcript.join("\n");
+    for marker in &markers {
+        assert!(!transcript.contains(marker), "{marker} leaked over stdio");
+    }
+    assert!(
+        !transcript.contains("CONFIG-MARKER"),
+        "a config value leaked"
+    );
+    assert!(!transcript.contains("FAKE-KEY-MARKER"), "a key leaked");
+}

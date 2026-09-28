@@ -26,8 +26,8 @@ const FORBIDDEN: [&str; 17] = [
     "tower-http",
 ];
 
-#[test]
-fn the_dependency_closure_excludes_every_network_keychain_and_gui_crate() {
+/// The resolved normal-dependency closure of `package` (every platform), by package name.
+fn closure_of(package: &str) -> BTreeSet<String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let output = Command::new(cargo)
         .args(["metadata", "--format-version", "1", "--locked"])
@@ -40,7 +40,6 @@ fn the_dependency_closure_excludes_every_network_keychain_and_gui_crate() {
         String::from_utf8_lossy(&output.stderr)
     );
     let meta: Value = serde_json::from_slice(&output.stdout).expect("metadata JSON");
-
     let names: HashMap<&str, &str> = meta["packages"]
         .as_array()
         .expect("packages")
@@ -55,10 +54,9 @@ fn the_dependency_closure_excludes_every_network_keychain_and_gui_crate() {
         .collect();
     let root = names
         .iter()
-        .find(|(_, n)| **n == "steadyinvest-mcp")
+        .find(|(_, n)| **n == package)
         .map(|(id, _)| *id)
-        .expect("the mcp package");
-
+        .expect("the package");
     // Breadth-first over NORMAL edges only (a `dep_kinds` entry with `kind: null`), every platform.
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     let mut queue = VecDeque::from([root]);
@@ -77,7 +75,12 @@ fn the_dependency_closure_excludes_every_network_keychain_and_gui_crate() {
             }
         }
     }
-    let closure: BTreeSet<&str> = seen.iter().map(|id| names[id]).collect();
+    seen.iter().map(|id| names[id].to_string()).collect()
+}
+
+#[test]
+fn the_dependency_closure_excludes_every_network_keychain_and_gui_crate() {
+    let closure = closure_of("steadyinvest-mcp");
     assert!(closure.contains("rmcp"), "the walk reaches the SDK");
     assert!(
         closure.contains("steadyinvest-persistence"),
@@ -88,4 +91,14 @@ fn the_dependency_closure_excludes_every_network_keychain_and_gui_crate() {
         leaked.is_empty(),
         "forbidden crates in the steadyinvest-mcp closure: {leaked:?}"
     );
+}
+
+/// Negative control (G3): the same walk from the app DOES find the network and keychain crates —
+/// the test above can fail.
+#[test]
+fn the_walk_finds_the_network_and_keychain_crates_of_the_app() {
+    let closure = closure_of("steadyinvest-app");
+    for name in ["reqwest", "keyring", "steadyinvest-ingestion", "slint"] {
+        assert!(closure.contains(name), "{name} not found from the app");
+    }
 }

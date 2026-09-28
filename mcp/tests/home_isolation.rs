@@ -11,9 +11,29 @@ mod support;
 use serde_json::json;
 use support::*;
 
+/// Every absolute path anywhere in `text` (a `/` that starts a path token — not the middle of a
+/// word like « hausse/baisse ») starts with `root`; and the real home never appears.
 fn every_path_under(text: &str, root: &str) {
-    for token in text.split('"') {
-        if token.starts_with('/') {
+    if let Some(real_home) = std::env::var_os("HOME") {
+        let real_home = real_home.to_string_lossy().to_string();
+        if !root.starts_with(&real_home) {
+            assert!(
+                !text.contains(&real_home),
+                "the real home appeared in the output"
+            );
+        }
+    }
+    let bytes = text.as_bytes();
+    for (i, _) in text.match_indices('/') {
+        let starts_token = i == 0 || !(bytes[i - 1] as char).is_alphanumeric();
+        let continues = bytes
+            .get(i + 1)
+            .is_some_and(|b| (*b as char).is_alphanumeric());
+        if starts_token && continues {
+            let token: String = text[i..]
+                .chars()
+                .take_while(|c| !matches!(c, '"' | ' ' | '\\' | ')' | ',' | '\n'))
+                .collect();
             assert!(
                 token.starts_with(root),
                 "a path outside the temp home appeared: {token}"

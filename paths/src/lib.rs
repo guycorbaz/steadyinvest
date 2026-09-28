@@ -46,6 +46,15 @@ pub struct DossierPointers {
     pub last_opened_path: Option<PathBuf>,
     /// The configured dossier (kept on a dossier refused by name, G3 M4).
     pub journal_path: Option<PathBuf>,
+    /// The recent-journals list (only the paths are read) — the seed guard refuses every one.
+    pub recent_journals: Vec<RecentPointer>,
+}
+
+/// One entry of the app-config's recent-journals list (only its path is read).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct RecentPointer {
+    pub path: PathBuf,
 }
 
 /// Why the app-config could not be read.
@@ -103,12 +112,25 @@ pub fn read_dossier_pointers(path: &Path) -> Result<Option<DossierPointers>, Poi
             });
         }
     };
-    serde_json::from_str::<DossierPointers>(&raw)
-        .map(Some)
-        .map_err(|e| PointerError::Invalid {
+    let pointers =
+        serde_json::from_str::<DossierPointers>(&raw).map_err(|e| PointerError::Invalid {
             path: path.to_path_buf(),
             detail: e.to_string(),
-        })
+        })?;
+    // A relative dossier pointer would resolve against the server's working directory — not the
+    // app's: refused by name, never guessed (Story 8.4 G3).
+    for (name, pointer) in [
+        ("last_opened_path", &pointers.last_opened_path),
+        ("journal_path", &pointers.journal_path),
+    ] {
+        if pointer.as_ref().is_some_and(|p| p.is_relative()) {
+            return Err(PointerError::Invalid {
+                path: path.to_path_buf(),
+                detail: format!("{name} is a relative path"),
+            });
+        }
+    }
+    Ok(Some(pointers))
 }
 
 /// Why no dossier path could be determined.
@@ -180,6 +202,7 @@ mod tests {
         let both = DossierPointers {
             last_opened_path: Some(p("/seen.db")),
             journal_path: Some(p("/configured.db")),
+            recent_journals: vec![],
         };
         assert_eq!(
             resolve_dossier_with(
@@ -196,6 +219,7 @@ mod tests {
         let configured_only = DossierPointers {
             last_opened_path: None,
             journal_path: Some(p("/configured.db")),
+            recent_journals: vec![],
         };
         assert_eq!(
             resolve_dossier_with(None, Ok(Some(configured_only)), Some(p("/default.db"))),
@@ -269,11 +293,7 @@ mod tests {
     fn unknown_fields_are_tolerated_and_missing_ones_are_none() {
         let dir = tempfile::tempdir().unwrap();
         let config = dir.path().join("config.json");
-        std::fs::write(
-            &config,
-            r#"{"theme":"dark","recent_journals":[],"some_future_field":{"x":1}}"#,
-        )
-        .unwrap();
+        std::fs::write(&config, r#"{"theme":"dark","some_future_field":{"x":1}}"#).unwrap();
         assert_eq!(
             read_dossier_pointers(&config),
             Ok(Some(DossierPointers::default()))
@@ -288,6 +308,31 @@ mod tests {
         assert_eq!(
             read_dossier_pointers(&config),
             Ok(Some(DossierPointers::default()))
+        );
+    }
+
+    #[test]
+    fn a_relative_pointer_is_refused_by_name_and_recent_paths_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.json");
+        std::fs::write(&config, r#"{"last_opened_path":"journal.db"}"#).unwrap();
+        match read_dossier_pointers(&config) {
+            Err(PointerError::Invalid { detail, .. }) => {
+                assert!(detail.contains("last_opened_path"), "{detail}")
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        std::fs::write(
+            &config,
+            r#"{"recent_journals":[{"path":"/a.db","journal_id":"x","last_seen_version":3}]}"#,
+        )
+        .unwrap();
+        let p = read_dossier_pointers(&config).unwrap().unwrap();
+        assert_eq!(
+            p.recent_journals,
+            vec![RecentPointer {
+                path: "/a.db".into()
+            }]
         );
     }
 }

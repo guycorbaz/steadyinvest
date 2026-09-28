@@ -16,4 +16,5 @@ disallowed-methods = [
     { path = "steadyinvest_persistence::inspect_backup", reason = "the MCP server never touches the dossier file (arch A3)" },
     { path = "steadyinvest_persistence::clear_lock", reason = "the MCP server never takes or clears the app lock (arch A2)" },
     { path = "steadyinvest_persistence::sweep_stale_read_copies", reason = "the MCP server never touches the dossier directory (arch A3)" },
+    { path = "steadyinvest_persistence::lock_is_stale", reason = "the MCP server never inspects the app lock (arch A2)" },
 ]

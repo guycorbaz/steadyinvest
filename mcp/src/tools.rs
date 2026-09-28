@@ -17,7 +17,8 @@ use steadyinvest_contract::{
     DraftField, DraftFieldKind, DraftKind, DraftOrigin, DraftStatus, DraftTarget, Timestamp,
 };
 use steadyinvest_persistence::{
-    DossierIdentity, DraftFilter, DraftSubmission, Error, MAX_PAGE, McpAccess, Page, SubmitError,
+    DossierIdentity, DraftFilter, DraftSubmission, Error, MAX_PAGE, McpAccess, McpRead,
+    McpReadRequest, Page, SubmissionRefusal, SubmitError,
 };
 use uuid::Uuid;
 
@@ -37,6 +38,8 @@ pub const TOOL_NAMES: [&str; 8] = [
 pub const DEFAULT_LIST_PAGE: u32 = 50;
 /// Default page size of a study's history (each snapshot is a full study).
 pub const DEFAULT_HISTORY_PAGE: u32 = 20;
+/// The largest history page (G3: each snapshot is a full study — bounded response size).
+pub const MAX_HISTORY_PAGE: u32 = 50;
 
 /// The text returned as the server's `instructions` (English, neutral — scanned for banned verbs).
 pub const INSTRUCTIONS: &str = "SteadyInvest MCP server. It reads the stock studies of the \
@@ -67,7 +70,7 @@ fn uuid_prop(description: &str) -> Value {
     json!({ "type": "string", "format": "uuid", "description": description })
 }
 
-fn page_props(props: &mut Map<String, Value>, default_limit: u32) {
+fn page_props(props: &mut Map<String, Value>, default_limit: u32, max_limit: u32) {
     props.insert(
         "offset".into(),
         json!({ "type": "integer", "minimum": 0, "description": "Rows skipped (default 0)." }),
@@ -77,8 +80,8 @@ fn page_props(props: &mut Map<String, Value>, default_limit: u32) {
         json!({
             "type": "integer",
             "minimum": 1,
-            "maximum": MAX_PAGE,
-            "description": format!("Rows returned (default {default_limit}, at most {MAX_PAGE})."),
+            "maximum": max_limit,
+            "description": format!("Rows returned (default {default_limit}, at most {max_limit})."),
         }),
     );
 }
@@ -167,7 +170,7 @@ pub fn tool_specs() -> Vec<(&'static str, String, Map<String, Value>)> {
     let mut out = Vec::new();
 
     let mut p = Map::new();
-    page_props(&mut p, DEFAULT_LIST_PAGE);
+    page_props(&mut p, DEFAULT_LIST_PAGE, MAX_PAGE);
     out.push((
         "list_studies",
         "List the studies of the dossier (id, ticker, creation date, status), one page at a time."
@@ -191,7 +194,7 @@ pub fn tool_specs() -> Vec<(&'static str, String, Map<String, Value>)> {
 
     let mut p = Map::new();
     p.insert("study_id".into(), uuid_prop("The study id."));
-    page_props(&mut p, DEFAULT_HISTORY_PAGE);
+    page_props(&mut p, DEFAULT_HISTORY_PAGE, MAX_HISTORY_PAGE);
     out.push((
         "get_judgment_history",
         "Read a study's history: each entry is the full study at a past save, newest first."
@@ -220,7 +223,7 @@ pub fn tool_specs() -> Vec<(&'static str, String, Map<String, Value>)> {
             "description": "Optional: only the propositions in this status.",
         }),
     );
-    page_props(&mut p, DEFAULT_LIST_PAGE);
+    page_props(&mut p, DEFAULT_LIST_PAGE, MAX_PAGE);
     out.push((
         "get_drafts_record",
         "Read the record of every proposition (pending, validated, validated then undone, \
@@ -320,7 +323,10 @@ type ArgResult<T> = Result<T, Rendered>;
 impl Args {
     fn new(map: Map<String, Value>, allowed: &[&str]) -> ArgResult<Self> {
         if let Some(extra) = map.keys().find(|k| !allowed.contains(&k.as_str())) {
-            return Err(messages::invalid_call(&format!("unknown argument {extra}")));
+            return Err(messages::invalid_call(&format!(
+                "unknown argument {}",
+                messages::echo(extra)
+            )));
         }
         Ok(Args { map })
     }
@@ -365,7 +371,7 @@ impl Args {
         }
     }
 
-    fn page(&self, default_limit: u32) -> ArgResult<Page> {
+    fn page(&self, default_limit: u32, max_limit: u32) -> ArgResult<Page> {
         let offset = match self.opt_int("offset")? {
             None => 0,
             Some(o) if o >= 0 => o as u64,
@@ -373,8 +379,12 @@ impl Args {
         };
         let limit = match self.opt_int("limit")? {
             None => default_limit,
-            Some(l) if l >= 1 => u32::try_from(l).unwrap_or(MAX_PAGE).min(MAX_PAGE),
-            Some(_) => return Err(messages::invalid_call("limit must be 1 or more")),
+            Some(l) if (1..=i64::from(max_limit)).contains(&l) => l as u32,
+            Some(_) => {
+                return Err(messages::invalid_call(&format!(
+                    "limit must be between 1 and {max_limit}"
+                )));
+            }
         };
         Ok(Page { offset, limit })
     }
@@ -396,12 +406,14 @@ fn allowed(tool_args: &[&'static str], extra: &[&'static str]) -> Vec<&'static s
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────────────────────
 
-/// What a call needs from its environment: the explicit `--dossier`, the clock and the id source
-/// (the server is the caller of `McpAccess` — ADD15: identity and time come from it).
+/// What a call needs from its environment: the explicit `--dossier`, the clock, the id source (the
+/// server is the caller of `McpAccess` — ADD15: identity and time come from it), and whether the
+/// client cancelled the call (checked before the insert).
 pub struct CallEnv<'a> {
     pub explicit: Option<&'a Path>,
     pub now: &'a dyn Fn() -> Timestamp,
     pub new_id: &'a dyn Fn() -> Uuid,
+    pub cancelled: &'a dyn Fn() -> bool,
 }
 
 fn error_body(r: &Rendered, dossier: Option<&DossierIdentity>, resolved: Option<&Path>) -> Value {
@@ -413,21 +425,35 @@ fn error_body(r: &Rendered, dossier: Option<&DossierIdentity>, resolved: Option<
     })
 }
 
-fn fail(r: Rendered, dossier: Option<&DossierIdentity>, resolved: Option<&Path>) -> Outcome {
-    tracing::warn!(code = r.code, message = %r.message, "tool call refused or failed");
+/// A refused or failed call. The LOG gets the tool and the code only — never the message, which
+/// can echo AI-written text (G3: a newline in it would forge a log line).
+fn fail(
+    tool: &'static str,
+    r: Rendered,
+    dossier: Option<&DossierIdentity>,
+    resolved: Option<&Path>,
+) -> Outcome {
+    tracing::warn!(tool, code = r.code, "tool call refused or failed");
     Outcome {
         is_error: true,
         body: error_body(&r, dossier, resolved),
     }
 }
 
-fn log_failure(tool: &str, e: &Error) {
+/// The log line of a dossier-layer failure: its kind and MCP code — plus, for a denied write, each
+/// denied action and object (engine-produced SQL names, never AI text).
+fn log_failure(tool: &'static str, e: &Error) {
     if let Error::McpDenied { denials } = e {
         for d in denials {
             tracing::warn!(tool, action = %d.action, object = %d.object, "write denied");
         }
     }
-    tracing::warn!(tool, error = %e, "dossier call failed");
+    tracing::warn!(
+        tool,
+        kind = ?e.kind(),
+        code = e.mcp_code().unwrap_or("dossier_error"),
+        "dossier call failed"
+    );
 }
 
 fn ok(dossier: &DossierIdentity, mut data: Value) -> Outcome {
@@ -440,36 +466,58 @@ fn ok(dossier: &DossierIdentity, mut data: Value) -> Outcome {
     }
 }
 
+/// The tool's own `'static` name (so the log never carries a client-sent string), or `None`.
+fn known_tool(name: &str) -> Option<&'static str> {
+    TOOL_NAMES.iter().copied().find(|t| *t == name)
+}
+
 /// Run one tool call (blocking — the server runs it on a blocking thread).
 pub fn call(name: &str, arguments: Map<String, Value>, env: &CallEnv<'_>) -> Outcome {
-    tracing::info!(tool = name, "tool call");
+    let Some(tool) = known_tool(name) else {
+        tracing::warn!("call of an unknown tool");
+        return fail(
+            "unknown",
+            messages::invalid_call("unknown tool"),
+            None,
+            None,
+        );
+    };
+    tracing::info!(tool, "tool call");
     let path = match steadyinvest_paths::resolve_dossier(env.explicit) {
         Ok(p) => p,
         Err(e) => {
-            tracing::warn!(tool = name, error = %e, "no dossier resolved");
-            return fail(messages::resolve_error(&e), None, None);
+            // The config path and parse detail go to the log only, never to the client (G3).
+            tracing::warn!(tool, error = %e, "no dossier resolved");
+            return fail(tool, messages::resolve_error(&e), None, None);
         }
     };
+    if path.to_str().is_none() {
+        return fail(tool, messages::path_unusable(), None, None);
+    }
     let access = McpAccess::at(&path);
     let resolved = access.path().to_path_buf();
-    match call_on(name, arguments, env, &access) {
+    match call_on(tool, arguments, env, &access) {
         Ok(outcome) => outcome,
-        Err(Failure::Rendered(r, dossier)) => fail(r, dossier.as_ref(), Some(&resolved)),
+        Err(Failure::Rendered(r, dossier)) => fail(tool, r, dossier.as_ref(), Some(&resolved)),
         Err(Failure::Dossier(e, dossier)) => {
-            log_failure(name, &e);
+            log_failure(tool, &e);
             fail(
+                tool,
                 messages::failure(&e, &resolved),
                 dossier.as_ref(),
                 Some(&resolved),
             )
         }
         Err(Failure::Submit(e, dossier)) => {
-            if let SubmitError::Failed(f) = &e {
-                log_failure(name, f);
-            } else {
-                tracing::warn!(tool = name, refusal = ?e, "proposition refused");
+            match &e {
+                SubmitError::Failed(f) => log_failure(tool, f),
+                SubmitError::Refused(r) => {
+                    tracing::warn!(tool, code = r.code(), "proposition refused")
+                }
+                SubmitError::Cancelled => tracing::info!(tool, "call cancelled"),
             }
             fail(
+                tool,
                 messages::submit_error(&e, &resolved),
                 dossier.as_ref(),
                 Some(&resolved),
@@ -484,55 +532,71 @@ enum Failure {
     Submit(SubmitError, Option<DossierIdentity>),
 }
 
+/// One identified read (the identity and the data in the same read transaction — G3).
+fn read(
+    access: &McpAccess,
+    request: McpReadRequest,
+) -> Result<(DossierIdentity, McpRead), Failure> {
+    access
+        .read_identified(request)
+        .map_err(|e| Failure::Dossier(e, None))
+}
+
+fn study_missing(id: DossierIdentity, study_id: Uuid) -> Failure {
+    Failure::Rendered(
+        messages::refusal(&SubmissionRefusal::StudyNotFound { study_id }),
+        Some(id),
+    )
+}
+
+fn unexpected(id: DossierIdentity) -> Failure {
+    Failure::Rendered(messages::invalid_call("unexpected read result"), Some(id))
+}
+
 fn call_on(
-    name: &str,
+    tool: &'static str,
     arguments: Map<String, Value>,
     env: &CallEnv<'_>,
     access: &McpAccess,
 ) -> Result<Outcome, Failure> {
     let rendered = |r: Rendered| Failure::Rendered(r, None);
-    match name {
+    match tool {
         "list_studies" => {
             let args = Args::new(arguments, &PAGE_ARGS).map_err(rendered)?;
-            let page = args.page(DEFAULT_LIST_PAGE).map_err(rendered)?;
-            let id = identity(access)?;
-            let list = access
-                .list_studies(page)
-                .map_err(|e| Failure::Dossier(e, Some(id.clone())))?;
-            Ok(ok(&id, dto::study_list(&list)))
+            let page = args.page(DEFAULT_LIST_PAGE, MAX_PAGE).map_err(rendered)?;
+            match read(access, McpReadRequest::Studies(page))? {
+                (id, McpRead::Studies(list)) => Ok(ok(&id, dto::study_list(&list))),
+                (id, _) => Err(unexpected(id)),
+            }
         }
         "get_study" | "get_notes" => {
             let args = Args::new(arguments, &["study_id"]).map_err(rendered)?;
             let study_id = args.uuid("study_id").map_err(rendered)?;
-            let id = identity(access)?;
-            let read = access
-                .read_study(study_id)
-                .map_err(|e| Failure::Dossier(e, Some(id.clone())))?;
-            let Some(read) = read else {
-                return Err(Failure::Rendered(
-                    messages::refusal(
-                        &steadyinvest_persistence::SubmissionRefusal::StudyNotFound { study_id },
-                    ),
-                    Some(id),
-                ));
-            };
-            let data = if name == "get_study" {
-                dto::study_read(&read)
-            } else {
-                dto::notes(&read)
-            };
-            Ok(ok(&id, data))
+            match read(access, McpReadRequest::Study(study_id))? {
+                (id, McpRead::Study(read)) => Ok(ok(
+                    &id,
+                    if tool == "get_study" {
+                        dto::study_read(&read)
+                    } else {
+                        dto::notes(&read)
+                    },
+                )),
+                (id, McpRead::StudyMissing(s)) => Err(study_missing(id, s)),
+                (id, _) => Err(unexpected(id)),
+            }
         }
         "get_judgment_history" => {
             let args =
                 Args::new(arguments, &allowed(&["study_id"], &PAGE_ARGS)).map_err(rendered)?;
             let study_id = args.uuid("study_id").map_err(rendered)?;
-            let page = args.page(DEFAULT_HISTORY_PAGE).map_err(rendered)?;
-            let id = identity(access)?;
-            let hist = access
-                .read_history(study_id, page)
-                .map_err(|e| Failure::Dossier(e, Some(id.clone())))?;
-            Ok(ok(&id, dto::history(study_id, &hist)))
+            let page = args
+                .page(DEFAULT_HISTORY_PAGE, MAX_HISTORY_PAGE)
+                .map_err(rendered)?;
+            match read(access, McpReadRequest::History(study_id, page))? {
+                (id, McpRead::History(hist)) => Ok(ok(&id, dto::history(study_id, &hist))),
+                (id, McpRead::StudyMissing(s)) => Err(study_missing(id, s)),
+                (id, _) => Err(unexpected(id)),
+            }
         }
         "get_drafts_record" => {
             let args = Args::new(arguments, &allowed(&["study_id", "status"], &PAGE_ARGS))
@@ -541,37 +605,31 @@ fn call_on(
             let status = match args.opt_str("status").map_err(rendered)? {
                 None => None,
                 Some(s) => Some(s.parse::<DraftStatus>().map_err(|_| {
-                    rendered(messages::invalid_call(&format!("status {s} is unknown")))
+                    rendered(messages::invalid_call("status is not a draft status"))
                 })?),
             };
-            let page = args.page(DEFAULT_LIST_PAGE).map_err(rendered)?;
-            let id = identity(access)?;
-            let list = access
-                .list_drafts(DraftFilter { study_id, status }, page)
-                .map_err(|e| Failure::Dossier(e, Some(id.clone())))?;
-            Ok(ok(&id, dto::draft_list(&list)))
+            let page = args.page(DEFAULT_LIST_PAGE, MAX_PAGE).map_err(rendered)?;
+            match read(
+                access,
+                McpReadRequest::Drafts(DraftFilter { study_id, status }, page),
+            )? {
+                (id, McpRead::Drafts(list)) => Ok(ok(&id, dto::draft_list(&list))),
+                (id, McpRead::StudyMissing(s)) => Err(study_missing(id, s)),
+                (id, _) => Err(unexpected(id)),
+            }
         }
-        "submit_draft_study" | "submit_draft_note" | "submit_draft_value" => {
-            submit(name, arguments, env, access)
-        }
-        other => Err(rendered(messages::invalid_call(&format!(
-            "unknown tool {other}"
-        )))),
+        _ => submit(tool, arguments, env, access),
     }
 }
 
-fn identity(access: &McpAccess) -> Result<DossierIdentity, Failure> {
-    access.identity().map_err(|e| Failure::Dossier(e, None))
-}
-
 fn submit(
-    name: &str,
+    tool: &'static str,
     arguments: Map<String, Value>,
     env: &CallEnv<'_>,
     access: &McpAccess,
 ) -> Result<Outcome, Failure> {
     let rendered = |r: Rendered| Failure::Rendered(r, None);
-    let own: &[&'static str] = match name {
+    let own: &[&'static str] = match tool {
         "submit_draft_study" => &["security_ticker", "native_currency", "company_name"],
         "submit_draft_note" => &["study_id", "note_text"],
         _ => &["study_id", "field", "fiscal_year", "proposed_value"],
@@ -589,8 +647,10 @@ fn submit(
     let draft_id = args.opt_uuid("draft_id").map_err(rendered)?;
 
     let mut sub = DraftSubmission {
-        id: Uuid::nil(),
-        created_at: Timestamp(String::new()),
+        id: draft_id.unwrap_or_else(|| (env.new_id)()),
+        // A retry of the same draft_id keeps the STORED creation time (McpAccess, in the
+        // insert's transaction) — this one is used only for a new draft.
+        created_at: (env.now)(),
         kind: DraftKind::Study,
         study_id: None,
         security_ticker: None,
@@ -604,7 +664,7 @@ fn submit(
         dossier,
         method_version: steadyinvest_core::METHOD_VERSION.to_string(),
     };
-    match name {
+    match tool {
         "submit_draft_study" => {
             sub.kind = DraftKind::Study;
             sub.security_ticker = Some(args.str("security_ticker").map_err(rendered)?);
@@ -629,12 +689,14 @@ fn submit(
             let (kind, target) = match (DraftField::from_key(&field).map(|f| f.kind()), year) {
                 (Some(DraftFieldKind::Cell), None) => {
                     return Err(rendered(messages::invalid_call(&format!(
-                        "the cell field {field} needs a fiscal_year"
+                        "the cell field {} needs a fiscal_year",
+                        messages::echo(&field)
                     ))));
                 }
                 (Some(DraftFieldKind::Judgment), Some(_)) => {
                     return Err(rendered(messages::invalid_call(&format!(
-                        "the judgment field {field} takes no fiscal_year"
+                        "the judgment field {} takes no fiscal_year",
+                        messages::echo(&field)
                     ))));
                 }
                 (Some(DraftFieldKind::Cell), Some(fiscal_year)) | (None, Some(fiscal_year)) => (
@@ -657,45 +719,15 @@ fn submit(
         }
     }
 
-    // Identity and time: the server's (ADD15). A retry with the same draft_id reuses the stored
-    // creation time, so the same proposition is recorded once (McpAccess compares it).
-    let id = identity(access)?;
-    sub.id = draft_id.unwrap_or_else(|| (env.new_id)());
-    sub.created_at = match draft_id {
-        Some(existing) => stored_created_at(access, existing)
-            .map_err(|e| Failure::Dossier(e, Some(id.clone())))?
-            .unwrap_or_else(|| (env.now)()),
-        None => (env.now)(),
-    };
-    let draft = access
-        .submit_draft(&sub)
+    let id = access.identity().map_err(|e| Failure::Dossier(e, None))?;
+    let recorded = access
+        .submit_draft_recorded(&sub, env.cancelled)
         .map_err(|e| Failure::Submit(e, Some(id.clone())))?;
-    tracing::info!(tool = name, draft = %draft, "proposition recorded");
+    tracing::info!(tool, draft = %recorded.id, status = recorded.status.as_str(), "proposition recorded");
     Ok(ok(
         &id,
-        json!({ "draft_id": draft.to_string(), "status": "pending" }),
+        json!({ "draft_id": recorded.id.to_string(), "status": recorded.status.as_str() }),
     ))
-}
-
-/// The stored creation time of the draft `draft`, if it exists (a bounded scan of the record).
-fn stored_created_at(access: &McpAccess, draft: Uuid) -> Result<Option<Timestamp>, Error> {
-    let mut offset = 0;
-    loop {
-        let page = access.list_drafts(
-            DraftFilter::default(),
-            Page {
-                offset,
-                limit: MAX_PAGE,
-            },
-        )?;
-        if let Some(d) = page.items.iter().find(|d| d.id == draft) {
-            return Ok(Some(d.created_at.clone()));
-        }
-        offset += page.items.len() as u64;
-        if page.items.is_empty() || offset >= page.total {
-            return Ok(None);
-        }
-    }
 }
 
 /// The French unit of a field (re-exported for the seed example and tests).

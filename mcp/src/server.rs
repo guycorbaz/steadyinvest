@@ -65,27 +65,31 @@ impl ServerHandler for SteadyMcp {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let name = request.name.to_string();
         if !tools::TOOL_NAMES.contains(&name.as_str()) {
-            return Err(ErrorData::invalid_params(
-                format!("unknown tool {name}"),
-                None,
-            ));
+            // Never echo a client-sent name (G3): generic, and nothing logged from it.
+            return Err(ErrorData::invalid_params("unknown tool", None));
+        }
+        if context.ct.is_cancelled() {
+            return Err(ErrorData::internal_error("the call was cancelled", None));
         }
         let arguments = request.arguments.unwrap_or_default();
         let explicit = self.explicit.clone();
+        let ct = context.ct.clone();
         let outcome = tokio::task::spawn_blocking(move || {
+            let cancelled = move || ct.is_cancelled();
             let env = CallEnv {
                 explicit: explicit.as_deref(),
                 now: &now,
                 new_id: &Uuid::new_v4,
+                cancelled: &cancelled,
             };
             tools::call(&name, arguments, &env)
         })
         .await
-        .map_err(|e| ErrorData::internal_error(format!("tool call aborted: {e}"), None))?;
+        .map_err(|_| ErrorData::internal_error("tool call aborted", None))?;
         let text = outcome.body.to_string();
         let result = if outcome.is_error {
             CallToolResult::error(vec![ContentBlock::text(text)])
