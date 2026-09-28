@@ -732,7 +732,8 @@ development_status:
   8-5a-ai-frame-and-draft-inbox: done
   # 2026-09-28: 8-5b story file created (create-story) → ready-for-dev; branch feat/8-5b-deciding-drafts.
   # 2026-09-28: 8-5b dev complete (1392 tests; headless walk v85b/ 00–27, two fixes) → review.
-  8-5b-deciding-drafts: review
+  # 2026-09-28: 8-5b dev + G3 (3 layers, 1 high fixed) → PR #263 merged → done; Guy's on-display check pending.
+  8-5b-deciding-drafts: done
   8-6-ai-judgment-lines: backlog
   8-7-draft-study-end-to-end-and-drafts-record: backlog
   8-8-frozen-decision-time-verdict: backlog
