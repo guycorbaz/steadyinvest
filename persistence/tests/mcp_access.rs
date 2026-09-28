@@ -1226,6 +1226,7 @@ mod protected {
                 access.submit_draft(&note(&path, 1)).err().map(|e| match e {
                     SubmitError::Failed(err) => err,
                     SubmitError::Refused(r) => panic!("unexpected refusal {r:?}"),
+                    SubmitError::Cancelled => panic!("unexpected cancellation"),
                 }),
             ] {
                 match outcome {
@@ -1239,5 +1240,131 @@ mod protected {
             let _ = std::fs::remove_file(inner_dir.join(".probe"));
         }
         set_mode(&inner_dir, 0o755);
+    }
+}
+
+/// Story 8.4 G3: a retry is the same proposition whatever its creation time (the server's clock at
+/// each attempt), and answers the STORED status — a draft decided since answers its decision.
+#[test]
+fn a_retry_with_another_clock_reading_is_the_same_draft_and_answers_its_stored_status() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    let access = McpAccess::at(&path);
+    let first = note(&path, 7);
+    let recorded = access
+        .submit_draft_recorded(&first, &|| false)
+        .expect("first");
+    assert_eq!(recorded.status, DraftStatus::Pending);
+    let later = DraftSubmission {
+        created_at: ts("2026-09-28T11:59:59Z"),
+        ..first.clone()
+    };
+    let again = access
+        .submit_draft_recorded(&later, &|| false)
+        .expect("again");
+    assert_eq!(again.id, recorded.id);
+    assert_eq!(draft_count(&path), 1);
+    // The owner decides it (straight in the table, as the decision rail's outcome).
+    let conn = Connection::open(&path).expect("raw");
+    conn.execute(
+        "UPDATE ai_drafts SET status = 'validated', decided_at = '2026-09-28T12:00:00Z' WHERE id = ?1",
+        params![recorded.id.to_string()],
+    )
+    .expect("decide");
+    drop(conn);
+    let after = access
+        .submit_draft_recorded(&later, &|| false)
+        .expect("after the decision");
+    assert_eq!(after.status, DraftStatus::Validated);
+    let stored = access
+        .read_identified(steadyinvest_persistence::McpReadRequest::Draft(recorded.id))
+        .expect("point lookup");
+    match stored.1 {
+        steadyinvest_persistence::McpRead::Draft(Some(d)) => {
+            assert_eq!(
+                d.created_at,
+                ts("2026-09-28T09:00:00Z"),
+                "the stored time stands"
+            );
+            assert_eq!(d.status, DraftStatus::Validated);
+        }
+        other => panic!("expected the draft, got {other:?}"),
+    }
+}
+
+/// Story 8.4 G3: concurrent retries of the same proposition (same id) all record it once — none is
+/// refused as another draft with the same id.
+#[test]
+fn concurrent_retries_of_the_same_draft_record_it_once_and_none_conflicts() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    let barrier = Arc::new(Barrier::new(4));
+    let handles: Vec<_> = (0..4)
+        .map(|i| {
+            let path = path.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let sub = DraftSubmission {
+                    created_at: ts(&format!("2026-09-28T10:00:0{i}Z")),
+                    ..note(&path, 8)
+                };
+                barrier.wait();
+                McpAccess::at(&path).submit_draft_recorded(&sub, &|| false)
+            })
+        })
+        .collect();
+    for h in handles {
+        let r = h.join().expect("thread").expect("recorded, never refused");
+        assert_eq!(r.id, Uuid::from_u128(0x83_d008));
+    }
+    assert_eq!(draft_count(&path), 1);
+}
+
+/// Story 8.4 G3: a call cancelled before its insert writes nothing.
+#[test]
+fn a_cancelled_submission_writes_nothing() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Wal);
+    let access = McpAccess::at(&path);
+    match access.submit_draft_recorded(&note(&path, 9), &|| true) {
+        Err(SubmitError::Cancelled) => {}
+        other => panic!("expected a cancellation, got {other:?}"),
+    }
+    assert_eq!(draft_count(&path), 0);
+}
+
+/// Story 8.4 G3: one read transaction names the dossier AND reads the data; a study-scoped read of
+/// an unknown study says so instead of an empty page.
+#[test]
+fn an_identified_read_names_the_dossier_and_an_unknown_study_is_missing() {
+    use steadyinvest_persistence::{McpRead, McpReadRequest};
+    let dir = TempDir::new().expect("tempdir");
+    let path = dossier(&dir, JournalMode::Delete);
+    let access = McpAccess::at(&path);
+    let unknown = Uuid::from_u128(0xdead);
+    for request in [
+        McpReadRequest::Study(unknown),
+        McpReadRequest::History(unknown, Page::first(5)),
+        McpReadRequest::Drafts(
+            DraftFilter {
+                study_id: Some(unknown),
+                status: None,
+            },
+            Page::first(5),
+        ),
+    ] {
+        let (identity, read) = access.read_identified(request).expect("read");
+        assert_eq!(identity.journal_id, Uuid::from_u128(JID));
+        assert_eq!(read, McpRead::StudyMissing(unknown), "{request:?}");
+    }
+    let (_, read) = access
+        .read_identified(McpReadRequest::History(
+            Uuid::from_u128(STUDY_A),
+            Page::first(5),
+        ))
+        .expect("history");
+    match read {
+        McpRead::History(page) => assert_eq!(page.total, 1),
+        other => panic!("expected a history page, got {other:?}"),
     }
 }

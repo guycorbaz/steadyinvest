@@ -718,8 +718,13 @@ development_status:
   #             clippy boundary land with the mcp crate in 8.4; rusqlite `hooks` feature).
   # 2026-09-28: 8-3 dev complete (1284 tests; clippy/fmt/deny green) → review.
   # 2026-09-28: 8-3 G3 applied (2 critical/high + mediums/lows; v9 id guard) → 1303 tests → review.
-  8-3-mcp-access-gated-access-surface: review
-  8-4-steadyinvest-mcp-stdio-server: backlog
+  # 2026-09-28: 8-3 dev + G3 (3 layers + security re-review; 2 high fixed) → PR #260 merged → done.
+  8-3-mcp-access-gated-access-surface: done
+  # 2026-09-28: 8-4 story file created (create-story) → ready-for-dev. SDK decision: rmcp 3.4
+  #             (server + transport-io + macros + schemars; no HTTP in the closure, cargo deny ok);
+  #             new crates paths/ (shared locations) and mcp/.
+  # 2026-09-28: 8-4 dev complete (rmcp stdio server, paths crate, last_opened_path, 1334 tests) → review.
+  8-4-steadyinvest-mcp-stdio-server: review
   8-5a-ai-frame-and-draft-inbox: backlog
   8-5b-deciding-drafts: backlog
   8-6-ai-judgment-lines: backlog

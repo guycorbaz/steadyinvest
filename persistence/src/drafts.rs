@@ -322,15 +322,7 @@ impl Journal {
     /// One draft by id, or `None` when the dossier holds no such draft — the same corruption rule
     /// as [`Self::list_drafts`] (a corrupt row is an error, never `None`).
     pub fn get_draft(&self, id: Uuid) -> Result<Option<DraftRecord>> {
-        let row = self
-            .conn
-            .query_row(
-                &format!("SELECT {DRAFT_COLUMNS} FROM ai_drafts WHERE id = ?1"),
-                rusqlite::params![id.to_string()],
-                row_tuple,
-            )
-            .optional()?;
-        row.map(record_from_row).transpose()
+        read_draft_in(&self.conn, id)
     }
 
     /// A study's lifecycle status (`"active"` / `"archived"`), or `None` when the study is gone —
@@ -461,4 +453,18 @@ fn draft_status_in(
         .map(|s| parse_uuid(s, "ai_drafts.study_id"))
         .transpose()?;
     Ok((status, study))
+}
+
+/// One draft by id on a given connection (the journal's, or the MCP access surface's — Story 8.4
+/// G3 point lookup): a corrupt row is an error, never `None`.
+pub(crate) fn read_draft_in(conn: &rusqlite::Connection, id: Uuid) -> Result<Option<DraftRecord>> {
+    use rusqlite::OptionalExtension;
+    let row = conn
+        .query_row(
+            &format!("SELECT {DRAFT_COLUMNS} FROM ai_drafts WHERE id = ?1"),
+            rusqlite::params![id.to_string()],
+            row_tuple,
+        )
+        .optional()?;
+    row.map(record_from_row).transpose()
 }

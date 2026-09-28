@@ -4,7 +4,7 @@
 
 [workspace]
 resolver = "2"
-members = ["core", "contract", "ingestion", "persistence", "report", "app"]
+members = ["core", "contract", "ingestion", "persistence", "report", "app", "paths", "mcp"]
 
 [workspace.package]
 version = "0.1.0"
@@ -21,6 +21,8 @@ steadyinvest-contract = { path = "contract", version = "0.1.0" }
 steadyinvest-ingestion = { path = "ingestion", version = "0.1.0" }
 steadyinvest-persistence = { path = "persistence", version = "0.1.0" }
 steadyinvest-report = { path = "report", version = "0.1.0" }
+# Story 8.4 (arch §Phase 4 A10): the per-machine locations shared by the app and the MCP server.
+steadyinvest-paths = { path = "paths", version = "0.1.0" }
 
 # ── External (pinned; latest stable verified 2026-06) ──
 slint = "1.16"
@@ -42,6 +44,13 @@ rust_decimal = { version = "1.42", features = ["maths"] }     # exact decimal + 
 # Mozilla roots → no system cert store dependency, portable single binary).
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "webpki-roots"] }
 tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "macros"] }
+# The MCP SDK of the `steadyinvest-mcp` stdio server (Story 8.4, arch §Phase 4 A1 / A12): the official
+# modelcontextprotocol/rust-sdk, Apache-2.0, MSRV 1.88. default-features OFF + server-side stdio only:
+# its HTTP transports (hyper / reqwest / axum) stay optional deps we never enable — the `mcp` crate's
+# closure test (mcp/tests/closure.rs) fails the build if one ever enters. Bump deliberately.
+# Story 8.4 G3: only `server` + `transport-io` — the handler is hand-written (schemas built at run
+# time from the draftable registry), so `macros` / `schemars` (as an explicit feature) are not used.
+rmcp = { version = "3.4", default-features = false, features = ["server", "transport-io"] }
 # Pure-Rust rustls + the `ring` crypto provider (no aws-lc-rs, no cmake). Must match reqwest 0.13's
 # rustls (0.23) so the process-default provider installed via `ingestion::install_crypto_provider()`
 # applies to reqwest's TLS. default-features off drops the aws-lc-rs default.

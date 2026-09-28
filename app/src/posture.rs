@@ -753,8 +753,10 @@ mod tests {
         // the history chip (« Masquer / Afficher les notes ») and the glossary's « Notes »:
         // 1012 + 19 = 1031, measured. Its G3 review asks before a note being written is lost
         // (« Abandonner la note en cours ? » / « Abandonner »): 1031 + 2 = 1033, measured.
+        // 8.4 (MCP server): the glossary's « Serveur MCP » term and definition (FR75): 1033 + 2 =
+        // 1035, measured.
         assert!(
-            total >= 1033,
+            total >= 1035,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

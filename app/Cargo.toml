@@ -19,6 +19,9 @@ steadyinvest-contract = { workspace = true }
 steadyinvest-ingestion = { workspace = true }
 steadyinvest-persistence = { workspace = true }
 steadyinvest-report = { workspace = true }
+# Story 8.4: the per-machine locations (config file, default dossier, log dir), shared with the MCP
+# server so the two can never drift apart (arch §Phase 4 A10).
+steadyinvest-paths = { workspace = true }
 slint = { workspace = true }
 tokio = { workspace = true }
 directories = { workspace = true }

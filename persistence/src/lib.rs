@@ -45,8 +45,9 @@ pub use journal::{
 };
 pub use mcp_access::{
     DossierIdentity, DraftFilter, DraftSubmission, MAX_COMMENT_CHARS, MAX_COMPANY_NAME_CHARS,
-    MAX_NOTE_CHARS, MAX_ORIGIN_CHARS, MAX_PAGE, McpAccess, McpDenial, McpSnapshot, McpStudyRead,
-    McpUnavailable, Page, Paged, SubmissionRefusal, SubmitError,
+    MAX_NOTE_CHARS, MAX_ORIGIN_CHARS, MAX_PAGE, MAX_PROPOSED_VALUE_CHARS, McpAccess, McpDenial,
+    McpRead, McpReadRequest, McpSnapshot, McpStudyRead, McpUnavailable, Page, Paged, Recorded,
+    SubmissionRefusal, SubmitError,
 };
 pub use restore::{BackupInfo, inspect_backup, restore_journal_file, restore_journal_file_keeping};
 pub use studies::{JudgmentSnapshotSummary, StudySummary};

@@ -952,6 +952,11 @@ export component SettingsScreen inherits Rectangle {
                     term: @tr("Notes");
                     definition: @tr("Remarques datées sur une étude, à côté de la justification de la décision. Une note supprimée reste lisible dans l'historique de l'étude ; les notes ne sont pas imprimées.");
                 }
+                // Story 8.4 (FR75, NFR-S3).
+                GlossaryRow {
+                    term: @tr("Serveur MCP");
+                    definition: @tr("Serveur local qu'un client IA de votre choix lance pour lire les études du dossier. Il ne donne jamais accès au portefeuille, à la liste de suivi, aux clés ni à la configuration. L'IA n'y dépose que des propositions, qui ne changent rien tant que vous ne les avez pas validées une à une. Les objectifs de recherche restent dans la session du client IA et ne sont pas enregistrés dans le dossier.");
+                }
             }
 
             // ── Story 2.13 — Vérifier le moteur (FR9): replay the bundled golden studies on demand. ──

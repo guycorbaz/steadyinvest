@@ -18,6 +18,32 @@ const NEWER_SCHEMA: ReadOnlyCause = ReadOnlyCause::NewerSchema {
     file_user_version: 99,
 };
 
+/// Every app test opens its dossier through this (Story 8.4 G3, F13): the default dossier is a
+/// TEMP path beside the configured one — never the owner's real `default_journal_path()`.
+fn open_or_create_test(
+    configured: Option<&Path>,
+    clock: Box<dyn Clock>,
+    idgen: Box<dyn IdGen>,
+) -> (JournalState, Option<String>) {
+    let default = configured
+        .and_then(|p| p.parent())
+        .map(|dir| dir.join("unused-test-default.db"));
+    assert!(default.is_some(), "a test always configures a temp dossier");
+    JournalState::open_or_create_with_default(configured, default, clock, idgen)
+}
+
+/// F13 guard: no app test calls the real-default opener.
+#[test]
+fn no_app_test_opens_the_real_default_dossier() {
+    let this_file = include_str!("tests.rs");
+    let forbidden = concat!("JournalState::", "open_or_create(");
+    assert_eq!(
+        this_file.matches(forbidden).count(),
+        0,
+        "use open_or_create_test (a temp default), never the real default dossier"
+    );
+}
+
 fn fixed(id: u128, ts: &str) -> (Box<dyn Clock>, Box<dyn IdGen>) {
     (
         Box::new(FixedClock(Timestamp(ts.to_string()))),
@@ -41,7 +67,7 @@ fn undo_state(dir: &TempDir, seed: u128, ts: &str) -> JournalState {
         );
     }
     let (clock, idgen) = fixed(seed, ts);
-    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    let (state, _) = open_or_create_test(Some(&path), clock, idgen);
     state
 }
 
@@ -61,7 +87,7 @@ fn watch_state_with_journal_id(dir: &TempDir, seed: u128, jid: u128) -> JournalS
     }
     let clock: Box<dyn Clock> = Box::new(FixedClock(Timestamp("2026-06-27T15:00:00Z".to_string())));
     let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
-    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    let (state, _) = open_or_create_test(Some(&path), clock, idgen);
     state
 }
 
@@ -81,7 +107,7 @@ fn watch_state(dir: &TempDir, seed: u128) -> JournalState {
     }
     let clock: Box<dyn Clock> = Box::new(FixedClock(Timestamp("2026-06-27T15:00:00Z".to_string())));
     let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
-    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    let (state, _) = open_or_create_test(Some(&path), clock, idgen);
     state
 }
 
@@ -792,8 +818,7 @@ fn the_app_clears_an_interrupted_restore_when_it_opens_the_dossier() {
     std::fs::write(&marker, "4294967294 1").unwrap(); // a process that is gone
     std::fs::write(&staging, b"partial").unwrap();
     let (clock, idgen) = fixed(0x54D, "2026-06-14T09:00:00Z");
-    let (state, _notice) =
-        JournalState::open_or_create(Some(&dir.path().join("journal.db")), clock, idgen);
+    let (state, _notice) = open_or_create_test(Some(&dir.path().join("journal.db")), clock, idgen);
     assert!(state.journal_id().is_some(), "the dossier opened");
     assert!(
         !marker.exists() && !staging.exists(),
@@ -809,8 +834,7 @@ fn a_leftover_prerestore_is_named_at_startup() {
     let snapshot = dir.path().join("journal.db-prerestore");
     std::fs::write(&snapshot, b"original").unwrap();
     let (clock, idgen) = fixed(0x54B, "2026-06-14T09:00:00Z");
-    let (_state, notice) =
-        JournalState::open_or_create(Some(&dir.path().join("journal.db")), clock, idgen);
+    let (_state, notice) = open_or_create_test(Some(&dir.path().join("journal.db")), clock, idgen);
     assert_eq!(notice, Some(prerestore_found_message(&snapshot)));
 }
 
@@ -1119,7 +1143,7 @@ fn dated_state(dir: &TempDir, seed: u128, ts: &str) -> JournalState {
     }
     let clock: Box<dyn Clock> = Box::new(FixedClock(Timestamp(ts.to_string())));
     let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
-    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    let (state, _) = open_or_create_test(Some(&path), clock, idgen);
     state
 }
 
@@ -3165,7 +3189,7 @@ fn review_state_at(dir: &TempDir, seed: u128, ts: &str) -> JournalState {
     }
     let clock: Box<dyn Clock> = Box::new(FixedClock(Timestamp(ts.to_string())));
     let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
-    let (state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    let (state, _) = open_or_create_test(Some(&path), clock, idgen);
     state
 }
 
@@ -5317,7 +5341,7 @@ fn create_then_list_then_reopen_restores_full_state() {
         .unwrap(),
     );
 
-    let (mut state, notice) = JournalState::open_or_create(Some(&path), clock, idgen);
+    let (mut state, notice) = open_or_create_test(Some(&path), clock, idgen);
     assert!(notice.is_none(), "clean open has no notice");
     assert!(!state.is_read_only());
     assert_eq!(state.path(), Some(path.as_path()));
@@ -5358,7 +5382,7 @@ fn blank_ticker_is_refused_with_a_neutral_message_and_writes_nothing() {
         .unwrap(),
     );
     let (clock, idgen) = fixed(0x1, "2026-06-13T09:00:00Z");
-    let (mut state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+    let (mut state, _) = open_or_create_test(Some(&path), clock, idgen);
 
     assert_eq!(
         state.create_study("   ", "CHF"),
@@ -5374,15 +5398,28 @@ fn blank_ticker_is_refused_with_a_neutral_message_and_writes_nothing() {
 #[test]
 fn missing_configured_file_falls_through_to_a_created_default_or_none() {
     // A configured path that does NOT exist must not be opened as an empty journal; the code
-    // falls through to the default. In a sandbox the data dir may be unavailable — either a
-    // created default (Some path) or a clean no-journal state is acceptable, never a panic.
+    // falls through to the default. Story 8.4 (dev safety, arch A12): the default is a TEMP path
+    // — this test used the real `default_journal_path()` and so created an empty dossier in the
+    // owner's real data dir on every run.
+    let dir = TempDir::new().unwrap();
+    let default = dir.path().join("default.db");
     let (clock, idgen) = fixed(0x2, "2026-06-13T09:00:00Z");
     let missing = PathBuf::from("/nonexistent/steadyinvest/journal.db");
-    let (state, _notice) = JournalState::open_or_create(Some(&missing), clock, idgen);
+    let (state, _notice) = JournalState::open_or_create_with_default(
+        Some(&missing),
+        Some(default.clone()),
+        clock,
+        idgen,
+    );
     assert_ne!(
         state.path(),
         Some(missing.as_path()),
         "a missing configured file is never adopted as-is"
+    );
+    assert_eq!(
+        state.path(),
+        Some(default.as_path()),
+        "the default is created"
     );
 }
 
@@ -5399,7 +5436,7 @@ fn created_at_date_takes_the_date_portion() {
 
 fn open_state(path: &Path) -> JournalState {
     let (clock, idgen) = fixed(0x5D, "2026-06-13T09:00:00Z");
-    let (state, _) = JournalState::open_or_create(Some(path), clock, idgen);
+    let (state, _) = open_or_create_test(Some(path), clock, idgen);
     state
 }
 
@@ -8125,7 +8162,7 @@ fn protected_dossier(dir: &TempDir) -> Option<(std::path::PathBuf, Uuid)> {
     let (clock, idgen) = fixed(0x4440, "2026-09-26T10:00:00Z");
     let study_id = {
         // The configured path EXISTS, so this opens it — never the default journal.
-        let (mut state, _) = JournalState::open_or_create(Some(&path), clock, idgen);
+        let (mut state, _) = open_or_create_test(Some(&path), clock, idgen);
         state.create_study("NESN", "CHF").unwrap()
     };
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
@@ -8168,7 +8205,7 @@ fn a_protected_configured_dossier_is_named_at_startup() {
         return;
     };
     let (clock, idgen) = fixed(0x446, "2026-09-26T10:00:00Z");
-    let (state, notice) = JournalState::open_or_create(Some(&path), clock, idgen);
+    let (state, notice) = open_or_create_test(Some(&path), clock, idgen);
     assert_eq!(
         state.path(),
         Some(path.as_path()),
@@ -8479,6 +8516,50 @@ fn reselecting_the_stand_in_ends_the_kept_configured_dossier() {
     let outcome = state.open_journal(&default).expect("reselect the stand-in");
     assert!(outcome.unchanged);
     assert_eq!(state.kept_configured_path(), None);
+}
+
+/// Story 8.4 AC 4 / AC 5: while the stand-in runs for a configured dossier refused by name, the
+/// app-config keeps `journal_path` on the refused dossier (G3 M4) and `last_opened_path` names the
+/// stand-in — the one the owner sees, which the MCP server resolves first.
+#[test]
+fn the_stand_in_is_the_last_opened_dossier_while_journal_path_keeps_the_refused_one() {
+    let dir = TempDir::new().unwrap();
+    let configured = dir.path().join("mine.db");
+    let default = dir.path().join("default.db");
+    fresh_journal(&configured);
+    assert!(
+        held_by_another_instance(&configured),
+        "the lock of another live instance can be simulated (Linux /proc)"
+    );
+    let (clock, idgen) = fixed(0x55, "2026-09-28T10:00:00Z");
+    let (state, _) = JournalState::open_or_create_with_default(
+        Some(&configured),
+        Some(default.clone()),
+        clock,
+        idgen,
+    );
+    assert_eq!(state.kept_configured_path(), Some(configured.as_path()));
+    assert_eq!(
+        state.path(),
+        Some(default.as_path()),
+        "the stand-in is open"
+    );
+    let config_path = Some(dir.path().join("config.json"));
+    let config = std::rc::Rc::new(std::cell::RefCell::new(crate::config::AppConfig {
+        journal_path: Some(configured.clone()),
+        ..crate::config::AppConfig::default()
+    }));
+    let state = std::rc::Rc::new(std::cell::RefCell::new(state));
+    crate::wiring::journal::record_current_pointer(&state, &config, &config_path);
+    assert_eq!(config.borrow().journal_path, Some(configured.clone()));
+    assert_eq!(config.borrow().last_opened_path, Some(default.clone()));
+    // The persisted file resolves, for the MCP server, to the stand-in.
+    let pointers =
+        steadyinvest_paths::read_dossier_pointers(config_path.as_deref().expect("a path"));
+    assert_eq!(
+        steadyinvest_paths::resolve_dossier_with(None, pointers, None),
+        Ok(default)
+    );
 }
 
 #[test]

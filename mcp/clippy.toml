@@ -1,0 +1,20 @@
+# Clippy configuration of the `steadyinvest-mcp` crate (Story 8.4 AC 13, arch §Phase 4 A3).
+#
+# This file REPLACES the workspace `clippy.toml` for this crate (clippy reads the nearest file). The
+# workspace file carries no active setting today (comments only), so nothing is lost; if one is added
+# there, repeat it here.
+#
+# The persistence boundary: the MCP server reaches the dossier ONLY through `McpAccess` (typed reads,
+# draft inserts) — never a `Journal` (the app's read-write handle), never the functions that touch
+# the dossier file itself (restore, lock, backup inspection, read-copy sweep).
+disallowed-types = [
+    { path = "steadyinvest_persistence::Journal", reason = "the MCP server uses McpAccess only (arch A3)" },
+]
+disallowed-methods = [
+    { path = "steadyinvest_persistence::restore_journal_file", reason = "the MCP server never touches the dossier file (arch A3)" },
+    { path = "steadyinvest_persistence::restore_journal_file_keeping", reason = "the MCP server never touches the dossier file (arch A3)" },
+    { path = "steadyinvest_persistence::inspect_backup", reason = "the MCP server never touches the dossier file (arch A3)" },
+    { path = "steadyinvest_persistence::clear_lock", reason = "the MCP server never takes or clears the app lock (arch A2)" },
+    { path = "steadyinvest_persistence::sweep_stale_read_copies", reason = "the MCP server never touches the dossier directory (arch A3)" },
+    { path = "steadyinvest_persistence::lock_is_stale", reason = "the MCP server never inspects the app lock (arch A2)" },
+]

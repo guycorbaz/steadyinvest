@@ -165,7 +165,7 @@ text** is marked `{IA:…}` and may only appear inside an `AiFrame` (§4.1).
 
 **MCP refusal reasons (8.3, 8.4) — decided here (Q11)**
 A stable English `snake_case` code (never shown in the UI) + a French message:
-- `dossier_mismatch` — « Le dossier a changé depuis la lecture ({chemin lu} ≠ {chemin actuel}) ; rien n'a été enregistré. »
+- `dossier_mismatch` — « Le dossier a changé depuis la lecture ({chemin lu} ≠ {chemin actuel}) ; rien n'a été enregistré. » — when both paths are the same (a restored or replaced file), the two journal ids stand in the parentheses instead (Story 8.4 G3, owner-pending)
 - `dossier_replaced` (A11) — « Le fichier du dossier a été remplacé pendant l'écriture (restauration) ; rien n'a été enregistré. »
 - `schema_mismatch` — « Le dossier est au schéma v{a}, ce serveur MCP en v{b} ; ouvrez-le d'abord dans l'application. » / « … ce serveur MCP est plus ancien que le dossier. »
 - `no_dossier` — « Aucun dossier n'a pu être déterminé ; rien n'a été lu. »
@@ -185,7 +185,7 @@ A stable English `snake_case` code (never shown in the UI) + a French message:
 - `study_archived` — « L'étude {TICKER} est archivée ; la proposition n'a pas été enregistrée. »
 - `value_out_of_range` — « La valeur « {texte} » de {champ} est hors des bornes d'une proposition (moins de 10¹⁵ en valeur absolue, au plus 10 décimales) ; rien n'a été enregistré. »
 - `empty_note_text` — « Le texte de la note est vide ; rien n'a été enregistré. »
-- `text_too_long` — « Le texte {champ} dépasse {max} caractères ({n}) ; rien n'a été enregistré. » ({champ} : le commentaire / le texte de la note / le nom de la société / le client / le modèle)
+- `text_too_long` — « Le texte {champ} dépasse {max} caractères ({n}) ; rien n'a été enregistré. » — {champ} as written by Story 8.4: « du commentaire » · « de la note » · « du nom de la société » · « du client » · « du modèle » · « de la valeur proposée » (e.g. « Le texte du commentaire dépasse 10000 caractères (10001) ; … »; the proposed value is capped at 100 characters, checked before any parse)
 - `draft_id_conflict` — « Une autre proposition porte déjà l'identifiant {id} ; rien n'a été enregistré. » (the same proposition sent again is accepted once, without a second write)
 - `dossier_busy` — « Une restauration du dossier est en cours ; rien n'a été lu ni enregistré. »
 - `restore_interrupted` — « Une restauration du dossier a été interrompue ; ouvrez le dossier dans l'application, qui la termine ; rien n'a été lu ni enregistré. »
@@ -195,6 +195,12 @@ A stable English `snake_case` code (never shown in the UI) + a French message:
 - `not_a_dossier` — « Le fichier {chemin} n'est pas un dossier SteadyInvest ; rien n'a été lu. »
 - `dossier_identity_unreadable` — « L'identité du fichier du dossier n'a pas pu être lue ; rien n'a été enregistré. »
 - `invalid_call` — « L'appel au serveur MCP est mal formé ({détail}) ; rien n'a été enregistré. » (a server defect, logged — never an AI proposal's fault)
+- *Added by Story 8.4 (2026-09-28, owner-pending):*
+- `config_unreadable` — « La configuration de l'application n'a pas pu être lue ; aucun dossier n'a été déterminé, rien n'a été lu. » (an invalid `config.json`, or a relative dossier pointer in it, is refused, never guessed around; its path and the detail go to the server's log only — G3)
+- `dossier_path_unusable` — « Le chemin du dossier contient des caractères non pris en charge ; rien n'a été lu. » (a resolved path that is not valid UTF-8 — G3)
+- `cancelled` — « L'appel a été annulé par le client ; rien n'a été enregistré. » (checked right before the insert — G3)
+- Every echo of a client- or AI-written text in these messages (a proposed value, a field key, a path read) is cut to 40 characters with « … », control characters replaced by a space (G3).
+- `dossier_error` — « Le dossier n'a pas pu être lu ou écrit ({cause}) ; rien n'a été enregistré. » (a failure with no named MCP cause, e.g. an SQLite I/O error — logged)
 
 ## 4. Shared components (`app/ui/components/`)
 
