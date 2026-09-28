@@ -1,0 +1,172 @@
+// Propositions — the draft inbox, read side (Story 8.5a; UX spec §5.2 « À traiter »; FR72, FR73).
+// Every pending AI draft of the dossier in one titled card, grouped by study (the draft studies last
+// under « Nouvelles études »), newest first. A row states its target and « Actuel → Proposé » as app
+// text, its state word, and the AI's comment inside a compact AiFrame — the only place AI-written
+// text is shown (§4.1). Display only in 8.5a: deciding comes with 8.5b, the « Registre » view and
+// draft-study validation with 8.7. A failed read is a ⊘ band, never an empty list (arch A9). Ink and
+// words only, no hue.
+
+import { Tokens } from "../tokens.slint";
+import { Drafts, DraftRow } from "../state.slint";
+import { ChoiceChip } from "../components/choice_chip.slint";
+import { Dropdown } from "../components/dropdown.slint";
+import { PanelCard } from "../components/panel_card.slint";
+import { StatusBand } from "../components/status_band.slint";
+import { AiFrame } from "../components/ai_frame.slint";
+
+component DraftRowView inherits VerticalLayout {
+    in property <DraftRow> draft;
+    spacing: Tokens.space-4;
+    padding-left: Tokens.space-8;
+
+    HorizontalLayout {
+        spacing: Tokens.space-8;
+        Text {
+            text: root.draft.kind == "study" ? @tr("Nouvelle étude : {}", root.draft.target)
+                : root.draft.kind == "note" ? @tr("{} · nouvelle note", root.draft.target)
+                : root.draft.target;
+            color: Tokens.text-high;
+            font-size: Tokens.font-body;
+            font-weight: Tokens.weight-medium;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+        if root.draft.state == 1: Text {
+            text: @tr("périmée");
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            font-weight: Tokens.weight-semibold;
+            vertical-alignment: center;
+        }
+        if root.draft.state == 2: Text {
+            text: @tr("cible disparue");
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            font-weight: Tokens.weight-semibold;
+            vertical-alignment: center;
+        }
+    }
+    if root.draft.kind == "note": Text {
+        text: @tr("Nouvelle note");
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+    }
+    if root.draft.kind == "cell" || root.draft.kind == "judgment": Text {
+        text: @tr("Actuel {} → Proposé {}", root.draft.current, root.draft.proposed);
+        color: Tokens.text-high;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-caption;
+        wrap: word-wrap;
+    }
+    if root.draft.kind == "study": Text {
+        text: @tr("La validation d'une proposition d'étude n'est pas encore disponible ; la proposition reste en attente.");
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+        wrap: word-wrap;
+    }
+    AiFrame {
+        compact: true;
+        ai-client: root.draft.ai-client;
+        ai-model: root.draft.ai-model;
+        ai-text: root.draft.ai-text;
+        submitted: root.draft.submitted;
+    }
+}
+
+export component PropositionsScreen inherits Rectangle {
+    Flickable {
+        viewport-height: content.preferred-height;
+
+        content := VerticalLayout {
+            alignment: start;
+            padding: Tokens.space-24;
+            spacing: Tokens.space-16;
+
+            PanelCard {
+                title: @tr("Propositions");
+                subtitle: @tr("Proposées par une IA via le serveur MCP ; aucune n'est appliquée sans votre validation.");
+
+                // The kind chips (spec §3.3). The « Registre » view chip arrives with 8.7.
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    ChoiceChip {
+                        label: @tr("Toutes");
+                        selected: Drafts.kind-filter == "all";
+                        activated => { Drafts.pick-kind("all"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Valeurs");
+                        selected: Drafts.kind-filter == "values";
+                        activated => { Drafts.pick-kind("values"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Jugements");
+                        selected: Drafts.kind-filter == "judgments";
+                        activated => { Drafts.pick-kind("judgments"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Notes");
+                        selected: Drafts.kind-filter == "notes";
+                        activated => { Drafts.pick-kind("notes"); }
+                    }
+                    ChoiceChip {
+                        label: @tr("Études");
+                        selected: Drafts.kind-filter == "studies";
+                        activated => { Drafts.pick-kind("studies"); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    Text {
+                        text: @tr("Étude :");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    Dropdown {
+                        width: 320px;
+                        options: Drafts.study-options;
+                        value <=> Drafts.study-value;
+                        picked(index) => { Drafts.pick-study(index); }
+                    }
+                }
+
+                if Drafts.read-failed: StatusBand {
+                    icon: "⊘";
+                    text: Drafts.failure-cause != ""
+                        ? @tr("Les propositions n'ont pas pu être lues ; la liste est indisponible ({}).", Drafts.failure-cause)
+                        : @tr("Les propositions n'ont pas pu être lues ; la liste est indisponible.");
+                }
+                if !Drafts.read-failed && Drafts.read-only: StatusBand {
+                    icon: "◦";
+                    text: @tr("Dossier en lecture seule : les propositions sont consultables, aucune décision n'est possible.");
+                }
+                if !Drafts.read-failed && Drafts.rows.length == 0: Text {
+                    text: @tr("Aucune proposition à traiter. Une IA enregistrée comme client MCP peut en déposer ici ; rien n'est appliqué sans votre validation.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+
+                for r in Drafts.rows: VerticalLayout {
+                    spacing: Tokens.space-8;
+                    if r.group-start: VerticalLayout {
+                        padding-top: Tokens.space-8;
+                        spacing: Tokens.space-4;
+                        Rectangle { height: Tokens.border; background: Tokens.separator; }
+                        Text {
+                            text: r.group-is-studies ? @tr("Nouvelles études") : r.group-title;
+                            color: Tokens.text-high;
+                            font-size: Tokens.font-body;
+                            font-weight: Tokens.weight-semibold;
+                        }
+                    }
+                    DraftRowView { draft: r; }
+                }
+            }
+        }
+    }
+}

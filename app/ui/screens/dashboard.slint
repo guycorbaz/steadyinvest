@@ -8,7 +8,7 @@
 // Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
 import { Tokens } from "../tokens.slint";
-import { Comparison, Dialog, Holdings, Labels, Studies, StudyRow, Confront } from "../state.slint";
+import { Comparison, Dialog, Holdings, Labels, Studies, StudyRow, Confront, Drafts } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
@@ -83,6 +83,13 @@ component StudyListRow inherits Rectangle {
                     color: Tokens.text-high;
                     font-size: Tokens.font-body;
                     font-weight: Tokens.weight-medium;
+                    vertical-alignment: center;
+                }
+                // Story 8.5a (UX spec §5.4): the study's pending AI drafts, « ★ {n} », in ink.
+                if root.entry.pending-drafts > 0: Text {
+                    text: @tr("{} {}", Tokens.ai-glyph, root.entry.pending-drafts);
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-caption;
                     vertical-alignment: center;
                 }
                 Text {
@@ -245,6 +252,15 @@ export component DashboardScreen inherits Rectangle {
             PanelCard {
                 title: @tr("Études");
                 subtitle: @tr("Une étude par titre, dans la devise de ses chiffres ; la liste s'ouvre d'un clic sur le symbole.");
+
+            // Story 8.5a (UX spec §5.4): AI draft STUDIES waiting — first row of the card; the
+            // tickers are listed on the Propositions screen, not here.
+            if Drafts.draft-study-count > 0: StatusBand {
+                icon: Tokens.ai-glyph;
+                text: @tr("{} proposition(s) d'étude de l'IA en attente.", Drafts.draft-study-count);
+                action-label: @tr("Voir les propositions");
+                action => { Drafts.show-draft-studies(); }
+            }
 
             HorizontalLayout {
                 alignment: start;

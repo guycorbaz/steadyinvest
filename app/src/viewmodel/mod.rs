@@ -3,6 +3,7 @@
 
 pub mod chart;
 pub mod comparison;
+pub mod drafts;
 pub mod engine;
 pub mod entry;
 pub mod form;

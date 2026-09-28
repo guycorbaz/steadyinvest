@@ -1,4 +1,4 @@
-// Application shell (Story 2.1): persistent left nav rail (4 destinations) + top bar + content
+// Application shell (Story 2.1): persistent left nav rail (6 destinations since 8.5a) + top bar + content
 // area + pinned footer disclaimer (FR64 — outside any scrollable area, on every screen).
 // Deliberately shallow: no breadcrumbs, no nested routing. Every colour/size reads `Tokens`;
 // every user-visible string is French inside `@tr()` (UX-DR29).
@@ -25,6 +25,7 @@ import { Dialog } from "state.slint";
 import { Review, ReviewShareRow, ReviewPositionRow, ReviewDueRow } from "state.slint";
 import { Comparison, ComparisonHeader, StudyChoice } from "state.slint";
 import { QuickScreen, QuickPriceRow } from "state.slint";
+import { Drafts, DraftRow } from "state.slint";
 import { NavItem } from "components/nav_item.slint";
 import { ConfrontOverlay } from "components/confront_overlay.slint";
 import { ModalDialog } from "components/modal_dialog.slint";
@@ -33,6 +34,7 @@ import { WatchlistScreen } from "screens/watchlist.slint";
 import { PortfolioScreen } from "screens/portfolio.slint";
 import { SettingsScreen } from "screens/settings.slint";
 import { ReviewScreen } from "screens/review.slint";
+import { PropositionsScreen } from "screens/propositions.slint";
 
 // Re-export the globals + form structs so the Rust side (theme.rs, labels.rs, regime.rs, state.rs,
 // viewmodel/form.rs, main.rs) can reach them.
@@ -49,6 +51,7 @@ export { Dialog }
 export { Review, ReviewShareRow, ReviewPositionRow, ReviewDueRow }
 export { Comparison, ComparisonHeader, StudyChoice }
 export { QuickScreen, QuickPriceRow }
+export { Drafts, DraftRow }
 
 export component MainWindow inherits Window {
     title: @tr("steadyinvest");
@@ -70,6 +73,9 @@ export component MainWindow inherits Window {
         @tr("Liste de suivi"),
         @tr("Portefeuille"),
         @tr("Revue"),
+        // Story 8.5a — the draft inbox (index 4); Réglages moves to 5. The rail shows its own
+        // label with the pending count (below); the top bar keeps this plain word.
+        @tr("Propositions"),
         @tr("Réglages"),
     ];
 
@@ -116,7 +122,14 @@ export component MainWindow inherits Window {
                     spacing: Tokens.space-4;
 
                     for destination[index] in root.destinations: NavItem {
-                        label: destination;
+                        // Story 8.5a (UX spec §5.1): « Propositions · {n} » while drafts wait,
+                        // « Propositions · ⊘ » when the last poll or read failed — never vanishing,
+                        // no badge, no hue. The top bar title stays `destinations[…]`.
+                        label: index == 4
+                            ? (Drafts.read-failed ? @tr("Propositions · ⊘")
+                                : Drafts.pending-count > 0 ? @tr("Propositions · {}", Drafts.pending-count)
+                                : destination)
+                            : destination;
                         active: root.current-screen == index;
                         activated => {
                             root.current-screen = index;
@@ -148,7 +161,8 @@ export component MainWindow inherits Window {
                 if root.current-screen == 1: WatchlistScreen { }
                 if root.current-screen == 2: PortfolioScreen { }
                 if root.current-screen == 3: ReviewScreen { }
-                if root.current-screen == 4: SettingsScreen { }
+                if root.current-screen == 4: PropositionsScreen { }
+                if root.current-screen == 5: SettingsScreen { }
             }
         }
 

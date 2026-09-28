@@ -534,3 +534,75 @@ impl JournalState {
             .map_err(decision_save_error)
     }
 }
+
+/// A draft-inbox read that failed (Story 8.5a): the French message (logged, for tests) and its
+/// named cause, for the « indisponible » band — never an empty-looking inbox (arch A9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InboxReadError {
+    pub message: String,
+    /// `None` when no cause can be named (the band then says « indisponible » without one).
+    pub cause: Option<&'static str>,
+}
+
+fn inbox_read_error(error: PersistError) -> InboxReadError {
+    let cause = persist_cause(&error);
+    InboxReadError {
+        message: super::read_failure(super::MSG_SUBJECT_DRAFTS, error),
+        cause,
+    }
+}
+
+/// What the inbox shows, read in one go: every draft (the inbox keeps the pending ones) and
+/// today's study of each pending draft that has one — a study absent from the map was deleted.
+#[derive(Debug, Clone)]
+pub struct InboxData {
+    pub drafts: Vec<steadyinvest_persistence::DraftRecord>,
+    pub studies: std::collections::HashMap<Uuid, Study>,
+}
+
+impl JournalState {
+    /// `PRAGMA data_version` of the open dossier (Story 8.5a, arch A9): `Ok(None)` when no dossier
+    /// is open (a true absence), `Err` on a read failure (logged, cause named).
+    ///
+    /// `log`: the poller asks every 2.5 s — it logs a failure once, when it starts (`log = true`),
+    /// then quietly while it lasts.
+    pub fn try_data_version(&self, log: bool) -> Result<Option<i64>, InboxReadError> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(None);
+        };
+        journal.data_version().map(Some).map_err(|error| {
+            if log {
+                inbox_read_error(error)
+            } else {
+                InboxReadError {
+                    cause: persist_cause(&error),
+                    message: String::new(),
+                }
+            }
+        })
+    }
+
+    /// Read the inbox (Story 8.5a): the drafts and the studies their pending ones target, through
+    /// the app's own journal — never `McpAccess`. `Ok(None)` when no dossier is open. ANY failure
+    /// — the drafts or one study — fails the whole read (no partial list with guessed values).
+    pub fn read_inbox(&self) -> Result<Option<InboxData>, InboxReadError> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(None);
+        };
+        let drafts = journal.list_drafts().map_err(inbox_read_error)?;
+        let mut studies = std::collections::HashMap::new();
+        for id in drafts
+            .iter()
+            .filter(|d| d.status == steadyinvest_contract::DraftStatus::Pending)
+            .filter_map(|d| d.study_id)
+        {
+            if studies.contains_key(&id) {
+                continue;
+            }
+            if let Some(study) = journal.get_study(id).map_err(inbox_read_error)? {
+                studies.insert(id, study);
+            }
+        }
+        Ok(Some(InboxData { drafts, studies }))
+    }
+}

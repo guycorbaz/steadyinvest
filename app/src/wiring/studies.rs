@@ -294,6 +294,10 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     studies.set_study_count(summaries.len() as i32);
     studies.set_rows(ModelRc::new(VecModel::from(rows)));
     studies.set_read_only(state.is_read_only());
+    // Story 8.5a: every app write that touches drafts — a study delete's cascade, an import, a
+    // restore, a dossier switch — ends here; the app's own commits do not move `data_version`, so
+    // the inbox is re-read explicitly (it also sets the rows' « ★ {n} »).
+    crate::wiring::drafts::push_drafts(ui, state);
 }
 
 /// G1 final review M3: what belongs to the study on screen and must never show over another study

@@ -43,8 +43,8 @@ use steadyinvest_contract::Money;
 mod cells;
 mod concentration;
 mod confront;
-// Story 8.2b: the headless draft-decision API. Its callers — the inbox — arrive with Stories
-// 8.5a / 8.5b; until then only the tests call it.
+// Story 8.2b: the headless draft-decision API. The inbox reads it since 8.5a (freshness, the
+// inbox reads); the decision rail's callers arrive with 8.5b — until then only the tests call it.
 #[cfg_attr(not(test), expect(dead_code))]
 mod drafts;
 mod export_import;
@@ -70,7 +70,6 @@ mod tests;
 pub use cells::*;
 pub use concentration::*;
 pub use confront::*;
-#[cfg_attr(not(test), expect(unused_imports))] // see `mod drafts` above
 pub use drafts::*;
 pub use export_import::ImportRequest;
 pub use holdings::StudyChoice;

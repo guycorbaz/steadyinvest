@@ -92,6 +92,8 @@ pub(crate) fn push_form(
             .collect::<Vec<_>>(),
     )));
     studies.set_notes_unavailable(false);
+    // Story 8.5a: the ★ reminder of this study's pending AI drafts (from the inbox's last read).
+    crate::wiring::drafts::apply_open_study(ui, Some(study.id));
 
     let years = viewmodel::form::materialized_year_numbers(study);
     match engine::build_frame(study) {

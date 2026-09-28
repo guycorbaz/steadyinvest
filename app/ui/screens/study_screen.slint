@@ -13,7 +13,7 @@
 // formula captions (`A÷C`, …) are static display text, not computed.
 
 import { Tokens } from "../tokens.slint";
-import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen, Dialog, NoteRow } from "../state.slint";
+import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen, Dialog, NoteRow, Drafts } from "../state.slint";
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
@@ -26,6 +26,7 @@ import { PeHistoryChart } from "../components/pe_history_chart.slint";
 import { ScenarioCompare } from "../components/scenario_compare.slint";
 import { RationaleNote } from "../components/rationale_note.slint";
 import { PanelCard } from "../components/panel_card.slint";
+import { StatusBand } from "../components/status_band.slint";
 
 // The faithful em-dash slot, in one place (mirrors `viewmodel::form::EMPTY_SLOT`). A gap, never `0`.
 global FormConst {
@@ -447,6 +448,37 @@ export component StudyScreen inherits Rectangle {
             open-traceability => { Studies.open-traceability("verdict"); }
         }
         Rectangle { height: Tokens.border; background: Tokens.separator; }
+
+        // ── Story 8.8 slot: the FrozenVerdictStrip goes HERE, between the verdict bar and the ★
+        //    reminder (UX spec §5.3: verdict bar → frozen strip → ★ reminder → notice slot). ──
+
+        // ── Story 8.5a (UX spec §5.4): the ★ reminder of the open study's pending AI drafts, or its
+        //    ⊘ variant when the last poll or read failed — never removed on a failure. Pinned
+        //    outside the scroll like the notice slot. Not on the demo study (no dossier study). ──
+        if !Studies.demo-active && Drafts.read-failed: VerticalLayout {
+            padding-left: Tokens.space-24;
+            padding-right: Tokens.space-24;
+            padding-top: Tokens.space-8;
+            padding-bottom: Tokens.space-8;
+            StatusBand {
+                icon: "⊘";
+                text: @tr("Les propositions de cette étude n'ont pas pu être lues ; état indisponible.");
+                action-label: @tr("Voir les propositions");
+                action => { Drafts.show-for-study(); }
+            }
+        }
+        if !Studies.demo-active && !Drafts.read-failed && Drafts.open-study-pending > 0: VerticalLayout {
+            padding-left: Tokens.space-24;
+            padding-right: Tokens.space-24;
+            padding-top: Tokens.space-8;
+            padding-bottom: Tokens.space-8;
+            StatusBand {
+                icon: Tokens.ai-glyph;
+                text: @tr("{} proposition(s) de l'IA en attente sur cette étude.", Drafts.open-study-pending);
+                action-label: @tr("Voir les propositions");
+                action => { Drafts.show-for-study(); }
+            }
+        }
 
         // ── G1 J — the open study's notice slot. Pinned OUTSIDE the scroll, just under the verdict
         //    bar, so a notice raised deep in the form (the soft-lock on a §3 cell, a drag refusal)

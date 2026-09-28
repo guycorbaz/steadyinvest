@@ -957,6 +957,19 @@ export component SettingsScreen inherits Rectangle {
                     term: @tr("Serveur MCP");
                     definition: @tr("Serveur local qu'un client IA de votre choix lance pour lire les études du dossier. Il ne donne jamais accès au portefeuille, à la liste de suivi, aux clés ni à la configuration. L'IA n'y dépose que des propositions, qui ne changent rien tant que vous ne les avez pas validées une à une. Les objectifs de recherche restent dans la session du client IA et ne sont pas enregistrés dans le dossier.");
                 }
+                // Story 8.5a (the draft inbox).
+                GlossaryRow {
+                    term: @tr("Propositions");
+                    definition: @tr("Valeurs, jugements, notes ou études qu'une IA a déposés par le serveur MCP. Ils attendent dans l'écran Propositions et n'ont aucun effet sur les chiffres, les zones ni le verdict tant qu'ils ne sont pas validés, un par un. Leur texte est toujours montré dans un cadre « IA » avec l'avertissement.");
+                }
+                GlossaryRow {
+                    term: @tr("Proposition périmée");
+                    definition: @tr("Proposition dont la cible a changé depuis son dépôt (une saisie, un rafraîchissement, un changement de méthode). Elle reste consultable ; sa validation demandera une confirmation explicite.");
+                }
+                GlossaryRow {
+                    term: @tr("Cible disparue");
+                    definition: @tr("Proposition dont la cible n'existe plus (une année retirée de l'étude, une étude supprimée). Elle ne peut plus qu'être rejetée.");
+                }
             }
 
             // ── Story 2.13 — Vérifier le moteur (FR9): replay the bundled golden studies on demand. ──

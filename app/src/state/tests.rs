@@ -568,7 +568,7 @@ fn journal_imported_message_fills_the_counts() {
     let summary = ImportSummary {
         fx_rates: 0,
         judgment_snapshots: 0,
-        ai_drafts: 0,
+        ai_drafts: 6,
         source_journal_id: Uuid::from_u128(1),
         source_logical_version: 7,
         studies: 3,
@@ -582,6 +582,9 @@ fn journal_imported_message_fills_the_counts() {
     assert!(msg.contains("2 valeur"));
     assert!(msg.contains("5 ligne"));
     assert!(msg.contains("4 mouvement"));
+    // Story 8.5a: the AI drafts the file carried are named too.
+    assert!(msg.contains("6 proposition"));
+    assert!(!msg.contains('{'), "every placeholder filled: {msg}");
 }
 
 // ── Story 5.4 — restore from backup ──
@@ -9780,5 +9783,51 @@ mod drafts_8_2b {
             );
         }
         assert_eq!(judgment_draft_field("current_price"), None);
+    }
+
+    // ── Story 8.5a — the inbox reads (read side of the draft API) ──
+
+    #[test]
+    fn the_inbox_reads_drafts_with_their_studies_and_sees_other_connections_commits() {
+        let dir = TempDir::new().unwrap();
+        let (state, id) = decision_state(&dir);
+        let before = state
+            .try_data_version(true)
+            .unwrap()
+            .expect("a dossier is open");
+        let draft = plant(&state, 0x85A1, "note", Some(id), &note_payload("Une note."));
+        // The MCP-shaped commit came from another connection: the signal moved.
+        assert_ne!(state.try_data_version(true).unwrap(), Some(before));
+        let inbox = state.read_inbox().unwrap().expect("a dossier is open");
+        assert_eq!(inbox.drafts.len(), 1);
+        assert_eq!(inbox.drafts[0].id, draft);
+        assert_eq!(
+            inbox.studies.get(&id).map(|s| s.security_ticker.as_str()),
+            Some("NESN")
+        );
+    }
+
+    #[test]
+    fn an_unreadable_study_makes_the_inbox_unavailable_never_a_partial_list() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        plant(&state, 0x85A2, "note", Some(id), &note_payload("Une note."));
+        make_study_unreadable(&mut state, id);
+        let err = state.read_inbox().expect_err("indisponible, not a guess");
+        assert!(
+            err.message.contains("la liste des propositions"),
+            "{}",
+            err.message
+        );
+        assert!(err.cause.is_some(), "the cause is named");
+    }
+
+    #[test]
+    fn no_dossier_is_an_empty_inbox_not_a_failure() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, _) = decision_state(&dir);
+        state.journal = None;
+        assert!(state.read_inbox().unwrap().is_none());
+        assert_eq!(state.try_data_version(true).unwrap(), None);
     }
 }

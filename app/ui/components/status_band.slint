@@ -5,12 +5,18 @@
 // the card it concerns), a full-width surface-alt band with a border, and an ink glyph — never a hue.
 
 import { Tokens } from "../tokens.slint";
+import { ActionButton } from "action_button.slint";
 
 export component StatusBand inherits Rectangle {
     in property <string> text;
     // The ink glyph: "◦" (a hollow dot — absent / missing / stale), "⚠" (a threshold murmur),
     // "⊘" (indisponible — a read failure or an unformable figure).
     in property <string> icon: "◦";
+    // Story 8.5a (UX spec §4.5) — an optional action (« Voir les propositions », 8.8's « Voir la
+    // comparaison »), under the band text: empty = no button, the band renders exactly as before.
+    // The button is an `ActionButton` (Tab-reachable after the band text, Enter/Space, focus ring).
+    in property <string> action-label: "";
+    callback action();
 
     background: Tokens.surface-alt;
     border-width: Tokens.border;
@@ -31,13 +37,26 @@ export component StatusBand inherits Rectangle {
             font-size: Tokens.font-body;
             vertical-alignment: top;
         }
-        Text {
-            text: root.text;
-            color: Tokens.text-mid;
-            font-size: Tokens.font-caption;
-            wrap: word-wrap;
-            vertical-alignment: center;
+        VerticalLayout {
             horizontal-stretch: 1;
+            spacing: Tokens.space-8;
+            Text {
+                text: root.text;
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                wrap: word-wrap;
+                vertical-alignment: center;
+            }
+            // The action sits UNDER the text, left-aligned: a card wider than the window (the G6
+            // row-width debt at 1600 px) must never push it off-screen (seen on the Études card,
+            // 8.5a headless walk).
+            if root.action-label != "": HorizontalLayout {
+                alignment: start;
+                ActionButton {
+                    label: root.action-label;
+                    clicked => { root.action(); }
+                }
+            }
         }
     }
 }
