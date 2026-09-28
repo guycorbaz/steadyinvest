@@ -170,6 +170,22 @@ fn ai_marked(
     }
 }
 
+/// Story 8.6 (spec §7): a JUDGMENT figure an AI placed and the owner validated (its `ai_placed`
+/// slot set) — the figure with [`AI_SIGIL`], after the « * » when it is also judged-marked
+/// (« 18* † »), kept on one line. An absent figure stays the plain em-dash. `marked` records that a
+/// sigil was printed (the note under the section iff one was).
+fn ai_placed_figure(figure: String, placed: bool, marked: &mut bool) -> String {
+    if !placed || figure == EM_DASH || figure.is_empty() {
+        return figure;
+    }
+    *marked = true;
+    if carries_judged(&figure) {
+        format!("{figure}\u{00A0}{AI_SIGIL}")
+    } else {
+        format!("{figure}{AI_SIGIL}")
+    }
+}
+
 const JUDGED_ON: char = '\u{E000}';
 const JUDGED_OFF: char = '\u{E001}';
 
@@ -271,20 +287,35 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
             nf.pct(outputs.growth.eps_cagr_pct)
         ),
     );
+    // Story 8.6: an AI-placed judgment carries « † » (the note iff one was printed).
+    let placed = &judgment.ai_placed;
+    let mut ai_in_1 = false;
     let estimated = [
         format!(
             "(2) Croissance estimée des ventes : {}",
-            judged(&nf.pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal())))
+            ai_placed_figure(
+                judged(&nf.pct(judgment.projected_sales_growth_pct.map(|m| m.as_decimal()))),
+                placed.projected_sales_growth_pct.is_some(),
+                &mut ai_in_1,
+            )
         ),
         format!(
             "(4) Croissance estimée du BPA : {}",
-            judged(&nf.pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal())))
+            ai_placed_figure(
+                judged(&nf.pct(judgment.projected_eps_growth_pct.map(|m| m.as_decimal()))),
+                placed.projected_eps_growth_pct.is_some(),
+                &mut ai_in_1,
+            )
         ),
     ];
     doc.two_columns(&estimated[0], &estimated[1]);
-    // The note iff a « * » is shown on the page (G3 review).
-    if estimated.iter().any(|s| carries_judged(s)) {
-        doc.small_line(JUDGED_NOTE);
+    // The note iff a « * » is shown on the page (G3 review) — and the « † » note iff an AI-placed
+    // judgment is (Story 8.6), on the SAME line: the full-page chart leaves page 1 room for one.
+    match (estimated.iter().any(|s| carries_judged(s)), ai_in_1) {
+        (true, true) => doc.small_line(&format!("{JUDGED_NOTE}   ·   {AI_NOTE}")),
+        (true, false) => doc.small_line(JUDGED_NOTE),
+        (false, true) => doc.small_line(AI_NOTE),
+        (false, false) => {}
     }
     doc.new_page();
 
@@ -379,22 +410,41 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         // the judged EPS growth otherwise (a result, printed unmarked). The low EPS is
         // direct-only (core: `estimated_low_eps`), so it is always the analyst's.
         let est_high_text = nf.fmt_dec(est_high, DisplayField::PerShare);
+        // Story 8.6: an AI-placed judgment carries « † » after its « * ».
+        let placed = &judgment.ai_placed;
+        let mut ai_in_4 = false;
         let est_high_text = if judgment.estimated_high_eps.is_some() {
-            judged(&est_high_text)
+            ai_placed_figure(
+                judged(&est_high_text),
+                placed.estimated_high_eps.is_some(),
+                &mut ai_in_4,
+            )
         } else {
             est_high_text
         };
         b.line(&format!(
             "A · Prix haut à 5 ans : PER haut moyen jugé {} × BPA estimé haut {} = {}",
-            judged(&nf.num(judgment.judged_avg_high_pe.map(|m| m.as_decimal()))),
+            ai_placed_figure(
+                judged(&nf.num(judgment.judged_avg_high_pe.map(|m| m.as_decimal()))),
+                placed.judged_avg_high_pe.is_some(),
+                &mut ai_in_4,
+            ),
             est_high_text,
             nf.money(r.forecast_high),
         ));
         b.line("B · Prix bas à 5 ans, les quatre candidats :");
         b.indent_line(&format!(
             "(a) PER bas moyen jugé {} × BPA estimé bas {} = {}",
-            judged(&nf.num(judgment.judged_avg_low_pe.map(|m| m.as_decimal()))),
-            judged(&nf.fmt_dec(est_low, DisplayField::PerShare)),
+            ai_placed_figure(
+                judged(&nf.num(judgment.judged_avg_low_pe.map(|m| m.as_decimal()))),
+                placed.judged_avg_low_pe.is_some(),
+                &mut ai_in_4,
+            ),
+            ai_placed_figure(
+                judged(&nf.fmt_dec(est_low, DisplayField::PerShare)),
+                placed.estimated_low_eps.is_some(),
+                &mut ai_in_4,
+            ),
             nf.money(c.avg_low_pe_times_eps),
         ));
         b.indent_line(&format!(
@@ -404,20 +454,32 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         b.indent_line(&format!(
             "(c) Plus bas sévère récent = {}",
             // The analyst's pick of the recent severe low (core: « adopting it is a judgment »).
-            judged(&nf.money(c.recent_severe_low)),
+            ai_placed_figure(
+                judged(&nf.money(c.recent_severe_low)),
+                placed.recent_severe_low.is_some(),
+                &mut ai_in_4,
+            ),
         ));
         b.indent_line(&format!(
             "(d) Prix soutenu par le dividende : dividende {} ÷ rendement haut moyen {} = {}",
-            nf.fmt_dec(
-                judgment.present_full_year_dividend.map(|m| m.as_decimal()),
-                DisplayField::PerShare
+            ai_placed_figure(
+                nf.fmt_dec(
+                    judgment.present_full_year_dividend.map(|m| m.as_decimal()),
+                    DisplayField::PerShare
+                ),
+                placed.present_full_year_dividend.is_some(),
+                &mut ai_in_4,
             ),
             nf.pct(outputs.valuation.avg_high_yield_pct),
             nf.money(c.dividend_supported),
         ));
         b.indent_line(&format!(
             "Prix bas retenu ({}) = {}",
-            option_label(judgment.forecast_low_option),
+            ai_placed_figure(
+                option_label(judgment.forecast_low_option).to_string(),
+                placed.forecast_low_option.is_some(),
+                &mut ai_in_4,
+            ),
             nf.money(r.forecast_low),
         ));
         match &r.zones {
@@ -473,6 +535,10 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         // The note iff a « * » is shown in the section (G3 review).
         if b.lines.iter().any(|(_, s)| carries_judged(s)) {
             b.small_line(JUDGED_NOTE);
+        }
+        // Story 8.6: the « † » note iff an AI-placed judgment was printed in the section.
+        if ai_in_4 {
+            b.small_line(AI_NOTE);
         }
         let bar_h = if r.zones.is_some() {
             ZONEBAR_H_RESERVE
@@ -3871,6 +3937,54 @@ mod tests {
         );
         // WinAnsi: the dagger is a printable byte.
         assert_eq!(winansi(AI_SIGIL), vec![0x86]);
+    }
+
+    #[test]
+    fn an_ai_placed_judgment_carries_star_and_dagger_and_the_note_only_then() {
+        // Story 8.6 (AC 12): a judgment an AI placed and the owner validated.
+        let origin = || {
+            Some(steadyinvest_contract::AiOrigin {
+                draft_id: uuid::Uuid::from_u128(8),
+                client: "claude-code".into(),
+                model: "opus".into(),
+                validated_at: steadyinvest_contract::Timestamp("2026-09-28T10:00:00Z".into()),
+            })
+        };
+        let mut s = demo_study();
+        s.judgment.ai_placed.judged_avg_high_pe = origin();
+        s.judgment.ai_placed.forecast_low_option = origin();
+        let pe = s.judgment.judged_avg_high_pe.expect("a judged high P/E");
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        let pages = page_streams(&bytes);
+        let p2 = shown_text(&pages[1]);
+        let figure = NumberStyle::Point.num(Some(pe.as_decimal()));
+        assert!(
+            shows(
+                &p2,
+                &format!("PER haut moyen jugé {figure}*\u{00A0}{AI_SIGIL} ×")
+            ),
+            "« * † » after the judged, AI-placed figure"
+        );
+        assert!(contains(&pages[1], AI_NOTE), "the § 4 note");
+        assert!(
+            !contains(&pages[0], AI_NOTE),
+            "nothing AI-placed on page 1: no note there"
+        );
+        // An AI-placed growth on page 1 → its note there.
+        let mut g = demo_study();
+        g.judgment.projected_eps_growth_pct = Some(money_of("12.5"));
+        g.judgment.ai_placed.projected_eps_growth_pct = origin();
+        let bytes = render_study_pdf(&g, NumberStyle::Comma).unwrap();
+        let p1 = page_streams(&bytes)[0].clone();
+        assert!(shows(
+            &shown_text(&p1),
+            &format!("(4) Croissance estimée du BPA : 12,5\u{00A0}%*\u{00A0}{AI_SIGIL}")
+        ));
+        assert!(contains(&p1, AI_NOTE), "the note on page 1");
+        assert_eq!(page_streams(&bytes).len(), 3, "both notes fit page 1");
+        // A pending draft (no `ai_placed`) prints nothing: the demo stays byte-identical.
+        let plain = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        assert!(page_streams(&plain).iter().all(|p| !contains(p, AI_NOTE)));
     }
 
     /// FNV-1a 64 — a pinned fingerprint of a whole PDF (no hashing crate in `report`).
