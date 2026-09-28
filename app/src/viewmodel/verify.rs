@@ -329,22 +329,10 @@ mod tests {
         );
     }
 
-    /// Story 8.3 AC 12 (FR72, "a pending draft changes no computed output"): for EVERY golden
-    /// fixture AND every study of the frozen persistence corpus (`v1.db`, `v8.db`), the study read
-    /// through the MCP access surface yields the same snapshot — through the app's own
-    /// `report::form::build_snapshot` — with and without pending drafts of every kind.
-    ///
-    /// **The structural argument this test samples** (G3 F6): a computed output is a function of
-    /// the `Study` alone (`build_snapshot(&Study)` — no dossier, no connection); the study is read
-    /// from `studies`; drafts live in `ai_drafts`, which no study read touches and no computation
-    /// path reads (`tests/drafts.rs` isolation scan). So no draft can reach an output; the fixtures
-    /// below check it end to end on real shapes, not only on the argument.
-    #[test]
-    fn pending_drafts_of_every_kind_change_no_computed_output_of_any_fixture_study() {
-        use steadyinvest_contract::{DraftKind, DraftOrigin, DraftTarget};
-        use steadyinvest_persistence::{DraftSubmission, Journal, McpAccess, Page};
-
-        let now = Timestamp("2026-09-28T12:00:00Z".to_string());
+    /// Every golden fixture AND every study of the frozen persistence corpus (`v1.db`, `v8.db`),
+    /// migrated on a copy — the metamorphic suites' population (Stories 8.3, 8.6).
+    fn fixture_studies() -> Vec<(String, Study)> {
+        use steadyinvest_persistence::Journal;
         let mut fixtures: Vec<(String, Study)> = GOLDEN_FIXTURES
             .iter()
             .enumerate()
@@ -376,6 +364,27 @@ mod tests {
             fixtures.len() > GOLDEN_FIXTURES.len(),
             "the corpus studies are included"
         );
+
+        fixtures
+    }
+
+    /// Story 8.3 AC 12 (FR72, "a pending draft changes no computed output"): for EVERY golden
+    /// fixture AND every study of the frozen persistence corpus (`v1.db`, `v8.db`), the study read
+    /// through the MCP access surface yields the same snapshot — through the app's own
+    /// `report::form::build_snapshot` — with and without pending drafts of every kind.
+    ///
+    /// **The structural argument this test samples** (G3 F6): a computed output is a function of
+    /// the `Study` alone (`build_snapshot(&Study)` — no dossier, no connection); the study is read
+    /// from `studies`; drafts live in `ai_drafts`, which no study read touches and no computation
+    /// path reads (`tests/drafts.rs` isolation scan). So no draft can reach an output; the fixtures
+    /// below check it end to end on real shapes, not only on the argument.
+    #[test]
+    fn pending_drafts_of_every_kind_change_no_computed_output_of_any_fixture_study() {
+        use steadyinvest_contract::{DraftKind, DraftOrigin, DraftTarget};
+        use steadyinvest_persistence::{DraftSubmission, Journal, McpAccess, Page};
+
+        let now = Timestamp("2026-09-28T12:00:00Z".to_string());
+        let fixtures = fixture_studies();
 
         for (n, (label, study)) in fixtures.iter().enumerate() {
             let n = n as u128;
@@ -480,6 +489,120 @@ mod tests {
                 snapshot("after"),
                 without,
                 "{label}: a pending draft changed a computed output"
+            );
+        }
+    }
+
+    /// Story 8.6 AC 11 (FR72): through the app's VIEW-MODEL path — the §2–§5 computed results, the
+    /// owner chart geometry (incl. its scale bounds), the zone bar, the verdict state and the
+    /// buy-zone alert fact — every fixture study reads the same with and without pending judgment
+    /// drafts of EVERY judgment field (a growth proposal and an option proposal included), their AI
+    /// overlay computed in between. The overlay functions take the study by `&` and nothing they
+    /// compute is kept: this samples that argument on real shapes.
+    #[test]
+    fn pending_judgment_drafts_change_no_view_model_verdict_or_alert() {
+        use crate::viewmodel::ai_lines::{ai_judgments, pending_judgment_overlays};
+        use crate::viewmodel::chart::{growth_chart, pe_chart};
+        use crate::viewmodel::engine;
+        use crate::viewmodel::format::NumberFormat;
+        use steadyinvest_contract::{
+            DRAFT_PAYLOAD_VERSION, DraftKind, DraftPayload, DraftStatus, DraftTarget,
+        };
+        use steadyinvest_persistence::DraftRecord;
+
+        let format = NumberFormat::Comma;
+        let view = |study: &Study| -> String {
+            let mut out = format!("buy-zone {}\n", engine::study_in_buy_zone(study));
+            if let Ok(frame) = engine::build_frame(study) {
+                let snapshot = &frame.snapshot;
+                let outputs = snapshot.outputs();
+                let g = growth_chart(&frame, format);
+                let p = pe_chart(&frame, &study.judgment, format);
+                out.push_str(&format!(
+                    "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n",
+                    engine::growth_computed(outputs, format),
+                    engine::pe_computed(outputs, format),
+                    engine::risk_computed(outputs, &study.judgment, format),
+                    engine::return_computed(outputs, format),
+                    engine::zone_bar(study, snapshot, format),
+                    engine::verdict_badge(study, snapshot, format),
+                ));
+                out.push_str(&format!(
+                    "{} {} {} {} {} {} {} {}\n{} {} {} {} {} {}\n",
+                    g.judgment_commands,
+                    g.judgment_low_commands,
+                    g.judgment_y,
+                    g.judgment_low_y,
+                    g.judgment_label,
+                    g.judgment_low_label,
+                    g.axis_min,
+                    g.axis_max,
+                    p.judged_high_commands,
+                    p.judged_low_commands,
+                    p.judged_high_y,
+                    p.judged_low_y,
+                    p.axis_min,
+                    p.axis_max,
+                ));
+            }
+            out
+        };
+        let proposals = [
+            ("estimated_high_eps", "7.5"),
+            ("estimated_low_eps", "0.5"),
+            ("projected_sales_growth_pct", "4"),
+            ("projected_eps_growth_pct", "30"),
+            ("judged_avg_high_pe", "80"),
+            ("judged_avg_low_pe", "1"),
+            ("recent_severe_low", "0.01"),
+            ("present_full_year_dividend", "9"),
+            ("forecast_low_option", "dividend_supported"),
+        ];
+        for (label, study) in fixture_studies() {
+            let before = view(&study);
+            let drafts: Vec<DraftRecord> = proposals
+                .iter()
+                .enumerate()
+                .map(|(k, (field, value))| DraftRecord {
+                    id: Uuid::from_u128(0x86_0000 + k as u128),
+                    kind: DraftKind::Judgment,
+                    study_id: Some(study.id),
+                    security_ticker: study.security_ticker.clone(),
+                    native_currency: None,
+                    status: DraftStatus::Pending,
+                    created_at: Timestamp("2026-09-28T12:00:00Z".to_string()),
+                    decided_at: None,
+                    comment: "proposition de test".to_string(),
+                    origin_client: "test".to_string(),
+                    origin_model: "test".to_string(),
+                    stale_at_decision: None,
+                    edited_before_validation: None,
+                    created_study_id: None,
+                    payload: serde_json::to_string(&DraftPayload {
+                        version: DRAFT_PAYLOAD_VERSION,
+                        target: Some(DraftTarget::Judgment {
+                            field: (*field).to_string(),
+                        }),
+                        proposed_value: Some((*value).to_string()),
+                        note_text: None,
+                        company_name: None,
+                        base_fingerprint: None,
+                    })
+                    .expect("payload"),
+                })
+                .collect();
+            let overlays = pending_judgment_overlays(&study, &drafts, format);
+            assert_eq!(
+                overlays.len(),
+                proposals.len(),
+                "{label}: every proposal is overlaid"
+            );
+            let frame = engine::build_frame(&study).ok();
+            let _ = ai_judgments(&study, frame.as_ref(), &overlays, format);
+            assert_eq!(
+                view(&study),
+                before,
+                "{label}: a pending judgment draft changed a view model, the verdict or an alert"
             );
         }
     }

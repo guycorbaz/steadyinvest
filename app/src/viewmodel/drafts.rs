@@ -360,7 +360,7 @@ fn target_and_values(
 
 /// The proposed figure spelled with at least the current one's decimals (G3 F12): « 2,10 → 2,50 »,
 /// never « 2,10 → 2,5 » — the same value, read side by side. Only between two plain figures.
-fn same_decimals(current: &str, proposed: &str, format: NumberFormat) -> String {
+pub(crate) fn same_decimals(current: &str, proposed: &str, format: NumberFormat) -> String {
     let sep = match format {
         NumberFormat::Comma => ',',
         NumberFormat::Point => '.',
