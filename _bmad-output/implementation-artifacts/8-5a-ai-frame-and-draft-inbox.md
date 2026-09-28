@@ -351,9 +351,11 @@ Claude Opus 5.5 (claude-opus-5-5), dev-story, 2026-09-28.
   documented) + its self-test (a stray `row.ai-text` fails; the frame and a `state.slint` field
   declaration pass); `draft_rows_are_built_only_in_wiring_drafts`; the inbox label inventory (5).
   State tests: the inbox read sees another connection's commit; an unreadable study makes the inbox
-  unavailable (cause named); no dossier = empty, not a failure. T9.5: the repo has no UI-level
-  (MainWindow) test pattern — the failure/success rules are tested at the state and view-model
-  levels.
+  unavailable (cause named); no dossier = empty, not a failure. **T9.5 — honestly: not done as
+  written.** The repo has no UI-level (MainWindow) test harness, so no test asserts the `Drafts`
+  global after a failed read; the rules are unit-tested at the state level (`read_inbox`) and the
+  view-model level (`inbox_rows`, `PollState`), and the wiring (`show_failure` / `push_drafts`) was
+  checked only on screen (headless walks below).
 - **T10** posture: `@tr` floor 1035 → 1074 (+39, tally in `posture.rs`), messages 241 → 242,
   inbox labels 0 → 5. Gates: `cargo test --workspace` 1369 passed / 0 failed / 2 ignored (the corpus
   generators); clippy `-D warnings`, `fmt --check`, `cargo deny check` clean.
@@ -378,6 +380,67 @@ Claude Opus 5.5 (claude-opus-5-5), dev-story, 2026-09-28.
 - **Not verified headless:** the dropdown « Étude : » pick by mouse (its keyboard model is the
   existing Dropdown's); Guy's on-display check.
 
+### G3 review (3 layers, no high) — applied 2026-09-28
+
+Commits `ee1e814` (persistence), `17d0725` (posture), `6752489` (app + UI). 1378 tests passed /
+0 failed / 2 ignored; clippy `-D warnings`, `fmt --check`, `cargo deny check` clean.
+
+1. **AiFrame scan** — comment/string-aware lexer (`/* */`; `//` not cut inside a string; string
+   contents ignored), `_`→`-` normalisation, a relay (`property` / `<=>`) inside an AiFrame is a
+   violation; self-test extended (underscore, block comment, string, relay, two-way).
+2. **Imported ticker** — the 8.3 identifier rule now holds for a DRAFT STUDY on import (malformed,
+   nothing applied) and on every read (corrupt): shared `persistence::{is_ticker,
+   is_currency_code}`. Other kinds copy their study's ticker (app data, maybe hand-typed) and are
+   not held to it; the inbox shows such a ticker (study gone) only if it reads as one, else « — ».
+3. **Stuck ⊘** — `PollState::mark_read_failed`, set by `show_failure`: the next tick re-reads even if
+   `data_version` did not move; unit-tested tick sequence.
+4. **Rust guard** — cuts only the trailing `#[cfg(test)] mod tests`; AI fields read only in
+   viewmodel `ai_fields`, wiring `to_slint` (as `ai_*` assignments) and the 8.2b decision rail
+   (writes them into the dossier — decision 13).
+5. **Filters** — filter line « Aucune proposition ne correspond à ce filtre. »; « Études » clears the
+   study pick; the rail (`screen-activated(4)`) and a dossier change reset kind + study; a failure
+   clears the « Étude : » choices.
+6. **Études ⊘** — « Les propositions d'étude n'ont pas pu être lues ; état indisponible. » +
+   « Voir les propositions »; every row shows « ★ ⊘ » while unreadable (decision 15).
+7. **Rail width** — back to 200 px; the count is a 16 px badge after the label (« · ⊘ », « · n »,
+   capped « · 99+ » — 999+ does not fit, decision 17); NavItem spacing 12 → 8, rail right padding
+   8 → 4. Study action row: at 1600 « Historique » is visible (`g02`); at 1280 it is clipped (`g03`)
+   — the pre-existing G6 width debt: 8.5a no longer changes any width there (rail back to 200), so
+   main clips it the same way.
+8. **Band action** — compact 32 px `ActionButton` variant; TRAILING by default (the study ★ band is
+   ~40 px, `g02`), under the text with `action-below` only on the over-wide Études card.
+9. **Compact rows** — `one_line` collapses line breaks (LF, CR, U+2028, U+2029), tabs and runs of
+   spaces; the proposed note / company name is a separate `ai-lead` elided FIRST, the comment keeps
+   up to 360 px (`g05`); the AiFrame date is its own non-eliding Text (`g04`).
+10. **Unshowable value** — a proposed value that is no value of its field → the whole inbox
+    « indisponible (une proposition est illisible) » (`g15`), even when filtered out (every row is
+    built before filtering).
+11. **Archived studies** — listed with « étude archivée », left out of the rail / study counts
+    (`g12`).
+12. **Compact width** — kind chips wrap to two rows below 700 px of screen (`g04`, window 800);
+    Dropdown min 200 / preferred 320 px.
+13. **Performance** — `Journal::list_pending_drafts` (the inbox reads pending only); an unchanged
+    re-read rebuilds no model.
+14. **⊘ glyph** — Inter DOES cover « ⊘ » (fontTools; no fallback); it looks large because Inter draws
+    it about an em wide — hence the smaller rail badge; kept everywhere for consistency.
+15. **Evidence** (headless, Xvfb :97, temp XDG dirs, provider « none », fresh copy of `corpus/v8.db`
+    migrated to v9 by the app, `just mcp-seed`; real `~/.config/steadyinvest` and
+    `~/.local/share/steadyinvest` untouched before and after) — in `/tmp/claude-1000/-home-gcorbaz-devel-steadyinvest/8577d162-f5d7-4e5d-8ece-8aef6549b517/scratchpad/v85a-g3/`:
+    `g01` Études at 1600 (rail « · 7 », band + action under the text, « ★ 5 ») · `g02` study at 1600
+    (compact trailing ★ band, « Historique » visible) · `g03` study at 1280 (G6 clip, see 7) · `g04`
+    Propositions at 800 px (wrapped chips, origin elided, date kept) · `g05` a multi-line note draft
+    on one line, lead elided first · `g06`/`g07` a STALE row produced by a real in-app edit (the §4
+    option chip) · `g08` rail activation resets the study filter · `g09`/`g10` Tab to the Dropdown,
+    ↓ picks · `g11` the filter line · `g12` archived study · `g13`/`g14` chmod 000 on the dossier
+    directory: the pragma does NOT fail (it reads the open connection's counter) — the pragma-failure
+    ⊘ path is covered by unit tests only · `g15` read failure with its named cause · `g17` Études ⊘
+    band + « ★ ⊘ » rows · `g18` rail « · ⊘ » fits 200 px · `g19` recovery · `g20` active rail with
+    count · `g22` an EXISTING ◦ band (Revue) after the StatusBand relayout · `g23`/`g24` Tab to the
+    study band's « Voir les propositions », Enter opens the filtered inbox · `g25` ★ / ⊘ / ◦ in band
+    and row context. Not reachable on this data: ◆ in context (no watchlist item in the corpus — the
+    14 px render `v85a/19-confusability-14px.png` stands); a lock blocking the inbox read (the app's
+    WAL connection prevents an exclusive lock from another process).
+
 ### Decisions for Guy (owner-pending)
 
 1. (story) No window-focus trigger — Slint 1.17 has no public window-activation API; the 2.5 s timer
@@ -388,21 +451,35 @@ Claude Opus 5.5 (claude-opus-5-5), dev-story, 2026-09-28.
 4. (story) A study read failure while building the inbox makes the whole read « indisponible ».
 5. The ⊘ band without a nameable cause reads « … la liste est indisponible. » (no empty
    parentheses).
-6. The StatusBand action sits UNDER the band text, left-aligned (a right-aligned button fell off the
-   1600 px window on the over-wide Études card — the G6 debt); existing bands (no action) render as
-   before.
-7. The nav rail widens 200 → 232 px so « Propositions · ⊘ » / « · {n} » fit (all screens lose
-   32 px of content width).
+6. (revised by G3) The StatusBand action is a compact button, trailing by default; under the text only
+   in the over-wide Études card (`action-below`). Existing bands (no action) render as before.
+7. (revised by G3) The rail stays 200 px; the count is a 16 px badge after the label.
 8. The submission date is shown once, in the AiFrame header (« … le JJ/MM/AAAA »), not repeated on
    the row.
 9. A note draft's compact AiFrame line reads « {note} — {commentaire} » (the proposed text first).
 10. The study reminder is not shown on the demo study.
 11. The read side uses one state read (`read_inbox`) rather than `try_list_drafts` +
     `try_get_study` (same rules, one failure path).
+12. (G3) New wording: « Aucune proposition ne correspond à ce filtre. », « étude archivée », « Les
+    propositions d'étude n'ont pas pu être lues ; état indisponible. », the ⊘ cause « une
+    proposition est illisible ».
+13. (G3) The 8.2b decision rail (`state/drafts.rs`) is allowed to read the AI fields: it writes them
+    into the dossier (the validated note, `AiOrigin`), never into a Slint model.
+14. (G3) Drafts of an archived study stay listed (« étude archivée ») and are left out of the counts.
+15. (G3) While the inbox is unreadable, every Études row shows « ★ ⊘ » (each study's state unknown).
+16. (G3) The AiFrame header is two texts: « — Proposée par {client} ({modèle}) » (elides) and
+    « le {date} » (never elides) — the §3.3 header split in two.
+17. (G3) The rail count caps at « 99+ » (the suggested « 999+ » does not fit 200 px).
+18. (G3) The identifier rule is enforced on read / import for draft STUDIES only; other kinds keep
+    their study's spelling, and the inbox shows it (study gone) only when it reads as a ticker.
 
 ### File List
 
 - `persistence/src/journal.rs` (modified — `data_version`)
+- `persistence/src/drafts.rs`, `persistence/src/export.rs`, `persistence/src/mcp_access.rs`,
+  `persistence/src/lib.rs`, `persistence/tests/drafts.rs` (modified — G3: identifier rule, pending
+  read)
+- `app/ui/components/nav_item.slint`, `app/ui/components/action_button.slint` (modified — G3)
 - `persistence/tests/inbox_polling.rs` (new)
 - `app/src/viewmodel/drafts.rs` (new)
 - `app/src/viewmodel/mod.rs`, `app/src/viewmodel/history.rs`, `app/src/viewmodel/studies.rs` (modified)
@@ -422,3 +499,6 @@ Claude Opus 5.5 (claude-opus-5-5), dev-story, 2026-09-28.
 
 - 2026-09-28 — dev complete (inbox read side, AiFrame, poller, reminders, glossary, posture); status
   review.
+- 2026-09-28 — G3 review applied (15 items: scan and guard hardened, identifier rule on read/import,
+  never-stuck ⊘, filters, Études ⊘, rail 200 px with badge, compact band action, one-line rows,
+  unshowable values, archived studies, narrow chips, pending-only read); headless re-walk `g01`–`g25`.
