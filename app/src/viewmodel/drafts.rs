@@ -14,7 +14,7 @@
 //! Also here: the counts behind the rail label, the study reminder and the Études signals, and the
 //! poller's pure decision (arch A9).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use steadyinvest_contract::{
     DraftField, DraftFieldKind, DraftKind, DraftPayload, DraftStatus, DraftValue,
@@ -43,6 +43,8 @@ pub const OPT_RECENT_SEVERE_LOW: &str = "Plus bas sévère récent";
 pub const OPT_DIVIDEND_SUPPORTED: &str = "Soutenu par dividende";
 /// The « Étude : » filter's first option (spec §3.3).
 pub const STUDY_FILTER_ALL: &str = "Toutes les études";
+/// The ⊘ inbox's cause when one draft cannot be shown (G3 — owner-pending wording).
+pub const INBOX_CAUSE_UNREADABLE_DRAFT: &str = "une proposition est illisible";
 
 /// Every app string of the inbox built in Rust, scanned by the posture gate (FR13).
 #[cfg(test)]
@@ -52,6 +54,7 @@ pub const DRAFTS_USER_FACING_LABELS: &[&str] = &[
     OPT_RECENT_SEVERE_LOW,
     OPT_DIVIDEND_SUPPORTED,
     STUDY_FILTER_ALL,
+    INBOX_CAUSE_UNREADABLE_DRAFT,
 ];
 
 /// The French label of a forecast-low option, as the §4 chips show it.
@@ -163,6 +166,8 @@ pub enum RowState {
     Fresh,
     Stale,
     TargetGone,
+    /// The draft's study is archived (G3): listed, marked, left out of the counts.
+    Archived,
 }
 
 impl RowState {
@@ -172,6 +177,7 @@ impl RowState {
             RowState::Fresh => 0,
             RowState::Stale => 1,
             RowState::TargetGone => 2,
+            RowState::Archived => 3,
         }
     }
 }
@@ -190,7 +196,8 @@ pub struct InboxRow {
     pub group_is_studies: bool,
     /// App text: « {TICKER} · {champ} · {année} », « {TICKER} · {champ} », « {TICKER} » for a
     /// note (Slint adds « · nouvelle note »), « {TICKER} ({DEV}) » for a draft study (Slint
-    /// prefixes « Nouvelle étude : »). Ticker / currency passed `identifier_invalid` (8.3).
+    /// prefixes « Nouvelle étude : »). A draft study's ticker / currency pass the identifier rule
+    /// (enforced on submission, import and read — `persistence::is_ticker`).
     pub target: String,
     /// « Actuel » / « Proposé », app-formatted; empty for a note or a draft study.
     pub current: String,
@@ -198,11 +205,12 @@ pub struct InboxRow {
     pub state: RowState,
     /// JJ/MM/AAAA, local time.
     pub submitted: String,
-    /// AI-written (reach Slint only through `AiFrame`).
+    /// AI-written (reach Slint only through `AiFrame`), each on ONE line (compact rows).
     pub ai_client: String,
     pub ai_model: String,
-    /// The comment — for a note draft, the proposed note text then the comment; for a draft study,
-    /// « {nom} — {commentaire} » (no name: the comment alone).
+    /// What the draft proposes before its comment: a note text, a company name ("" = none).
+    pub ai_lead: String,
+    /// The comment.
     pub ai_text: String,
 }
 
@@ -219,19 +227,60 @@ pub struct StudyChoice {
 pub struct InboxView {
     pub rows: Vec<InboxRow>,
     pub study_choices: Vec<StudyChoice>,
+    /// Every pending draft before the kind / study filters (the empty text vs the filter line).
+    pub unfiltered: usize,
 }
 
-/// A draft the inbox cannot show — its payload does not parse (the read validated it, so this is
-/// a defect or a concurrent change); the whole inbox then reads « indisponible » (no partial list
-/// with guessed values — decision 4 of the story).
+/// A draft the inbox cannot show — its payload does not parse, or its proposed value is no value
+/// of its field (the reads validate both, so this is a defect or a concurrent change); the whole
+/// inbox then reads « indisponible » with the cause [`INBOX_CAUSE_UNREADABLE_DRAFT`] (no partial
+/// list with guessed values — decision 4 of the story; G3: never « Proposé — »).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unshowable {
     pub draft_id: Uuid,
     pub detail: String,
 }
 
+/// Collapse line breaks (`\n`, `\r`, U+2028, U+2029), tabs and runs of spaces to single spaces —
+/// AI text in a compact, one-line row (G3).
+pub fn one_line(text: &str) -> String {
+    text.split(|c: char| c.is_whitespace())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The AI-written fields of a row — the ONE place the view model reads a draft's comment, origin,
+/// proposed note text and proposed company name (the posture guard pins it), each made one line.
+/// Returns `(client, model, lead, comment)`.
+fn ai_fields(d: &DraftRecord, payload: &DraftPayload) -> (String, String, String, String) {
+    let lead = match d.kind {
+        DraftKind::Note => payload.note_text.as_deref().unwrap_or_default(),
+        DraftKind::Study => payload.company_name.as_deref().unwrap_or_default(),
+        _ => "",
+    };
+    (
+        one_line(&d.origin_client),
+        one_line(&d.origin_model),
+        one_line(lead),
+        one_line(&d.comment),
+    )
+}
+
 fn group_title(study: &Study) -> String {
     format!("{} ({})", study.security_ticker, study.native_currency)
+}
+
+/// The ticker a draft of a study carries, shown only when its study is gone (a note / cell /
+/// judgment draft copies its study's ticker at submission — app data). Shown when it reads as a
+/// ticker (upper-cased), else the em-dash — never arbitrary text outside an AiFrame.
+fn fallback_ticker(d: &DraftRecord) -> String {
+    let t = d.security_ticker.trim().to_ascii_uppercase();
+    if steadyinvest_persistence::is_ticker(&t) {
+        t
+    } else {
+        HIST_EMPTY_SLOT.to_string()
+    }
 }
 
 fn payload_of(record: &DraftRecord) -> Result<DraftPayload, Unshowable> {
@@ -241,30 +290,29 @@ fn payload_of(record: &DraftRecord) -> Result<DraftPayload, Unshowable> {
     })
 }
 
-/// The row's target and values (app text) for a draft of an existing study.
+/// The row's target and values (app text) for a draft of an existing study; a proposed value that
+/// is no value of its field is [`Unshowable`].
 fn target_and_values(
     record: &DraftRecord,
     payload: &DraftPayload,
     study: Option<&Study>,
     format: NumberFormat,
-) -> (String, String, String) {
-    let ticker = study.map_or(record.security_ticker.as_str(), |s| {
-        s.security_ticker.as_str()
-    });
+) -> Result<(String, String, String), Unshowable> {
+    let ticker = study.map_or_else(|| fallback_ticker(record), |s| s.security_ticker.clone());
     if record.kind == DraftKind::Note {
-        return (ticker.to_string(), String::new(), String::new());
+        return Ok((ticker, String::new(), String::new()));
     }
     let Some(target) = payload.target.as_ref() else {
-        return (ticker.to_string(), String::new(), String::new());
+        return Ok((ticker, String::new(), String::new()));
     };
     let Some((field, year)) = DraftField::of_target(target) else {
         // An unknown field (a malformed import): named by its ticker only — the raw key is never
         // shown (8.2b G3 F4); the row reads « cible disparue ».
-        return (
-            ticker.to_string(),
+        return Ok((
+            ticker,
             HIST_EMPTY_SLOT.to_string(),
             HIST_EMPTY_SLOT.to_string(),
-        );
+        ));
     };
     let label = field_label(field);
     let target_text = match year {
@@ -282,24 +330,29 @@ fn target_and_values(
         (DraftFieldKind::Judgment, _) => field.judgment_value(&s.judgment),
         _ => None,
     });
-    let proposed = payload
-        .proposed_value
-        .as_deref()
-        .and_then(|t| field.parse_value(t).ok());
-    (
+    let proposed = match payload.proposed_value.as_deref() {
+        Some(text) => Some(field.parse_value(text).map_err(|problem| Unshowable {
+            draft_id: record.id,
+            detail: format!("proposed value is no value of {}: {problem:?}", field.key()),
+        })?),
+        None => None,
+    };
+    Ok((
         target_text,
         value_display(field, current, format),
         value_display(field, proposed, format),
-    )
+    ))
 }
 
 /// Build « À traiter »: PENDING drafts only, grouped by study (header « {TICKER} ({DEV}) »,
 /// newest group first), the draft studies last under « Nouvelles études », rows newest first
-/// (`list_drafts` is oldest first — reversed). `studies` holds today's study of every pending
-/// draft that has one (absent = deleted: the row reads « cible disparue »).
+/// (the read is oldest first — reversed). `studies` holds today's study of every pending draft
+/// that has one (absent = deleted: the row reads « cible disparue »); `archived` the studies
+/// archived today (their drafts read « étude archivée » — G3).
 pub fn inbox_rows(
     drafts: &[DraftRecord],
     studies: &HashMap<Uuid, Study>,
+    archived: &HashSet<Uuid>,
     format: NumberFormat,
     kind: KindFilter,
     study_filter: Option<Uuid>,
@@ -334,7 +387,7 @@ pub fn inbox_rows(
                     pending
                         .iter()
                         .find(|d| d.study_id == Some(*id))
-                        .map(|d| d.security_ticker.clone())
+                        .map(|d| fallback_ticker(d))
                         .unwrap_or_default()
                 },
                 group_title,
@@ -346,48 +399,40 @@ pub fn inbox_rows(
     let push_group = |group: Option<Uuid>, rows: &mut Vec<InboxRow>| -> Result<(), Unshowable> {
         let mut first = true;
         for d in pending.iter().filter(|d| d.study_id == group) {
-            if !kind.admits(d.kind) {
-                continue;
-            }
-            if let Some(filter) = study_filter
-                && d.study_id != Some(filter)
-            {
-                continue;
-            }
+            // Every row is BUILT (a defect anywhere makes the inbox unavailable, whatever the
+            // filters); the filters only decide what is listed.
             let payload = payload_of(d)?;
             let study = group.and_then(|id| studies.get(&id));
-            let state = match draft_freshness(study, d.kind, &payload) {
-                DraftFreshness::Fresh => RowState::Fresh,
-                DraftFreshness::Stale => RowState::Stale,
-                DraftFreshness::TargetGone(_) => RowState::TargetGone,
+            let state = if group.is_some_and(|id| archived.contains(&id)) {
+                RowState::Archived
+            } else {
+                match draft_freshness(study, d.kind, &payload) {
+                    DraftFreshness::Fresh => RowState::Fresh,
+                    DraftFreshness::Stale => RowState::Stale,
+                    DraftFreshness::TargetGone(_) => RowState::TargetGone,
+                }
             };
-            let (target, current, proposed, ai_text) = if d.kind == DraftKind::Study {
+            let (target, current, proposed) = if d.kind == DraftKind::Study {
                 let currency = d.native_currency.clone().unwrap_or_default();
-                let ai_text = match payload.company_name.as_deref().filter(|n| !n.is_empty()) {
-                    Some(name) => format!("{name} — {}", d.comment),
-                    None => d.comment.clone(),
-                };
                 (
                     format!("{} ({currency})", d.security_ticker),
                     String::new(),
                     String::new(),
-                    ai_text,
                 )
             } else {
-                let (target, current, proposed) = target_and_values(d, &payload, study, format);
-                let ai_text = match (d.kind, payload.note_text.as_deref()) {
-                    (DraftKind::Note, Some(text)) => format!("{text} — {}", d.comment),
-                    _ => d.comment.clone(),
-                };
-                (target, current, proposed, ai_text)
+                target_and_values(d, &payload, study, format)?
             };
+            if !kind.admits(d.kind) || study_filter.is_some_and(|f| d.study_id != Some(f)) {
+                continue;
+            }
+            let (ai_client, ai_model, ai_lead, ai_text) = ai_fields(d, &payload);
             rows.push(InboxRow {
                 id: d.id,
                 kind: d.kind,
                 group_start: first,
                 group_title: study.map(group_title).unwrap_or_else(|| {
                     if group.is_some() {
-                        d.security_ticker.clone()
+                        fallback_ticker(d)
                     } else {
                         String::new()
                     }
@@ -398,8 +443,9 @@ pub fn inbox_rows(
                 proposed,
                 state,
                 submitted: date_fr(&d.created_at),
-                ai_client: d.origin_client.clone(),
-                ai_model: d.origin_model.clone(),
+                ai_client,
+                ai_model,
+                ai_lead,
                 ai_text,
             });
             first = false;
@@ -413,6 +459,7 @@ pub fn inbox_rows(
     Ok(InboxView {
         rows,
         study_choices,
+        unfiltered: pending.len(),
     })
 }
 
@@ -425,9 +472,12 @@ pub struct PendingCounts {
     pub total: usize,
 }
 
-pub fn pending_counts(drafts: &[DraftRecord]) -> PendingCounts {
+/// Drafts of an ARCHIVED study are left out (they stay listed, marked « étude archivée » — G3).
+pub fn pending_counts(drafts: &[DraftRecord], archived: &HashSet<Uuid>) -> PendingCounts {
     let mut counts = PendingCounts::default();
-    for d in drafts.iter().filter(|d| d.status == DraftStatus::Pending) {
+    for d in drafts.iter().filter(|d| {
+        d.status == DraftStatus::Pending && !d.study_id.is_some_and(|id| archived.contains(&id))
+    }) {
         counts.total += 1;
         match d.study_id {
             Some(id) => *counts.by_study.entry(id).or_default() += 1,
@@ -486,6 +536,12 @@ impl PollState {
                 }
             }
         }
+    }
+
+    /// A re-read after this tick FAILED (the pragma read, then the inbox read did not): the next
+    /// tick re-reads even if the version did not move — the ⊘ is never stuck (G3, arch A9).
+    pub fn mark_read_failed(&mut self) {
+        self.failed = true;
     }
 
     /// Forget the last version (a dossier switch, an explicit push): the next tick re-reads.
@@ -704,6 +760,7 @@ mod tests {
         let view = inbox_rows(
             &drafts,
             &studies,
+            &HashSet::new(),
             NumberFormat::default(),
             KindFilter::All,
             None,
@@ -732,6 +789,7 @@ mod tests {
         let view = inbox_rows(
             &drafts,
             &studies,
+            &HashSet::new(),
             NumberFormat::default(),
             KindFilter::All,
             None,
@@ -785,11 +843,13 @@ mod tests {
         let note = row(3);
         assert_eq!(note.target, "ROG");
         assert!(note.current.is_empty() && note.proposed.is_empty());
-        assert_eq!(note.ai_text, "Texte de note — Commentaire de l'IA");
+        assert_eq!(note.ai_lead, "Texte de note");
+        assert_eq!(note.ai_text, "Commentaire de l'IA");
         // A draft study: ticker + currency as app text; the name before the comment, AI side.
         let dstudy = row(4);
         assert_eq!(dstudy.target, "AAPL (USD)");
-        assert_eq!(dstudy.ai_text, "Apple Inc. — Commentaire de l'IA");
+        assert_eq!(dstudy.ai_lead, "Apple Inc.");
+        assert_eq!(dstudy.ai_text, "Commentaire de l'IA");
         assert_eq!(dstudy.ai_client, "claude-code");
         assert_eq!(dstudy.ai_model, "opus");
         assert_eq!(
@@ -805,6 +865,7 @@ mod tests {
         let view = inbox_rows(
             &drafts,
             &studies,
+            &HashSet::new(),
             NumberFormat::default(),
             KindFilter::All,
             None,
@@ -819,12 +880,19 @@ mod tests {
     fn filters_by_kind_and_by_study() {
         let (drafts, studies) = fixture();
         let only = |k, s| {
-            inbox_rows(&drafts, &studies, NumberFormat::default(), k, s)
-                .expect("builds")
-                .rows
-                .iter()
-                .map(|r| r.id.as_u128())
-                .collect::<Vec<_>>()
+            inbox_rows(
+                &drafts,
+                &studies,
+                &HashSet::new(),
+                NumberFormat::default(),
+                k,
+                s,
+            )
+            .expect("builds")
+            .rows
+            .iter()
+            .map(|r| r.id.as_u128())
+            .collect::<Vec<_>>()
         };
         assert_eq!(only(KindFilter::Values, None), vec![5, 1]);
         assert_eq!(only(KindFilter::Judgments, None), vec![6, 2]);
@@ -838,6 +906,7 @@ mod tests {
         let view = inbox_rows(
             &drafts,
             &studies,
+            &HashSet::new(),
             NumberFormat::default(),
             KindFilter::Values,
             None,
@@ -855,13 +924,14 @@ mod tests {
         let view = inbox_rows(
             &drafts,
             &studies,
+            &HashSet::new(),
             NumberFormat::default(),
             KindFilter::All,
             None,
         )
         .expect("builds");
         assert!(view.rows.iter().all(|r| r.id.as_u128() != 1));
-        let counts = pending_counts(&drafts);
+        let counts = pending_counts(&drafts, &HashSet::new());
         assert_eq!(counts.total, 5);
         assert_eq!(counts.draft_studies, 1);
         assert_eq!(counts.by_study.get(&Uuid::from_u128(0xA)), Some(&1));
@@ -875,6 +945,7 @@ mod tests {
         let err = inbox_rows(
             &drafts,
             &studies,
+            &HashSet::new(),
             NumberFormat::default(),
             KindFilter::All,
             None,
@@ -933,5 +1004,136 @@ mod tests {
         p.on_tick(Ok(Some(9)));
         p.reset();
         assert_eq!(p.on_tick(Ok(Some(9))), PollAction::Reread, "after a reset");
+    }
+
+    #[test]
+    fn compact_ai_text_is_one_line() {
+        assert_eq!(
+            one_line("a\nb\r\nc\u{2028}d\u{2029}e\tf   g "),
+            "a b c d e f g"
+        );
+        let (mut drafts, studies) = fixture();
+        drafts[0].comment = "Ligne un\nligne\tdeux".into();
+        drafts[0].origin_model = "opus\r\n5".into();
+        let view = inbox_rows(
+            &drafts,
+            &studies,
+            &HashSet::new(),
+            NumberFormat::default(),
+            KindFilter::All,
+            None,
+        )
+        .expect("builds");
+        let row = view.rows.iter().find(|r| r.id.as_u128() == 1).expect("row");
+        assert_eq!(row.ai_text, "Ligne un ligne deux");
+        assert_eq!(row.ai_model, "opus 5");
+    }
+
+    #[test]
+    fn an_unparsable_proposed_value_makes_the_inbox_unshowable_never_proposed_dash() {
+        let (mut drafts, studies) = fixture();
+        let mut p: DraftPayload = serde_json::from_str(&drafts[0].payload).expect("payload");
+        p.proposed_value = Some("douze".into());
+        drafts[0].payload = serde_json::to_string(&p).expect("json");
+        // Even when the filter would hide it: no partial list.
+        let err = inbox_rows(
+            &drafts,
+            &studies,
+            &HashSet::new(),
+            NumberFormat::default(),
+            KindFilter::Notes,
+            None,
+        )
+        .expect_err("indisponible");
+        assert_eq!(err.draft_id, Uuid::from_u128(1));
+    }
+
+    #[test]
+    fn an_archived_studys_drafts_are_listed_marked_and_left_out_of_the_counts() {
+        let (drafts, studies) = fixture();
+        let archived: HashSet<Uuid> = [Uuid::from_u128(0xB)].into_iter().collect();
+        let view = inbox_rows(
+            &drafts,
+            &studies,
+            &archived,
+            NumberFormat::default(),
+            KindFilter::All,
+            None,
+        )
+        .expect("builds");
+        let rog: Vec<RowState> = view
+            .rows
+            .iter()
+            .filter(|r| r.group_title == "ROG (CHF)")
+            .map(|r| r.state)
+            .collect();
+        assert_eq!(rog, vec![RowState::Archived; 3]);
+        assert_eq!(view.unfiltered, 6, "still listed");
+        let counts = pending_counts(&drafts, &archived);
+        assert_eq!(counts.total, 3);
+        assert_eq!(counts.by_study.get(&Uuid::from_u128(0xB)), None);
+    }
+
+    #[test]
+    fn the_unfiltered_count_tells_an_empty_inbox_from_an_empty_filter() {
+        let (drafts, studies) = fixture();
+        let view = inbox_rows(
+            &drafts,
+            &studies,
+            &HashSet::new(),
+            NumberFormat::default(),
+            KindFilter::Notes,
+            Some(Uuid::from_u128(0xA)),
+        )
+        .expect("builds");
+        assert!(view.rows.is_empty());
+        assert_eq!(view.unfiltered, 6);
+        let empty = inbox_rows(
+            &[],
+            &studies,
+            &HashSet::new(),
+            NumberFormat::default(),
+            KindFilter::All,
+            None,
+        )
+        .expect("builds");
+        assert_eq!(empty.unfiltered, 0);
+    }
+
+    #[test]
+    fn a_study_gone_shows_its_ticker_only_when_it_reads_as_one() {
+        let (mut drafts, mut studies) = fixture();
+        studies.remove(&Uuid::from_u128(0xA));
+        drafts[0].security_ticker = " nesn.sw ".into();
+        drafts[1].security_ticker = "texte libre\nde l'IA".into();
+        let view = inbox_rows(
+            &drafts,
+            &studies,
+            &HashSet::new(),
+            NumberFormat::default(),
+            KindFilter::All,
+            None,
+        )
+        .expect("builds");
+        let t = |n: u128| {
+            view.rows
+                .iter()
+                .find(|r| r.id.as_u128() == n)
+                .expect("row")
+                .target
+                .clone()
+        };
+        assert!(t(1).starts_with("NESN.SW · "), "{}", t(1));
+        assert!(t(2).starts_with("— · "), "{}", t(2));
+    }
+
+    #[test]
+    fn a_failed_reread_is_retried_on_the_next_tick() {
+        let mut p = PollState::default();
+        assert_eq!(p.on_tick(Ok(Some(5))), PollAction::Reread);
+        // The inbox read after that tick failed: the version did not move, the tick re-reads.
+        p.mark_read_failed();
+        assert_eq!(p.on_tick(Ok(Some(5))), PollAction::Reread);
+        assert_eq!(p.on_tick(Ok(Some(5))), PollAction::Nothing, "recovered");
     }
 }

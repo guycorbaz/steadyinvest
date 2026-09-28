@@ -85,9 +85,12 @@ component StudyListRow inherits Rectangle {
                     font-weight: Tokens.weight-medium;
                     vertical-alignment: center;
                 }
-                // Story 8.5a (UX spec §5.4): the study's pending AI drafts, « ★ {n} », in ink.
-                if root.entry.pending-drafts > 0: Text {
-                    text: @tr("{} {}", Tokens.ai-glyph, root.entry.pending-drafts);
+                // Story 8.5a (UX spec §5.4): the study's pending AI drafts, « ★ {n} », in ink; while
+                // the inbox is unreadable, « ★ ⊘ » on every row — each study's state is unknown,
+                // never a vanished marker (G3).
+                if Drafts.read-failed || root.entry.pending-drafts > 0: Text {
+                    text: Drafts.read-failed ? @tr("{} ⊘", Tokens.ai-glyph)
+                        : @tr("{} {}", Tokens.ai-glyph, root.entry.pending-drafts);
                     color: Tokens.text-high;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
@@ -255,10 +258,20 @@ export component DashboardScreen inherits Rectangle {
 
             // Story 8.5a (UX spec §5.4): AI draft STUDIES waiting — first row of the card; the
             // tickers are listed on the Propositions screen, not here.
-            if Drafts.draft-study-count > 0: StatusBand {
+            // The card is wider than a 1600 px window (the G6 debt): the action goes under the text.
+            if !Drafts.read-failed && Drafts.draft-study-count > 0: StatusBand {
                 icon: Tokens.ai-glyph;
                 text: @tr("{} proposition(s) d'étude de l'IA en attente.", Drafts.draft-study-count);
                 action-label: @tr("Voir les propositions");
+                action-below: true;
+                action => { Drafts.show-draft-studies(); }
+            }
+            // G3: an unreadable inbox is SAID here too — nothing vanishes.
+            if Drafts.read-failed: StatusBand {
+                icon: "⊘";
+                text: @tr("Les propositions d'étude n'ont pas pu être lues ; état indisponible.");
+                action-label: @tr("Voir les propositions");
+                action-below: true;
                 action => { Drafts.show-draft-studies(); }
             }
 

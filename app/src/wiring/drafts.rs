@@ -25,8 +25,8 @@ use uuid::Uuid;
 
 use crate::state::JournalState;
 use crate::viewmodel::drafts::{
-    InboxView, KindFilter, PendingCounts, PollAction, PollState, STUDY_FILTER_ALL, StudyChoice,
-    inbox_rows, pending_counts,
+    INBOX_CAUSE_UNREADABLE_DRAFT, InboxRow, InboxView, KindFilter, PendingCounts, PollAction,
+    PollState, STUDY_FILTER_ALL, StudyChoice, inbox_rows, pending_counts,
 };
 use crate::viewmodel::format::NumberFormat;
 use crate::wiring::Session;
@@ -45,6 +45,8 @@ struct InboxCache {
     choices: Vec<StudyChoice>,
     study_filter: Option<Uuid>,
     open_study: Option<Uuid>,
+    /// The rows and « Étude : » labels last pushed — an unchanged re-read rebuilds no model (G3).
+    shown: Option<(Vec<InboxRow>, Vec<String>)>,
 }
 
 thread_local! {
@@ -77,6 +79,7 @@ fn to_slint(view: &InboxView) -> Vec<DraftRow> {
             // AI-written: read in Slint ONLY inside an AiFrame (UX spec §4.1).
             ai_client: r.ai_client.clone().into(),
             ai_model: r.ai_model.clone().into(),
+            ai_lead: r.ai_lead.clone().into(),
             ai_text: r.ai_text.clone().into(),
         })
         .collect()
@@ -121,17 +124,27 @@ pub(crate) fn apply_open_study(ui: &MainWindow, study_id: Option<Uuid>) {
     ui.global::<Drafts>().set_open_study_pending(n as i32);
 }
 
-/// Show « indisponible »: rows cleared, counts zero, the cause named ("" when none can be).
+/// Show « indisponible »: rows and « Étude : » choices cleared, counts zero, the cause named (""
+/// when none can be). The poller then re-reads on its next tick even if nothing moved — a ⊘ is
+/// never stuck (G3, arch A9).
 fn show_failure(ui: &MainWindow, cause: &str) {
     INBOX.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.counts = PendingCounts::default();
         cache.failed = true;
+        cache.choices.clear();
+        cache.shown = None;
+        cache.poll.mark_read_failed();
     });
     let drafts = ui.global::<Drafts>();
     drafts.set_rows(ModelRc::new(VecModel::from(Vec::<DraftRow>::new())));
+    drafts.set_study_options(ModelRc::new(VecModel::from(vec![SharedString::from(
+        STUDY_FILTER_ALL,
+    )])));
+    drafts.set_study_value(STUDY_FILTER_ALL.into());
     drafts.set_pending_count(0);
     drafts.set_draft_study_count(0);
+    drafts.set_unfiltered_count(0);
     drafts.set_open_study_pending(0);
     drafts.set_failure_cause(cause.into());
     drafts.set_read_failed(true);
@@ -149,17 +162,25 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
             return;
         }
     };
-    let (drafts, studies) = match data {
-        Some(d) => (d.drafts, d.studies),
+    let (drafts, studies, archived) = match data {
+        Some(d) => (d.drafts, d.studies, d.archived),
         // No dossier open: a true absence — an empty inbox, no ⊘.
-        None => (Vec::new(), std::collections::HashMap::new()),
+        None => Default::default(),
     };
-    let counts = pending_counts(&drafts);
+    let counts = pending_counts(&drafts, &archived);
     let kind = KindFilter::from_wire(drafts_global.get_kind_filter().as_str());
     // The « Étude : » pick survives a re-read while that study still has pending drafts.
-    let study_filter = INBOX.with(|c| c.borrow().study_filter);
-    let study_filter = study_filter.filter(|id| counts.by_study.contains_key(id));
-    let view = match inbox_rows(&drafts, &studies, number_format(ui), kind, study_filter) {
+    let study_filter = INBOX
+        .with(|c| c.borrow().study_filter)
+        .filter(|id| drafts.iter().any(|d| d.study_id == Some(*id)));
+    let view: InboxView = match inbox_rows(
+        &drafts,
+        &studies,
+        &archived,
+        number_format(ui),
+        kind,
+        study_filter,
+    ) {
         Ok(view) => view,
         Err(problem) => {
             tracing::warn!(
@@ -167,52 +188,72 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
                 problem.draft_id,
                 problem.detail
             );
-            show_failure(ui, "");
+            show_failure(ui, INBOX_CAUSE_UNREADABLE_DRAFT);
             return;
         }
     };
-    let (open_study, total, draft_studies) = INBOX.with(|cache| {
+    let labels: Vec<String> = std::iter::once(STUDY_FILTER_ALL.to_string())
+        .chain(view.study_choices.iter().map(|c| c.label.clone()))
+        .collect();
+    let (open_study, total, draft_studies, unchanged) = INBOX.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.failed = false;
         cache.choices = view.study_choices.clone();
         cache.study_filter = study_filter;
         cache.counts = counts;
+        let unchanged = cache
+            .shown
+            .as_ref()
+            .is_some_and(|(rows, l)| *rows == view.rows && *l == labels);
+        if !unchanged {
+            cache.shown = Some((view.rows.clone(), labels.clone()));
+        }
         (
             cache.open_study,
             cache.counts.total,
             cache.counts.draft_studies,
+            unchanged,
         )
     });
-    let mut options: Vec<SharedString> = vec![STUDY_FILTER_ALL.into()];
-    options.extend(
-        view.study_choices
-            .iter()
-            .map(|c| SharedString::from(c.label.as_str())),
-    );
+    // An unchanged re-read rebuilds no model (G3): the rows' focus and scroll stay put.
+    if !unchanged {
+        let options: Vec<SharedString> = labels.iter().map(|l| l.as_str().into()).collect();
+        drafts_global.set_study_options(ModelRc::new(VecModel::from(options)));
+        drafts_global.set_rows(ModelRc::new(VecModel::from(to_slint(&view))));
+    }
     let value = study_filter
         .and_then(|id| view.study_choices.iter().find(|c| c.study_id == id))
         .map_or(STUDY_FILTER_ALL, |c| c.label.as_str())
         .to_string();
-    drafts_global.set_study_options(ModelRc::new(VecModel::from(options)));
     drafts_global.set_study_value(value.into());
-    drafts_global.set_rows(ModelRc::new(VecModel::from(to_slint(&view))));
     drafts_global.set_pending_count(total as i32);
     drafts_global.set_draft_study_count(draft_studies as i32);
+    drafts_global.set_unfiltered_count(view.unfiltered as i32);
     drafts_global.set_failure_cause(SharedString::new());
     drafts_global.set_read_failed(false);
     apply_open_study(ui, open_study);
     apply_row_counts(ui);
 }
 
-/// A dossier change (open, create, recent, restore, a lost journal): forget the poller's version
-/// and the open study; the next tick re-reads (the caller's `refresh_studies` also pushes).
-pub(crate) fn forget_dossier() {
+/// Back to « Toutes » and « Toutes les études » (G3): on a dossier change and when the reader
+/// opens the inbox from the rail — the filters survive only the bands' « Voir les propositions »
+/// path, which sets them.
+pub(crate) fn reset_filters(ui: &MainWindow) {
+    INBOX.with(|cache| cache.borrow_mut().study_filter = None);
+    ui.global::<Drafts>().set_kind_filter("all".into());
+}
+
+/// A dossier change (open, create, recent, restore, a lost journal): forget the poller's version,
+/// the open study, the filters and the last rows; the next tick re-reads (the caller's
+/// `refresh_studies` also pushes).
+pub(crate) fn forget_dossier(ui: &MainWindow) {
     INBOX.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.poll.reset();
         cache.open_study = None;
-        cache.study_filter = None;
+        cache.shown = None;
     });
+    reset_filters(ui);
 }
 
 /// Wire the inbox's callbacks: the kind chips, the « Étude : » filter, the bands' « Voir les
@@ -224,6 +265,11 @@ pub(crate) fn wire_drafts(ui: &MainWindow, s: &Session) {
         let journal_state = Rc::clone(&s.journal_state);
         drafts.on_pick_kind(move |kind| {
             let ui = ui_weak.unwrap();
+            // « Études » lists draft studies, which belong to no study: the study pick would
+            // hide them all (G3).
+            if kind.as_str() == "studies" {
+                INBOX.with(|cache| cache.borrow_mut().study_filter = None);
+            }
             ui.global::<Drafts>().set_kind_filter(kind);
             push_drafts(&ui, &journal_state.borrow());
         });
@@ -301,6 +347,7 @@ pub(crate) fn start_poller(ui: &MainWindow, s: &Session) -> Rc<slint::Timer> {
             let action = INBOX.with(|cache| cache.borrow_mut().poll.on_tick(read));
             match action {
                 PollAction::Nothing => {}
+                // A failed re-read marks the poller (`show_failure`): the next tick retries.
                 PollAction::Reread => push_drafts(&ui, &state),
                 PollAction::Failed(cause) => show_failure(&ui, &cause),
             }

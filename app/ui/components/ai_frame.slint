@@ -17,6 +17,10 @@ export component AiFrame inherits Rectangle {
     in property <string> ai-client;
     in property <string> ai-model;
     in property <string> ai-text;
+    // AI-written: what the draft proposes, before its comment — a proposed note text, a proposed
+    // company name ("" = none). In a compact row it is ELIDED FIRST, so the comment stays readable
+    // (G3); the view model collapses line breaks and tabs to spaces for compact rows.
+    in property <string> ai-lead;
     // App text: the submission date, JJ/MM/AAAA.
     in property <string> submitted;
     in property <bool> compact: false;
@@ -57,21 +61,61 @@ export component AiFrame inherits Rectangle {
                     font-weight: Tokens.weight-semibold;
                     vertical-alignment: center;
                 }
+                // The origin (AI-written) elides; the date (app text) never does (G3).
                 Text {
-                    text: @tr("— Proposée par {} ({}) le {}", root.ai-client, root.ai-model, root.submitted);
+                    text: @tr("— Proposée par {} ({})", root.ai-client, root.ai-model);
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
                     overflow: elide;
+                    min-width: 0px;
                     horizontal-stretch: 1;
                 }
+                Text {
+                    text: @tr("le {}", root.submitted);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
             }
-            Text {
+            // Compact (list rows): one line — the lead elided first, then the comment.
+            if root.compact: HorizontalLayout {
+                spacing: Tokens.space-4;
+                if root.ai-lead != "": Text {
+                    text: root.ai-lead;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-body;
+                    overflow: elide;
+                    min-width: 0px;
+                    horizontal-stretch: 1;
+                }
+                if root.ai-lead != "": Text {
+                    text: "—";
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-body;
+                }
+                Text {
+                    text: root.ai-text;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-body;
+                    overflow: elide;
+                    // The comment keeps up to 360 px before it elides itself (a width-relative bound
+                    // would loop through the layout).
+                    min-width: min(self.preferred-width, 360px);
+                    horizontal-stretch: root.ai-lead != "" ? 0 : 1;
+                }
+            }
+            if !root.compact && root.ai-lead != "": Text {
+                text: root.ai-lead;
+                color: Tokens.text-high;
+                font-size: Tokens.font-body;
+                wrap: word-wrap;
+            }
+            if !root.compact: Text {
                 text: root.ai-text;
                 color: Tokens.text-high;
                 font-size: Tokens.font-body;
-                wrap: root.compact ? no-wrap : word-wrap;
-                overflow: elide;
+                wrap: word-wrap;
             }
             @children
             Text {

@@ -138,7 +138,7 @@ impl DossierSession {
 /// - the Revue: its export notice goes (it named a file of the previous dossier's review).
 fn clear_dossier_session(ui: &MainWindow, session: &DossierSession) {
     // Story 8.5a: the inbox poller forgets the old dossier's version; the next tick re-reads.
-    crate::wiring::drafts::forget_dossier();
+    crate::wiring::drafts::forget_dossier(ui);
     end_dossier_cells(session);
     ui.global::<Studies>().invoke_close_study();
     ui.global::<Studies>().set_fetching(false);

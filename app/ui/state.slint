@@ -1695,12 +1695,14 @@ export struct DraftRow {
     // « Actuel » / « Proposé », app-formatted; "" for a note or a draft study.
     current: string,
     proposed: string,
-    // 0 fresh · 1 « périmée » · 2 « cible disparue »
+    // 0 fresh · 1 « périmée » · 2 « cible disparue » · 3 « étude archivée »
     state: int,
     // JJ/MM/AAAA
     submitted: string,
     ai-client: string,
     ai-model: string,
+    // What the draft proposes (a note text, a company name) — elided first in a compact row.
+    ai-lead: string,
     ai-text: string,
 }
 
@@ -1709,6 +1711,9 @@ export global Drafts {
     // Pending drafts in the dossier (the rail label); draft studies among them (the Études band).
     in-out property <int> pending-count;
     in-out property <int> draft-study-count;
+    // Every pending draft in the inbox before the kind / study filters (archived studies' drafts
+    // included): 0 → the empty text; > 0 with no row → the filter line (G3).
+    in-out property <int> unfiltered-count;
     // The last poll or read failed: the ⊘ bands and the rail « · ⊘ » — never an empty inbox.
     in-out property <bool> read-failed;
     // The named cause of that failure ("" when none can be named).

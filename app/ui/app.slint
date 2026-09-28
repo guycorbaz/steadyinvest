@@ -119,17 +119,21 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     alignment: start;
                     padding: Tokens.space-8;
+                    padding-right: Tokens.space-4;
                     spacing: Tokens.space-4;
 
                     for destination[index] in root.destinations: NavItem {
                         // Story 8.5a (UX spec §5.1): « Propositions · {n} » while drafts wait,
                         // « Propositions · ⊘ » when the last poll or read failed — never vanishing,
-                        // no badge, no hue. The top bar title stays `destinations[…]`.
-                        label: index == 4
-                            ? (Drafts.read-failed ? @tr("Propositions · ⊘")
-                                : Drafts.pending-count > 0 ? @tr("Propositions · {}", Drafts.pending-count)
-                                : destination)
-                            : destination;
+                        // no hue. The count is a small badge (G3: the rail keeps 200 px), capped
+                        // « 99+ » (a wider count does not fit). The top bar title stays
+                        // `destinations[…]`.
+                        label: destination;
+                        badge: index != 4 ? ""
+                            : Drafts.read-failed ? @tr("· ⊘")
+                            : Drafts.pending-count > 99 ? @tr("· 99+")
+                            : Drafts.pending-count > 0 ? @tr("· {}", Drafts.pending-count)
+                            : "";
                         active: root.current-screen == index;
                         activated => {
                             root.current-screen = index;

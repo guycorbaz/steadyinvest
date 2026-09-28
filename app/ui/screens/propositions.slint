@@ -46,6 +46,14 @@ component DraftRowView inherits VerticalLayout {
             font-weight: Tokens.weight-semibold;
             vertical-alignment: center;
         }
+        // G3: a draft of an ARCHIVED study stays listed, marked, and is left out of the counts.
+        if root.draft.state == 3: Text {
+            text: @tr("étude archivée");
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            font-weight: Tokens.weight-semibold;
+            vertical-alignment: center;
+        }
     }
     if root.draft.kind == "note": Text {
         text: @tr("Nouvelle note");
@@ -70,11 +78,21 @@ component DraftRowView inherits VerticalLayout {
         ai-client: root.draft.ai-client;
         ai-model: root.draft.ai-model;
         ai-text: root.draft.ai-text;
+        ai-lead: root.draft.ai-lead;
         submitted: root.draft.submitted;
     }
 }
 
+// One kind chip — selected from the `Drafts` global, activating `pick-kind(key)`.
+component KindChip inherits ChoiceChip {
+    in property <string> key;
+    selected: Drafts.kind-filter == root.key;
+    activated => { Drafts.pick-kind(root.key); }
+}
+
 export component PropositionsScreen inherits Rectangle {
+    // The five kind chips need ~560 px: below 700 px of screen they wrap to two rows (G3).
+    property <bool> narrow: root.width < 700px;
     Flickable {
         viewport-height: content.preferred-height;
 
@@ -87,34 +105,31 @@ export component PropositionsScreen inherits Rectangle {
                 title: @tr("Propositions");
                 subtitle: @tr("Proposées par une IA via le serveur MCP ; aucune n'est appliquée sans votre validation.");
 
-                // The kind chips (spec §3.3). The « Registre » view chip arrives with 8.7.
-                HorizontalLayout {
+                // The kind chips (spec §3.3). The « Registre » view chip arrives with 8.7. On a
+                // narrow window (720–870 px) they wrap to two rows (G3).
+                if !root.narrow: HorizontalLayout {
                     spacing: Tokens.space-8;
                     alignment: start;
-                    ChoiceChip {
-                        label: @tr("Toutes");
-                        selected: Drafts.kind-filter == "all";
-                        activated => { Drafts.pick-kind("all"); }
+                    KindChip { key: "all"; label: @tr("Toutes"); }
+                    KindChip { key: "values"; label: @tr("Valeurs"); }
+                    KindChip { key: "judgments"; label: @tr("Jugements"); }
+                    KindChip { key: "notes"; label: @tr("Notes"); }
+                    KindChip { key: "studies"; label: @tr("Études"); }
+                }
+                if root.narrow: VerticalLayout {
+                    spacing: Tokens.space-8;
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        alignment: start;
+                        KindChip { key: "all"; label: @tr("Toutes"); }
+                        KindChip { key: "values"; label: @tr("Valeurs"); }
+                        KindChip { key: "judgments"; label: @tr("Jugements"); }
                     }
-                    ChoiceChip {
-                        label: @tr("Valeurs");
-                        selected: Drafts.kind-filter == "values";
-                        activated => { Drafts.pick-kind("values"); }
-                    }
-                    ChoiceChip {
-                        label: @tr("Jugements");
-                        selected: Drafts.kind-filter == "judgments";
-                        activated => { Drafts.pick-kind("judgments"); }
-                    }
-                    ChoiceChip {
-                        label: @tr("Notes");
-                        selected: Drafts.kind-filter == "notes";
-                        activated => { Drafts.pick-kind("notes"); }
-                    }
-                    ChoiceChip {
-                        label: @tr("Études");
-                        selected: Drafts.kind-filter == "studies";
-                        activated => { Drafts.pick-kind("studies"); }
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        alignment: start;
+                        KindChip { key: "notes"; label: @tr("Notes"); }
+                        KindChip { key: "studies"; label: @tr("Études"); }
                     }
                 }
                 HorizontalLayout {
@@ -127,7 +142,10 @@ export component PropositionsScreen inherits Rectangle {
                         vertical-alignment: center;
                     }
                     Dropdown {
-                        width: 320px;
+                        min-width: 200px;
+                        preferred-width: 320px;
+                        max-width: 320px;
+                        horizontal-stretch: 1;
                         options: Drafts.study-options;
                         value <=> Drafts.study-value;
                         picked(index) => { Drafts.pick-study(index); }
@@ -144,8 +162,15 @@ export component PropositionsScreen inherits Rectangle {
                     icon: "◦";
                     text: @tr("Dossier en lecture seule : les propositions sont consultables, aucune décision n'est possible.");
                 }
-                if !Drafts.read-failed && Drafts.rows.length == 0: Text {
+                if !Drafts.read-failed && Drafts.unfiltered-count == 0: Text {
                     text: @tr("Aucune proposition à traiter. Une IA enregistrée comme client MCP peut en déposer ici ; rien n'est appliqué sans votre validation.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+                // G3: drafts wait, but the kind / study filters keep none of them.
+                if !Drafts.read-failed && Drafts.unfiltered-count > 0 && Drafts.rows.length == 0: Text {
+                    text: @tr("Aucune proposition ne correspond à ce filtre.");
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     wrap: word-wrap;

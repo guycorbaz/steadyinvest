@@ -6,13 +6,16 @@ import { Tokens } from "../tokens.slint";
 
 export component NavItem inherits Rectangle {
     in property <string> label;
+    // Story 8.5a (G3): an optional count or state after the label (« · 3 », « · ⊘ »), at caption
+    // size in mid ink so the rail keeps its 200 px (the full-size label clipped); "" = none.
+    in property <string> badge;
     in property <bool> active;
     callback activated();
 
     // Assistive-tech semantics (NFR-U discipline): a nav destination is a button whose
     // pressed state mirrors the active destination; the default action activates it.
     accessible-role: button;
-    accessible-label: root.label;
+    accessible-label: root.badge != "" ? root.label + root.badge : root.label;
     accessible-checkable: true;
     accessible-checked: root.active;
     accessible-action-default => { root.activated(); }
@@ -44,7 +47,8 @@ export component NavItem inherits Rectangle {
     HorizontalLayout {
         padding-top: Tokens.space-4;
         padding-bottom: Tokens.space-4;
-        spacing: Tokens.space-12;
+        // 8 px (was 12) since 8.5a G3: « Propositions · 99+ » / « · ⊘ » must fit the 200 px rail.
+        spacing: Tokens.space-8;
 
         Rectangle {
             width: Tokens.indicator-width;
@@ -56,6 +60,13 @@ export component NavItem inherits Rectangle {
             color: root.active ? Tokens.text-high : Tokens.text-mid;
             font-size: Tokens.font-body;
             font-weight: root.active ? Tokens.weight-semibold : Tokens.weight-regular;
+            vertical-alignment: center;
+        }
+        if root.badge != "": Text {
+            text: root.badge;
+            color: Tokens.text-mid;
+            // 16 px: Inter draws « ⊘ » about an em wide — at caption size it overflowed the rail.
+            font-size: Tokens.font-caption - 3px;
             vertical-alignment: center;
         }
     }

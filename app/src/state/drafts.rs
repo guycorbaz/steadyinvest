@@ -552,12 +552,13 @@ fn inbox_read_error(error: PersistError) -> InboxReadError {
     }
 }
 
-/// What the inbox shows, read in one go: every draft (the inbox keeps the pending ones) and
-/// today's study of each pending draft that has one — a study absent from the map was deleted.
+/// What the inbox shows, read in one go: the PENDING drafts, today's study of each that has one — a
+/// study absent from the map was deleted — and the studies archived today (G3).
 #[derive(Debug, Clone)]
 pub struct InboxData {
     pub drafts: Vec<steadyinvest_persistence::DraftRecord>,
     pub studies: std::collections::HashMap<Uuid, Study>,
+    pub archived: std::collections::HashSet<Uuid>,
 }
 
 impl JournalState {
@@ -589,20 +590,30 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(None);
         };
-        let drafts = journal.list_drafts().map_err(inbox_read_error)?;
+        // Pending only: the decided record is 8.7's, never read on every poll (G3).
+        let drafts = journal.list_pending_drafts().map_err(inbox_read_error)?;
         let mut studies = std::collections::HashMap::new();
-        for id in drafts
-            .iter()
-            .filter(|d| d.status == steadyinvest_contract::DraftStatus::Pending)
-            .filter_map(|d| d.study_id)
-        {
+        let mut archived = std::collections::HashSet::new();
+        for id in drafts.iter().filter_map(|d| d.study_id) {
             if studies.contains_key(&id) {
                 continue;
             }
             if let Some(study) = journal.get_study(id).map_err(inbox_read_error)? {
+                if journal
+                    .study_status(id)
+                    .map_err(inbox_read_error)?
+                    .as_deref()
+                    == Some("archived")
+                {
+                    archived.insert(id);
+                }
                 studies.insert(id, study);
             }
         }
-        Ok(Some(InboxData { drafts, studies }))
+        Ok(Some(InboxData {
+            drafts,
+            studies,
+            archived,
+        }))
     }
 }
