@@ -1,6 +1,6 @@
 # Story 8.5b: Deciding drafts
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created 2026-09-28 by create-story on branch feat/8-5b-deciding-drafts (main with 8.1–8.5a).
      Autonomous Epic 8 run (Guy, 2026-09-28): questions resolved with the most conservative option,
@@ -109,58 +109,58 @@ Source: `epics.md` Story 8.5b + the Epic 8 posture AC; UX spec `ux-ai-assistance
 
 ## Tasks / Subtasks
 
-- [ ] **T1 — State: what the dialog needs (AC 2, 5, 7, 8)** — `app/src/state/drafts.rs`
-  - [ ] T1.1 `pub fn seen_fingerprint(study: &Study, payload: &DraftPayload) -> Option<String>`: the
+- [x] **T1 — State: what the dialog needs (AC 2, 5, 7, 8)** — `app/src/state/drafts.rs`
+  - [x] T1.1 `pub fn seen_fingerprint(study: &Study, payload: &DraftPayload) -> Option<String>`: the
     current fingerprint of a cell/judgment draft's target (wraps the private `current_fingerprint`),
     `None` for a note / gone target. The dialog stores it at open; « Valider » on a stale draft passes
     it as `Decision::Validate { seen_fingerprint: Some(..) }`; a fresh draft passes `None` (8.2b
     contract: `None` = base fingerprint).
-  - [ ] T1.2 `JournalState::draft_for_dialog(draft_id) -> Result<DialogDraft, String>`: one read of the
+  - [x] T1.2 `JournalState::draft_for_dialog(draft_id) -> Result<DialogDraft, String>`: one read of the
     draft record + its study (+ archived status), mirroring `read_inbox`'s rules (any failure named,
     never guessed). `DialogDraft` carries `DraftRef`, kind, payload, freshness, the study's `✓` state
     of the target cell (for Q5), and `open_study_differs: bool`.
-  - [ ] T1.3 Undo/redo report what they stepped over: change `undo`/`redo` to return
+  - [x] T1.3 Undo/redo report what they stepped over: change `undo`/`redo` to return
     `Result<Stepped, String>` with `enum Stepped { Nothing, Study, Draft(Uuid) }` (was `bool`);
     update the two callers in `wiring/judgment.rs` and every test (`Ok(true)` → `Stepped::Study`/
     `Draft`). No semantic change otherwise.
-  - [ ] T1.4 Tests: `seen_fingerprint` equals what `decided_study` accepts for a stale draft
+  - [x] T1.4 Tests: `seen_fingerprint` equals what `decided_study` accepts for a stale draft
     (stale → confirm with seen → validates; target moved after seen → `Changed{confirmed:true}`);
     `Stepped::Draft(id)` on undo/redo of a draft step.
-- [ ] **T2 — View model (AC 2, 4, 5, 7, 8)** — `app/src/viewmodel/drafts.rs`
-  - [ ] T2.1 `pub fn dialog_view(d: &DialogDraft, open_study: Option<Uuid>, format) -> DecisionView`
+- [x] **T2 — View model (AC 2, 4, 5, 7, 8)** — `app/src/viewmodel/drafts.rs`
+  - [x] T2.1 `pub fn dialog_view(d: &DialogDraft, open_study: Option<Uuid>, format) -> DecisionView`
     (pure): target text (same as the row's), context line (other study), `current` / `proposed`
     (reuse `value_display`), state (fresh / stale / gone + the §3.3 band text with `{cible}` and
     `{maintenant}` — `{maintenant}` is the current value as displayed), `initial_focus`
     ("cancel" | "validate"), the edit prefill (number as displayed, option label, note text), the
     option labels list for an option field, the AI fields (client, model, comment, note text).
-  - [ ] T2.2 Unit tests: each kind, stale/gone/fresh, millions prefill (« 1 234,5 » for 1 234 500 000
+  - [x] T2.2 Unit tests: each kind, stale/gone/fresh, millions prefill (« 1 234,5 » for 1 234 500 000
     under a comma format), option labels, the other-study context line, Q5 focus on a `✓` target.
-- [ ] **T3 — Dialog UI (AC 2, 5, 7, 8, 12, 14, 15)** — `app/ui/state.slint`, `app/ui/components/modal_dialog.slint`
-  - [ ] T3.1 `Dialog` gains: `decision-target`, `decision-context`, `decision-current`,
+- [x] **T3 — Dialog UI (AC 2, 5, 7, 8, 12, 14, 15)** — `app/ui/state.slint`, `app/ui/components/modal_dialog.slint`
+  - [x] T3.1 `Dialog` gains: `decision-target`, `decision-context`, `decision-current`,
     `decision-proposed`, `decision-state` (int: 0 fresh · 1 stale · 2 gone), `decision-band`,
     `decision-note` (bool), `decision-focus` ("cancel"|"validate"), `edit-kind`
     ("number"|"option"|"note"), `edit-options: [string]`, and the AI fields `ai-client`, `ai-model`,
     `ai-text`, `ai-lead` (read ONLY inside `AiFrame`); callbacks on `Drafts`: `open-draft(string)`,
     `decide(string /* validate|reject|edit */) -> bool`, `confirm-stale()`.
-  - [ ] T3.2 `ModalDialog`: the `"decision"` variant (layout per AC 2 — reuse `StatusBand`,
+  - [x] T3.2 `ModalDialog`: the `"decision"` variant (layout per AC 2 — reuse `StatusBand`,
     `AiFrame`, `ActionButton`, the numeric font); the `"draft-edit"` form (reuses `LabeledField` /
     `LabeledDropdown` / `LabeledTextArea` — the note area as `@children` of the AiFrame); Esc/scrim
     cancel; the stale confirm uses the existing confirm kind with action `"validate-stale"` whose
     « Annuler » returns to the decision dialog (the `discard-note` resume pattern), and whose verb
     calls `Drafts.confirm-stale()`. Buttons disabled on `Holdings.read-only` (AC 12); « Valider » /
     « Modifier… » absent on a gone target (AC 8).
-  - [ ] T3.3 Focus trap and initial focus per `decision-focus` (the `cancel-request` /
+  - [x] T3.3 Focus trap and initial focus per `decision-focus` (the `cancel-request` /
     `commit-request` counters).
-- [ ] **T4 — Inbox rows activatable (AC 1, 15)** — `app/ui/screens/propositions.slint`
-  - [ ] T4.1 Wrap `DraftRowView` of kinds cell / judgment / note (state ≠ 3 archived) in a focusable
+- [x] **T4 — Inbox rows activatable (AC 1, 15)** — `app/ui/screens/propositions.slint`
+  - [x] T4.1 Wrap `DraftRowView` of kinds cell / judgment / note (state ≠ 3 archived) in a focusable
     activator (FocusScope + TouchArea, focus ring, Enter/Space) → `Drafts.open-draft(r.id)`.
     Draft-study and archived rows unchanged (not activatable).
-  - [ ] T4.2 `Drafts.notice` slot under the bands (inline outcome, F4 rule).
-- [ ] **T5 — Wiring (AC 3, 6, 7, 9, 10, 11)** — `app/src/wiring/drafts.rs`, `dialog.rs`, `judgment.rs`
-  - [ ] T5.1 A `DECISION` thread-local (the open dialog's `DialogDraft` + `seen_fingerprint`).
+  - [x] T4.2 `Drafts.notice` slot under the bands (inline outcome, F4 rule).
+- [x] **T5 — Wiring (AC 3, 6, 7, 9, 10, 11)** — `app/src/wiring/drafts.rs`, `dialog.rs`, `judgment.rs`
+  - [x] T5.1 A `DECISION` thread-local (the open dialog's `DialogDraft` + `seen_fingerprint`).
     `on_open_draft`: `draft_for_dialog` → `dialog_view` → `to_dialog` (the ONLY setter of
     `Dialog.ai-*`) → `Dialog.kind = "decision"`. A read failure → `dialog::refuse`.
-  - [ ] T5.2 `on_decide`: `Dialog.gesture = true` around it (set by the Slint side, like forms); if
+  - [x] T5.2 `on_decide`: `Dialog.gesture = true` around it (set by the Slint side, like forms); if
     the draft's study is not open → `ui.global::<Studies>().invoke_open_study(id)` first (AC 6) — the `Studies.open-study` callback of `state.slint:629` (the one that stays on the current screen), NOT the navigation global's `open-study` at `state.slint:1231` (it switches to Études); stale +
     validate/edit → raise the stale confirm (AC 7) and return false; else build the `Decision`
     (`owner_edit` for edit — map an option LABEL back to its `option_name` first) and call
@@ -168,34 +168,34 @@ Source: `epics.md` Story 8.5b + the Epic 8 posture AC; UX spec `ux-ai-assistance
     (the grid shows ★), `push_drafts`. On Err: `dialog::refuse` (→ `field-error`), then re-read the
     draft: if still pending, refresh the dialog content (AC 7 « affichée de nouveau »); if gone,
     keep the refusal visible and `push_drafts`.
-  - [ ] T5.3 `dialog::route`: `"decision" if gesture => FieldError` (unit test beside the existing
+  - [x] T5.3 `dialog::route`: `"decision" if gesture => FieldError` (unit test beside the existing
     routing tests).
-  - [ ] T5.4 Undo/redo in `wiring/judgment.rs`: on `Stepped::Draft(_)` → `study_notice::outcome`
+  - [x] T5.4 Undo/redo in `wiring/judgment.rs`: on `Stepped::Draft(_)` → `study_notice::outcome`
     (new `Source::Draft`) with the §3.3 undo/redo text, then `push_drafts`; `Err` → as today
     (`MSG_UNDO_DRAFT_STEP_DROPPED` is a refusal → `dialog::refuse`).
-- [ ] **T6 — The AI-origin cell mark (AC 4)** — `app/ui/state.slint` `GridCellState`, `viewmodel/form.rs`
+- [x] **T6 — The AI-origin cell mark (AC 4)** — `app/ui/state.slint` `GridCellState`, `viewmodel/form.rs`
   `editable_cell`, `components/editable_cell.slint`, `study_screen.slint`
-  - [ ] T6.1 `GridCellState.ai-validated: string` — "" or the JJ/MM/AAAA of `ai_origin.validated_at`
+  - [x] T6.1 `GridCellState.ai-validated: string` — "" or the JJ/MM/AAAA of `ai_origin.validated_at`
     (local time, `date_fr`) — never the client/model.
-  - [ ] T6.2 `editable_cell.slint`: a `★` Text in the trailing column bottom half when
+  - [x] T6.2 `editable_cell.slint`: a `★` Text in the trailing column bottom half when
     `ai-validated != ""` (and `trail-col` reserves the column for it); on focus set
     `Studies.active-ai-validated`; `study_screen.slint` shows « proposée par l'IA, validée le {} »
     beside « Source : … ».
-  - [ ] T6.3 Test: `Cell::validated_from_draft` yields `Freshness::Current` (the ★/◦ slot is never
+  - [x] T6.3 Test: `Cell::validated_from_draft` yields `Freshness::Current` (the ★/◦ slot is never
     shared); the view model sets `ai_validated` only when `ai_origin` is `Some`; an owner edit clears it.
-- [ ] **T7 — Study PDF (AC 13)** — `report/src/pdf.rs` (+ `report::form` if the laid-out rows need
+- [x] **T7 — Study PDF (AC 13)** — `report/src/pdf.rs` (+ `report::form` if the laid-out rows need
   the provenance)
-  - [ ] T7.1 `AI_SIGIL = "†"` after an AI-origin cell figure + the legend line once under the table
+  - [x] T7.1 `AI_SIGIL = "†"` after an AI-origin cell figure + the legend line once under the table
     that shows one; WinAnsi check (0x86). Test: a study without AI origin is byte-identical to main's
     output; one with an AI-origin sales cell prints « † » and the legend.
-- [ ] **T8 — Posture & glossary (AC 14, 16)** — `app/src/posture.rs`, `messages.rs`, `settings.slint`
-  - [ ] T8.1 New Rust consts (outcomes ×5, band/confirm/context texts if built in Rust) join
+- [x] **T8 — Posture & glossary (AC 14, 16)** — `app/src/posture.rs`, `messages.rs`, `settings.slint`
+  - [x] T8.1 New Rust consts (outcomes ×5, band/confirm/context texts if built in Rust) join
     `USER_FACING_MESSAGES` (delta stated). Slint `@tr` floor re-measured (tally).
-  - [ ] T8.2 Extend the AiFrame scan self-test (`Dialog.ai-text` outside a frame fails) and the Rust
+  - [x] T8.2 Extend the AiFrame scan self-test (`Dialog.ai-text` outside a frame fails) and the Rust
     guard allow-list (`to_dialog`).
-  - [ ] T8.3 Glossary « Proposition validée par l'utilisateur » (★ on a cell: a value an AI proposed
+  - [x] T8.3 Glossary « Proposition validée par l'utilisateur » (★ on a cell: a value an AI proposed
     that you validated; your next edit removes the mark).
-- [ ] **T9 — Verification** — gates + headless walk (below); story record with screenshot paths under
+- [x] **T9 — Verification** — gates + headless walk (below); story record with screenshot paths under
   the session scratchpad `v85b/`.
 
 ## Dev Notes
@@ -346,10 +346,87 @@ focused-cell line, glossary). Measure, tally in `posture.rs`, state the delta.
 
 ### Agent Model Used
 
+claude-opus-5-5 (dev-story, autonomous Epic 8 run).
+
 ### Debug Log References
+
+- Gates: `cargo test --workspace` 1392 passed / 0 failed / 2 ignored (the corpus generators);
+  `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean;
+  `cargo deny check` ok.
+- Headless walk (verify skill, Xvfb :96, temp HOME / XDG dirs, provider « none »): a copy of
+  `persistence/tests/corpus/v8.db` migrated to v9 by the app, seeded with the built `seed` example
+  (a separate empty config dir — the seed guard rightly refuses the dossier the temp config points
+  at). Real `~/.config/steadyinvest` and `~/.local/share/steadyinvest` checked unchanged (listing
+  and md5 of config.json before / after). Screenshots: session scratchpad `v85b/` 00–27.
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created (2026-09-28).
+- **What was verified on screen** (`v85b/`): the dialog of another study's draft with its context
+  line and Q5 focus on a `✓` target (02); validate → outcome notice, rail 7 → 6, the cell `?` +
+  AI origin (03); a stale judgment → ◦ band (04) → « Valider une proposition périmée ? » (05) →
+  « Annuler » back to the dialog (06) → confirmed, recorded stale (07); an option edited in the
+  `draft-edit` form (08) through the stale confirmation (09) → « Proposition validée (modifiée avant
+  validation). » (10); a note dialog (« — » | the text in the AiFrame, 11) and its edit INSIDE the
+  AiFrame, saved with Ctrl+Enter as the owner's note (12–13); a note validated as proposed keeps its
+  AI origin (14, dossier checked); the ★ in the 2022 EPS cell (17) and « Source : manuel  proposée
+  par l'IA, validée le 28/09/2026 » on focus (18); keyboard: Tab to a row with its focus ring (19),
+  Enter opens, Tab wraps inside the dialog, Esc cancels with nothing written (20–21), Enter on the
+  focused « Valider » validates; undo after close + reopen → « Validation annulée ; … » and
+  `validated_undone` (22), redo → `validated` (23); a draft decided by another writer while the
+  dialog is open → « Cette proposition a déjà été traitée ; … » inline, verbs withdrawn, inbox
+  re-read (24); a rejection (25); a protected dossier → the dialog opens with the ⊘ read-only band,
+  every verb disabled, « Annuler » focused (26); a target gone → only « Rejeter » / « Annuler » (27).
+- **Found and fixed during the walk:** (1) deciding from the inbox then going to the study (the
+  rail closes it, reopening reset the history) made the validation impossible to undo — closing a
+  study now PARKS its history and reopening that study hands it back (`park_undo`); (2) the focused
+  cell's provenance line widened the study form past the window — the gesture hints elide.
+- **Not verified on screen:** the number edit form with a millions field and a comma format (unit
+  test: prefill and read-back round trip), the PDF « † » (unit test — the export goes through the
+  real file portal, never driven headless), the study-deleted-since-listing refusal (covered by the
+  8.2b rail tests; the draft-decided race was driven instead).
+- **Deviations (owner-pending):**
+  1. Undo / redo outcomes use the study notice's existing `Source::Edit` (undo was already an Edit
+     source) — no new `Source::Draft`.
+  2. The edit form's field label reuses « Proposé » (no new string).
+  3. A closed study's undo history is parked and handed back on reopen (decision above — needed
+     for AC 9 with the rail's close path).
+  4. The other-study context line is also shown on a read-only dossier, where no decision is
+     possible (the band says so right above).
+  5. The Propositions notice stays until the next decision / row activation (F4 slot).
+- **Decisions of the story (owner-pending, unchanged):** 1–8 of « Decisions taken » above.
+- **Posture:** `USER_FACING_MESSAGES` 242 → 247 (+5 outcomes); decision labels 0 → 4 (new
+  inventory); `@tr` floor 1086 → 1105 (+19, tallied in `posture.rs`).
 
 ### File List
+
+- `app/src/main.rs` — wires the decision dialog.
+- `app/src/posture.rs` — message count, decision-label inventory, `@tr` floor, AiFrame scan
+  self-test (dialog fields), the AI-field guard admits `to_dialog`.
+- `app/src/state/drafts.rs` — `seen_fingerprint`, `DialogDraft`, `draft_for_dialog`,
+  `decision_study`, `draft_was_edited`.
+- `app/src/state/messages.rs` — five outcome messages.
+- `app/src/state/mod.rs` — the drafts module is no longer test-only.
+- `app/src/state/undo.rs` — `Stepped`; parked history (`park_undo`).
+- `app/src/state/tests.rs` — 8.5b state tests; `Stepped` in the undo tests.
+- `app/src/viewmodel/drafts.rs` — `dialog_view`, `DecisionView`, `option_wire_for_label`, the
+  dialog texts; `ai_fields(compact)`.
+- `app/src/viewmodel/form.rs` — `draft_validated` on a grid cell.
+- `app/src/wiring/dialog.rs` — route `"decision"`.
+- `app/src/wiring/drafts.rs` — the decision dialog (open, decide, stale confirmation, `to_dialog`).
+- `app/src/wiring/judgment.rs` — undo / redo outcomes over a draft step.
+- `app/src/wiring/studies.rs` — close parks the undo history; clears the focused-cell AI date.
+- `app/ui/state.slint` — `DraftDecision`, `Dialog.decision`, `Drafts` callbacks and notice,
+  `GridCellState.draft-validated`, `Studies.active-draft-validated`.
+- `app/ui/components/modal_dialog.slint` — the `"decision"` kind, the `"draft-edit"` form, the
+  stale confirmation.
+- `app/ui/components/editable_cell.slint` — the ★ mark.
+- `app/ui/screens/propositions.slint` — activatable rows, the notice slot.
+- `app/ui/screens/study_screen.slint` — « proposée par l'IA, validée le … »; the hints elide.
+- `app/ui/screens/settings.slint` — glossary « Proposition validée par l'utilisateur ».
+- `report/src/pdf.rs` — « † » and its note for AI-origin figures.
+
+### Change Log
+
+- 2026-09-28 — dev-story: implemented (5e4b1bf, 873f5fa, b9d65e5); headless walk fixes (155a221);
+  status → review.
