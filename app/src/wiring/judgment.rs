@@ -612,7 +612,11 @@ fn stepped_outcome(
             if let Some(study) = journal_state.borrow().get_study(id) {
                 push_form(ui, &journal_state.borrow(), &study, format);
             }
+            // G3: the focused cell's revealed facts follow the restored value.
+            refresh_active_facts(ui);
             if let state::Stepped::Draft(_) = stepped {
+                ui.global::<crate::Drafts>()
+                    .set_notice(slint::SharedString::new());
                 let text = if undo {
                     state::MSG_DRAFT_UNDONE
                 } else {
@@ -623,10 +627,48 @@ fn stepped_outcome(
             }
         }
         Err(message) if message == state::MSG_UNDO_DRAFT_STEP_DROPPED => {
+            // G3: the step left the history — the undo / redo controls follow.
+            if let Some(study) = journal_state.borrow().get_study(id) {
+                push_form(ui, &journal_state.borrow(), &study, format);
+            }
             crate::wiring::dialog::refuse(ui, &message);
             crate::wiring::drafts::push_drafts(ui, &journal_state.borrow());
         }
         Err(message) => study_notice::fail(ui, Source::Edit, &message),
+    }
+}
+
+/// Re-read the focused grid cell's revealed facts (source, date, pending provider value, AI-draft
+/// validation) from the rows just pushed (Story 8.5b G3): an undo / redo changes the cell under
+/// the cursor without a new focus event.
+fn refresh_active_facts(ui: &MainWindow) {
+    use slint::Model;
+    let studies = ui.global::<Studies>();
+    let (year, field) = (studies.get_active_year(), studies.get_active_field());
+    if year < 0 || field.is_empty() {
+        return;
+    }
+    let mut cells = Vec::new();
+    let pe = studies.get_pe_rows();
+    for i in 0..pe.row_count() {
+        if let Some(r) = pe.row_data(i) {
+            cells.extend([r.a, r.b, r.c, r.f]);
+        }
+    }
+    let mgmt = studies.get_mgmt_rows();
+    for i in 0..mgmt.row_count() {
+        if let Some(r) = mgmt.row_data(i) {
+            cells.extend(r.cells.iter());
+        }
+    }
+    if let Some(c) = cells
+        .into_iter()
+        .find(|c| c.year_index == year && c.field == field)
+    {
+        studies.set_active_source(c.source);
+        studies.set_active_timestamp(c.timestamp);
+        studies.set_active_pending(c.pending);
+        studies.set_active_draft_validated(c.draft_validated);
     }
 }
 

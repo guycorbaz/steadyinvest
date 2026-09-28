@@ -772,9 +772,10 @@ mod tests {
         // the target « {} · nouvelle note »), its edit form (title, sentence, « Proposé » ×2, the
         // target, « Note »), the stale confirmation (title, verb), the focused cell's « proposée par
         // l'IA, validée le {} » and the glossary's « Proposition validée par l'utilisateur » term
-        // and definition: 1086 + 19 = 1105, measured.
+        // and definition: 1086 + 19 = 1105, measured. Its G3 review keeps « Actuel » in the edit
+        // form: 1105 + 1 = 1106, measured.
         assert!(
-            total >= 1105,
+            total >= 1106,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

@@ -91,6 +91,11 @@ component DraftRowActivator inherits Rectangle {
     in property <DraftRow> draft;
     property <bool> active: (root.draft.kind == "cell" || root.draft.kind == "judgment" || root.draft.kind == "note")
         && root.draft.state != 3;
+    // G3 F7: back from its decision dialog, the row takes the focus again.
+    property <int> return-request: Drafts.return-request;
+    changed return-request => {
+        if (root.active && Drafts.return-row == root.draft.id) { fs.focus(); }
+    }
     border-radius: Tokens.radius;
     border-width: fs.has-focus ? Tokens.focus-border : 0px;
     border-color: Tokens.focus;
@@ -119,6 +124,8 @@ component DraftRowActivator inherits Rectangle {
         enabled: root.active;
         focus-on-click: false;
         key-pressed(event) => {
+            // A held key's auto-repeat never re-opens (G3).
+            if (event.repeat && (event.text == Key.Return || event.text == " ")) { return accept; }
             if (root.active && (event.text == Key.Return || event.text == " ")) {
                 Drafts.open-draft(root.draft.id);
                 return accept;
@@ -203,16 +210,16 @@ export component PropositionsScreen inherits Rectangle {
                         ? @tr("Les propositions n'ont pas pu être lues ; la liste est indisponible ({}).", Drafts.failure-cause)
                         : @tr("Les propositions n'ont pas pu être lues ; la liste est indisponible.");
                 }
+                if !Drafts.read-failed && Drafts.read-only: StatusBand {
+                    icon: "◦";
+                    text: @tr("Dossier en lecture seule : les propositions sont consultables, aucune décision n'est possible.");
+                }
                 // Story 8.5b: a decision's outcome (the F4 slot).
                 if Drafts.notice != "": Text {
                     text: Drafts.notice;
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     wrap: word-wrap;
-                }
-                if !Drafts.read-failed && Drafts.read-only: StatusBand {
-                    icon: "◦";
-                    text: @tr("Dossier en lecture seule : les propositions sont consultables, aucune décision n'est possible.");
                 }
                 if !Drafts.read-failed && Drafts.unfiltered-count == 0: Text {
                     text: @tr("Aucune proposition à traiter. Une IA enregistrée comme client MCP peut en déposer ici ; rien n'est appliqué sans votre validation.");

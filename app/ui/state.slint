@@ -1781,4 +1781,8 @@ export global Drafts {
     callback confirm-stale() -> bool;
     // A decision's outcome (the F4 slot of the Propositions card).
     in-out property <string> notice;
+    // G3 F7: the row whose decision dialog is open — the focus returns to it when the dialog closes
+    // (bumping `return-request`).
+    in-out property <string> return-row;
+    in-out property <int> return-request;
 }

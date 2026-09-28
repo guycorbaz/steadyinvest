@@ -211,6 +211,8 @@ export component ModalDialog inherits Rectangle {
     property <int> first-request;
     property <int> cancel-request;
     property <int> commit-request;
+    // Story 8.5b (G3 F8): « Rejeter » — the decision's last enabled verb on a target gone.
+    property <int> reject-request;
 
     function can-submit() -> bool {
         if (Holdings.read-only) { return false; }
@@ -327,7 +329,8 @@ export component ModalDialog inherits Rectangle {
     }
 
     function is-note-form() -> bool {
-        return Dialog.form-id == "note-add" || Dialog.form-id == "note-edit";
+        return Dialog.form-id == "note-add" || Dialog.form-id == "note-edit"
+            || (Dialog.form-id == "draft-edit" && Dialog.decision.edit-kind == "note");
     }
 
     // ── Story 8.5b — the decision dialog. ──
@@ -420,7 +423,10 @@ export component ModalDialog inherits Rectangle {
         } else if (Dialog.kind == "confirm") {
             if (root.confirm-enabled()) { root.commit-request += 1; } else { root.cancel-request += 1; }
         } else if (Dialog.kind == "decision") {
-            if (root.can-validate() && !Holdings.read-only) { root.commit-request += 1; } else { root.cancel-request += 1; }
+            if (Holdings.read-only) { root.cancel-request += 1; }
+            else if (root.can-validate()) { root.commit-request += 1; }
+            else if (Dialog.decision.live) { root.reject-request += 1; }
+            else { root.cancel-request += 1; }
         } else {
             if (root.can-submit()) { root.commit-request += 1; } else { root.cancel-request += 1; }
         }
@@ -620,13 +626,19 @@ export component ModalDialog inherits Rectangle {
                         color: Tokens.text-mid;
                         font-size: Tokens.font-caption;
                     }
-                    // The AI's comment (and a proposed note's text) — whole, framed.
-                    AiFrame {
-                        ai-client: Dialog.decision.ai-client;
-                        ai-model: Dialog.decision.ai-model;
-                        ai-lead: Dialog.decision.ai-lead;
-                        ai-text: Dialog.decision.ai-text;
-                        submitted: Dialog.decision.submitted;
+                    // The AI's comment (and a proposed note's text) — whole, framed; a long text
+                    // scrolls inside a bounded box so the verbs stay on screen (G3 EC-3).
+                    Flickable {
+                        height: min(decision-frame.preferred-height, 320px);
+                        viewport-height: decision-frame.preferred-height;
+                        decision-frame := AiFrame {
+                            width: parent.width;
+                            ai-client: Dialog.decision.ai-client;
+                            ai-model: Dialog.decision.ai-model;
+                            ai-lead: Dialog.decision.ai-lead;
+                            ai-text: Dialog.decision.ai-text;
+                            submitted: Dialog.decision.submitted;
+                        }
                     }
                     // A refusal of this dialog's own verbs: inline, the dialog kept.
                     if Dialog.field-error != "": StatusBand {
@@ -650,11 +662,14 @@ export component ModalDialog inherits Rectangle {
                         }
                         if Dialog.decision.live: ActionButton {
                             label: @tr("Rejeter");
+                            guard-reflex: true;
+                            focus-request: root.reject-request;
                             enabled: !Holdings.read-only;
                             clicked => { root.decide("reject"); }
                         }
                         if root.can-validate(): ActionButton {
                             label: @tr("Valider");
+                            guard-reflex: true;
                             enabled: !Holdings.read-only;
                             autofocus: !Dialog.decision.focus-cancel && !Holdings.read-only;
                             focus-request: root.commit-request;
@@ -1046,6 +1061,32 @@ export component ModalDialog inherits Rectangle {
                             font-weight: Tokens.weight-medium;
                             wrap: word-wrap;
                         }
+                        // G3 F9: the edit keeps what the decision showed — the other-study line, the
+                        // stale band, the current value.
+                        if Dialog.decision.context != "": Text {
+                            text: Dialog.decision.context;
+                            color: Tokens.text-mid;
+                            font-size: Tokens.font-caption;
+                            wrap: word-wrap;
+                        }
+                        if Dialog.decision.state == 1: StatusBand {
+                            icon: Tokens.stale-dot;
+                            text: Dialog.decision.band;
+                        }
+                        if Dialog.decision.edit-kind != "note": VerticalLayout {
+                            spacing: Tokens.space-4;
+                            Text {
+                                text: @tr("Actuel");
+                                color: Tokens.text-mid;
+                                font-size: Tokens.font-caption;
+                            }
+                            Text {
+                                text: Dialog.decision.current;
+                                color: Tokens.text-high;
+                                font-family: Tokens.font-numeric;
+                                font-size: Tokens.font-body;
+                            }
+                        }
                         if Dialog.decision.edit-kind == "number": LabeledField {
                             label: @tr("Proposé");
                             text <=> Dialog.draft-text;
@@ -1060,7 +1101,12 @@ export component ModalDialog inherits Rectangle {
                             autofocus: true;
                             focus-request: root.first-request;
                         }
-                        AiFrame {
+                        // G3 EC-3: a long AI text scrolls inside a bounded box; the buttons stay put.
+                        Flickable {
+                            height: min(edit-frame.preferred-height, 360px);
+                            viewport-height: edit-frame.preferred-height;
+                            edit-frame := AiFrame {
+                            width: parent.width;
                             ai-client: Dialog.decision.ai-client;
                             ai-model: Dialog.decision.ai-model;
                             ai-text: Dialog.decision.ai-text;
@@ -1069,9 +1115,16 @@ export component ModalDialog inherits Rectangle {
                                 label: @tr("Note");
                                 autofocus: true;
                                 focus-request: root.first-request;
-                                init => { self.text = Dialog.decision.ai-lead; }
+                                // The draft and its seed start as the proposed text (G3: an untouched save
+                                // is the proposal, never an « empty » note; the abandon guard compares).
+                                init => {
+                                    self.text = Dialog.decision.ai-lead;
+                                    Dialog.draft-text = self.text;
+                                    Dialog.seed-text = self.text;
+                                }
                                 changed text => { Dialog.draft-text = self.text; }
                                 accepted => { root.submit(); }
+                            }
                             }
                         }
                     }

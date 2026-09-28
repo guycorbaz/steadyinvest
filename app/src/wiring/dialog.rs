@@ -130,7 +130,16 @@ pub(crate) fn wire_dialog(ui: &MainWindow) {
                 body,
                 target,
             }) => show_confirm(&ui, &action, &body, &target),
-            None => {}
+            None => {
+                // Story 8.5b (G3 F7): the overlay is free — the focus goes back to the inbox row
+                // whose decision dialog just closed (if it is still listed).
+                let drafts = ui.global::<crate::Drafts>();
+                if !drafts.get_return_row().is_empty() {
+                    // The row reads `return-row` when the bump reaches it (after this callback),
+                    // so the id stays; the next row activation replaces it.
+                    drafts.set_return_request(drafts.get_return_request() + 1);
+                }
+            }
         }
     });
 }

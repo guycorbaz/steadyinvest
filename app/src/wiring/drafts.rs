@@ -183,6 +183,7 @@ fn show_decision(
 /// the reason (the draft gone or decided meanwhile, a read failure) and the inbox re-read.
 pub(crate) fn open_decision(ui: &MainWindow, state: &JournalState, id: Uuid) {
     ui.global::<Drafts>().set_notice(SharedString::new());
+    ui.global::<Drafts>().set_return_row(id.to_string().into());
     if let Err(message) = show_decision(ui, state, id, "") {
         dialog::refuse(ui, &message);
         push_drafts(ui, state);
@@ -192,11 +193,17 @@ pub(crate) fn open_decision(ui: &MainWindow, state: &JournalState, id: Uuid) {
 /// After a refused decision: show the draft again with the refusal (its values re-read), or — when
 /// it can no longer be decided (gone, decided elsewhere) — keep the refusal and only « Annuler ».
 fn after_refusal(ui: &MainWindow, state: &JournalState, id: Uuid) {
-    let error = ui.global::<Dialog>().get_field_error().to_string();
-    // The dialog shows again only while its own kind is up (the refusal landed inline).
-    let kind = ui.global::<Dialog>().get_kind();
-    if kind.as_str() == "decision" && show_decision(ui, state, id, &error).is_err() {
-        let dialog = ui.global::<Dialog>();
+    let dialog = ui.global::<Dialog>();
+    let error = dialog.get_field_error().to_string();
+    // The refusal landed inline in the decision OR in its edit form (G3): either way the draft is
+    // read afresh — its freshness, the fingerprint shown, whether it is still decidable — and the
+    // decision view shows again with the refusal, never the stale edit form looping on it.
+    let kind = dialog.get_kind();
+    let in_edit = kind.as_str() == "form" && dialog.get_form_id().as_str() == "draft-edit";
+    if (kind.as_str() == "decision" || in_edit) && show_decision(ui, state, id, &error).is_err() {
+        dialog.set_form_id(SharedString::new());
+        dialog.set_field_error(error.as_str().into());
+        dialog.set_kind("decision".into());
         let mut shown = dialog.get_decision();
         shown.live = false;
         dialog.set_decision(shown);
@@ -205,18 +212,28 @@ fn after_refusal(ui: &MainWindow, state: &JournalState, id: Uuid) {
     push_drafts(ui, state);
 }
 
-/// Decide the open draft (Story 8.5b): open its study first when it is not the open one (arch A8),
-/// decide, then say the outcome, re-render the open study and re-read the inbox. `false` on a
-/// refusal (raised inline — the dialog's own gesture).
+/// Decide the open draft (Story 8.5b): the checks that need no open study run first (G3 — a refused
+/// decision never switches the open study for nothing); then its study is opened when it is not
+/// the open one (arch A8), the draft decided, the outcome said, the open study re-rendered and the
+/// inbox re-read. A decision refused AFTER that open (a race) reopens the previous study with its
+/// undo history. `false` on a refusal (raised inline — the dialog's own gesture).
 fn decide_open(ui: &MainWindow, s: &Rc<RefCell<JournalState>>, decision: Decision) -> bool {
     let Some(draft) = DECISION.with(|d| d.borrow().as_ref().map(|o| o.draft.clone())) else {
         return false;
     };
     let id = draft.draft.draft_id;
+    let precheck = s.borrow().precheck_decision(&draft.draft, &decision);
+    if let Err(message) = precheck {
+        dialog::refuse(ui, &message);
+        after_refusal(ui, &s.borrow(), id);
+        return false;
+    }
+    let previous = s.borrow().decision_study();
+    let mut switched: Option<state::UndoHistory> = None;
     if let Some(study_id) = draft.draft.study_id
-        && s.borrow().decision_study() != Some(study_id)
-        && draft.freshness != DraftFreshness::TargetGone(state::GoneReason::StudyDeleted)
+        && previous != Some(study_id)
     {
+        switched = Some(s.borrow_mut().take_undo());
         // The ordinary open path: undo history reset to that study, form pushed; the screen stays.
         ui.global::<Studies>()
             .invoke_open_study(study_id.to_string().into());
@@ -246,6 +263,17 @@ fn decide_open(ui: &MainWindow, s: &Rc<RefCell<JournalState>>, decision: Decisio
             true
         }
         Err(message) => {
+            if let Some(history) = switched {
+                // Nothing was written: back to the study that was open, with its history.
+                match previous {
+                    Some(prev) => {
+                        ui.global::<Studies>()
+                            .invoke_open_study(prev.to_string().into());
+                        s.borrow_mut().put_back_undo(history);
+                    }
+                    None => ui.global::<Studies>().invoke_close_study(),
+                }
+            }
             dialog::refuse(ui, &message);
             after_refusal(ui, &s.borrow(), id);
             false
@@ -458,6 +486,8 @@ pub(crate) fn reset_filters(ui: &MainWindow) {
 /// `refresh_studies` also pushes).
 pub(crate) fn forget_dossier(ui: &MainWindow) {
     DECISION.with(|d| *d.borrow_mut() = None);
+    // G3: an outcome said of the previous dossier is not this one's.
+    ui.global::<Drafts>().set_notice(SharedString::new());
     INBOX.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.poll.reset();
@@ -635,21 +665,7 @@ pub(crate) fn wire_decisions(ui: &MainWindow, s: &Session) {
                     }
                 },
             };
-            let written = decide_open(&ui, &journal_state, decision);
-            if !written && back == "form" {
-                // A refusal of the edit shows the decision again with its new values (AC 7).
-                let kind = ui.global::<Dialog>().get_kind();
-                if kind.as_str() == "form" {
-                    let error = ui.global::<Dialog>().get_field_error().to_string();
-                    let id = draft.draft.draft_id;
-                    if show_decision(&ui, &journal_state.borrow(), id, &error).is_err() {
-                        let mut shown = ui.global::<Dialog>().get_decision();
-                        shown.live = false;
-                        ui.global::<Dialog>().set_decision(shown);
-                    }
-                }
-            }
-            written
+            decide_open(&ui, &journal_state, decision)
         });
     }
 }

@@ -349,11 +349,51 @@ fn target_and_values(
         })?),
         None => None,
     };
+    let current_text = value_display(field, current, format);
+    let proposed_text = value_display(field, proposed, format);
     Ok((
         target_text,
-        value_display(field, current, format),
-        value_display(field, proposed, format),
+        current_text.clone(),
+        same_decimals(&current_text, &proposed_text, format),
     ))
+}
+
+/// The proposed figure spelled with at least the current one's decimals (G3 F12): « 2,10 → 2,50 »,
+/// never « 2,10 → 2,5 » — the same value, read side by side. Only between two plain figures.
+fn same_decimals(current: &str, proposed: &str, format: NumberFormat) -> String {
+    let sep = match format {
+        NumberFormat::Comma => ',',
+        NumberFormat::Point => '.',
+    };
+    let figure = |t: &str| {
+        !t.is_empty()
+            && t.chars().any(|c| c.is_ascii_digit())
+            && t.chars().all(|c| {
+                c.is_ascii_digit()
+                    || c == ','
+                    || c == '.'
+                    || c == '-'
+                    || c == '\u{2212}'
+                    || c == '\u{a0}'
+                    || c == '\u{202f}'
+                    || c == ' '
+                    || c == '\''
+            })
+    };
+    if !figure(current) || !figure(proposed) {
+        return proposed.to_string();
+    }
+    let decimals = |t: &str| t.rsplit_once(sep).map_or(0, |(_, d)| d.len());
+    let (want, have) = (decimals(current), decimals(proposed));
+    if have >= want {
+        return proposed.to_string();
+    }
+    let mut out = proposed.to_string();
+    if have == 0 {
+        out.push(sep);
+    }
+    out.extend(std::iter::repeat_n('0', want - have));
+    out
 }
 
 /// Build « À traiter »: PENDING drafts only, grouped by study (header « {TICKER} ({DEV}) »,
@@ -1506,5 +1546,23 @@ mod tests {
             v.edit_prefill.is_empty(),
             "a note's prefill is AI text (ai_lead)"
         );
+    }
+
+    #[test]
+    fn a_proposed_figure_takes_the_current_ones_decimals() {
+        let comma = NumberFormat::Comma;
+        assert_eq!(same_decimals("2,10", "2,5", comma), "2,50");
+        assert_eq!(same_decimals("2,10", "3", comma), "3,00");
+        assert_eq!(same_decimals("2,1", "2,555", comma), "2,555");
+        assert_eq!(
+            same_decimals("1\u{a0}234,5", "1\u{a0}300", comma),
+            "1\u{a0}300,0"
+        );
+        assert_eq!(same_decimals("—", "2,5", comma), "2,5");
+        assert_eq!(
+            same_decimals("PER bas × BPA bas", "Plus bas sévère récent", comma),
+            "Plus bas sévère récent"
+        );
+        assert_eq!(same_decimals("2.10", "2.5", NumberFormat::Point), "2.50");
     }
 }
