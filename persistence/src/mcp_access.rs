@@ -131,6 +131,37 @@ pub struct McpSnapshot {
     pub study: Study,
 }
 
+/// One read of [`McpAccess::read_identified`] (Story 8.4 G3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpReadRequest {
+    Studies(Page),
+    Study(Uuid),
+    History(Uuid, Page),
+    Drafts(DraftFilter, Page),
+    /// One draft of the record, by id.
+    Draft(Uuid),
+}
+
+/// The result of a [`McpReadRequest`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum McpRead {
+    Studies(Paged<StudySummary>),
+    Study(Box<McpStudyRead>),
+    History(Paged<McpSnapshot>),
+    Drafts(Paged<DraftRecord>),
+    Draft(Option<Box<DraftRecord>>),
+    /// A study-scoped request named a study the dossier does not hold.
+    StudyMissing(Uuid),
+}
+
+/// A recorded submission: the draft's id and its STORED status — `pending` for a new draft; for
+/// the same proposition sent again, whatever the owner has decided since (Story 8.4 G3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recorded {
+    pub id: Uuid,
+    pub status: DraftStatus,
+}
+
 /// Which drafts a [`McpAccess::list_drafts`] call returns (both filters optional).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DraftFilter {
@@ -168,6 +199,9 @@ pub const MAX_NOTE_CHARS: usize = 10_000;
 pub const MAX_COMPANY_NAME_CHARS: usize = 200;
 /// The longest client or model name of a draft's origin, in characters.
 pub const MAX_ORIGIN_CHARS: usize = 100;
+/// The longest proposed value text, in characters (Story 8.4 G3: checked before any parse, so a
+/// refusal never echoes a huge text).
+pub const MAX_PROPOSED_VALUE_CHARS: usize = 100;
 
 /// Why the MCP access surface cannot use a dossier at all (nothing was read or written). The MCP
 /// server renders each by its [`code`](McpUnavailable::code) (Story 8.0 §3.3).
@@ -283,7 +317,7 @@ pub enum SubmissionRefusal {
     /// The client or the model is blank (NFR-A4).
     MissingOrigin,
     /// A text is longer than its cap (`field` = `comment`, `note_text`, `company_name`,
-    /// `origin_client`, `origin_model`).
+    /// `origin_client`, `origin_model`, `proposed_value`).
     TextTooLong {
         field: &'static str,
         max: usize,
@@ -358,6 +392,8 @@ impl SubmissionRefusal {
 pub enum SubmitError {
     Refused(SubmissionRefusal),
     Failed(Error),
+    /// The caller cancelled the call before the insert (Story 8.4 G3): nothing was written.
+    Cancelled,
 }
 
 impl SubmitError {
@@ -367,6 +403,7 @@ impl SubmitError {
         match self {
             SubmitError::Refused(r) => Some(r.code()),
             SubmitError::Failed(e) => e.mcp_code(),
+            SubmitError::Cancelled => Some("cancelled"),
         }
     }
 }
@@ -834,109 +871,58 @@ impl McpAccess {
 
     /// One page of the studies, ordered by `(created_at, id)`, with their total count.
     pub fn list_studies(&self, page: Page) -> Result<Paged<StudySummary>> {
-        let bounded = page.bounded();
-        self.read(|conn| {
-            let total: i64 = conn.query_row("SELECT COUNT(*) FROM studies", [], |r| r.get(0))?;
-            Ok(Paged {
-                items: list_studies_in(conn, Some(bounded))?,
-                offset: bounded.1,
-                total: u64::try_from(total).unwrap_or(0),
-            })
-        })
+        self.read(|conn| query_studies(conn, page))
     }
 
     /// One study (FR69): the whole contract study and its status, `None` when the dossier holds
     /// no such study.
     pub fn read_study(&self, id: Uuid) -> Result<Option<McpStudyRead>> {
-        self.read(|conn| {
-            let Some(study) = read_study_in(conn, id)? else {
-                return Ok(None);
-            };
-            let status = study_status_in(conn, id)?.unwrap_or_else(|| "active".to_string());
-            Ok(Some(McpStudyRead { study, status }))
-        })
+        self.read(|conn| query_study(conn, id))
     }
 
     /// One page of a study's FR51 history, newest first (each entry the full study state).
     pub fn read_history(&self, study_id: Uuid, page: Page) -> Result<Paged<McpSnapshot>> {
-        let (limit, offset) = page.bounded();
-        self.read(|conn| {
-            let total: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",
-                rusqlite::params![study_id.to_string()],
-                |r| r.get(0),
-            )?;
-            let mut stmt = conn.prepare(
-                "SELECT id, created_at, schema_version, payload FROM judgments
-                 WHERE study_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT ?2 OFFSET ?3",
-            )?;
-            let rows = stmt.query_map(
-                rusqlite::params![
-                    study_id.to_string(),
-                    i64::from(limit),
-                    i64::try_from(offset).unwrap_or(i64::MAX)
-                ],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, i64>(2)?,
-                        r.get::<_, String>(3)?,
-                    ))
-                },
-            )?;
-            let mut items = Vec::new();
-            for row in rows {
-                let (id, created_at, schema_version, payload) = row?;
-                items.push(McpSnapshot {
-                    id: crate::util::parse_uuid(&id, "judgments.id")?,
-                    created_at: Timestamp(created_at),
-                    study: parse_study_row(schema_version, &payload)?,
-                });
-            }
-            Ok(Paged {
-                items,
-                offset,
-                total: u64::try_from(total).unwrap_or(0),
-            })
-        })
+        self.read(|conn| query_history(conn, study_id, page))
     }
 
     /// One page of the drafts record (FR77), filtered, ordered by `(created_at, id)`.
     pub fn list_drafts(&self, filter: DraftFilter, page: Page) -> Result<Paged<DraftRecord>> {
-        let (limit, offset) = page.bounded();
-        let study = filter.study_id.map(|s| s.to_string());
-        let status = filter.status.map(DraftStatus::as_str);
+        self.read(|conn| query_drafts(conn, filter, page))
+    }
+
+    /// One read AND the identity of the dossier it read, in the SAME read transaction (Story 8.4
+    /// G3 — a response names exactly the dossier its data came from). A study-scoped request on a
+    /// study the dossier does not hold answers [`McpRead::StudyMissing`].
+    pub fn read_identified(&self, request: McpReadRequest) -> Result<(DossierIdentity, McpRead)> {
         self.read(|conn| {
-            let total: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM ai_drafts
-                 WHERE (?1 IS NULL OR study_id = ?1) AND (?2 IS NULL OR status = ?2)",
-                rusqlite::params![study, status],
-                |r| r.get(0),
-            )?;
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {DRAFT_COLUMNS} FROM ai_drafts
-                 WHERE (?1 IS NULL OR study_id = ?1) AND (?2 IS NULL OR status = ?2)
-                 ORDER BY created_at, id LIMIT ?3 OFFSET ?4"
-            ))?;
-            let rows = stmt.query_map(
-                rusqlite::params![
-                    study,
-                    status,
-                    i64::from(limit),
-                    i64::try_from(offset).unwrap_or(i64::MAX)
-                ],
-                row_tuple,
-            )?;
-            let mut items = Vec::new();
-            for row in rows {
-                items.push(record_from_row(row?)?);
-            }
-            Ok(Paged {
-                items,
-                offset,
-                total: u64::try_from(total).unwrap_or(0),
-            })
+            let identity = DossierIdentity {
+                journal_id: read_journal_id(conn)?,
+                path: self.path.clone(),
+            };
+            let study_known =
+                |id: Uuid| -> Result<bool> { Ok(study_status_in(conn, id)?.is_some()) };
+            let out = match request {
+                McpReadRequest::Studies(page) => McpRead::Studies(query_studies(conn, page)?),
+                McpReadRequest::Study(id) => match query_study(conn, id)? {
+                    Some(read) => McpRead::Study(Box::new(read)),
+                    None => McpRead::StudyMissing(id),
+                },
+                McpReadRequest::History(id, page) => {
+                    if study_known(id)? {
+                        McpRead::History(query_history(conn, id, page)?)
+                    } else {
+                        McpRead::StudyMissing(id)
+                    }
+                }
+                McpReadRequest::Drafts(filter, page) => match filter.study_id {
+                    Some(id) if !study_known(id)? => McpRead::StudyMissing(id),
+                    _ => McpRead::Drafts(query_drafts(conn, filter, page)?),
+                },
+                McpReadRequest::Draft(id) => {
+                    McpRead::Draft(crate::drafts::read_draft_in(conn, id)?.map(Box::new))
+                }
+            };
+            Ok((identity, out))
         })
     }
 
@@ -944,12 +930,24 @@ impl McpAccess {
     /// transaction; a refused draft writes nothing. Returns the draft's id (the caller's). The same
     /// draft submitted again (same id, same content) returns its id and writes nothing.
     pub fn submit_draft(&self, sub: &DraftSubmission) -> std::result::Result<Uuid, SubmitError> {
+        self.submit_draft_recorded(sub, &|| false).map(|r| r.id)
+    }
+
+    /// [`Self::submit_draft`] returning the STORED status too (a retry of a decided draft answers
+    /// its decision), and checking `cancelled` right before the insert (Story 8.4 G3): a cancelled
+    /// call writes nothing ([`SubmitError::Cancelled`]).
+    pub fn submit_draft_recorded(
+        &self,
+        sub: &DraftSubmission,
+        cancelled: &dyn Fn() -> bool,
+    ) -> std::result::Result<Recorded, SubmitError> {
         self.submit_draft_with(
             sub,
             SubmitHooks {
                 after_open: &mut || {},
                 in_transaction: &mut || {},
             },
+            cancelled,
         )
     }
 
@@ -958,7 +956,8 @@ impl McpAccess {
         &self,
         sub: &DraftSubmission,
         hooks: SubmitHooks<'_>,
-    ) -> std::result::Result<Uuid, SubmitError> {
+        cancelled: &dyn Fn() -> bool,
+    ) -> std::result::Result<Recorded, SubmitError> {
         check_shape(sub)?;
         // Kept whole: the connection drops before the identity (Windows: an open handle).
         let mut gated = self
@@ -969,19 +968,22 @@ impl McpAccess {
                 .conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|e| SubmitError::Failed(map_sqlite(e, &gated.denials)))?;
-            match self.check_and_insert(&tx, sub, &gated.opened, hooks.in_transaction) {
-                Ok(()) => tx
+            match self.check_and_insert(&tx, sub, &gated.opened, hooks.in_transaction, cancelled) {
+                Ok(status) => tx
                     .commit()
+                    .map(|()| status)
                     .map_err(|e| SubmitError::Failed(map_sqlite(e, &gated.denials))),
                 Err(e) => Err(e), // the transaction rolls back on drop: nothing written
             }
         };
-        outcome.map(|()| sub.id).map_err(|e| match e {
-            SubmitError::Failed(err) => {
-                SubmitError::Failed(self.name_busy(lift(err, &gated.denials)))
-            }
-            other => other,
-        })
+        outcome
+            .map(|status| Recorded { id: sub.id, status })
+            .map_err(|e| match e {
+                SubmitError::Failed(err) => {
+                    SubmitError::Failed(self.name_busy(lift(err, &gated.denials)))
+                }
+                other => other,
+            })
     }
 
     /// The submission checks, in the story's order (T5.3), then the insert — inside the caller's
@@ -992,7 +994,8 @@ impl McpAccess {
         sub: &DraftSubmission,
         opened: &FileId,
         in_transaction: &mut dyn FnMut(),
-    ) -> std::result::Result<(), SubmitError> {
+        cancelled: &dyn Fn() -> bool,
+    ) -> std::result::Result<DraftStatus, SubmitError> {
         // 1. A11 — still the file this call opened (a restore renames another over it).
         if !self.still_the_opened_file(tx, opened)? {
             return Err(SubmissionRefusal::DossierReplaced.into());
@@ -1027,7 +1030,7 @@ impl McpAccess {
         // 4. The same id again: the same draft is idempotent, another one is refused.
         if let Some(existing) = existing_draft(tx, sub.id)? {
             return if same_submission(&existing, sub) {
-                Ok(())
+                Ok(existing.status)
             } else {
                 Err(SubmissionRefusal::DraftIdConflict { id: sub.id }.into())
             };
@@ -1052,6 +1055,9 @@ impl McpAccess {
         check_payload(&payload, sub.kind).map_err(|problem| Error::McpInvalidCall {
             detail: format!("the built payload does not fit its kind: {problem}"),
         })?;
+        if cancelled() {
+            return Err(SubmitError::Cancelled);
+        }
         tx.execute(
             "INSERT INTO ai_drafts
                  (id, kind, study_id, security_ticker, native_currency, status, created_at,
@@ -1072,7 +1078,7 @@ impl McpAccess {
             ],
         )
         .map_err(Error::Sqlite)?;
-        Ok(())
+        Ok(DraftStatus::Pending)
     }
 
     /// A draft study (D2, D8): identifier rule, name cap, then the two duplicate checks.
@@ -1254,6 +1260,7 @@ impl McpAccess {
             .proposed_value
             .clone()
             .ok_or_else(|| invalid("a cell or judgment draft carries its proposed value"))?;
+        within("proposed_value", &text, MAX_PROPOSED_VALUE_CHARS)?;
         if let Err(problem) = field.parse_value(&text) {
             return Err(match problem {
                 DraftValueProblem::NotANumber => SubmissionRefusal::ValueUnparsable { text, field },
@@ -1405,6 +1412,105 @@ fn check_shape(sub: &DraftSubmission) -> std::result::Result<(), SubmitError> {
 }
 
 /// The stored row of draft `id`, if any.
+/// One page of study summaries (with the total).
+fn query_studies(conn: &Connection, page: Page) -> Result<Paged<StudySummary>> {
+    let bounded = page.bounded();
+    let total: i64 = conn.query_row("SELECT COUNT(*) FROM studies", [], |r| r.get(0))?;
+    Ok(Paged {
+        items: list_studies_in(conn, Some(bounded))?,
+        offset: bounded.1,
+        total: u64::try_from(total).unwrap_or(0),
+    })
+}
+
+/// One study and its status.
+fn query_study(conn: &Connection, id: Uuid) -> Result<Option<McpStudyRead>> {
+    let Some(study) = read_study_in(conn, id)? else {
+        return Ok(None);
+    };
+    let status = study_status_in(conn, id)?.unwrap_or_else(|| "active".to_string());
+    Ok(Some(McpStudyRead { study, status }))
+}
+
+/// One page of a study's FR51 history, newest first.
+fn query_history(conn: &Connection, study_id: Uuid, page: Page) -> Result<Paged<McpSnapshot>> {
+    let (limit, offset) = page.bounded();
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM judgments WHERE study_id = ?1",
+        rusqlite::params![study_id.to_string()],
+        |r| r.get(0),
+    )?;
+    let mut stmt = conn.prepare(
+        "SELECT id, created_at, schema_version, payload FROM judgments
+         WHERE study_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT ?2 OFFSET ?3",
+    )?;
+    let rows = stmt.query_map(
+        rusqlite::params![
+            study_id.to_string(),
+            i64::from(limit),
+            i64::try_from(offset).unwrap_or(i64::MAX)
+        ],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        },
+    )?;
+    let mut items = Vec::new();
+    for row in rows {
+        let (id, created_at, schema_version, payload) = row?;
+        items.push(McpSnapshot {
+            id: crate::util::parse_uuid(&id, "judgments.id")?,
+            created_at: Timestamp(created_at),
+            study: parse_study_row(schema_version, &payload)?,
+        });
+    }
+    Ok(Paged {
+        items,
+        offset,
+        total: u64::try_from(total).unwrap_or(0),
+    })
+}
+
+/// One page of the drafts record, filtered.
+fn query_drafts(conn: &Connection, filter: DraftFilter, page: Page) -> Result<Paged<DraftRecord>> {
+    let (limit, offset) = page.bounded();
+    let study = filter.study_id.map(|s| s.to_string());
+    let status = filter.status.map(DraftStatus::as_str);
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ai_drafts
+         WHERE (?1 IS NULL OR study_id = ?1) AND (?2 IS NULL OR status = ?2)",
+        rusqlite::params![study, status],
+        |r| r.get(0),
+    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {DRAFT_COLUMNS} FROM ai_drafts
+         WHERE (?1 IS NULL OR study_id = ?1) AND (?2 IS NULL OR status = ?2)
+         ORDER BY created_at, id LIMIT ?3 OFFSET ?4"
+    ))?;
+    let rows = stmt.query_map(
+        rusqlite::params![
+            study,
+            status,
+            i64::from(limit),
+            i64::try_from(offset).unwrap_or(i64::MAX)
+        ],
+        row_tuple,
+    )?;
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(record_from_row(row?)?);
+    }
+    Ok(Paged {
+        items,
+        offset,
+        total: u64::try_from(total).unwrap_or(0),
+    })
+}
+
 fn existing_draft(tx: &Connection, id: Uuid) -> Result<Option<DraftRecord>> {
     let row = tx
         .query_row(
@@ -1417,7 +1523,8 @@ fn existing_draft(tx: &Connection, id: Uuid) -> Result<Option<DraftRecord>> {
 }
 
 /// Whether a stored draft IS this submission (a re-submission after a lost reply): the same kind,
-/// study, comment, origin, time and proposal. The ticker of a note / value draft is the stored
+/// study, comment, origin and proposal. The creation time is NOT compared (Story 8.4 G3): it is
+/// the server's clock at each attempt, so a retry never repeats it; the stored one stands. The ticker of a note / value draft is the stored
 /// study's and the base fingerprint is computed at insert, so neither is compared.
 fn same_submission(existing: &DraftRecord, sub: &DraftSubmission) -> bool {
     let Ok(payload) = serde_json::from_str::<DraftPayload>(&existing.payload) else {
@@ -1436,7 +1543,6 @@ fn same_submission(existing: &DraftRecord, sub: &DraftSubmission) -> bool {
         && existing.comment == sub.comment
         && existing.origin_client == sub.origin.client
         && existing.origin_model == sub.origin.model
-        && existing.created_at == sub.created_at
         && payload.target == sub.target
         && payload.proposed_value.as_deref() == sub.proposed_value.as_deref().map(str::trim)
         && payload.note_text == sub.note_text
@@ -1957,6 +2063,7 @@ mod tests {
                 },
                 in_transaction: &mut || {},
             },
+            &|| false,
         );
         match outcome {
             Err(SubmitError::Refused(SubmissionRefusal::DossierReplaced)) => {}
@@ -2121,6 +2228,7 @@ mod tests {
                             taken = Some(another_process_takes_the_write_lock(&path));
                         },
                     },
+                    &|| false,
                 )
                 .expect("accepted");
             assert_eq!(
@@ -2154,6 +2262,7 @@ mod tests {
                         taken = Some(another_process_takes_the_write_lock(&path));
                     },
                 },
+                &|| false,
             )
             .expect("accepted");
         assert_eq!(
@@ -2188,6 +2297,7 @@ mod tests {
                 },
                 in_transaction: &mut || {},
             },
+            &|| false,
         );
         let drafts = McpAccess::at(&path)
             .list_drafts(DraftFilter::default(), Page::first(10))
