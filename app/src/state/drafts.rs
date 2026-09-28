@@ -572,6 +572,48 @@ impl JournalState {
         self.history.owner()
     }
 
+    /// The refusals of a decision that need no open study (Story 8.5b G3): the dossier read-only,
+    /// the draft gone or already decided, its study gone or archived, the target gone, or — for a
+    /// validation — the target changed since the fingerprint the owner saw. Run BEFORE the dialog
+    /// opens the draft's study, so a refused decision never switches the open study for nothing.
+    /// The rail re-checks all of it in its transaction.
+    pub fn precheck_decision(&self, draft: &DraftRef, decision: &Decision) -> Result<(), String> {
+        if self.read_only.is_some() {
+            return Err(MSG_DECISION_READ_ONLY.to_string());
+        }
+        let shown = self.draft_for_dialog(draft.draft_id)?;
+        let ticker = draft.ticker.as_str();
+        let Some(study_id) = shown.record.study_id else {
+            return Ok(());
+        };
+        if shown.archived {
+            return Err(MSG_DECISION_STUDY_ARCHIVED.replace("{ticker}", ticker));
+        }
+        let Some(before) = shown.study.as_ref() else {
+            return Err(MSG_DECISION_STUDY_GONE.replace("{ticker}", ticker));
+        };
+        debug_assert_eq!(before.id, study_id);
+        if *decision == Decision::Reject {
+            return Ok(());
+        }
+        // The pure build decides target-gone / changed exactly as the rail will; its context is
+        // a placeholder (nothing is written here).
+        let ctx = DecisionContext {
+            origin: AiOrigin {
+                draft_id: draft.draft_id,
+                client: String::new(),
+                model: String::new(),
+                validated_at: self.clock.now(),
+            },
+            new_note_id: Uuid::nil(),
+            manual: self.manual_provenance(),
+            now: self.clock.now(),
+        };
+        decided_study(before, shown.record.kind, &shown.payload, decision, ctx)
+            .map(|_| ())
+            .map_err(|problem| problem.refusal(draft.draft_id))
+    }
+
     /// Whether a decided draft was recorded as edited before its validation (Story 8.5b: the
     /// outcome notice « … (modifiée avant validation) »). A read failure reads `false` — the plain
     /// outcome, never a wrong claim of an edit.

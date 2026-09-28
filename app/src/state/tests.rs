@@ -9963,23 +9963,130 @@ mod drafts_8_2b {
     fn a_closed_studys_history_is_parked_and_handed_back_when_it_is_reopened() {
         let dir = TempDir::new().unwrap();
         let (mut state, id) = decision_state(&dir);
-        let draft = plant_value(&state, 0x85B6, id, cell_target(2024, "eps"), "7.5");
-        state.decide_draft(&dref(id, draft), validate()).unwrap();
-        // Closed: ownerless (no decision on a closed study), the steps kept.
+        // One decision, parked on close, handed back on reopen (AC 9).
+        let decided = |state: &mut JournalState, n: u128| {
+            let draft = plant_value(state, n, id, cell_target(2024, "eps"), &format!("7.{n}"));
+            state.decide_draft(&dref(id, draft), validate()).unwrap();
+            draft
+        };
+        let draft = decided(&mut state, 1);
         state.park_undo();
-        assert_eq!(state.decision_study(), None);
-        assert!(state.can_undo());
-        // Reopened: the validation is undoable on the study (AC 9).
+        assert_eq!(
+            state.decision_study(),
+            None,
+            "no decision on a closed study"
+        );
         state.reset_undo_for(id);
         assert_eq!(state.undo(id), Ok(Stepped::Draft(draft)));
-        // Another study opened meanwhile, or the demo: the parked history goes.
+        // Another study opened meanwhile: the parked history goes.
+        state.reset_undo_for(id);
+        decided(&mut state, 2);
         state.park_undo();
         state.reset_undo_for(Uuid::from_u128(0xBEEF));
         state.reset_undo_for(id);
-        assert!(!state.can_undo() && !state.can_redo());
+        assert!(!state.can_undo(), "another open dropped it");
+        // The demo (an ownerless reset) drops it too.
+        decided(&mut state, 3);
         state.park_undo();
         state.reset_undo();
         state.reset_undo_for(id);
-        assert!(!state.can_redo());
+        assert!(!state.can_undo(), "the demo dropped it");
+    }
+
+    #[test]
+    fn a_parked_history_is_dropped_when_its_study_was_written_meanwhile() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        // An import while the study is closed: dropped (G3).
+        let draft = plant_value(&state, 0x85C1, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        let text = state.export_journal().unwrap();
+        state.park_undo();
+        state.import_journal(&text).unwrap();
+        state.reset_undo_for(id);
+        assert!(!state.can_undo(), "an import dropped the parked history");
+        // Another writer changes the study while it is closed: the reopen sees it and drops it.
+        let draft = plant_value(&state, 0x85C2, id, cell_target(2024, "eps"), "8.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        assert!(state.can_undo());
+        state.park_undo();
+        let mut other = state.get_study(id).unwrap();
+        other.rationale = Some("écrit ailleurs".into());
+        state
+            .journal
+            .as_mut()
+            .unwrap()
+            .put_study_with_history(&other, &Timestamp("2026-09-28T11:00:00Z".into()))
+            .unwrap();
+        state.reset_undo_for(id);
+        assert!(
+            !state.can_undo(),
+            "an external write dropped the parked history"
+        );
+    }
+
+    #[test]
+    fn the_precheck_refuses_without_touching_the_open_study_or_its_history() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 0x85C3, id, cell_target(2024, "eps"), "7.5");
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("6")))
+            .unwrap();
+        // Stale, shown fresh: refused before any open.
+        assert_eq!(
+            state
+                .precheck_decision(&dref(id, draft), &validate())
+                .unwrap_err(),
+            MSG_DECISION_STUDY_CHANGED
+        );
+        assert!(
+            state
+                .precheck_decision(&dref(id, draft), &Decision::Reject)
+                .is_ok()
+        );
+        // A draft of a study while ANOTHER is open: the precheck needs no open study.
+        state.reset_undo_for(Uuid::from_u128(0xBEEF));
+        let shown = state.draft_for_dialog(draft).unwrap();
+        assert!(
+            state
+                .precheck_decision(
+                    &shown.draft,
+                    &Decision::Validate {
+                        seen_fingerprint: shown.seen_fingerprint.clone()
+                    }
+                )
+                .is_ok()
+        );
+        assert_eq!(state.decision_study(), Some(Uuid::from_u128(0xBEEF)));
+        // Decided meanwhile: refused by name.
+        state.reset_undo_for(id);
+        state
+            .decide_draft(&dref(id, draft), Decision::Reject)
+            .unwrap();
+        assert_eq!(
+            state
+                .precheck_decision(&dref(id, draft), &Decision::Reject)
+                .unwrap_err(),
+            MSG_DECISION_ALREADY_DECIDED
+        );
+    }
+
+    #[test]
+    fn a_taken_history_goes_back_only_onto_its_own_study() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("6")))
+            .unwrap();
+        let taken = state.take_undo();
+        assert!(!state.can_undo());
+        state.reset_undo_for(id);
+        state.put_back_undo(taken);
+        assert!(state.can_undo(), "back onto its study");
+        let taken = state.take_undo();
+        state.reset_undo_for(Uuid::from_u128(0xBEEF));
+        state.put_back_undo(taken);
+        assert!(!state.can_undo(), "never onto another one");
     }
 }

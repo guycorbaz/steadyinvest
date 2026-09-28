@@ -53,11 +53,13 @@ pub struct UndoHistory {
     /// The study this history belongs to — the open study (Story 8.2b); `None` for the demo, after
     /// a dossier switch, and before any study is opened.
     owner: Option<Uuid>,
-    /// Story 8.5b: the study whose history was PARKED when it was closed — kept, ownerless (no
-    /// decision is taken on a closed study), and handed back when that same study is reopened, so
-    /// a validation decided from the inbox stays undoable on the study (AC 9). Any other open, the
-    /// demo, a dossier switch, a delete, an import or a restore clears it.
-    parked: Option<Uuid>,
+    /// Story 8.5b: the history PARKED when its study was closed — kept, ownerless (no decision is
+    /// taken on a closed study), with the study as it stood at park time. Reopening that study
+    /// hands the history back ONLY while the stored study still equals that snapshot (G3): any
+    /// write meanwhile — a late fetch, an import, another writer — drops it, so no undo can write
+    /// back a state older than a change it never saw. Any other open, the demo, a dossier switch,
+    /// a delete, an import or a restore clears it too.
+    parked: Option<(Uuid, Study)>,
 }
 
 /// One undo/redo entry: a whole-study snapshot, and — when the step recorded an AI draft's
@@ -92,7 +94,19 @@ impl UndoHistory {
     /// an undo would write it back as the open study's state). Such a step is dropped and logged;
     /// the redo branch is left as it is (the open study was not edited).
     fn push_step(&mut self, step: UndoStep) {
-        if let Some(owner) = self.owner.or(self.parked)
+        // A closed study's parked history takes no step: a write to it while closed invalidates the
+        // parked history (its reopen would otherwise undo into a state that skips this write).
+        if self.owner.is_none()
+            && let Some((parked, _)) = &self.parked
+        {
+            if step.study.id == *parked {
+                self.parked = None;
+                self.undo.clear();
+                self.redo.clear();
+            }
+            return;
+        }
+        if let Some(owner) = self.owner
             && step.study.id != owner
         {
             tracing::warn!(
@@ -109,21 +123,35 @@ impl UndoHistory {
     }
 
     fn reset(&mut self, owner: Option<Uuid>) {
-        // The same study reopened after a close gets its parked history back (Story 8.5b).
-        if owner.is_some() && owner == self.parked {
-            self.owner = owner;
-            self.parked = None;
-            return;
-        }
         self.undo.clear();
         self.redo.clear();
         self.owner = owner;
         self.parked = None;
     }
 
-    fn park(&mut self) {
-        if self.owner.is_some() {
-            self.parked = self.owner.take();
+    /// Hand the parked history back to its study, reopened as `current` — only if nothing wrote the
+    /// study since it was parked (G3). Returns whether it was handed back.
+    fn unpark(&mut self, id: Uuid, current: Option<&Study>) -> bool {
+        match self.parked.take() {
+            Some((parked, snapshot)) if parked == id && current == Some(&snapshot) => {
+                self.owner = Some(id);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn park(&mut self, current: Option<Study>) {
+        match (self.owner.take(), current) {
+            (Some(owner), Some(study)) if study.id == owner => {
+                self.parked = Some((owner, study));
+            }
+            // The study could not be read at close: nothing to prove its history valid — dropped.
+            _ => {
+                self.undo.clear();
+                self.redo.clear();
+                self.parked = None;
+            }
         }
     }
 
@@ -151,15 +179,45 @@ impl JournalState {
 
     /// Clear the undo/redo history for a newly opened study, which becomes its owner — the only
     /// study a draft decision may be taken on (Story 8.2b, arch A8). Reopening the study whose
-    /// history was parked by [`JournalState::park_undo`] hands that history back (Story 8.5b).
+    /// history was parked by [`JournalState::park_undo`] hands that history back (Story 8.5b) —
+    /// only while the stored study is still the one parked (G3).
     pub fn reset_undo_for(&mut self, study_id: Uuid) {
-        self.history.reset(Some(study_id));
+        let current = self.try_get_study(study_id).ok().flatten();
+        if !self.history.unpark(study_id, current.as_ref()) {
+            self.history.reset(Some(study_id));
+        }
     }
 
-    /// The open study is closed (Story 8.5b): its history is kept but ownerless — no decision and
-    /// no stray step of another study lands in it — until that study is reopened.
+    /// The open study is closed (Story 8.5b): its history is kept, ownerless — no decision and no
+    /// step lands in it — with the study as stored now, until that study is reopened unchanged.
     pub fn park_undo(&mut self) {
-        self.history.park();
+        let current = self
+            .history
+            .owner()
+            .and_then(|id| self.try_get_study(id).ok().flatten());
+        self.history.park(current);
+    }
+
+    /// Take the whole history out (Story 8.5b G3): deciding a draft of another study opens that
+    /// study; if the decision is then refused, [`JournalState::put_back_undo`] restores the
+    /// previous study's history when that study is reopened.
+    pub(crate) fn take_undo(&mut self) -> UndoHistory {
+        std::mem::take(&mut self.history)
+    }
+
+    /// Put back a history taken by [`JournalState::take_undo`] — only onto its own owner study,
+    /// reopened and unchanged since (nothing was written: the decision was refused).
+    pub(crate) fn put_back_undo(&mut self, history: UndoHistory) {
+        if history.owner.is_some() && history.owner == self.history.owner {
+            self.history = history;
+        }
+    }
+
+    /// Drop a parked history (Story 8.5b G3): an import may rewrite its study.
+    pub(crate) fn drop_parked_undo(&mut self) {
+        if self.history.owner.is_none() && self.history.parked.is_some() {
+            self.history.reset(None);
+        }
     }
 
     /// Whether an undo / redo step is available (the UI disables its control when not).
