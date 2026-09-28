@@ -715,6 +715,17 @@ impl Journal {
         })
     }
 
+    /// SQLite's `PRAGMA data_version` on THIS connection (Story 8.5a, arch A9): it changes only when
+    /// ANOTHER connection commits to the file — an MCP draft insert, another process — never on
+    /// this connection's own writes. The app polls it to learn that drafts arrived; its own
+    /// draft-affecting writes (delete cascade, import, restore, decisions) are pushed explicitly.
+    /// One cheap pragma on the existing connection: no second file descriptor is opened (8.3).
+    pub fn data_version(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("PRAGMA data_version", [], |r| r.get(0))?)
+    }
+
     /// True when the journal is opened read-only (a newer schema, or write protection).
     pub fn is_read_only(&self) -> bool {
         self.read_only.is_some()
