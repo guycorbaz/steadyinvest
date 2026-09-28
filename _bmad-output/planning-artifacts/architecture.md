@@ -1068,7 +1068,10 @@ and architecture decisions A1–A13 below are final._
   `persistence::decide_draft(study, draft_id, decision)` performs the study upsert (with its history
   snapshot) **and** the draft's status / `decided_at` / `stale_at_decision` /
   `edited_before_validation` update in **one transaction** with one `logical_version` bump; the open
-  study is then refreshed from the dossier **without** resetting its undo history. Undoing a
+  study is then refreshed from the dossier **without** resetting its undo history. Closing a study (Story
+  8.5b) **parks** its history, ownerless, with the study as it stood; reopening it hands the history
+  back only while the stored study still equals that snapshot — any write meanwhile (a late fetch,
+  an import, another writer) drops it, so no undo writes back a state that skips a change. Undoing a
   validation restores the prior study and sets the draft to `validated_undone` in one transaction;
   redoing it re-applies the value and sets the draft back to `validated`, in one transaction too. Rejection updates only the draft. A draft
   study's validation opens the create-study dialog prefilled (D2); its confirmation creates the study

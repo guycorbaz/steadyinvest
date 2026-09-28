@@ -161,6 +161,21 @@ export component EditableCell inherits Rectangle {
         x: root.trail-col-x;
         y: parent.height / 2;
     }
+    // Story 8.5b (UX 8.0 §5.8, FR17) — a value an AI proposed and the owner validated: « ★ » in the
+    // trailing column, bottom half — the stale dot's slot (they never coincide: a validated AI value
+    // is a manual entry, never stale). Ink, no hue; the date is revealed on focus.
+    ai := Text {
+        visible: root.state.draft-validated != "" && !stale.visible;
+        text: Tokens.ai-glyph;
+        color: Tokens.text-high;
+        font-size: Tokens.mark-font;
+        width: Tokens.mark-col;
+        height: parent.height / 2;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: root.trail-col-x;
+        y: parent.height / 2;
+    }
     // Story 2.7 — the plausibility warning glyph (△). Anchored at the TOP edge, in the trailing
     // marker column (G1 final review M4) — the top-right corner, clear of the review mark (top-left)
     // and of the stale dot under it (AC3: a corner distinct from the review marker AND the coverage
@@ -194,7 +209,7 @@ export component EditableCell inherits Rectangle {
     // past the floor the cell shows the overflow mark and reveals the figure on focus.
     property <length> mark-span: Tokens.mark-inset * 2 + Tokens.mark-col;
     property <bool> lead-col: root.state.review != "none";
-    property <bool> trail-col: stale.visible || warn.visible;
+    property <bool> trail-col: stale.visible || warn.visible || ai.visible;
     property <length> trail-col-x: root.width - Tokens.mark-inset - Tokens.mark-col;
     property <length> lead: root.lead-col ? root.mark-span : Tokens.space-8;
     property <length> trail: max(
@@ -266,6 +281,7 @@ export component EditableCell inherits Rectangle {
                 Studies.active-source = root.state.source;
                 Studies.active-timestamp = root.state.timestamp; // freshness as-of, revealed on focus (Story 3.3)
                 Studies.active-pending = root.state.pending; // pending provider divergence (Story 3.4)
+                Studies.active-draft-validated = root.state.draft-validated; // Story 8.5b: an AI origin
                 // Reveal the plausibility fact on focus (keyboard-reachable, NFR-U2) — "" when none.
                 Studies.active-warning = Warnings.text(root.state.warning-key);
                 self.select-all(); // typing replaces the value (spreadsheet behaviour)

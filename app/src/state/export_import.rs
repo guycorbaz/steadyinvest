@@ -83,6 +83,8 @@ impl JournalState {
         if existing_archived == Some((true, true)) {
             self.set_study_status(id, "active")?;
         }
+        // Story 8.5b (G3): a parked undo history may describe the study this import rewrote.
+        self.drop_parked_undo();
         Ok((id, overwrote))
     }
 
@@ -119,6 +121,8 @@ impl JournalState {
         // Issue #65 (the 6.3 sharpening): make the aggregates truthful against the merged ledger
         // NOW — not at the next ledger mutation, which would silently snap them back.
         self.rederive_position_aggregates();
+        // Story 8.5b (G3): a parked undo history may describe a study this import rewrote.
+        self.drop_parked_undo();
         Ok(summary)
     }
 

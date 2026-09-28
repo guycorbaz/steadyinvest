@@ -17,6 +17,11 @@ export component ActionButton inherits Rectangle {
     // Story 8.5a (G3): a compact variant (caption text, 32 px) — the action inside a StatusBand, so
     // the band stays one line high.
     in property <bool> compact: false;
+    // Story 8.5b (G3): a decision verb — Enter / Space activate it only once it has held the focus
+    // for a moment, so a reflex double tap (the row's Enter, then Enter again) never decides; a click
+    // is unaffected. Every button ignores a held key's auto-repeat.
+    in property <bool> guard-reflex: false;
+    property <bool> armed: true;
     callback clicked();
 
     changed focus-request => {
@@ -58,10 +63,23 @@ export component ActionButton inherits Rectangle {
         }
     }
 
+    Timer {
+        interval: 350ms;
+        running: root.guard-reflex && fs.has-focus && !root.armed;
+        triggered => {
+            self.running = false;
+            root.armed = true;
+        }
+    }
     fs := FocusScope {
         enabled: root.enabled;
+        focus-changed-event => {
+            if (root.guard-reflex && self.has-focus) { root.armed = false; }
+        }
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") {
+                // A held key's auto-repeat, or a reflex press right after the focus arrived.
+                if (event.repeat || !root.armed) { return accept; }
                 root.activate();
                 return accept;
             }

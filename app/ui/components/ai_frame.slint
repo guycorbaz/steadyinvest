@@ -105,13 +105,17 @@ export component AiFrame inherits Rectangle {
                     horizontal-stretch: root.ai-lead != "" ? 0 : 1;
                 }
             }
+            // G3 F6: what the draft proposes (a note's text, a name) in semibold, told apart from
+            // the comment below it.
             if !root.compact && root.ai-lead != "": Text {
                 text: root.ai-lead;
                 color: Tokens.text-high;
                 font-size: Tokens.font-body;
+                font-weight: Tokens.weight-semibold;
                 wrap: word-wrap;
             }
-            if !root.compact: Text {
+            // A frame that only holds an edit field (8.5b: the note being edited) shows no text line.
+            if !root.compact && root.ai-text != "": Text {
                 text: root.ai-text;
                 color: Tokens.text-high;
                 font-size: Tokens.font-body;

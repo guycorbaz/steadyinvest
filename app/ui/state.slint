@@ -225,6 +225,10 @@ export struct GridCellState {
     //    fact is revealed on focus (via `Studies.active-warning`). Silent by default (AC6).
     warning: bool,        // an input-shape / calc-time plausibility finding anchors at this cell
     warning-key: string,  // the PlausibilityKey wire key ("" when none) → `Warnings.text(...)`
+    // Story 8.5b (UX spec §5.8, FR17): the JJ/MM/AAAA an AI draft's value was validated on — the
+    // cell then shows « ★ » in its trailing column (bottom half); "" = no AI origin. App text: the
+    // client / model never leave an AiFrame.
+    draft-validated: string,
 }
 
 // One year row of the §3 A–H P/E table. A/B/C/F are editable raw-input cells (Story 2.4); D/E/G/H are
@@ -605,6 +609,9 @@ export global Studies {
     // The focused cell's pending provider divergence, revealed on demand (Story 3.4, FR22) — ""
     // hides it (no divergence). When non-empty, the resolve controls (accept/keep) are offered.
     in-out property <string> active-pending;
+    // Story 8.5b: the focused cell's AI-draft validation date (« proposée par l'IA, validée le … »
+    // beside the source) — "" when the value carries no AI origin.
+    in-out property <string> active-draft-validated;
     // Resolve a pending divergence on the (year-index, field) cell (Story 3.4, AC4). `accept-provider`
     // takes the provider value; `keep-manual` keeps the manual value and dismisses the pending.
     callback accept-provider(int, string);
@@ -1052,6 +1059,37 @@ export global Confront {
 //    acknowledges; a destructive gesture is a `confirm`; every data entry/edit is a `form` with a
 //    title, one explanatory sentence and labelled fields. A persistent STATE is never a dialog
 //    (StatusBand); an OUTCOME (« … a été enregistré. ») stays an inline notice (F4 slot rule). ──
+// ── Story 8.5b — the decision dialog's draft. App text in every field but the `ai-*` ones (read ONLY
+//    inside an `AiFrame`, UX spec §4.1). Built by `app/src/wiring/drafts.rs`. ──
+export struct DraftDecision {
+    id: string,
+    // "note" | "cell" | "judgment"
+    kind: string,
+    target: string,
+    // « Valider ou rejeter ouvre l'étude … » when deciding opens another study; "" otherwise.
+    context: string,
+    current: string,
+    proposed: string,
+    // 0 fresh · 1 stale · 2 target gone (rejection only)
+    state: int,
+    // The stale / gone band text ("" when fresh).
+    band: string,
+    // Q5: the initial focus on « Annuler » (a ✓ target), else on « Valider ».
+    focus-cancel: bool,
+    // "number" | "option" | "note" — the edit form's field.
+    edit-kind: string,
+    edit-prefill: string,
+    edit-options: [string],
+    // Still decidable: false once a refusal ended it (the draft gone or decided meanwhile).
+    live: bool,
+    submitted: string,
+    ai-client: string,
+    ai-model: string,
+    // The proposed note text (a note draft), "" otherwise.
+    ai-lead: string,
+    ai-text: string,
+}
+
 export global Dialog {
     in-out property <string> kind;        // "" (hidden) | "notice" | "confirm" | "form"
     in-out property <string> title;       // "" on a notice = the default « Action refusée »
@@ -1084,6 +1122,9 @@ export global Dialog {
     in-out property <string> seed-text;       // Story 8.1: the text the note form opened with
     in-out property <string> resume-title;    // Story 8.1: the note form behind « Abandonner… ? »
     in-out property <string> resume-body;
+    // Story 8.5b: the AI draft the decision dialog (`kind == "decision"`) and its edit form
+    // (`form-id == "draft-edit"`) are about — filled by Rust (`wiring::drafts::to_dialog`).
+    in-out property <DraftDecision> decision;
 
     public function close() {
         self.kind = "";
@@ -1732,4 +1773,16 @@ export global Drafts {
     // (kind « Études »).
     callback show-for-study();
     callback show-draft-studies();
+    // Story 8.5b — deciding. A row opens the decision dialog; `decide(verb)` — "validate" |
+    // "reject" | "edit" (the edit form's « Enregistrer », `Dialog.draft-text`) — returns whether it
+    // was written (the dialog then closes); `confirm-stale()` is the stale confirmation's verb.
+    callback open-draft(string);
+    callback decide(string) -> bool;
+    callback confirm-stale() -> bool;
+    // A decision's outcome (the F4 slot of the Propositions card).
+    in-out property <string> notice;
+    // G3 F7: the row whose decision dialog is open — the focus returns to it when the dialog closes
+    // (bumping `return-request`).
+    in-out property <string> return-row;
+    in-out property <int> return-request;
 }

@@ -4948,7 +4948,7 @@ fn undo_redo_steps_back_and_forward_and_a_new_edit_clears_redo() {
     );
 
     // Undo → the pre-edit (fresh, no-value) state returns.
-    assert_eq!(state.undo(id), Ok(true));
+    assert_eq!(state.undo(id), Ok(Stepped::Study));
     assert!(state.can_redo());
     let undone = state.get_study(id).unwrap();
     assert!(
@@ -4957,7 +4957,7 @@ fn undo_redo_steps_back_and_forward_and_a_new_edit_clears_redo() {
     );
 
     // Redo → the value comes back.
-    assert_eq!(state.redo(id), Ok(true));
+    assert_eq!(state.redo(id), Ok(Stepped::Study));
     assert!(
         state.get_study(id).unwrap().years[0]
             .high_price
@@ -4966,7 +4966,7 @@ fn undo_redo_steps_back_and_forward_and_a_new_edit_clears_redo() {
     );
 
     // A NEW edit after an undo forks history → the redo branch is cleared.
-    assert_eq!(state.undo(id), Ok(true));
+    assert_eq!(state.undo(id), Ok(Stepped::Study));
     assert!(state.can_redo());
     state.edit_cell(id, 0, "b", Some(und_money(50))).unwrap();
     assert!(
@@ -4992,7 +4992,7 @@ fn undo_restores_a_judgment_edit() {
             .estimated_high_eps
             .is_some()
     );
-    assert_eq!(state.undo(id), Ok(true));
+    assert_eq!(state.undo(id), Ok(Stepped::Study));
     assert!(
         state
             .get_study(id)
@@ -5009,8 +5009,8 @@ fn undo_redo_on_empty_history_are_noops() {
     let dir = TempDir::new().unwrap();
     let mut state = undo_state(&dir, 0x3D, "2026-06-14T09:00:00Z");
     let id = state.create_study("NESN", "CHF").unwrap();
-    assert_eq!(state.undo(id), Ok(false), "nothing to undo");
-    assert_eq!(state.redo(id), Ok(false), "nothing to redo");
+    assert_eq!(state.undo(id), Ok(Stepped::Nothing), "nothing to undo");
+    assert_eq!(state.redo(id), Ok(Stepped::Nothing), "nothing to redo");
     assert!(!state.can_undo() && !state.can_redo());
 }
 
@@ -5119,7 +5119,7 @@ fn undo_restores_the_prior_rationale() {
     );
 
     // Undo restores the prior rationale (FR32 — a rationale edit is "any edit", never destroyed).
-    assert_eq!(state.undo(id), Ok(true));
+    assert_eq!(state.undo(id), Ok(Stepped::Study));
     assert_eq!(
         state.get_study(id).unwrap().rationale.as_deref(),
         Some("première raison"),
@@ -5238,7 +5238,7 @@ fn undo_restores_the_pre_extend_year_window() {
     assert_eq!(state.get_study(id).unwrap().years.len(), before + 1);
 
     // Adding a year is "any edit" — one undo step restores the prior window (FR32, never destroys).
-    assert_eq!(state.undo(id), Ok(true));
+    assert_eq!(state.undo(id), Ok(Stepped::Study));
     assert_eq!(
         state.get_study(id).unwrap().years.len(),
         before,
@@ -5315,7 +5315,7 @@ fn undo_restores_a_review_tag_without_destroying_the_value() {
         state.get_study(id).unwrap().years[0].high_price.review,
         Review::Validated
     );
-    assert_eq!(state.undo(id), Ok(true)); // undo the review change only
+    assert_eq!(state.undo(id), Ok(Stepped::Study)); // undo the review change only
     let undone = state.get_study(id).unwrap();
     assert_eq!(
         undone.years[0].high_price.review,
@@ -8662,21 +8662,21 @@ fn note_changes_undo_and_redo() {
     state.delete_note(id, note).unwrap();
     assert!(state.get_study(id).unwrap().notes.is_empty());
 
-    assert!(state.undo(id).unwrap());
+    assert_ne!(state.undo(id).unwrap(), Stepped::Nothing);
     assert_eq!(
         state.get_study(id).unwrap().notes[0].text,
         "Après.",
         "delete undone"
     );
-    assert!(state.undo(id).unwrap());
+    assert_ne!(state.undo(id).unwrap(), Stepped::Nothing);
     assert_eq!(
         state.get_study(id).unwrap().notes[0].text,
         "Avant.",
         "edit undone"
     );
-    assert!(state.undo(id).unwrap());
+    assert_ne!(state.undo(id).unwrap(), Stepped::Nothing);
     assert!(state.get_study(id).unwrap().notes.is_empty(), "add undone");
-    assert!(state.redo(id).unwrap());
+    assert_ne!(state.redo(id).unwrap(), Stepped::Nothing);
     assert_eq!(
         state.get_study(id).unwrap().notes[0].text,
         "Avant.",
@@ -8690,7 +8690,7 @@ fn a_vanished_note_is_refused_by_name_and_a_read_only_dossier_up_front() {
     let mut state = watch_state(&dir, 0x8140);
     let id = state.create_study("NESN", "CHF").unwrap();
     let note = state.add_note(id, "Texte.").unwrap();
-    assert!(state.undo(id).unwrap()); // the note is gone
+    assert_ne!(state.undo(id).unwrap(), Stepped::Nothing); // the note is gone
     assert_eq!(
         state.edit_note(id, note, "X"),
         Err(MSG_NOTE_GONE.to_string())
@@ -9545,7 +9545,7 @@ mod drafts_8_2b {
             "B's step was not recorded in A's history"
         );
         let before_undo_b = state.get_study(b).unwrap();
-        assert!(state.undo(a).unwrap());
+        assert_ne!(state.undo(a).unwrap(), Stepped::Nothing);
         assert_eq!(
             state.get_study(b).unwrap(),
             before_undo_b,
@@ -9594,15 +9594,15 @@ mod drafts_8_2b {
         state.decide_draft(&dref(id, draft), validate()).unwrap();
         let after = state.get_study(id).unwrap();
 
-        assert!(state.undo(id).unwrap());
+        assert_ne!(state.undo(id).unwrap(), Stepped::Nothing);
         assert_eq!(state.get_study(id).unwrap(), before);
         assert_eq!(facts(&state, draft).0, "validated_undone");
 
-        assert!(state.redo(id).unwrap());
+        assert_ne!(state.redo(id).unwrap(), Stepped::Nothing);
         assert_eq!(state.get_study(id).unwrap(), after);
         assert_eq!(facts(&state, draft).0, "validated");
 
-        assert!(state.undo(id).unwrap());
+        assert_ne!(state.undo(id).unwrap(), Stepped::Nothing);
         state
             .set_judgment_field(id, "low_pe", Some(money("10")))
             .unwrap();
@@ -9829,5 +9829,264 @@ mod drafts_8_2b {
         state.journal = None;
         assert!(state.read_inbox().unwrap().is_none());
         assert_eq!(state.try_data_version(true).unwrap(), None);
+    }
+
+    // ── Story 8.5b — deciding through the dialog ──
+
+    #[test]
+    fn the_seen_fingerprint_validates_a_stale_draft_until_the_target_moves_again() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 0x85B1, id, cell_target(2024, "eps"), "7.5");
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("6")))
+            .unwrap();
+        // The dialog opens on a stale draft: it records what the owner sees.
+        let shown = state.draft_for_dialog(draft).unwrap();
+        assert_eq!(shown.freshness, DraftFreshness::Stale);
+        let seen = shown.seen_fingerprint.clone();
+        assert!(seen.is_some());
+        // The target moves again between the look and the confirmation → refused by name.
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("6.5")))
+            .unwrap();
+        let err = state
+            .decide_draft(
+                &shown.draft,
+                Decision::Validate {
+                    seen_fingerprint: seen,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(err, MSG_DECISION_CHANGED);
+        // Shown again (re-read): its new fingerprint validates.
+        let again = state.draft_for_dialog(draft).unwrap();
+        state
+            .decide_draft(
+                &again.draft,
+                Decision::Validate {
+                    seen_fingerprint: again.seen_fingerprint,
+                },
+            )
+            .unwrap();
+        assert_eq!(facts(&state, draft), ("validated".into(), Some(1), Some(0)));
+    }
+
+    #[test]
+    fn the_dialog_reads_a_pending_draft_afresh_and_names_one_that_left() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        state
+            .set_review(id, 2, entry::FIELD_EPS, Review::Validated)
+            .unwrap();
+        state.reset_undo_for(id);
+        let draft = plant_value(&state, 0x85B2, id, cell_target(2024, "eps"), "7.5");
+        let shown = state.draft_for_dialog(draft).unwrap();
+        assert_eq!(shown.freshness, DraftFreshness::Fresh);
+        assert!(shown.target_validated, "Q5: the ✓ target is known");
+        assert!(!shown.archived);
+        assert_eq!(shown.draft.study_id, Some(id));
+        assert_eq!(shown.draft.ticker, "NESN");
+        assert_eq!(state.decision_study(), Some(id));
+        state.decide_draft(&shown.draft, validate()).unwrap();
+        assert!(!state.draft_was_edited(draft));
+        // Decided: the dialog refuses to show it again.
+        assert_eq!(
+            state.draft_for_dialog(draft).unwrap_err(),
+            MSG_DECISION_ALREADY_DECIDED
+        );
+        assert_eq!(
+            state.draft_for_dialog(Uuid::from_u128(0xDEAD)).unwrap_err(),
+            MSG_DECISION_DRAFT_GONE
+        );
+    }
+
+    #[test]
+    fn undo_and_redo_say_when_they_stepped_over_a_draft() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 0x85B3, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        assert_eq!(state.undo(id), Ok(Stepped::Draft(draft)));
+        assert_eq!(facts(&state, draft).0, "validated_undone");
+        assert_eq!(state.redo(id), Ok(Stepped::Draft(draft)));
+        assert_eq!(facts(&state, draft).0, "validated");
+        state
+            .edit_cell(id, 2, entry::FIELD_SALES, Some(money("1")))
+            .unwrap();
+        assert_eq!(state.undo(id), Ok(Stepped::Study));
+    }
+
+    #[test]
+    fn a_validated_ai_value_is_current_so_the_star_never_shares_the_stale_dot_slot() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 0x85B4, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        let cell = state.get_study(id).unwrap().years[2].eps.clone();
+        assert!(cell.provenance.ai_origin.is_some());
+        assert_eq!(cell.freshness, Freshness::Current, "★ and ◦ never coincide");
+        // The owner's next edit clears the mark.
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("8")))
+            .unwrap();
+        let cell = state.get_study(id).unwrap().years[2].eps.clone();
+        assert!(cell.provenance.ai_origin.is_none());
+    }
+
+    #[test]
+    fn an_owner_edit_of_a_proposal_is_recorded_as_edited() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 0x85B5, id, cell_target(2024, "eps"), "7.5");
+        let shown = state.draft_for_dialog(draft).unwrap();
+        let value = owner_edit(
+            shown.record.kind,
+            &shown.payload,
+            "7,25",
+            NumberFormat::default(),
+        )
+        .unwrap();
+        state
+            .decide_draft(
+                &shown.draft,
+                Decision::ValidateEdited {
+                    seen_fingerprint: None,
+                    value,
+                },
+            )
+            .unwrap();
+        assert!(state.draft_was_edited(draft));
+    }
+
+    #[test]
+    fn a_closed_studys_history_is_parked_and_handed_back_when_it_is_reopened() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        // One decision, parked on close, handed back on reopen (AC 9).
+        let decided = |state: &mut JournalState, n: u128| {
+            let draft = plant_value(state, n, id, cell_target(2024, "eps"), &format!("7.{n}"));
+            state.decide_draft(&dref(id, draft), validate()).unwrap();
+            draft
+        };
+        let draft = decided(&mut state, 1);
+        state.park_undo();
+        assert_eq!(
+            state.decision_study(),
+            None,
+            "no decision on a closed study"
+        );
+        state.reset_undo_for(id);
+        assert_eq!(state.undo(id), Ok(Stepped::Draft(draft)));
+        // Another study opened meanwhile: the parked history goes.
+        state.reset_undo_for(id);
+        decided(&mut state, 2);
+        state.park_undo();
+        state.reset_undo_for(Uuid::from_u128(0xBEEF));
+        state.reset_undo_for(id);
+        assert!(!state.can_undo(), "another open dropped it");
+        // The demo (an ownerless reset) drops it too.
+        decided(&mut state, 3);
+        state.park_undo();
+        state.reset_undo();
+        state.reset_undo_for(id);
+        assert!(!state.can_undo(), "the demo dropped it");
+    }
+
+    #[test]
+    fn a_parked_history_is_dropped_when_its_study_was_written_meanwhile() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        // An import while the study is closed: dropped (G3).
+        let draft = plant_value(&state, 0x85C1, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        let text = state.export_journal().unwrap();
+        state.park_undo();
+        state.import_journal(&text).unwrap();
+        state.reset_undo_for(id);
+        assert!(!state.can_undo(), "an import dropped the parked history");
+        // Another writer changes the study while it is closed: the reopen sees it and drops it.
+        let draft = plant_value(&state, 0x85C2, id, cell_target(2024, "eps"), "8.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        assert!(state.can_undo());
+        state.park_undo();
+        let mut other = state.get_study(id).unwrap();
+        other.rationale = Some("écrit ailleurs".into());
+        state
+            .journal
+            .as_mut()
+            .unwrap()
+            .put_study_with_history(&other, &Timestamp("2026-09-28T11:00:00Z".into()))
+            .unwrap();
+        state.reset_undo_for(id);
+        assert!(
+            !state.can_undo(),
+            "an external write dropped the parked history"
+        );
+    }
+
+    #[test]
+    fn the_precheck_refuses_without_touching_the_open_study_or_its_history() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 0x85C3, id, cell_target(2024, "eps"), "7.5");
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("6")))
+            .unwrap();
+        // Stale, shown fresh: refused before any open.
+        assert_eq!(
+            state
+                .precheck_decision(&dref(id, draft), &validate())
+                .unwrap_err(),
+            MSG_DECISION_STUDY_CHANGED
+        );
+        assert!(
+            state
+                .precheck_decision(&dref(id, draft), &Decision::Reject)
+                .is_ok()
+        );
+        // A draft of a study while ANOTHER is open: the precheck needs no open study.
+        state.reset_undo_for(Uuid::from_u128(0xBEEF));
+        let shown = state.draft_for_dialog(draft).unwrap();
+        assert!(
+            state
+                .precheck_decision(
+                    &shown.draft,
+                    &Decision::Validate {
+                        seen_fingerprint: shown.seen_fingerprint.clone()
+                    }
+                )
+                .is_ok()
+        );
+        assert_eq!(state.decision_study(), Some(Uuid::from_u128(0xBEEF)));
+        // Decided meanwhile: refused by name.
+        state.reset_undo_for(id);
+        state
+            .decide_draft(&dref(id, draft), Decision::Reject)
+            .unwrap();
+        assert_eq!(
+            state
+                .precheck_decision(&dref(id, draft), &Decision::Reject)
+                .unwrap_err(),
+            MSG_DECISION_ALREADY_DECIDED
+        );
+    }
+
+    #[test]
+    fn a_taken_history_goes_back_only_onto_its_own_study() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        state
+            .edit_cell(id, 2, entry::FIELD_EPS, Some(money("6")))
+            .unwrap();
+        let taken = state.take_undo();
+        assert!(!state.can_undo());
+        state.reset_undo_for(id);
+        state.put_back_undo(taken);
+        assert!(state.can_undo(), "back onto its study");
+        let taken = state.take_undo();
+        state.reset_undo_for(Uuid::from_u128(0xBEEF));
+        state.put_back_undo(taken);
+        assert!(!state.can_undo(), "never onto another one");
     }
 }

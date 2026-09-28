@@ -4,7 +4,9 @@
 // text, its state word, and the AI's comment inside a compact AiFrame — the only place AI-written
 // text is shown (§4.1). Display only in 8.5a: deciding comes with 8.5b, the « Registre » view and
 // draft-study validation with 8.7. A failed read is a ⊘ band, never an empty list (arch A9). Ink and
-// words only, no hue.
+// words only, no hue. Story 8.5b: a cell, judgment or note row is ACTIVATABLE (click, or Enter /
+// Space when focused) — it opens the decision dialog (action 1; « Valider » / « Rejeter » is action
+// 2); a draft-study row (8.7) and a row of an archived study are not.
 
 import { Tokens } from "../tokens.slint";
 import { Drafts, DraftRow } from "../state.slint";
@@ -80,6 +82,56 @@ component DraftRowView inherits VerticalLayout {
         ai-text: root.draft.ai-text;
         ai-lead: root.draft.ai-lead;
         submitted: root.draft.submitted;
+    }
+}
+
+// A row that opens its decision dialog (Story 8.5b): Tab-reachable with the focus ring, Enter /
+// Space or a click. A draft-study row and an archived study's row are shown, never activatable.
+component DraftRowActivator inherits Rectangle {
+    in property <DraftRow> draft;
+    property <bool> active: (root.draft.kind == "cell" || root.draft.kind == "judgment" || root.draft.kind == "note")
+        && root.draft.state != 3;
+    // G3 F7: back from its decision dialog, the row takes the focus again.
+    property <int> return-request: Drafts.return-request;
+    changed return-request => {
+        if (root.active && Drafts.return-row == root.draft.id) { fs.focus(); }
+    }
+    border-radius: Tokens.radius;
+    border-width: fs.has-focus ? Tokens.focus-border : 0px;
+    border-color: Tokens.focus;
+    background: touch.has-hover && root.active ? Tokens.surface-alt : transparent;
+
+    accessible-role: button;
+    accessible-label: root.draft.target;
+    accessible-enabled: root.active;
+    accessible-action-default => {
+        if (root.active) { Drafts.open-draft(root.draft.id); }
+    }
+
+    VerticalLayout {
+        padding: Tokens.space-4;
+        DraftRowView { draft: root.draft; }
+    }
+    touch := TouchArea {
+        enabled: root.active;
+        mouse-cursor: root.active ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            fs.focus();
+            Drafts.open-draft(root.draft.id);
+        }
+    }
+    fs := FocusScope {
+        enabled: root.active;
+        focus-on-click: false;
+        key-pressed(event) => {
+            // A held key's auto-repeat never re-opens (G3).
+            if (event.repeat && (event.text == Key.Return || event.text == " ")) { return accept; }
+            if (root.active && (event.text == Key.Return || event.text == " ")) {
+                Drafts.open-draft(root.draft.id);
+                return accept;
+            }
+            reject
+        }
     }
 }
 
@@ -162,6 +214,13 @@ export component PropositionsScreen inherits Rectangle {
                     icon: "◦";
                     text: @tr("Dossier en lecture seule : les propositions sont consultables, aucune décision n'est possible.");
                 }
+                // Story 8.5b: a decision's outcome (the F4 slot).
+                if Drafts.notice != "": Text {
+                    text: Drafts.notice;
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
                 if !Drafts.read-failed && Drafts.unfiltered-count == 0: Text {
                     text: @tr("Aucune proposition à traiter. Une IA enregistrée comme client MCP peut en déposer ici ; rien n'est appliqué sans votre validation.");
                     color: Tokens.text-mid;
@@ -189,7 +248,7 @@ export component PropositionsScreen inherits Rectangle {
                             font-weight: Tokens.weight-semibold;
                         }
                     }
-                    DraftRowView { draft: r; }
+                    DraftRowActivator { draft: r; }
                 }
             }
         }

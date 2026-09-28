@@ -22,6 +22,16 @@ use super::{
 /// small but not free; a long session does not grow the history unboundedly (Story 2.9).
 const UNDO_CAP: usize = 100;
 
+/// What an undo / redo stepped over (Story 8.5b): nothing (the stack was empty), an ordinary study
+/// step, or the validation of an AI draft — whose status moved with the study (the caller then says
+/// so and re-reads the inbox).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stepped {
+    Nothing,
+    Study,
+    Draft(Uuid),
+}
+
 /// Which way [`JournalState::step`] moves through the history.
 #[derive(Clone, Copy)]
 enum Direction {
@@ -43,6 +53,13 @@ pub struct UndoHistory {
     /// The study this history belongs to — the open study (Story 8.2b); `None` for the demo, after
     /// a dossier switch, and before any study is opened.
     owner: Option<Uuid>,
+    /// Story 8.5b: the history PARKED when its study was closed — kept, ownerless (no decision is
+    /// taken on a closed study), with the study as it stood at park time. Reopening that study
+    /// hands the history back ONLY while the stored study still equals that snapshot (G3): any
+    /// write meanwhile — a late fetch, an import, another writer — drops it, so no undo can write
+    /// back a state older than a change it never saw. Any other open, the demo, a dossier switch,
+    /// a delete, an import or a restore clears it too.
+    parked: Option<(Uuid, Study)>,
 }
 
 /// One undo/redo entry: a whole-study snapshot, and — when the step recorded an AI draft's
@@ -77,6 +94,18 @@ impl UndoHistory {
     /// an undo would write it back as the open study's state). Such a step is dropped and logged;
     /// the redo branch is left as it is (the open study was not edited).
     fn push_step(&mut self, step: UndoStep) {
+        // A closed study's parked history takes no step: a write to it while closed invalidates the
+        // parked history (its reopen would otherwise undo into a state that skips this write).
+        if self.owner.is_none()
+            && let Some((parked, _)) = &self.parked
+        {
+            if step.study.id == *parked {
+                self.parked = None;
+                self.undo.clear();
+                self.redo.clear();
+            }
+            return;
+        }
         if let Some(owner) = self.owner
             && step.study.id != owner
         {
@@ -97,6 +126,33 @@ impl UndoHistory {
         self.undo.clear();
         self.redo.clear();
         self.owner = owner;
+        self.parked = None;
+    }
+
+    /// Hand the parked history back to its study, reopened as `current` — only if nothing wrote the
+    /// study since it was parked (G3). Returns whether it was handed back.
+    fn unpark(&mut self, id: Uuid, current: Option<&Study>) -> bool {
+        match self.parked.take() {
+            Some((parked, snapshot)) if parked == id && current == Some(&snapshot) => {
+                self.owner = Some(id);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn park(&mut self, current: Option<Study>) {
+        match (self.owner.take(), current) {
+            (Some(owner), Some(study)) if study.id == owner => {
+                self.parked = Some((owner, study));
+            }
+            // The study could not be read at close: nothing to prove its history valid — dropped.
+            _ => {
+                self.undo.clear();
+                self.redo.clear();
+                self.parked = None;
+            }
+        }
     }
 
     /// The study this history belongs to (see [`UndoHistory::owner`]).
@@ -122,9 +178,46 @@ impl JournalState {
     }
 
     /// Clear the undo/redo history for a newly opened study, which becomes its owner — the only
-    /// study a draft decision may be taken on (Story 8.2b, arch A8).
+    /// study a draft decision may be taken on (Story 8.2b, arch A8). Reopening the study whose
+    /// history was parked by [`JournalState::park_undo`] hands that history back (Story 8.5b) —
+    /// only while the stored study is still the one parked (G3).
     pub fn reset_undo_for(&mut self, study_id: Uuid) {
-        self.history.reset(Some(study_id));
+        let current = self.try_get_study(study_id).ok().flatten();
+        if !self.history.unpark(study_id, current.as_ref()) {
+            self.history.reset(Some(study_id));
+        }
+    }
+
+    /// The open study is closed (Story 8.5b): its history is kept, ownerless — no decision and no
+    /// step lands in it — with the study as stored now, until that study is reopened unchanged.
+    pub fn park_undo(&mut self) {
+        let current = self
+            .history
+            .owner()
+            .and_then(|id| self.try_get_study(id).ok().flatten());
+        self.history.park(current);
+    }
+
+    /// Take the whole history out (Story 8.5b G3): deciding a draft of another study opens that
+    /// study; if the decision is then refused, [`JournalState::put_back_undo`] restores the
+    /// previous study's history when that study is reopened.
+    pub(crate) fn take_undo(&mut self) -> UndoHistory {
+        std::mem::take(&mut self.history)
+    }
+
+    /// Put back a history taken by [`JournalState::take_undo`] — only onto its own owner study,
+    /// reopened and unchanged since (nothing was written: the decision was refused).
+    pub(crate) fn put_back_undo(&mut self, history: UndoHistory) {
+        if history.owner.is_some() && history.owner == self.history.owner {
+            self.history = history;
+        }
+    }
+
+    /// Drop a parked history (Story 8.5b G3): an import may rewrite its study.
+    pub(crate) fn drop_parked_undo(&mut self) {
+        if self.history.owner.is_none() && self.history.parked.is_some() {
+            self.history.reset(None);
+        }
     }
 
     /// Whether an undo / redo step is available (the UI disables its control when not).
@@ -143,23 +236,23 @@ impl JournalState {
         self.history.undo.len()
     }
 
-    /// Step the open study **back** to the snapshot before the last mutation (FR32). Returns
-    /// `Ok(true)` when a step was taken (the caller re-reads + re-renders), `Ok(false)` when the
-    /// undo stack is empty. The restore is a real, guarded `put_study` of the whole prior `Study`.
-    pub fn undo(&mut self, study_id: Uuid) -> Result<bool, String> {
+    /// Step the open study **back** to the snapshot before the last mutation (FR32). Returns what
+    /// was stepped over ([`Stepped`] — the caller re-reads + re-renders unless `Nothing`, the undo
+    /// stack being empty). The restore is a real, guarded `put_study` of the whole prior `Study`.
+    pub fn undo(&mut self, study_id: Uuid) -> Result<Stepped, String> {
         self.step(study_id, Direction::Undo)
     }
 
     /// Step the open study **forward** to a snapshot displaced by a prior undo (no-op if the redo
     /// stack is empty).
-    pub fn redo(&mut self, study_id: Uuid) -> Result<bool, String> {
+    pub fn redo(&mut self, study_id: Uuid) -> Result<Stepped, String> {
         self.step(study_id, Direction::Redo)
     }
 
     /// The shared undo/redo engine: pop the target snapshot, write it back, and move the present
     /// state onto the opposite stack so the step is itself reversible. On a write failure the popped
     /// snapshot is pushed back (the history is never silently lost) and a neutral notice surfaces.
-    fn step(&mut self, study_id: Uuid, dir: Direction) -> Result<bool, String> {
+    fn step(&mut self, study_id: Uuid, dir: Direction) -> Result<Stepped, String> {
         self.refuse_if_read_only()?;
         if self.journal.is_none() {
             return Err(MSG_NO_JOURNAL.to_string());
@@ -173,7 +266,7 @@ impl JournalState {
             draft,
         }) = popped
         else {
-            return Ok(false); // nothing to step to
+            return Ok(Stepped::Nothing); // nothing to step to
         };
         let push_back = |history: &mut UndoHistory, study: Study| {
             let step = UndoStep { study, draft };
@@ -227,7 +320,7 @@ impl JournalState {
                     Direction::Undo => self.history.redo.push(step),
                     Direction::Redo => self.history.undo.push(step),
                 }
-                Ok(true)
+                Ok(draft.map_or(Stepped::Study, Stepped::Draft))
             }
             // G3 B2/E7: a draft step whose draft is no longer in the state the step expects (decided
             // or removed elsewhere) can never succeed — pushing it back would wedge the history on

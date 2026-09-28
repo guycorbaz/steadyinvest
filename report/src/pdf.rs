@@ -147,6 +147,29 @@ pub const JUDGED_SIGIL: &str = "*";
 /// test). It says only what holds for EVERY starred value: the analyst judged it (the estimated
 /// sales growth, starred too, feeds no calculation — « les calculs l'utilisent » was false there).
 pub const JUDGED_NOTE: &str = "* valeur jugée par l'analyste";
+/// Story 8.5b (UX 8.0 §7, FR17): the sigil after a figure an AI proposed and the owner validated
+/// (WinAnsi 0x86 — survives a black-and-white print). A report never launders an AI value into a
+/// plain figure.
+pub const AI_SIGIL: &str = "†";
+/// The note that explains [`AI_SIGIL`], printed under a table that shows one — and only there.
+pub const AI_NOTE: &str = "† valeur proposée par une IA et validée par l'utilisateur";
+
+/// A raw cell's printed figure, with [`AI_SIGIL`] when its value carries an AI origin (an absent
+/// value stays the plain em-dash: nothing to mark). `marked` records that a sigil was printed.
+fn ai_marked(
+    figure: String,
+    cell: Option<&steadyinvest_contract::Cell>,
+    marked: &mut bool,
+) -> String {
+    let from_ai = cell.is_some_and(|c| c.value.is_some() && c.provenance.ai_origin.is_some());
+    if from_ai && figure != EM_DASH && !figure.is_empty() {
+        *marked = true;
+        format!("{figure}{AI_SIGIL}")
+    } else {
+        figure
+    }
+}
+
 const JUDGED_ON: char = '\u{E000}';
 const JUDGED_OFF: char = '\u{E001}';
 
@@ -339,7 +362,7 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
 
     // ── §3 Price / earnings history — the form's columns A–H over the window, totals, averages,
     //    the average and current P/E. ──
-    price_earnings_section(&mut doc, &frame, nf, current_price);
+    price_earnings_section(&mut doc, &frame, study, nf, current_price);
     doc.gap(6.0);
 
     // ── §4 Risk & reward — the form's A–E with every intermediate figure ──
@@ -524,6 +547,7 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
     doc.new_page();
     doc.section("Annexe — données historiques");
     doc.grid_begin(study.years.len());
+    let mut ai_shown = false;
     doc.grid_row_num(
         &[
             "Année",
@@ -540,29 +564,57 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         1,
     );
     for y in &study.years {
+        let m = &mut ai_shown;
         let cells = [
             y.year.to_string(),
             // Owner decision (Guy, 2026-09-26): sales and pre-tax profit in MILLIONS, the unit in
             // the header — as the study screen enters them (issue #117) and as the NAIC form
             // tabulates them — never a ten-digit figure shrunk to fit its column.
-            nf.millions(y.sales.value),
-            nf.millions(y.pre_tax_profit.as_ref().and_then(|c| c.value)),
-            nf.cell(y.eps.value, DisplayField::PerShare),
-            nf.cell(y.high_price.value, DisplayField::Price),
-            nf.cell(y.low_price.value, DisplayField::Price),
-            nf.cell(
-                y.dividend_per_share.as_ref().and_then(|c| c.value),
-                DisplayField::PerShare,
+            ai_marked(nf.millions(y.sales.value), Some(&y.sales), m),
+            ai_marked(
+                nf.millions(y.pre_tax_profit.as_ref().and_then(|c| c.value)),
+                y.pre_tax_profit.as_ref(),
+                m,
             ),
-            nf.cell(
-                y.book_value_per_share.as_ref().and_then(|c| c.value),
-                DisplayField::PerShare,
+            ai_marked(
+                nf.cell(y.eps.value, DisplayField::PerShare),
+                Some(&y.eps),
+                m,
+            ),
+            ai_marked(
+                nf.cell(y.high_price.value, DisplayField::Price),
+                Some(&y.high_price),
+                m,
+            ),
+            ai_marked(
+                nf.cell(y.low_price.value, DisplayField::Price),
+                Some(&y.low_price),
+                m,
+            ),
+            ai_marked(
+                nf.cell(
+                    y.dividend_per_share.as_ref().and_then(|c| c.value),
+                    DisplayField::PerShare,
+                ),
+                y.dividend_per_share.as_ref(),
+                m,
+            ),
+            ai_marked(
+                nf.cell(
+                    y.book_value_per_share.as_ref().and_then(|c| c.value),
+                    DisplayField::PerShare,
+                ),
+                y.book_value_per_share.as_ref(),
+                m,
             ),
         ];
         let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
         doc.grid_row_num(&refs, &COLS8, false, 1);
     }
     doc.grid_end(&COLS8);
+    if ai_shown {
+        doc.small_line(AI_NOTE);
+    }
 
     Ok(doc.finish())
 }
@@ -576,6 +628,7 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
 fn price_earnings_section(
     doc: &mut Doc,
     frame: &crate::form::StudyFrame,
+    study: &Study,
     nf: NumberStyle,
     current_price: Option<Decimal>,
 ) {
@@ -593,20 +646,32 @@ fn price_earnings_section(
         "H · F÷B %",
     ];
     let mut body: Vec<[String; 9]> = Vec::new();
+    // Story 8.5b: a raw figure an AI proposed and the owner validated carries « † ».
+    let mut ai_shown = false;
     for row in &v.per_year {
         let cy = frame.series.iter().find(|y| y.year == row.year);
         let (hp, lp, ep, dv) = match cy {
             Some(y) => (y.high_price, y.low_price, y.eps, y.dividend_per_share),
             None => (None, None, None, None),
         };
+        let raw = study.years.iter().find(|y| y.year == row.year);
+        let m = &mut ai_shown;
         let cells = [
             row.year.to_string(),
-            nf.money(hp),
-            nf.money(lp),
-            nf.fmt_dec(ep, DisplayField::PerShare),
+            ai_marked(nf.money(hp), raw.map(|y| &y.high_price), m),
+            ai_marked(nf.money(lp), raw.map(|y| &y.low_price), m),
+            ai_marked(
+                nf.fmt_dec(ep, DisplayField::PerShare),
+                raw.map(|y| &y.eps),
+                m,
+            ),
             nf.num(row.high_pe),
             nf.num(row.low_pe),
-            nf.fmt_dec(dv, DisplayField::PerShare),
+            ai_marked(
+                nf.fmt_dec(dv, DisplayField::PerShare),
+                raw.and_then(|y| y.dividend_per_share.as_ref()),
+                m,
+            ),
             nf.pct(row.payout_pct),
             nf.pct(row.high_yield_pct),
         ];
@@ -671,6 +736,9 @@ fn price_earnings_section(
     ];
     body.push(avg);
     let mut notes = Block::default();
+    if ai_shown {
+        notes.small_line(AI_NOTE);
+    }
     if totals
         .iter()
         .any(|t| matches!(t, Total::Absent { unknown: true, .. }))
@@ -1270,6 +1338,7 @@ const REPORT_USER_FACING: &[&str] = &[
     ANNEX_SALES,
     ANNEX_PRETAX,
     JUDGED_NOTE,
+    AI_NOTE,
     "BPA",
     "Cours haut",
     "Cours bas",
@@ -3764,6 +3833,90 @@ mod tests {
         assert_eq!(judged(EM_DASH), EM_DASH);
     }
 
+    #[test]
+    fn an_ai_origin_figure_carries_its_dagger_and_the_note_only_then() {
+        // Story 8.5b (UX 8.0 §7, FR17): a raw figure an AI proposed and the owner validated.
+        let plain = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let all = page_streams(&plain);
+        assert!(
+            all.iter().all(|p| !contains(p, AI_NOTE)),
+            "no AI origin → no note (and no sigil)"
+        );
+        let mut s = demo_study();
+        let year = s.years.last().expect("a year").year;
+        let row = s.years.last_mut().expect("a year");
+        row.high_price.provenance.ai_origin = Some(steadyinvest_contract::AiOrigin {
+            draft_id: uuid::Uuid::from_u128(7),
+            client: "claude-code".into(),
+            model: "opus".into(),
+            validated_at: steadyinvest_contract::Timestamp("2026-09-28T10:00:00Z".into()),
+        });
+        let high = row.high_price.value.expect("a high price");
+        let bytes = render_study_pdf(&s, NumberStyle::Point).unwrap();
+        let pages = page_streams(&bytes);
+        let with_note: Vec<usize> = (0..pages.len())
+            .filter(|i| contains(&pages[*i], AI_NOTE))
+            .collect();
+        assert!(!with_note.is_empty(), "the note is printed");
+        // §3 (page 2) and the annexe show the dagger after the figure.
+        let figure = NumberStyle::Point.money(Some(high.as_decimal()));
+        let marked = format!("{figure}{AI_SIGIL}");
+        let hits = pages
+            .iter()
+            .filter(|p| shows(&shown_text(p), &marked))
+            .count();
+        assert!(
+            hits >= 2,
+            "{year}: « {marked} » in §3 and the annexe ({hits})"
+        );
+        // WinAnsi: the dagger is a printable byte.
+        assert_eq!(winansi(AI_SIGIL), vec![0x86]);
+    }
+
+    /// FNV-1a 64 — a pinned fingerprint of a whole PDF (no hashing crate in `report`).
+    fn fnv64(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+        })
+    }
+
+    #[test]
+    fn a_study_without_ai_origin_renders_byte_identical_to_main() {
+        // Story 8.5b G3 F4: pinned from `main` (0e9bcca's base) — the « † » path adds nothing to a
+        // study that carries no AI origin.
+        let point = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let comma = render_study_pdf(&demo_study(), NumberStyle::Comma).unwrap();
+        assert_eq!((point.len(), fnv64(&point)), (22307, 0xbf09_23b9_616e_f393));
+        assert_eq!((comma.len(), fnv64(&comma)), (22307, 0x17c1_a1e9_ff03_a7e5));
+    }
+
+    #[test]
+    fn a_dagger_fits_every_annexe_column() {
+        // Story 8.5b G3 F4: the widest plausible figure of each annexe column, with its « † »,
+        // stays inside the column's rules, whole (G1 F: shrunk when it must, never cut).
+        let widest = [
+            "2026",       // year
+            "999 999.9†", // sales (M)
+            "99 999.9†",  // pre-tax (M)
+            "-999.99†",   // EPS
+            "99 999.99†", // high
+            "99 999.99†", // low
+            "999.99†",    // dividend
+            "9 999.99†",  // book value
+        ];
+        for (i, figure) in widest.iter().enumerate() {
+            let col_w = COLS8[i + 1] - COLS8[i];
+            // One line, the figure and its dagger whole — shrunk if needed, never split or cut.
+            let (lines, size) = cell_layout(figure, col_w, FONT, false);
+            assert_eq!(lines, vec![figure.to_string()], "column {i}");
+            assert!(size >= MIN_FIGURE_FONT, "column {i}: {size}");
+            assert!(
+                measure(figure, size, false) <= col_w - 2.0 * GRID_INSET,
+                "column {i}: « {figure} » crosses its rules"
+            );
+        }
+    }
+
     /// The content streams, one per page, in page order (the only streams in the file).
     fn page_streams(bytes: &[u8]) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
@@ -4605,12 +4758,14 @@ mod tests {
     fn section_3_moves_whole_when_it_would_straddle_a_page_break() {
         // L10, end to end: §3 started where its heading and a few rows fit (the heading's own reserve)
         // but not the whole section — the section moves whole, nothing of it stays behind.
-        let frame = crate::form::build_frame(&demo_study()).unwrap();
+        let study = demo_study();
+        let frame = crate::form::build_frame(&study).unwrap();
         let mut doc = Doc::new();
         doc.y = PAGE_H - BOTTOM - (HEAD_FONT + 5.0 * LINE_H + 20.0);
         price_earnings_section(
             &mut doc,
             &frame,
+            &study,
             NumberStyle::Point,
             Some(Decimal::from(80)),
         );
