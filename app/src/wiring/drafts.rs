@@ -13,8 +13,15 @@
 //! - There is no window-focus trigger: Slint 1.17 has no public window-activation callback (story
 //!   decision 1); the timer bounds the latency.
 //!
-//! This is the ONLY place the `DraftRow.ai_*` fields are set: AI-written text enters no other
-//! model (the guard test in `posture.rs`).
+//! - Deciding (Story 8.5b): a row opens the decision dialog ([`open_decision`], read afresh — never
+//!   the row's cached text); « Valider » / « Rejeter » / the edit form's « Enregistrer » /
+//!   the stale confirmation's verb decide through `JournalState::decide_draft`, after opening the
+//!   draft's study when it is not the open one (the undo history belongs to the open study, arch
+//!   A8). Every decision, undo and redo pushes the inbox explicitly: the app's own writes never move
+//!   `PRAGMA data_version`.
+//!
+//! This is the ONLY place the `DraftRow.ai_*` and `DraftDecision.ai_*` fields are set: AI-written
+//! text enters no other model (the guard test in `posture.rs`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -23,14 +30,20 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use steadyinvest_contract::DraftKind;
 use uuid::Uuid;
 
-use crate::state::JournalState;
+use crate::state::{
+    self, Decision, DialogDraft, DraftFreshness, JournalState, MSG_DRAFT_REJECTED,
+    MSG_DRAFT_VALIDATED, MSG_DRAFT_VALIDATED_EDITED, MSG_READ_FAILED, owner_edit,
+};
 use crate::viewmodel::drafts::{
-    INBOX_CAUSE_UNREADABLE_DRAFT, InboxRow, InboxView, KindFilter, PendingCounts, PollAction,
-    PollState, STUDY_FILTER_ALL, StudyChoice, inbox_rows, pending_counts,
+    DecisionView, INBOX_CAUSE_UNREADABLE_DRAFT, InboxRow, InboxView, KindFilter, PendingCounts,
+    PollAction, PollState, STUDY_FILTER_ALL, StudyChoice, dialog_view, inbox_rows,
+    option_wire_for_label, pending_counts,
 };
 use crate::viewmodel::format::NumberFormat;
 use crate::wiring::Session;
-use crate::{DraftRow, Drafts, MainWindow, Prefs, Studies};
+use crate::wiring::dialog;
+use crate::wiring::push::push_form;
+use crate::{Dialog, DraftDecision, DraftRow, Drafts, MainWindow, Prefs, Studies};
 
 /// The poll period (arch A9: new drafts within ~3 s).
 const POLL_PERIOD_MS: u64 = 2500;
@@ -83,6 +96,203 @@ fn to_slint(view: &InboxView) -> Vec<DraftRow> {
             ai_text: r.ai_text.clone().into(),
         })
         .collect()
+}
+
+/// The decision dialog's draft, as Slint shows it — the ONE setter of `DraftDecision.ai_*`.
+fn to_dialog(v: &DecisionView, id: Uuid, live: bool) -> DraftDecision {
+    let options: Vec<SharedString> = v.edit_options.iter().map(|o| o.as_str().into()).collect();
+    DraftDecision {
+        id: id.to_string().into(),
+        kind: kind_wire(v.kind).into(),
+        target: v.target.clone().into(),
+        context: v.context.clone().into(),
+        current: v.current.clone().into(),
+        proposed: v.proposed.clone().into(),
+        state: v.state.wire(),
+        band: v.band.clone().into(),
+        focus_cancel: v.focus_cancel,
+        edit_kind: v.edit_kind.wire().into(),
+        edit_prefill: v.edit_prefill.clone().into(),
+        edit_options: ModelRc::new(VecModel::from(options)),
+        live,
+        submitted: v.submitted.clone().into(),
+        // AI-written: read in Slint ONLY inside an AiFrame (UX spec §4.1).
+        ai_client: v.ai_client.clone().into(),
+        ai_model: v.ai_model.clone().into(),
+        ai_lead: v.ai_lead.clone().into(),
+        ai_text: v.ai_text.clone().into(),
+    }
+}
+
+/// The draft the decision dialog shows, and what a stale confirmation will decide.
+struct OpenDecision {
+    draft: DialogDraft,
+    confirm_body: String,
+    /// Set when « Valider » / « Enregistrer » raised the stale confirmation: the edited text
+    /// (`None` = validate as proposed).
+    stale_edit: Option<Option<String>>,
+}
+
+thread_local! {
+    static DECISION: RefCell<Option<OpenDecision>> = const { RefCell::new(None) };
+}
+
+/// Read a pending draft and show its decision dialog (Story 8.5b). `field_error`: a refusal to keep
+/// shown (a re-read after a refused decision). Returns the reason when the draft cannot be shown.
+fn show_decision(
+    ui: &MainWindow,
+    state: &JournalState,
+    id: Uuid,
+    field_error: &str,
+) -> Result<(), String> {
+    let draft = state.draft_for_dialog(id)?;
+    if draft.archived {
+        // Archived since the inbox was read (its rows are not activatable): refused by name.
+        return Err(state::MSG_DECISION_STUDY_ARCHIVED.replace("{ticker}", &draft.draft.ticker));
+    }
+    let view =
+        dialog_view(&draft, state.decision_study(), number_format(ui)).map_err(|problem| {
+            tracing::warn!(
+                "draft {} cannot be shown in the decision dialog: {}",
+                problem.draft_id,
+                problem.detail
+            );
+            MSG_READ_FAILED.to_string()
+        })?;
+    let dialog = ui.global::<Dialog>();
+    dialog.set_decision(to_dialog(&view, id, true));
+    dialog.set_title(SharedString::new());
+    dialog.set_body(SharedString::new());
+    dialog.set_context(SharedString::new());
+    dialog.set_action(SharedString::new());
+    dialog.set_verb(SharedString::new());
+    dialog.set_form_id(SharedString::new());
+    dialog.set_field_error(field_error.into());
+    dialog.set_kind("decision".into());
+    DECISION.with(|d| {
+        *d.borrow_mut() = Some(OpenDecision {
+            confirm_body: view.confirm_body.clone(),
+            draft,
+            stale_edit: None,
+        })
+    });
+    Ok(())
+}
+
+/// A row's activation (Story 8.5b): the decision dialog of that draft, or « Action refusée » with
+/// the reason (the draft gone or decided meanwhile, a read failure) and the inbox re-read.
+pub(crate) fn open_decision(ui: &MainWindow, state: &JournalState, id: Uuid) {
+    ui.global::<Drafts>().set_notice(SharedString::new());
+    if let Err(message) = show_decision(ui, state, id, "") {
+        dialog::refuse(ui, &message);
+        push_drafts(ui, state);
+    }
+}
+
+/// After a refused decision: show the draft again with the refusal (its values re-read), or — when
+/// it can no longer be decided (gone, decided elsewhere) — keep the refusal and only « Annuler ».
+fn after_refusal(ui: &MainWindow, state: &JournalState, id: Uuid) {
+    let error = ui.global::<Dialog>().get_field_error().to_string();
+    // The dialog shows again only while its own kind is up (the refusal landed inline).
+    let kind = ui.global::<Dialog>().get_kind();
+    if kind.as_str() == "decision" && show_decision(ui, state, id, &error).is_err() {
+        let dialog = ui.global::<Dialog>();
+        let mut shown = dialog.get_decision();
+        shown.live = false;
+        dialog.set_decision(shown);
+        DECISION.with(|d| *d.borrow_mut() = None);
+    }
+    push_drafts(ui, state);
+}
+
+/// Decide the open draft (Story 8.5b): open its study first when it is not the open one (arch A8),
+/// decide, then say the outcome, re-render the open study and re-read the inbox. `false` on a
+/// refusal (raised inline — the dialog's own gesture).
+fn decide_open(ui: &MainWindow, s: &Rc<RefCell<JournalState>>, decision: Decision) -> bool {
+    let Some(draft) = DECISION.with(|d| d.borrow().as_ref().map(|o| o.draft.clone())) else {
+        return false;
+    };
+    let id = draft.draft.draft_id;
+    if let Some(study_id) = draft.draft.study_id
+        && s.borrow().decision_study() != Some(study_id)
+        && draft.freshness != DraftFreshness::TargetGone(state::GoneReason::StudyDeleted)
+    {
+        // The ordinary open path: undo history reset to that study, form pushed; the screen stays.
+        ui.global::<Studies>()
+            .invoke_open_study(study_id.to_string().into());
+    }
+    let rejected = decision == Decision::Reject;
+    let result = s.borrow_mut().decide_draft(&draft.draft, decision);
+    match result {
+        Ok(()) => {
+            let text = if rejected {
+                MSG_DRAFT_REJECTED
+            } else if s.borrow().draft_was_edited(id) {
+                MSG_DRAFT_VALIDATED_EDITED
+            } else {
+                MSG_DRAFT_VALIDATED
+            };
+            ui.global::<Drafts>().set_notice(text.into());
+            DECISION.with(|d| *d.borrow_mut() = None);
+            if let Some(study_id) = draft.draft.study_id
+                && s.borrow().decision_study() == Some(study_id)
+            {
+                let reread = s.borrow().get_study(study_id);
+                if let Some(study) = reread {
+                    push_form(ui, &s.borrow(), &study, number_format(ui));
+                }
+            }
+            push_drafts(ui, &s.borrow());
+            true
+        }
+        Err(message) => {
+            dialog::refuse(ui, &message);
+            after_refusal(ui, &s.borrow(), id);
+            false
+        }
+    }
+}
+
+/// Raise the stale confirmation over the decision (or its edit form): its « Annuler » goes back.
+fn raise_stale_confirm(ui: &MainWindow, edit: Option<String>) {
+    let body = DECISION.with(|d| {
+        let mut d = d.borrow_mut();
+        let open = d.as_mut()?;
+        open.stale_edit = Some(edit);
+        Some(open.confirm_body.clone())
+    });
+    let Some(body) = body else {
+        return;
+    };
+    let dialog = ui.global::<Dialog>();
+    dialog.set_resume_title(dialog.get_title());
+    dialog.set_resume_body(dialog.get_body());
+    dialog.set_title(SharedString::new());
+    dialog.set_verb(SharedString::new());
+    dialog.set_body(body.into());
+    dialog.set_action("validate-stale".into());
+    dialog.set_kind("confirm".into());
+}
+
+/// The owner's edit read under their number format and the grid's units (8.2b `owner_edit`): an
+/// option LABEL picked in the drop-down is mapped back to its wire name first.
+fn read_edit(
+    ui: &MainWindow,
+    draft: &DialogDraft,
+    text: &str,
+) -> Result<state::EditedValue, String> {
+    let is_option = draft
+        .payload
+        .target
+        .as_ref()
+        .and_then(steadyinvest_contract::DraftField::of_target)
+        .is_some_and(|(f, _)| f.unit() == steadyinvest_contract::DraftUnit::Option);
+    let text = if is_option {
+        option_wire_for_label(text)
+    } else {
+        text.to_string()
+    };
+    owner_edit(draft.record.kind, &draft.payload, &text, number_format(ui))
 }
 
 fn number_format(ui: &MainWindow) -> NumberFormat {
@@ -247,6 +457,7 @@ pub(crate) fn reset_filters(ui: &MainWindow) {
 /// the open study, the filters and the last rows; the next tick re-reads (the caller's
 /// `refresh_studies` also pushes).
 pub(crate) fn forget_dossier(ui: &MainWindow) {
+    DECISION.with(|d| *d.borrow_mut() = None);
     INBOX.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.poll.reset();
@@ -315,6 +526,130 @@ pub(crate) fn wire_drafts(ui: &MainWindow, s: &Session) {
             ui.global::<Drafts>().set_kind_filter("studies".into());
             ui.set_current_screen(PROPOSITIONS_SCREEN);
             push_drafts(&ui, &journal_state.borrow());
+        });
+    }
+}
+
+/// Wire the decision dialog (Story 8.5b): a row opens it; its verbs decide.
+pub(crate) fn wire_decisions(ui: &MainWindow, s: &Session) {
+    let drafts = ui.global::<Drafts>();
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&s.journal_state);
+        drafts.on_open_draft(move |id_text| {
+            let ui = ui_weak.unwrap();
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            open_decision(&ui, &journal_state.borrow(), id);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&s.journal_state);
+        drafts.on_decide(move |verb| {
+            let ui = ui_weak.unwrap();
+            let Some(draft) = DECISION.with(|d| d.borrow().as_ref().map(|o| o.draft.clone()))
+            else {
+                return false;
+            };
+            let stale = draft.freshness == DraftFreshness::Stale;
+            match verb.as_str() {
+                "reject" => decide_open(&ui, &journal_state, Decision::Reject),
+                "validate" if stale => {
+                    raise_stale_confirm(&ui, None);
+                    false
+                }
+                "validate" => decide_open(
+                    &ui,
+                    &journal_state,
+                    Decision::Validate {
+                        seen_fingerprint: None,
+                    },
+                ),
+                "edit" => {
+                    let text = ui.global::<Dialog>().get_draft_text().to_string();
+                    // A text that reads as no value is refused inline, before any confirmation.
+                    let value = match read_edit(&ui, &draft, &text) {
+                        Ok(value) => value,
+                        Err(message) => {
+                            dialog::refuse(&ui, &message);
+                            return false;
+                        }
+                    };
+                    if stale {
+                        raise_stale_confirm(&ui, Some(text));
+                        return false;
+                    }
+                    decide_open(
+                        &ui,
+                        &journal_state,
+                        Decision::ValidateEdited {
+                            seen_fingerprint: None,
+                            value,
+                        },
+                    )
+                }
+                _ => false,
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&s.journal_state);
+        drafts.on_confirm_stale(move || {
+            let ui = ui_weak.unwrap();
+            let Some((draft, edit)) = DECISION.with(|d| {
+                d.borrow()
+                    .as_ref()
+                    .and_then(|o| o.stale_edit.clone().map(|e| (o.draft.clone(), e)))
+            }) else {
+                return false;
+            };
+            // Back to the decision (or its edit form) first: a refusal lands inline there.
+            let dialog = ui.global::<Dialog>();
+            dialog.set_title(dialog.get_resume_title());
+            dialog.set_body(dialog.get_resume_body());
+            dialog.set_action(SharedString::new());
+            dialog.set_verb(SharedString::new());
+            let back = if dialog.get_form_id().as_str() == "draft-edit" {
+                "form"
+            } else {
+                "decision"
+            };
+            dialog.set_kind(back.into());
+            // The fingerprint the owner SAW when the dialog opened (arch A7, O4).
+            let seen = draft.seen_fingerprint.clone();
+            let decision = match edit {
+                None => Decision::Validate {
+                    seen_fingerprint: seen,
+                },
+                Some(text) => match read_edit(&ui, &draft, &text) {
+                    Ok(value) => Decision::ValidateEdited {
+                        seen_fingerprint: seen,
+                        value,
+                    },
+                    Err(message) => {
+                        dialog::refuse(&ui, &message);
+                        return false;
+                    }
+                },
+            };
+            let written = decide_open(&ui, &journal_state, decision);
+            if !written && back == "form" {
+                // A refusal of the edit shows the decision again with its new values (AC 7).
+                let kind = ui.global::<Dialog>().get_kind();
+                if kind.as_str() == "form" {
+                    let error = ui.global::<Dialog>().get_field_error().to_string();
+                    let id = draft.draft.draft_id;
+                    if show_decision(&ui, &journal_state.borrow(), id, &error).is_err() {
+                        let mut shown = ui.global::<Dialog>().get_decision();
+                        shown.live = false;
+                        ui.global::<Dialog>().set_decision(shown);
+                    }
+                }
+            }
+            written
         });
     }
 }

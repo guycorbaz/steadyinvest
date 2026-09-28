@@ -52,7 +52,8 @@ enum Route {
 fn route(kind: &str, gesture: bool) -> Route {
     match kind {
         "" => Route::Notice,
-        "form" if gesture => Route::FieldError,
+        // Story 8.5b: the decision dialog's own verbs, like a form's submit.
+        "form" | "decision" if gesture => Route::FieldError,
         _ => Route::Queue,
     }
 }
@@ -151,5 +152,8 @@ mod tests {
         assert_eq!(route("confirm", false), Route::Queue);
         assert_eq!(route("confirm", true), Route::Queue);
         assert_eq!(route("notice", false), Route::Queue);
+        // Story 8.5b: the decision dialog's own verb → inline; anything else waits.
+        assert_eq!(route("decision", true), Route::FieldError);
+        assert_eq!(route("decision", false), Route::Queue);
     }
 }

@@ -128,6 +128,13 @@ fn editable_cell(
         // channels (AC3): a cell can be both `✓ validated` AND warned.
         warning: warning.is_some(),
         warning_key: warning.map(|k| k.as_str()).unwrap_or("").into(),
+        // Story 8.5b (FR17): the date an AI draft's value was validated (local time) — never the
+        // client / model, which stay in an AiFrame. "" = no AI origin.
+        draft_validated: cell
+            .and_then(|c| c.provenance.ai_origin.as_ref())
+            .map(|origin| crate::viewmodel::notes::date_fr(&origin.validated_at))
+            .unwrap_or_default()
+            .into(),
     }
 }
 
@@ -313,6 +320,32 @@ mod tests {
         );
         s.years = years;
         s
+    }
+
+    #[test]
+    fn a_cell_with_an_ai_origin_carries_its_validation_date_and_nothing_else() {
+        // Story 8.5b (FR17): the ★ mark's date — never the client / model.
+        let plain = editable_cell(
+            Some(&cell(Some("3"))),
+            "c",
+            0,
+            NumberFormat::default(),
+            None,
+        );
+        assert_eq!(plain.draft_validated, "");
+        let mut c = cell(Some("3"));
+        c.provenance.ai_origin = Some(steadyinvest_contract::AiOrigin {
+            draft_id: Uuid::from_u128(9),
+            client: "claude-code".into(),
+            model: "opus".into(),
+            validated_at: Timestamp("2026-09-28T10:00:00Z".into()),
+        });
+        let marked = editable_cell(Some(&c), "c", 0, NumberFormat::default(), None);
+        assert_eq!(
+            marked.draft_validated,
+            crate::viewmodel::notes::date_fr(&Timestamp("2026-09-28T10:00:00Z".into()))
+        );
+        assert!(!marked.draft_validated.contains("claude"));
     }
 
     #[test]

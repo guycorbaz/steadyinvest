@@ -718,6 +718,14 @@ export component StudyScreen inherits Rectangle {
                 }
                 // Story 3.3 (FR18) — the focused cell's freshness as-of date, revealed on demand
                 // beside the source. Fact-stating, never colour; "" hides it (a gap has no as-of).
+                // Story 8.5b (FR17): a value an AI proposed and the owner validated — app text, the
+                // client / model never leave an AiFrame.
+                if Studies.active-draft-validated != "": Text {
+                    text: @tr("proposée par l'IA, validée le {}", Studies.active-draft-validated);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                }
                 Text {
                     text: Studies.active-timestamp != "" ? @tr("Mis à jour le {}", Studies.active-timestamp) : "";
                     color: Tokens.text-mid;

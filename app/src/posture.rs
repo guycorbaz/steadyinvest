@@ -767,8 +767,14 @@ mod tests {
         // AiFrame date in its own text +1; « étude archivée » +1; the filter line +1; the Études
         // ⊘ band and its action +2; the rows' « ★ ⊘ » +1; the kind chips' narrow two-row layout
         // +5: 1074 + 12 = 1086, measured.
+        // 8.5b (deciding drafts): the decision dialog (title « Proposition de l'IA », « Actuel »,
+        // « Proposé » ×2, « Annuler », « Modifier avant de valider… », « Rejeter », « Valider »,
+        // the target « {} · nouvelle note »), its edit form (title, sentence, « Proposé » ×2, the
+        // target, « Note »), the stale confirmation (title, verb), the focused cell's « proposée par
+        // l'IA, validée le {} » and the glossary's « Proposition validée par l'utilisateur » term
+        // and definition: 1086 + 19 = 1105, measured.
         assert!(
-            total >= 1086,
+            total >= 1105,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -932,8 +938,9 @@ mod tests {
             // option that is none (MSG_VALUE_NOT_AN_OPTION) and a dropped undo step
             // (MSG_UNDO_DRAFT_STEP_DROPPED): 236 + 5 = 241, measured. 8.5a: the draft inbox's
             // read subject (MSG_SUBJECT_DRAFTS, « la liste des propositions »): 241 + 1 = 242,
-            // measured.
-            242,
+            // measured. 8.5b: the decision outcomes of the 8.0 spec §3.3 — validated, validated
+            // (edited), rejected, undone, redone: 242 + 5 = 247, measured.
+            247,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -1652,6 +1659,21 @@ mod tests {
         );
     }
 
+    /// Story 8.5b: the decision dialog's texts built in Rust (the other-study context line, the
+    /// stale / gone bands, the stale confirmation's body — 8.0 spec §3.3), scanned and counted.
+    #[test]
+    fn decision_user_facing_labels_are_neutral_no_banned_verb() {
+        for label in crate::viewmodel::drafts::DECISION_USER_FACING_LABELS {
+            assert_neutral(label, "viewmodel/drafts.rs (decision dialog)");
+        }
+        assert_eq!(
+            crate::viewmodel::drafts::DECISION_USER_FACING_LABELS.len(),
+            // 8.5b: context line + stale band + gone band + stale confirmation body: 0 + 4 = 4.
+            4,
+            "decision label inventory changed — register the new label"
+        );
+    }
+
     // ── Story 8.5a (UX spec §4.1, arch A12, FR13): AI-written text is shown ONLY inside an
     //    `AiFrame`. The AI-written strings (the comment, a proposed note text, a proposed company
     //    name, the origin client and model) reach Slint only through `ai-*` properties / model
@@ -1886,6 +1908,20 @@ mod tests {
             ai_reads_outside_frames(two_way, false, false),
             vec!["2: relay `<=>` inside an AiFrame".to_string()]
         );
+        // Story 8.5b: the decision dialog's AI fields — a stray read outside its frame fails, the
+        // same read inside it passes.
+        assert_eq!(
+            ai_reads_outside_frames("Text { text: Dialog.decision.ai-text; }", false, false),
+            vec!["1: ai-text".to_string()]
+        );
+        assert!(
+            ai_reads_outside_frames(
+                "AiFrame { ai-text: Dialog.decision.ai-text; LabeledTextArea { init => { self.text = Dialog.decision.ai-lead; } } }",
+                false,
+                false
+            )
+            .is_empty()
+        );
         // The frame component itself reads its own properties.
         assert!(ai_reads_outside_frames("Text { text: root.ai-text; }", true, false).is_empty());
         // A field declaration in state.slint is a type, not a read.
@@ -1908,7 +1944,8 @@ mod tests {
     /// model, proposed note text and company name, and the rows' `ai_*` copies — are read in the
     /// app's production code ONLY:
     /// - in `viewmodel/drafts.rs`, inside `fn ai_fields` (into the rows' `ai_*` fields);
-    /// - in `wiring/drafts.rs`, inside `fn to_slint`, and only as `ai_x: r.ai_x…` assignments;
+    /// - in `wiring/drafts.rs`, inside `fn to_slint` (the inbox rows) and `fn to_dialog` (the
+    ///   decision dialog, 8.5b), and only as `ai_x: r.ai_x…` assignments;
     /// - in `state/drafts.rs`, the 8.2b decision rail, which WRITES them into the dossier (the
     ///   validated note, `AiOrigin`) — never into a Slint model (it holds no UI handle).
     #[test]
@@ -1964,14 +2001,15 @@ mod tests {
             }
             let full = std::fs::read_to_string(&path).expect("rs readable");
             let prod = production_part(&full);
-            let allowed: Option<(usize, usize)> = if path.ends_with("viewmodel/drafts.rs") {
-                Some(fn_body(prod, "ai_fields"))
+            let allowed: Vec<(usize, usize)> = if path.ends_with("viewmodel/drafts.rs") {
+                vec![fn_body(prod, "ai_fields")]
             } else if path.ends_with("wiring/drafts.rs") {
-                Some(fn_body(prod, "to_slint"))
+                // The inbox rows (8.5a) and the decision dialog (8.5b).
+                vec![fn_body(prod, "to_slint"), fn_body(prod, "to_dialog")]
             } else if path.ends_with("state/drafts.rs") {
-                Some((0, prod.len()))
+                vec![(0, prod.len())]
             } else {
-                None
+                Vec::new()
             };
             for needle in SOURCES {
                 for (pos, _) in prod.match_indices(needle) {
@@ -1979,7 +2017,7 @@ mod tests {
                     if next.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                         continue; // a longer name
                     }
-                    let inside = allowed.is_some_and(|(a, b)| pos > a && pos < b);
+                    let inside = allowed.iter().any(|(a, b)| pos > *a && pos < *b);
                     let line = prod[..pos].lines().last().unwrap_or("").trim();
                     let as_ai_field =
                         !path.ends_with("wiring/drafts.rs") || line.starts_with("ai_");

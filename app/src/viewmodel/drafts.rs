@@ -250,20 +250,32 @@ pub fn one_line(text: &str) -> String {
         .join(" ")
 }
 
-/// The AI-written fields of a row — the ONE place the view model reads a draft's comment, origin,
-/// proposed note text and proposed company name (the posture guard pins it), each made one line.
-/// Returns `(client, model, lead, comment)`.
-fn ai_fields(d: &DraftRecord, payload: &DraftPayload) -> (String, String, String, String) {
+/// The AI-written fields of a draft — the ONE place the view model reads a draft's comment, origin,
+/// proposed note text and proposed company name (the posture guard pins it). `compact` (list rows):
+/// each made one line; the decision dialog (8.5b) shows the comment and the note text whole, their
+/// line breaks kept (the origin is always one line). Returns `(client, model, lead, comment)`.
+fn ai_fields(
+    d: &DraftRecord,
+    payload: &DraftPayload,
+    compact: bool,
+) -> (String, String, String, String) {
     let lead = match d.kind {
         DraftKind::Note => payload.note_text.as_deref().unwrap_or_default(),
         DraftKind::Study => payload.company_name.as_deref().unwrap_or_default(),
         _ => "",
     };
+    let text = |t: &str| {
+        if compact {
+            one_line(t)
+        } else {
+            t.trim().to_string()
+        }
+    };
     (
         one_line(&d.origin_client),
         one_line(&d.origin_model),
-        one_line(lead),
-        one_line(&d.comment),
+        text(lead),
+        text(&d.comment),
     )
 }
 
@@ -425,7 +437,7 @@ pub fn inbox_rows(
             if !kind.admits(d.kind) || study_filter.is_some_and(|f| d.study_id != Some(f)) {
                 continue;
             }
-            let (ai_client, ai_model, ai_lead, ai_text) = ai_fields(d, &payload);
+            let (ai_client, ai_model, ai_lead, ai_text) = ai_fields(d, &payload, true);
             rows.push(InboxRow {
                 id: d.id,
                 kind: d.kind,
@@ -461,6 +473,227 @@ pub fn inbox_rows(
         study_choices,
         unfiltered: pending.len(),
     })
+}
+
+// ── The decision dialog (Story 8.5b — UX spec §3.3 « Decision dialog », §4.2) ──
+
+/// The context line when the draft's study is not the open one (spec §3.3).
+pub const DECISION_CONTEXT_OTHER_STUDY: &str = "Valider ou rejeter ouvre l'étude {ticker} ({dev}).";
+/// The ◦ band of a stale draft (spec §3.3).
+pub const DECISION_BAND_STALE: &str =
+    "La cible {cible} a changé depuis la proposition. Valeur actuelle : {maintenant}.";
+/// The ⊘ band of a draft whose target is gone (spec §3.3).
+pub const DECISION_BAND_GONE: &str =
+    "Cible disparue : {raison} ; la proposition ne peut qu'être rejetée.";
+/// The stale confirmation's body (spec §3.3).
+pub const DECISION_CONFIRM_STALE: &str = "La cible {cible} a changé depuis la proposition (valeur actuelle : {maintenant}). La valeur proposée la remplacera.";
+
+/// Every app string of the decision dialog built in Rust, scanned by the posture gate (FR13).
+#[cfg(test)]
+pub const DECISION_USER_FACING_LABELS: &[&str] = &[
+    DECISION_CONTEXT_OTHER_STUDY,
+    DECISION_BAND_STALE,
+    DECISION_BAND_GONE,
+    DECISION_CONFIRM_STALE,
+];
+
+/// The decision dialog's state band.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionState {
+    Fresh,
+    Stale,
+    /// Rejection only.
+    TargetGone,
+}
+
+impl DecisionState {
+    /// The Slint wire value: 0 fresh · 1 stale · 2 target gone.
+    pub fn wire(self) -> i32 {
+        match self {
+            DecisionState::Fresh => 0,
+            DecisionState::Stale => 1,
+            DecisionState::TargetGone => 2,
+        }
+    }
+}
+
+/// Which field « Modifier avant de valider… » shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditKind {
+    Number,
+    Option,
+    Note,
+}
+
+impl EditKind {
+    pub fn wire(self) -> &'static str {
+        match self {
+            EditKind::Number => "number",
+            EditKind::Option => "option",
+            EditKind::Note => "note",
+        }
+    }
+}
+
+/// What the decision dialog shows for one pending draft (pure).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionView {
+    pub kind: DraftKind,
+    /// App text, as the inbox row spells it (Slint composes « · nouvelle note » for a note).
+    pub target: String,
+    /// « Valider ou rejeter ouvre l'étude … » when the draft's study is not the open one, else "".
+    pub context: String,
+    /// « Actuel » / « Proposé », app-formatted ("" for a note: its « Proposé » is AI text).
+    pub current: String,
+    pub proposed: String,
+    pub state: DecisionState,
+    /// The stale / gone band ("" when fresh).
+    pub band: String,
+    /// The stale confirmation's body ("" unless stale).
+    pub confirm_body: String,
+    /// Q5: the initial focus on « Annuler » (a `✓` target), else on « Valider ».
+    pub focus_cancel: bool,
+    pub edit_kind: EditKind,
+    /// The edit field's prefill, spelled like the grid (owner number format, millions for sales /
+    /// pre-tax profit, the option's chip label). A note's prefill is AI text: `ai_lead`.
+    pub edit_prefill: String,
+    /// An option field's choices, as the chips spell them.
+    pub edit_options: Vec<String>,
+    /// JJ/MM/AAAA.
+    pub submitted: String,
+    /// AI-written, whole (reach Slint only through `AiFrame`).
+    pub ai_client: String,
+    pub ai_model: String,
+    /// The proposed note text (a note draft), "" otherwise.
+    pub ai_lead: String,
+    pub ai_text: String,
+}
+
+/// A number's edit prefill: the exact value (never display-rounded — an untouched prefill equals
+/// the proposal, a plain validation), spelled in the owner's format, in the grid's units.
+fn edit_number(field: DraftField, value: Option<DraftValue>, format: NumberFormat) -> String {
+    match value {
+        Some(DraftValue::Number(m)) => match cell_wire(field) {
+            Some(wire) => cell_value_display(Some(m), wire, format),
+            None => crate::viewmodel::format::format_amount(&m.to_string(), format),
+        },
+        _ => String::new(),
+    }
+}
+
+/// Build the decision dialog of a pending cell, judgment or note draft (Story 8.5b). `open_study`:
+/// the study the undo history belongs to now (the context line says when deciding opens another).
+/// A proposed value that is no value of its field is [`Unshowable`] (no dialog with a guessed value).
+pub fn dialog_view(
+    d: &crate::state::DialogDraft,
+    open_study: Option<Uuid>,
+    format: NumberFormat,
+) -> Result<DecisionView, Unshowable> {
+    let record = &d.record;
+    let (target, current, proposed) =
+        target_and_values(record, &d.payload, d.study.as_ref(), format)?;
+    let context = match (record.study_id, d.study.as_ref()) {
+        (Some(id), Some(study)) if open_study != Some(id) => DECISION_CONTEXT_OTHER_STUDY
+            .replace("{ticker}", &study.security_ticker)
+            .replace("{dev}", &study.native_currency),
+        _ => String::new(),
+    };
+    let (state, band) = match &d.freshness {
+        DraftFreshness::Fresh => (DecisionState::Fresh, String::new()),
+        DraftFreshness::Stale => (
+            DecisionState::Stale,
+            DECISION_BAND_STALE
+                .replace("{cible}", &target)
+                .replace("{maintenant}", &current),
+        ),
+        DraftFreshness::TargetGone(why) => (
+            DecisionState::TargetGone,
+            DECISION_BAND_GONE.replace("{raison}", &why.text()),
+        ),
+    };
+    let confirm_body = if state == DecisionState::Stale {
+        DECISION_CONFIRM_STALE
+            .replace("{cible}", &target)
+            .replace("{maintenant}", &current)
+    } else {
+        String::new()
+    };
+    let field = d
+        .payload
+        .target
+        .as_ref()
+        .and_then(DraftField::of_target)
+        .map(|(f, _)| f);
+    let proposed_value = match (field, d.payload.proposed_value.as_deref()) {
+        (Some(f), Some(text)) => f.parse_value(text).ok(),
+        _ => None,
+    };
+    let (edit_kind, edit_prefill, edit_options) = match field {
+        _ if record.kind == DraftKind::Note => (EditKind::Note, String::new(), Vec::new()),
+        Some(f) if f.unit() == steadyinvest_contract::DraftUnit::Option => (
+            EditKind::Option,
+            match proposed_value {
+                Some(DraftValue::Option(o)) => option_label(o).to_string(),
+                _ => String::new(),
+            },
+            f.options()
+                .iter()
+                .map(|o| option_label(*o).to_string())
+                .collect(),
+        ),
+        Some(f) => (
+            EditKind::Number,
+            edit_number(f, proposed_value, format),
+            Vec::new(),
+        ),
+        None => (EditKind::Number, String::new(), Vec::new()),
+    };
+    let (ai_client, ai_model, ai_lead, ai_text) = ai_fields(record, &d.payload, false);
+    Ok(DecisionView {
+        kind: record.kind,
+        target,
+        context,
+        current: if record.kind == DraftKind::Note {
+            String::new()
+        } else {
+            current
+        },
+        proposed: if record.kind == DraftKind::Note {
+            String::new()
+        } else {
+            proposed
+        },
+        state,
+        band,
+        confirm_body,
+        focus_cancel: d.target_validated,
+        edit_kind,
+        edit_prefill,
+        edit_options,
+        submitted: date_fr(&record.created_at),
+        ai_client,
+        ai_model,
+        ai_lead,
+        ai_text,
+    })
+}
+
+/// The option's wire name for a label the edit form's drop-down picked (the owner's edit is read by
+/// `state::owner_edit`, which matches wire names). An unknown label is passed through unchanged —
+/// `owner_edit` then refuses it by name.
+pub fn option_wire_for_label(label: &str) -> String {
+    [
+        ForecastLowOption::AvgLowPeTimesEps,
+        ForecastLowOption::AvgLowPriceLast5y,
+        ForecastLowOption::RecentSevereLow,
+        ForecastLowOption::DividendSupported,
+    ]
+    .into_iter()
+    .find(|o| option_label(*o) == label.trim())
+    .map_or_else(
+        || label.to_string(),
+        |o| steadyinvest_contract::option_name(o).to_string(),
+    )
 }
 
 /// The pending counts the shell shows: per study (the reminder band, the Études rows' « ★ {n} »)
@@ -1135,5 +1368,143 @@ mod tests {
         p.mark_read_failed();
         assert_eq!(p.on_tick(Ok(Some(5))), PollAction::Reread);
         assert_eq!(p.on_tick(Ok(Some(5))), PollAction::Nothing, "recovered");
+    }
+
+    // ── Story 8.5b — the decision dialog ──
+
+    fn dialog_of(
+        record: DraftRecord,
+        study: Option<Study>,
+        freshness: DraftFreshness,
+        validated: bool,
+    ) -> crate::state::DialogDraft {
+        let payload: DraftPayload = serde_json::from_str(&record.payload).expect("payload");
+        crate::state::DialogDraft {
+            draft: crate::state::DraftRef {
+                draft_id: record.id,
+                study_id: record.study_id,
+                ticker: record.security_ticker.clone(),
+            },
+            payload,
+            study,
+            archived: false,
+            freshness,
+            target_validated: validated,
+            seen_fingerprint: None,
+            record,
+        }
+    }
+
+    #[test]
+    fn a_cell_dialog_prefills_in_the_grids_millions_and_the_owners_format() {
+        let (drafts, studies) = fixture();
+        let a = studies.get(&Uuid::from_u128(0xA)).cloned();
+        let mut sales = drafts[0].clone();
+        let mut p: DraftPayload = serde_json::from_str(&sales.payload).expect("payload");
+        p.proposed_value = Some("1234500000".into());
+        sales.payload = serde_json::to_string(&p).expect("json");
+        let d = dialog_of(sales, a, DraftFreshness::Fresh, false);
+        let comma = NumberFormat::parse("comma").unwrap_or_default();
+        let v = dialog_view(&d, Some(Uuid::from_u128(0xA)), comma).expect("view");
+        assert_eq!(v.edit_kind, EditKind::Number);
+        assert_eq!(
+            v.edit_prefill,
+            cell_value_display(Some(money("1234500000")), entry::FIELD_SALES, comma)
+        );
+        assert_eq!(v.proposed, v.edit_prefill, "shown like the grid");
+        // The prefill reads back as the proposal (an untouched edit is a plain validation).
+        let back = crate::state::owner_edit(d.record.kind, &d.payload, &v.edit_prefill, comma)
+            .expect("reads back");
+        assert_eq!(back, crate::state::EditedValue::Number(money("1234500000")));
+        assert_eq!(v.state, DecisionState::Fresh);
+        assert!(v.band.is_empty() && v.confirm_body.is_empty());
+        assert!(v.context.is_empty(), "its study is the open one");
+        assert!(!v.focus_cancel, "Q5: « Valider » focused");
+        // AI text is whole in the dialog (never one-lined).
+        assert_eq!(v.ai_text, "Commentaire de l'IA");
+    }
+
+    #[test]
+    fn another_studys_draft_says_that_deciding_opens_it_and_a_validated_target_focuses_cancel() {
+        let (drafts, studies) = fixture();
+        let a = studies.get(&Uuid::from_u128(0xA)).cloned();
+        let d = dialog_of(drafts[0].clone(), a, DraftFreshness::Fresh, true);
+        let v = dialog_view(&d, Some(Uuid::from_u128(0xB)), NumberFormat::default()).expect("view");
+        assert_eq!(v.context, "Valider ou rejeter ouvre l'étude NESN (CHF).");
+        assert!(v.focus_cancel, "Q5: a ✓ target focuses « Annuler »");
+        let none = dialog_view(&d, None, NumberFormat::default()).expect("view");
+        assert!(
+            !none.context.is_empty(),
+            "no open study: deciding opens it too"
+        );
+    }
+
+    #[test]
+    fn stale_and_gone_drafts_carry_their_bands_and_the_confirmation_body() {
+        let (drafts, studies) = fixture();
+        let a = studies.get(&Uuid::from_u128(0xA)).cloned();
+        let stale = dialog_of(drafts[1].clone(), a, DraftFreshness::Stale, false);
+        let v =
+            dialog_view(&stale, Some(Uuid::from_u128(0xA)), NumberFormat::default()).expect("view");
+        assert_eq!(v.state, DecisionState::Stale);
+        assert!(v.band.starts_with("La cible NESN · "), "{}", v.band);
+        assert!(
+            v.band
+                .contains(&format!("Valeur actuelle : {}.", v.current))
+        );
+        assert!(v.confirm_body.contains("La valeur proposée la remplacera."));
+        let b = studies.get(&Uuid::from_u128(0xB)).cloned();
+        let gone = dialog_of(
+            drafts[4].clone(),
+            b,
+            DraftFreshness::TargetGone(crate::state::GoneReason::YearRemoved(2019)),
+            false,
+        );
+        let v =
+            dialog_view(&gone, Some(Uuid::from_u128(0xB)), NumberFormat::default()).expect("view");
+        assert_eq!(v.state, DecisionState::TargetGone);
+        assert_eq!(
+            v.band,
+            "Cible disparue : l'année 2019 n'existe plus dans l'étude ; la proposition ne peut qu'être rejetée."
+        );
+        assert!(v.confirm_body.is_empty());
+    }
+
+    #[test]
+    fn an_option_dialog_lists_the_chip_labels_and_maps_a_label_back_to_its_wire_name() {
+        let (drafts, studies) = fixture();
+        let b = studies.get(&Uuid::from_u128(0xB)).cloned();
+        let d = dialog_of(drafts[5].clone(), b, DraftFreshness::Fresh, false);
+        let v = dialog_view(&d, Some(Uuid::from_u128(0xB)), NumberFormat::default()).expect("view");
+        assert_eq!(v.edit_kind, EditKind::Option);
+        assert_eq!(v.edit_prefill, OPT_RECENT_SEVERE_LOW);
+        assert_eq!(v.edit_options.len(), 4);
+        assert!(v.edit_options.contains(&OPT_DIVIDEND_SUPPORTED.to_string()));
+        assert_eq!(
+            option_wire_for_label(OPT_DIVIDEND_SUPPORTED),
+            steadyinvest_contract::option_name(ForecastLowOption::DividendSupported)
+        );
+        assert_eq!(option_wire_for_label("inconnu"), "inconnu");
+    }
+
+    #[test]
+    fn a_note_dialog_shows_the_note_whole_in_the_ai_fields_and_no_values() {
+        let (mut drafts, studies) = fixture();
+        let mut p: DraftPayload = serde_json::from_str(&drafts[2].payload).expect("payload");
+        p.note_text = Some("Ligne un\nligne deux".into());
+        drafts[2].payload = serde_json::to_string(&p).expect("json");
+        let b = studies.get(&Uuid::from_u128(0xB)).cloned();
+        let d = dialog_of(drafts[2].clone(), b, DraftFreshness::Fresh, false);
+        let v = dialog_view(&d, Some(Uuid::from_u128(0xB)), NumberFormat::default()).expect("view");
+        assert_eq!(v.edit_kind, EditKind::Note);
+        assert!(v.current.is_empty() && v.proposed.is_empty());
+        assert_eq!(
+            v.ai_lead, "Ligne un\nligne deux",
+            "line breaks kept in the dialog"
+        );
+        assert!(
+            v.edit_prefill.is_empty(),
+            "a note's prefill is AI text (ai_lead)"
+        );
     }
 }

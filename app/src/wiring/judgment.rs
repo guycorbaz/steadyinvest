@@ -560,19 +560,7 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             // `match`, so the `journal_state.borrow()` in the Ok(true) arm would panic "RefCell
             // already borrowed". (Same class as the fetch.rs price-refresh panic.)
             let undone = journal_state.borrow_mut().undo(id);
-            match undone {
-                Ok(true) => {
-                    study_notice::clear(&ui, Source::Edit);
-                    // G1 J review: the fetch summary may describe what this undo reverted — it
-                    // goes (its outcome only; a fetch failure stays, F4).
-                    study_notice::clear_outcome(&ui, Source::Fetch);
-                    if let Some(study) = journal_state.borrow().get_study(id) {
-                        push_form(&ui, &journal_state.borrow(), &study, format);
-                    }
-                }
-                Ok(false) => {} // nothing to undo
-                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
-            }
+            stepped_outcome(&ui, &journal_state, id, format, undone, true);
         });
     }
     {
@@ -597,18 +585,48 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
             // `match`, so the `journal_state.borrow()` in the Ok(true) arm would panic "RefCell
             // already borrowed". (Same class as the fetch.rs price-refresh panic.)
             let redone = journal_state.borrow_mut().redo(id);
-            match redone {
-                Ok(true) => {
-                    study_notice::clear(&ui, Source::Edit);
-                    study_notice::clear_outcome(&ui, Source::Fetch); // G1 J review, as undo
-                    if let Some(study) = journal_state.borrow().get_study(id) {
-                        push_form(&ui, &journal_state.borrow(), &study, format);
-                    }
-                }
-                Ok(false) => {}
-                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
-            }
+            stepped_outcome(&ui, &journal_state, id, format, redone, false);
         });
+    }
+}
+
+/// Settle an undo / redo (Story 2.9; Story 8.5b for a draft step): re-render the study; a step over
+/// an AI draft's validation says so in the study's notice slot and re-reads the inbox (the app's own
+/// writes never move `PRAGMA data_version`); a dropped draft step is a refusal (« Action
+/// refusée »); any other failure stays the study's own failure notice (the history is kept).
+fn stepped_outcome(
+    ui: &MainWindow,
+    journal_state: &Rc<RefCell<JournalState>>,
+    id: Uuid,
+    format: NumberFormat,
+    result: Result<state::Stepped, String>,
+    undo: bool,
+) {
+    match result {
+        Ok(state::Stepped::Nothing) => {}
+        Ok(stepped) => {
+            study_notice::clear(ui, Source::Edit);
+            // G1 J review: the fetch summary may describe what this step reverted — it goes (its
+            // outcome only; a fetch failure stays, F4).
+            study_notice::clear_outcome(ui, Source::Fetch);
+            if let Some(study) = journal_state.borrow().get_study(id) {
+                push_form(ui, &journal_state.borrow(), &study, format);
+            }
+            if let state::Stepped::Draft(_) = stepped {
+                let text = if undo {
+                    state::MSG_DRAFT_UNDONE
+                } else {
+                    state::MSG_DRAFT_REDONE
+                };
+                study_notice::outcome(ui, Source::Edit, text);
+                crate::wiring::drafts::push_drafts(ui, &journal_state.borrow());
+            }
+        }
+        Err(message) if message == state::MSG_UNDO_DRAFT_STEP_DROPPED => {
+            crate::wiring::dialog::refuse(ui, &message);
+            crate::wiring::drafts::push_drafts(ui, &journal_state.borrow());
+        }
+        Err(message) => study_notice::fail(ui, Source::Edit, &message),
     }
 }
 

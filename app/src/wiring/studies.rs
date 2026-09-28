@@ -742,6 +742,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             studies.set_active_year(-1);
             studies.set_active_field(SharedString::new());
             studies.set_active_source(SharedString::new());
+            studies.set_active_draft_validated(SharedString::new());
             studies.set_active_warning(SharedString::new());
             // Defensively clear any stuck drag state (review P5): if a previous study was closed
             // mid-drag the `up`/`cancel` may never have fired, which would leave the form's scroll
