@@ -13,6 +13,7 @@
 import { Tokens } from "../tokens.slint";
 import { Studies, PeChartState, AxisTick } from "../state.slint";
 import { ContextChip, LegendItem } from "growth_chart.slint";
+import { AiChartLine, AiChartCaption, AiChipRow } from "ai_judgment.slint";
 
 export component PeHistoryChart inherits Rectangle {
     in property <PeChartState> chart: Studies.pe-chart;
@@ -166,6 +167,33 @@ export component PeHistoryChart inherits Rectangle {
                     viewbox-height: root.chart.chart-h;
                 }
 
+                // ── Story 8.6: the PENDING AI judged-P/E proposals (dotted levels, hollow marker,
+                //    « IA {valeur} »), inert; and the « placée par l'IA » caption of a validated one. ──
+                AiChartLine {
+                    line: Studies.draft-judgments.pe-high;
+                    chart-h: root.chart.chart-h;
+                    end-x: root.chart.chart-w * 1px;
+                    strip-w: root.strip-w;
+                }
+                AiChartLine {
+                    line: Studies.draft-judgments.pe-low;
+                    chart-h: root.chart.chart-h;
+                    end-x: root.chart.chart-w * 1px;
+                    strip-w: root.strip-w;
+                }
+                AiChartCaption {
+                    date: Studies.draft-judgments.cap-high-pe;
+                    line-y: root.chart.judged-high-y;
+                    end-x: root.chart.chart-w * 1px;
+                    strip-w: root.strip-w;
+                }
+                AiChartCaption {
+                    date: Studies.draft-judgments.cap-low-pe;
+                    line-y: root.chart.judged-low-y;
+                    end-x: root.chart.chart-w * 1px;
+                    strip-w: root.strip-w;
+                }
+
                 // ── The drag strip: the grab target for the ACTIVE judged level. A GENEROUS mouse
                 //    target (strip-w wide), deliberately wider than the line. Issue #187 (same fix
                 //    as the §1 growth chart): the strip is CENTRED on the level line's right end
@@ -250,6 +278,10 @@ export component PeHistoryChart inherits Rectangle {
             padding-left: Tokens.space-32 + Tokens.space-8;
             LegendItem { hue: Tokens.series-price; name: @tr("PER historique"); }
             LegendItem { hue: Tokens.series-eps; name: @tr("PER moyen jugé"); }
+        }
+        // Story 8.6: one action chip per pending judged-P/E proposal drawn on this chart.
+        if Studies.draft-judgments.pe-chips.length > 0: AiChipRow {
+            chips: Studies.draft-judgments.pe-chips;
         }
     }
 }

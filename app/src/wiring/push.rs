@@ -142,6 +142,9 @@ pub(crate) fn push_form(
             studies.set_growth_chart(viewmodel::chart::growth_chart(&frame, format));
             // Issue #115 — the §3 P/E-history chart (historical high/low P/E + draggable judged levels).
             studies.set_pe_chart(viewmodel::chart::pe_chart(&frame, &study.judgment, format));
+            // Story 8.6 — the pending AI judgment lines / chips and the « placée par l'IA »
+            // captions, AFTER the owner charts and on their scale (never moving it).
+            crate::wiring::drafts::push_ai_judgments(ui, study, Some(&frame), format);
             // The study-level (§4) warning key — `low_price_above_current`, anchored near forecast-low.
             studies.set_section4_warning_key(
                 warnings
@@ -181,6 +184,8 @@ pub(crate) fn push_form(
             studies.set_verdict(VerdictState::default());
             studies.set_growth_chart(viewmodel::chart::unavailable());
             studies.set_pe_chart(viewmodel::chart::pe_chart_unavailable());
+            // Story 8.6: no chart drawn — every pending proposal's chip goes under its field.
+            crate::wiring::drafts::push_ai_judgments(ui, study, None, format);
             studies.set_section4_warning_key(SharedString::new());
             // G1 J: on the OPEN study's slot (the list's slot was invisible here), sourced Render so
             // the next render that computes takes it down again (a state that no longer holds).

@@ -34,16 +34,23 @@ use crate::state::{
     self, Decision, DialogDraft, DraftFreshness, JournalState, MSG_DRAFT_REJECTED,
     MSG_DRAFT_VALIDATED, MSG_DRAFT_VALIDATED_EDITED, MSG_READ_FAILED, owner_edit,
 };
+use crate::viewmodel::ai_lines::{
+    AiJudgmentsView, AiLineView, JudgmentOverlay, ai_judgments, pending_judgment_overlays,
+};
 use crate::viewmodel::drafts::{
     DecisionView, INBOX_CAUSE_UNREADABLE_DRAFT, InboxRow, InboxView, KindFilter, PendingCounts,
     PollAction, PollState, STUDY_FILTER_ALL, StudyChoice, dialog_view, inbox_rows,
     option_wire_for_label, pending_counts,
 };
+use crate::viewmodel::engine::StudyFrame;
 use crate::viewmodel::format::NumberFormat;
 use crate::wiring::Session;
 use crate::wiring::dialog;
 use crate::wiring::push::push_form;
-use crate::{Dialog, DraftDecision, DraftRow, Drafts, MainWindow, Prefs, Studies};
+use crate::{
+    AiChip, AiJudgments, AiLine, Dialog, DraftDecision, DraftRow, Drafts, MainWindow, Prefs,
+    Studies,
+};
 
 /// The poll period (arch A9: new drafts within ~3 s).
 const POLL_PERIOD_MS: u64 = 2500;
@@ -60,6 +67,12 @@ struct InboxCache {
     open_study: Option<Uuid>,
     /// The rows and « Étude : » labels last pushed — an unchanged re-read rebuilds no model (G3).
     shown: Option<(Vec<InboxRow>, Vec<String>)>,
+    /// Story 8.6: the pending JUDGMENT drafts of every study (from the last read — never a query per
+    /// edit), for the open study's AI lines and chips.
+    judgments: Vec<steadyinvest_persistence::DraftRecord>,
+    /// The open study's pending judgment drafts as last drawn (ids + payloads): a read that changes
+    /// them re-draws the open study's overlay.
+    drawn: Vec<(Uuid, String)>,
 }
 
 thread_local! {
@@ -364,6 +377,150 @@ pub(crate) fn apply_open_study(ui: &MainWindow, study_id: Option<Uuid>) {
     ui.global::<Drafts>().set_open_study_pending(n as i32);
 }
 
+/// A pending AI line as Slint draws it (Story 8.6) — `visible: false` when there is none.
+fn ai_line(v: &Option<AiLineView>) -> AiLine {
+    match v {
+        Some(l) => AiLine {
+            visible: true,
+            commands: l.geometry.commands.as_str().into(),
+            marker: l.geometry.marker.as_str().into(),
+            y: l.geometry.y,
+            value: l.value.as_str().into(),
+        },
+        None => AiLine {
+            y: -1.0,
+            ..Default::default()
+        },
+    }
+}
+
+/// One action chip (Story 8.6): app text only — the field label and the formatted proposal.
+fn ai_chip(o: &JudgmentOverlay) -> AiChip {
+    AiChip {
+        draft_id: o.draft_id.to_string().into(),
+        field: o.field_label.as_str().into(),
+        value: o.value_label.as_str().into(),
+        stale: o.stale,
+    }
+}
+
+/// The open study's AI overlay as the `Studies.ai-judgments` struct (Story 8.6).
+fn to_ai_slint(v: &AiJudgmentsView) -> AiJudgments {
+    use steadyinvest_contract::DraftField as F;
+    let chips = |list: &[JudgmentOverlay]| {
+        ModelRc::new(VecModel::from(list.iter().map(ai_chip).collect::<Vec<_>>()))
+    };
+    let mut out = AiJudgments {
+        est_high: ai_line(&v.est_high),
+        est_low: ai_line(&v.est_low),
+        pe_high: ai_line(&v.pe_high),
+        pe_low: ai_line(&v.pe_low),
+        growth_chips: chips(&v.growth_chips),
+        pe_chips: chips(&v.pe_chips),
+        ..Default::default()
+    };
+    for o in &v.field_chips {
+        let chip = ai_chip(o);
+        match o.field {
+            F::ProjectedSalesGrowthPct => out.chip_sales_growth = chip,
+            F::ProjectedEpsGrowthPct => out.chip_eps_growth = chip,
+            F::EstimatedHighEps => out.chip_est_high = chip,
+            F::EstimatedLowEps => out.chip_est_low = chip,
+            F::JudgedAvgHighPe => out.chip_high_pe = chip,
+            F::JudgedAvgLowPe => out.chip_low_pe = chip,
+            F::RecentSevereLow => out.chip_severe_low = chip,
+            F::PresentFullYearDividend => out.chip_dividend = chip,
+            F::ForecastLowOption => out.chip_option = chip,
+            _ => {}
+        }
+    }
+    for (field, date) in &v.captions {
+        let date: SharedString = date.as_str().into();
+        match field {
+            F::ProjectedSalesGrowthPct => out.cap_sales_growth = date,
+            F::ProjectedEpsGrowthPct => out.cap_eps_growth = date,
+            F::EstimatedHighEps => out.cap_est_high = date,
+            F::EstimatedLowEps => out.cap_est_low = date,
+            F::JudgedAvgHighPe => out.cap_high_pe = date,
+            F::JudgedAvgLowPe => out.cap_low_pe = date,
+            F::RecentSevereLow => out.cap_severe_low = date,
+            F::PresentFullYearDividend => out.cap_dividend = date,
+            F::ForecastLowOption => out.cap_option = date,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A study's pending judgment drafts as a comparable signature (ids + payloads, sorted).
+fn drawn_signature<'a>(
+    study_id: Uuid,
+    drafts: impl Iterator<Item = &'a steadyinvest_persistence::DraftRecord>,
+) -> Vec<(Uuid, String)> {
+    let mut sig: Vec<(Uuid, String)> = drafts
+        .filter(|d| d.study_id == Some(study_id))
+        .map(|d| (d.id, d.payload.clone()))
+        .collect();
+    sig.sort();
+    sig
+}
+
+/// Draw the open study's pending AI judgment lines, chips and captions (Story 8.6) — from the
+/// inbox's last read (no query) and the study as just rendered. Called by `push::push_form` after
+/// the owner charts, and when a read changes the open study's pending judgment drafts. Read-only:
+/// the owner chart state is never touched (AC 4).
+pub(crate) fn push_ai_judgments(
+    ui: &MainWindow,
+    study: &steadyinvest_contract::Study,
+    frame: Option<&StudyFrame>,
+    format: NumberFormat,
+) {
+    let mine: Vec<steadyinvest_persistence::DraftRecord> = INBOX.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let mine: Vec<_> = cache
+            .judgments
+            .iter()
+            .filter(|d| d.study_id == Some(study.id))
+            .cloned()
+            .collect();
+        cache.drawn = drawn_signature(study.id, mine.iter());
+        mine
+    });
+    let overlays = pending_judgment_overlays(study, &mine, format);
+    let view = ai_judgments(study, frame, &overlays, format);
+    ui.global::<Studies>()
+        .set_draft_judgments(to_ai_slint(&view));
+}
+
+/// Clear the AI overlay (a study closed, a dossier switch) — the next open draws it afresh.
+pub(crate) fn clear_ai_judgments(ui: &MainWindow) {
+    INBOX.with(|cache| cache.borrow_mut().drawn.clear());
+    ui.global::<Studies>()
+        .set_draft_judgments(AiJudgments::default());
+}
+
+/// After an inbox read: re-draw the open study's AI overlay when its pending judgment drafts
+/// changed (a draft arrived through MCP, was decided, undone or redone — AC 9).
+fn redraw_open_if_changed(ui: &MainWindow, state: &JournalState) {
+    let target = INBOX.with(|cache| {
+        let cache = cache.borrow();
+        let id = cache.open_study?;
+        (drawn_signature(id, cache.judgments.iter()) != cache.drawn).then_some(id)
+    });
+    let Some(id) = target else {
+        return;
+    };
+    // A closed study is drawn afresh when it is opened again.
+    if !ui.global::<Studies>().get_study_open() {
+        return;
+    }
+    let Some(study) = state.get_study(id) else {
+        return;
+    };
+    let frame = crate::viewmodel::engine::build_frame(&study).ok();
+    push_ai_judgments(ui, &study, frame.as_ref(), number_format(ui));
+}
+
 /// Show « indisponible »: rows and « Étude : » choices cleared, counts zero, the cause named (""
 /// when none can be). The poller then re-reads on its next tick even if nothing moved — a ⊘ is
 /// never stuck (G3, arch A9).
@@ -374,6 +531,8 @@ fn show_failure(ui: &MainWindow, cause: &str) {
         cache.failed = true;
         cache.choices.clear();
         cache.shown = None;
+        // Story 8.6: no pending proposal is drawn from a read that failed (never a guessed line).
+        cache.judgments.clear();
         cache.poll.mark_read_failed();
     });
     let drafts = ui.global::<Drafts>();
@@ -399,6 +558,7 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
         Ok(data) => data,
         Err(error) => {
             show_failure(ui, error.cause.unwrap_or(""));
+            redraw_open_if_changed(ui, state);
             return;
         }
     };
@@ -429,6 +589,7 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
                 problem.detail
             );
             show_failure(ui, INBOX_CAUSE_UNREADABLE_DRAFT);
+            redraw_open_if_changed(ui, state);
             return;
         }
     };
@@ -438,6 +599,11 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
     let (open_study, total, draft_studies, unchanged) = INBOX.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.failed = false;
+        cache.judgments = drafts
+            .iter()
+            .filter(|d| d.kind == DraftKind::Judgment)
+            .cloned()
+            .collect();
         cache.choices = view.study_choices.clone();
         cache.study_filter = study_filter;
         cache.counts = counts;
@@ -473,6 +639,7 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
     drafts_global.set_read_failed(false);
     apply_open_study(ui, open_study);
     apply_row_counts(ui);
+    redraw_open_if_changed(ui, state);
 }
 
 /// Back to « Toutes » and « Toutes les études » (G3): on a dossier change and when the reader
@@ -495,7 +662,9 @@ pub(crate) fn forget_dossier(ui: &MainWindow) {
         cache.poll.reset();
         cache.open_study = None;
         cache.shown = None;
+        cache.judgments.clear();
     });
+    clear_ai_judgments(ui);
     reset_filters(ui);
 }
 

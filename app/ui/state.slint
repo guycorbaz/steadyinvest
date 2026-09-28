@@ -382,6 +382,60 @@ export struct PeChartState {
     axis-max: float,
 }
 
+// ── Story 8.6 — a PENDING AI judgment proposal drawn on a §1 / §3 chart, BESIDE the owner's line
+// (never in its place): a dotted path + a hollow end marker, in the SAME viewbox as the owner lines
+// (`chart-w` × `chart-h`), on the owner's scale (the proposal never moves it). Inert: no drag handle,
+// no hit area — only its action chip opens the decision dialog. `value` is app-formatted (the label
+// « IA {valeur} »); no AI-written text ever crosses here (Q15).
+export struct AiLine {
+    visible: bool,
+    commands: string,
+    marker: string,
+    y: float,       // viewbox-y of the line's end (the label sits there)
+    value: string,
+}
+
+// One pending judgment proposal's action chip (« ★ IA · {champ} : {valeur} [· périmée] »): its
+// draft id (opens the 8.5b decision dialog), the field's French label and the proposed value, both
+// app text. `draft-id == ""` = no chip.
+export struct AiChip {
+    draft-id: string,
+    field: string,
+    value: string,
+    stale: bool,
+}
+
+// Story 8.6 — the open study's pending AI judgment proposals and its « placée par l'IA » captions.
+// Chart lines + chart chip rows for the chart-draggable fields; one chip slot per field for the
+// judgment fields (a chart field's chip lands under its field only while its chart is unavailable);
+// one caption date per field (« » = no caption).
+export struct AiJudgments {
+    est-high: AiLine,
+    est-low: AiLine,
+    pe-high: AiLine,
+    pe-low: AiLine,
+    growth-chips: [AiChip],
+    pe-chips: [AiChip],
+    chip-sales-growth: AiChip,
+    chip-eps-growth: AiChip,
+    chip-est-high: AiChip,
+    chip-est-low: AiChip,
+    chip-high-pe: AiChip,
+    chip-low-pe: AiChip,
+    chip-severe-low: AiChip,
+    chip-dividend: AiChip,
+    chip-option: AiChip,
+    cap-sales-growth: string,
+    cap-eps-growth: string,
+    cap-est-high: string,
+    cap-est-low: string,
+    cap-high-pe: string,
+    cap-low-pe: string,
+    cap-severe-low: string,
+    cap-dividend: string,
+    cap-option: string,
+}
+
 // The confront overlay geometry (Story 5.1) — the recorded §4 forecast band (a shaded rectangle) and
 // the security's actual close trajectory since the decision (a polyline), both Path `commands` on a
 // shared linear-price viewbox. `available == false` → a neutral empty state.
@@ -735,6 +789,8 @@ export global Studies {
     //    "low_pe"). Separate from the §1 chart: a LINEAR P/E scale, its own draggable judged levels.
     in-out property <PeChartState> pe-chart;
     in-out property <string> active-pe-judgment: "high_pe";
+    // ── Story 8.6 — the open study's pending AI judgment lines / chips and validated captions.
+    in-out property <AiJudgments> draft-judgments;
     // ── Story 2.9 — undo/redo availability (the controls disable when their stack is empty).
     in-out property <bool> can-undo;
     in-out property <bool> can-redo;
