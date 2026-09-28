@@ -762,9 +762,13 @@ mod tests {
         // disparue », « Nouvelle note », « Actuel {} → Proposé {} », the draft-study line) 7; the
         // rail (« Propositions », « · ⊘ », « · {} ») 3; the study reminder (★ and ⊘ texts, two
         // « Voir les propositions ») 4; the Études band (text, action) and the row marker 3; the
-        // glossary's three terms and definitions 6: 1035 + 39 = 1074, measured.
+        // glossary's three terms and definitions 6: 1035 + 39 = 1074, measured. Its G3 review: the
+        // rail count as a caption badge (« · ⊘ », « · 999+ », « · {} », the label plain) +1; the
+        // AiFrame date in its own text +1; « étude archivée » +1; the filter line +1; the Études
+        // ⊘ band and its action +2; the rows' « ★ ⊘ » +1; the kind chips' narrow two-row layout
+        // +5: 1074 + 12 = 1086, measured.
         assert!(
-            total >= 1074,
+            total >= 1086,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -1069,6 +1073,7 @@ mod tests {
         // Story 8.5a: an inbox payload that does not parse — `Unshowable.detail` reaches the log
         // only (`wiring::drafts` `tracing::warn!`); the screen shows the French ⊘ band.
         ("drafts.rs", "payload does not parse: {e}"),
+        ("drafts.rs", "proposed value is no value of {}: {problem:?}"),
     ];
 
     fn rust_sources(crate_dir: &str) -> Vec<PathBuf> {
@@ -1640,8 +1645,9 @@ mod tests {
         }
         assert_eq!(
             crate::viewmodel::drafts::DRAFTS_USER_FACING_LABELS.len(),
-            // 8.5a: the four forecast-low option labels + « Toutes les études »: 0 + 5 = 5.
-            5,
+            // 8.5a: the four forecast-low option labels + « Toutes les études »: 0 + 5 = 5. Its G3
+            // review names the unreadable draft (« une proposition est illisible »): 5 + 1 = 6.
+            6,
             "drafts.rs label inventory changed — register the new label"
         );
     }
@@ -1666,30 +1672,65 @@ mod tests {
     /// The names starting `ai-` that are NOT AI text.
     const AI_NAME_EXEMPT: &[&str] = &["ai-glyph"];
 
-    /// Every `ai-*` read in `src` outside an `AiFrame { … }` element, as `line: name` strings.
-    /// `is_frame`: the AiFrame component itself (every read allowed). `is_state`: `state.slint`
-    /// (field declarations `ai-…: string` are exempt).
-    fn ai_reads_outside_frames(src: &str, is_frame: bool, is_state: bool) -> Vec<String> {
-        if is_frame {
-            return Vec::new();
+    /// Blank out comments (`//` to end of line, `/* … */`) and string-literal CONTENTS, keeping
+    /// every byte's position and line (a `//` inside a string is not a comment; `ai-text` inside a
+    /// string is not a read). Then normalise `_` to `-` — Slint treats `ai_text` and `ai-text` as
+    /// one name (G3).
+    fn slint_code_only(src: &str) -> String {
+        let b = src.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'"' {
+                out.push(b'"');
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    if b[i] == b'\\' && i + 1 < b.len() {
+                        out.extend([b' ', if b[i + 1] == b'\n' { b'\n' } else { b' ' }]);
+                        i += 2;
+                        continue;
+                    }
+                    out.push(if b[i] == b'\n' { b'\n' } else { b' ' });
+                    i += 1;
+                }
+                if i < b.len() {
+                    out.push(b'"');
+                    i += 1;
+                }
+            } else if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
+                while i < b.len() && b[i] != b'\n' {
+                    out.push(b' ');
+                    i += 1;
+                }
+            } else if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                out.extend([b' ', b' ']);
+                i += 2;
+                while i < b.len() && !(b[i] == b'*' && b.get(i + 1) == Some(&b'/')) {
+                    out.push(if b[i] == b'\n' { b'\n' } else { b' ' });
+                    i += 1;
+                }
+                if i < b.len() {
+                    out.extend([b' ', b' ']);
+                    i += 2;
+                }
+            } else {
+                out.push(if b[i] == b'_' { b'-' } else { b[i] });
+                i += 1;
+            }
         }
-        // Drop `//` comments (they name `ai-*` in prose), keeping line structure.
-        let code: String = src
-            .lines()
-            .map(|l| match l.find("//") {
-                Some(i) => &l[..i],
-                None => l,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        // Only ASCII bytes were replaced, by ASCII: still UTF-8.
+        String::from_utf8(out).expect("utf-8 kept")
+    }
+
+    /// The byte ranges of every `AiFrame { … }` element in `code` (already comment-free).
+    fn ai_frame_ranges(code: &str) -> Vec<(usize, usize)> {
         let bytes = code.as_bytes();
-        // The byte ranges of every `AiFrame { … }` element.
-        let mut ranges: Vec<(usize, usize)> = Vec::new();
+        let mut ranges = Vec::new();
         let mut from = 0;
         while let Some(at) = code[from..].find("AiFrame") {
             let start = from + at;
             from = start + "AiFrame".len();
-            let before_ok = start == 0 || !(bytes[start - 1].is_ascii_alphanumeric());
+            let before_ok = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
             let rest = &code[from..];
             let trimmed = rest.trim_start();
             if !before_ok || !trimmed.starts_with('{') {
@@ -1713,17 +1754,52 @@ mod tests {
             }
             ranges.push((start, end));
         }
+        ranges
+    }
+
+    /// Every violation in `src`, as `line: what` strings:
+    /// - an `ai-*` read outside an `AiFrame { … }` element (`is_frame`: the AiFrame component —
+    ///   every read allowed; `is_state`: `state.slint` — `ai-…: string` field declarations exempt);
+    /// - a RELAY inside an `AiFrame { … }` element — a `property` declaration or a `<=>` binding,
+    ///   through which AI text could leave the frame under another name (G3).
+    fn ai_reads_outside_frames(src: &str, is_frame: bool, is_state: bool) -> Vec<String> {
+        if is_frame {
+            return Vec::new();
+        }
+        let code = slint_code_only(src);
+        let bytes = code.as_bytes();
+        let ranges = ai_frame_ranges(&code);
+        let line_of = |pos: usize| code[..pos].matches('\n').count() + 1;
         let mut found = Vec::new();
+        for (a, b) in &ranges {
+            let inner = &code[*a..*b];
+            for needle in ["<=>", "property"] {
+                for (off, _) in inner.match_indices(needle) {
+                    let pos = a + off;
+                    let word_ok = needle != "property"
+                        || ((pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric())
+                            && !bytes
+                                .get(pos + needle.len())
+                                .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'-'));
+                    if word_ok {
+                        found.push(format!(
+                            "{}: relay `{needle}` inside an AiFrame",
+                            line_of(pos)
+                        ));
+                    }
+                }
+            }
+        }
         let mut i = 0;
         while let Some(at) = code[i..].find("ai-") {
             let pos = i + at;
             i = pos + 3;
             let prev = if pos == 0 { b' ' } else { bytes[pos - 1] };
-            if prev.is_ascii_alphanumeric() || prev == b'-' || prev == b'_' {
+            if prev.is_ascii_alphanumeric() || prev == b'-' {
                 continue;
             }
             let name_end = code[pos..]
-                .find(|c: char| !(c.is_ascii_lowercase() || c == '-'))
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
                 .map_or(code.len(), |n| pos + n);
             let name = &code[pos..name_end];
             if name.len() <= 3 || AI_NAME_EXEMPT.contains(&name) {
@@ -1738,8 +1814,7 @@ mod tests {
             if ranges.iter().any(|(a, b)| pos > *a && pos < *b) {
                 continue;
             }
-            let line = code[..pos].matches('\n').count() + 1;
-            found.push(format!("{line}: {name}"));
+            found.push(format!("{}: {name}", line_of(pos)));
         }
         found
     }
@@ -1779,6 +1854,38 @@ mod tests {
         "#;
         let found = ai_reads_outside_frames(stray, false, false);
         assert_eq!(found, vec!["5: ai-text".to_string()], "{found:?}");
+        // The underscore spelling is the same name (G3).
+        assert_eq!(
+            ai_reads_outside_frames("Text { text: root.draft.ai_text; }", false, false),
+            vec!["1: ai-text".to_string()]
+        );
+        // A block comment and a `//` inside a string do not hide or fake a read (G3).
+        assert!(
+            ai_reads_outside_frames("/* root.draft.ai-text */ Text {}", false, false).is_empty()
+        );
+        assert_eq!(
+            ai_reads_outside_frames(
+                r#"Text { text: "a // b" + root.draft.ai-model; }"#,
+                false,
+                false
+            ),
+            vec!["1: ai-model".to_string()]
+        );
+        assert!(
+            ai_reads_outside_frames(r#"Text { text: @tr("ai-text"); }"#, false, false).is_empty(),
+            "a string is not a read"
+        );
+        // A relay out of the frame — a property or a two-way binding inside it (G3).
+        let relay = "AiFrame {\n  out property <string> leak: root.draft.ai-text;\n}";
+        assert_eq!(
+            ai_reads_outside_frames(relay, false, false),
+            vec!["2: relay `property` inside an AiFrame".to_string()]
+        );
+        let two_way = "AiFrame {\n  ai-text <=> root.draft.ai-text;\n}";
+        assert_eq!(
+            ai_reads_outside_frames(two_way, false, false),
+            vec!["2: relay `<=>` inside an AiFrame".to_string()]
+        );
         // The frame component itself reads its own properties.
         assert!(ai_reads_outside_frames("Text { text: root.ai-text; }", true, false).is_empty());
         // A field declaration in state.slint is a type, not a read.
@@ -1790,10 +1897,33 @@ mod tests {
         );
     }
 
-    /// Story 8.5a (UX spec §4.1): AI-written text enters no Slint model but the inbox's
-    /// `DraftRow`, built in ONE place — `wiring/drafts.rs`.
+    /// The production part of a Rust source: everything before its trailing `#[cfg(test)] mod
+    /// tests` block (a `#[cfg(test)]` on an item elsewhere is kept — G3).
+    fn production_part(src: &str) -> &str {
+        src.rfind("#[cfg(test)]\nmod tests")
+            .map_or(src, |at| &src[..at])
+    }
+
+    /// Story 8.5a (UX spec §4.1): the AI-written fields — a draft's comment, origin client and
+    /// model, proposed note text and company name, and the rows' `ai_*` copies — are read in the
+    /// app's production code ONLY:
+    /// - in `viewmodel/drafts.rs`, inside `fn ai_fields` (into the rows' `ai_*` fields);
+    /// - in `wiring/drafts.rs`, inside `fn to_slint`, and only as `ai_x: r.ai_x…` assignments;
+    /// - in `state/drafts.rs`, the 8.2b decision rail, which WRITES them into the dossier (the
+    ///   validated note, `AiOrigin`) — never into a Slint model (it holds no UI handle).
     #[test]
-    fn draft_rows_are_built_only_in_wiring_drafts() {
+    fn ai_fields_are_read_only_where_they_become_ai_star_fields() {
+        const SOURCES: &[&str] = &[
+            ".comment",
+            ".origin_client",
+            ".origin_model",
+            ".note_text",
+            "payload.company_name",
+            ".ai_text",
+            ".ai_client",
+            ".ai_model",
+            ".ai_lead",
+        ];
         fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
             for entry in std::fs::read_dir(dir).expect("src readable") {
                 let path = entry.expect("dir entry").path();
@@ -1804,24 +1934,77 @@ mod tests {
                 }
             }
         }
+        let fn_body = |src: &str, name: &str| -> (usize, usize) {
+            let at = src.find(&format!("fn {name}(")).expect("fn present");
+            let open = at + src[at..].find('{').expect("body");
+            let mut depth = 0usize;
+            for (i, c) in src[open..].char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return (open, open + i);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (open, src.len())
+        };
         let mut files = Vec::new();
         walk(
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
             &mut files,
         );
-        let mut builders = Vec::new();
+        let mut offenders = Vec::new();
         for path in files {
-            if path.ends_with("posture.rs") {
+            if path.ends_with("posture.rs") || path.ends_with("state/tests.rs") {
                 continue;
             }
-            let src = std::fs::read_to_string(&path).expect("rs readable");
-            // Production code only: stop at the first test module.
-            let prod = src.split("#[cfg(test)]").next().unwrap_or("");
-            if prod.contains("DraftRow {") || prod.contains("set_ai_") {
-                builders.push(path.display().to_string());
+            let full = std::fs::read_to_string(&path).expect("rs readable");
+            let prod = production_part(&full);
+            let allowed: Option<(usize, usize)> = if path.ends_with("viewmodel/drafts.rs") {
+                Some(fn_body(prod, "ai_fields"))
+            } else if path.ends_with("wiring/drafts.rs") {
+                Some(fn_body(prod, "to_slint"))
+            } else if path.ends_with("state/drafts.rs") {
+                Some((0, prod.len()))
+            } else {
+                None
+            };
+            for needle in SOURCES {
+                for (pos, _) in prod.match_indices(needle) {
+                    let next = prod[pos + needle.len()..].chars().next();
+                    if next.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                        continue; // a longer name
+                    }
+                    let inside = allowed.is_some_and(|(a, b)| pos > a && pos < b);
+                    let line = prod[..pos].lines().last().unwrap_or("").trim();
+                    let as_ai_field =
+                        !path.ends_with("wiring/drafts.rs") || line.starts_with("ai_");
+                    if !inside || !as_ai_field {
+                        offenders.push(format!("{}: {line}", path.display()));
+                    }
+                }
             }
         }
-        assert_eq!(builders.len(), 1, "DraftRow built in: {builders:?}");
-        assert!(builders[0].ends_with("wiring/drafts.rs"), "{builders:?}");
+        assert!(
+            offenders.is_empty(),
+            "AI-written text read outside its one path to an AiFrame:\n{}",
+            offenders.join("\n")
+        );
+    }
+
+    #[test]
+    fn production_part_cuts_only_the_trailing_test_module() {
+        let src =
+            "fn a() {}\n#[cfg(test)]\nfn helper() {}\nfn b() {}\n#[cfg(test)]\nmod tests {\n}\n";
+        let prod = production_part(src);
+        assert!(
+            prod.contains("fn b()"),
+            "an item-level cfg(test) keeps what follows"
+        );
+        assert!(!prod.contains("mod tests"));
     }
 }
