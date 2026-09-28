@@ -3873,6 +3873,50 @@ mod tests {
         assert_eq!(winansi(AI_SIGIL), vec![0x86]);
     }
 
+    /// FNV-1a 64 — a pinned fingerprint of a whole PDF (no hashing crate in `report`).
+    fn fnv64(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+        })
+    }
+
+    #[test]
+    fn a_study_without_ai_origin_renders_byte_identical_to_main() {
+        // Story 8.5b G3 F4: pinned from `main` (0e9bcca's base) — the « † » path adds nothing to a
+        // study that carries no AI origin.
+        let point = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
+        let comma = render_study_pdf(&demo_study(), NumberStyle::Comma).unwrap();
+        assert_eq!((point.len(), fnv64(&point)), (22307, 0xbf09_23b9_616e_f393));
+        assert_eq!((comma.len(), fnv64(&comma)), (22307, 0x17c1_a1e9_ff03_a7e5));
+    }
+
+    #[test]
+    fn a_dagger_fits_every_annexe_column() {
+        // Story 8.5b G3 F4: the widest plausible figure of each annexe column, with its « † »,
+        // stays inside the column's rules, whole (G1 F: shrunk when it must, never cut).
+        let widest = [
+            "2026",       // year
+            "999 999.9†", // sales (M)
+            "99 999.9†",  // pre-tax (M)
+            "-999.99†",   // EPS
+            "99 999.99†", // high
+            "99 999.99†", // low
+            "999.99†",    // dividend
+            "9 999.99†",  // book value
+        ];
+        for (i, figure) in widest.iter().enumerate() {
+            let col_w = COLS8[i + 1] - COLS8[i];
+            // One line, the figure and its dagger whole — shrunk if needed, never split or cut.
+            let (lines, size) = cell_layout(figure, col_w, FONT, false);
+            assert_eq!(lines, vec![figure.to_string()], "column {i}");
+            assert!(size >= MIN_FIGURE_FONT, "column {i}: {size}");
+            assert!(
+                measure(figure, size, false) <= col_w - 2.0 * GRID_INSET,
+                "column {i}: « {figure} » crosses its rules"
+            );
+        }
+    }
+
     /// The content streams, one per page, in page order (the only streams in the file).
     fn page_streams(bytes: &[u8]) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
