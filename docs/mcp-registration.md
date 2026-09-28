@@ -35,13 +35,23 @@ Le binaire est `target/release/steadyinvest-mcp` (chemin absolu à noter, par ex
 
 ## 2. Faire une copie de test du dossier
 
-Application **fermée**, copiez le fichier du dossier (et ses fichiers `-wal` / `-shm` s'ils existent)
-dans un répertoire à part, par exemple :
+Le fichier du dossier est celui dont le chemin est affiché dans **Réglages** (carte du dossier). La
+façon la plus sûre d'en obtenir une copie cohérente est la **sauvegarde de l'application** (Réglages →
+créer une sauvegarde) : copiez le fichier de sauvegarde produit. Sinon, application **fermée**, copiez
+le fichier du dossier **et** ses fichiers `-wal` et `-shm` s'ils existent, en gardant les mêmes
+suffixes :
 
 ```sh
 mkdir -p ~/steadyinvest-ia/dossiers
-cp ~/.local/share/steadyinvest/journal.db ~/steadyinvest-ia/dossiers/copie.db
+D="<le chemin affiché dans Réglages>"
+cp "$D" ~/steadyinvest-ia/dossiers/copie.db
+[ -f "$D-wal" ] && cp "$D-wal" ~/steadyinvest-ia/dossiers/copie.db-wal
+[ -f "$D-shm" ] && cp "$D-shm" ~/steadyinvest-ia/dossiers/copie.db-shm
 ```
+
+**Attention :** si vous ouvrez cette copie dans l'application (pour y voir les propositions),
+l'application la retient comme dossier courant. Revenez ensuite à votre vrai dossier (Réglages →
+ouvrir un dossier) avant de reprendre votre travail.
 
 Pour voir des propositions dans l'application sans session IA, vous pouvez en déposer de chaque sorte
 dans la copie : `just mcp-seed ~/steadyinvest-ia/dossiers/copie.db` (la commande refuse votre vrai
