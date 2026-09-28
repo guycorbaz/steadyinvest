@@ -683,9 +683,11 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
             *current_study.borrow_mut() = None;
-            // Story 8.2b (G3 B1): the undo history leaves with its study — no owner study while
-            // none is open, so no decision and no stray step lands in a closed study's history.
-            journal_state.borrow_mut().reset_undo();
+            // Story 8.2b (G3 B1): no owner study while none is open, so no decision and no stray
+            // step lands in a closed study's history. Story 8.5b: the history is PARKED, not
+            // dropped — reopening this study hands it back (a validation decided from the inbox
+            // stays undoable on the study).
+            journal_state.borrow_mut().park_undo();
             studies.set_study_open(false);
             studies.set_demo_active(false);
             reset_study_overlays(&ui, &compare_study);

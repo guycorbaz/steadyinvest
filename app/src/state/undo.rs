@@ -53,6 +53,11 @@ pub struct UndoHistory {
     /// The study this history belongs to — the open study (Story 8.2b); `None` for the demo, after
     /// a dossier switch, and before any study is opened.
     owner: Option<Uuid>,
+    /// Story 8.5b: the study whose history was PARKED when it was closed — kept, ownerless (no
+    /// decision is taken on a closed study), and handed back when that same study is reopened, so
+    /// a validation decided from the inbox stays undoable on the study (AC 9). Any other open, the
+    /// demo, a dossier switch, a delete, an import or a restore clears it.
+    parked: Option<Uuid>,
 }
 
 /// One undo/redo entry: a whole-study snapshot, and — when the step recorded an AI draft's
@@ -87,7 +92,7 @@ impl UndoHistory {
     /// an undo would write it back as the open study's state). Such a step is dropped and logged;
     /// the redo branch is left as it is (the open study was not edited).
     fn push_step(&mut self, step: UndoStep) {
-        if let Some(owner) = self.owner
+        if let Some(owner) = self.owner.or(self.parked)
             && step.study.id != owner
         {
             tracing::warn!(
@@ -104,9 +109,22 @@ impl UndoHistory {
     }
 
     fn reset(&mut self, owner: Option<Uuid>) {
+        // The same study reopened after a close gets its parked history back (Story 8.5b).
+        if owner.is_some() && owner == self.parked {
+            self.owner = owner;
+            self.parked = None;
+            return;
+        }
         self.undo.clear();
         self.redo.clear();
         self.owner = owner;
+        self.parked = None;
+    }
+
+    fn park(&mut self) {
+        if self.owner.is_some() {
+            self.parked = self.owner.take();
+        }
     }
 
     /// The study this history belongs to (see [`UndoHistory::owner`]).
@@ -132,9 +150,16 @@ impl JournalState {
     }
 
     /// Clear the undo/redo history for a newly opened study, which becomes its owner — the only
-    /// study a draft decision may be taken on (Story 8.2b, arch A8).
+    /// study a draft decision may be taken on (Story 8.2b, arch A8). Reopening the study whose
+    /// history was parked by [`JournalState::park_undo`] hands that history back (Story 8.5b).
     pub fn reset_undo_for(&mut self, study_id: Uuid) {
         self.history.reset(Some(study_id));
+    }
+
+    /// The open study is closed (Story 8.5b): its history is kept but ownerless — no decision and
+    /// no stray step of another study lands in it — until that study is reopened.
+    pub fn park_undo(&mut self) {
+        self.history.park();
     }
 
     /// Whether an undo / redo step is available (the UI disables its control when not).

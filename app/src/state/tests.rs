@@ -9958,4 +9958,28 @@ mod drafts_8_2b {
             .unwrap();
         assert!(state.draft_was_edited(draft));
     }
+
+    #[test]
+    fn a_closed_studys_history_is_parked_and_handed_back_when_it_is_reopened() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let draft = plant_value(&state, 0x85B6, id, cell_target(2024, "eps"), "7.5");
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        // Closed: ownerless (no decision on a closed study), the steps kept.
+        state.park_undo();
+        assert_eq!(state.decision_study(), None);
+        assert!(state.can_undo());
+        // Reopened: the validation is undoable on the study (AC 9).
+        state.reset_undo_for(id);
+        assert_eq!(state.undo(id), Ok(Stepped::Draft(draft)));
+        // Another study opened meanwhile, or the demo: the parked history goes.
+        state.park_undo();
+        state.reset_undo_for(Uuid::from_u128(0xBEEF));
+        state.reset_undo_for(id);
+        assert!(!state.can_undo() && !state.can_redo());
+        state.park_undo();
+        state.reset_undo();
+        state.reset_undo_for(id);
+        assert!(!state.can_redo());
+    }
 }

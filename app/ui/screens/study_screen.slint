@@ -760,6 +760,8 @@ export component StudyScreen inherits Rectangle {
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
                 }
+                // Story 8.5b: the gesture hints give way (elided) to the focused cell's facts, so a long
+                // provenance line never widens the form past the window.
                 Text {
                     text: @tr("Ctrl+V : coller une colonne · Ctrl+Espace : marquer non disponible · Ctrl+Entrée : à revoir / validé");
                     color: Tokens.text-low;
@@ -767,6 +769,8 @@ export component StudyScreen inherits Rectangle {
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                     horizontal-alignment: right;
+                    overflow: elide;
+                    min-width: 0px;
                 }
             }
 
