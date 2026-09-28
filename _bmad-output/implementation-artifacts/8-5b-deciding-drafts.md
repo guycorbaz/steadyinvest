@@ -398,6 +398,58 @@ claude-opus-5-5 (dev-story, autonomous Epic 8 run).
 - **Posture:** `USER_FACING_MESSAGES` 242 → 247 (+5 outcomes); decision labels 0 → 4 (new
   inventory); `@tr` floor 1086 → 1105 (+19, tallied in `posture.rs`).
 
+### G3 review (3 layers) — applied 2026-09-28
+
+Commits de45833 (state), 1040a10 (PDF tests), c872662 (UI / wiring), 2be0bbc (re-walk fixes).
+Gates: 1398 passed / 0 failed / 2 ignored; clippy `-D warnings`, fmt, `cargo deny` clean. `@tr`
+floor 1105 → 1106 (« Actuel » kept in the edit form).
+
+1. **Parked history made safe** — parked WITH the study as it stood; handed back on reopen only
+   while the stored study still equals it; dropped by `import_study` / `import_journal` and by a
+   step of the parked study while closed. Arch A8 amended. Tests: park → import → reopen and park
+   → external write → reopen drop it; the park test no longer passes vacuously (each segment builds
+   its own history).
+2. **Reflex Enter** — auto-repeat ignored on rows and every `ActionButton`; the decision verbs
+   (`guard-reflex`) accept Enter / Space only after holding the focus 350 ms. *Decision:* an arming
+   delay after focus rather than « arm after key release » (a release can land after the dialog's
+   focus arrives, so it does not stop a reflex double tap); Q5 kept. Walk: 05 (a double Enter on a
+   row opens the dialog, decides nothing).
+3. **Untouched note edit** — the area seeds the draft and its seed (07: saved as a plain validation,
+   AI origin kept, `edited_before_validation = 0`).
+4. **Refusal in the edit form** — re-reads the draft and shows the decision view with the error (11).
+5. **Refused decision vs the study switch** — `precheck_decision` runs the no-open-study refusals
+   first (13–14: refused, no study opened); after a switch a refusal reopens the previous study with
+   its history (`take_undo` / `put_back_undo`) or closes the draft's study when none was open.
+   Tests for the precheck and the take / put back.
+6. **Long AI text** — bounded scroll boxes (decision 320 px; edit 180 px, 110 px beside a note);
+   the edited note in its own AiFrame so it stays in view (02, 03, 06 — 10 000-char comment,
+   60-line note, at 1280 × 900).
+7. **Abandon guard** for a changed draft-edit note (09) — and « Annuler » keeps the owner's text
+   (10; the area seeds itself once per edit).
+8. `Drafts.notice` cleared on a dossier change and on a draft undo / redo; a dropped undo step
+   re-pushes the undo controls; undo / redo re-derive the focused cell's revealed facts (17 → 18:
+   the AI line and the date follow the restored value).
+9. Focus back to the originating row on close (04); the decision's last enabled verb
+   (« Rejeter » on a target gone) closes the focus trap.
+10. Edit form keeps the context line, the stale band and « Actuel » (12); the proposed note text is
+    semibold, apart from the comment (08); a proposed figure takes the current one's decimals
+    (01: « 2,10 → 2,50 »; unit test).
+11. *Recorded exception (F10):* a draft-step undo / redo that fails to WRITE stays the study's own
+    failure notice (the pre-existing undo rail); only the dropped-step refusal goes through
+    « Action refusée ». The Propositions notice now sits after the read-only band.
+12. PDF: the demo study's PDF pinned (length + FNV-1a, both number formats) against `main`; a « † »
+    figure lays out whole in every annexe column (unit tests). Evidence: the whole ★ cell ×4 (16)
+    and ★ ◦ ◆ △ side by side at 14 px in Inter (19).
+
+**Re-walk** (Xvfb :95, temp HOME / XDG, provider « none », fresh copy of `corpus/v8.db` seeded
+with the `seed` example; real config / data checked unchanged): session scratchpad
+`v85b-g3/01–21` at 1280 × 900, and 20–21 at 1600. At 1280 the study form's §3 table and action
+row run past the window — the pre-existing G6 width debt, not a regression.
+
+**Decisions for Guy (added):** the 350 ms arming delay (item 2); a draft-edit « Abandonner » closes
+the whole dialog (not back to the decision); the refused-write exception (item 11); the parked
+history's validity rule (item 1).
+
 ### File List
 
 - `app/src/main.rs` — wires the decision dialog.
@@ -424,9 +476,15 @@ claude-opus-5-5 (dev-story, autonomous Epic 8 run).
 - `app/ui/screens/propositions.slint` — activatable rows, the notice slot.
 - `app/ui/screens/study_screen.slint` — « proposée par l'IA, validée le … »; the hints elide.
 - `app/ui/screens/settings.slint` — glossary « Proposition validée par l'utilisateur ».
-- `report/src/pdf.rs` — « † » and its note for AI-origin figures.
+- `report/src/pdf.rs` — « † » and its note for AI-origin figures; pinned byte-identity and annexe
+  fit tests (G3).
+- `app/src/state/export_import.rs` — imports drop a parked undo history (G3).
+- `app/ui/components/action_button.slint` — auto-repeat ignored; `guard-reflex` (G3).
+- `app/ui/components/ai_frame.slint` — semibold proposed text; no empty text line (G3).
+- `_bmad-output/planning-artifacts/architecture.md` — A8: the parked history's validity rule (G3).
 
 ### Change Log
 
 - 2026-09-28 — dev-story: implemented (5e4b1bf, 873f5fa, b9d65e5); headless walk fixes (155a221);
   status → review.
+- 2026-09-28 — G3 review applied (de45833, 1040a10, c872662, 2be0bbc); re-walk v85b-g3/.
