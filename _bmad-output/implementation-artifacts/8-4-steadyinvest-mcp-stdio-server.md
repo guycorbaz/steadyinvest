@@ -500,6 +500,37 @@ page sizes 50 / 20; registration at `--scope local` from a directory outside the
 **Not verified:** the Windows path of the resolution / log locations (no Windows target; CI Linux
 only). No AI client was connected and nothing was registered (dev-safety rule).
 
+### G3 review (2026-09-28) — applied
+
+Three layers, no high; all 16 items applied (commits cff9972, 0b1cc0e, b659b2f). Gates after:
+**1351 passed, 0 failed, 2 ignored**; clippy `-D warnings`, fmt, `cargo deny check` clean; the
+lockfile loses 6 crates (rmcp `macros` / `schemars` features dropped). A full test run no longer
+creates anything in the owner's data dir (checked: `~/.local/share/steadyinvest/journal.db` absent
+before and after).
+
+- Log hygiene: only codes, tool names, field keys, SQL denial names; `rmcp` target at ERROR;
+  unknown tool refused generically; panic hook first; unwritable log dir → no file, server serves.
+- McpAccess: `read_identified` (identity + data in one read transaction, `StudyMissing`), draft
+  point lookup, retry by id ignoring the clock with the STORED status returned
+  (`submit_draft_recorded`), cancellation checked before the insert, `proposed_value` ≤ 100 chars.
+- Paging bounds (1..=200, history 1..=50) → `invalid_call`; unknown study → `study_not_found`.
+- Relative config pointer → `config_unreadable`; non-UTF-8 path → `dossier_path_unusable`; the app
+  clears `last_opened_path` when startup opens no dossier.
+- Seed guard: device + inode (hard links) and every `recent_journals[].path`.
+- Tests added (see commit 0b1cc0e); every app test opens through a temp default (guard test).
+
+**Decisions for Guy (G3, owner-pending):**
+1. Same-path `dossier_mismatch` names the two journal ids instead of the two (equal) paths.
+2. New codes `cancelled` and `dossier_path_unusable`; `config_unreadable` drops the config path from
+   the message (log only).
+3. Echoes of AI / client text in messages cut at 40 characters, control characters replaced.
+4. `proposed_value` capped at 100 characters (`text_too_long`, « de la valeur proposée »).
+5. History pages capped at 50 (lists 200); a limit out of range is refused, not clamped.
+6. A retry with the same `draft_id` is the same proposition whatever its time; it answers the stored
+   status (e.g. `validated`) rather than `pending`.
+7. AC 2 amended: rmcp features `server` + `transport-io` only.
+8. A relative `last_opened_path` / `journal_path` in the config is refused, not resolved.
+
 ### File List
 
 - `Cargo.toml` (members `paths`, `mcp`; `steadyinvest-paths`, `rmcp` workspace deps), `Cargo.lock`
@@ -515,9 +546,12 @@ only). No AI client was connected and nothing was registered (dev-safety rule).
 - `app/Cargo.toml`, `app/src/config.rs`, `app/src/logging.rs`, `app/src/state/mod.rs`,
   `app/src/state/tests.rs`, `app/src/posture.rs`, `app/ui/screens/settings.slint`
 - `_bmad-output/planning-artifacts/ux-ai-assistance-surfaces.md` (§3.3: two codes)
+- `persistence/src/mcp_access.rs`, `persistence/src/drafts.rs`, `persistence/src/lib.rs`,
+  `persistence/tests/mcp_access.rs`, `app/src/main.rs` (G3)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`,
   `_bmad-output/implementation-artifacts/8-4-steadyinvest-mcp-stdio-server.md
 
 ### Change Log
 
 - 2026-09-28: dev complete (commits f4f659e, 30efd07) → review.
+- 2026-09-28: G3 review applied, 16 items (cff9972, 0b1cc0e, b659b2f); 1351 tests → review.
