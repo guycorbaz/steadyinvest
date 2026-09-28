@@ -1,6 +1,6 @@
 # Story 8.4: `steadyinvest-mcp` stdio server
 
-Status: review
+Status: done
 
 <!-- Created 2026-09-28 by create-story (Epic 8 autonomous run). Sources: epics.md Story 8.4 + Epic 8
 preamble; architecture.md §Phase 4 A1 / A2 / A3 / A10 / A11 / A12; ux-ai-assistance-surfaces.md §3.3

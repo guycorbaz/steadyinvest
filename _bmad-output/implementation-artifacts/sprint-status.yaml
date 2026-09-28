@@ -724,7 +724,8 @@ development_status:
   #             (server + transport-io + macros + schemars; no HTTP in the closure, cargo deny ok);
   #             new crates paths/ (shared locations) and mcp/.
   # 2026-09-28: 8-4 dev complete (rmcp stdio server, paths crate, last_opened_path, 1334 tests) → review.
-  8-4-steadyinvest-mcp-stdio-server: review
+  # 2026-09-28: 8-4 dev + G3 (3 layers, 16 fixes) → PR #261 merged → done.
+  8-4-steadyinvest-mcp-stdio-server: done
   8-5a-ai-frame-and-draft-inbox: backlog
   8-5b-deciding-drafts: backlog
   8-6-ai-judgment-lines: backlog
