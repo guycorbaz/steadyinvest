@@ -349,6 +349,8 @@ export component ModalDialog inherits Rectangle {
     // note's text is seeded inside its AiFrame).
     function start-edit() {
         Dialog.draft-text = Dialog.decision.edit-kind == "note" ? "" : Dialog.decision.edit-prefill;
+        // A note's area seeds itself once, inside its AiFrame (the proposed text is AI-written).
+        Dialog.flag = false;
         Dialog.field-error = "";
         Dialog.context = "";
         Dialog.title = @tr("Modifier la proposition");
@@ -1101,30 +1103,42 @@ export component ModalDialog inherits Rectangle {
                             autofocus: true;
                             focus-request: root.first-request;
                         }
-                        // G3 EC-3: a long AI text scrolls inside a bounded box; the buttons stay put.
+                        // G3 EC-3: a long AI comment scrolls inside a bounded box; the note being edited
+                        // stays in view in its own frame below (AI-written until saved), the buttons put.
                         Flickable {
-                            height: min(edit-frame.preferred-height, 360px);
+                            // Shorter beside a note being edited, so the note box and the verbs fit.
+                            height: min(edit-frame.preferred-height, Dialog.decision.edit-kind == "note" ? 110px : 180px);
                             viewport-height: edit-frame.preferred-height;
                             edit-frame := AiFrame {
-                            width: parent.width;
+                                width: parent.width;
+                                ai-client: Dialog.decision.ai-client;
+                                ai-model: Dialog.decision.ai-model;
+                                ai-text: Dialog.decision.ai-text;
+                                submitted: Dialog.decision.submitted;
+                            }
+                        }
+                        if Dialog.decision.edit-kind == "note": AiFrame {
                             ai-client: Dialog.decision.ai-client;
                             ai-model: Dialog.decision.ai-model;
-                            ai-text: Dialog.decision.ai-text;
                             submitted: Dialog.decision.submitted;
-                            if Dialog.decision.edit-kind == "note": LabeledTextArea {
+                            LabeledTextArea {
                                 label: @tr("Note");
                                 autofocus: true;
                                 focus-request: root.first-request;
                                 // The draft and its seed start as the proposed text (G3: an untouched save
                                 // is the proposal, never an « empty » note; the abandon guard compares).
+                                // Seeded once per edit (`Dialog.flag`): the area is re-created when the
+                                // abandon question hands back to the form, and keeps the owner's text.
                                 init => {
-                                    self.text = Dialog.decision.ai-lead;
-                                    Dialog.draft-text = self.text;
-                                    Dialog.seed-text = self.text;
+                                    if (!Dialog.flag) {
+                                        Dialog.seed-text = Dialog.decision.ai-lead;
+                                        Dialog.draft-text = Dialog.seed-text;
+                                        Dialog.flag = true;
+                                    }
+                                    self.text = Dialog.draft-text;
                                 }
                                 changed text => { Dialog.draft-text = self.text; }
                                 accepted => { root.submit(); }
-                            }
                             }
                         }
                     }

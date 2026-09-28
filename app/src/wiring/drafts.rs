@@ -202,6 +202,8 @@ fn after_refusal(ui: &MainWindow, state: &JournalState, id: Uuid) {
     let in_edit = kind.as_str() == "form" && dialog.get_form_id().as_str() == "draft-edit";
     if (kind.as_str() == "decision" || in_edit) && show_decision(ui, state, id, &error).is_err() {
         dialog.set_form_id(SharedString::new());
+        dialog.set_title(SharedString::new());
+        dialog.set_body(SharedString::new());
         dialog.set_field_error(error.as_str().into());
         dialog.set_kind("decision".into());
         let mut shown = dialog.get_decision();

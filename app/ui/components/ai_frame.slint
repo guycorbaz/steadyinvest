@@ -114,7 +114,8 @@ export component AiFrame inherits Rectangle {
                 font-weight: Tokens.weight-semibold;
                 wrap: word-wrap;
             }
-            if !root.compact: Text {
+            // A frame that only holds an edit field (8.5b: the note being edited) shows no text line.
+            if !root.compact && root.ai-text != "": Text {
                 text: root.ai-text;
                 color: Tokens.text-high;
                 font-size: Tokens.font-body;
