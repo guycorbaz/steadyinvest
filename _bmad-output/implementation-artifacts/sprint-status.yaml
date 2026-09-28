@@ -727,7 +727,8 @@ development_status:
   # 2026-09-28: 8-4 dev + G3 (3 layers, 16 fixes) → PR #261 merged → done.
   8-4-steadyinvest-mcp-stdio-server: done
   # 2026-09-28: 8-5a story file created (create-story) → ready-for-dev; branch feat/8-5a-draft-inbox.
-  8-5a-ai-frame-and-draft-inbox: ready-for-dev
+  # 2026-09-28: 8-5a dev complete (1369 tests; headless walk on a seeded temp copy) → review.
+  8-5a-ai-frame-and-draft-inbox: review
   8-5b-deciding-drafts: backlog
   8-6-ai-judgment-lines: backlog
   8-7-draft-study-end-to-end-and-drafts-record: backlog
