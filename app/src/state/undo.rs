@@ -22,6 +22,16 @@ use super::{
 /// small but not free; a long session does not grow the history unboundedly (Story 2.9).
 const UNDO_CAP: usize = 100;
 
+/// What an undo / redo stepped over (Story 8.5b): nothing (the stack was empty), an ordinary study
+/// step, or the validation of an AI draft — whose status moved with the study (the caller then says
+/// so and re-reads the inbox).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stepped {
+    Nothing,
+    Study,
+    Draft(Uuid),
+}
+
 /// Which way [`JournalState::step`] moves through the history.
 #[derive(Clone, Copy)]
 enum Direction {
@@ -143,23 +153,23 @@ impl JournalState {
         self.history.undo.len()
     }
 
-    /// Step the open study **back** to the snapshot before the last mutation (FR32). Returns
-    /// `Ok(true)` when a step was taken (the caller re-reads + re-renders), `Ok(false)` when the
-    /// undo stack is empty. The restore is a real, guarded `put_study` of the whole prior `Study`.
-    pub fn undo(&mut self, study_id: Uuid) -> Result<bool, String> {
+    /// Step the open study **back** to the snapshot before the last mutation (FR32). Returns what
+    /// was stepped over ([`Stepped`] — the caller re-reads + re-renders unless `Nothing`, the undo
+    /// stack being empty). The restore is a real, guarded `put_study` of the whole prior `Study`.
+    pub fn undo(&mut self, study_id: Uuid) -> Result<Stepped, String> {
         self.step(study_id, Direction::Undo)
     }
 
     /// Step the open study **forward** to a snapshot displaced by a prior undo (no-op if the redo
     /// stack is empty).
-    pub fn redo(&mut self, study_id: Uuid) -> Result<bool, String> {
+    pub fn redo(&mut self, study_id: Uuid) -> Result<Stepped, String> {
         self.step(study_id, Direction::Redo)
     }
 
     /// The shared undo/redo engine: pop the target snapshot, write it back, and move the present
     /// state onto the opposite stack so the step is itself reversible. On a write failure the popped
     /// snapshot is pushed back (the history is never silently lost) and a neutral notice surfaces.
-    fn step(&mut self, study_id: Uuid, dir: Direction) -> Result<bool, String> {
+    fn step(&mut self, study_id: Uuid, dir: Direction) -> Result<Stepped, String> {
         self.refuse_if_read_only()?;
         if self.journal.is_none() {
             return Err(MSG_NO_JOURNAL.to_string());
@@ -173,7 +183,7 @@ impl JournalState {
             draft,
         }) = popped
         else {
-            return Ok(false); // nothing to step to
+            return Ok(Stepped::Nothing); // nothing to step to
         };
         let push_back = |history: &mut UndoHistory, study: Study| {
             let step = UndoStep { study, draft };
@@ -227,7 +237,7 @@ impl JournalState {
                     Direction::Undo => self.history.redo.push(step),
                     Direction::Redo => self.history.undo.push(step),
                 }
-                Ok(true)
+                Ok(draft.map_or(Stepped::Study, Stepped::Draft))
             }
             // G3 B2/E7: a draft step whose draft is no longer in the state the step expects (decided
             // or removed elsewhere) can never succeed — pushing it back would wedge the history on

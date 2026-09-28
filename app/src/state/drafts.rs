@@ -166,6 +166,17 @@ fn current_fingerprint(study: &Study, target: &DraftTarget) -> Result<String, Go
         .ok_or_else(|| GoneReason::YearRemoved(year.unwrap_or_default()))
 }
 
+/// The fingerprint of a cell / judgment draft's target as the owner sees it NOW (Story 8.5b): taken
+/// when the decision dialog opens, and passed back as `Decision::Validate { seen_fingerprint }` when
+/// the owner confirms a stale draft — so a target that moves again between the look and the click
+/// is refused (arch A7, O4). `None` for a note / study draft or a target that is gone.
+pub fn seen_fingerprint(study: &Study, payload: &DraftPayload) -> Option<String> {
+    payload
+        .target
+        .as_ref()
+        .and_then(|target| current_fingerprint(study, target).ok())
+}
+
 /// Whether a cell / judgment draft's target differs from its base (G3 B3/E6): stale when the base is
 /// absent (it cannot prove freshness), the target is gone, or today's fingerprint differs.
 fn is_stale(study: &Study, payload: &DraftPayload, target: &DraftTarget) -> bool {
@@ -532,6 +543,122 @@ impl JournalState {
                 study: None,
             })
             .map_err(decision_save_error)
+    }
+}
+
+/// Everything the decision dialog needs about one pending draft (Story 8.5b), read afresh when the
+/// dialog opens — never the inbox row's cached text.
+#[derive(Debug, Clone)]
+pub struct DialogDraft {
+    /// The reference a decision is taken on (its study named even if the study goes).
+    pub draft: DraftRef,
+    pub record: steadyinvest_persistence::DraftRecord,
+    pub payload: DraftPayload,
+    /// The draft's study as read now (`None`: a draft study, or its study was deleted).
+    pub study: Option<Study>,
+    /// The draft's study is archived (its decisions are refused — the row is not activatable).
+    pub archived: bool,
+    pub freshness: DraftFreshness,
+    /// The target cell carries the `✓` tag (Q5: the dialog's initial focus is then « Annuler »).
+    pub target_validated: bool,
+    /// The target's fingerprint now — what a stale confirmation passes back ([`seen_fingerprint`]).
+    pub seen_fingerprint: Option<String>,
+}
+
+impl JournalState {
+    /// The study the undo history belongs to — the only study a draft decision is taken on
+    /// (8.2b); the decision dialog opens the draft's study first when it is another one (8.5b).
+    pub fn decision_study(&self) -> Option<Uuid> {
+        self.history.owner()
+    }
+
+    /// Whether a decided draft was recorded as edited before its validation (Story 8.5b: the
+    /// outcome notice « … (modifiée avant validation) »). A read failure reads `false` — the plain
+    /// outcome, never a wrong claim of an edit.
+    pub fn draft_was_edited(&self, draft_id: Uuid) -> bool {
+        self.journal
+            .as_ref()
+            .and_then(|j| j.get_draft(draft_id).ok().flatten())
+            .is_some_and(|r| r.edited_before_validation == Some(true))
+    }
+
+    /// Read one pending draft for the decision dialog (Story 8.5b): the draft record, its payload,
+    /// its study (and whether it is archived), its freshness, whether its target cell is `✓`, and the
+    /// fingerprint the owner is about to see. Every failure is named — a draft gone or already
+    /// decided, a read failure — never a guessed dialog.
+    pub fn draft_for_dialog(&self, draft_id: Uuid) -> Result<DialogDraft, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Err(MSG_NO_JOURNAL.to_string());
+        };
+        let record = match journal.get_draft(draft_id) {
+            Ok(Some(record)) => record,
+            Ok(None) => return Err(MSG_DECISION_DRAFT_GONE.to_string()),
+            Err(error) => {
+                tracing::warn!("draft read failed: {error}");
+                return Err(MSG_READ_FAILED.to_string());
+            }
+        };
+        if record.status != steadyinvest_contract::DraftStatus::Pending {
+            return Err(MSG_DECISION_ALREADY_DECIDED.to_string());
+        }
+        let payload: DraftPayload = serde_json::from_str(&record.payload).map_err(|error| {
+            tracing::warn!("draft payload unreadable after a checked read: {error}");
+            MSG_READ_FAILED.to_string()
+        })?;
+        let (study, archived) = match record.study_id {
+            None => (None, false),
+            Some(id) => {
+                let study = self.try_get_study(id)?;
+                let archived = match journal.study_status(id) {
+                    Ok(status) => status.as_deref() == Some("archived"),
+                    Err(error) => {
+                        tracing::warn!("study status read failed: {error}");
+                        return Err(MSG_READ_FAILED.to_string());
+                    }
+                };
+                (study, archived)
+            }
+        };
+        let freshness = draft_freshness(study.as_ref(), record.kind, &payload);
+        let target_validated = match (study.as_ref(), payload.target.as_ref()) {
+            (Some(s), Some(target)) => DraftField::of_target(target)
+                .filter(|(f, _)| f.kind() == DraftFieldKind::Cell)
+                .and_then(|(f, year)| {
+                    s.years
+                        .iter()
+                        .find(|y| Some(y.year) == year)
+                        .and_then(|row| f.cell_in(row))
+                        .map(|c| c.review == steadyinvest_contract::Review::Validated)
+                })
+                .unwrap_or(false),
+            _ => false,
+        };
+        let seen = study.as_ref().and_then(|s| seen_fingerprint(s, &payload));
+        let ticker = match study.as_ref() {
+            Some(s) => s.security_ticker.clone(),
+            None => {
+                let t = record.security_ticker.trim().to_ascii_uppercase();
+                if steadyinvest_persistence::is_ticker(&t) {
+                    t
+                } else {
+                    "—".to_string()
+                }
+            }
+        };
+        Ok(DialogDraft {
+            draft: DraftRef {
+                draft_id,
+                study_id: record.study_id,
+                ticker,
+            },
+            record,
+            payload,
+            study,
+            archived,
+            freshness,
+            target_validated,
+            seen_fingerprint: seen,
+        })
     }
 }
 

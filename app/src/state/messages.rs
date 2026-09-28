@@ -165,6 +165,17 @@ pub const MSG_VALUE_NOT_AN_OPTION: &str =
 /// Story 8.2b (G3 B2/E7, owner-pending): an undo / redo step over a draft whose draft was decided or
 /// removed elsewhere — the step is dropped from the history, nothing is written.
 pub const MSG_UNDO_DRAFT_STEP_DROPPED: &str = "Cette étape portait sur une proposition qui n'est plus dans l'état attendu ; elle a été retirée de l'historique d'annulation, rien n'a été modifié.";
+/// Story 8.5b outcome (spec §3.3): a draft validated as proposed.
+pub const MSG_DRAFT_VALIDATED: &str = "Proposition validée.";
+/// Story 8.5b outcome: a draft validated after the owner edited it.
+pub const MSG_DRAFT_VALIDATED_EDITED: &str = "Proposition validée (modifiée avant validation).";
+/// Story 8.5b outcome: a draft rejected.
+pub const MSG_DRAFT_REJECTED: &str = "Proposition rejetée.";
+/// Story 8.5b outcome: an undo over a draft's validation.
+pub const MSG_DRAFT_UNDONE: &str =
+    "Validation annulée ; la proposition est notée validée puis annulée.";
+/// Story 8.5b outcome: a redo over a draft's validation.
+pub const MSG_DRAFT_REDONE: &str = "Validation rétablie.";
 /// Story 8.2b target-gone reason: the draft's fiscal year left the study (`{year}`).
 pub const MSG_GONE_REASON_YEAR: &str = "l'année {year} n'existe plus dans l'étude";
 /// Story 8.2b target-gone reason: the draft's study was deleted.
@@ -1162,6 +1173,11 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_DECISION_STUDY_CHANGED,
     MSG_VALUE_NOT_AN_OPTION,
     MSG_UNDO_DRAFT_STEP_DROPPED,
+    MSG_DRAFT_VALIDATED,
+    MSG_DRAFT_VALIDATED_EDITED,
+    MSG_DRAFT_REJECTED,
+    MSG_DRAFT_UNDONE,
+    MSG_DRAFT_REDONE,
     MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,
