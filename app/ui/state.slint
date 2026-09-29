@@ -1119,7 +1119,7 @@ export global Confront {
 //    inside an `AiFrame`, UX spec §4.1). Built by `app/src/wiring/drafts.rs`. ──
 export struct DraftDecision {
     id: string,
-    // "note" | "cell" | "judgment"
+    // "note" | "cell" | "judgment" | "study"
     kind: string,
     target: string,
     // « Valider ou rejeter ouvre l'étude … » when deciding opens another study; "" otherwise.
@@ -1141,9 +1141,13 @@ export struct DraftDecision {
     submitted: string,
     ai-client: string,
     ai-model: string,
-    // The proposed note text (a note draft), "" otherwise.
+    // The proposed note text (a note draft) or company name (a draft study), "" otherwise.
     ai-lead: string,
     ai-text: string,
+    // Story 8.7: a draft study's proposed ticker / currency (identifiers, app-checked — exempt from
+    // the AiFrame, spec §4.1): the create form's prefill.
+    study-ticker: string,
+    study-currency: string,
 }
 
 export global Dialog {
@@ -1182,6 +1186,17 @@ export global Dialog {
     // (`form-id == "draft-edit"`) are about — filled by Rust (`wiring::drafts::to_dialog`).
     in-out property <DraftDecision> decision;
 
+    // Story 8.7 (spec §4.2): the ordinary « Créer une étude » form in its draft variant, for the
+    // draft study the decision dialog holds (`decision`): `target-id` names the draft, the ticker
+    // and currency are prefilled (identifiers, plain), the proposed name is seeded once inside the
+    // form's AiFrame (`flag`), like the 8.5b note edit.
+    public function open-draft-study-form() {
+        self.form("study-create", @tr("Créer une étude"),
+            @tr("Étude proposée par une IA ; vérifiez le symbole, la devise et le nom avant de créer."),
+            self.decision.id, "");
+        self.draft-ticker = self.decision.study-ticker;
+        self.draft-currency = self.decision.study-currency;
+    }
     public function close() {
         self.kind = "";
         self.form-id = "";
@@ -1833,6 +1848,10 @@ export global Drafts {
     // "reject" | "edit" (the edit form's « Enregistrer », `Dialog.draft-text`) — returns whether it
     // was written (the dialog then closes); `confirm-stale()` is the stale confirmation's verb.
     callback open-draft(string);
+    // Story 8.7: « Valider… » on a draft-study row — the prefilled create form, directly (Q14).
+    callback validate-study(string);
+    // Story 8.7: the draft create form's « Créer » (draft id, ticker, currency, name) → written?
+    callback create-from-draft(string, string, string, string) -> bool;
     callback decide(string) -> bool;
     callback confirm-stale() -> bool;
     // A decision's outcome (the F4 slot of the Propositions card).

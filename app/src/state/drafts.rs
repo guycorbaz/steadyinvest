@@ -586,11 +586,17 @@ impl JournalState {
             now: &now,
         }) {
             Ok(()) => Ok(study.id),
-            Err(PersistError::DraftStudyExists {
-                ticker, currency, ..
-            }) => Err(MSG_DRAFT_STUDY_EXISTS
-                .replace("{ticker}", ticker.trim())
-                .replace("{currency}", currency.trim())),
+            Err(PersistError::DraftStudyExists { study_id, .. }) => {
+                // Named in the EXISTING study's spelling, read back (never the error's text).
+                match self.try_get_study(study_id) {
+                    Ok(Some(existing)) => Err(MSG_DRAFT_STUDY_EXISTS
+                        .replace("{ticker}", existing.security_ticker.trim())
+                        .replace("{currency}", existing.native_currency.trim())),
+                    _ => Err(MSG_DRAFT_STUDY_EXISTS
+                        .replace("{ticker}", study.security_ticker.trim())
+                        .replace("{currency}", study.native_currency.trim())),
+                }
+            }
             Err(error) => Err(decision_save_error(error)),
         }
     }

@@ -606,9 +606,13 @@ pub struct DecisionView {
     /// AI-written, whole (reach Slint only through `AiFrame`).
     pub ai_client: String,
     pub ai_model: String,
-    /// The proposed note text (a note draft), "" otherwise.
+    /// The proposed note text (a note draft) or company name (a draft study), "" otherwise.
     pub ai_lead: String,
     pub ai_text: String,
+    /// A draft study's proposed ticker and currency (identifiers, app-checked at submission and on
+    /// read — exempt from the AiFrame, spec §4.1) — the create form's prefill (Story 8.7); "" else.
+    pub study_ticker: String,
+    pub study_currency: String,
 }
 
 /// A number's edit prefill: the exact value (never display-rounded — an untouched prefill equals
@@ -623,7 +627,7 @@ fn edit_number(field: DraftField, value: Option<DraftValue>, format: NumberForma
     }
 }
 
-/// Build the decision dialog of a pending cell, judgment or note draft (Story 8.5b). `open_study`:
+/// Build the decision dialog of a pending cell, judgment, note (Story 8.5b) or study (8.7) draft. `open_study`:
 /// the study the undo history belongs to now (the context line says when deciding opens another).
 /// A proposed value that is no value of its field is [`Unshowable`] (no dialog with a guessed value).
 pub fn dialog_view(
@@ -691,6 +695,40 @@ pub fn dialog_view(
         None => (EditKind::Number, String::new(), Vec::new()),
     };
     let (ai_client, ai_model, ai_lead, ai_text) = ai_fields(record, &d.payload, false);
+    if record.kind == DraftKind::Study {
+        // Story 8.7 (Decision 1): a draft study is validated through the prefilled create form
+        // (« Valider… ») or rejected here; « Actuel » « — », « Proposé » its identifier. The initial
+        // focus is « Annuler » — a rejection is final for a draft study.
+        let ticker = record.security_ticker.trim().to_string();
+        let currency = record
+            .native_currency
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let identifier = format!("{ticker} ({currency})");
+        return Ok(DecisionView {
+            kind: record.kind,
+            target: identifier.clone(),
+            context: String::new(),
+            current: String::new(),
+            proposed: identifier,
+            state: DecisionState::Fresh,
+            band: String::new(),
+            confirm_body: String::new(),
+            focus_cancel: true,
+            edit_kind: EditKind::Number,
+            edit_prefill: String::new(),
+            edit_options: Vec::new(),
+            submitted: date_fr(&record.created_at),
+            ai_client,
+            ai_model,
+            ai_lead,
+            ai_text,
+            study_ticker: ticker,
+            study_currency: currency,
+        });
+    }
     Ok(DecisionView {
         kind: record.kind,
         target,
@@ -717,6 +755,8 @@ pub fn dialog_view(
         ai_model,
         ai_lead,
         ai_text,
+        study_ticker: String::new(),
+        study_currency: String::new(),
     })
 }
 

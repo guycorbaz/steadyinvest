@@ -6,7 +6,8 @@
 // draft-study validation with 8.7. A failed read is a ⊘ band, never an empty list (arch A9). Ink and
 // words only, no hue. Story 8.5b: a cell, judgment or note row is ACTIVATABLE (click, or Enter /
 // Space when focused) — it opens the decision dialog (action 1; « Valider » / « Rejeter » is action
-// 2); a draft-study row (8.7) and a row of an archived study are not.
+// 2); a row of an archived study is not. Story 8.7: a draft-study row too (« Rejeter »), plus
+// « Valider… », the prefilled create form directly.
 
 import { Tokens } from "../tokens.slint";
 import { Drafts, DraftRow } from "../state.slint";
@@ -15,6 +16,7 @@ import { Dropdown } from "../components/dropdown.slint";
 import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
 import { AiFrame } from "../components/ai_frame.slint";
+import { ActionButton } from "../components/action_button.slint";
 
 component DraftRowView inherits VerticalLayout {
     in property <DraftRow> draft;
@@ -69,12 +71,6 @@ component DraftRowView inherits VerticalLayout {
         font-size: Tokens.font-caption;
         wrap: word-wrap;
     }
-    if root.draft.kind == "study": Text {
-        text: @tr("La validation d'une proposition d'étude n'est pas encore disponible ; la proposition reste en attente.");
-        color: Tokens.text-mid;
-        font-size: Tokens.font-caption;
-        wrap: word-wrap;
-    }
     AiFrame {
         compact: true;
         ai-client: root.draft.ai-client;
@@ -86,11 +82,12 @@ component DraftRowView inherits VerticalLayout {
 }
 
 // A row that opens its decision dialog (Story 8.5b): Tab-reachable with the focus ring, Enter /
-// Space or a click. A draft-study row and an archived study's row are shown, never activatable.
+// Space or a click. An archived study's row is shown, never activatable. A draft-study row (Story
+// 8.7) opens the draft-study decision (« Rejeter ») and carries « Valider… » — the prefilled
+// create form directly (Q14: « Valider… » + « Créer » = 2 actions).
 component DraftRowActivator inherits Rectangle {
     in property <DraftRow> draft;
-    property <bool> active: (root.draft.kind == "cell" || root.draft.kind == "judgment" || root.draft.kind == "note")
-        && root.draft.state != 3;
+    property <bool> active: root.draft.state != 3;
     // G3 F7: back from its decision dialog, the row takes the focus again.
     property <int> return-request: Drafts.return-request;
     changed return-request => {
@@ -132,6 +129,14 @@ component DraftRowActivator inherits Rectangle {
             }
             reject
         }
+    }    // Story 8.7: above the row's hit area (declared after it), top right, beside the target.
+    if root.draft.kind == "study": ActionButton {
+        compact: true;
+        label: @tr("Valider…");
+        enabled: !Drafts.read-only;
+        x: parent.width - self.width - Tokens.space-8;
+        y: Tokens.space-4;
+        clicked => { Drafts.validate-study(root.draft.id); }
     }
 }
 

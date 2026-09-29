@@ -134,6 +134,8 @@ fn to_dialog(v: &DecisionView, id: Uuid, live: bool) -> DraftDecision {
         ai_model: v.ai_model.clone().into(),
         ai_lead: v.ai_lead.clone().into(),
         ai_text: v.ai_text.clone().into(),
+        study_ticker: v.study_ticker.clone().into(),
+        study_currency: v.study_currency.clone().into(),
     }
 }
 
@@ -781,6 +783,59 @@ pub(crate) fn wire_drafts(ui: &MainWindow, s: &Session) {
 /// Wire the decision dialog (Story 8.5b): a row opens it; its verbs decide.
 pub(crate) fn wire_decisions(ui: &MainWindow, s: &Session) {
     let drafts = ui.global::<Drafts>();
+    // Story 8.7 (Q14): « Valider… » on a draft-study row — its decision is read afresh (as the
+    // row's activation reads it), then the overlay switches straight to the prefilled create form.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&s.journal_state);
+        drafts.on_validate_study(move |id_text| {
+            let ui = ui_weak.unwrap();
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            open_decision(&ui, &journal_state.borrow(), id);
+            let dialog = ui.global::<Dialog>();
+            if dialog.get_kind() == "decision" && dialog.get_decision().kind == "study" {
+                dialog.invoke_open_draft_study_form();
+            }
+        });
+    }
+    // Story 8.7: « Créer » in the draft create form — the study and the draft's validation in one
+    // write (arch A8); a refusal lands inline (the form's own gesture) and a draft decided
+    // meanwhile re-reads the inbox.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&s.journal_state);
+        drafts.on_create_from_draft(move |id_text, ticker, currency, name| {
+            let ui = ui_weak.unwrap();
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return false;
+            };
+            let result = journal_state
+                .borrow_mut()
+                .validate_draft_study(id, &ticker, &currency, &name);
+            match result {
+                Ok(_) => {
+                    let text = if journal_state.borrow().draft_was_edited(id) {
+                        MSG_DRAFT_VALIDATED_EDITED
+                    } else {
+                        MSG_DRAFT_VALIDATED
+                    };
+                    ui.global::<Drafts>().set_notice(text.into());
+                    DECISION.with(|d| *d.borrow_mut() = None);
+                    // The app's own write does not move `data_version` (A9): re-read here — the
+                    // Études list (the new study) and, through it, the inbox.
+                    crate::wiring::studies::refresh_studies(&ui, &journal_state.borrow());
+                    true
+                }
+                Err(message) => {
+                    dialog::refuse(&ui, &message);
+                    push_drafts(&ui, &journal_state.borrow());
+                    false
+                }
+            }
+        });
+    }
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(&s.journal_state);

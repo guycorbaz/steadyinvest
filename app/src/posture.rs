@@ -944,8 +944,9 @@ mod tests {
             // (MSG_UNDO_DRAFT_STEP_DROPPED): 236 + 5 = 241, measured. 8.5a: the draft inbox's
             // read subject (MSG_SUBJECT_DRAFTS, « la liste des propositions »): 241 + 1 = 242,
             // measured. 8.5b: the decision outcomes of the 8.0 spec §3.3 — validated, validated
-            // (edited), rejected, undone, redone: 242 + 5 = 247, measured.
-            247,
+            // (edited), rejected, undone, redone: 242 + 5 = 247, measured. 8.7: the draft-study
+            // duplicate refusal (MSG_DRAFT_STUDY_EXISTS): 247 + 1 = 248, measured.
+            248,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
