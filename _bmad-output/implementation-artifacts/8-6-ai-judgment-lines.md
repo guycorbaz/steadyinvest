@@ -281,6 +281,10 @@ metamorphic in `verify.rs`; PDF in `report/src/pdf.rs` tests; all gates: `cargo 
     `same_decimals`); the implied est-high stays formatted as the axis unit (Decision 5).
 13. **Focus after a decision from a chip that is then gone** goes to the study (Ctrl+Z / Ctrl+Y);
     a cancelled dialog still returns it to the chip (8.5b F7).
+14. **A proposal finer than the field's display scale shows its exact digits** on its chip and line
+    (G3) — the dialog keeps the 8.5a display, which shows Actuel and Proposé side by side.
+15. **A failed inbox read keeps the last read's proposals drawn** (G3, UX §8 « nothing vanishes »);
+    deciding one re-reads it, so a proposal decided elsewhere meanwhile is refused, never applied.
 
 ### Project Structure Notes
 
@@ -351,6 +355,40 @@ Claude Opus 5.5 (claude-opus-5-5)
   wider than the window (right-hand fields clipped) — pre-existing, noted in 8.5b.
 - No UI-level harness: the wiring (focus return, redraw on read) is verified headless only.
 
+### G3 review (3 layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor)
+
+Applied (aed2712), 1416 tests, clippy / fmt / deny green:
+1. **Chip focus lost on a redraw** (edge, medium): the chip rows were a new model on every draw →
+   the repeater recreated the chips and dropped the focus. Now one model per row, synced in place
+   (Slint 1.17 `Repeater::model` keeps instances while the model is the same `Rc`). Re-walked:
+   `v86/51–53` — chip focused, `just mcp-seed` run while the app is open, the §3 row grows to two
+   chips (AC 9 live), the focus ring stays, Enter opens the stale dialog.
+2. **A failed read made every AI line vanish** (blind + edge + auditor, UX §8): the last read's
+   proposals stay drawn; an unreadable draft of another study no longer hides the open study's.
+3. **Display rounding could make a proposal read as the owner's value** (edge, medium): a proposal
+   finer than its field's scale shows its exact digits (Decision 14).
+4. **Metamorphic AC 11 incomplete** (auditor, medium): now every alert fact (buy-zone, below-band,
+   zone) and every engine view `push_form` sets (§2, scenario, trace, warnings, verdict state).
+5. **Tautological owner-geometry test** (blind + auditor): compares a chart drawn before the overlay.
+6. **State test did not assert the status** (auditor): `validated_undone` / `validated` asserted.
+7. **mcp-seed blind to its target** (blind + auditor): first study with a 3-year EPS history, the
+   growth proposal on another study, and it prints which.
+
+Dismissed after checking: EPS ≤ 0 on the log scale (`y_for` floors at 1e-12 → the bottom edge, the
+label exact — the owner-drag rule, Decision 4); AI viewbox vs `CHART_W` (the owner paths use the
+same element-width viewbox, and `judgment-x == CHART_W`); `return-gone` for inbox rows and the
+chip / row focus race (the study and Propositions screens are never mounted together, `app.slint`
+`current-screen`); a stale cache at dialog close (`decide_open` re-reads before the close);
+stale lines without a chart cue (Decision 3); the combined « * … · † … » PDF note line (one legend
+line, UX §7); the legend-height change outside 8.6's scope (a pre-existing #121 defect, recorded).
+
+Deferred (low): the live drag preview does not re-draw the overlay (an implied line stays until
+release; a caption follows its dragged line until the commit clears it); two duplicate pending
+est-high drafts (a data error, logged) no longer block the implied growth line; hard-coded row
+heights (24 px legend, 32 px chips) in the chart min-height; the AI label vs a « placée par
+l'IA » caption of the other field are not collision-checked; the marker sits `r` inside the edge
+so the dotted line runs into it.
+
 ### File List
 
 New: `app/src/viewmodel/ai_lines.rs`, `app/ui/components/ai_judgment.slint`.
@@ -365,3 +403,4 @@ Modified: `app/src/viewmodel/{chart,drafts,mod,verify}.rs`, `app/src/wiring/{dia
 - 2026-09-28 — create-story (37588a0).
 - 2026-09-29 — dev-story: T1–T7 (b027008, 9f27c12, 51949e6, 95c1769); headless walk v86/ and its
   fixes (194319a); AC 8 corrected (Decision 9); status → review.
+- 2026-09-29 — G3 review (3 layers) applied (aed2712); re-walk v86/50–53.
