@@ -862,7 +862,8 @@ export global Studies {
     in-out property <HistoryAiDetail> history-ai-detail;
     callback open-history();
     callback close-history();
-    callback toggle-history-entry(string); // snapshot id → expand (or collapse if already open)
+    // snapshot (or ★ draft, Story 8.7) id + whether the entry is a ★ AI draft → expand (or collapse)
+    callback toggle-history-entry(string, bool);
     // Story 8.1 (arch A12): « Masquer les notes » hides the note-only entries (default: shown).
     in-out property <bool> history-hide-notes;
     callback toggle-history-notes();
@@ -1865,6 +1866,9 @@ export global Drafts {
     in-out property <[RecordRow]> record-rows;
     in-out property <string> outcome-filter: "all";
     in-out property <int> record-unfiltered;
+    // The one Registre row whose « Détail » is open, by draft id (G3: never by row position — a
+    // re-read that inserts a row must not move the open detail onto another draft).
+    in-out property <string> record-detail-id;
     in-out property <bool> record-failed;
     in-out property <string> record-failure-cause;
     callback pick-view(string);

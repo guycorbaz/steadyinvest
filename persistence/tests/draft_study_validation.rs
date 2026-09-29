@@ -308,3 +308,42 @@ fn a_study_id_already_in_the_dossier_is_never_overwritten() {
     assert_eq!(journal.get_study(existing.id).unwrap(), Some(existing));
     assert_eq!(facts(&path).0, "pending");
 }
+
+// Story 8.7 AC 17 (Decision 4): MCP `get_drafts_record` filtered on a study returns its own drafts
+// AND the draft study it was created from.
+#[test]
+fn the_mcp_record_of_a_study_includes_the_draft_study_it_came_from() {
+    use steadyinvest_persistence::{DraftFilter, McpAccess, Page};
+    let (_dir, path, mut journal) = dossier();
+    plant_draft_study(&path, "ROG", "CHF", "pending");
+    let now = ts("2026-09-29T09:00:00Z");
+    let study = new_study(0x51, "ROG", "CHF", "2026-09-29T09:00:00Z");
+    journal
+        .validate_draft_study(validation(&study, &now, false))
+        .unwrap();
+    raw(&path)
+        .execute(
+            "INSERT INTO ai_drafts
+                 (id, kind, study_id, security_ticker, native_currency, status, created_at,
+                  decided_at, comment, origin_client, origin_model, stale_at_decision,
+                  edited_before_validation, created_study_id, payload)
+             VALUES (?1, 'note', ?2, 'ROG', NULL, 'pending', '2026-09-29T10:00:00Z', NULL,
+                     'Une note.', 'c', 'm', NULL, NULL, NULL,
+                     '{\"version\":1,\"note_text\":\"Texte\"}')",
+            params![Uuid::from_u128(0xE1).to_string(), study.id.to_string()],
+        )
+        .unwrap();
+    drop(journal);
+    let record = McpAccess::at(&path)
+        .list_drafts(
+            DraftFilter {
+                study_id: Some(study.id),
+                status: None,
+            },
+            Page::first(50),
+        )
+        .expect("record");
+    let mut ids: Vec<Uuid> = record.items.iter().map(|d| d.id).collect();
+    ids.sort();
+    assert_eq!(ids, vec![Uuid::from_u128(DRAFT), Uuid::from_u128(0xE1)]);
+}

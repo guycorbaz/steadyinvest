@@ -129,10 +129,12 @@ component DraftRowActivator inherits Rectangle {
             }
             reject
         }
-    }    // Story 8.7: above the row's hit area (declared after it), top right, beside the target.
+    }
+    // Story 8.7: above the row's hit area (declared after it), top right, beside the target.
     if root.draft.kind == "study": ActionButton {
         compact: true;
         label: @tr("Valider…");
+        guard-reflex: true;
         enabled: !Drafts.read-only;
         // Outside a layout an element takes its parent's width: its own, here.
         width: self.min-width;
@@ -148,7 +150,7 @@ component DraftRowActivator inherits Rectangle {
 // AiFrame. Read-only: nothing here decides.
 component RecordRowView inherits VerticalLayout {
     in property <RecordRow> entry;
-    property <bool> expanded: false;
+    property <bool> expanded: Drafts.record-detail-id == root.entry.id;
     spacing: Tokens.space-4;
     padding-top: Tokens.space-4;
     padding-bottom: Tokens.space-4;
@@ -208,11 +210,15 @@ component RecordRowView inherits VerticalLayout {
             label: root.expanded ? @tr("Masquer le détail") : @tr("Détail");
             // One width for both labels: the columns never shift when a row opens.
             min-width: 180px;
-            clicked => { root.expanded = !root.expanded; }
+            clicked => { Drafts.record-detail-id = root.expanded ? "" : root.entry.id; }
         }
     }
+    // A pending draft: « Actuel → Proposé » (today's value); a decided one: its proposal only —
+    // today's value is not the one it was decided against (G3).
     if root.expanded && (root.entry.kind == "cell" || root.entry.kind == "judgment"): Text {
-        text: @tr("Actuel {} → Proposé {}", root.entry.current, root.entry.proposed);
+        text: root.entry.outcome == 0
+            ? @tr("Actuel {} → Proposé {}", root.entry.current, root.entry.proposed)
+            : @tr("Proposé {}", root.entry.proposed);
         color: Tokens.text-high;
         font-family: Tokens.font-numeric;
         font-size: Tokens.font-caption;
@@ -387,23 +393,23 @@ export component PropositionsScreen inherits Rectangle {
                 }
 
                 if Drafts.view == "inbox": VerticalLayout {
-                // The card's own spacing between rows (the rows were its direct children before).
-                spacing: Tokens.space-12;
-                for r in Drafts.rows: VerticalLayout {
-                    spacing: Tokens.space-8;
-                    if r.group-start: VerticalLayout {
-                        padding-top: Tokens.space-8;
-                        spacing: Tokens.space-4;
-                        Rectangle { height: Tokens.border; background: Tokens.separator; }
-                        Text {
-                            text: r.group-is-studies ? @tr("Nouvelles études") : r.group-title;
-                            color: Tokens.text-high;
-                            font-size: Tokens.font-body;
-                            font-weight: Tokens.weight-semibold;
+                    // The card's own spacing between rows (the rows were its direct children before).
+                    spacing: Tokens.space-12;
+                    for r in Drafts.rows: VerticalLayout {
+                        spacing: Tokens.space-8;
+                        if r.group-start: VerticalLayout {
+                            padding-top: Tokens.space-8;
+                            spacing: Tokens.space-4;
+                            Rectangle { height: Tokens.border; background: Tokens.separator; }
+                            Text {
+                                text: r.group-is-studies ? @tr("Nouvelles études") : r.group-title;
+                                color: Tokens.text-high;
+                                font-size: Tokens.font-body;
+                                font-weight: Tokens.weight-semibold;
+                            }
                         }
+                        DraftRowActivator { draft: r; }
                     }
-                    DraftRowActivator { draft: r; }
-                }
                 }
             }
         }

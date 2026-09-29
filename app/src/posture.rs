@@ -785,9 +785,10 @@ mod tests {
         // / « Masquer le détail », « Actuel {} → Proposé {} ») +14, the view chips +2, the outcome
         // chips +4, its ⊘ band ×2, its empty and filter texts +2 (+10); the history Détail's
         // « Proposé {} » +1; the glossary's « Registre » term and definition +2: 1113 + 33 = 1146,
-        // measured.
+        // measured. Its G3 review: a decided draft's Registre Détail reads « Proposé {} » only:
+        // 1146 + 1 = 1147, measured.
         assert!(
-            total >= 1146,
+            total >= 1147,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

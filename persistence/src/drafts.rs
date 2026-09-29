@@ -472,7 +472,11 @@ impl Journal {
     pub fn validate_draft_study(&mut self, v: DraftStudyValidation<'_>) -> Result<()> {
         self.check_writable()?;
         self.check_study_identity(v.study)?;
-        let tx = self.conn.transaction()?;
+        // IMMEDIATE (G3): the write lock is taken before the reads, so an MCP submission landing
+        // meanwhile makes this wait (busy timeout) instead of failing at the first write.
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let (status, draft_study) = draft_status_in(&tx, v.draft_id)?;
         let kind: String = tx.query_row(
             "SELECT kind FROM ai_drafts WHERE id = ?1",

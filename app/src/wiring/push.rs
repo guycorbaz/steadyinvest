@@ -232,7 +232,10 @@ pub(crate) fn push_history(
     let drafts = (|| -> Result<Vec<viewmodel::history::HistoryDraft>, String> {
         let mut out = Vec::new();
         for record in state.try_list_study_drafts(study_id)? {
-            if let Some(entry) = viewmodel::drafts::history_draft(&record).map_err(|p| p.detail)? {
+            if let Some(entry) = viewmodel::drafts::history_draft(&record).map_err(|p| {
+                tracing::warn!("history draft {}: {}", p.draft_id, p.detail);
+                String::new()
+            })? {
                 out.push(entry);
             }
         }

@@ -1008,7 +1008,13 @@ pub fn dialog_view(
             ai_lead,
             ai_text,
             study_ticker: ticker,
-            study_currency: currency,
+            // A currency the app does not offer (MCP accepts any ISO code) is not prefilled: the
+            // owner picks one of the drop-down's, as on the ordinary path (G3).
+            study_currency: if crate::config::SUPPORTED_CURRENCIES.contains(&currency.as_str()) {
+                currency
+            } else {
+                String::new()
+            },
         });
     }
     Ok(DecisionView {

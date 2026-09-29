@@ -9550,7 +9550,8 @@ mod drafts_8_2b {
         let draft = plant_draft_study(&state, 30, "ROG", "CHF");
         let id = state
             .validate_draft_study(draft, "ROG", "CHF", "Roche Holding")
-            .expect("created");
+            .expect("created")
+            .0;
         let study = state.get_study(id).unwrap();
         assert_eq!(
             (
@@ -9597,7 +9598,8 @@ mod drafts_8_2b {
         let draft = plant_draft_study(&state, 31, "ROG", "CHF");
         let id = state
             .validate_draft_study(draft, " rog.sw ", "chf", "")
-            .unwrap();
+            .unwrap()
+            .0;
         let study = state.get_study(id).unwrap();
         assert_eq!(
             study.security_ticker, "rog.sw",
@@ -9607,11 +9609,19 @@ mod drafts_8_2b {
         assert_eq!(study.company_name, None);
         assert_eq!(facts(&state, draft).2, Some(1), "edited before validation");
         assert!(state.draft_was_edited(draft));
-        // Only a case change of the proposal is no edit.
+        // G3: the ticker is stored as typed, so a change of case IS an edit; the same proposal
+        // confirmed as is is not.
         let draft = plant_draft_study(&state, 32, "NOVN", "CHF");
-        state
+        let (_, edited) = state
             .validate_draft_study(draft, "novn", "CHF", "Roche Holding")
             .unwrap();
+        assert!(edited);
+        assert_eq!(facts(&state, draft).2, Some(1));
+        let draft = plant_draft_study(&state, 35, "UHR", "CHF");
+        let (_, edited) = state
+            .validate_draft_study(draft, " UHR ", "chf", "Roche Holding")
+            .unwrap();
+        assert!(!edited, "trimmed ticker, upper-cased currency, same name");
         assert_eq!(facts(&state, draft).2, Some(0));
     }
 
@@ -9707,7 +9717,8 @@ mod drafts_8_2b {
         let draft = access.submit_draft(&submission(0x87E1)).expect("submitted");
         let id = state
             .validate_draft_study(draft, "ROG", "CHF", "Roche Holding")
-            .expect("validated");
+            .expect("validated")
+            .0;
         let read = access.read_study(id).expect("read").expect("present");
         assert!(
             read.study.years.is_empty(),

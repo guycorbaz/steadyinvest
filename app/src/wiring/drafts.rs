@@ -31,8 +31,9 @@ use steadyinvest_contract::DraftKind;
 use uuid::Uuid;
 
 use crate::state::{
-    self, Decision, DialogDraft, DraftFreshness, JournalState, MSG_DRAFT_REJECTED,
-    MSG_DRAFT_VALIDATED, MSG_DRAFT_VALIDATED_EDITED, MSG_READ_FAILED, owner_edit,
+    self, Decision, DialogDraft, DraftFreshness, JournalState, MSG_BLANK_CURRENCY,
+    MSG_BLANK_TICKER, MSG_DRAFT_REJECTED, MSG_DRAFT_STUDY_EXISTS, MSG_DRAFT_VALIDATED,
+    MSG_DRAFT_VALIDATED_EDITED, MSG_READ_FAILED, owner_edit,
 };
 use crate::viewmodel::ai_lines::{
     AiJudgmentsView, AiLineView, JudgmentOverlay, ai_judgments, pending_judgment_overlays,
@@ -76,6 +77,8 @@ struct InboxCache {
     /// Story 8.7: the « Étude : » choices of the Registre (every study some draft is about or
     /// became) — the drop-down lists the active view's.
     record_choices: Vec<StudyChoice>,
+    /// The Registre's « Étude : » labels last pushed (rebuilt only when they change).
+    record_labels: Vec<String>,
 }
 
 thread_local! {
@@ -617,6 +620,11 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
         Err(error) => {
             show_failure(ui, error.cause.unwrap_or(""));
             redraw_open_if_changed(ui, state);
+            // The Registre reads on its own: shown, it says its own ⊘ (or its rows) — never a
+            // stale list or an « empty dossier » over a failed read (G3).
+            if record_shown(ui) {
+                push_record(ui, state);
+            }
             return;
         }
     };
@@ -658,6 +666,9 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
             });
             show_failure(ui, INBOX_CAUSE_UNREADABLE_DRAFT);
             redraw_open_if_changed(ui, state);
+            if record_shown(ui) {
+                push_record(ui, state);
+            }
             return;
         }
     };
@@ -712,9 +723,15 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
     apply_open_study(ui, open_study);
     apply_row_counts(ui);
     redraw_open_if_changed(ui, state);
-    if !inbox_view {
+    if record_shown(ui) {
         push_record(ui, state);
     }
+}
+
+/// The Registre is on screen: the Propositions screen, its « Registre » view — the only time the
+/// whole record is read (AC 15, the 8.5a rule).
+fn record_shown(ui: &MainWindow) -> bool {
+    ui.get_current_screen() == PROPOSITIONS_SCREEN && ui.global::<Drafts>().get_view() == "record"
 }
 
 thread_local! {
@@ -788,10 +805,28 @@ pub(crate) fn push_record(ui: &MainWindow, state: &JournalState) {
             return fail(INBOX_CAUSE_UNREADABLE_DRAFT);
         }
     };
-    let labels: Vec<SharedString> = std::iter::once(SharedString::from(STUDY_FILTER_ALL))
-        .chain(view.study_choices.iter().map(|c| c.label.as_str().into()))
+    // A picked study that left the record (deleted — O7 took its drafts) is no filter any more:
+    // back to « Toutes les études » and re-built (never an empty list under an « all » label).
+    if let Some(id) = study_filter
+        && !view.study_choices.iter().any(|c| c.study_id == id)
+    {
+        INBOX.with(|c| c.borrow_mut().study_filter = None);
+        return push_record(ui, state);
+    }
+    let labels: Vec<String> = std::iter::once(STUDY_FILTER_ALL.to_string())
+        .chain(view.study_choices.iter().map(|c| c.label.clone()))
         .collect();
-    drafts_global.set_study_options(ModelRc::new(VecModel::from(labels)));
+    // An unchanged choice list rebuilds no model (an open drop-down keeps its state on a poll).
+    let changed = INBOX.with(|c| {
+        let mut c = c.borrow_mut();
+        let changed = c.record_labels != labels;
+        c.record_labels = labels.clone();
+        changed
+    });
+    if changed {
+        let options: Vec<SharedString> = labels.iter().map(|l| l.as_str().into()).collect();
+        drafts_global.set_study_options(ModelRc::new(VecModel::from(options)));
+    }
     let value = study_filter
         .and_then(|id| view.study_choices.iter().find(|c| c.study_id == id))
         .map_or(STUDY_FILTER_ALL, |c| c.label.as_str())
@@ -829,6 +864,8 @@ pub(crate) fn reset_filters(ui: &MainWindow) {
     // Story 8.7: back to « À traiter », every outcome.
     drafts.set_view("inbox".into());
     drafts.set_outcome_filter("all".into());
+    drafts.set_record_detail_id(SharedString::new());
+    INBOX.with(|cache| cache.borrow_mut().record_labels.clear());
 }
 
 /// A dossier change (open, create, recent, restore, a lost journal): forget the poller's version,
@@ -860,8 +897,13 @@ pub(crate) fn wire_drafts(ui: &MainWindow, s: &Session) {
         drafts.on_pick_view(move |view| {
             let ui = ui_weak.unwrap();
             ui.global::<Drafts>().set_view(view);
-            // The study pick survives when the other view lists that study (push re-checks).
-            INBOX.with(|cache| cache.borrow_mut().shown = None);
+            // The study pick survives when the other view lists that study (push re-checks); the
+            // drop-down takes the new view's choices.
+            INBOX.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                cache.shown = None;
+                cache.record_labels.clear();
+            });
             push_drafts(&ui, &journal_state.borrow());
         });
     }
@@ -921,6 +963,9 @@ pub(crate) fn wire_drafts(ui: &MainWindow, s: &Session) {
             });
             ui.global::<Drafts>().set_kind_filter("all".into());
             // Setting the screen from Rust fires no `screen-activated`: push explicitly.
+            // A band names pending proposals: always « À traiter », every outcome (G3).
+            ui.global::<Drafts>().set_view("inbox".into());
+            ui.global::<Drafts>().set_outcome_filter("all".into());
             ui.set_current_screen(PROPOSITIONS_SCREEN);
             push_drafts(&ui, &journal_state.borrow());
         });
@@ -932,6 +977,9 @@ pub(crate) fn wire_drafts(ui: &MainWindow, s: &Session) {
             let ui = ui_weak.unwrap();
             INBOX.with(|cache| cache.borrow_mut().study_filter = None);
             ui.global::<Drafts>().set_kind_filter("studies".into());
+            // A band names pending proposals: always « À traiter », every outcome (G3).
+            ui.global::<Drafts>().set_view("inbox".into());
+            ui.global::<Drafts>().set_outcome_filter("all".into());
             ui.set_current_screen(PROPOSITIONS_SCREEN);
             push_drafts(&ui, &journal_state.borrow());
         });
@@ -973,8 +1021,8 @@ pub(crate) fn wire_decisions(ui: &MainWindow, s: &Session) {
                 .borrow_mut()
                 .validate_draft_study(id, &ticker, &currency, &name);
             match result {
-                Ok(_) => {
-                    let text = if journal_state.borrow().draft_was_edited(id) {
+                Ok((_, edited)) => {
+                    let text = if edited {
                         MSG_DRAFT_VALIDATED_EDITED
                     } else {
                         MSG_DRAFT_VALIDATED
@@ -987,9 +1035,24 @@ pub(crate) fn wire_decisions(ui: &MainWindow, s: &Session) {
                     true
                 }
                 Err(message) => {
+                    // A duplicate or a blank field is fixed in the form: the refusal stays inline
+                    // and the owner's text is kept. Anything else (the draft decided or gone, a
+                    // read-only dossier, a write failure) cannot succeed on a retry: the form
+                    // closes and the refusal follows as « Action refusée » (G3).
+                    let duplicate = MSG_DRAFT_STUDY_EXISTS
+                        .split("{ticker}")
+                        .next()
+                        .is_some_and(|prefix| message.starts_with(prefix));
+                    let fixable =
+                        duplicate || message == MSG_BLANK_TICKER || message == MSG_BLANK_CURRENCY;
+                    if !fixable {
+                        DECISION.with(|d| *d.borrow_mut() = None);
+                        // Not this form's gesture any more: the refusal waits for the overlay.
+                        ui.global::<Dialog>().set_gesture(false);
+                    }
                     dialog::refuse(&ui, &message);
                     push_drafts(&ui, &journal_state.borrow());
-                    false
+                    !fixable
                 }
             }
         });

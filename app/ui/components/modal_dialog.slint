@@ -679,6 +679,7 @@ export component ModalDialog inherits Rectangle {
                         // create form (spec §4.2) — « Valider… » opens it, « Créer » is the write.
                         if root.can-validate() && Dialog.decision.kind == "study": ActionButton {
                             label: @tr("Valider…");
+                            guard-reflex: true;
                             enabled: !Holdings.read-only;
                             clicked => { Dialog.open-draft-study-form(); }
                         }

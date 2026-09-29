@@ -523,20 +523,20 @@ impl JournalState {
         Ok(())
     }
 
-    /// Write a rejection: only the draft row (its outcome and whether its target had changed).
     /// Validate a pending draft study (Story 8.7, arch A8, FR70): the owner confirmed the prefilled
     /// create form with `ticker` / `currency` / `company_name` (as the form holds them — possibly
     /// edited). Builds the new, empty study through the ordinary create path's builder and writes
     /// it with the draft's `validated` + `created_study_id` in ONE transaction (the duplicate check
     /// runs again inside it). Not on any undo stack: the owner reverses it by deleting the study
-    /// (O7). No provider call (FR76). Returns the new study's id.
+    /// (O7). No provider call (FR76). Returns the new study's id and whether the owner changed the
+    /// proposal (the outcome's wording).
     pub fn validate_draft_study(
         &mut self,
         draft_id: Uuid,
         ticker: &str,
         currency: &str,
         company_name: &str,
-    ) -> Result<Uuid, String> {
+    ) -> Result<(Uuid, bool), String> {
         if self.read_only.is_some() {
             return Err(MSG_DECISION_READ_ONLY.to_string());
         }
@@ -566,15 +566,17 @@ impl JournalState {
             .and_then(|p| p.company_name)
             .unwrap_or_default();
         let study = self.new_study_from_form(ticker, currency, company_name)?;
-        let edited = !study
-            .security_ticker
-            .eq_ignore_ascii_case(record.security_ticker.trim())
+        // The ticker is stored as typed: a change of case IS an edit (G3); the currency is
+        // upper-cased on both sides.
+        let edited = study.security_ticker != record.security_ticker.trim()
             || record
                 .native_currency
                 .as_deref()
                 .is_none_or(|c| !study.native_currency.eq_ignore_ascii_case(c.trim()))
             || study.company_name.as_deref().unwrap_or("") != proposed_name.trim();
-        let now = self.clock.now();
+        // ONE instant for the study, its creation snapshot and the decision (the ordinary create
+        // path's rule).
+        let now = study.created_at.clone();
         let journal = self
             .journal
             .as_mut()
@@ -585,7 +587,7 @@ impl JournalState {
             edited,
             now: &now,
         }) {
-            Ok(()) => Ok(study.id),
+            Ok(()) => Ok((study.id, edited)),
             Err(PersistError::DraftStudyExists { study_id, .. }) => {
                 // Named in the EXISTING study's spelling, read back (never the error's text).
                 match self.try_get_study(study_id) {
@@ -601,6 +603,7 @@ impl JournalState {
         }
     }
 
+    /// Write a rejection: only the draft row (its outcome and whether its target had changed).
     fn write_rejection(
         &mut self,
         draft_id: Uuid,
