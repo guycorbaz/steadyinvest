@@ -24,7 +24,7 @@ use steadyinvest_contract::{
     DraftValue, ForecastLowOption, Money, Note, Study, Timestamp, draft_fingerprint, option_name,
 };
 use steadyinvest_persistence::{
-    DraftDecisionWrite, DraftVerdict, Error as PersistError, StudyWrite,
+    DraftDecisionWrite, DraftStudyValidation, DraftVerdict, Error as PersistError, StudyWrite,
 };
 use uuid::Uuid;
 
@@ -36,9 +36,10 @@ use super::{
     JournalState, MSG_DECISION_ALREADY_DECIDED, MSG_DECISION_CHANGED, MSG_DECISION_DRAFT_GONE,
     MSG_DECISION_OTHER_STUDY, MSG_DECISION_READ_ONLY, MSG_DECISION_SAVE_FAILED,
     MSG_DECISION_SAVE_FAILED_CAUSE, MSG_DECISION_STUDY_ARCHIVED, MSG_DECISION_STUDY_CHANGED,
-    MSG_DECISION_STUDY_GONE, MSG_DECISION_TARGET_GONE, MSG_GONE_REASON_FIELD,
-    MSG_GONE_REASON_STUDY, MSG_GONE_REASON_YEAR, MSG_NO_JOURNAL, MSG_NO_STUDY_OPEN, MSG_NOTE_EMPTY,
-    MSG_READ_FAILED, MSG_VALUE_NOT_A_NUMBER, MSG_VALUE_NOT_AN_OPTION, persist_cause, typed_entry,
+    MSG_DECISION_STUDY_GONE, MSG_DECISION_TARGET_GONE, MSG_DRAFT_STUDY_EXISTS,
+    MSG_GONE_REASON_FIELD, MSG_GONE_REASON_STUDY, MSG_GONE_REASON_YEAR, MSG_NO_JOURNAL,
+    MSG_NO_STUDY_OPEN, MSG_NOTE_EMPTY, MSG_READ_FAILED, MSG_VALUE_NOT_A_NUMBER,
+    MSG_VALUE_NOT_AN_OPTION, persist_cause, typed_entry,
 };
 
 /// Why a pending draft's target is gone (it can then only be rejected).
@@ -522,6 +523,86 @@ impl JournalState {
         Ok(())
     }
 
+    /// Validate a pending draft study (Story 8.7, arch A8, FR70): the owner confirmed the prefilled
+    /// create form with `ticker` / `currency` / `company_name` (as the form holds them — possibly
+    /// edited). Builds the new, empty study through the ordinary create path's builder and writes
+    /// it with the draft's `validated` + `created_study_id` in ONE transaction (the duplicate check
+    /// runs again inside it). Not on any undo stack: the owner reverses it by deleting the study
+    /// (O7). No provider call (FR76). Returns the new study's id and whether the owner changed the
+    /// proposal (the outcome's wording).
+    pub fn validate_draft_study(
+        &mut self,
+        draft_id: Uuid,
+        ticker: &str,
+        currency: &str,
+        company_name: &str,
+    ) -> Result<(Uuid, bool), String> {
+        if self.read_only.is_some() {
+            return Err(MSG_DECISION_READ_ONLY.to_string());
+        }
+        let Some(journal) = self.journal.as_ref() else {
+            return Err(MSG_NO_JOURNAL.to_string());
+        };
+        let record = match journal.get_draft(draft_id) {
+            Ok(Some(record)) => record,
+            Ok(None) => return Err(MSG_DECISION_DRAFT_GONE.to_string()),
+            Err(error) => {
+                tracing::warn!("draft read failed: {error}");
+                return Err(MSG_READ_FAILED.to_string());
+            }
+        };
+        if record.status != steadyinvest_contract::DraftStatus::Pending {
+            return Err(MSG_DECISION_ALREADY_DECIDED.to_string());
+        }
+        if record.kind != DraftKind::Study {
+            tracing::warn!(
+                "draft {draft_id}: a draft-study validation of a {:?} draft",
+                record.kind
+            );
+            return Err(MSG_DECISION_SAVE_FAILED.to_string());
+        }
+        let proposed_name = serde_json::from_str::<DraftPayload>(&record.payload)
+            .ok()
+            .and_then(|p| p.company_name)
+            .unwrap_or_default();
+        let study = self.new_study_from_form(ticker, currency, company_name)?;
+        // The ticker is stored as typed: a change of case IS an edit (G3); the currency is
+        // upper-cased on both sides.
+        let edited = study.security_ticker != record.security_ticker.trim()
+            || record
+                .native_currency
+                .as_deref()
+                .is_none_or(|c| !study.native_currency.eq_ignore_ascii_case(c.trim()))
+            || study.company_name.as_deref().unwrap_or("") != proposed_name.trim();
+        // ONE instant for the study, its creation snapshot and the decision (the ordinary create
+        // path's rule).
+        let now = study.created_at.clone();
+        let journal = self
+            .journal
+            .as_mut()
+            .ok_or_else(|| MSG_NO_JOURNAL.to_string())?;
+        match journal.validate_draft_study(DraftStudyValidation {
+            draft_id,
+            study: &study,
+            edited,
+            now: &now,
+        }) {
+            Ok(()) => Ok((study.id, edited)),
+            Err(PersistError::DraftStudyExists { study_id, .. }) => {
+                // Named in the EXISTING study's spelling, read back (never the error's text).
+                match self.try_get_study(study_id) {
+                    Ok(Some(existing)) => Err(MSG_DRAFT_STUDY_EXISTS
+                        .replace("{ticker}", existing.security_ticker.trim())
+                        .replace("{currency}", existing.native_currency.trim())),
+                    _ => Err(MSG_DRAFT_STUDY_EXISTS
+                        .replace("{ticker}", study.security_ticker.trim())
+                        .replace("{currency}", study.native_currency.trim())),
+                }
+            }
+            Err(error) => Err(decision_save_error(error)),
+        }
+    }
+
     /// Write a rejection: only the draft row (its outcome and whether its target had changed).
     fn write_rejection(
         &mut self,
@@ -759,11 +840,65 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(None);
         };
-        // Pending only: the decided record is 8.7's, never read on every poll (G3).
+        // Pending only: the decided record is the Registre's (8.7), never read on every poll (G3).
         let drafts = journal.list_pending_drafts().map_err(inbox_read_error)?;
+        self.with_studies(drafts).map(Some)
+    }
+
+    /// Read the drafts record (Story 8.7, FR77): EVERY draft of the dossier, pending included, and
+    /// the studies they target or created — read when the « Registre » is shown, never on every
+    /// poll. Same rules as [`Self::read_inbox`] (one failure fails the whole read).
+    pub fn read_record(&self) -> Result<Option<InboxData>, InboxReadError> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(None);
+        };
+        let drafts = journal.list_drafts().map_err(inbox_read_error)?;
+        self.with_studies(drafts).map(Some)
+    }
+
+    /// A study's processed drafts (its own and the draft study it came from), by decision time —
+    /// the history merges them (Story 8.7, arch A12). A read failure is named (the history then
+    /// reads « indisponible », never a timeline silently missing its ★ entries).
+    pub fn try_list_study_drafts(
+        &self,
+        study_id: Uuid,
+    ) -> Result<Vec<steadyinvest_persistence::DraftRecord>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        journal.list_study_drafts(study_id).map_err(|error| {
+            tracing::warn!("study drafts read failed: {error}");
+            MSG_READ_FAILED.to_string()
+        })
+    }
+
+    /// One draft by id (the history Détail of a ★ entry); `Ok(None)` when it is not a draft.
+    pub fn try_get_draft(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<steadyinvest_persistence::DraftRecord>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(None);
+        };
+        journal.get_draft(id).map_err(|error| {
+            tracing::warn!("draft read failed: {error}");
+            MSG_READ_FAILED.to_string()
+        })
+    }
+
+    /// The studies `drafts` are about (`study_id` / `created_study_id`) and which are archived.
+    fn with_studies(
+        &self,
+        drafts: Vec<steadyinvest_persistence::DraftRecord>,
+    ) -> Result<InboxData, InboxReadError> {
+        let journal = self.journal.as_ref().expect("checked by the callers");
         let mut studies = std::collections::HashMap::new();
         let mut archived = std::collections::HashSet::new();
-        for id in drafts.iter().filter_map(|d| d.study_id) {
+        for id in drafts
+            .iter()
+            .flat_map(|d| [d.study_id, d.created_study_id])
+            .flatten()
+        {
             if studies.contains_key(&id) {
                 continue;
             }
@@ -779,10 +914,10 @@ impl JournalState {
                 studies.insert(id, study);
             }
         }
-        Ok(Some(InboxData {
+        Ok(InboxData {
             drafts,
             studies,
             archived,
-        }))
+        })
     }
 }

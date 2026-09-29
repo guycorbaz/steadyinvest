@@ -17,7 +17,10 @@
 
 use crate::error::{Error, Result};
 use crate::journal::Journal;
-use crate::studies::{stored_study_is, study_status_in, write_study_with_snapshot};
+use crate::studies::{
+    read_study_in, stored_study_is, study_status_in, study_with_identifier,
+    write_study_with_snapshot,
+};
 use crate::util::{bump_logical_version, parse_uuid};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -80,6 +83,20 @@ pub struct StudyWrite<'a> {
     /// The study with the draft applied.
     pub after: &'a Study,
     /// The injected clock's now, for the FR51 snapshot row.
+    pub now: &'a Timestamp,
+}
+
+/// The validation of a pending draft study (Story 8.7, arch A8, FR70): the study the owner
+/// confirmed in the prefilled create form (built by the app — ticker, currency and name as the form
+/// holds them), whether it differs from the proposal, and the app's clock.
+#[derive(Debug, Clone, Copy)]
+pub struct DraftStudyValidation<'a> {
+    pub draft_id: Uuid,
+    /// The new study, as it is to be created (empty — no provider call, FR76).
+    pub study: &'a Study,
+    /// The owner changed the ticker, the currency or the name before « Créer ».
+    pub edited: bool,
+    /// The injected clock's now: the draft's `decided_at` and the study's FR51 creation snapshot.
     pub now: &'a Timestamp,
 }
 
@@ -355,6 +372,24 @@ impl Journal {
         Ok(out)
     }
 
+    /// A study's PROCESSED drafts (status ≠ pending) — its own (`study_id`) and the draft study it
+    /// was created from (`created_study_id`) — ordered by `(decided_at, id)`: the study history
+    /// merges them at their decision time (Story 8.7, arch A12; a rejected draft wrote no snapshot).
+    /// Same corruption rule as [`Self::list_drafts`].
+    pub fn list_study_drafts(&self, study_id: Uuid) -> Result<Vec<DraftRecord>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {DRAFT_COLUMNS} FROM ai_drafts
+              WHERE status <> 'pending' AND (study_id = ?1 OR created_study_id = ?1)
+              ORDER BY decided_at, id"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![study_id.to_string()], row_tuple)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(record_from_row(row?)?);
+        }
+        Ok(out)
+    }
+
     /// One draft by id, or `None` when the dossier holds no such draft — the same corruption rule
     /// as [`Self::list_drafts`] (a corrupt row is an error, never `None`).
     pub fn get_draft(&self, id: Uuid) -> Result<Option<DraftRecord>> {
@@ -414,6 +449,77 @@ impl Journal {
                 d.stale_at_decision.map(i64::from),
                 d.edited_before_validation.map(i64::from),
                 d.draft_id.to_string()
+            ],
+        )?;
+        if updated != 1 {
+            return Err(Error::DraftNotPending {
+                status: status.as_str().to_string(),
+            });
+        }
+        bump_logical_version(&tx)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Validate a pending draft study (Story 8.7, arch A8, FR70, D2): in **one** transaction,
+    /// re-check that the draft is a pending draft study ([`Error::DraftNotPending`] /
+    /// [`Error::DraftStudyMismatch`] for another kind), re-run the duplicate check on the study's
+    /// identifier and currency ([`Error::DraftStudyExists`], archived studies included), create the
+    /// study with its FR51 creation snapshot, and record the draft `validated` with `decided_at`,
+    /// `created_study_id` and `edited_before_validation`; bump the logical version **once**. Not an
+    /// undoable decision: the owner reverses it by deleting the study (O7 cascade). Any failure
+    /// rolls the whole transaction back — never half-applied (NFR-R2).
+    pub fn validate_draft_study(&mut self, v: DraftStudyValidation<'_>) -> Result<()> {
+        self.check_writable()?;
+        self.check_study_identity(v.study)?;
+        // IMMEDIATE (G3): the write lock is taken before the reads, so an MCP submission landing
+        // meanwhile makes this wait (busy timeout) instead of failing at the first write.
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let (status, draft_study) = draft_status_in(&tx, v.draft_id)?;
+        let kind: String = tx.query_row(
+            "SELECT kind FROM ai_drafts WHERE id = ?1",
+            rusqlite::params![v.draft_id.to_string()],
+            |r| r.get(0),
+        )?;
+        if kind != DraftKind::Study.as_str() || draft_study.is_some() {
+            return Err(Error::DraftStudyMismatch {
+                study_id: v.study.id,
+            });
+        }
+        if status != DraftStatus::Pending {
+            return Err(Error::DraftNotPending {
+                status: status.as_str().to_string(),
+            });
+        }
+        // A NEW study: never an upsert over a stored one (an id collision is internal).
+        if read_study_in(&tx, v.study.id)?.is_some() {
+            return Err(Error::DraftStudyMismatch {
+                study_id: v.study.id,
+            });
+        }
+        if let Some(existing) =
+            study_with_identifier(&tx, &v.study.security_ticker, &v.study.native_currency)?
+        {
+            return Err(Error::DraftStudyExists {
+                ticker: existing.security_ticker,
+                currency: existing.native_currency,
+                study_id: existing.id,
+            });
+        }
+        let payload = serde_json::to_string(v.study)?;
+        write_study_with_snapshot(&tx, v.study, &payload, v.now)?;
+        let updated = tx.execute(
+            "UPDATE ai_drafts
+                 SET status = 'validated', decided_at = ?1, created_study_id = ?2,
+                     edited_before_validation = ?3
+               WHERE id = ?4 AND status = 'pending'",
+            rusqlite::params![
+                v.now.0,
+                v.study.id.to_string(),
+                i64::from(v.edited),
+                v.draft_id.to_string()
             ],
         )?;
         if updated != 1 {

@@ -227,13 +227,31 @@ pub(crate) fn push_history(
         }
         Ok(loaded)
     })();
+    // Story 8.7 (arch A12): the study's processed AI drafts, merged at their decision time — a
+    // draft that cannot be read or shown fails the panel like a snapshot would.
+    let drafts = (|| -> Result<Vec<viewmodel::history::HistoryDraft>, String> {
+        let mut out = Vec::new();
+        for record in state.try_list_study_drafts(study_id)? {
+            if let Some(entry) = viewmodel::drafts::history_draft(&record).map_err(|p| {
+                tracing::warn!("history draft {}: {}", p.draft_id, p.detail);
+                String::new()
+            })? {
+                out.push(entry);
+            }
+        }
+        Ok(out)
+    })();
+    let loaded = match (loaded, drafts) {
+        (Ok(loaded), Ok(drafts)) => Ok((loaded, drafts)),
+        (Err(e), _) | (_, Err(e)) => Err(e),
+    };
     match loaded {
-        Ok(loaded) => {
+        Ok((loaded, drafts)) => {
             // Story 8.1 (arch A12): « Masquer les notes » drops the note-only entries and the day
             // headers are recomputed on what remains; the detail still diffs against the TRUE
             // predecessor (`toggle-history-entry` reads the unfiltered listing).
             let rows: Vec<crate::HistoryEntryRow> = viewmodel::history::visible_history(
-                viewmodel::history::history_entries(&loaded, format),
+                viewmodel::history::history_entries(&loaded, &drafts, format),
                 studies.get_history_hide_notes(),
             )
             .into_iter()
@@ -243,6 +261,7 @@ pub(crate) fn push_history(
                 first_of_day: e.first_of_day,
                 time: e.time.into(),
                 summary: e.summary.into(),
+                ai: e.ai,
             })
             .collect();
             studies.set_history_unavailable(false);

@@ -778,8 +778,17 @@ mod tests {
         // form), the chart chip row « Propositions de l'IA : », the line label « IA {} », the
         // caption « placée par l'IA · validée le {} » and the glossary's « Ligne IA » term and
         // definition: 1106 + 7 = 1113, measured.
+        // 8.7 (draft study end-to-end & the Registre): the « pas encore disponible » line goes
+        // (-1); « Valider… » on the row and in the dialog, the dialog's « Nouvelle étude : {} »,
+        // the draft create form's title, sentence, name label and placeholder (+7); the Registre
+        // row (target ×2, four outcome words, three pending words, two decision flags, « Détail »
+        // / « Masquer le détail », « Actuel {} → Proposé {} ») +14, the view chips +2, the outcome
+        // chips +4, its ⊘ band ×2, its empty and filter texts +2 (+10); the history Détail's
+        // « Proposé {} » +1; the glossary's « Registre » term and definition +2: 1113 + 33 = 1146,
+        // measured. Its G3 review: a decided draft's Registre Détail reads « Proposé {} » only:
+        // 1146 + 1 = 1147, measured.
         assert!(
-            total >= 1113,
+            total >= 1147,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -793,8 +802,9 @@ mod tests {
         }
         assert_eq!(
             crate::viewmodel::history::HISTORY_USER_FACING_LABELS.len(),
-            // 8.1: +3 (« Note ajoutée / modifiée / supprimée »).
-            20,
+            // 8.1: +3 (« Note ajoutée / modifiée / supprimée »). 8.7: the four ★ summaries of a
+            // processed draft and its note / draft-study targets: 20 + 6 = 26, measured.
+            26,
             "history.rs label inventory changed — register the new label"
         );
     }
@@ -944,8 +954,9 @@ mod tests {
             // (MSG_UNDO_DRAFT_STEP_DROPPED): 236 + 5 = 241, measured. 8.5a: the draft inbox's
             // read subject (MSG_SUBJECT_DRAFTS, « la liste des propositions »): 241 + 1 = 242,
             // measured. 8.5b: the decision outcomes of the 8.0 spec §3.3 — validated, validated
-            // (edited), rejected, undone, redone: 242 + 5 = 247, measured.
-            247,
+            // (edited), rejected, undone, redone: 242 + 5 = 247, measured. 8.7: the draft-study
+            // duplicate refusal (MSG_DRAFT_STUDY_EXISTS): 247 + 1 = 248, measured.
+            248,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -2024,8 +2035,13 @@ mod tests {
             let allowed: Vec<(usize, usize)> = if path.ends_with("viewmodel/drafts.rs") {
                 vec![fn_body(prod, "ai_fields")]
             } else if path.ends_with("wiring/drafts.rs") {
-                // The inbox rows (8.5a) and the decision dialog (8.5b).
-                vec![fn_body(prod, "to_slint"), fn_body(prod, "to_dialog")]
+                // The inbox rows (8.5a), the decision dialog (8.5b) and the Registre rows (8.7).
+                vec![
+                    fn_body(prod, "to_slint"),
+                    fn_body(prod, "to_dialog"),
+                    fn_body(prod, "record_to_slint"),
+                    fn_body(prod, "history_ai_to_slint"),
+                ]
             } else if path.ends_with("state/drafts.rs") {
                 vec![(0, prod.len())]
             } else {

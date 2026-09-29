@@ -32,8 +32,8 @@ mod util;
 mod watchlist;
 
 pub use drafts::{
-    DraftDecisionWrite, DraftRecord, DraftStep, DraftVerdict, StudyWrite, is_currency_code,
-    is_ticker,
+    DraftDecisionWrite, DraftRecord, DraftStep, DraftStudyValidation, DraftVerdict, StudyWrite,
+    is_currency_code, is_ticker,
 };
 pub use error::{Error, ErrorKind, Result};
 pub use export::{

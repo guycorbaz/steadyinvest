@@ -16,6 +16,7 @@ import { Tokens } from "../tokens.slint";
 import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen, Dialog, NoteRow, Drafts } from "../state.slint";
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
+import { AiFrame } from "../components/ai_frame.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { EditableCell, CellFit, CellMark, CellTip } from "../components/editable_cell.slint";
 import { JudgmentField } from "../components/judgment_field.slint";
@@ -655,10 +656,30 @@ export component StudyScreen inherits Rectangle {
                                 label: Studies.history-detail-id == hentry.id
                                     ? @tr("Masquer le détail") : @tr("Détail");
                                 enabled: true;
-                                clicked => { Studies.toggle-history-entry(hentry.id); }
+                                clicked => { Studies.toggle-history-entry(hentry.id, hentry.ai); }
                             }
                         }
-                        if Studies.history-detail-id == hentry.id: VerticalLayout {
+                        // Story 8.7 (spec §5.7): a ★ entry's Détail — the proposed value (app text)
+                        // and the AI's words inside an AiFrame.
+                        if Studies.history-detail-id == hentry.id && hentry.ai: VerticalLayout {
+                            padding-left: Tokens.space-24;
+                            spacing: Tokens.space-8;
+                            if Studies.history-ai-detail.proposed != "": Text {
+                                text: @tr("Proposé {}", Studies.history-ai-detail.proposed);
+                                color: Tokens.text-mid;
+                                font-family: Tokens.font-numeric;
+                                font-size: Tokens.font-caption;
+                                wrap: word-wrap;
+                            }
+                            AiFrame {
+                                ai-client: Studies.history-ai-detail.ai-client;
+                                ai-model: Studies.history-ai-detail.ai-model;
+                                ai-lead: Studies.history-ai-detail.ai-lead;
+                                ai-text: Studies.history-ai-detail.ai-text;
+                                submitted: Studies.history-ai-detail.submitted;
+                            }
+                        }
+                        if Studies.history-detail-id == hentry.id && !hentry.ai: VerticalLayout {
                             padding-left: Tokens.space-24;
                             spacing: Tokens.space-8;
                             for line in Studies.history-detail-lines: Text {

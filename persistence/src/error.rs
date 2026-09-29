@@ -198,6 +198,16 @@ pub enum Error {
     #[error("the decision's study {study_id} is not the draft's study; nothing was written")]
     DraftStudyMismatch { study_id: Uuid },
 
+    /// A draft study's validation found the dossier already holding a study with the same
+    /// identifier and currency (Story 8.7, FR70, D2 — the re-check at validation). `ticker` /
+    /// `currency` are the EXISTING study's spelling. Nothing was written; the draft stays pending.
+    #[error("a study {ticker} in {currency} already exists; nothing was written")]
+    DraftStudyExists {
+        ticker: String,
+        currency: String,
+        study_id: Uuid,
+    },
+
     /// The MCP access surface met a dossier whose SQL schema is not exactly this build's (Story 8.3,
     /// arch A2): it never migrates and never reads a schema it does not know. Nothing was read or
     /// written. `file_user_version` above `supported` = a newer dossier; below = an older one.
@@ -522,6 +532,11 @@ mod tests {
             Error::DraftStudyMismatch {
                 study_id: Uuid::from_u128(4),
             },
+            Error::DraftStudyExists {
+                ticker: "NESN".to_string(),
+                currency: "CHF".to_string(),
+                study_id: Uuid::from_u128(5),
+            },
             Error::McpSchemaMismatch {
                 file_user_version: 9,
                 supported: 8,
@@ -574,6 +589,7 @@ mod tests {
                 | Error::DraftStatusMismatch { .. }
                 | Error::StudyChangedSinceRead
                 | Error::DraftStudyMismatch { .. }
+                | Error::DraftStudyExists { .. }
                 | Error::McpSchemaMismatch { .. }
                 | Error::McpDenied { .. }
                 | Error::McpInvalidCall { .. }
@@ -582,10 +598,11 @@ mod tests {
         }
         // 31 variants (21 + the five draft-decision variants of Story 8.2b + the four MCP access
         // variants and `RestoreSnapshot` of Story 8.3); `WriteProtected` and `WriteProtectedOutdated`
-        // are sampled for both of their causes (file, directory). 8.3 delta: 28 → 33.
+        // are sampled for both of their causes (file, directory). 8.3 delta: 28 → 33; 8.7: + the
+        // draft-study duplicate (`DraftStudyExists`) → 34.
         assert_eq!(
             sample_errors().len(),
-            33,
+            34,
             "one sample per variant (+2 causes)"
         );
     }

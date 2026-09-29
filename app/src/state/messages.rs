@@ -176,6 +176,10 @@ pub const MSG_DRAFT_UNDONE: &str =
     "Validation annulée ; la proposition est notée validée puis annulée.";
 /// Story 8.5b outcome: a redo over a draft's validation.
 pub const MSG_DRAFT_REDONE: &str = "Validation rétablie.";
+/// Story 8.7 refusal (UX spec §3.3): the draft study's validation found the same study already in
+/// the dossier (`{ticker}` / `{currency}` in the EXISTING study's spelling). Nothing was created.
+pub const MSG_DRAFT_STUDY_EXISTS: &str =
+    "Une étude {ticker} en {currency} existe déjà ; rien n'a été créé.";
 /// Story 8.2b target-gone reason: the draft's fiscal year left the study (`{year}`).
 pub const MSG_GONE_REASON_YEAR: &str = "l'année {year} n'existe plus dans l'étude";
 /// Story 8.2b target-gone reason: the draft's study was deleted.
@@ -1178,6 +1182,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_DRAFT_REJECTED,
     MSG_DRAFT_UNDONE,
     MSG_DRAFT_REDONE,
+    MSG_DRAFT_STUDY_EXISTS,
     MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,

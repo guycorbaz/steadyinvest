@@ -9486,7 +9486,7 @@ mod drafts_8_2b {
         };
         assert!(
             state.decide_draft(&reference, validate()).is_err(),
-            "8.7 owns the creation"
+            "the create form (8.7 `validate_draft_study`) is the only validation path"
         );
         assert_eq!(facts(&state, draft).0, "pending");
         // A reference that names a study for a draft study is internal, refused.
@@ -9498,6 +9498,307 @@ mod drafts_8_2b {
         );
         state.decide_draft(&reference, Decision::Reject).unwrap();
         assert_eq!(facts(&state, draft), ("rejected".into(), None, None));
+    }
+
+    /// Like `decision_state` with a SEQUENTIAL id source: a draft-study validation creates a second
+    /// study, which needs its own id.
+    fn draft_study_state(dir: &TempDir) -> (JournalState, Uuid) {
+        let mut state = watch_state(dir, 0x87_000);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_for(&[2022, 2023, 2024]))
+            .unwrap();
+        state.reset_undo_for(id);
+        (state, id)
+    }
+
+    /// Plant one pending draft study proposing `ticker` in `currency` (with a company name).
+    fn plant_draft_study(state: &JournalState, n: u128, ticker: &str, currency: &str) -> Uuid {
+        let id = Uuid::from_u128(n);
+        raw(state)
+            .execute(
+                "INSERT INTO ai_drafts
+                     (id, kind, study_id, security_ticker, native_currency, status, created_at,
+                      decided_at, comment, origin_client, origin_model, stale_at_decision,
+                      edited_before_validation, created_study_id, payload)
+                 VALUES (?1, 'study', NULL, ?2, ?3, 'pending', '2026-09-27T09:00:00Z', NULL,
+                         'Croissance régulière.', 'claude-code', 'claude-opus-5-5', NULL, NULL,
+                         NULL, '{\"version\":1,\"company_name\":\"Roche Holding\"}')",
+                rusqlite::params![id.to_string(), ticker, currency],
+            )
+            .unwrap();
+        id
+    }
+
+    fn created_study_id(state: &JournalState, draft: Uuid) -> Option<String> {
+        raw(state)
+            .query_row(
+                "SELECT created_study_id FROM ai_drafts WHERE id = ?1",
+                rusqlite::params![draft.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    // Story 8.7 AC 3, 8, 9 — « Créer » creates an ordinary empty study (not watched, no fetch), the
+    // draft validated with the study it became, in one write; nothing lands on the undo stack.
+    #[test]
+    fn validating_a_draft_study_creates_an_ordinary_empty_study() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, nesn) = draft_study_state(&dir);
+        let undo_before = state.can_undo();
+        let draft = plant_draft_study(&state, 30, "ROG", "CHF");
+        let id = state
+            .validate_draft_study(draft, "ROG", "CHF", "Roche Holding")
+            .expect("created")
+            .0;
+        let study = state.get_study(id).unwrap();
+        assert_eq!(
+            (
+                study.security_ticker.as_str(),
+                study.native_currency.as_str()
+            ),
+            ("ROG", "CHF")
+        );
+        assert_eq!(study.company_name.as_deref(), Some("Roche Holding"));
+        assert!(study.years.is_empty(), "empty — no provider call (FR76)");
+        assert_eq!(facts(&state, draft), ("validated".into(), None, Some(0)));
+        assert_eq!(created_study_id(&state, draft), Some(id.to_string()));
+        assert!(
+            state.list_watch_items().is_empty(),
+            "never added to the watchlist (FR74)"
+        );
+        assert_eq!(state.can_undo(), undo_before, "not on the undo stack (A8)");
+        assert_eq!(
+            state.try_list_study_history(id).unwrap().len(),
+            1,
+            "its creation is its first history entry"
+        );
+        // O7: deleting the created study deletes the draft-study record with it.
+        state.delete_study(id).unwrap();
+        assert!(state.path().is_some());
+        assert_eq!(
+            raw(&state)
+                .query_row(
+                    "SELECT count(*) FROM ai_drafts WHERE id = ?1",
+                    rusqlite::params![draft.to_string()],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert!(state.get_study(nesn).is_some(), "other studies untouched");
+    }
+
+    // Story 8.7 AC 2, 11 (Decision 2) — the owner's edits make the study; the draft is marked.
+    #[test]
+    fn an_edited_draft_study_validation_is_marked() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, _) = draft_study_state(&dir);
+        let draft = plant_draft_study(&state, 31, "ROG", "CHF");
+        let id = state
+            .validate_draft_study(draft, " rog.sw ", "chf", "")
+            .unwrap()
+            .0;
+        let study = state.get_study(id).unwrap();
+        assert_eq!(
+            study.security_ticker, "rog.sw",
+            "the ticker as typed, trimmed"
+        );
+        assert_eq!(study.native_currency, "CHF");
+        assert_eq!(study.company_name, None);
+        assert_eq!(facts(&state, draft).2, Some(1), "edited before validation");
+        assert!(state.draft_was_edited(draft));
+        // G3: the ticker is stored as typed, so a change of case IS an edit; the same proposal
+        // confirmed as is is not.
+        let draft = plant_draft_study(&state, 32, "NOVN", "CHF");
+        let (_, edited) = state
+            .validate_draft_study(draft, "novn", "CHF", "Roche Holding")
+            .unwrap();
+        assert!(edited);
+        assert_eq!(facts(&state, draft).2, Some(1));
+        let draft = plant_draft_study(&state, 35, "UHR", "CHF");
+        let (_, edited) = state
+            .validate_draft_study(draft, " UHR ", "chf", "Roche Holding")
+            .unwrap();
+        assert!(!edited, "trimmed ticker, upper-cased currency, same name");
+        assert_eq!(facts(&state, draft).2, Some(0));
+    }
+
+    // Story 8.7 AC 4, 6 — the duplicate check again at « Créer »; a decided draft; read-only.
+    #[test]
+    fn a_draft_study_validation_refuses_a_duplicate_and_a_decided_draft() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, _) = draft_study_state(&dir);
+        let draft = plant_draft_study(&state, 33, "NESN", "CHF");
+        assert_eq!(
+            state
+                .validate_draft_study(draft, "nesn", "chf", "")
+                .unwrap_err(),
+            "Une étude NESN en CHF existe déjà ; rien n'a été créé.",
+            "named in the existing study's spelling"
+        );
+        assert_eq!(facts(&state, draft).0, "pending", "the draft stays pending");
+        assert_eq!(state.list_studies().len(), 1, "nothing created");
+        // Blank fields are the ordinary form's refusals.
+        assert_eq!(
+            state
+                .validate_draft_study(draft, " ", "CHF", "")
+                .unwrap_err(),
+            MSG_BLANK_TICKER
+        );
+        state
+            .decide_draft(
+                &DraftRef {
+                    draft_id: draft,
+                    study_id: None,
+                    ticker: "nesn".into(),
+                },
+                Decision::Reject,
+            )
+            .unwrap();
+        assert_eq!(
+            state
+                .validate_draft_study(draft, "ROG", "CHF", "")
+                .unwrap_err(),
+            MSG_DECISION_ALREADY_DECIDED
+        );
+        // A note draft is no draft study (internal, named neutrally).
+        let note = plant(
+            &state,
+            34,
+            "note",
+            Some(state.list_studies()[0].id),
+            &note_payload("x"),
+        );
+        assert_eq!(
+            state
+                .validate_draft_study(note, "ROG", "CHF", "")
+                .unwrap_err(),
+            MSG_DECISION_SAVE_FAILED
+        );
+    }
+
+    // Story 8.7 AC 9, 10 (FR70, FR76, NFR-A3) — the end-to-end path on a temp dossier, with no
+    // special step: an AI submits a draft study (MCP) → the owner validates it (app) → MCP reads the
+    // EMPTY study (no provider call on validation) → the owner fetches (stubbed) → MCP reads the
+    // fetched figures → a second draft study for the same security and currency is refused; the
+    // record (MCP, filtered on the study) shows the draft study it was created from. NFR-A3 over
+    // the whole MCP surface is `mcp/tests/closure.rs`.
+    #[test]
+    fn a_draft_study_goes_end_to_end_through_the_ordinary_path() {
+        use steadyinvest_contract::{DraftKind, DraftOrigin};
+        use steadyinvest_persistence::{
+            DraftFilter, DraftSubmission, McpAccess, Page, SubmissionRefusal, SubmitError,
+        };
+        let dir = TempDir::new().unwrap();
+        let (mut state, _) = draft_study_state(&dir);
+        let access = McpAccess::at(state.path().unwrap());
+        let dossier = access.identity().expect("identity");
+        let submission = |n: u128| DraftSubmission {
+            id: Uuid::from_u128(n),
+            created_at: Timestamp("2026-09-29T08:00:00Z".to_string()),
+            kind: DraftKind::Study,
+            study_id: None,
+            security_ticker: Some("ROG".to_string()),
+            native_currency: Some("CHF".to_string()),
+            company_name: Some("Roche Holding".to_string()),
+            target: None,
+            proposed_value: None,
+            note_text: None,
+            comment: "Croissance régulière.".to_string(),
+            origin: DraftOrigin {
+                client: "test".to_string(),
+                model: "test".to_string(),
+            },
+            dossier: dossier.clone(),
+            method_version: steadyinvest_core::METHOD_VERSION.to_string(),
+        };
+        let draft = access.submit_draft(&submission(0x87E1)).expect("submitted");
+        let id = state
+            .validate_draft_study(draft, "ROG", "CHF", "Roche Holding")
+            .expect("validated")
+            .0;
+        let read = access.read_study(id).expect("read").expect("present");
+        assert!(
+            read.study.years.is_empty(),
+            "no provider call on validation"
+        );
+        state
+            .apply_provider_refresh(id, &fetched_for(&[2022, 2023, 2024]))
+            .expect("the owner's (stubbed) fetch");
+        let read = access.read_study(id).expect("read").expect("present");
+        assert_eq!(
+            read.study.years.len(),
+            3,
+            "the fetched figures, readable through MCP"
+        );
+        match access.submit_draft(&submission(0x87E2)) {
+            Err(SubmitError::Refused(SubmissionRefusal::StudyExists { study_id, .. })) => {
+                assert_eq!(study_id, id)
+            }
+            other => panic!("expected study_exists, got {other:?}"),
+        }
+        let record = access
+            .list_drafts(
+                DraftFilter {
+                    study_id: Some(id),
+                    status: None,
+                },
+                Page::first(50),
+            )
+            .expect("record");
+        assert_eq!(
+            record.items.len(),
+            1,
+            "the draft study it was created from (Decision 4)"
+        );
+        assert_eq!(record.items[0].created_study_id, Some(id));
+        assert_eq!(
+            record.items[0].status,
+            steadyinvest_contract::DraftStatus::Validated
+        );
+    }
+
+    // Story 8.7 AC 22 (FR65) — AI assistance is optional: a dossier no AI ever wrote to reads an
+    // empty record, no pending draft study, and a history without ★ entries.
+    #[test]
+    fn a_dossier_without_any_draft_works_with_no_mcp_server() {
+        use crate::viewmodel::drafts::{KindFilter, OutcomeFilter, pending_counts, record_rows};
+        let dir = TempDir::new().unwrap();
+        let (state, id) = draft_study_state(&dir);
+        let record = state.read_record().unwrap().expect("a dossier");
+        assert!(record.drafts.is_empty());
+        let view = record_rows(
+            &record.drafts,
+            &record.studies,
+            &record.archived,
+            crate::viewmodel::format::NumberFormat::Comma,
+            KindFilter::All,
+            None,
+            OutcomeFilter::All,
+        )
+        .unwrap();
+        assert_eq!(
+            view.unfiltered, 0,
+            "« Aucune proposition dans ce dossier. »"
+        );
+        assert_eq!(
+            pending_counts(&record.drafts, &record.archived).draft_studies,
+            0
+        );
+        assert!(
+            state.try_list_study_drafts(id).unwrap().is_empty(),
+            "no ★ entry"
+        );
+        assert!(
+            state
+                .read_inbox()
+                .unwrap()
+                .expect("a dossier")
+                .drafts
+                .is_empty()
+        );
     }
 
     // AC 14 — a write failure is named, the study and the draft unchanged, no undo step.

@@ -64,7 +64,8 @@ use crate::journal::{apply_connection_local_pragmas, file_uri, read_journal_id, 
 use crate::migrations;
 use crate::schema::{DRAFT_TRIGGER, MCP_READABLE_TABLES, SQLITE_INTERNAL_TABLES};
 use crate::studies::{
-    StudySummary, list_studies_in, parse_study_row, read_study_in, study_status_in,
+    StudySummary, list_studies_in, parse_study_row, read_study_in, same_identifier,
+    study_status_in, study_with_identifier,
 };
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
@@ -165,7 +166,8 @@ pub struct Recorded {
 /// Which drafts a [`McpAccess::list_drafts`] call returns (both filters optional).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DraftFilter {
-    /// Only the drafts about this study (`study_id`).
+    /// Only the drafts about this study: its own (`study_id`) and the draft study it was created
+    /// from (`created_study_id`, Story 8.7 Decision 4 — the owner's Registre reads the same).
     pub study_id: Option<Uuid>,
     /// Only the drafts in this status.
     pub status: Option<DraftStatus>,
@@ -639,13 +641,6 @@ fn denial_of(action: &AuthAction<'_>) -> McpDenial {
     }
 }
 
-/// Two identifiers (tickers, currencies) name the same thing: compared ignoring ASCII case and
-/// surrounding spaces — the app's `same_ticker` rule (G1 P review L-h). Stored studies may carry a
-/// hand-typed spelling the submission rule would refuse (`chf`, ` NESN.SW`).
-fn same_identifier(a: &str, b: &str) -> bool {
-    a.trim().eq_ignore_ascii_case(b.trim())
-}
-
 /// A text within its character cap, or the refusal naming it.
 fn within(field: &'static str, text: &str, max: usize) -> std::result::Result<(), SubmitError> {
     let len = text.chars().count();
@@ -1091,29 +1086,13 @@ impl McpAccess {
             within("company_name", name, MAX_COMPANY_NAME_CHARS)?;
         }
         // D2 — already studied in the same currency (archived studies count: still in the dossier).
-        let mut stmt = tx
-            .prepare("SELECT id, security_ticker FROM studies ORDER BY created_at, id")
-            .map_err(Error::Sqlite)?;
-        let candidates = stmt
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-            .map_err(Error::Sqlite)?;
-        for (id, stored_ticker) in candidates {
-            if !same_identifier(&stored_ticker, &ticker) {
-                continue;
+        if let Some(study) = study_with_identifier(tx, &ticker, &currency)? {
+            return Err(SubmissionRefusal::StudyExists {
+                ticker,
+                currency,
+                study_id: study.id,
             }
-            let id = crate::util::parse_uuid(&id, "studies.id")?;
-            let study = read_study_in(tx, id)?.ok_or_else(|| Error::CorruptPayload {
-                detail: format!("study {id} vanished inside the submission transaction"),
-            })?;
-            if same_identifier(&study.native_currency, &currency) {
-                return Err(SubmissionRefusal::StudyExists {
-                    ticker,
-                    currency,
-                    study_id: id,
-                }
-                .into());
-            }
+            .into());
         }
         // D8 — already pending as a draft study in the same currency.
         let mut stmt = tx
@@ -1474,13 +1453,13 @@ fn query_drafts(conn: &Connection, filter: DraftFilter, page: Page) -> Result<Pa
     let status = filter.status.map(DraftStatus::as_str);
     let total: i64 = conn.query_row(
         "SELECT COUNT(*) FROM ai_drafts
-         WHERE (?1 IS NULL OR study_id = ?1) AND (?2 IS NULL OR status = ?2)",
+         WHERE (?1 IS NULL OR study_id = ?1 OR created_study_id = ?1) AND (?2 IS NULL OR status = ?2)",
         rusqlite::params![study, status],
         |r| r.get(0),
     )?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {DRAFT_COLUMNS} FROM ai_drafts
-         WHERE (?1 IS NULL OR study_id = ?1) AND (?2 IS NULL OR status = ?2)
+         WHERE (?1 IS NULL OR study_id = ?1 OR created_study_id = ?1) AND (?2 IS NULL OR status = ?2)
          ORDER BY created_at, id LIMIT ?3 OFFSET ?4"
     ))?;
     let rows = stmt.query_map(

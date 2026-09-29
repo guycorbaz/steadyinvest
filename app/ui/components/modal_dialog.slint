@@ -278,6 +278,10 @@ export component ModalDialog inherits Rectangle {
             if (Holdings.rename-portfolio(Dialog.target-id, Dialog.draft-name)) { Dialog.close(); }
         } else if (Dialog.form-id == "watch-add") {
             if (Watchlist.add-watch(Dialog.draft-ticker)) { Dialog.close(); }
+        } else if (Dialog.form-id == "study-create" && Dialog.target-id != "") {
+            // Story 8.7: « Créer » from a draft study — the study and the draft's validation in
+            // one write; a refusal (a duplicate, the draft decided meanwhile) stays inline.
+            if (Drafts.create-from-draft(Dialog.target-id, Dialog.draft-ticker, Dialog.draft-currency, Dialog.draft-name)) { Dialog.close(); }
         } else if (Dialog.form-id == "study-create") {
             if (Studies.create-study(Dialog.draft-ticker, Dialog.draft-currency, Dialog.draft-name)) { Dialog.close(); }
         } else if (Dialog.form-id == "fx-rate") {
@@ -360,7 +364,9 @@ export component ModalDialog inherits Rectangle {
     }
     // The draft's target, as the inbox row spells it.
     function decision-target() -> string {
-        return Dialog.decision.kind == "note" ? @tr("{} · nouvelle note", Dialog.decision.target) : Dialog.decision.target;
+        return Dialog.decision.kind == "note" ? @tr("{} · nouvelle note", Dialog.decision.target)
+            : Dialog.decision.kind == "study" ? @tr("Nouvelle étude : {}", Dialog.decision.target)
+            : Dialog.decision.target;
     }
     // A click on the scrim: ignored while a note is being written (G3 E2) — Esc or « Annuler »
     // still leave; anything else cancels as before.
@@ -601,7 +607,7 @@ export component ModalDialog inherits Rectangle {
                                 font-size: Tokens.font-caption;
                             }
                             Text {
-                                text: Dialog.decision.kind == "note" ? "—" : Dialog.decision.current;
+                                text: Dialog.decision.kind == "note" || Dialog.decision.kind == "study" ? "—" : Dialog.decision.current;
                                 color: Tokens.text-high;
                                 font-family: Tokens.font-numeric;
                                 font-size: Tokens.font-body;
@@ -657,7 +663,7 @@ export component ModalDialog inherits Rectangle {
                             focus-request: root.first-request + root.cancel-request;
                             clicked => { root.cancel(); }
                         }
-                        if root.can-validate(): ActionButton {
+                        if root.can-validate() && Dialog.decision.kind != "study": ActionButton {
                             label: @tr("Modifier avant de valider…");
                             enabled: !Holdings.read-only;
                             clicked => { root.start-edit(); }
@@ -669,7 +675,15 @@ export component ModalDialog inherits Rectangle {
                             enabled: !Holdings.read-only;
                             clicked => { root.decide("reject"); }
                         }
-                        if root.can-validate(): ActionButton {
+                        // Story 8.7 (Decision 1): a draft study is validated through the prefilled
+                        // create form (spec §4.2) — « Valider… » opens it, « Créer » is the write.
+                        if root.can-validate() && Dialog.decision.kind == "study": ActionButton {
+                            label: @tr("Valider…");
+                            guard-reflex: true;
+                            enabled: !Holdings.read-only;
+                            clicked => { Dialog.open-draft-study-form(); }
+                        }
+                        if root.can-validate() && Dialog.decision.kind != "study": ActionButton {
                             label: @tr("Valider");
                             guard-reflex: true;
                             enabled: !Holdings.read-only;
@@ -1015,11 +1029,33 @@ export component ModalDialog inherits Rectangle {
                                 value <=> Dialog.draft-currency;
                             }
                         }
-                        LabeledField {
+                        if Dialog.target-id == "": LabeledField {
                             label: @tr("Nom de société (facultatif)");
                             placeholder: @tr("p. ex. Nestlé");
                             text <=> Dialog.draft-name;
                             accepted => { root.submit(); }
+                        }
+                        // Story 8.7 (spec §4.2): from a draft study, the proposed name and the AI's
+                        // comment are AI-written until « Créer » — framed; the name is seeded once
+                        // (`Dialog.flag`, reset by `form()`), then it is the owner's field.
+                        if Dialog.target-id != "": AiFrame {
+                            ai-client: Dialog.decision.ai-client;
+                            ai-model: Dialog.decision.ai-model;
+                            ai-text: Dialog.decision.ai-text;
+                            submitted: Dialog.decision.submitted;
+                            LabeledField {
+                                label: @tr("Nom de société (facultatif)");
+                                placeholder: @tr("p. ex. Nestlé");
+                                init => {
+                                    if (!Dialog.flag) {
+                                        Dialog.draft-name = Dialog.decision.ai-lead;
+                                        Dialog.flag = true;
+                                    }
+                                    self.text = Dialog.draft-name;
+                                }
+                                changed text => { Dialog.draft-name = self.text; }
+                                accepted => { root.submit(); }
+                            }
                         }
                     }
 

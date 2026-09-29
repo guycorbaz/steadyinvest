@@ -607,6 +607,18 @@ export struct HistoryEntryRow {
     first-of-day: bool,
     time: string,         // HH:MM ("" on a malformed stamp)
     summary: string,
+    ai: bool,             // Story 8.7: a processed AI draft (★ summary; its Détail is framed)
+}
+
+// Story 8.7 (UX spec §5.7): the Détail of a ★ history entry — the proposed value (app text) and
+// the AI-written parts, read ONLY inside an `AiFrame`. Set by `wiring::drafts` alone.
+export struct HistoryAiDetail {
+    proposed: string,
+    submitted: string,
+    ai-client: string,
+    ai-model: string,
+    ai-lead: string,
+    ai-text: string,
 }
 
 // Story 8.1 (FR78): one row of the study's « Notes » card — newest first; `meta` is the Rust-built
@@ -847,9 +859,11 @@ export global Studies {
     in-out property <[HistoryEntryRow]> history-rows;
     in-out property <string> history-detail-id;
     in-out property <[string]> history-detail-lines;
+    in-out property <HistoryAiDetail> history-ai-detail;
     callback open-history();
     callback close-history();
-    callback toggle-history-entry(string); // snapshot id → expand (or collapse if already open)
+    // snapshot (or ★ draft, Story 8.7) id + whether the entry is a ★ AI draft → expand (or collapse)
+    callback toggle-history-entry(string, bool);
     // Story 8.1 (arch A12): « Masquer les notes » hides the note-only entries (default: shown).
     in-out property <bool> history-hide-notes;
     callback toggle-history-notes();
@@ -1119,7 +1133,7 @@ export global Confront {
 //    inside an `AiFrame`, UX spec §4.1). Built by `app/src/wiring/drafts.rs`. ──
 export struct DraftDecision {
     id: string,
-    // "note" | "cell" | "judgment"
+    // "note" | "cell" | "judgment" | "study"
     kind: string,
     target: string,
     // « Valider ou rejeter ouvre l'étude … » when deciding opens another study; "" otherwise.
@@ -1141,9 +1155,13 @@ export struct DraftDecision {
     submitted: string,
     ai-client: string,
     ai-model: string,
-    // The proposed note text (a note draft), "" otherwise.
+    // The proposed note text (a note draft) or company name (a draft study), "" otherwise.
     ai-lead: string,
     ai-text: string,
+    // Story 8.7: a draft study's proposed ticker / currency (identifiers, app-checked — exempt from
+    // the AiFrame, spec §4.1): the create form's prefill.
+    study-ticker: string,
+    study-currency: string,
 }
 
 export global Dialog {
@@ -1182,6 +1200,17 @@ export global Dialog {
     // (`form-id == "draft-edit"`) are about — filled by Rust (`wiring::drafts::to_dialog`).
     in-out property <DraftDecision> decision;
 
+    // Story 8.7 (spec §4.2): the ordinary « Créer une étude » form in its draft variant, for the
+    // draft study the decision dialog holds (`decision`): `target-id` names the draft, the ticker
+    // and currency are prefilled (identifiers, plain), the proposed name is seeded once inside the
+    // form's AiFrame (`flag`), like the 8.5b note edit.
+    public function open-draft-study-form() {
+        self.form("study-create", @tr("Créer une étude"),
+            @tr("Étude proposée par une IA ; vérifiez le symbole, la devise et le nom avant de créer."),
+            self.decision.id, "");
+        self.draft-ticker = self.decision.study-ticker;
+        self.draft-currency = self.decision.study-currency;
+    }
     public function close() {
         self.kind = "";
         self.form-id = "";
@@ -1803,8 +1832,47 @@ export struct DraftRow {
     ai-text: string,
 }
 
+// Story 8.7 — one row of the « Registre » (every draft, whatever its outcome; read-only). App
+// text in every field but the `ai-*` ones (read ONLY inside an `AiFrame`).
+export struct RecordRow {
+    id: string,
+    // "study" | "note" | "cell" | "judgment"
+    kind: string,
+    // As a DraftRow spells it (the note / draft-study prefixes are Slint's).
+    target: string,
+    current: string,
+    proposed: string,
+    // 0 « en attente » · 1 « validée » · 2 « validée puis annulée » · 3 « rejetée »
+    outcome: int,
+    // A pending draft's word: 0 none · 1 « périmée » · 2 « cible disparue » · 3 « étude archivée »
+    state: int,
+    stale-at-decision: bool,
+    edited: bool,
+    // JJ/MM/AAAA; `decided` is "" while pending.
+    submitted: string,
+    decided: string,
+    ai-client: string,
+    ai-model: string,
+    ai-lead: string,
+    ai-text: string,
+}
+
 export global Drafts {
     in-out property <[DraftRow]> rows;
+    // Story 8.7: the view chip — "inbox" (« À traiter ») | "record" (« Registre »).
+    in-out property <string> view: "inbox";
+    // The Registre: its rows, its outcome chip ("all" | "pending" | "validated" | "undone" |
+    // "rejected"), every draft before the filters, and a failed read (⊘, never an empty list).
+    in-out property <[RecordRow]> record-rows;
+    in-out property <string> outcome-filter: "all";
+    in-out property <int> record-unfiltered;
+    // The one Registre row whose « Détail » is open, by draft id (G3: never by row position — a
+    // re-read that inserts a row must not move the open detail onto another draft).
+    in-out property <string> record-detail-id;
+    in-out property <bool> record-failed;
+    in-out property <string> record-failure-cause;
+    callback pick-view(string);
+    callback pick-outcome(string);
     // Pending drafts in the dossier (the rail label); draft studies among them (the Études band).
     in-out property <int> pending-count;
     in-out property <int> draft-study-count;
@@ -1833,6 +1901,10 @@ export global Drafts {
     // "reject" | "edit" (the edit form's « Enregistrer », `Dialog.draft-text`) — returns whether it
     // was written (the dialog then closes); `confirm-stale()` is the stale confirmation's verb.
     callback open-draft(string);
+    // Story 8.7: « Valider… » on a draft-study row — the prefilled create form, directly (Q14).
+    callback validate-study(string);
+    // Story 8.7: the draft create form's « Créer » (draft id, ticker, currency, name) → written?
+    callback create-from-draft(string, string, string, string) -> bool;
     callback decide(string) -> bool;
     callback confirm-stale() -> bool;
     // A decision's outcome (the F4 slot of the Propositions card).
