@@ -1,6 +1,6 @@
 # Story 8.7: Draft study end-to-end & drafts record
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created 2026-09-29 by create-story on branch feat/8-7-draft-study-end-to-end (main with 8.1–8.6).
      Autonomous Epic 8 run (Guy, 2026-09-28): questions resolved with the most conservative option,
@@ -36,6 +36,8 @@ Assistance Outcomes » (l.261–274).
    {date} » + disclaimer); ticker and currency stay plain (exempt, §4.1). The AI name reaches Slint
    only through `ai-*` properties (the AiFrame structural guard must see it); the editable field's
    text is the owner's once « Créer » is pressed (FR74). The submit button stays « Créer ».
+   *Corrected at dev (Decision 11): the ordinary form's verb is « Enregistrer » — kept; « Créer »
+   in the epics names the action, not the label.*
 3. **« Créer » = one transaction (arch A8, FR70, D2).** Confirming creates a new, empty study
    (ticker as typed, currency upper-cased, name blank → absent — the ordinary `create_study_named`
    rules) with its FR51 creation snapshot, and records the draft `validated` with `decided_at` and
@@ -152,7 +154,7 @@ Assistance Outcomes » (l.261–274).
 
 ## Tasks / Subtasks
 
-- [ ] **T1 — Persistence: validate a draft study (AC 3, 4, 6).** `persistence/src/drafts.rs`:
+- [x] **T1 — Persistence: validate a draft study (AC 3, 4, 6).** `persistence/src/drafts.rs`:
   `Journal::validate_draft_study(&mut self, w: DraftStudyValidation { draft_id, study: Study
   (built by the app), edited: bool, now }) -> Result<(), DraftError>` — one transaction:
   re-read the draft (pending, kind study, else `AlreadyDecided` / `NotFound`); duplicate check via
@@ -161,11 +163,11 @@ Assistance Outcomes » (l.261–274).
   currency }` with the existing study's spelling; `write_study_with_snapshot` (studies.rs:79);
   `UPDATE ai_drafts SET status='validated', decided_at, created_study_id, edited_before_validation`;
   one bump. The 8.2a CHECKs hold by construction.
-  - [ ] Tests in `persistence/tests/draft_decisions.rs` (or a new `draft_study_validation.rs`):
+  - [x] Tests in `persistence/tests/draft_decisions.rs` (or a new `draft_study_validation.rs`):
     creates study + snapshot + draft facts atomically; duplicate (case / archived) refused with
     nothing written; decided meanwhile refused; FK/CHECK never violated; one bump; delete of the
     created study cascades the draft (O7, reuse the existing cascade test pattern).
-- [ ] **T2 — App state (AC 3–8, 11).** `app/src/state/drafts.rs`: `validate_draft_study(&mut self,
+- [x] **T2 — App state (AC 3–8, 11).** `app/src/state/drafts.rs`: `validate_draft_study(&mut self,
   draft_id, ticker, currency, company_name) -> Result<Uuid, String>`: read-only refusal; the same
   trimming / upper-casing / blank rules as `create_study_named` (extract a shared builder, do not
   copy); `edited` = any of ticker (case-insensitive), currency, name differs from the proposal;
@@ -173,62 +175,62 @@ Assistance Outcomes » (l.261–274).
   créé. », `AlreadyDecided` → existing message. Not pushed on any undo stack. `decide_draft`'s
   study-kind `Validate` branch stays refused (the create form is the only validation path);
   update the test `a_draft_study_can_be_rejected_here_but_not_validated` doc accordingly.
-  - [ ] `read_record()` → every draft (`Journal::list_drafts`) + studies + archived for the targets;
+  - [x] `read_record()` → every draft (`Journal::list_drafts`) + studies + archived for the targets;
     `list_study_drafts(study_id)` for the history (T5).
-  - [ ] State tests: validate → study created, not in the watchlist, draft validated with
+  - [x] State tests: validate → study created, not in the watchlist, draft validated with
     `created_study_id`, no undo entry; edited flag; duplicate refusal; cancel = nothing; reject.
-- [ ] **T3 — UI: draft create form + row (AC 1, 2, 5, 7, 11).**
-  - [ ] `state.slint` `Dialog`: `draft-study-id`, `ai-client`, `ai-model`, `ai-text` (comment),
+- [x] **T3 — UI: draft create form + row (AC 1, 2, 5, 7, 11).**
+  - [x] `state.slint` `Dialog`: `draft-study-id`, `ai-client`, `ai-model`, `ai-text` (comment),
     `ai-lead` (proposed name, for display), `ai-submitted`, and a `public function form-draft-study(...)`
     that calls `form("study-create", …)` then sets the prefill (the reset order matters). `Drafts`
     callback `validate-study(draft-id) ` opens it from Rust (the AI fields are set only in
     `wiring/drafts.rs`, module rule).
-  - [ ] `modal_dialog.slint` `study-create`: when `Dialog.draft-study-id != ""`, the sentence and the
+  - [x] `modal_dialog.slint` `study-create`: when `Dialog.draft-study-id != ""`, the sentence and the
     name field + comment inside `AiFrame { … @children }`; submit calls
     `Drafts.create-from-draft(id, ticker, currency, name) -> bool` (stays open on refusal, like
     `create-study`).
-  - [ ] `propositions.slint`: the study row gets « Valider… » (`ActionButton`, `guard-reflex`),
+  - [x] `propositions.slint`: the study row gets « Valider… » (`ActionButton`, `guard-reflex`),
     remove the placeholder line; the row becomes activatable → decision dialog draft-study variant.
-  - [ ] `viewmodel/drafts.rs` `dialog_view` + `wiring/drafts.rs` `to_dialog`: the draft-study variant
+  - [x] `viewmodel/drafts.rs` `dialog_view` + `wiring/drafts.rs` `to_dialog`: the draft-study variant
     (context line, Actuel « — », Proposé « {TICKER} ({DEV}) », actions « Valider… » / « Rejeter » /
     « Annuler », initial focus « Annuler »); « Valider… » in the dialog → close + open the create form.
-- [ ] **T4 — Registre (AC 12–17).**
-  - [ ] `viewmodel/drafts.rs`: `RecordFilter { kind, study, outcome }`, `record_rows(drafts, studies,
+- [x] **T4 — Registre (AC 12–17).**
+  - [x] `viewmodel/drafts.rs`: `RecordFilter { kind, study, outcome }`, `record_rows(drafts, studies,
     archived, format, filter) -> Result<RecordView, Unshowable>` (pure, tested): submitted date,
     target, outcome word + pending freshness word, flags, decided date, and the Détail fields
     (`ai_fields` stays the one AI-text reader). Study filter on `study_id` or `created_study_id`.
-  - [ ] `state.slint` `Drafts`: `view` (« inbox » / « record »), `record-rows`, `outcome-filter`,
+  - [x] `state.slint` `Drafts`: `view` (« inbox » / « record »), `record-rows`, `outcome-filter`,
     `pick-view`, `pick-outcome`, `toggle-record-detail`; `RecordRow` struct.
-  - [ ] `propositions.slint`: view chips, outcome chips (Registre only), record rows with « Détail »
+  - [x] `propositions.slint`: view chips, outcome chips (Registre only), record rows with « Détail »
     and the compact AiFrame; ⊘ band / empty texts; keyboard order.
-  - [ ] `wiring/drafts.rs`: read the record on entering the Registre and on a `data_version` move
+  - [x] `wiring/drafts.rs`: read the record on entering the Registre and on a `data_version` move
     while shown; reset view + filters on a dossier change and on the rail (8.5a G3 item 5 rule).
-  - [ ] MCP: `DraftFilter.study_id` matches `created_study_id` too (`mcp_access.rs` query_drafts
+  - [x] MCP: `DraftFilter.study_id` matches `created_study_id` too (`mcp_access.rs` query_drafts
     `WHERE (?1 IS NULL OR study_id = ?1 OR created_study_id = ?1)`); `get_drafts_record` description;
     test in `persistence/tests/mcp_access.rs`.
-- [ ] **T5 — History merge (AC 18–20).** `persistence`: `Journal::list_study_drafts(study_id)`.
+- [x] **T5 — History merge (AC 18–20).** `persistence`: `Journal::list_study_drafts(study_id)`.
   `viewmodel/history.rs`: `HistoryItem` = snapshot entry | draft entry; `history_entries` merges by
   (timestamp, snapshot-before-draft, id); new labels « ★ Proposition validée : {} » etc. into
   `HISTORY_USER_FACING_LABELS`; draft entries never `notes_only`. `wiring/push.rs::push_history`
   + `wiring/studies.rs::on_toggle_history_entry`: an entry id prefix (e.g. `draft:`) routes Détail
   to a draft branch (AiFrame lines); `study_screen.slint` history Détail renders the AiFrame for a
   draft entry.
-- [ ] **T6 — Seed + E2E (AC 9, 10, 21).** `mcp/examples/seed.rs`: submit three draft studies
+- [x] **T6 — Seed + E2E (AC 9, 10, 21).** `mcp/examples/seed.rs`: submit three draft studies
   (distinct tickers, e.g. SEED.A / SEED.B / SEED.C in USD, refusal-tolerant). App test (temp dossier):
   `McpAccess::submit_draft` (draft study) → `validate_draft_study` → `McpAccess::read_study` (empty,
   no years) → `apply_provider_refresh(id, &fetched_for(..))` → `read_study` (the fetched years) →
   a second `submit_draft` refused `study_exists`; `list_drafts` shows `validated` +
   `created_study_id`; NFR-A3 stays covered by the existing whole-surface test (cite it).
-- [ ] **T7 — FR65 + posture (AC 22, 23).** A test: a fresh dossier with no drafts reads an empty
+- [x] **T7 — FR65 + posture (AC 22, 23).** A test: a fresh dossier with no drafts reads an empty
   record, no band, no ★ history entry, and every screen's view model builds. Posture deltas
   measured and stated; glossary « Registre ».
-- [ ] **T8 — Headless walk (AC 21, DoD).** Temp HOME/XDG, provider « none », fresh copy of
+- [x] **T8 — Headless walk (AC 21, DoD).** Temp HOME/XDG, provider « none », fresh copy of
   `persistence/tests/corpus/v8.db` (+ the g01 DEMO studies if needed for charts), `just mcp-seed`:
   the steps of AC 21; Registre with every outcome + filters + Détail; a history with ★ entries
   (validated, rejected, undone) and its Détail; the create form's AiFrame; duplicate refusal (create
   the same ticker by hand first); cancel; keyboard; 1280 and 1600. Screens in the session scratchpad
   `v87/`. Real `~/.config/steadyinvest` + `~/.local/share/steadyinvest` checked unchanged.
-- [ ] **T9 — Record.** Story record, AI-assistance success criteria checklist with evidence, posture
+- [x] **T9 — Record.** Story record, AI-assistance success criteria checklist with evidence, posture
   deltas, decisions, sprint-status 8-7 → review.
 
 ## Dev Notes
@@ -321,6 +323,14 @@ Assistance Outcomes » (l.261–274).
    AiFrame header for « À traiter » rows (8.5a Decision 8 kept there).
 10. **Journey 6's provider fetch is not driven headless** (safety rule): the E2E test covers it with a
     stubbed fetch; the walk stops at the created empty studies.
+11. **The draft create form keeps the ordinary verb « Enregistrer »** (the « ordinary create-study
+    dialog »); the epics' « Créer » names the action.
+12. **The study pick of « Étude : » is shared by both views**; the Registre keeps a pick whose study
+    has only decided drafts (« À traiter » drops it, 8.5a rule); « Études » kind clears it (both).
+13. **A study id already in the dossier is refused** by `validate_draft_study` (never an upsert) —
+    found by a test whose fixed id generator reused the open study's id.
+14. **« Proposé {} » in a ★ history Détail** is the proposed value only (the value before the
+    decision is in the neighbouring snapshot entry).
 
 ### Testing standards
 
@@ -360,10 +370,88 @@ modal_dialog.slint, screens/propositions.slint, screens/study_screen.slint, scre
 
 ### Agent Model Used
 
+Claude Opus 5.5 (claude-opus-5-5)
+
 ### Debug Log References
+
+- The posture « no error Display » scan follows every name bound in an `Err(...)` pattern through
+  the file: destructuring `ticker` / `currency` out of `DraftStudyExists` flagged every later use
+  of `ticker` → only `study_id` is bound; the existing study is read back to name it.
+- A commit (bb85ecf) went in with the AI-field guard failing (a `grep` pipeline hid the test exit
+  code); fixed in the next commit (1c9e6d0). Gates are now read from the summary line.
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- T1 persistence (b0e9a64, 4e30bd9): `Journal::validate_draft_study` (one transaction, one bump;
+  duplicate re-check with the MOVED `same_identifier` / `study_with_identifier`, shared with MCP
+  D2; id-collision guard), `Journal::list_study_drafts`, `Error::DraftStudyExists`; MCP
+  `get_drafts_record`'s study filter also matches `created_study_id`. 8 persistence tests.
+- T2 state (4e30bd9): `validate_draft_study` through `new_study_from_form` (extracted from
+  `create_study_named`), `MSG_DRAFT_STUDY_EXISTS`; `read_record`, `try_list_study_drafts`,
+  `try_get_draft`.
+- T3 UI (5514987, 2009482): draft-study decision variant, « Valider… » row button, the draft
+  variant of `study-create` (sentence, AiFrame around the name + comment), `create-from-draft`.
+- T4 Registre (bb85ecf, 1c9e6d0, 0ccfc9d): view chips, outcome chips, rows + « Détail », synced
+  model, read only while shown.
+- T5 history (6331972): ★ entries merged, Détail in an AiFrame.
+- T6/T7 (ba7cf4e): end-to-end MCP test, FR65 test, glossary « Registre ».
+- **Posture deltas (measured)**: `@tr` floor 1113 → 1146 (+33, itemised in `posture.rs`);
+  `USER_FACING_MESSAGES` 247 → 248 (`MSG_DRAFT_STUDY_EXISTS`); `HISTORY_USER_FACING_LABELS` 20 →
+  26 (four ★ summaries, « nouvelle note », « Nouvelle étude : {} ({}) »); `DRAFTS_USER_FACING_LABELS`
+  6 and `DECISION_USER_FACING_LABELS` 4 unchanged (the new words are `@tr` on the Slint side); the
+  AI-field guard knows `record_to_slint` and `history_ai_to_slint`. Gates: fmt, clippy
+  `-D warnings`, `cargo test --workspace` 1433 passed, deny ok.
+- **T8 headless walk — Journey 6** (Xvfb :94, temp HOME / XDG, provider « none », real
+  `~/.config/steadyinvest` + `~/.local/share/steadyinvest` listed + md5 before/after — unchanged).
+  Fresh copy of `persistence/tests/corpus/v8.db` migrated by one launch, + DEMO1 / DEMO2 (golden
+  g01, Python), `just mcp-seed` (three draft studies, a note, every chart judgment on DEMO1, a
+  growth proposal on DEMO2). Screens in the session scratchpad `v87/`:
+  - first pass 01–09: draft studies listed with « Valider… » (02: the button covered the target →
+    fixed, 03), the prefilled form with the AiFrame (04), created (05, « Proposition validée. »),
+    the draft-study decision (06, focus « Annuler »), rejected (07), a duplicate refused inline
+    (08: SEED.A edited to « seed.b » → « Une étude SEED.B en USD existe déjà ; rien n'a été
+    créé. »), cancel keeps it pending (09);
+  - Registre 10–12 (view chips; columns aligned by stretch; « Détail » in an AiFrame);
+  - Journey 6, 20–41: the Études ★ band → « Études » kind (21), SEED.C rejected by keyboard
+    (22–23), SEED.B and SEED.A validated « Valider… » + Enter (24–25), the two new EMPTY studies
+    in the list, the watchlist empty (26–27); DEMO1: est-high validated from its chip (caption),
+    est-low rejected (28–30), low P/E validated then Ctrl+Z (32, « validée puis annulée »), the
+    note validated (33); Registre filtered on DEMO1 with every outcome (34), « Études » kind (35:
+    SEED.C rejected, SEED.A/B validated, the corpus' NESN validated, ASML pending), « Rejetées »
+    (36); DEMO1 history with the ★ entries after their snapshots (37) and a ★ Détail in its
+    AiFrame (38); Registre at 1280 (39) and by keyboard (40–41: Tab to « Détail », Enter).
+  - Not driven headless: the provider fetch (safety rule) — the E2E test covers submit →
+    validate → stubbed fetch → MCP read.
+- **Found and fixed in the walk**: the « Valider… » button took the row's full width (outside a
+  layout); the inbox rows lost their spacing inside the new view wrapper; the Registre's columns
+  followed their text widths (target / outcome / dates); the « Détail » label change shifted them.
+- **Seen, not changed (pre-existing)**: the study screen is wider than the window once « Masquer
+  l'historique » is shown (the toolbar), so the history's « Détail » buttons sit at the edge and
+  the page scrolls sideways on focus — the G6 width debt noted in 8.5b.
+- **PRD « AI Assistance Outcomes » (l.261–274), checked off**:
+  1. 100 % of MCP writes outside the inbox rejected and logged — `mcp/tests/closure.rs`, the
+     `persistence/tests/mcp_access.rs` authorizer suite (8.3 / 8.4), unchanged and green.
+  2. No MCP resource returns portfolio / watchlist / keys / config — the 8.4 whole-surface test.
+  3. No provider call reachable from MCP — `mcp/tests/closure.rs` (NFR-A3); 8.7 adds no MCP write.
+  4. A pending draft changes no computed output — the 8.3 + 8.6 metamorphic suites (`verify.rs`).
+  5. Every draft carries a non-empty comment and an origin — the 8.2a CHECKs + 8.3 checks.
+  6. ≤ 2 actions, current and proposed side by side — the 8.5b dialog; 8.7: « Valider… » +
+     « Enregistrer » (walk 24–25), « Rejeter » from the row's dialog (22–23).
+  7. A study from a validated draft follows the normal path — `a_draft_study_goes_end_to_end_…`.
+  8. Every AI-text surface carries the label and the disclaimer — the AiFrame structural scan and
+     the Rust AI-field guard (now incl. the create form, the Registre and the history Détail).
+- No UI-level harness exists: the wiring is verified headless only.
 
 ### File List
+
+New: `persistence/tests/draft_study_validation.rs`. Modified: `persistence/src/{drafts,error,lib,
+mcp_access,studies}.rs`, `mcp/src/tools.rs`, `mcp/examples/seed.rs`, `app/src/state/{drafts,
+studies,messages,tests}.rs`, `app/src/viewmodel/{drafts,history}.rs`, `app/src/wiring/{drafts,
+push,studies}.rs`, `app/src/posture.rs`, `app/ui/{state.slint, components/modal_dialog.slint,
+screens/propositions.slint, screens/study_screen.slint, screens/settings.slint}`,
+`_bmad-output/implementation-artifacts/sprint-status.yaml`.
+
+## Change Log
+
+- 2026-09-29 — create-story (cc247fd); dev-story T1–T9 (b0e9a64 … 0ccfc9d); headless walk v87/;
+  status → review.
