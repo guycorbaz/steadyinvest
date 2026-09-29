@@ -136,13 +136,21 @@ fn run(copy: &str) -> Result<(), String> {
         }
         m
     };
-    let mut submissions = vec![(
-        "submit_draft_study",
-        base(
-            json!({ "security_ticker": "SEED.TEST", "native_currency": "USD",
-                     "company_name": "Seed Test SA" }),
-        ),
-    )];
+    // Story 8.7 (Journey 6): three draft studies — one to reject, two to validate.
+    let mut submissions: Vec<(&str, Value)> = [
+        ("SEED.A", "Seed Alpha SA"),
+        ("SEED.B", "Seed Beta SA"),
+        ("SEED.C", "Seed Gamma SA"),
+    ]
+    .into_iter()
+    .map(|(ticker, name)| {
+        (
+            "submit_draft_study",
+            base(json!({ "security_ticker": ticker, "native_currency": "USD",
+                         "company_name": name })),
+        )
+    })
+    .collect();
     // G3: the value / judgment proposals go to the first study with an EPS history the §1 chart
     // can draw (three EPS years), else to the first study — never blindly to the list's head.
     let ids: Vec<String> = list["studies"]

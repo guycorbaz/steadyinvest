@@ -134,6 +134,9 @@ component DraftRowActivator inherits Rectangle {
         compact: true;
         label: @tr("Valider…");
         enabled: !Drafts.read-only;
+        // Outside a layout an element takes its parent's width: its own, here.
+        width: self.min-width;
+        height: 32px;
         x: parent.width - self.width - Tokens.space-8;
         y: Tokens.space-4;
         clicked => { Drafts.validate-study(root.draft.id); }
