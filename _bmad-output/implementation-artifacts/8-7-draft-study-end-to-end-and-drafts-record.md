@@ -331,6 +331,8 @@ Assistance Outcomes » (l.261–274).
     found by a test whose fixed id generator reused the open study's id.
 14. **« Proposé {} » in a ★ history Détail** is the proposed value only (the value before the
     decision is in the neighbouring snapshot entry).
+15. **A proposed currency the app does not offer is not prefilled** (G3): the owner picks one of
+    the drop-down's; MCP keeps accepting any ISO code (a proposal, not a study).
 
 ### Testing standards
 
@@ -442,6 +444,51 @@ Claude Opus 5.5 (claude-opus-5-5)
      the Rust AI-field guard (now incl. the create form, the Registre and the history Détail).
 - No UI-level harness exists: the wiring is verified headless only.
 
+### G3 review (3 layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor)
+
+Applied (335e906), 1434 tests, clippy / fmt / deny green; re-walk `v87/50–52`:
+1. **The Registre's open « Détail » followed the row position** (all three layers, high): keyed by
+   draft id now (`Drafts.record-detail-id`). Re-walk 50–51: five drafts arrive on top by
+   `just mcp-seed` with the app open, the open Détail stays on its draft (moved to row 8).
+2. **« Voir les propositions » bands could land on the Registre filtered** (auditor + edge): they
+   set « À traiter », every outcome (52).
+3. **The Registre was read while hidden** (auditor): only on the Propositions screen in its view;
+   and it now reads (its own ⊘ or rows) when the inbox read fails (edge — it stayed stale or said
+   « aucune proposition »).
+4. **A decided draft's Détail showed today's value as « Actuel »** (auditor + edge): « Proposé {} »
+   only for a decided draft (Decision 14's rule, also in the Registre).
+5. **« Valider… » lacked `guard-reflex`** (auditor, AC 1): added on the row and in the dialog.
+6. **A currency the app does not offer was prefilled** (edge + auditor): not prefilled; the owner
+   picks from the drop-down (Decision 15).
+7. **An unrecoverable refusal kept « Enregistrer » live** (blind + edge): the draft decided / gone,
+   read-only, a write failure → the form closes and the refusal follows as « Action refusée »; a
+   duplicate or a blank field stays inline.
+8. **Two clock reads for one creation** (blind + edge): one instant (the study's `created_at`) for
+   the study, its snapshot and `decided_at`. **DEFERRED transaction** vs an MCP write (edge):
+   `IMMEDIATE`. **A change of ticker case was no edit** (blind + edge): it is one now (the ticker is
+   stored as typed — Decision 2 amended). The edited flag is returned, not re-read (blind).
+9. **The history Détail read any id as a draft first** (blind): only for a ★ entry (`ai` flag).
+10. **A picked study that left the record kept filtering under « Toutes les études »** (blind):
+    reset; the drop-down is rebuilt only when its choices change (blind).
+11. MCP record filter test with the study's own draft + its draft study (auditor, AC 17); the
+    history logs an unshowable draft by id (blind); doc comment of `write_rejection` restored;
+    indentation (blind + auditor). `@tr` floor 1146 → 1147 (« Proposé {} »).
+
+Dismissed after checking: the owner's name inside the AiFrame after editing (spec §4.2 wants the
+name field framed until « Créer »); `Dialog.target-id` routing (`form()` sets it, every ordinary
+opener passes ""); a draft study without a currency (the 8.2a CHECK forbids it); string-ordered
+stamps (every stamp is the app clock's RFC 3339 UTC seconds; equal stamps keep the listing order);
+the Registre Détail's full (non-compact) AiFrame (the Détail exists to show the whole text; the
+rows themselves carry no AI text); one unreadable draft makes the Registre « indisponible » (the
+inbox rule, 8.5a decision 4); AC 6's wording for a deleted draft (the existing, more exact
+« n'existe plus » message is kept).
+
+Deferred (low): the keyboard focus stays on the row POSITION after a re-read (the open Détail
+follows its draft); no focus target after a successful « Enregistrer » from a row (as for any
+decided row since 8.5b); several decisions within one second order all snapshots before all ★
+entries; a validated-then-undone draft keeps only its undo time (8.2b Decision 5); the FR65 test
+does not build every screen's view model.
+
 ### File List
 
 New: `persistence/tests/draft_study_validation.rs`. Modified: `persistence/src/{drafts,error,lib,
@@ -455,3 +502,4 @@ screens/propositions.slint, screens/study_screen.slint, screens/settings.slint}`
 
 - 2026-09-29 — create-story (cc247fd); dev-story T1–T9 (b0e9a64 … 0ccfc9d); headless walk v87/;
   status → review.
+- 2026-09-29 — G3 review (3 layers) applied (335e906); re-walk v87/50–52.
