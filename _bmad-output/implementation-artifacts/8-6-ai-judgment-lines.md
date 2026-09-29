@@ -1,6 +1,6 @@
 # Story 8.6: AI judgment lines
 
-Status: review
+Status: done
 
 <!-- Created 2026-09-28 by create-story on branch feat/8-6-ai-judgment-lines (main with 8.1–8.5b).
      Autonomous Epic 8 run (Guy, 2026-09-28): questions resolved with the most conservative option,
