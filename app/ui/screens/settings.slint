@@ -980,6 +980,11 @@ export component SettingsScreen inherits Rectangle {
                     term: @tr("Ligne IA");
                     definition: @tr("Proposition de jugement d'une IA, tracée en pointillé avec un rond creux et l'étiquette « IA » ; elle ne change rien tant qu'elle n'est pas validée.");
                 }
+                // Story 8.7 (the drafts record).
+                GlossaryRow {
+                    term: @tr("Registre");
+                    definition: @tr("La liste de toutes les propositions d'une IA et de leur issue : en attente, validée, validée puis annulée, rejetée.");
+                }
             }
 
             // ── Story 2.13 — Vérifier le moteur (FR9): replay the bundled golden studies on demand. ──

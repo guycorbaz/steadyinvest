@@ -9669,6 +9669,127 @@ mod drafts_8_2b {
         );
     }
 
+    // Story 8.7 AC 9, 10 (FR70, FR76, NFR-A3) — the end-to-end path on a temp dossier, with no
+    // special step: an AI submits a draft study (MCP) → the owner validates it (app) → MCP reads the
+    // EMPTY study (no provider call on validation) → the owner fetches (stubbed) → MCP reads the
+    // fetched figures → a second draft study for the same security and currency is refused; the
+    // record (MCP, filtered on the study) shows the draft study it was created from. NFR-A3 over
+    // the whole MCP surface is `mcp/tests/closure.rs`.
+    #[test]
+    fn a_draft_study_goes_end_to_end_through_the_ordinary_path() {
+        use steadyinvest_contract::{DraftKind, DraftOrigin};
+        use steadyinvest_persistence::{
+            DraftFilter, DraftSubmission, McpAccess, Page, SubmissionRefusal, SubmitError,
+        };
+        let dir = TempDir::new().unwrap();
+        let (mut state, _) = draft_study_state(&dir);
+        let access = McpAccess::at(state.path().unwrap());
+        let dossier = access.identity().expect("identity");
+        let submission = |n: u128| DraftSubmission {
+            id: Uuid::from_u128(n),
+            created_at: Timestamp("2026-09-29T08:00:00Z".to_string()),
+            kind: DraftKind::Study,
+            study_id: None,
+            security_ticker: Some("ROG".to_string()),
+            native_currency: Some("CHF".to_string()),
+            company_name: Some("Roche Holding".to_string()),
+            target: None,
+            proposed_value: None,
+            note_text: None,
+            comment: "Croissance régulière.".to_string(),
+            origin: DraftOrigin {
+                client: "test".to_string(),
+                model: "test".to_string(),
+            },
+            dossier: dossier.clone(),
+            method_version: steadyinvest_core::METHOD_VERSION.to_string(),
+        };
+        let draft = access.submit_draft(&submission(0x87E1)).expect("submitted");
+        let id = state
+            .validate_draft_study(draft, "ROG", "CHF", "Roche Holding")
+            .expect("validated");
+        let read = access.read_study(id).expect("read").expect("present");
+        assert!(
+            read.study.years.is_empty(),
+            "no provider call on validation"
+        );
+        state
+            .apply_provider_refresh(id, &fetched_for(&[2022, 2023, 2024]))
+            .expect("the owner's (stubbed) fetch");
+        let read = access.read_study(id).expect("read").expect("present");
+        assert_eq!(
+            read.study.years.len(),
+            3,
+            "the fetched figures, readable through MCP"
+        );
+        match access.submit_draft(&submission(0x87E2)) {
+            Err(SubmitError::Refused(SubmissionRefusal::StudyExists { study_id, .. })) => {
+                assert_eq!(study_id, id)
+            }
+            other => panic!("expected study_exists, got {other:?}"),
+        }
+        let record = access
+            .list_drafts(
+                DraftFilter {
+                    study_id: Some(id),
+                    status: None,
+                },
+                Page::first(50),
+            )
+            .expect("record");
+        assert_eq!(
+            record.items.len(),
+            1,
+            "the draft study it was created from (Decision 4)"
+        );
+        assert_eq!(record.items[0].created_study_id, Some(id));
+        assert_eq!(
+            record.items[0].status,
+            steadyinvest_contract::DraftStatus::Validated
+        );
+    }
+
+    // Story 8.7 AC 22 (FR65) — AI assistance is optional: a dossier no AI ever wrote to reads an
+    // empty record, no pending draft study, and a history without ★ entries.
+    #[test]
+    fn a_dossier_without_any_draft_works_with_no_mcp_server() {
+        use crate::viewmodel::drafts::{KindFilter, OutcomeFilter, pending_counts, record_rows};
+        let dir = TempDir::new().unwrap();
+        let (state, id) = draft_study_state(&dir);
+        let record = state.read_record().unwrap().expect("a dossier");
+        assert!(record.drafts.is_empty());
+        let view = record_rows(
+            &record.drafts,
+            &record.studies,
+            &record.archived,
+            crate::viewmodel::format::NumberFormat::Comma,
+            KindFilter::All,
+            None,
+            OutcomeFilter::All,
+        )
+        .unwrap();
+        assert_eq!(
+            view.unfiltered, 0,
+            "« Aucune proposition dans ce dossier. »"
+        );
+        assert_eq!(
+            pending_counts(&record.drafts, &record.archived).draft_studies,
+            0
+        );
+        assert!(
+            state.try_list_study_drafts(id).unwrap().is_empty(),
+            "no ★ entry"
+        );
+        assert!(
+            state
+                .read_inbox()
+                .unwrap()
+                .expect("a dossier")
+                .drafts
+                .is_empty()
+        );
+    }
+
     // AC 14 — a write failure is named, the study and the draft unchanged, no undo step.
     #[test]
     fn a_failed_decision_write_is_named_and_changes_nothing() {

@@ -778,8 +778,16 @@ mod tests {
         // form), the chart chip row « Propositions de l'IA : », the line label « IA {} », the
         // caption « placée par l'IA · validée le {} » and the glossary's « Ligne IA » term and
         // definition: 1106 + 7 = 1113, measured.
+        // 8.7 (draft study end-to-end & the Registre): the « pas encore disponible » line goes
+        // (-1); « Valider… » on the row and in the dialog, the dialog's « Nouvelle étude : {} »,
+        // the draft create form's title, sentence, name label and placeholder (+7); the Registre
+        // row (target ×2, four outcome words, three pending words, two decision flags, « Détail »
+        // / « Masquer le détail », « Actuel {} → Proposé {} ») +14, the view chips +2, the outcome
+        // chips +4, its ⊘ band ×2, its empty and filter texts +2 (+10); the history Détail's
+        // « Proposé {} » +1; the glossary's « Registre » term and definition +2: 1113 + 33 = 1146,
+        // measured.
         assert!(
-            total >= 1113,
+            total >= 1146,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
