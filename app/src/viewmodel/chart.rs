@@ -197,6 +197,32 @@ fn dashed_line(p0: (f32, f32), p1: (f32, f32), dash: f32, gap: f32) -> String {
     s
 }
 
+/// A DOTTED straight line (Story 8.6 — the pending AI line): the same baked-geometry technique as
+/// [`dashed_line`], with short strokes the Slint `Path` draws with `stroke-line-cap: round` so they
+/// read as dots — the one pattern free on both charts (solid = owner, 9/6 dash = est-low /
+/// judged-low). 2 / 5 viewbox px, never mistakable for the 9 / 6 dash.
+pub(crate) fn dotted_line(p0: (f32, f32), p1: (f32, f32)) -> String {
+    dashed_line(p0, p1, AI_DOT, AI_DOT_GAP)
+}
+
+/// The dot / gap (viewbox px) of [`dotted_line`].
+const AI_DOT: f32 = 2.0;
+const AI_DOT_GAP: f32 = 5.0;
+/// The radius (viewbox px) of the AI line's hollow end marker.
+const AI_MARKER_R: f32 = 5.0;
+
+/// A hollow circle (two SVG arcs) of radius `r` centred at `(cx, cy)`, kept inside the viewbox
+/// (like [`square_marker`]) — the pending AI line's end marker, stroked, never filled (Story 8.6).
+pub(crate) fn hollow_circle(cx: f32, cy: f32, r: f32) -> String {
+    let cx = cx.clamp(r, CHART_W - r);
+    let cy = cy.clamp(r, CHART_H - r);
+    format!(
+        "M {l:.1} {cy:.1} A {r:.1} {r:.1} 0 1 0 {rt:.1} {cy:.1} A {r:.1} {r:.1} 0 1 0 {l:.1} {cy:.1} Z ",
+        l = cx - r,
+        rt = cx + r,
+    )
+}
+
 /// The x (viewbox px) of a year at `offset` units from the first plotted year, across a total span of
 /// `(plotted_years - 1) + FORECAST_HORIZON_YEARS` units (so the forecast point lands at the right edge).
 fn x_for(offset: f64, span: f64) -> f32 {
@@ -216,26 +242,11 @@ fn x_for(offset: f64, span: f64) -> f32 {
 /// direct value or the value derived from the growth-% they typed). When neither is set the line is
 /// **unset** (`judgment_y = -1`) — the chart never auto-places it (FR33).
 pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartState {
-    let years = &frame.series;
-    let n = years.len();
-    if n == 0 {
+    let Some(scale) = eps_scale(frame) else {
         return unavailable();
-    }
-    // Total horizontal span in "year units": the historical years plus the forecast horizon, so the
-    // forecast point sits at the right edge (x == CHART_W).
-    //
-    // Issue #35: a TRAILING year with nothing this chart plots (no sales, no EPS, no high price —
-    // « Ajouter une année » before any entry) must not reserve an x-slot: it shifted the whole
-    // history left on the click, before any figure existed. Only the plotted prefix spans; a
-    // trailing year enters the span the moment its first plottable figure lands. The drag mapping
-    // is untouched (vertical-only — the span drives x placement, never the y↔value inverse), and a
-    // non-trailing gap year rightly keeps its slot (the series' time axis stays honest).
-    let n_plotted = years
-        .iter()
-        .rposition(|cy| cy.sales.is_some() || cy.eps.is_some() || cy.high_price.is_some())
-        .map_or(0, |i| i + 1);
-    let span = (n_plotted.max(1) as f64 - 1.0) + f64::from(FORECAST_HORIZON_YEARS);
-    let x_hist = |i: usize| x_for(i as f64, span);
+    };
+    let years = &frame.series;
+    let x_hist = |i: usize| x_for(i as f64, scale.span);
 
     // Per-series (x, value) points.
     let series_pts =
@@ -250,45 +261,21 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
     let eps_pts = series_pts(|cy| cy.eps);
     let price_pts = series_pts(|cy| cy.high_price);
 
-    // The projection / fan origin: the last historical year that has an EPS value.
-    let last_eps = years
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(i, cy)| cy.eps.and_then(|d| d.to_f64()).map(|v| (x_hist(i), v)));
+    let last_eps = scale.last_eps;
     let est_high = frame.snapshot.outputs().growth.estimated_high_eps;
     let est_low = frame.snapshot.outputs().growth.estimated_low_eps;
-
-    // Issue #121: the least-squares SEED band over the historical EPS — a draggable STARTING point for
-    // the est-high / est-low handles (display only; an untouched seed never flows into §4/verdict, so
-    // `core` stays pure). Also reserves EPS-scale headroom so a not-yet-judged handle stays on-scale.
-    let eps_hist_pts: Vec<(i32, rust_decimal::Decimal)> = years
-        .iter()
-        .filter_map(|cy| cy.eps.map(|e| (cy.year, e)))
-        .collect();
-    let seed = least_squares_log_eps_band(&eps_hist_pts, FORECAST_HORIZON_YEARS);
+    let seed = scale.seed;
     // The value each handle SHOWS: the user's judgment when set, else the seed (drawn dimmed). `None`
     // only when neither exists (no judgment + un-fittable history) → the line stays unset (-1).
     let high_value = est_high.or_else(|| seed.map(|s| s.high));
     let low_value = est_low.or_else(|| seed.map(|s| s.low));
 
     // ── Issue #25 (multi-scale): each series on its OWN log scale so none clamps off the top and none
-    //    compresses. Sales/Price fit their own data; the EPS scale ALSO reserves the forecast headroom
-    //    (the fan at 30 % + the est-high) so the projection + the drag live comfortably on it. ──
+    //    compresses. Sales/Price fit their own data; the EPS scale is [`eps_scale`]'s (shared with the
+    //    Story 8.6 AI overlay, so both draw on the identical bounds). ──
     let (s_lmin, s_lmax) = series_bounds(sales_pts.iter().map(|p| p.1));
     let (p_lmin, p_lmax) = series_bounds(price_pts.iter().map(|p| p.1));
-    // The EPS scale is STABLE during a drag: historical EPS + a FIXED forecast headroom (the 30 % fan
-    // endpoint) + the STABLE seed band (so a not-yet-dragged est-low BELOW the history stays on-scale),
-    // but NOT the live judged `est_high`/`est_low` (including those would shift the scale as you drag,
-    // so a line would "flee" the cursor). A drag beyond the headroom clamps at an edge.
-    let eps_range_vals: Vec<f64> = eps_pts
-        .iter()
-        .map(|p| p.1)
-        .chain(last_eps.map(|(_, ov)| ov * 1.30f64.powi(FORECAST_HORIZON_YEARS as i32)))
-        .chain(seed.and_then(|s| s.high.to_f64()))
-        .chain(seed.and_then(|s| s.low.to_f64()))
-        .collect();
-    let (e_lmin, e_lmax) = series_bounds(eps_range_vals);
+    let (e_lmin, e_lmax) = (scale.lmin, scale.lmax);
 
     let sales_commands = path_commands(&sales_pts, s_lmin, s_lmax);
     let price_commands = path_commands(&price_pts, p_lmin, p_lmax);
@@ -369,6 +356,86 @@ pub fn growth_chart(frame: &StudyFrame, format: NumberFormat) -> GrowthChartStat
         axis_min: 10f64.powf(e_lmin) as f32,
         axis_max: 10f64.powf(e_lmax) as f32,
     }
+}
+
+/// The §1 EPS scale (issue #25 / #121) — ONE computation shared by the owner lines
+/// ([`growth_chart`]) and the Story 8.6 AI overlay, so a pending AI line sits on the identical
+/// bounds. `None` when there is no year to plot.
+pub(crate) struct EpsScale {
+    /// The projection / fan origin: the last historical year with an EPS, `(x px, value)`.
+    pub last_eps: Option<(f32, f64)>,
+    /// The least-squares seed band (issue #121) — a draggable starting point, display only.
+    pub seed: Option<steadyinvest_core::ssg::EpsSeedBand>,
+    /// The log10 bounds of the EPS scale.
+    pub lmin: f64,
+    pub lmax: f64,
+    /// The horizontal span in year units (history + forecast horizon).
+    pub span: f64,
+}
+
+pub(crate) fn eps_scale(frame: &StudyFrame) -> Option<EpsScale> {
+    let years = &frame.series;
+    let n = years.len();
+    if n == 0 {
+        return None;
+    }
+    // Total horizontal span in "year units": the historical years plus the forecast horizon, so the
+    // forecast point sits at the right edge (x == CHART_W).
+    //
+    // Issue #35: a TRAILING year with nothing this chart plots (no sales, no EPS, no high price —
+    // « Ajouter une année » before any entry) must not reserve an x-slot: it shifted the whole
+    // history left on the click, before any figure existed. Only the plotted prefix spans; a
+    // trailing year enters the span the moment its first plottable figure lands. The drag mapping
+    // is untouched (vertical-only — the span drives x placement, never the y↔value inverse), and a
+    // non-trailing gap year rightly keeps its slot (the series' time axis stays honest).
+    let n_plotted = years
+        .iter()
+        .rposition(|cy| cy.sales.is_some() || cy.eps.is_some() || cy.high_price.is_some())
+        .map_or(0, |i| i + 1);
+    let span = (n_plotted.max(1) as f64 - 1.0) + f64::from(FORECAST_HORIZON_YEARS);
+    let x_hist = |i: usize| x_for(i as f64, span);
+    let eps_pts: Vec<(f32, f64)> = years
+        .iter()
+        .enumerate()
+        .filter_map(|(i, cy)| cy.eps.and_then(|d| d.to_f64()).map(|v| (x_hist(i), v)))
+        .collect();
+
+    // The projection / fan origin: the last historical year that has an EPS value.
+    let last_eps = years
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, cy)| cy.eps.and_then(|d| d.to_f64()).map(|v| (x_hist(i), v)));
+
+    // Issue #121: the least-squares SEED band over the historical EPS — a draggable STARTING point for
+    // the est-high / est-low handles (display only; an untouched seed never flows into §4/verdict, so
+    // `core` stays pure). Also reserves EPS-scale headroom so a not-yet-judged handle stays on-scale.
+    let eps_hist_pts: Vec<(i32, rust_decimal::Decimal)> = years
+        .iter()
+        .filter_map(|cy| cy.eps.map(|e| (cy.year, e)))
+        .collect();
+    let seed = least_squares_log_eps_band(&eps_hist_pts, FORECAST_HORIZON_YEARS);
+
+    // The EPS scale is STABLE during a drag: historical EPS + a FIXED forecast headroom (the 30 % fan
+    // endpoint) + the STABLE seed band (so a not-yet-dragged est-low BELOW the history stays on-scale),
+    // but NOT the live judged `est_high`/`est_low` (including those would shift the scale as you drag,
+    // so a line would "flee" the cursor) — and NOT a pending AI proposal (Story 8.6: the owner's scale
+    // never moves for a draft). A drag beyond the headroom clamps at an edge.
+    let eps_range_vals: Vec<f64> = eps_pts
+        .iter()
+        .map(|p| p.1)
+        .chain(last_eps.map(|(_, ov)| ov * 1.30f64.powi(FORECAST_HORIZON_YEARS as i32)))
+        .chain(seed.and_then(|s| s.high.to_f64()))
+        .chain(seed.and_then(|s| s.low.to_f64()))
+        .collect();
+    let (lmin, lmax) = series_bounds(eps_range_vals);
+    Some(EpsScale {
+        last_eps,
+        seed,
+        lmin,
+        lmax,
+        span,
+    })
 }
 
 /// Nice 1/2/5×10^k ticks that fall inside the EPS scale `[10^lmin, 10^lmax]` (issue #25). Positions
@@ -548,17 +615,8 @@ pub fn pe_chart(frame: &StudyFrame, judgment: &Judgment, format: NumberFormat) -
     let high_value = judged_high.or(seed_high);
     let low_value = judged_low.or(seed_low);
 
-    // Linear P/E scale: the historical highs/lows + the STABLE seed levels (so a level below/above the
-    // history stays on-scale). The live JUDGED value is excluded (as §1) so the scale does not shift
-    // as you drag; a drag beyond the padded range clamps at an edge (the numeric field is exact).
-    let scale_vals: Vec<f64> = high_pts
-        .iter()
-        .map(|p| p.1)
-        .chain(low_pts.iter().map(|p| p.1))
-        .chain(seed_high.and_then(|d| d.to_f64()))
-        .chain(seed_low.and_then(|d| d.to_f64()))
-        .collect();
-    let (axis_min, axis_max) = pe_bounds(scale_vals);
+    // The linear P/E scale ([`pe_scale`], shared with the Story 8.6 AI overlay).
+    let (axis_min, axis_max) = pe_scale(frame).unwrap_or(PE_AXIS_FALLBACK);
 
     // A judged/seed level → its horizontal line + grip geometry. Solid for high, dashed for low.
     let level = |judged: Option<rust_decimal::Decimal>,
@@ -601,6 +659,69 @@ pub fn pe_chart(frame: &StudyFrame, judgment: &Judgment, format: NumberFormat) -
         judged_low_derived,
         axis_min: axis_min as f32,
         axis_max: axis_max as f32,
+    }
+}
+
+/// The §3 linear P/E scale (issue #115) — ONE computation shared by the owner levels
+/// ([`pe_chart`]) and the Story 8.6 AI overlay: the historical highs/lows + the STABLE seed levels
+/// (so a level below/above the history stays on-scale). The live JUDGED value is excluded (as §1) so
+/// the scale does not shift as you drag — and a pending AI proposal is excluded too (the owner's
+/// scale never moves for a draft); a value beyond the padded range clamps at an edge. `None` when
+/// there is no valuation year.
+pub(crate) fn pe_scale(frame: &StudyFrame) -> Option<(f64, f64)> {
+    let valuation = &frame.snapshot.outputs().valuation;
+    if valuation.per_year.is_empty() {
+        return None;
+    }
+    let scale_vals: Vec<f64> = valuation
+        .per_year
+        .iter()
+        .filter_map(|yv| yv.high_pe.and_then(|d| d.to_f64()))
+        .chain(
+            valuation
+                .per_year
+                .iter()
+                .filter_map(|yv| yv.low_pe.and_then(|d| d.to_f64())),
+        )
+        .chain(valuation.avg_high_pe.and_then(|d| d.to_f64()))
+        .chain(valuation.avg_low_pe.and_then(|d| d.to_f64()))
+        .collect();
+    Some(pe_bounds(scale_vals))
+}
+
+/// A pending AI proposal drawn on a chart (Story 8.6): its dotted line, its hollow end marker, the
+/// viewbox-y of its end (for the label) — never a drag target.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AiGeometry {
+    pub commands: String,
+    pub marker: String,
+    pub y: f32,
+}
+
+/// A pending est-high / est-low EPS proposal on the §1 EPS scale: from the owner lines' fixed origin
+/// (the last historical EPS) to `value` at the forecast edge, dotted; clamped to the edge when
+/// off-scale (like a drag). No historical EPS → the marker alone (the #26 rule).
+pub(crate) fn ai_growth_geometry(scale: &EpsScale, value: f64) -> AiGeometry {
+    let y = y_for(value, scale.lmin, scale.lmax);
+    let commands = match scale.last_eps {
+        Some((ox, ov)) => dotted_line((ox, y_for(ov, scale.lmin, scale.lmax)), (CHART_W, y)),
+        None => String::new(),
+    };
+    AiGeometry {
+        commands,
+        marker: hollow_circle(CHART_W, y, AI_MARKER_R),
+        y,
+    }
+}
+
+/// A pending judged-P/E proposal on the §3 linear scale: a full-width dotted level, clamped to the
+/// edge when off-scale.
+pub(crate) fn ai_pe_geometry(axis: (f64, f64), value: f64) -> AiGeometry {
+    let y = lin_y_for(value, axis.0, axis.1);
+    AiGeometry {
+        commands: dotted_line((0.0, y), (CHART_W, y)),
+        marker: hollow_circle(CHART_W, y, AI_MARKER_R),
+        y,
     }
 }
 
@@ -1373,5 +1494,52 @@ mod tests {
             (with.axis_min, with.axis_max),
             (without.axis_min, without.axis_max)
         );
+    }
+
+    /// Story 8.6: the AI line is DOTTED — many short strokes, never the owner's 9/6 dash — and ends
+    /// in a hollow circle kept inside the viewbox.
+    #[test]
+    fn the_ai_line_is_dotted_with_a_hollow_marker_distinct_from_the_dash() {
+        let dots = dotted_line((0.0, 100.0), (100.0, 100.0));
+        let dashes = dashed_line((0.0, 100.0), (100.0, 100.0), 9.0, 6.0);
+        assert_ne!(dots, dashes);
+        let strokes = dots.matches('M').count();
+        assert!(
+            strokes > dashes.matches('M').count(),
+            "more, shorter strokes"
+        );
+        assert_eq!(strokes, 15, "a 2 + 5 px period over 100 px");
+        let marker = hollow_circle(CHART_W, 0.0, AI_MARKER_R);
+        assert!(
+            marker.contains(" A "),
+            "arcs, a circle — never the filled square marker"
+        );
+        // Kept inside the viewbox (a proposal clamped to the top edge still shows a whole circle).
+        assert!(marker.starts_with(&format!(
+            "M {:.1} {:.1}",
+            CHART_W - 2.0 * AI_MARKER_R,
+            AI_MARKER_R
+        )));
+    }
+
+    /// Story 8.6 AC 4: the shared scale helpers return exactly the owner charts' bounds.
+    #[test]
+    fn the_shared_scales_are_the_owner_charts_bounds() {
+        let years: Vec<YearData> = (2021..=2025)
+            .enumerate()
+            .map(|(i, y)| year(y, &format!("{}", 4 + i)))
+            .collect();
+        let j = judgment(Some(money("9")));
+        let frame = build_frame(&study(years, j.clone())).expect("normalizes");
+        let g = growth_chart(&frame, NumberFormat::Comma);
+        let e = eps_scale(&frame).expect("scale");
+        assert_eq!(g.axis_min, 10f64.powf(e.lmin) as f32);
+        assert_eq!(g.axis_max, 10f64.powf(e.lmax) as f32);
+        let p = pe_chart(&frame, &j, NumberFormat::Comma);
+        let (lo, hi) = pe_scale(&frame).expect("scale");
+        assert_eq!((p.axis_min, p.axis_max), (lo as f32, hi as f32));
+        // An AI level at the owner's value sits on the owner's level.
+        let ai = ai_pe_geometry((lo, hi), 20.0);
+        assert_eq!(ai.y, p.judged_high_y, "the judged high P/E is 20");
     }
 }

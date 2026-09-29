@@ -137,6 +137,8 @@ pub(crate) fn wire_dialog(ui: &MainWindow) {
                 if !drafts.get_return_row().is_empty() {
                     // The row reads `return-row` when the bump reaches it (after this callback),
                     // so the id stays; the next row activation replaces it.
+                    let gone = !super::drafts::is_pending_judgment(&drafts.get_return_row());
+                    drafts.set_return_gone(gone);
                     drafts.set_return_request(drafts.get_return_request() + 1);
                 }
             }

@@ -19,6 +19,7 @@ import { ChoiceChip } from "../components/choice_chip.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { EditableCell, CellFit, CellMark, CellTip } from "../components/editable_cell.slint";
 import { JudgmentField } from "../components/judgment_field.slint";
+import { AiChipButton, AiCaption } from "../components/ai_judgment.slint";
 import { ZoneBar } from "../components/zone_bar.slint";
 import { VerdictBar } from "../components/verdict_badge.slint";
 import { GrowthChart } from "../components/growth_chart.slint";
@@ -421,7 +422,13 @@ export component StudyScreen inherits Rectangle {
     // Story 2.9 — study-level key handler for undo/redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z). The cell
     // editor's Ctrl-chords (Story 2.4/2.5) are intercepted first while a cell is focused and reject
     // any other key, so Ctrl+Z bubbles up to here when no focused element consumes it.
-    FocusScope {
+    // Story 8.6: a decision dialog opened from an AI chip closes with that chip gone (the draft
+    // decided) — the study takes the focus so Ctrl+Z / Ctrl+Y still reach it.
+    property <int> return-request: Drafts.return-request;
+    changed return-request => {
+        if (Drafts.return-gone) { study-keys.focus(); }
+    }
+    study-keys := FocusScope {
         width: 100%;
         height: 100%;
         key-pressed(e) => {
@@ -997,6 +1004,8 @@ export component StudyScreen inherits Rectangle {
                         value: Studies.judgment.sales-growth;
                         suffix: "%";
                         suggestion: Studies.judgment-suggestions.sales-growth;
+                        proposal-chip: Studies.draft-judgments.chip-sales-growth;
+                        proposal-caption: Studies.draft-judgments.cap-sales-growth;
                     }
                     VerticalLayout {
                         spacing: Tokens.space-4;
@@ -1007,6 +1016,8 @@ export component StudyScreen inherits Rectangle {
                             value: Studies.judgment.eps-growth;
                             suffix: "%";
                             suggestion: Studies.judgment-suggestions.eps-growth;
+                            proposal-chip: Studies.draft-judgments.chip-eps-growth;
+                            proposal-caption: Studies.draft-judgments.cap-eps-growth;
                         }
                         // 2026-07-12: the field's ROLE stated permanently — it is NOT redundant with
                         // the dragged curves: the §5 average-annual-EPS (→ rendement moyen) always
@@ -1034,6 +1045,9 @@ export component StudyScreen inherits Rectangle {
                         label: @tr("BPA estimé haut");
                         field-key: "est_high_eps";
                         value: Studies.judgment.est-high-eps;
+                        // Story 8.6: while the §1 chart is drawn, the chip and the caption live there.
+                        proposal-chip: Studies.draft-judgments.chip-est-high;
+                        proposal-caption: Studies.growth-chart.available ? "" : Studies.draft-judgments.cap-est-high;
                     }
                     VerticalLayout {
                         alignment: start;
@@ -1045,6 +1059,8 @@ export component StudyScreen inherits Rectangle {
                             // Issue #214: the latest EPS (the downside case), adoptable in one click.
                             suggestion: Studies.judgment-suggestions.est-low-eps;
                             suggestion-year: Studies.judgment-suggestions.est-low-eps-year;
+                            proposal-chip: Studies.draft-judgments.chip-est-low;
+                            proposal-caption: Studies.growth-chart.available ? "" : Studies.draft-judgments.cap-est-low;
                         }
                         // 2026-09-24 (Guy, from use): the field's meaning stated where it is typed —
                         // a low EPS taken from the growth trend lifts the forecast low above the
@@ -1187,12 +1203,16 @@ export component StudyScreen inherits Rectangle {
                         field-key: "high_pe";
                         value: Studies.judgment.high-pe;
                         suggestion: Studies.judgment-suggestions.high-pe;
+                        proposal-chip: Studies.draft-judgments.chip-high-pe;
+                        proposal-caption: Studies.pe-chart.available ? "" : Studies.draft-judgments.cap-high-pe;
                     }
                     JudgmentField {
                         label: @tr("PER bas moyen jugé");
                         field-key: "low_pe";
                         value: Studies.judgment.low-pe;
                         suggestion: Studies.judgment-suggestions.low-pe;
+                        proposal-chip: Studies.draft-judgments.chip-low-pe;
+                        proposal-caption: Studies.pe-chart.available ? "" : Studies.draft-judgments.cap-low-pe;
                     }
                 }
             }
@@ -1248,6 +1268,14 @@ export component StudyScreen inherits Rectangle {
                         activated => { Studies.set-forecast-low-option("dividend_supported"); }
                     }
                 }
+                // Story 8.6: a pending AI proposal of the option (the group is untouched while
+                // pending), and the caption of a validated one.
+                if Studies.draft-judgments.chip-option.draft-id != "": AiChipButton {
+                    chip: Studies.draft-judgments.chip-option;
+                }
+                if Studies.draft-judgments.cap-option != "": AiCaption {
+                    date: Studies.draft-judgments.cap-option;
+                }
                 // §4 price/dividend judgment inputs.
                 HorizontalLayout {
                     spacing: Tokens.space-16;
@@ -1256,6 +1284,8 @@ export component StudyScreen inherits Rectangle {
                         field-key: "recent_severe_low";
                         value: Studies.judgment.recent-severe-low;
                         suggestion: Studies.judgment-suggestions.recent-severe-low;
+                        proposal-chip: Studies.draft-judgments.chip-severe-low;
+                        proposal-caption: Studies.draft-judgments.cap-severe-low;
                     }
                     JudgmentField {
                         label: @tr("Prix actuel");
@@ -1269,6 +1299,8 @@ export component StudyScreen inherits Rectangle {
                         // Issue #214: the latest year's fetched dividend per share, adoptable.
                         suggestion: Studies.judgment-suggestions.dividend;
                         suggestion-year: Studies.judgment-suggestions.dividend-year;
+                        proposal-chip: Studies.draft-judgments.chip-dividend;
+                        proposal-caption: Studies.draft-judgments.cap-dividend;
                     }
                 }
 

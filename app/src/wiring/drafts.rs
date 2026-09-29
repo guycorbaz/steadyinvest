@@ -34,16 +34,23 @@ use crate::state::{
     self, Decision, DialogDraft, DraftFreshness, JournalState, MSG_DRAFT_REJECTED,
     MSG_DRAFT_VALIDATED, MSG_DRAFT_VALIDATED_EDITED, MSG_READ_FAILED, owner_edit,
 };
+use crate::viewmodel::ai_lines::{
+    AiJudgmentsView, AiLineView, JudgmentOverlay, ai_judgments, pending_judgment_overlays,
+};
 use crate::viewmodel::drafts::{
     DecisionView, INBOX_CAUSE_UNREADABLE_DRAFT, InboxRow, InboxView, KindFilter, PendingCounts,
     PollAction, PollState, STUDY_FILTER_ALL, StudyChoice, dialog_view, inbox_rows,
     option_wire_for_label, pending_counts,
 };
+use crate::viewmodel::engine::StudyFrame;
 use crate::viewmodel::format::NumberFormat;
 use crate::wiring::Session;
 use crate::wiring::dialog;
 use crate::wiring::push::push_form;
-use crate::{Dialog, DraftDecision, DraftRow, Drafts, MainWindow, Prefs, Studies};
+use crate::{
+    AiChip, AiJudgments, AiLine, Dialog, DraftDecision, DraftRow, Drafts, MainWindow, Prefs,
+    Studies,
+};
 
 /// The poll period (arch A9: new drafts within ~3 s).
 const POLL_PERIOD_MS: u64 = 2500;
@@ -60,6 +67,12 @@ struct InboxCache {
     open_study: Option<Uuid>,
     /// The rows and « Étude : » labels last pushed — an unchanged re-read rebuilds no model (G3).
     shown: Option<(Vec<InboxRow>, Vec<String>)>,
+    /// Story 8.6: the pending JUDGMENT drafts of every study (from the last read — never a query per
+    /// edit), for the open study's AI lines and chips.
+    judgments: Vec<steadyinvest_persistence::DraftRecord>,
+    /// The open study's pending judgment drafts as last drawn (ids + payloads): a read that changes
+    /// them re-draws the open study's overlay.
+    drawn: Vec<(Uuid, String)>,
 }
 
 thread_local! {
@@ -177,6 +190,18 @@ fn show_decision(
         })
     });
     Ok(())
+}
+
+/// Whether `id` is a pending judgment draft of the inbox's last read — i.e. whether its chip is
+/// still drawn on the open study (Story 8.6: the focus returns to it, else to the study).
+pub(crate) fn is_pending_judgment(id: &str) -> bool {
+    INBOX.with(|cache| {
+        cache
+            .borrow()
+            .judgments
+            .iter()
+            .any(|d| d.id.to_string() == id)
+    })
 }
 
 /// A row's activation (Story 8.5b): the decision dialog of that draft, or « Action refusée » with
@@ -364,6 +389,176 @@ pub(crate) fn apply_open_study(ui: &MainWindow, study_id: Option<Uuid>) {
     ui.global::<Drafts>().set_open_study_pending(n as i32);
 }
 
+/// A pending AI line as Slint draws it (Story 8.6) — `visible: false` when there is none.
+fn ai_line(v: &Option<AiLineView>) -> AiLine {
+    match v {
+        Some(l) => AiLine {
+            visible: true,
+            commands: l.geometry.commands.as_str().into(),
+            marker: l.geometry.marker.as_str().into(),
+            y: l.geometry.y,
+            value: l.value.as_str().into(),
+        },
+        None => AiLine {
+            y: -1.0,
+            ..Default::default()
+        },
+    }
+}
+
+/// One action chip (Story 8.6): app text only — the field label and the formatted proposal.
+fn ai_chip(o: &JudgmentOverlay) -> AiChip {
+    AiChip {
+        draft_id: o.draft_id.to_string().into(),
+        field: o.field_label.as_str().into(),
+        value: o.value_label.as_str().into(),
+        stale: o.stale,
+    }
+}
+
+thread_local! {
+    /// The §1 / §3 chip rows' models, kept for the app's life and synced in place (G3): a redraw
+    /// (a proposal arriving on another field, a re-read) then keeps the chip instances — a new
+    /// model would recreate them and drop the keyboard focus a chip holds.
+    static CHIP_ROWS: (Rc<VecModel<AiChip>>, Rc<VecModel<AiChip>>) =
+        (Rc::new(VecModel::default()), Rc::new(VecModel::default()));
+}
+
+/// Make `model` hold `rows`, touching only the rows that differ.
+fn sync_rows(model: &VecModel<AiChip>, rows: Vec<AiChip>) {
+    let keep = rows.len().min(model.row_count());
+    for (i, row) in rows.iter().enumerate().take(keep) {
+        if model.row_data(i).as_ref() != Some(row) {
+            model.set_row_data(i, row.clone());
+        }
+    }
+    while model.row_count() > rows.len() {
+        model.remove(model.row_count() - 1);
+    }
+    for row in rows.into_iter().skip(keep) {
+        model.push(row);
+    }
+}
+
+/// The open study's AI overlay as the `Studies.draft-judgments` struct (Story 8.6).
+fn to_ai_slint(v: &AiJudgmentsView) -> AiJudgments {
+    use steadyinvest_contract::DraftField as F;
+    let (growth_chips, pe_chips) = CHIP_ROWS.with(|(growth, pe)| {
+        sync_rows(growth, v.growth_chips.iter().map(ai_chip).collect());
+        sync_rows(pe, v.pe_chips.iter().map(ai_chip).collect());
+        (ModelRc::from(growth.clone()), ModelRc::from(pe.clone()))
+    });
+    let mut out = AiJudgments {
+        est_high: ai_line(&v.est_high),
+        est_low: ai_line(&v.est_low),
+        pe_high: ai_line(&v.pe_high),
+        pe_low: ai_line(&v.pe_low),
+        growth_chips,
+        pe_chips,
+        ..Default::default()
+    };
+    for o in &v.field_chips {
+        let chip = ai_chip(o);
+        match o.field {
+            F::ProjectedSalesGrowthPct => out.chip_sales_growth = chip,
+            F::ProjectedEpsGrowthPct => out.chip_eps_growth = chip,
+            F::EstimatedHighEps => out.chip_est_high = chip,
+            F::EstimatedLowEps => out.chip_est_low = chip,
+            F::JudgedAvgHighPe => out.chip_high_pe = chip,
+            F::JudgedAvgLowPe => out.chip_low_pe = chip,
+            F::RecentSevereLow => out.chip_severe_low = chip,
+            F::PresentFullYearDividend => out.chip_dividend = chip,
+            F::ForecastLowOption => out.chip_option = chip,
+            _ => {}
+        }
+    }
+    for (field, date) in &v.captions {
+        let date: SharedString = date.as_str().into();
+        match field {
+            F::ProjectedSalesGrowthPct => out.cap_sales_growth = date,
+            F::ProjectedEpsGrowthPct => out.cap_eps_growth = date,
+            F::EstimatedHighEps => out.cap_est_high = date,
+            F::EstimatedLowEps => out.cap_est_low = date,
+            F::JudgedAvgHighPe => out.cap_high_pe = date,
+            F::JudgedAvgLowPe => out.cap_low_pe = date,
+            F::RecentSevereLow => out.cap_severe_low = date,
+            F::PresentFullYearDividend => out.cap_dividend = date,
+            F::ForecastLowOption => out.cap_option = date,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A study's pending judgment drafts as a comparable signature (ids + payloads, sorted).
+fn drawn_signature<'a>(
+    study_id: Uuid,
+    drafts: impl Iterator<Item = &'a steadyinvest_persistence::DraftRecord>,
+) -> Vec<(Uuid, String)> {
+    let mut sig: Vec<(Uuid, String)> = drafts
+        .filter(|d| d.study_id == Some(study_id))
+        .map(|d| (d.id, d.payload.clone()))
+        .collect();
+    sig.sort();
+    sig
+}
+
+/// Draw the open study's pending AI judgment lines, chips and captions (Story 8.6) — from the
+/// inbox's last read (no query) and the study as just rendered. Called by `push::push_form` after
+/// the owner charts, and when a read changes the open study's pending judgment drafts. Read-only:
+/// the owner chart state is never touched (AC 4).
+pub(crate) fn push_ai_judgments(
+    ui: &MainWindow,
+    study: &steadyinvest_contract::Study,
+    frame: Option<&StudyFrame>,
+    format: NumberFormat,
+) {
+    let mine: Vec<steadyinvest_persistence::DraftRecord> = INBOX.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let mine: Vec<_> = cache
+            .judgments
+            .iter()
+            .filter(|d| d.study_id == Some(study.id))
+            .cloned()
+            .collect();
+        cache.drawn = drawn_signature(study.id, mine.iter());
+        mine
+    });
+    let overlays = pending_judgment_overlays(study, &mine, format);
+    let view = ai_judgments(study, frame, &overlays, format);
+    ui.global::<Studies>()
+        .set_draft_judgments(to_ai_slint(&view));
+}
+
+/// Clear the AI overlay (a study closed, a dossier switch) — the next open draws it afresh.
+pub(crate) fn clear_ai_judgments(ui: &MainWindow) {
+    INBOX.with(|cache| cache.borrow_mut().drawn.clear());
+    ui.global::<Studies>()
+        .set_draft_judgments(AiJudgments::default());
+}
+
+/// After an inbox read: re-draw the open study's AI overlay when its pending judgment drafts
+/// changed (a draft arrived through MCP, was decided, undone or redone — AC 9).
+fn redraw_open_if_changed(ui: &MainWindow, state: &JournalState) {
+    let target = INBOX.with(|cache| {
+        let cache = cache.borrow();
+        let id = cache.open_study?;
+        (drawn_signature(id, cache.judgments.iter()) != cache.drawn).then_some(id)
+    });
+    let Some(id) = target else {
+        return;
+    };
+    // A closed study is drawn afresh when it is opened again.
+    if !ui.global::<Studies>().get_study_open() {
+        return;
+    }
+    let Some(study) = state.get_study(id) else {
+        return;
+    };
+    let frame = crate::viewmodel::engine::build_frame(&study).ok();
+    push_ai_judgments(ui, &study, frame.as_ref(), number_format(ui));
+}
+
 /// Show « indisponible »: rows and « Étude : » choices cleared, counts zero, the cause named (""
 /// when none can be). The poller then re-reads on its next tick even if nothing moved — a ⊘ is
 /// never stuck (G3, arch A9).
@@ -374,6 +569,8 @@ fn show_failure(ui: &MainWindow, cause: &str) {
         cache.failed = true;
         cache.choices.clear();
         cache.shown = None;
+        // Story 8.6 (G3): the last successful read's proposals stay drawn — a failed poll makes
+        // nothing vanish (UX §8; the study band says the read failed). Deciding one re-reads it.
         cache.poll.mark_read_failed();
     });
     let drafts = ui.global::<Drafts>();
@@ -399,6 +596,7 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
         Ok(data) => data,
         Err(error) => {
             show_failure(ui, error.cause.unwrap_or(""));
+            redraw_open_if_changed(ui, state);
             return;
         }
     };
@@ -428,7 +626,17 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
                 problem.draft_id,
                 problem.detail
             );
+            // The read itself succeeded: the open study's proposals follow it (one unreadable
+            // draft of any study must not freeze or hide the others).
+            INBOX.with(|cache| {
+                cache.borrow_mut().judgments = drafts
+                    .iter()
+                    .filter(|d| d.kind == DraftKind::Judgment)
+                    .cloned()
+                    .collect();
+            });
             show_failure(ui, INBOX_CAUSE_UNREADABLE_DRAFT);
+            redraw_open_if_changed(ui, state);
             return;
         }
     };
@@ -438,6 +646,11 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
     let (open_study, total, draft_studies, unchanged) = INBOX.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.failed = false;
+        cache.judgments = drafts
+            .iter()
+            .filter(|d| d.kind == DraftKind::Judgment)
+            .cloned()
+            .collect();
         cache.choices = view.study_choices.clone();
         cache.study_filter = study_filter;
         cache.counts = counts;
@@ -473,6 +686,7 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
     drafts_global.set_read_failed(false);
     apply_open_study(ui, open_study);
     apply_row_counts(ui);
+    redraw_open_if_changed(ui, state);
 }
 
 /// Back to « Toutes » and « Toutes les études » (G3): on a dossier change and when the reader
@@ -495,7 +709,9 @@ pub(crate) fn forget_dossier(ui: &MainWindow) {
         cache.poll.reset();
         cache.open_study = None;
         cache.shown = None;
+        cache.judgments.clear();
     });
+    clear_ai_judgments(ui);
     reset_filters(ui);
 }
 
@@ -707,4 +923,31 @@ pub(crate) fn start_poller(ui: &MainWindow, s: &Session) -> Rc<slint::Timer> {
         },
     );
     timer
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chip(id: &str, value: &str) -> AiChip {
+        AiChip {
+            draft_id: id.into(),
+            value: value.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_chip_row_is_synced_in_place_never_rebuilt() {
+        let model = VecModel::from(vec![chip("a", "1"), chip("b", "2")]);
+        // A proposal arrives on another field: the existing rows are untouched, one is added.
+        sync_rows(&model, vec![chip("a", "1"), chip("b", "2"), chip("c", "3")]);
+        assert_eq!(model.row_count(), 3);
+        // One is decided, another changes: the row count shrinks from the end, rows are replaced.
+        sync_rows(&model, vec![chip("a", "1"), chip("c", "3")]);
+        let rows: Vec<AiChip> = model.iter().collect();
+        assert_eq!(rows, vec![chip("a", "1"), chip("c", "3")]);
+        sync_rows(&model, Vec::new());
+        assert_eq!(model.row_count(), 0);
+    }
 }

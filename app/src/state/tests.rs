@@ -9081,6 +9081,63 @@ mod drafts_8_2b {
         assert!(state.get_study(id).unwrap().judgment.ai_placed.is_empty());
     }
 
+    // Story 8.6 AC 1, 6–9: a pending judgment proposal is overlaid on the open study; validated,
+    // it leaves the overlay and its caption shows; undone, the prior judgment returns, the caption
+    // goes and the draft (now `validated_undone`, no longer pending) is not drawn; redone, the
+    // caption is back. A value-changing write clears the caption.
+    #[test]
+    fn a_judgment_proposal_is_overlaid_then_captioned_and_undo_redo_follow() {
+        use crate::viewmodel::ai_lines::{ai_placed_captions, pending_judgment_overlays};
+        use crate::viewmodel::format::NumberFormat;
+        use steadyinvest_contract::DraftField;
+
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = decision_state(&dir);
+        let before = state.get_study(id).unwrap().judgment.judged_avg_high_pe;
+        let draft = plant_value(&state, 6, id, judgment_target("judged_avg_high_pe"), "24");
+        let pending = |state: &JournalState| {
+            let inbox = state.read_inbox().unwrap().expect("a dossier");
+            let study = state.get_study(id).unwrap();
+            pending_judgment_overlays(&study, &inbox.drafts, NumberFormat::Comma)
+        };
+        let overlays = pending(&state);
+        assert_eq!(overlays.len(), 1);
+        assert_eq!(overlays[0].field, DraftField::JudgedAvgHighPe);
+        assert_eq!(overlays[0].draft_id, draft);
+
+        state.decide_draft(&dref(id, draft), validate()).unwrap();
+        assert!(
+            pending(&state).is_empty(),
+            "a decided proposal is no longer drawn"
+        );
+        let caps = ai_placed_captions(&state.get_study(id).unwrap());
+        assert_eq!(caps.len(), 1);
+        assert_eq!(caps[0].0, DraftField::JudgedAvgHighPe);
+
+        state.undo(id).unwrap();
+        let study = state.get_study(id).unwrap();
+        assert_eq!(
+            study.judgment.judged_avg_high_pe, before,
+            "the prior judgment"
+        );
+        assert!(ai_placed_captions(&study).is_empty(), "the caption goes");
+        assert!(
+            pending(&state).is_empty(),
+            "validated_undone is not pending"
+        );
+        assert_eq!(facts(&state, draft).0, "validated_undone");
+
+        state.redo(id).unwrap();
+        assert_eq!(ai_placed_captions(&state.get_study(id).unwrap()).len(), 1);
+        assert_eq!(facts(&state, draft).0, "validated");
+
+        // A value-changing write (a drag commit or a typed value go through this rail) clears it.
+        state
+            .set_judgment_field(id, "high_pe", Some(money("25")))
+            .unwrap();
+        assert!(ai_placed_captions(&state.get_study(id).unwrap()).is_empty());
+    }
+
     // AC 3 / 9 — a note draft appends a note with its origin; edited, it is the owner's own.
     #[test]
     fn a_note_validation_appends_a_note_and_an_edited_one_carries_no_origin() {

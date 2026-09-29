@@ -975,6 +975,11 @@ export component SettingsScreen inherits Rectangle {
                     term: @tr("Cible disparue");
                     definition: @tr("Proposition dont la cible n'existe plus (une année retirée de l'étude, une étude supprimée). Elle ne peut plus qu'être rejetée.");
                 }
+                // Story 8.6 (AI judgment lines).
+                GlossaryRow {
+                    term: @tr("Ligne IA");
+                    definition: @tr("Proposition de jugement d'une IA, tracée en pointillé avec un rond creux et l'étiquette « IA » ; elle ne change rien tant qu'elle n'est pas validée.");
+                }
             }
 
             // ── Story 2.13 — Vérifier le moteur (FR9): replay the bundled golden studies on demand. ──

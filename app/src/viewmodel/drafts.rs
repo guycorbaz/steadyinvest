@@ -84,7 +84,9 @@ pub fn cell_wire(field: DraftField) -> Option<&'static str> {
 }
 
 /// A judgment field's history label and display scale; `None` for a cell field.
-fn judgment_label_display(field: DraftField) -> Option<(&'static str, Option<DisplayField>)> {
+pub(crate) fn judgment_label_display(
+    field: DraftField,
+) -> Option<(&'static str, Option<DisplayField>)> {
     Some(match field {
         DraftField::EstimatedHighEps => (LBL_EST_HIGH_EPS, Some(DisplayField::PerShare)),
         DraftField::EstimatedLowEps => (LBL_EST_LOW_EPS, Some(DisplayField::PerShare)),
@@ -360,7 +362,7 @@ fn target_and_values(
 
 /// The proposed figure spelled with at least the current one's decimals (G3 F12): « 2,10 → 2,50 »,
 /// never « 2,10 → 2,5 » — the same value, read side by side. Only between two plain figures.
-fn same_decimals(current: &str, proposed: &str, format: NumberFormat) -> String {
+pub(crate) fn same_decimals(current: &str, proposed: &str, format: NumberFormat) -> String {
     let sep = match format {
         NumberFormat::Comma => ',',
         NumberFormat::Point => '.',

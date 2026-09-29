@@ -15,6 +15,7 @@
 
 import { Tokens } from "../tokens.slint";
 import { Studies, GrowthChartState, AxisTick } from "../state.slint";
+import { AiChartLine, AiChartCaption, AiChipRow } from "ai_judgment.slint";
 
 // One legend entry (issue #25/#116): a colour swatch matching a series' stroke + its name.
 // Exported so the §3 P/E chart (#115) reuses the same legend row.
@@ -84,7 +85,13 @@ export component GrowthChart inherits Rectangle {
     // `JudgmentField` remains the precise keyboard path).
     property <length> arrow-key-step: 10px;
 
-    min-height: root.plot-h + Tokens.row-height + 2 * Tokens.chart-pad;
+    // The layout below is under an `if`, so its rows are summed here: the « Ajuster : » row, the
+    // plot, the legend and (Story 8.6) the « Propositions de l'IA : » chip row when present — each
+    // after the layout's spacing. The legend was not counted before 8.6 and slid under what follows.
+    property <length> legend-h: 24px;
+    property <length> chip-row-h: Studies.draft-judgments.growth-chips.length > 0 ? 32px + Tokens.space-4 : 0px;
+    min-height: Tokens.row-height + Tokens.space-4 + root.plot-h + Tokens.space-4 + root.legend-h
+        + root.chip-row-h + 2 * Tokens.chart-pad;
 
     // ── Calm empty state (no plottable years) — constant geometry, nothing drawn ──
     if !root.chart.available: Rectangle {
@@ -272,6 +279,39 @@ export component GrowthChart inherits Rectangle {
                 viewbox-height: root.chart.chart-h;
             }
 
+            // ── Story 8.6: the PENDING AI proposals, beside the owner's lines (never in their place),
+            //    on the same EPS scale — dotted, hollow end marker, « IA {valeur} »; inert (no hit
+            //    area: the strip below stays the only grab target). And the « placée par l'IA »
+            //    caption of a validated one at its line's end. ──
+            AiChartLine {
+                line: Studies.draft-judgments.est-high;
+                label-right: true;
+                chart-h: root.chart.chart-h;
+                end-x: root.chart.judgment-x * 1px;
+                strip-w: root.strip-w;
+            }
+            AiChartLine {
+                line: Studies.draft-judgments.est-low;
+                label-right: true;
+                other: Studies.draft-judgments.est-high;
+                chart-h: root.chart.chart-h;
+                end-x: root.chart.judgment-x * 1px;
+                strip-w: root.strip-w;
+            }
+            AiChartCaption {
+                date: Studies.draft-judgments.cap-est-high;
+                line-y: root.chart.judgment-y;
+                end-x: root.chart.judgment-x * 1px;
+                strip-w: root.strip-w;
+            }
+            AiChartCaption {
+                date: Studies.draft-judgments.cap-est-low;
+                above: false;
+                line-y: root.chart.judgment-low-y;
+                end-x: root.chart.judgment-x * 1px;
+                strip-w: root.strip-w;
+            }
+
             // ── The drag strip: the grab target for the future endpoint. mouse-y spans the full
             //    height, so it maps 1:1 to the viewbox-y the adapter inverts. A GENEROUS mouse
             //    target (strip-w wide) is deliberately wider than the line itself. Issue #187: the
@@ -381,12 +421,17 @@ export component GrowthChart inherits Rectangle {
         //    independently-scaled curves are identifiable (only the EPS scale is numbered on the side
         //    axis; Sales/Price live on their own scales). ──
         HorizontalLayout {
+            height: root.legend-h;
             spacing: Tokens.space-16;
             alignment: start;
             padding-left: Tokens.space-32 + Tokens.space-8;
             LegendItem { hue: Tokens.series-sales; name: @tr("Ventes"); }
             LegendItem { hue: Tokens.series-price; name: @tr("Prix"); }
             LegendItem { hue: Tokens.series-eps; name: @tr("BPA"); }
+        }
+        // Story 8.6: one action chip per pending proposal drawn on this chart (outside « Ajuster : »).
+        if Studies.draft-judgments.growth-chips.length > 0: AiChipRow {
+            chips: Studies.draft-judgments.growth-chips;
         }
     }
 }

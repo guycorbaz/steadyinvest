@@ -143,12 +143,36 @@ fn run(copy: &str) -> Result<(), String> {
                      "company_name": "Seed Test SA" }),
         ),
     )];
-    if let Some(first) = list["studies"].as_array().and_then(|s| s.first()) {
-        let id = first["id"].as_str().unwrap_or_default().to_string();
+    // G3: the value / judgment proposals go to the first study with an EPS history the §1 chart
+    // can draw (three EPS years), else to the first study — never blindly to the list's head.
+    let ids: Vec<String> = list["studies"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s["id"].as_str().map(str::to_string))
+        .collect();
+    let mut chosen: Option<(String, Value)> = None;
+    for id in &ids {
         let (err, study) = c.call("get_study", json!({ "study_id": id }))?;
         if err {
             return Err(format!("get_study refused: {study}"));
         }
+        let eps_years = study["study"]["years"].as_array().map_or(0, |ys| {
+            ys.iter().filter(|y| !y["eps"]["value"].is_null()).count()
+        });
+        if eps_years >= 3 {
+            chosen = Some((id.clone(), study));
+            break;
+        }
+        if chosen.is_none() {
+            chosen = Some((id.clone(), study));
+        }
+    }
+    if let Some((id, study)) = chosen {
+        println!(
+            "proposals seeded on {}",
+            study["study"]["security_ticker"].as_str().unwrap_or("?")
+        );
         let year = study["study"]["years"]
             .as_array()
             .and_then(|y| y.last())
@@ -164,11 +188,34 @@ fn run(copy: &str) -> Result<(), String> {
                              "proposed_value": "1.23" })),
             ));
         }
-        submissions.push((
-            "submit_draft_value",
-            base(json!({ "study_id": id, "field": "estimated_low_eps",
-                         "proposed_value": "2.5" })),
-        ));
+        // Story 8.6: every judgment field the charts draw — proposals near the study's own figures
+        // (the last EPS, the last low price) so the AI lines land on the owner's scale.
+        let last_of = |field: &str| -> Option<f64> {
+            study["study"]["years"].as_array().and_then(|years| {
+                years.iter().rev().find_map(|y| {
+                    y[field]["value"]
+                        .as_str()
+                        .and_then(|v| v.parse::<f64>().ok())
+                })
+            })
+        };
+        let eps = last_of("eps").filter(|e| *e > 0.0).unwrap_or(2.0);
+        let low_price = last_of("low_price").filter(|p| *p > 0.0);
+        let mut judgment = vec![
+            ("estimated_high_eps", format!("{:.2}", eps * 1.6)),
+            ("estimated_low_eps", format!("{:.2}", eps * 0.9)),
+            ("judged_avg_high_pe", "24".to_string()),
+            ("judged_avg_low_pe", "11".to_string()),
+        ];
+        if let Some(p) = low_price {
+            judgment.push(("recent_severe_low", format!("{:.2}", p * 0.8)));
+        }
+        for (field, value) in judgment {
+            submissions.push((
+                "submit_draft_value",
+                base(json!({ "study_id": id, "field": field, "proposed_value": value })),
+            ));
+        }
         let current = study["study"]["judgment"]["forecast_low_option"]
             .as_str()
             .unwrap_or_default()
@@ -183,6 +230,23 @@ fn run(copy: &str) -> Result<(), String> {
             base(json!({ "study_id": id, "field": "forecast_low_option",
                          "proposed_value": option })),
         ));
+        // Story 8.6 (Decision 2): a projected EPS-growth draft is drawn as the est-high line it
+        // implies only on a study WITHOUT a direct est-high — seeded on another such study.
+        for other_id in ids.iter().filter(|o| **o != id) {
+            let other_id = other_id.clone();
+            let (err, other_study) = c.call("get_study", json!({ "study_id": other_id }))?;
+            if err || !other_study["study"]["judgment"]["estimated_high_eps"].is_null() {
+                continue;
+            }
+            submissions.push((
+                "submit_draft_value",
+                base(
+                    json!({ "study_id": other_id, "field": "projected_eps_growth_pct",
+                             "proposed_value": "9" }),
+                ),
+            ));
+            break;
+        }
     } else {
         println!("no study in the copy: only a draft study is seeded");
     }

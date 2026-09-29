@@ -1,0 +1,146 @@
+// Story 8.6 — the pending AI judgment proposals of the open study, and the « placée par l'IA »
+// caption of a validated one (FR33, FR72; UX spec §5.5, Q13, Q15).
+//
+// An AI proposal is INERT while pending: a dotted line + a hollow end marker + « IA {valeur} » on the
+// owner's chart (three non-colour cues, NFR-U1), never a drag handle and never a hit area on the
+// chart — only its action chip (a focusable `ActionButton`, neutral ink, outside the « Ajuster : »
+// selector and never a series-hued `ContextChip`) opens the 8.5b decision dialog. No AI-written text
+// here: the chip and the label carry the field's French label and the value the app formatted; the
+// AI's comment is in the dialog's AiFrame (Q15).
+
+import { Tokens } from "../tokens.slint";
+import { Drafts, AiChip, AiLine } from "../state.slint";
+import { ActionButton } from "action_button.slint";
+
+// One action chip — « ★ IA · {champ} : {valeur} » (« · périmée » when the target changed since the
+// proposal). Click / Enter / Space → the decision dialog; the focus comes back here when it closes.
+export component AiChipButton inherits HorizontalLayout {
+    in property <AiChip> chip;
+    alignment: start;
+    // Story 8.5b (G3 F7): the dialog's close bumps `return-request`; the chip that opened it takes
+    // the focus back.
+    property <int> return-request: Drafts.return-request;
+    changed return-request => {
+        if (root.chip.draft-id != "" && Drafts.return-row == root.chip.draft-id) {
+            button.focus();
+        }
+    }
+    button := ActionButton {
+        compact: true;
+        label: root.chip.stale
+            ? @tr("{} IA · {} : {} · périmée", Tokens.ai-glyph, root.chip.field, root.chip.value)
+            : @tr("{} IA · {} : {}", Tokens.ai-glyph, root.chip.field, root.chip.value);
+        clicked => { Drafts.open-draft(root.chip.draft-id); }
+    }
+}
+
+// The chart's « Propositions de l'IA : » row — one chip per pending field drawn on that chart.
+export component AiChipRow inherits HorizontalLayout {
+    in property <[AiChip]> chips;
+    spacing: Tokens.space-8;
+    alignment: start;
+    padding-left: Tokens.space-32 + Tokens.space-8;
+    Text {
+        text: @tr("Propositions de l'IA :");
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+        vertical-alignment: center;
+    }
+    for c in root.chips: AiChipButton { chip: c; }
+}
+
+// A validated AI judgment's caption — app text, the date only (Decision 8).
+export component AiCaption inherits Text {
+    in property <string> date;
+    text: @tr("placée par l'IA · validée le {}", root.date);
+    color: Tokens.text-low;
+    font-size: Tokens.font-caption;
+}
+
+// A pending AI line on a chart plot: the dotted path, the hollow end marker and « IA {valeur} » —
+// to the left of the drag strip (never under the owner's grip) under a level line (§3), or right of
+// the strip beside its marker when `label-right` (§1, where the fan's sloped lines would cross it).
+// Place it inside the plot rectangle, AFTER the owner lines; it has no TouchArea (inert, AC 5).
+export component AiChartLine inherits Rectangle {
+    in property <AiLine> line;
+    in property <float> chart-h;
+    // The x (viewbox = px) of the line's right end, and the drag strip's width the label keeps clear of.
+    in property <length> end-x;
+    in property <length> strip-w;
+    // The chart's OTHER AI line, when this label must keep clear of its label (set on the low line
+    // only): two proposals clamped to one edge would otherwise print their labels on top of each other.
+    in property <AiLine> other;
+    in property <bool> label-right: false;
+    property <length> label-h: 16px;
+    property <length> own-y: root.base-y(root.line.y);
+    property <length> other-y: root.base-y(root.other.y);
+    property <bool> collides: root.other.visible && abs(root.own-y - root.other-y) < root.label-h;
+    property <length> label-y: !root.collides ? root.own-y
+        : root.other-y + 2 * root.label-h <= root.height ? root.other-y + root.label-h
+        : root.other-y - root.label-h;
+    pure function base-y(y: float) -> length {
+        clamp(root.label-right ? y * 1px - root.label-h / 2 : y * 1px + Tokens.space-4, 0px, root.height - root.label-h)
+    }
+    x: 0;
+    y: 0;
+    width: 100%;
+    height: 100%;
+    if root.line.visible: Path {
+        commands: root.line.commands;
+        stroke: Tokens.text-mid;
+        stroke-width: Tokens.chart-stroke-thin;
+        stroke-line-cap: round;
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.chart-h;
+    }
+    if root.line.visible: Path {
+        commands: root.line.marker;
+        stroke: Tokens.text-mid;
+        stroke-width: Tokens.chart-stroke-thin;
+        fill: transparent;
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.chart-h;
+    }
+    if root.line.visible: Text {
+        text: @tr("IA {}", root.line.value);
+        color: Tokens.text-mid;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-caption;
+        x: root.label-right
+            ? max(0px, min(root.end-x + root.strip-w / 2 + Tokens.space-4, root.width - self.width))
+            : max(0px, min(root.end-x, root.width) - root.strip-w / 2 - self.width - Tokens.space-4);
+        height: root.label-h;
+        vertical-alignment: center;
+        y: root.label-y;
+    }
+}
+
+// A validated AI judgment's caption at its line's end on a chart (AC 6): beside the owner's line,
+// left of the drag strip. `line-y < 0` (the owner line not drawn) or no date → nothing.
+export component AiChartCaption inherits Rectangle {
+    in property <string> date;
+    in property <float> line-y;
+    in property <length> end-x;
+    in property <length> strip-w;
+    // Above a high line (it rises toward its end on §1), below a low one (it falls): the caption
+    // then stays clear of its own line on its whole width.
+    in property <bool> above: true;
+    x: 0;
+    y: 0;
+    width: 100%;
+    height: 100%;
+    if root.date != "" && root.line-y >= 0.0: AiCaption {
+        date: root.date;
+        x: max(0px, min(root.end-x, root.width) - root.strip-w / 2 - self.width - Tokens.space-4);
+        y: clamp(root.above ? root.line-y * 1px - self.height - Tokens.space-4 : root.line-y * 1px + Tokens.space-4,
+            0px, root.height - self.height);
+    }
+}

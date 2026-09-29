@@ -774,8 +774,12 @@ mod tests {
         // l'IA, validée le {} » and the glossary's « Proposition validée par l'utilisateur » term
         // and definition: 1086 + 19 = 1105, measured. Its G3 review keeps « Actuel » in the edit
         // form: 1105 + 1 = 1106, measured.
+        // 8.6 (AI judgment lines): the action chip (« {} IA · {} : {} » and its « · périmée »
+        // form), the chart chip row « Propositions de l'IA : », the line label « IA {} », the
+        // caption « placée par l'IA · validée le {} » and the glossary's « Ligne IA » term and
+        // definition: 1106 + 7 = 1113, measured.
         assert!(
-            total >= 1106,
+            total >= 1113,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -1672,6 +1676,21 @@ mod tests {
             // 8.5b: context line + stale band + gone band + stale confirmation body: 0 + 4 = 4.
             4,
             "decision label inventory changed — register the new label"
+        );
+    }
+
+    /// Story 8.6: the AI judgment chips' Rust-built field label (« Option du bas prévisionnel »),
+    /// scanned and counted — every other chip word is a history label already inventoried.
+    #[test]
+    fn ai_lines_user_facing_labels_are_neutral_no_banned_verb() {
+        for label in crate::viewmodel::ai_lines::AI_LINES_USER_FACING_LABELS {
+            assert_neutral(label, "viewmodel/ai_lines.rs (AI judgment chips)");
+        }
+        assert_eq!(
+            crate::viewmodel::ai_lines::AI_LINES_USER_FACING_LABELS.len(),
+            // 8.6: the option chip's field label: 0 + 1 = 1.
+            1,
+            "ai_lines.rs label inventory changed — register the new label"
         );
     }
 
