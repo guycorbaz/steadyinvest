@@ -416,19 +416,45 @@ fn ai_chip(o: &JudgmentOverlay) -> AiChip {
     }
 }
 
-/// The open study's AI overlay as the `Studies.ai-judgments` struct (Story 8.6).
+thread_local! {
+    /// The §1 / §3 chip rows' models, kept for the app's life and synced in place (G3): a redraw
+    /// (a proposal arriving on another field, a re-read) then keeps the chip instances — a new
+    /// model would recreate them and drop the keyboard focus a chip holds.
+    static CHIP_ROWS: (Rc<VecModel<AiChip>>, Rc<VecModel<AiChip>>) =
+        (Rc::new(VecModel::default()), Rc::new(VecModel::default()));
+}
+
+/// Make `model` hold `rows`, touching only the rows that differ.
+fn sync_rows(model: &VecModel<AiChip>, rows: Vec<AiChip>) {
+    let keep = rows.len().min(model.row_count());
+    for (i, row) in rows.iter().enumerate().take(keep) {
+        if model.row_data(i).as_ref() != Some(row) {
+            model.set_row_data(i, row.clone());
+        }
+    }
+    while model.row_count() > rows.len() {
+        model.remove(model.row_count() - 1);
+    }
+    for row in rows.into_iter().skip(keep) {
+        model.push(row);
+    }
+}
+
+/// The open study's AI overlay as the `Studies.draft-judgments` struct (Story 8.6).
 fn to_ai_slint(v: &AiJudgmentsView) -> AiJudgments {
     use steadyinvest_contract::DraftField as F;
-    let chips = |list: &[JudgmentOverlay]| {
-        ModelRc::new(VecModel::from(list.iter().map(ai_chip).collect::<Vec<_>>()))
-    };
+    let (growth_chips, pe_chips) = CHIP_ROWS.with(|(growth, pe)| {
+        sync_rows(growth, v.growth_chips.iter().map(ai_chip).collect());
+        sync_rows(pe, v.pe_chips.iter().map(ai_chip).collect());
+        (ModelRc::from(growth.clone()), ModelRc::from(pe.clone()))
+    });
     let mut out = AiJudgments {
         est_high: ai_line(&v.est_high),
         est_low: ai_line(&v.est_low),
         pe_high: ai_line(&v.pe_high),
         pe_low: ai_line(&v.pe_low),
-        growth_chips: chips(&v.growth_chips),
-        pe_chips: chips(&v.pe_chips),
+        growth_chips,
+        pe_chips,
         ..Default::default()
     };
     for o in &v.field_chips {
@@ -543,8 +569,8 @@ fn show_failure(ui: &MainWindow, cause: &str) {
         cache.failed = true;
         cache.choices.clear();
         cache.shown = None;
-        // Story 8.6: no pending proposal is drawn from a read that failed (never a guessed line).
-        cache.judgments.clear();
+        // Story 8.6 (G3): the last successful read's proposals stay drawn — a failed poll makes
+        // nothing vanish (UX §8; the study band says the read failed). Deciding one re-reads it.
         cache.poll.mark_read_failed();
     });
     let drafts = ui.global::<Drafts>();
@@ -600,6 +626,15 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
                 problem.draft_id,
                 problem.detail
             );
+            // The read itself succeeded: the open study's proposals follow it (one unreadable
+            // draft of any study must not freeze or hide the others).
+            INBOX.with(|cache| {
+                cache.borrow_mut().judgments = drafts
+                    .iter()
+                    .filter(|d| d.kind == DraftKind::Judgment)
+                    .cloned()
+                    .collect();
+            });
             show_failure(ui, INBOX_CAUSE_UNREADABLE_DRAFT);
             redraw_open_if_changed(ui, state);
             return;
@@ -888,4 +923,31 @@ pub(crate) fn start_poller(ui: &MainWindow, s: &Session) -> Rc<slint::Timer> {
         },
     );
     timer
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chip(id: &str, value: &str) -> AiChip {
+        AiChip {
+            draft_id: id.into(),
+            value: value.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_chip_row_is_synced_in_place_never_rebuilt() {
+        let model = VecModel::from(vec![chip("a", "1"), chip("b", "2")]);
+        // A proposal arrives on another field: the existing rows are untouched, one is added.
+        sync_rows(&model, vec![chip("a", "1"), chip("b", "2"), chip("c", "3")]);
+        assert_eq!(model.row_count(), 3);
+        // One is decided, another changes: the row count shrinks from the end, rows are replaced.
+        sync_rows(&model, vec![chip("a", "1"), chip("c", "3")]);
+        let rows: Vec<AiChip> = model.iter().collect();
+        assert_eq!(rows, vec![chip("a", "1"), chip("c", "3")]);
+        sync_rows(&model, Vec::new());
+        assert_eq!(model.row_count(), 0);
+    }
 }

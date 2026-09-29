@@ -18,15 +18,15 @@ use steadyinvest_contract::{
     DraftField, DraftFieldKind, DraftKind, DraftPayload, DraftStatus, DraftTarget, DraftValue,
     Study,
 };
-use steadyinvest_core::rounding::DisplayField;
+use steadyinvest_core::rounding::{DisplayField, round_for_display};
 use steadyinvest_persistence::DraftRecord;
 use uuid::Uuid;
 
 use crate::state::{DraftFreshness, draft_freshness};
 use crate::viewmodel::chart::{self, AiGeometry};
-use crate::viewmodel::drafts::{field_label, same_decimals, value_display};
+use crate::viewmodel::drafts::{field_label, judgment_label_display, same_decimals, value_display};
 use crate::viewmodel::engine::{self, StudyFrame};
-use crate::viewmodel::format::{NumberFormat, format_scaled};
+use crate::viewmodel::format::{NumberFormat, format_amount, format_scaled};
 use crate::viewmodel::notes::date_fr;
 
 /// The chip's field label of the forecast-low option (spec §5.5 — « ★ IA · Option du bas
@@ -117,7 +117,17 @@ fn overlay_of(
     let stale =
         draft_freshness(Some(study), DraftKind::Judgment, &payload) != DraftFreshness::Fresh;
     let current = value_display(field, field.judgment_value(&study.judgment), format);
-    let proposed = value_display(field, Some(value), format);
+    // The field's display rounding must never make a proposal read as another value (« 20,0 » for
+    // a proposed 20.04 beside the owner's 20,0): a proposal finer than the display scale shows its
+    // exact digits.
+    let proposed = match (value, judgment_label_display(field)) {
+        (DraftValue::Number(m), Some((_, Some(display))))
+            if round_for_display(m.as_decimal(), display) != m.as_decimal() =>
+        {
+            format_amount(&m.as_decimal().normalize().to_string(), format)
+        }
+        _ => value_display(field, Some(value), format),
+    };
     let field_label = if field == DraftField::ForecastLowOption {
         AI_CHIP_OPTION_FIELD.to_string()
     } else {
@@ -393,6 +403,7 @@ mod tests {
         let s = study();
         let frame = engine::build_frame(&s).expect("frame");
         let before = chart::eps_scale(&frame).expect("scale");
+        let owner_before = chart::growth_chart(&frame, NumberFormat::Point);
         // A proposal far off the scale: clamped to the edge like a drag, label exact.
         let overlays = pending_judgment_overlays(
             &s,
@@ -408,11 +419,15 @@ mod tests {
         );
         let after = chart::eps_scale(&frame).expect("scale");
         assert_eq!((before.lmin, before.lmax), (after.lmin, after.lmax));
-        // The owner chart output is identical with and without the overlay computed.
-        let a = chart::growth_chart(&frame, NumberFormat::Point);
-        let b = chart::growth_chart(&frame, NumberFormat::Point);
-        assert_eq!(a.judgment_commands, b.judgment_commands);
-        assert_eq!(a.axis_min, b.axis_min);
+        // The owner chart drawn before and after the overlay was computed is the same chart.
+        let owner_after = chart::growth_chart(&frame, NumberFormat::Point);
+        assert_eq!(
+            owner_before.judgment_commands,
+            owner_after.judgment_commands
+        );
+        assert_eq!(owner_before.judgment_y, owner_after.judgment_y);
+        assert_eq!(owner_before.axis_min, owner_after.axis_min);
+        assert_eq!(owner_before.axis_max, owner_after.axis_max);
     }
 
     #[test]
@@ -462,6 +477,20 @@ mod tests {
         assert_eq!(
             v.est_low.expect("drawn").value,
             chip(DraftField::EstimatedLowEps)
+        );
+    }
+
+    #[test]
+    fn a_proposal_finer_than_the_display_scale_shows_its_exact_digits() {
+        let s = study();
+        let got = pending_judgment_overlays(
+            &s,
+            &[fresh(&s, "judged_avg_high_pe", "20.04")],
+            NumberFormat::Comma,
+        );
+        assert_eq!(
+            got[0].value_label, "20,04",
+            "never rounded into another value"
         );
     }
 

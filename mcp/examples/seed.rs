@@ -143,12 +143,36 @@ fn run(copy: &str) -> Result<(), String> {
                      "company_name": "Seed Test SA" }),
         ),
     )];
-    if let Some(first) = list["studies"].as_array().and_then(|s| s.first()) {
-        let id = first["id"].as_str().unwrap_or_default().to_string();
+    // G3: the value / judgment proposals go to the first study with an EPS history the §1 chart
+    // can draw (three EPS years), else to the first study — never blindly to the list's head.
+    let ids: Vec<String> = list["studies"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s["id"].as_str().map(str::to_string))
+        .collect();
+    let mut chosen: Option<(String, Value)> = None;
+    for id in &ids {
         let (err, study) = c.call("get_study", json!({ "study_id": id }))?;
         if err {
             return Err(format!("get_study refused: {study}"));
         }
+        let eps_years = study["study"]["years"].as_array().map_or(0, |ys| {
+            ys.iter().filter(|y| !y["eps"]["value"].is_null()).count()
+        });
+        if eps_years >= 3 {
+            chosen = Some((id.clone(), study));
+            break;
+        }
+        if chosen.is_none() {
+            chosen = Some((id.clone(), study));
+        }
+    }
+    if let Some((id, study)) = chosen {
+        println!(
+            "proposals seeded on {}",
+            study["study"]["security_ticker"].as_str().unwrap_or("?")
+        );
         let year = study["study"]["years"]
             .as_array()
             .and_then(|y| y.last())
@@ -207,9 +231,9 @@ fn run(copy: &str) -> Result<(), String> {
                          "proposed_value": option })),
         ));
         // Story 8.6 (Decision 2): a projected EPS-growth draft is drawn as the est-high line it
-        // implies only on a study WITHOUT a direct est-high — seeded on the next such study.
-        for other in list["studies"].as_array().into_iter().flatten().skip(1) {
-            let other_id = other["id"].as_str().unwrap_or_default().to_string();
+        // implies only on a study WITHOUT a direct est-high — seeded on another such study.
+        for other_id in ids.iter().filter(|o| **o != id) {
+            let other_id = other_id.clone();
             let (err, other_study) = c.call("get_study", json!({ "study_id": other_id }))?;
             if err || !other_study["study"]["judgment"]["estimated_high_eps"].is_null() {
                 continue;

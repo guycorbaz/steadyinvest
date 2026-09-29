@@ -512,10 +512,27 @@ mod tests {
 
         let format = NumberFormat::Comma;
         let view = |study: &Study| -> String {
-            let mut out = format!("buy-zone {}\n", engine::study_in_buy_zone(study));
+            // Every alert fact the watchlist / holdings read, then every engine view `push_form`
+            // sets (G3: the §2 table, the scenario, the trace, the warnings, the verdict state).
+            let mut out = format!(
+                "buy-zone {} below-band {} zone {:?}\n",
+                engine::study_in_buy_zone(study),
+                engine::study_below_forecast_band(study),
+                engine::study_zone(study),
+            );
             if let Ok(frame) = engine::build_frame(study) {
                 let snapshot = &frame.snapshot;
                 let outputs = snapshot.outputs();
+                let years = crate::viewmodel::form::materialized_year_numbers(study);
+                out.push_str(&format!(
+                    "{:?}\n{:?}\n{:?}\n{:?}\n{} {:?}\n",
+                    engine::mgmt_computed(outputs, &years, format),
+                    engine::scenario_outcome(snapshot, format),
+                    engine::verdict_trace(study, snapshot, format),
+                    engine::plausibility(&frame.plausibility, &outputs.findings, &years),
+                    engine::study_incomplete(snapshot),
+                    engine::required_judgment_fields(snapshot),
+                ));
                 let g = growth_chart(&frame, format);
                 let p = pe_chart(&frame, &study.judgment, format);
                 out.push_str(&format!(

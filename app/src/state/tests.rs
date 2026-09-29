@@ -9125,9 +9125,11 @@ mod drafts_8_2b {
             pending(&state).is_empty(),
             "validated_undone is not pending"
         );
+        assert_eq!(facts(&state, draft).0, "validated_undone");
 
         state.redo(id).unwrap();
         assert_eq!(ai_placed_captions(&state.get_study(id).unwrap()).len(), 1);
+        assert_eq!(facts(&state, draft).0, "validated");
 
         // A value-changing write (a drag commit or a typed value go through this rail) clears it.
         state

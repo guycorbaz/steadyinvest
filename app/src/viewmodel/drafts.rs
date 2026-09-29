@@ -84,7 +84,9 @@ pub fn cell_wire(field: DraftField) -> Option<&'static str> {
 }
 
 /// A judgment field's history label and display scale; `None` for a cell field.
-fn judgment_label_display(field: DraftField) -> Option<(&'static str, Option<DisplayField>)> {
+pub(crate) fn judgment_label_display(
+    field: DraftField,
+) -> Option<(&'static str, Option<DisplayField>)> {
     Some(match field {
         DraftField::EstimatedHighEps => (LBL_EST_HIGH_EPS, Some(DisplayField::PerShare)),
         DraftField::EstimatedLowEps => (LBL_EST_LOW_EPS, Some(DisplayField::PerShare)),
