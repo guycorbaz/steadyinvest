@@ -837,11 +837,35 @@ impl JournalState {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(None);
         };
-        // Pending only: the decided record is 8.7's, never read on every poll (G3).
+        // Pending only: the decided record is the Registre's (8.7), never read on every poll (G3).
         let drafts = journal.list_pending_drafts().map_err(inbox_read_error)?;
+        self.with_studies(drafts).map(Some)
+    }
+
+    /// Read the drafts record (Story 8.7, FR77): EVERY draft of the dossier, pending included, and
+    /// the studies they target or created — read when the « Registre » is shown, never on every
+    /// poll. Same rules as [`Self::read_inbox`] (one failure fails the whole read).
+    pub fn read_record(&self) -> Result<Option<InboxData>, InboxReadError> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(None);
+        };
+        let drafts = journal.list_drafts().map_err(inbox_read_error)?;
+        self.with_studies(drafts).map(Some)
+    }
+
+    /// The studies `drafts` are about (`study_id` / `created_study_id`) and which are archived.
+    fn with_studies(
+        &self,
+        drafts: Vec<steadyinvest_persistence::DraftRecord>,
+    ) -> Result<InboxData, InboxReadError> {
+        let journal = self.journal.as_ref().expect("checked by the callers");
         let mut studies = std::collections::HashMap::new();
         let mut archived = std::collections::HashSet::new();
-        for id in drafts.iter().filter_map(|d| d.study_id) {
+        for id in drafts
+            .iter()
+            .flat_map(|d| [d.study_id, d.created_study_id])
+            .flatten()
+        {
             if studies.contains_key(&id) {
                 continue;
             }
@@ -857,10 +881,10 @@ impl JournalState {
                 studies.insert(id, study);
             }
         }
-        Ok(Some(InboxData {
+        Ok(InboxData {
             drafts,
             studies,
             archived,
-        }))
+        })
     }
 }

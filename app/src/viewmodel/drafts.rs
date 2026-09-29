@@ -517,6 +517,206 @@ pub fn inbox_rows(
     })
 }
 
+// ── The drafts record (Story 8.7 — UX spec §3.3, §5.2 « Registre »; FR77) ──
+
+/// The Registre's outcome chips (spec §3.3): none selected = every outcome (Decision 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutcomeFilter {
+    #[default]
+    All,
+    Pending,
+    Validated,
+    Undone,
+    Rejected,
+}
+
+impl OutcomeFilter {
+    /// The Slint wire key; anything unknown falls back to every outcome.
+    pub fn from_wire(s: &str) -> Self {
+        match s {
+            "pending" => Self::Pending,
+            "validated" => Self::Validated,
+            "undone" => Self::Undone,
+            "rejected" => Self::Rejected,
+            _ => Self::All,
+        }
+    }
+
+    fn admits(self, status: DraftStatus) -> bool {
+        match self {
+            Self::All => true,
+            Self::Pending => status == DraftStatus::Pending,
+            Self::Validated => status == DraftStatus::Validated,
+            Self::Undone => status == DraftStatus::ValidatedUndone,
+            Self::Rejected => status == DraftStatus::Rejected,
+        }
+    }
+}
+
+/// A record row's outcome (spec §3.2 words, spelled on the Slint side).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// « en attente » (+ its [`RowState`] word: « périmée », « cible disparue », « étude archivée »).
+    Pending,
+    /// « validée ».
+    Validated,
+    /// « validée puis annulée ».
+    Undone,
+    /// « rejetée ».
+    Rejected,
+}
+
+impl Outcome {
+    pub fn wire(self) -> i32 {
+        match self {
+            Outcome::Pending => 0,
+            Outcome::Validated => 1,
+            Outcome::Undone => 2,
+            Outcome::Rejected => 3,
+        }
+    }
+
+    fn of(status: DraftStatus) -> Self {
+        match status {
+            DraftStatus::Pending => Outcome::Pending,
+            DraftStatus::Validated => Outcome::Validated,
+            DraftStatus::ValidatedUndone => Outcome::Undone,
+            DraftStatus::Rejected => Outcome::Rejected,
+        }
+    }
+}
+
+/// One row of the « Registre »: every draft, whatever its outcome — read-only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordRow {
+    pub id: Uuid,
+    pub kind: DraftKind,
+    /// App text, as « À traiter » spells it (a note: « {TICKER} », Slint adds « · nouvelle note »;
+    /// a draft study: « {TICKER} ({DEV}) », Slint prefixes « Nouvelle étude : »).
+    pub target: String,
+    /// « Actuel » / « Proposé », app-formatted; empty for a note or a draft study.
+    pub current: String,
+    pub proposed: String,
+    pub outcome: Outcome,
+    /// A pending draft's state word (fresh / stale / target gone / archived study).
+    pub state: RowState,
+    /// The decision facts (spec §3.3 « périmée à la décision », « modifiée avant validation »).
+    pub stale_at_decision: bool,
+    pub edited: bool,
+    /// JJ/MM/AAAA, local time; `decided` is "" while pending.
+    pub submitted: String,
+    pub decided: String,
+    /// AI-written, whole (the « Détail » AiFrame).
+    pub ai_client: String,
+    pub ai_model: String,
+    pub ai_lead: String,
+    pub ai_text: String,
+}
+
+/// The Registre, read side.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RecordView {
+    pub rows: Vec<RecordRow>,
+    /// Every study some draft is about or became — the « Étude : » drop-down.
+    pub study_choices: Vec<StudyChoice>,
+    /// Every draft before the filters (the empty text vs the filter line).
+    pub unfiltered: usize,
+}
+
+/// Build the « Registre » (Story 8.7, FR77): every draft, newest submission first, filtered by
+/// kind, study (its `study_id` or the `created_study_id` of a validated draft study — Decision 4)
+/// and outcome. A draft that cannot be shown makes the whole record unavailable (the inbox rule).
+pub fn record_rows(
+    drafts: &[DraftRecord],
+    studies: &HashMap<Uuid, Study>,
+    archived: &HashSet<Uuid>,
+    format: NumberFormat,
+    kind: KindFilter,
+    study_filter: Option<Uuid>,
+    outcome: OutcomeFilter,
+) -> Result<RecordView, Unshowable> {
+    let mut all: Vec<&DraftRecord> = drafts.iter().collect();
+    all.sort_by(|a, b| {
+        b.created_at
+            .0
+            .cmp(&a.created_at.0)
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    let mut study_ids: Vec<Uuid> = Vec::new();
+    for d in &all {
+        for id in [d.study_id, d.created_study_id].into_iter().flatten() {
+            if studies.contains_key(&id) && !study_ids.contains(&id) {
+                study_ids.push(id);
+            }
+        }
+    }
+    let study_choices = study_ids
+        .iter()
+        .filter_map(|id| {
+            studies.get(id).map(|s| StudyChoice {
+                study_id: *id,
+                label: group_title(s),
+            })
+        })
+        .collect();
+    let mut rows = Vec::new();
+    for d in &all {
+        let payload = payload_of(d)?;
+        let study = d.study_id.and_then(|id| studies.get(&id));
+        let (target, current, proposed) = if d.kind == DraftKind::Study {
+            let currency = d.native_currency.clone().unwrap_or_default();
+            (
+                format!("{} ({currency})", d.security_ticker),
+                String::new(),
+                String::new(),
+            )
+        } else {
+            target_and_values(d, &payload, study, format)?
+        };
+        let state = if d.status != DraftStatus::Pending {
+            RowState::Fresh
+        } else if d.study_id.is_some_and(|id| archived.contains(&id)) {
+            RowState::Archived
+        } else {
+            match draft_freshness(study, d.kind, &payload) {
+                DraftFreshness::Fresh => RowState::Fresh,
+                DraftFreshness::Stale => RowState::Stale,
+                DraftFreshness::TargetGone(_) => RowState::TargetGone,
+            }
+        };
+        let about = |f: Uuid| d.study_id == Some(f) || d.created_study_id == Some(f);
+        if !kind.admits(d.kind)
+            || study_filter.is_some_and(|f| !about(f))
+            || !outcome.admits(d.status)
+        {
+            continue;
+        }
+        let (ai_client, ai_model, ai_lead, ai_text) = ai_fields(d, &payload, false);
+        rows.push(RecordRow {
+            id: d.id,
+            kind: d.kind,
+            target,
+            current,
+            proposed,
+            outcome: Outcome::of(d.status),
+            state,
+            stale_at_decision: d.stale_at_decision == Some(true),
+            edited: d.edited_before_validation == Some(true),
+            submitted: date_fr(&d.created_at),
+            decided: d.decided_at.as_ref().map(date_fr).unwrap_or_default(),
+            ai_client,
+            ai_model,
+            ai_lead,
+            ai_text,
+        });
+    }
+    Ok(RecordView {
+        rows,
+        study_choices,
+        unfiltered: all.len(),
+    })
+}
+
 // ── The decision dialog (Story 8.5b — UX spec §3.3 « Decision dialog », §4.2) ──
 
 /// The context line when the draft's study is not the open one (spec §3.3).
@@ -1067,6 +1267,126 @@ mod tests {
         studies.insert(a.id, a);
         studies.insert(b.id, b);
         (drafts, studies)
+    }
+
+    /// The fixture with outcomes: 1 validated (edited), 2 rejected (stale at decision), 3 still
+    /// pending, 4 a draft study validated into study 0xC, 5 validated then undone, 6 pending.
+    fn record_fixture() -> (Vec<DraftRecord>, HashMap<Uuid, Study>) {
+        let (mut drafts, mut studies) = fixture();
+        let decided = |d: &mut DraftRecord, status: DraftStatus, at: &str| {
+            d.status = status;
+            d.decided_at = Some(Timestamp(at.to_string()));
+        };
+        decided(
+            &mut drafts[0],
+            DraftStatus::Validated,
+            "2026-09-28T09:00:00Z",
+        );
+        drafts[0].edited_before_validation = Some(true);
+        drafts[0].stale_at_decision = Some(false);
+        decided(
+            &mut drafts[1],
+            DraftStatus::Rejected,
+            "2026-09-28T10:00:00Z",
+        );
+        drafts[1].stale_at_decision = Some(true);
+        decided(
+            &mut drafts[3],
+            DraftStatus::Validated,
+            "2026-09-28T11:00:00Z",
+        );
+        drafts[3].created_study_id = Some(Uuid::from_u128(0xC));
+        drafts[3].edited_before_validation = Some(false);
+        decided(
+            &mut drafts[4],
+            DraftStatus::ValidatedUndone,
+            "2026-09-28T12:00:00Z",
+        );
+        let c = study(0xC, "AAPL");
+        studies.insert(c.id, c);
+        (drafts, studies)
+    }
+
+    fn record_view(kind: KindFilter, study: Option<u128>, outcome: OutcomeFilter) -> RecordView {
+        let (drafts, studies) = record_fixture();
+        record_rows(
+            &drafts,
+            &studies,
+            &HashSet::new(),
+            NumberFormat::Comma,
+            kind,
+            study.map(Uuid::from_u128),
+            outcome,
+        )
+        .expect("builds")
+    }
+
+    #[test]
+    fn the_record_lists_every_draft_newest_first_with_its_outcome() {
+        let view = record_view(KindFilter::All, None, OutcomeFilter::All);
+        let ids: Vec<u128> = view.rows.iter().map(|r| r.id.as_u128()).collect();
+        assert_eq!(
+            ids,
+            vec![4, 3, 6, 5, 2, 1],
+            "every draft, newest submission first"
+        );
+        assert_eq!(view.unfiltered, 6);
+        let by_id = |n: u128| view.rows.iter().find(|r| r.id.as_u128() == n).unwrap();
+        assert_eq!(by_id(1).outcome, Outcome::Validated);
+        assert!(by_id(1).edited && !by_id(1).stale_at_decision);
+        assert_eq!(by_id(2).outcome, Outcome::Rejected);
+        assert!(by_id(2).stale_at_decision, "« périmée à la décision »");
+        assert_eq!(by_id(5).outcome, Outcome::Undone);
+        assert_eq!(by_id(3).outcome, Outcome::Pending);
+        assert_eq!(by_id(5).decided, "28/09/2026");
+        assert_eq!(by_id(3).decided, "", "pending: no decision date");
+        assert_eq!(by_id(4).target, "AAPL (USD)");
+        assert_eq!(
+            by_id(4).ai_lead,
+            "Apple Inc.",
+            "the whole AI text, for « Détail »"
+        );
+        // A pending draft keeps its state word; a decided one has none.
+        assert_eq!(by_id(6).state, RowState::Fresh);
+        assert_eq!(by_id(1).state, RowState::Fresh);
+    }
+
+    #[test]
+    fn the_record_filters_by_kind_study_and_outcome() {
+        let ids = |v: RecordView| v.rows.iter().map(|r| r.id.as_u128()).collect::<Vec<_>>();
+        assert_eq!(
+            ids(record_view(KindFilter::All, None, OutcomeFilter::Validated)),
+            vec![4, 1]
+        );
+        assert_eq!(
+            ids(record_view(KindFilter::All, None, OutcomeFilter::Undone)),
+            vec![5]
+        );
+        assert_eq!(
+            ids(record_view(KindFilter::All, None, OutcomeFilter::Pending)),
+            vec![3, 6]
+        );
+        // Decision 4: a study's record includes the draft study it was created from.
+        assert_eq!(
+            ids(record_view(KindFilter::All, Some(0xC), OutcomeFilter::All)),
+            vec![4]
+        );
+        assert_eq!(
+            ids(record_view(KindFilter::Studies, None, OutcomeFilter::All)),
+            vec![4]
+        );
+        let view = record_view(KindFilter::All, None, OutcomeFilter::All);
+        let labels: Vec<&str> = view
+            .study_choices
+            .iter()
+            .map(|c| c.label.as_str())
+            .collect();
+        assert_eq!(labels, vec!["AAPL (CHF)", "ROG (CHF)", "NESN (CHF)"]);
+        // Filters never change `unfiltered`.
+        assert_eq!(
+            record_view(KindFilter::Notes, None, OutcomeFilter::Rejected).unfiltered,
+            6
+        );
     }
 
     #[test]

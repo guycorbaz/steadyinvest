@@ -1818,8 +1818,44 @@ export struct DraftRow {
     ai-text: string,
 }
 
+// Story 8.7 — one row of the « Registre » (every draft, whatever its outcome; read-only). App
+// text in every field but the `ai-*` ones (read ONLY inside an `AiFrame`).
+export struct RecordRow {
+    id: string,
+    // "study" | "note" | "cell" | "judgment"
+    kind: string,
+    // As a DraftRow spells it (the note / draft-study prefixes are Slint's).
+    target: string,
+    current: string,
+    proposed: string,
+    // 0 « en attente » · 1 « validée » · 2 « validée puis annulée » · 3 « rejetée »
+    outcome: int,
+    // A pending draft's word: 0 none · 1 « périmée » · 2 « cible disparue » · 3 « étude archivée »
+    state: int,
+    stale-at-decision: bool,
+    edited: bool,
+    // JJ/MM/AAAA; `decided` is "" while pending.
+    submitted: string,
+    decided: string,
+    ai-client: string,
+    ai-model: string,
+    ai-lead: string,
+    ai-text: string,
+}
+
 export global Drafts {
     in-out property <[DraftRow]> rows;
+    // Story 8.7: the view chip — "inbox" (« À traiter ») | "record" (« Registre »).
+    in-out property <string> view: "inbox";
+    // The Registre: its rows, its outcome chip ("all" | "pending" | "validated" | "undone" |
+    // "rejected"), every draft before the filters, and a failed read (⊘, never an empty list).
+    in-out property <[RecordRow]> record-rows;
+    in-out property <string> outcome-filter: "all";
+    in-out property <int> record-unfiltered;
+    in-out property <bool> record-failed;
+    in-out property <string> record-failure-cause;
+    callback pick-view(string);
+    callback pick-outcome(string);
     // Pending drafts in the dossier (the rail label); draft studies among them (the Études band).
     in-out property <int> pending-count;
     in-out property <int> draft-study-count;

@@ -38,9 +38,9 @@ use crate::viewmodel::ai_lines::{
     AiJudgmentsView, AiLineView, JudgmentOverlay, ai_judgments, pending_judgment_overlays,
 };
 use crate::viewmodel::drafts::{
-    DecisionView, INBOX_CAUSE_UNREADABLE_DRAFT, InboxRow, InboxView, KindFilter, PendingCounts,
-    PollAction, PollState, STUDY_FILTER_ALL, StudyChoice, dialog_view, inbox_rows,
-    option_wire_for_label, pending_counts,
+    DecisionView, INBOX_CAUSE_UNREADABLE_DRAFT, InboxRow, InboxView, KindFilter, OutcomeFilter,
+    PendingCounts, PollAction, PollState, RecordView, STUDY_FILTER_ALL, StudyChoice, dialog_view,
+    inbox_rows, option_wire_for_label, pending_counts, record_rows,
 };
 use crate::viewmodel::engine::StudyFrame;
 use crate::viewmodel::format::NumberFormat;
@@ -49,7 +49,7 @@ use crate::wiring::dialog;
 use crate::wiring::push::push_form;
 use crate::{
     AiChip, AiJudgments, AiLine, Dialog, DraftDecision, DraftRow, Drafts, MainWindow, Prefs,
-    Studies,
+    RecordRow, Studies,
 };
 
 /// The poll period (arch A9: new drafts within ~3 s).
@@ -73,6 +73,9 @@ struct InboxCache {
     /// The open study's pending judgment drafts as last drawn (ids + payloads): a read that changes
     /// them re-draws the open study's overlay.
     drawn: Vec<(Uuid, String)>,
+    /// Story 8.7: the « Étude : » choices of the Registre (every study some draft is about or
+    /// became) — the drop-down lists the active view's.
+    record_choices: Vec<StudyChoice>,
 }
 
 thread_local! {
@@ -609,10 +612,11 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
     };
     let counts = pending_counts(&drafts, &archived);
     let kind = KindFilter::from_wire(drafts_global.get_kind_filter().as_str());
-    // The « Étude : » pick survives a re-read while that study still has pending drafts.
-    let study_filter = INBOX
-        .with(|c| c.borrow().study_filter)
-        .filter(|id| drafts.iter().any(|d| d.study_id == Some(*id)));
+    let inbox_view = drafts_global.get_view() != "record";
+    // The « Étude : » pick survives a re-read while that study still has pending drafts — in
+    // « À traiter »; the Registre keeps it (its study may have decided drafts only, Story 8.7).
+    let picked = INBOX.with(|c| c.borrow().study_filter);
+    let study_filter = picked.filter(|id| drafts.iter().any(|d| d.study_id == Some(*id)));
     let view: InboxView = match inbox_rows(
         &drafts,
         &studies,
@@ -654,7 +658,7 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
             .cloned()
             .collect();
         cache.choices = view.study_choices.clone();
-        cache.study_filter = study_filter;
+        cache.study_filter = if inbox_view { study_filter } else { picked };
         cache.counts = counts;
         let unchanged = cache
             .shown
@@ -672,15 +676,19 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
     });
     // An unchanged re-read rebuilds no model (G3): the rows' focus and scroll stay put.
     if !unchanged {
-        let options: Vec<SharedString> = labels.iter().map(|l| l.as_str().into()).collect();
-        drafts_global.set_study_options(ModelRc::new(VecModel::from(options)));
+        if inbox_view {
+            let options: Vec<SharedString> = labels.iter().map(|l| l.as_str().into()).collect();
+            drafts_global.set_study_options(ModelRc::new(VecModel::from(options)));
+        }
         drafts_global.set_rows(ModelRc::new(VecModel::from(to_slint(&view))));
     }
-    let value = study_filter
-        .and_then(|id| view.study_choices.iter().find(|c| c.study_id == id))
-        .map_or(STUDY_FILTER_ALL, |c| c.label.as_str())
-        .to_string();
-    drafts_global.set_study_value(value.into());
+    if inbox_view {
+        let value = study_filter
+            .and_then(|id| view.study_choices.iter().find(|c| c.study_id == id))
+            .map_or(STUDY_FILTER_ALL, |c| c.label.as_str())
+            .to_string();
+        drafts_global.set_study_value(value.into());
+    }
     drafts_global.set_pending_count(total as i32);
     drafts_global.set_draft_study_count(draft_studies as i32);
     drafts_global.set_unfiltered_count(view.unfiltered as i32);
@@ -689,6 +697,111 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
     apply_open_study(ui, open_study);
     apply_row_counts(ui);
     redraw_open_if_changed(ui, state);
+    if !inbox_view {
+        push_record(ui, state);
+    }
+}
+
+thread_local! {
+    /// The Registre rows' model, kept and synced in place (8.6 G3 lesson): a re-read on a poll
+    /// keeps the row instances — their « Détail » state and the keyboard focus.
+    static RECORD_ROWS: Rc<VecModel<RecordRow>> = Rc::new(VecModel::default());
+}
+
+fn record_to_slint(v: &RecordView) -> Vec<RecordRow> {
+    v.rows
+        .iter()
+        .map(|r| RecordRow {
+            id: r.id.to_string().into(),
+            kind: kind_wire(r.kind).into(),
+            target: r.target.clone().into(),
+            current: r.current.clone().into(),
+            proposed: r.proposed.clone().into(),
+            outcome: r.outcome.wire(),
+            state: r.state.wire(),
+            stale_at_decision: r.stale_at_decision,
+            edited: r.edited,
+            submitted: r.submitted.clone().into(),
+            decided: r.decided.clone().into(),
+            // AI-written: read in Slint ONLY inside an AiFrame (UX spec §4.1).
+            ai_client: r.ai_client.clone().into(),
+            ai_model: r.ai_model.clone().into(),
+            ai_lead: r.ai_lead.clone().into(),
+            ai_text: r.ai_text.clone().into(),
+        })
+        .collect()
+}
+
+/// Read and push the « Registre » (Story 8.7, FR77) — only while it is shown (the view chip, a
+/// `data_version` move through `push_drafts`, a filter): every draft, filtered by the shared kind
+/// and study picks and the outcome chip. A failed read is the ⊘ band, never an empty list.
+pub(crate) fn push_record(ui: &MainWindow, state: &JournalState) {
+    let drafts_global = ui.global::<Drafts>();
+    let fail = |cause: &str| {
+        drafts_global.set_record_failed(true);
+        drafts_global.set_record_failure_cause(cause.into());
+        RECORD_ROWS.with(|m| m.set_vec(Vec::new()));
+        drafts_global.set_record_rows(RECORD_ROWS.with(|m| ModelRc::from(m.clone())));
+    };
+    let data = match state.read_record() {
+        Ok(data) => data,
+        Err(error) => return fail(error.cause.unwrap_or("")),
+    };
+    let (drafts, studies, archived) = match data {
+        Some(d) => (d.drafts, d.studies, d.archived),
+        None => Default::default(),
+    };
+    let kind = KindFilter::from_wire(drafts_global.get_kind_filter().as_str());
+    let outcome = OutcomeFilter::from_wire(drafts_global.get_outcome_filter().as_str());
+    let study_filter = INBOX.with(|c| c.borrow().study_filter);
+    let view = match record_rows(
+        &drafts,
+        &studies,
+        &archived,
+        number_format(ui),
+        kind,
+        study_filter,
+        outcome,
+    ) {
+        Ok(view) => view,
+        Err(problem) => {
+            tracing::warn!(
+                "draft {} cannot be shown in the record: {}",
+                problem.draft_id,
+                problem.detail
+            );
+            return fail(INBOX_CAUSE_UNREADABLE_DRAFT);
+        }
+    };
+    let labels: Vec<SharedString> = std::iter::once(SharedString::from(STUDY_FILTER_ALL))
+        .chain(view.study_choices.iter().map(|c| c.label.as_str().into()))
+        .collect();
+    drafts_global.set_study_options(ModelRc::new(VecModel::from(labels)));
+    let value = study_filter
+        .and_then(|id| view.study_choices.iter().find(|c| c.study_id == id))
+        .map_or(STUDY_FILTER_ALL, |c| c.label.as_str())
+        .to_string();
+    drafts_global.set_study_value(value.into());
+    INBOX.with(|c| c.borrow_mut().record_choices = view.study_choices.clone());
+    let rows = record_to_slint(&view);
+    RECORD_ROWS.with(|model| {
+        let keep = rows.len().min(model.row_count());
+        for (i, row) in rows.iter().enumerate().take(keep) {
+            if model.row_data(i).as_ref() != Some(row) {
+                model.set_row_data(i, row.clone());
+            }
+        }
+        while model.row_count() > rows.len() {
+            model.remove(model.row_count() - 1);
+        }
+        for row in rows.into_iter().skip(keep) {
+            model.push(row);
+        }
+        drafts_global.set_record_rows(ModelRc::from(model.clone()));
+    });
+    drafts_global.set_record_unfiltered(view.unfiltered as i32);
+    drafts_global.set_record_failure_cause(SharedString::new());
+    drafts_global.set_record_failed(false);
 }
 
 /// Back to « Toutes » and « Toutes les études » (G3): on a dossier change and when the reader
@@ -696,7 +809,11 @@ pub(crate) fn push_drafts(ui: &MainWindow, state: &JournalState) {
 /// path, which sets them.
 pub(crate) fn reset_filters(ui: &MainWindow) {
     INBOX.with(|cache| cache.borrow_mut().study_filter = None);
-    ui.global::<Drafts>().set_kind_filter("all".into());
+    let drafts = ui.global::<Drafts>();
+    drafts.set_kind_filter("all".into());
+    // Story 8.7: back to « À traiter », every outcome.
+    drafts.set_view("inbox".into());
+    drafts.set_outcome_filter("all".into());
 }
 
 /// A dossier change (open, create, recent, restore, a lost journal): forget the poller's version,
@@ -721,6 +838,27 @@ pub(crate) fn forget_dossier(ui: &MainWindow) {
 /// propositions ».
 pub(crate) fn wire_drafts(ui: &MainWindow, s: &Session) {
     let drafts = ui.global::<Drafts>();
+    // Story 8.7: the view chips and the Registre's outcome chips.
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&s.journal_state);
+        drafts.on_pick_view(move |view| {
+            let ui = ui_weak.unwrap();
+            ui.global::<Drafts>().set_view(view);
+            // The study pick survives when the other view lists that study (push re-checks).
+            INBOX.with(|cache| cache.borrow_mut().shown = None);
+            push_drafts(&ui, &journal_state.borrow());
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(&s.journal_state);
+        drafts.on_pick_outcome(move |outcome| {
+            let ui = ui_weak.unwrap();
+            ui.global::<Drafts>().set_outcome_filter(outcome);
+            push_record(&ui, &journal_state.borrow());
+        });
+    }
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(&s.journal_state);
@@ -743,10 +881,15 @@ pub(crate) fn wire_drafts(ui: &MainWindow, s: &Session) {
             INBOX.with(|cache| {
                 let mut cache = cache.borrow_mut();
                 // 0 = « Toutes les études »; i → the (i-1)-th study, by identity (never by label).
+                let choices = if ui.global::<Drafts>().get_view() == "record" {
+                    &cache.record_choices
+                } else {
+                    &cache.choices
+                };
                 cache.study_filter = usize::try_from(index)
                     .ok()
                     .and_then(|i| i.checked_sub(1))
-                    .and_then(|i| cache.choices.get(i))
+                    .and_then(|i| choices.get(i))
                     .map(|c| c.study_id);
             });
             push_drafts(&ui, &journal_state.borrow());

@@ -10,7 +10,7 @@
 // « Valider… », the prefilled create form directly.
 
 import { Tokens } from "../tokens.slint";
-import { Drafts, DraftRow } from "../state.slint";
+import { Drafts, DraftRow, RecordRow } from "../state.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { Dropdown } from "../components/dropdown.slint";
 import { PanelCard } from "../components/panel_card.slint";
@@ -143,6 +143,102 @@ component DraftRowActivator inherits Rectangle {
     }
 }
 
+// Story 8.7 — one row of the « Registre » (spec §5.2): submitted date, target, outcome word (+ the
+// decision flags), decided date; « Détail » expands the AI's comment and what it proposed inside an
+// AiFrame. Read-only: nothing here decides.
+component RecordRowView inherits VerticalLayout {
+    in property <RecordRow> entry;
+    property <bool> expanded: false;
+    spacing: Tokens.space-4;
+    padding-top: Tokens.space-4;
+    padding-bottom: Tokens.space-4;
+    HorizontalLayout {
+        spacing: Tokens.space-12;
+        Text {
+            text: root.entry.submitted;
+            min-width: 96px;
+            color: Tokens.text-mid;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.entry.kind == "note" ? @tr("{} · nouvelle note", root.entry.target)
+                : root.entry.kind == "study" ? @tr("Nouvelle étude : {}", root.entry.target)
+                : root.entry.target;
+            // Columns by stretch alone (a zero preferred width), so they align row to row.
+            preferred-width: 0;
+            min-width: 0;
+            horizontal-stretch: 3;
+            color: Tokens.text-high;
+            font-size: Tokens.font-body;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            text: (root.entry.outcome == 0 ? @tr("en attente")
+                    : root.entry.outcome == 1 ? @tr("validée")
+                    : root.entry.outcome == 2 ? @tr("validée puis annulée")
+                    : @tr("rejetée"))
+                + (root.entry.outcome == 0 && root.entry.state == 1 ? @tr(" · périmée")
+                    : root.entry.outcome == 0 && root.entry.state == 2 ? @tr(" · cible disparue")
+                    : root.entry.outcome == 0 && root.entry.state == 3 ? @tr(" · étude archivée") : "")
+                + (root.entry.stale-at-decision ? @tr(" · périmée à la décision") : "")
+                + (root.entry.edited ? @tr(" · modifiée avant validation") : "");
+            preferred-width: 0;
+            min-width: 0;
+            horizontal-stretch: 2;
+            color: Tokens.text-mid;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.entry.decided;
+            min-width: 96px;
+            color: Tokens.text-mid;
+            font-family: Tokens.font-numeric;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
+        }
+        ActionButton {
+            compact: true;
+            label: root.expanded ? @tr("Masquer le détail") : @tr("Détail");
+            // One width for both labels: the columns never shift when a row opens.
+            min-width: 180px;
+            clicked => { root.expanded = !root.expanded; }
+        }
+    }
+    if root.expanded && (root.entry.kind == "cell" || root.entry.kind == "judgment"): Text {
+        text: @tr("Actuel {} → Proposé {}", root.entry.current, root.entry.proposed);
+        color: Tokens.text-high;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-caption;
+        wrap: word-wrap;
+    }
+    if root.expanded: AiFrame {
+        ai-client: root.entry.ai-client;
+        ai-model: root.entry.ai-model;
+        ai-lead: root.entry.ai-lead;
+        ai-text: root.entry.ai-text;
+        submitted: root.entry.submitted;
+    }
+}
+
+// One view chip (Story 8.7): « À traiter » · « Registre ».
+component ViewChip inherits ChoiceChip {
+    in property <string> key;
+    selected: Drafts.view == root.key;
+    activated => { Drafts.pick-view(root.key); }
+}
+
+// One outcome chip of the Registre (none selected = every outcome; a second press clears it).
+component OutcomeChip inherits ChoiceChip {
+    in property <string> key;
+    selected: Drafts.outcome-filter == root.key;
+    activated => { Drafts.pick-outcome(Drafts.outcome-filter == root.key ? "all" : root.key); }
+}
+
 // One kind chip — selected from the `Drafts` global, activating `pick-kind(key)`.
 component KindChip inherits ChoiceChip {
     in property <string> key;
@@ -165,8 +261,16 @@ export component PropositionsScreen inherits Rectangle {
                 title: @tr("Propositions");
                 subtitle: @tr("Proposées par une IA via le serveur MCP ; aucune n'est appliquée sans votre validation.");
 
-                // The kind chips (spec §3.3). The « Registre » view chip arrives with 8.7. On a
-                // narrow window (720–870 px) they wrap to two rows (G3).
+                // Story 8.7: the view chips (spec §3.3) — « À traiter » never reads « En attente »,
+                // so it cannot be confused with the Registre's outcome chip.
+                HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    ViewChip { key: "inbox"; label: @tr("À traiter"); }
+                    ViewChip { key: "record"; label: @tr("Registre"); }
+                }
+                // The kind chips (spec §3.3), both views. On a narrow window (720–870 px) they
+                // wrap to two rows (G3).
                 if !root.narrow: HorizontalLayout {
                     spacing: Tokens.space-8;
                     alignment: start;
@@ -212,37 +316,77 @@ export component PropositionsScreen inherits Rectangle {
                     }
                 }
 
-                if Drafts.read-failed: StatusBand {
+                if Drafts.view == "record": HorizontalLayout {
+                    spacing: Tokens.space-8;
+                    alignment: start;
+                    OutcomeChip { key: "pending"; label: @tr("En attente"); }
+                    OutcomeChip { key: "validated"; label: @tr("Validées"); }
+                    OutcomeChip { key: "undone"; label: @tr("Validées puis annulées"); }
+                    OutcomeChip { key: "rejected"; label: @tr("Rejetées"); }
+                }
+
+                // ── « Registre » (Story 8.7) ──
+                if Drafts.view == "record" && Drafts.record-failed: StatusBand {
+                    icon: "⊘";
+                    text: Drafts.record-failure-cause != ""
+                        ? @tr("Les propositions n'ont pas pu être lues ; la liste est indisponible ({}).", Drafts.record-failure-cause)
+                        : @tr("Les propositions n'ont pas pu être lues ; la liste est indisponible.");
+                }
+                if Drafts.view == "record" && !Drafts.record-failed && Drafts.record-unfiltered == 0: Text {
+                    text: @tr("Aucune proposition dans ce dossier.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+                if Drafts.view == "record" && !Drafts.record-failed && Drafts.record-unfiltered > 0 && Drafts.record-rows.length == 0: Text {
+                    text: @tr("Aucune proposition ne correspond à ce filtre.");
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+                if Drafts.view == "record": VerticalLayout {
+                    spacing: 0;
+                    for r in Drafts.record-rows: VerticalLayout {
+                        Rectangle { height: Tokens.border; background: Tokens.separator; }
+                        RecordRowView { entry: r; }
+                    }
+                }
+
+                // ── « À traiter » ──
+                if Drafts.view == "inbox" && Drafts.read-failed: StatusBand {
                     icon: "⊘";
                     text: Drafts.failure-cause != ""
                         ? @tr("Les propositions n'ont pas pu être lues ; la liste est indisponible ({}).", Drafts.failure-cause)
                         : @tr("Les propositions n'ont pas pu être lues ; la liste est indisponible.");
                 }
-                if !Drafts.read-failed && Drafts.read-only: StatusBand {
+                if Drafts.view == "inbox" && !Drafts.read-failed && Drafts.read-only: StatusBand {
                     icon: "◦";
                     text: @tr("Dossier en lecture seule : les propositions sont consultables, aucune décision n'est possible.");
                 }
                 // Story 8.5b: a decision's outcome (the F4 slot).
-                if Drafts.notice != "": Text {
+                if Drafts.view == "inbox" && Drafts.notice != "": Text {
                     text: Drafts.notice;
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     wrap: word-wrap;
                 }
-                if !Drafts.read-failed && Drafts.unfiltered-count == 0: Text {
+                if Drafts.view == "inbox" && !Drafts.read-failed && Drafts.unfiltered-count == 0: Text {
                     text: @tr("Aucune proposition à traiter. Une IA enregistrée comme client MCP peut en déposer ici ; rien n'est appliqué sans votre validation.");
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     wrap: word-wrap;
                 }
                 // G3: drafts wait, but the kind / study filters keep none of them.
-                if !Drafts.read-failed && Drafts.unfiltered-count > 0 && Drafts.rows.length == 0: Text {
+                if Drafts.view == "inbox" && !Drafts.read-failed && Drafts.unfiltered-count > 0 && Drafts.rows.length == 0: Text {
                     text: @tr("Aucune proposition ne correspond à ce filtre.");
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
                     wrap: word-wrap;
                 }
 
+                if Drafts.view == "inbox": VerticalLayout {
+                // The card's own spacing between rows (the rows were its direct children before).
+                spacing: Tokens.space-12;
                 for r in Drafts.rows: VerticalLayout {
                     spacing: Tokens.space-8;
                     if r.group-start: VerticalLayout {
@@ -257,6 +401,7 @@ export component PropositionsScreen inherits Rectangle {
                         }
                     }
                     DraftRowActivator { draft: r; }
+                }
                 }
             }
         }
