@@ -192,6 +192,18 @@ fn show_decision(
     Ok(())
 }
 
+/// Whether `id` is a pending judgment draft of the inbox's last read — i.e. whether its chip is
+/// still drawn on the open study (Story 8.6: the focus returns to it, else to the study).
+pub(crate) fn is_pending_judgment(id: &str) -> bool {
+    INBOX.with(|cache| {
+        cache
+            .borrow()
+            .judgments
+            .iter()
+            .any(|d| d.id.to_string() == id)
+    })
+}
+
 /// A row's activation (Story 8.5b): the decision dialog of that draft, or « Action refusée » with
 /// the reason (the draft gone or decided meanwhile, a read failure) and the inbox re-read.
 pub(crate) fn open_decision(ui: &MainWindow, state: &JournalState, id: Uuid) {

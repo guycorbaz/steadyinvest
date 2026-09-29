@@ -27,7 +27,13 @@ export component PeHistoryChart inherits Rectangle {
     property <length> plot-h: root.chart.chart-h * 1px;
     property <length> strip-w: Tokens.space-48;
 
-    min-height: root.plot-h + Tokens.row-height + 2 * Tokens.chart-pad;
+    // The layout below is under an `if`, so its rows are summed here: the « Ajuster : » row, the
+    // plot, the legend and (Story 8.6) the « Propositions de l'IA : » chip row when present — each
+    // after the layout's spacing. The legend was not counted before 8.6 and slid under what follows.
+    property <length> legend-h: 24px;
+    property <length> chip-row-h: Studies.draft-judgments.pe-chips.length > 0 ? 32px + Tokens.space-4 : 0px;
+    min-height: Tokens.row-height + Tokens.space-4 + root.plot-h + Tokens.space-4 + root.legend-h
+        + root.chip-row-h + 2 * Tokens.chart-pad;
 
     // ── Calm empty state (no usable P/E history) — constant geometry, nothing drawn. ──
     if !root.chart.available: Rectangle {
@@ -177,6 +183,7 @@ export component PeHistoryChart inherits Rectangle {
                 }
                 AiChartLine {
                     line: Studies.draft-judgments.pe-low;
+                    other: Studies.draft-judgments.pe-high;
                     chart-h: root.chart.chart-h;
                     end-x: root.chart.chart-w * 1px;
                     strip-w: root.strip-w;
@@ -189,6 +196,7 @@ export component PeHistoryChart inherits Rectangle {
                 }
                 AiChartCaption {
                     date: Studies.draft-judgments.cap-low-pe;
+                    above: false;
                     line-y: root.chart.judged-low-y;
                     end-x: root.chart.chart-w * 1px;
                     strip-w: root.strip-w;
@@ -273,6 +281,7 @@ export component PeHistoryChart inherits Rectangle {
 
         // ── Legend: the historical P/E channel vs the judged levels. ──
         HorizontalLayout {
+            height: root.legend-h;
             spacing: Tokens.space-16;
             alignment: start;
             padding-left: Tokens.space-32 + Tokens.space-8;

@@ -1841,4 +1841,7 @@ export global Drafts {
     // (bumping `return-request`).
     in-out property <string> return-row;
     in-out property <int> return-request;
+    // Story 8.6: that row is no longer a pending judgment proposal (decided) — its chip is gone, so
+    // the open study takes the focus back (Ctrl+Z / Ctrl+Y keep working).
+    in-out property <bool> return-gone;
 }

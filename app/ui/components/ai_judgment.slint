@@ -57,15 +57,30 @@ export component AiCaption inherits Text {
     font-size: Tokens.font-caption;
 }
 
-// A pending AI line on a chart plot: the dotted path, the hollow end marker and « IA {valeur} » to
-// the left of the drag strip (never under the owner's grip). Place it inside the plot rectangle,
-// AFTER the owner lines; it has no TouchArea (inert, AC 5).
+// A pending AI line on a chart plot: the dotted path, the hollow end marker and « IA {valeur} » —
+// to the left of the drag strip (never under the owner's grip) under a level line (§3), or right of
+// the strip beside its marker when `label-right` (§1, where the fan's sloped lines would cross it).
+// Place it inside the plot rectangle, AFTER the owner lines; it has no TouchArea (inert, AC 5).
 export component AiChartLine inherits Rectangle {
     in property <AiLine> line;
     in property <float> chart-h;
     // The x (viewbox = px) of the line's right end, and the drag strip's width the label keeps clear of.
     in property <length> end-x;
     in property <length> strip-w;
+    // The chart's OTHER AI line, when this label must keep clear of its label (set on the low line
+    // only): two proposals clamped to one edge would otherwise print their labels on top of each other.
+    in property <AiLine> other;
+    in property <bool> label-right: false;
+    property <length> label-h: 16px;
+    property <length> own-y: root.base-y(root.line.y);
+    property <length> other-y: root.base-y(root.other.y);
+    property <bool> collides: root.other.visible && abs(root.own-y - root.other-y) < root.label-h;
+    property <length> label-y: !root.collides ? root.own-y
+        : root.other-y + 2 * root.label-h <= root.height ? root.other-y + root.label-h
+        : root.other-y - root.label-h;
+    pure function base-y(y: float) -> length {
+        clamp(root.label-right ? y * 1px - root.label-h / 2 : y * 1px + Tokens.space-4, 0px, root.height - root.label-h)
+    }
     x: 0;
     y: 0;
     width: 100%;
@@ -99,18 +114,25 @@ export component AiChartLine inherits Rectangle {
         color: Tokens.text-mid;
         font-family: Tokens.font-numeric;
         font-size: Tokens.font-caption;
-        x: max(0px, min(root.end-x, root.width) - root.strip-w / 2 - self.width - Tokens.space-4);
-        y: clamp(root.line.y * 1px + Tokens.space-4, 0px, root.height - self.height);
+        x: root.label-right
+            ? max(0px, min(root.end-x + root.strip-w / 2 + Tokens.space-4, root.width - self.width))
+            : max(0px, min(root.end-x, root.width) - root.strip-w / 2 - self.width - Tokens.space-4);
+        height: root.label-h;
+        vertical-alignment: center;
+        y: root.label-y;
     }
 }
 
-// A validated AI judgment's caption at its line's end on a chart (AC 6): under the owner's line,
+// A validated AI judgment's caption at its line's end on a chart (AC 6): beside the owner's line,
 // left of the drag strip. `line-y < 0` (the owner line not drawn) or no date → nothing.
 export component AiChartCaption inherits Rectangle {
     in property <string> date;
     in property <float> line-y;
     in property <length> end-x;
     in property <length> strip-w;
+    // Above a high line (it rises toward its end on §1), below a low one (it falls): the caption
+    // then stays clear of its own line on its whole width.
+    in property <bool> above: true;
     x: 0;
     y: 0;
     width: 100%;
@@ -118,6 +140,7 @@ export component AiChartCaption inherits Rectangle {
     if root.date != "" && root.line-y >= 0.0: AiCaption {
         date: root.date;
         x: max(0px, min(root.end-x, root.width) - root.strip-w / 2 - self.width - Tokens.space-4);
-        y: clamp(root.line-y * 1px - self.height - Tokens.space-4, 0px, root.height - self.height);
+        y: clamp(root.above ? root.line-y * 1px - self.height - Tokens.space-4 : root.line-y * 1px + Tokens.space-4,
+            0px, root.height - self.height);
     }
 }

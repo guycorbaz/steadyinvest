@@ -85,7 +85,13 @@ export component GrowthChart inherits Rectangle {
     // `JudgmentField` remains the precise keyboard path).
     property <length> arrow-key-step: 10px;
 
-    min-height: root.plot-h + Tokens.row-height + 2 * Tokens.chart-pad;
+    // The layout below is under an `if`, so its rows are summed here: the « Ajuster : » row, the
+    // plot, the legend and (Story 8.6) the « Propositions de l'IA : » chip row when present — each
+    // after the layout's spacing. The legend was not counted before 8.6 and slid under what follows.
+    property <length> legend-h: 24px;
+    property <length> chip-row-h: Studies.draft-judgments.growth-chips.length > 0 ? 32px + Tokens.space-4 : 0px;
+    min-height: Tokens.row-height + Tokens.space-4 + root.plot-h + Tokens.space-4 + root.legend-h
+        + root.chip-row-h + 2 * Tokens.chart-pad;
 
     // ── Calm empty state (no plottable years) — constant geometry, nothing drawn ──
     if !root.chart.available: Rectangle {
@@ -279,12 +285,15 @@ export component GrowthChart inherits Rectangle {
             //    caption of a validated one at its line's end. ──
             AiChartLine {
                 line: Studies.draft-judgments.est-high;
+                label-right: true;
                 chart-h: root.chart.chart-h;
                 end-x: root.chart.judgment-x * 1px;
                 strip-w: root.strip-w;
             }
             AiChartLine {
                 line: Studies.draft-judgments.est-low;
+                label-right: true;
+                other: Studies.draft-judgments.est-high;
                 chart-h: root.chart.chart-h;
                 end-x: root.chart.judgment-x * 1px;
                 strip-w: root.strip-w;
@@ -297,6 +306,7 @@ export component GrowthChart inherits Rectangle {
             }
             AiChartCaption {
                 date: Studies.draft-judgments.cap-est-low;
+                above: false;
                 line-y: root.chart.judgment-low-y;
                 end-x: root.chart.judgment-x * 1px;
                 strip-w: root.strip-w;
@@ -411,6 +421,7 @@ export component GrowthChart inherits Rectangle {
         //    independently-scaled curves are identifiable (only the EPS scale is numbered on the side
         //    axis; Sales/Price live on their own scales). ──
         HorizontalLayout {
+            height: root.legend-h;
             spacing: Tokens.space-16;
             alignment: start;
             padding-left: Tokens.space-32 + Tokens.space-8;

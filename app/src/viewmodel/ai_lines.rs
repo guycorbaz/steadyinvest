@@ -189,16 +189,21 @@ pub fn ai_judgments(
         DraftValue::Number(m) => Some(m.as_decimal()),
         DraftValue::Option(_) => None,
     };
-    let eps_line = |value: Decimal| {
+    // A direct proposal's line label is its chip's value (same digits on the chart and in the row);
+    // the implied est-high of a growth proposal is formatted as the axis unit (Decision 5).
+    let eps_line = |value: Decimal, label: Option<&str>| {
         eps.as_ref().map(|s| AiLineView {
             geometry: chart::ai_growth_geometry(s, value.to_f64().unwrap_or(0.0)),
-            value: format_scaled(value, DisplayField::PerShare, format),
+            value: label.map_or_else(
+                || format_scaled(value, DisplayField::PerShare, format),
+                str::to_string,
+            ),
         })
     };
-    let pe_line = |value: Decimal| {
+    let pe_line = |value: Decimal, label: &str| {
         pe.map(|axis| AiLineView {
             geometry: chart::ai_pe_geometry(axis, value.to_f64().unwrap_or(0.0)),
-            value: format_scaled(value, DisplayField::PeRatio, format),
+            value: label.to_string(),
         })
     };
     let est_high_pending = overlays
@@ -207,11 +212,11 @@ pub fn ai_judgments(
     for o in overlays {
         let drawn = match o.field {
             DraftField::EstimatedHighEps => {
-                view.est_high = number(o).and_then(eps_line);
+                view.est_high = number(o).and_then(|v| eps_line(v, Some(&o.value_label)));
                 view.est_high.is_some()
             }
             DraftField::EstimatedLowEps => {
-                view.est_low = number(o).and_then(eps_line);
+                view.est_low = number(o).and_then(|v| eps_line(v, Some(&o.value_label)));
                 view.est_low.is_some()
             }
             DraftField::ProjectedEpsGrowthPct
@@ -220,15 +225,15 @@ pub fn ai_judgments(
                 view.est_high = eps
                     .as_ref()
                     .and_then(|_| implied_est_high(study, o.value))
-                    .and_then(eps_line);
+                    .and_then(|v| eps_line(v, None));
                 view.est_high.is_some()
             }
             DraftField::JudgedAvgHighPe => {
-                view.pe_high = number(o).and_then(pe_line);
+                view.pe_high = number(o).and_then(|v| pe_line(v, &o.value_label));
                 view.pe_high.is_some()
             }
             DraftField::JudgedAvgLowPe => {
-                view.pe_low = number(o).and_then(pe_line);
+                view.pe_low = number(o).and_then(|v| pe_line(v, &o.value_label));
                 view.pe_low.is_some()
             }
             _ => false,
@@ -431,6 +436,33 @@ mod tests {
         let v = ai_judgments(&s, Some(&frame), &overlays, NumberFormat::Comma);
         assert!(v.est_high.is_none());
         assert_eq!(v.field_chips.len(), 1);
+    }
+
+    #[test]
+    fn a_direct_proposals_line_label_is_its_chips_value() {
+        let s = study();
+        let frame = engine::build_frame(&s).expect("frame");
+        let overlays = pending_judgment_overlays(
+            &s,
+            &[
+                fresh(&s, "judged_avg_low_pe", "11"),
+                fresh(&s, "estimated_low_eps", "1.3"),
+            ],
+            NumberFormat::Comma,
+        );
+        let v = ai_judgments(&s, Some(&frame), &overlays, NumberFormat::Comma);
+        let chip = |f: DraftField| {
+            let o = overlays.iter().find(|o| o.field == f).expect("overlay");
+            o.value_label.clone()
+        };
+        assert_eq!(
+            v.pe_low.expect("drawn").value,
+            chip(DraftField::JudgedAvgLowPe)
+        );
+        assert_eq!(
+            v.est_low.expect("drawn").value,
+            chip(DraftField::EstimatedLowEps)
+        );
     }
 
     #[test]
