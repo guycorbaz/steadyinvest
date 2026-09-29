@@ -740,6 +740,7 @@ development_status:
   8-6-ai-judgment-lines: done
   # 2026-09-29: 8-7 story file created (create-story) → ready-for-dev; branch feat/8-7-draft-study-end-to-end.
   # 2026-09-29: 8-7 dev complete (1433 tests; headless walk v87 Journey 6) → review.
-  8-7-draft-study-end-to-end-and-drafts-record: review
+  # 2026-09-29: 8-7 dev + Journey 6 walk + G3 (3 layers, 11 applied) → PR #265 merged → done.
+  8-7-draft-study-end-to-end-and-drafts-record: done
   8-8-frozen-decision-time-verdict: backlog
   epic-8-retrospective: optional

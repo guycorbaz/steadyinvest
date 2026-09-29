@@ -1,6 +1,6 @@
 # Story 8.7: Draft study end-to-end & drafts record
 
-Status: review
+Status: done
 
 <!-- Created 2026-09-29 by create-story on branch feat/8-7-draft-study-end-to-end (main with 8.1–8.6).
      Autonomous Epic 8 run (Guy, 2026-09-28): questions resolved with the most conservative option,
