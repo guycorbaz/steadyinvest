@@ -18,7 +18,8 @@
 use crate::error::{Error, Result};
 use crate::journal::Journal;
 use crate::studies::{
-    stored_study_is, study_status_in, study_with_identifier, write_study_with_snapshot,
+    read_study_in, stored_study_is, study_status_in, study_with_identifier,
+    write_study_with_snapshot,
 };
 use crate::util::{bump_logical_version, parse_uuid};
 use rusqlite::OptionalExtension;
@@ -486,6 +487,12 @@ impl Journal {
         if status != DraftStatus::Pending {
             return Err(Error::DraftNotPending {
                 status: status.as_str().to_string(),
+            });
+        }
+        // A NEW study: never an upsert over a stored one (an id collision is internal).
+        if read_study_in(&tx, v.study.id)?.is_some() {
+            return Err(Error::DraftStudyMismatch {
+                study_id: v.study.id,
             });
         }
         if let Some(existing) =

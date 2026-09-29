@@ -290,3 +290,21 @@ fn a_study_s_processed_drafts_exclude_pending_ones_and_other_studies() {
         "processed only, by decided_at"
     );
 }
+
+#[test]
+fn a_study_id_already_in_the_dossier_is_never_overwritten() {
+    let (_dir, path, mut journal) = dossier();
+    let existing = new_study(0x51, "NESN", "CHF", "2026-09-29T07:30:00Z");
+    journal
+        .put_study_with_history(&existing, &ts("2026-09-29T07:30:00Z"))
+        .unwrap();
+    plant_draft_study(&path, "ROG", "CHF", "pending");
+    let now = ts("2026-09-29T09:00:00Z");
+    let colliding = new_study(0x51, "ROG", "CHF", "2026-09-29T09:00:00Z");
+    assert!(matches!(
+        journal.validate_draft_study(validation(&colliding, &now, false)),
+        Err(Error::DraftStudyMismatch { .. })
+    ));
+    assert_eq!(journal.get_study(existing.id).unwrap(), Some(existing));
+    assert_eq!(facts(&path).0, "pending");
+}

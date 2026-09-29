@@ -24,7 +24,7 @@ use steadyinvest_contract::{
     DraftValue, ForecastLowOption, Money, Note, Study, Timestamp, draft_fingerprint, option_name,
 };
 use steadyinvest_persistence::{
-    DraftDecisionWrite, DraftVerdict, Error as PersistError, StudyWrite,
+    DraftDecisionWrite, DraftStudyValidation, DraftVerdict, Error as PersistError, StudyWrite,
 };
 use uuid::Uuid;
 
@@ -36,9 +36,10 @@ use super::{
     JournalState, MSG_DECISION_ALREADY_DECIDED, MSG_DECISION_CHANGED, MSG_DECISION_DRAFT_GONE,
     MSG_DECISION_OTHER_STUDY, MSG_DECISION_READ_ONLY, MSG_DECISION_SAVE_FAILED,
     MSG_DECISION_SAVE_FAILED_CAUSE, MSG_DECISION_STUDY_ARCHIVED, MSG_DECISION_STUDY_CHANGED,
-    MSG_DECISION_STUDY_GONE, MSG_DECISION_TARGET_GONE, MSG_GONE_REASON_FIELD,
-    MSG_GONE_REASON_STUDY, MSG_GONE_REASON_YEAR, MSG_NO_JOURNAL, MSG_NO_STUDY_OPEN, MSG_NOTE_EMPTY,
-    MSG_READ_FAILED, MSG_VALUE_NOT_A_NUMBER, MSG_VALUE_NOT_AN_OPTION, persist_cause, typed_entry,
+    MSG_DECISION_STUDY_GONE, MSG_DECISION_TARGET_GONE, MSG_DRAFT_STUDY_EXISTS,
+    MSG_GONE_REASON_FIELD, MSG_GONE_REASON_STUDY, MSG_GONE_REASON_YEAR, MSG_NO_JOURNAL,
+    MSG_NO_STUDY_OPEN, MSG_NOTE_EMPTY, MSG_READ_FAILED, MSG_VALUE_NOT_A_NUMBER,
+    MSG_VALUE_NOT_AN_OPTION, persist_cause, typed_entry,
 };
 
 /// Why a pending draft's target is gone (it can then only be rejected).
@@ -523,6 +524,77 @@ impl JournalState {
     }
 
     /// Write a rejection: only the draft row (its outcome and whether its target had changed).
+    /// Validate a pending draft study (Story 8.7, arch A8, FR70): the owner confirmed the prefilled
+    /// create form with `ticker` / `currency` / `company_name` (as the form holds them — possibly
+    /// edited). Builds the new, empty study through the ordinary create path's builder and writes
+    /// it with the draft's `validated` + `created_study_id` in ONE transaction (the duplicate check
+    /// runs again inside it). Not on any undo stack: the owner reverses it by deleting the study
+    /// (O7). No provider call (FR76). Returns the new study's id.
+    pub fn validate_draft_study(
+        &mut self,
+        draft_id: Uuid,
+        ticker: &str,
+        currency: &str,
+        company_name: &str,
+    ) -> Result<Uuid, String> {
+        if self.read_only.is_some() {
+            return Err(MSG_DECISION_READ_ONLY.to_string());
+        }
+        let Some(journal) = self.journal.as_ref() else {
+            return Err(MSG_NO_JOURNAL.to_string());
+        };
+        let record = match journal.get_draft(draft_id) {
+            Ok(Some(record)) => record,
+            Ok(None) => return Err(MSG_DECISION_DRAFT_GONE.to_string()),
+            Err(error) => {
+                tracing::warn!("draft read failed: {error}");
+                return Err(MSG_READ_FAILED.to_string());
+            }
+        };
+        if record.status != steadyinvest_contract::DraftStatus::Pending {
+            return Err(MSG_DECISION_ALREADY_DECIDED.to_string());
+        }
+        if record.kind != DraftKind::Study {
+            tracing::warn!(
+                "draft {draft_id}: a draft-study validation of a {:?} draft",
+                record.kind
+            );
+            return Err(MSG_DECISION_SAVE_FAILED.to_string());
+        }
+        let proposed_name = serde_json::from_str::<DraftPayload>(&record.payload)
+            .ok()
+            .and_then(|p| p.company_name)
+            .unwrap_or_default();
+        let study = self.new_study_from_form(ticker, currency, company_name)?;
+        let edited = !study
+            .security_ticker
+            .eq_ignore_ascii_case(record.security_ticker.trim())
+            || record
+                .native_currency
+                .as_deref()
+                .is_none_or(|c| !study.native_currency.eq_ignore_ascii_case(c.trim()))
+            || study.company_name.as_deref().unwrap_or("") != proposed_name.trim();
+        let now = self.clock.now();
+        let journal = self
+            .journal
+            .as_mut()
+            .ok_or_else(|| MSG_NO_JOURNAL.to_string())?;
+        match journal.validate_draft_study(DraftStudyValidation {
+            draft_id,
+            study: &study,
+            edited,
+            now: &now,
+        }) {
+            Ok(()) => Ok(study.id),
+            Err(PersistError::DraftStudyExists {
+                ticker, currency, ..
+            }) => Err(MSG_DRAFT_STUDY_EXISTS
+                .replace("{ticker}", ticker.trim())
+                .replace("{currency}", currency.trim())),
+            Err(error) => Err(decision_save_error(error)),
+        }
+    }
+
     fn write_rejection(
         &mut self,
         draft_id: Uuid,

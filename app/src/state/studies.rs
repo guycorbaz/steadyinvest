@@ -98,6 +98,30 @@ impl JournalState {
         currency: &str,
         company_name: &str,
     ) -> Result<Uuid, String> {
+        let study = self.new_study_from_form(ticker, currency, company_name)?;
+        let id = study.id;
+        let Some(journal) = self.journal.as_mut() else {
+            return Err(MSG_NO_JOURNAL.to_string());
+        };
+        // Issue #34 (FR51): the creation IS the timeline's first entry — the durable history
+        // starts at the all-`None` state, same transaction as the row itself.
+        match journal.put_study_with_history(&study, &study.created_at) {
+            Ok(()) => Ok(id),
+            // The newer-schema guard can also fire here (defense in depth); name it neutrally.
+            Err(error) => Err(save_error(error)),
+        }
+    }
+
+    /// The new, empty study the « Créer une étude » form describes — the ONE builder of the ordinary
+    /// create path and of a draft study's validation (Story 8.7): ticker and currency trimmed and
+    /// required, currency upper-cased, ticker kept as typed, the name trimmed with empty ⇒ absent,
+    /// id / journal / clock injected. Refuses a read-only dossier. Writes nothing.
+    pub(crate) fn new_study_from_form(
+        &self,
+        ticker: &str,
+        currency: &str,
+        company_name: &str,
+    ) -> Result<Study, String> {
         let ticker = ticker.trim();
         let currency = currency.trim();
         if ticker.is_empty() {
@@ -107,10 +131,9 @@ impl JournalState {
             return Err(MSG_BLANK_CURRENCY.to_string());
         }
         self.refuse_if_read_only()?;
-        let Some(journal) = self.journal.as_mut() else {
+        let Some(journal) = self.journal.as_ref() else {
             return Err(MSG_NO_JOURNAL.to_string());
         };
-
         let mut study = Study::new(
             self.idgen.new_id(),
             journal.id(),
@@ -121,14 +144,7 @@ impl JournalState {
         );
         let company_name = company_name.trim();
         study.company_name = (!company_name.is_empty()).then(|| company_name.to_string());
-        let id = study.id;
-        // Issue #34 (FR51): the creation IS the timeline's first entry — the durable history
-        // starts at the all-`None` state, same transaction as the row itself.
-        match journal.put_study_with_history(&study, &study.created_at) {
-            Ok(()) => Ok(id),
-            // The newer-schema guard can also fire here (defense in depth); name it neutrally.
-            Err(error) => Err(save_error(error)),
-        }
+        Ok(study)
     }
 
     /// Compute the coherent [`StudySnapshot`] for a study (Story 2.6 — THE engine-call site): re-read
