@@ -853,6 +853,36 @@ impl JournalState {
         self.with_studies(drafts).map(Some)
     }
 
+    /// A study's processed drafts (its own and the draft study it came from), by decision time —
+    /// the history merges them (Story 8.7, arch A12). A read failure is named (the history then
+    /// reads « indisponible », never a timeline silently missing its ★ entries).
+    pub fn try_list_study_drafts(
+        &self,
+        study_id: Uuid,
+    ) -> Result<Vec<steadyinvest_persistence::DraftRecord>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(Vec::new());
+        };
+        journal.list_study_drafts(study_id).map_err(|error| {
+            tracing::warn!("study drafts read failed: {error}");
+            MSG_READ_FAILED.to_string()
+        })
+    }
+
+    /// One draft by id (the history Détail of a ★ entry); `Ok(None)` when it is not a draft.
+    pub fn try_get_draft(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<steadyinvest_persistence::DraftRecord>, String> {
+        let Some(journal) = self.journal.as_ref() else {
+            return Ok(None);
+        };
+        journal.get_draft(id).map_err(|error| {
+            tracing::warn!("draft read failed: {error}");
+            MSG_READ_FAILED.to_string()
+        })
+    }
+
     /// The studies `drafts` are about (`study_id` / `created_study_id`) and which are archived.
     fn with_studies(
         &self,

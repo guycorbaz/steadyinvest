@@ -607,6 +607,18 @@ export struct HistoryEntryRow {
     first-of-day: bool,
     time: string,         // HH:MM ("" on a malformed stamp)
     summary: string,
+    ai: bool,             // Story 8.7: a processed AI draft (★ summary; its Détail is framed)
+}
+
+// Story 8.7 (UX spec §5.7): the Détail of a ★ history entry — the proposed value (app text) and
+// the AI-written parts, read ONLY inside an `AiFrame`. Set by `wiring::drafts` alone.
+export struct HistoryAiDetail {
+    proposed: string,
+    submitted: string,
+    ai-client: string,
+    ai-model: string,
+    ai-lead: string,
+    ai-text: string,
 }
 
 // Story 8.1 (FR78): one row of the study's « Notes » card — newest first; `meta` is the Rust-built
@@ -847,6 +859,7 @@ export global Studies {
     in-out property <[HistoryEntryRow]> history-rows;
     in-out property <string> history-detail-id;
     in-out property <[string]> history-detail-lines;
+    in-out property <HistoryAiDetail> history-ai-detail;
     callback open-history();
     callback close-history();
     callback toggle-history-entry(string); // snapshot id → expand (or collapse if already open)

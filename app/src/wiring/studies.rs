@@ -467,6 +467,38 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             let state = journal_state.borrow();
             let format = config.borrow().number_format;
+            // Story 8.7: a ★ entry is a processed AI draft — its Détail frames the AI's words.
+            match state.try_get_draft(snapshot_id) {
+                Ok(Some(record)) => {
+                    let study = state.get_study(study_id);
+                    match viewmodel::drafts::history_draft_detail(&record, study.as_ref(), format) {
+                        Ok(detail) => {
+                            studies.set_history_ai_detail(
+                                crate::wiring::drafts::history_ai_to_slint(&detail),
+                            );
+                            studies.set_history_detail_lines(ModelRc::new(VecModel::from(Vec::<
+                                SharedString,
+                            >::new(
+                            ))));
+                            studies.set_history_detail_id(id);
+                        }
+                        Err(problem) => {
+                            tracing::warn!(
+                                "history draft {}: {}",
+                                problem.draft_id,
+                                problem.detail
+                            );
+                            studies.set_history_unavailable(true);
+                        }
+                    }
+                    return;
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    studies.set_history_unavailable(true);
+                    return;
+                }
+            }
             // The detail diffs THIS snapshot against its predecessor — located by the listing
             // order (oldest first). Any read failure marks the whole panel « indisponible »
             // (the #95 discipline), never a silently empty detail.

@@ -717,6 +717,88 @@ pub fn record_rows(
     })
 }
 
+// ── A study's processed drafts in its history (Story 8.7 — UX spec §5.7; arch A12) ──
+
+/// A processed draft's ★ history entry: its target without the ticker (the history is the
+/// study's own), its outcome, its decision time. A pending draft has no entry (`None`).
+pub fn history_draft(
+    record: &DraftRecord,
+) -> Result<Option<crate::viewmodel::history::HistoryDraft>, Unshowable> {
+    use crate::viewmodel::history::{
+        HIST_DRAFT_NOTE, HIST_DRAFT_REJECTED, HIST_DRAFT_STUDY, HIST_DRAFT_UNDONE,
+        HIST_DRAFT_VALIDATED, HIST_DRAFT_VALIDATED_EDITED, HistoryDraft,
+    };
+    let Some(decided) = record.decided_at.as_ref() else {
+        return Ok(None);
+    };
+    let payload = payload_of(record)?;
+    let target = match record.kind {
+        DraftKind::Study => HIST_DRAFT_STUDY
+            .replacen("{}", record.security_ticker.trim(), 1)
+            .replacen(
+                "{}",
+                record.native_currency.as_deref().unwrap_or("").trim(),
+                1,
+            ),
+        DraftKind::Note => HIST_DRAFT_NOTE.to_string(),
+        _ => match payload.target.as_ref().and_then(DraftField::of_target) {
+            Some((field, Some(year))) => format!("{} · {year}", field_label(field)),
+            Some((field, None)) => field_label(field).to_string(),
+            None => HIST_EMPTY_SLOT.to_string(),
+        },
+    };
+    let template = match record.status {
+        DraftStatus::Pending => return Ok(None),
+        DraftStatus::Validated if record.edited_before_validation == Some(true) => {
+            HIST_DRAFT_VALIDATED_EDITED
+        }
+        DraftStatus::Validated => HIST_DRAFT_VALIDATED,
+        DraftStatus::ValidatedUndone => HIST_DRAFT_UNDONE,
+        DraftStatus::Rejected => HIST_DRAFT_REJECTED,
+    };
+    Ok(Some(HistoryDraft {
+        id: record.id,
+        decided_at: decided.0.clone(),
+        summary: template.replacen("{}", &target, 1),
+    }))
+}
+
+/// The Détail of a ★ history entry: the proposed value (app-formatted, « Proposé {} ») for a cell
+/// or judgment draft, and the AI-written parts for the AiFrame (origin, comment, note text or
+/// company name, submission date).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryDraftDetail {
+    pub proposed: String,
+    pub submitted: String,
+    pub ai_client: String,
+    pub ai_model: String,
+    pub ai_lead: String,
+    pub ai_text: String,
+}
+
+pub fn history_draft_detail(
+    record: &DraftRecord,
+    study: Option<&Study>,
+    format: NumberFormat,
+) -> Result<HistoryDraftDetail, Unshowable> {
+    let payload = payload_of(record)?;
+    let proposed = match record.kind {
+        DraftKind::Cell | DraftKind::Judgment => {
+            target_and_values(record, &payload, study, format)?.2
+        }
+        _ => String::new(),
+    };
+    let (ai_client, ai_model, ai_lead, ai_text) = ai_fields(record, &payload, false);
+    Ok(HistoryDraftDetail {
+        proposed,
+        submitted: date_fr(&record.created_at),
+        ai_client,
+        ai_model,
+        ai_lead,
+        ai_text,
+    })
+}
+
 // ── The decision dialog (Story 8.5b — UX spec §3.3 « Decision dialog », §4.2) ──
 
 /// The context line when the draft's study is not the open one (spec §3.3).
@@ -1319,6 +1401,40 @@ mod tests {
             outcome,
         )
         .expect("builds")
+    }
+
+    #[test]
+    fn a_processed_draft_reads_as_a_star_history_entry() {
+        let (drafts, _) = record_fixture();
+        let summary = |n: usize| {
+            history_draft(&drafts[n])
+                .expect("builds")
+                .map(|h| h.summary)
+        };
+        assert_eq!(
+            summary(0).as_deref(),
+            Some("★ Proposition validée (modifiée) : Ventes · 2024")
+        );
+        assert_eq!(
+            summary(1).as_deref(),
+            Some("★ Proposition rejetée : Croissance projetée des ventes")
+        );
+        assert_eq!(
+            summary(3).as_deref(),
+            Some("★ Proposition validée : Nouvelle étude : AAPL (USD)")
+        );
+        assert_eq!(
+            summary(4).as_deref(),
+            Some("★ Proposition validée puis annulée : BPA · 2019")
+        );
+        assert_eq!(summary(2), None, "a pending draft has no history entry");
+        let mut note = drafts[2].clone();
+        note.status = DraftStatus::Rejected;
+        note.decided_at = Some(Timestamp("2026-09-29T08:00:00Z".to_string()));
+        assert_eq!(
+            history_draft(&note).unwrap().map(|h| h.summary).as_deref(),
+            Some("★ Proposition rejetée : nouvelle note")
+        );
     }
 
     #[test]

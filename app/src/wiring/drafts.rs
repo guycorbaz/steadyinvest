@@ -114,6 +114,21 @@ fn to_slint(view: &InboxView) -> Vec<DraftRow> {
         .collect()
 }
 
+/// Story 8.7: the Détail of a ★ history entry, as Slint shows it — the ONE setter of
+/// `HistoryAiDetail.ai_*` (read in Slint only inside an AiFrame).
+pub(crate) fn history_ai_to_slint(
+    d: &crate::viewmodel::drafts::HistoryDraftDetail,
+) -> crate::HistoryAiDetail {
+    crate::HistoryAiDetail {
+        proposed: d.proposed.clone().into(),
+        submitted: d.submitted.clone().into(),
+        ai_client: d.ai_client.clone().into(),
+        ai_model: d.ai_model.clone().into(),
+        ai_lead: d.ai_lead.clone().into(),
+        ai_text: d.ai_text.clone().into(),
+    }
+}
+
 /// The decision dialog's draft, as Slint shows it — the ONE setter of `DraftDecision.ai_*`.
 fn to_dialog(v: &DecisionView, id: Uuid, live: bool) -> DraftDecision {
     let options: Vec<SharedString> = v.edit_options.iter().map(|o| o.as_str().into()).collect();

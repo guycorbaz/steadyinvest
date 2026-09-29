@@ -793,8 +793,9 @@ mod tests {
         }
         assert_eq!(
             crate::viewmodel::history::HISTORY_USER_FACING_LABELS.len(),
-            // 8.1: +3 (« Note ajoutée / modifiée / supprimée »).
-            20,
+            // 8.1: +3 (« Note ajoutée / modifiée / supprimée »). 8.7: the four ★ summaries of a
+            // processed draft and its note / draft-study targets: 20 + 6 = 26, measured.
+            26,
             "history.rs label inventory changed — register the new label"
         );
     }
@@ -2030,6 +2031,7 @@ mod tests {
                     fn_body(prod, "to_slint"),
                     fn_body(prod, "to_dialog"),
                     fn_body(prod, "record_to_slint"),
+                    fn_body(prod, "history_ai_to_slint"),
                 ]
             } else if path.ends_with("state/drafts.rs") {
                 vec![(0, prod.len())]

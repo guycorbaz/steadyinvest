@@ -45,6 +45,15 @@ pub const LBL_FORECAST_LOW_OPTION: &str = "Prix bas prévu (sélection)";
 pub const LBL_SEVERE_LOW: &str = "Plus bas sévère récent";
 pub const LBL_DIVIDEND_YEAR: &str = "Dividende annuel courant";
 pub const LBL_TTM_EPS: &str = "BPA 12 derniers mois";
+/// Story 8.7 (UX spec §3.3 « History », §5.7) — a processed AI draft merged into the timeline at
+/// its decision time; `{}` is its target (« {champ} · {année} », « {champ} », « nouvelle note »,
+/// « Nouvelle étude : {TICKER} ({DEV}) »). App text only — the AI's words are in the Détail frame.
+pub const HIST_DRAFT_VALIDATED: &str = "★ Proposition validée : {}";
+pub const HIST_DRAFT_VALIDATED_EDITED: &str = "★ Proposition validée (modifiée) : {}";
+pub const HIST_DRAFT_REJECTED: &str = "★ Proposition rejetée : {}";
+pub const HIST_DRAFT_UNDONE: &str = "★ Proposition validée puis annulée : {}";
+pub const HIST_DRAFT_NOTE: &str = "nouvelle note";
+pub const HIST_DRAFT_STUDY: &str = "Nouvelle étude : {} ({})";
 
 /// Every history label, exposed so the crate-local posture gate (FR13) scans them for banned
 /// verbs alongside the `@tr()` literals — the `engine::USER_FACING_LABELS` precedent.
@@ -70,6 +79,12 @@ pub const HISTORY_USER_FACING_LABELS: &[&str] = &[
     LBL_SEVERE_LOW,
     LBL_DIVIDEND_YEAR,
     LBL_TTM_EPS,
+    HIST_DRAFT_VALIDATED,
+    HIST_DRAFT_VALIDATED_EDITED,
+    HIST_DRAFT_REJECTED,
+    HIST_DRAFT_UNDONE,
+    HIST_DRAFT_NOTE,
+    HIST_DRAFT_STUDY,
 ];
 
 /// One timeline entry (newest first): the snapshot's identity + day/time + the neutral summary.
@@ -87,6 +102,17 @@ pub struct HistoryEntryView {
     /// Story 8.1 (arch A12): the entry changes notes and nothing else — the « Masquer les notes »
     /// chip hides exactly these, so judgment changes stay readable.
     pub notes_only: bool,
+    /// Story 8.7: a processed AI draft (its `id` is the draft's), not a snapshot.
+    pub ai: bool,
+}
+
+/// Story 8.7 (arch A12) — a processed AI draft as the timeline merges it: its id, its decision
+/// time (RFC 3339, the snapshot stamps' format) and its ★ summary (app text).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryDraft {
+    pub id: Uuid,
+    pub decided_at: String,
+    pub summary: String,
 }
 
 /// One note change between two consecutive states, keyed by the note's id (never its position).
@@ -427,11 +453,14 @@ fn time_of(stamp: &str) -> String {
 /// is the creation. `first_of_day` marks where the UI draws the day header.
 pub fn history_entries(
     snapshots: &[(Uuid, String, Study)],
+    drafts: &[HistoryDraft],
     format: NumberFormat,
 ) -> Vec<HistoryEntryView> {
-    let mut entries: Vec<HistoryEntryView> = Vec::with_capacity(snapshots.len());
-    for index in (0..snapshots.len()).rev() {
-        let (id, stamp, next) = &snapshots[index];
+    // (stamp, rank, entry): at the same instant the snapshot (rank 0, the effect) comes before the
+    // ★ entry naming its cause (rank 1) — Story 8.7 Decision 7; newest first once reversed.
+    let mut keyed: Vec<(String, u8, usize, HistoryEntryView)> =
+        Vec::with_capacity(snapshots.len() + drafts.len());
+    for (index, (id, stamp, next)) in snapshots.iter().enumerate() {
         let (summary, notes_only) = match index.checked_sub(1).map(|i| &snapshots[i].2) {
             Some(prev) => {
                 let diff = diff_states(prev, next, format);
@@ -439,15 +468,39 @@ pub fn history_entries(
             }
             None => (summary_of(&empty_diff(), true), false),
         };
-        entries.push(HistoryEntryView {
-            id: *id,
-            day: day_of(stamp),
-            first_of_day: false, // filled below
-            time: time_of(stamp),
-            summary,
-            notes_only,
-        });
+        keyed.push((
+            stamp.clone(),
+            0,
+            index,
+            HistoryEntryView {
+                id: *id,
+                day: day_of(stamp),
+                first_of_day: false, // filled below
+                time: time_of(stamp),
+                summary,
+                notes_only,
+                ai: false,
+            },
+        ));
     }
+    for (index, d) in drafts.iter().enumerate() {
+        keyed.push((
+            d.decided_at.clone(),
+            1,
+            index,
+            HistoryEntryView {
+                id: d.id,
+                day: day_of(&d.decided_at),
+                first_of_day: false,
+                time: time_of(&d.decided_at),
+                summary: d.summary.clone(),
+                notes_only: false,
+                ai: true,
+            },
+        ));
+    }
+    keyed.sort_by(|a, b| (&a.0, a.1, a.2).cmp(&(&b.0, b.1, b.2)));
+    let mut entries: Vec<HistoryEntryView> = keyed.into_iter().rev().map(|k| k.3).collect();
     mark_first_of_day(&mut entries);
     entries
 }
@@ -576,6 +629,52 @@ mod tests {
         s
     }
 
+    // Story 8.7 (arch A12, spec §5.7): processed drafts merged at their decision time; at the same
+    // instant the ★ entry sits after the snapshot it names (newest first: above it).
+    #[test]
+    fn processed_drafts_merge_into_the_timeline_after_their_snapshot() {
+        let study = |low: &str| {
+            let mut j = judgment();
+            j.judged_avg_low_pe = Some(money(low));
+            study(Vec::new(), j, None)
+        };
+        let snapshots = vec![
+            (
+                Uuid::from_u128(1),
+                "2026-09-28T08:00:00Z".to_string(),
+                study("10"),
+            ),
+            (
+                Uuid::from_u128(2),
+                "2026-09-28T09:00:00Z".to_string(),
+                study("11"),
+            ),
+        ];
+        let drafts = vec![
+            HistoryDraft {
+                id: Uuid::from_u128(0xD1),
+                decided_at: "2026-09-28T09:00:00Z".to_string(),
+                summary: "★ Proposition validée : PER bas moyen".to_string(),
+            },
+            HistoryDraft {
+                id: Uuid::from_u128(0xD2),
+                decided_at: "2026-09-29T07:00:00Z".to_string(),
+                summary: "★ Proposition rejetée : nouvelle note".to_string(),
+            },
+        ];
+        let entries = history_entries(&snapshots, &drafts, NumberFormat::Comma);
+        let ids: Vec<u128> = entries.iter().map(|e| e.id.as_u128()).collect();
+        assert_eq!(
+            ids,
+            vec![0xD2, 0xD1, 2, 1],
+            "newest first; a rejection has no snapshot"
+        );
+        assert!(entries[0].ai && entries[1].ai && !entries[2].ai);
+        assert!(entries[0].first_of_day && entries[1].first_of_day && !entries[2].first_of_day);
+        // « Masquer les notes » never hides a ★ entry.
+        assert_eq!(visible_history(entries, true).len(), 4);
+    }
+
     #[test]
     fn the_timeline_is_newest_first_with_day_headers_and_a_creation_entry() {
         let created = study(vec![], judgment(), None);
@@ -592,7 +691,7 @@ mod tests {
                 edited,
             ),
         ];
-        let entries = history_entries(&snapshots, NumberFormat::Comma);
+        let entries = history_entries(&snapshots, &[], NumberFormat::Comma);
         assert_eq!(entries.len(), 2);
         // Newest first; each new day carries the header flag.
         assert_eq!(entries[0].id, Uuid::from_u128(0xB));
@@ -749,6 +848,7 @@ mod tests {
                     after,
                 ),
             ],
+            &[],
             NumberFormat::Comma,
         );
         assert_eq!(
@@ -785,6 +885,7 @@ mod tests {
                     after,
                 ),
             ],
+            &[],
             NumberFormat::Comma,
         );
         assert!(!entries[0].notes_only);
@@ -823,7 +924,7 @@ mod tests {
                 noted_again,
             ),
         ];
-        let all = history_entries(&snapshots, NumberFormat::Comma);
+        let all = history_entries(&snapshots, &[], NumberFormat::Comma);
         assert_eq!(visible_history(all.clone(), false), all, "shown by default");
         let shown = visible_history(all, true);
         let ids: Vec<Uuid> = shown.iter().map(|e| e.id).collect();
