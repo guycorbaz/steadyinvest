@@ -156,7 +156,8 @@ component RecordRowView inherits VerticalLayout {
         spacing: Tokens.space-12;
         Text {
             text: root.entry.submitted;
-            min-width: 96px;
+            // A fixed column: a row with a decided date aligns with one without.
+            width: 112px;
             color: Tokens.text-mid;
             font-family: Tokens.font-numeric;
             font-size: Tokens.font-caption;
@@ -195,7 +196,8 @@ component RecordRowView inherits VerticalLayout {
         }
         Text {
             text: root.entry.decided;
-            min-width: 96px;
+            // A fixed column: a row with a decided date aligns with one without.
+            width: 112px;
             color: Tokens.text-mid;
             font-family: Tokens.font-numeric;
             font-size: Tokens.font-caption;
