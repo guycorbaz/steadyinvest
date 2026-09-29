@@ -2025,8 +2025,12 @@ mod tests {
             let allowed: Vec<(usize, usize)> = if path.ends_with("viewmodel/drafts.rs") {
                 vec![fn_body(prod, "ai_fields")]
             } else if path.ends_with("wiring/drafts.rs") {
-                // The inbox rows (8.5a) and the decision dialog (8.5b).
-                vec![fn_body(prod, "to_slint"), fn_body(prod, "to_dialog")]
+                // The inbox rows (8.5a), the decision dialog (8.5b) and the Registre rows (8.7).
+                vec![
+                    fn_body(prod, "to_slint"),
+                    fn_body(prod, "to_dialog"),
+                    fn_body(prod, "record_to_slint"),
+                ]
             } else if path.ends_with("state/drafts.rs") {
                 vec![(0, prod.len())]
             } else {
