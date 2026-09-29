@@ -172,6 +172,42 @@ pub(crate) fn read_study_in(conn: &rusqlite::Connection, id: Uuid) -> Result<Opt
         .transpose()
 }
 
+/// Two identifiers (tickers, currencies) name the same thing: compared ignoring ASCII case and
+/// surrounding spaces — the app's `same_ticker` rule (G1 P review L-h). Stored studies may carry a
+/// hand-typed spelling the submission rule would refuse (`chf`, ` NESN.SW`). ONE rule for the MCP
+/// submission checks (D2 / D8) and the draft-study validation (Story 8.7) — never two.
+pub(crate) fn same_identifier(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
+}
+
+/// The dossier's study with the same identifier as (`ticker`, `currency`) under
+/// [`same_identifier`] — archived studies included (they are still in the dossier, 8.3 Decision 1)
+/// — or `None`. The oldest wins when several match (a hand-made duplicate).
+pub(crate) fn study_with_identifier(
+    conn: &rusqlite::Connection,
+    ticker: &str,
+    currency: &str,
+) -> Result<Option<Study>> {
+    let mut stmt =
+        conn.prepare("SELECT id, security_ticker FROM studies ORDER BY created_at, id")?;
+    let candidates = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (id, stored_ticker) in candidates {
+        if !same_identifier(&stored_ticker, ticker) {
+            continue;
+        }
+        let id = crate::util::parse_uuid(&id, "studies.id")?;
+        let study = read_study_in(conn, id)?.ok_or_else(|| Error::CorruptPayload {
+            detail: format!("study {id} vanished inside the identifier check"),
+        })?;
+        if same_identifier(&study.native_currency, currency) {
+            return Ok(Some(study));
+        }
+    }
+    Ok(None)
+}
+
 /// A study's lifecycle status on any connection, `None` when the study is gone.
 pub(crate) fn study_status_in(conn: &rusqlite::Connection, id: Uuid) -> Result<Option<String>> {
     Ok(conn

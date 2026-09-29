@@ -213,7 +213,9 @@ pub fn tool_specs() -> Vec<(&'static str, String, Map<String, Value>)> {
     let mut p = Map::new();
     p.insert(
         "study_id".into(),
-        uuid_prop("Optional: only the propositions about this study."),
+        uuid_prop(
+            "Optional: only the propositions about this study, including the draft study it was created from.",
+        ),
     );
     p.insert(
         "status".into(),
