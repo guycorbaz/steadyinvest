@@ -80,6 +80,7 @@ fn study(id: u128, journal_id: Uuid, ticker: &str, created_at: &str) -> Study {
         rationale: Some("Margin trend noted; demand steady.".to_string()),
         company_name: None,
         notes: Vec::new(),
+        frozen_verdict: None,
         created_at: ts(created_at),
         schema_version: SCHEMA_VERSION,
     }

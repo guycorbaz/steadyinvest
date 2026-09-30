@@ -185,6 +185,7 @@ fn study() -> impl Strategy<Value = Study> {
                     rationale,
                     company_name,
                     notes,
+                    frozen_verdict: None,
                     created_at: Timestamp(ts),
                     schema_version: sv,
                 }

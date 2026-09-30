@@ -21,6 +21,7 @@ pub mod cell;
 pub mod draft;
 pub mod draftable;
 pub mod export;
+pub mod frozen;
 pub mod money;
 pub mod provenance;
 pub mod study;
@@ -39,6 +40,9 @@ pub use draftable::{
     MAX_PROPOSAL_ABS, MAX_PROPOSAL_DECIMALS, draft_fingerprint, option_name,
 };
 pub use export::{ImportError, StudyExport, from_export_json, sha256_hex, to_export_json};
+pub use frozen::{
+    FrozenCriterion, FrozenUpsideDownside, FrozenVerdict, FrozenZone, FrozenZoneBounds,
+};
 pub use money::Money;
 pub use provenance::{Provenance, Timestamp};
 pub use study::{AiPlaced, ForecastLowOption, Judgment, Note, Study, YearData};
