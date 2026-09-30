@@ -258,6 +258,15 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
             Some(r) => crate::viewmodel::engine::fmt_total_return(r, format),
             None => crate::viewmodel::form::EMPTY_SLOT.to_string(),
         };
+        // Guy's on-screen test (2026-09-30): the U/D ratio off the SAME snapshot, as the study
+        // shows it.
+        let ud = match &snapshot {
+            Some(snap) => crate::viewmodel::engine::fmt_ud(
+                &snap.outputs().risk_reward.upside_downside,
+                format,
+            ),
+            None => crate::viewmodel::form::EMPTY_SLOT.to_string(),
+        };
         let incomplete = snapshot
             .as_ref()
             .is_some_and(crate::viewmodel::engine::study_incomplete);
@@ -276,6 +285,7 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
             viewmodel::studies::StudyReturn {
                 value,
                 display,
+                ud,
                 incomplete,
                 zone,
                 // The user-entered company name shown after the ticker on the list row (2026-07-12).
