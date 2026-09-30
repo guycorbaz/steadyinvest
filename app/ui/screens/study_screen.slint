@@ -17,6 +17,7 @@ import { Studies, FormHeader, PeRow, MgmtRow, Warnings, QuickScreen, Dialog, Not
 import { CollapsibleSection } from "../components/collapsible_section.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
 import { AiFrame } from "../components/ai_frame.slint";
+import { FrozenVerdictStrip } from "../components/frozen_verdict_strip.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { EditableCell, CellFit, CellMark, CellTip } from "../components/editable_cell.slint";
 import { JudgmentField } from "../components/judgment_field.slint";
@@ -457,8 +458,11 @@ export component StudyScreen inherits Rectangle {
         }
         Rectangle { height: Tokens.border; background: Tokens.separator; }
 
-        // ── Story 8.8 slot: the FrozenVerdictStrip goes HERE, between the verdict bar and the ★
-        //    reminder (UX spec §5.3: verdict bar → frozen strip → ★ reminder → notice slot). ──
+        // ── Story 8.8: the FrozenVerdictStrip, between the verdict bar and the ★ reminder (UX spec
+        //    §5.3: verdict bar → frozen strip → ★ reminder → notice slot). Not on the demo study. ──
+        if !Studies.demo-active: FrozenVerdictStrip {
+            area-height: root.height;
+        }
 
         // ── Story 8.5a (UX spec §5.4): the ★ reminder of the open study's pending AI drafts, or its
         //    ⊘ variant when the last poll or read failed — never removed on a failure. Pinned
@@ -583,6 +587,30 @@ export component StudyScreen inherits Rectangle {
                             Studies.open-history();
                         }
                     }
+                }
+                // Story 8.8 (spec §5.9, Q12): freeze the verdict — only a full one; otherwise
+                // disabled, the reason beside it. With a frozen verdict already stored, the replace
+                // confirmation first.
+                ActionButton {
+                    label: @tr("Valider l'étude");
+                    enabled: !Studies.demo-active && !Studies.read-only && Studies.freeze-open-list == "";
+                    clicked => {
+                        if (Studies.frozen-strip.state != 0) {
+                            Dialog.confirm(@tr("Remplacer le verdict figé ?"),
+                                @tr("Le verdict figé le {} sera remplacé ; il reste lisible dans l'historique.", Studies.frozen-strip.date),
+                                @tr("Valider l'étude"), "freeze-replace", "");
+                        } else {
+                            Studies.freeze-verdict();
+                        }
+                    }
+                }
+                if !Studies.demo-active && Studies.freeze-open-list != "": Text {
+                    text: @tr("Verdict incomplet — entrées ouvertes : {}", Studies.freeze-open-list);
+                    color: Tokens.text-mid;
+                    font-size: Tokens.font-caption;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    max-width: 420px;
                 }
             }
 

@@ -108,6 +108,43 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
         });
     }
 
+    // ── Story 8.8 (FR68) — « Valider l'étude »: freeze the full verdict (the replace confirm, when
+    //    one is stored, was answered on the Slint side). An owner edit: undoable, one FR51 entry;
+    //    the outcome goes to the study's notice slot; a refusal is « Action refusée ». ──
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let current_study = Rc::clone(current_study);
+        ui.global::<Studies>().on_freeze_verdict(move || {
+            let ui = ui_weak.unwrap();
+            let id = match current_study_id(&current_study) {
+                Ok(id) => id,
+                Err(message) => return crate::wiring::dialog::refuse(&ui, &message),
+            };
+            let result = journal_state.borrow_mut().freeze_verdict(id);
+            match result {
+                Ok(at) => {
+                    if let Some(study) = journal_state.borrow().get_study(id) {
+                        push_form(
+                            &ui,
+                            &journal_state.borrow(),
+                            &study,
+                            config.borrow().number_format,
+                        );
+                    }
+                    study_notice::outcome(
+                        &ui,
+                        Source::Edit,
+                        &state::MSG_FREEZE_DONE
+                            .replace("{date}", &crate::viewmodel::frozen::day_month(&at)),
+                    );
+                }
+                Err(message) => crate::wiring::dialog::refuse(&ui, &message),
+            }
+        });
+    }
+
     // ── Story 8.1 (FR78) — the study's notes: the `note-add` / `note-edit` forms and the
     //    `delete-note` confirm. Each rail is atomic + undoable (`mutate_study`); a refusal raised by
     //    a form's own submit lands in its `field-error` (`dialog::refuse` honours `Dialog.gesture`),
@@ -614,6 +651,21 @@ fn stepped_outcome(
             }
             // G3: the focused cell's revealed facts follow the restored value.
             refresh_active_facts(ui);
+            // Story 8.8: a step over the freeze says so (the redo names the restored date).
+            if let state::Stepped::Freeze = stepped {
+                let text = if undo {
+                    state::MSG_FREEZE_UNDONE.to_string()
+                } else {
+                    let date = journal_state
+                        .borrow()
+                        .get_study(id)
+                        .and_then(|s| s.frozen_verdict)
+                        .map(|f| crate::viewmodel::frozen::day_month(&f.frozen_at))
+                        .unwrap_or_default();
+                    state::MSG_FREEZE_DONE.replace("{date}", &date)
+                };
+                study_notice::outcome(ui, Source::Edit, &text);
+            }
             if let state::Stepped::Draft(_) = stepped {
                 ui.global::<crate::Drafts>()
                     .set_notice(slint::SharedString::new());

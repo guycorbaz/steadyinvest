@@ -54,6 +54,10 @@ pub const HIST_DRAFT_REJECTED: &str = "★ Proposition rejetée : {}";
 pub const HIST_DRAFT_UNDONE: &str = "★ Proposition validée puis annulée : {}";
 pub const HIST_DRAFT_NOTE: &str = "nouvelle note";
 pub const HIST_DRAFT_STUDY: &str = "Nouvelle étude : {} ({})";
+/// Story 8.8 (UX spec §3.3 l.150): a snapshot that freezes (or replaces) the verdict, and one that
+/// removes it (an undone freeze — Decision 7).
+pub const HIST_FROZEN_SET: &str = "Étude validée ; verdict figé";
+pub const HIST_FROZEN_REMOVED: &str = "Validation de l'étude annulée";
 
 /// Every history label, exposed so the crate-local posture gate (FR13) scans them for banned
 /// verbs alongside the `@tr()` literals — the `engine::USER_FACING_LABELS` precedent.
@@ -85,6 +89,8 @@ pub const HISTORY_USER_FACING_LABELS: &[&str] = &[
     HIST_DRAFT_UNDONE,
     HIST_DRAFT_NOTE,
     HIST_DRAFT_STUDY,
+    HIST_FROZEN_SET,
+    HIST_FROZEN_REMOVED,
 ];
 
 /// One timeline entry (newest first): the snapshot's identity + day/time + the neutral summary.
@@ -135,6 +141,8 @@ struct Diff {
     /// Note changes (Story 8.1), in the order: edits and deletions of the previous notes, then
     /// additions.
     notes: Vec<NoteChange>,
+    /// Story 8.8: the frozen verdict moved — `Some(true)` set or replaced, `Some(false)` removed.
+    frozen: Option<bool>,
     /// A change none of the named facets caught (defensive — the dedup guarantees the states
     /// differ, so an empty diff must still say *something* honest).
     other: bool,
@@ -303,18 +311,25 @@ fn diff_states(prev: &Study, next: &Study, format: NumberFormat) -> Diff {
     let judgment = diff_judgment(&prev.judgment, &next.judgment, format);
     let rationale_changed = prev.rationale != next.rationale;
     let notes = diff_notes(prev, next);
+    let frozen =
+        (prev.frozen_verdict != next.frozen_verdict).then(|| next.frozen_verdict.is_some());
+    // The facets cover every field but `frozen_verdict`: compare the rest to catch the unnamed.
+    let (mut p, mut n) = (prev.clone(), next.clone());
+    p.frozen_verdict = None;
+    n.frozen_verdict = None;
     let other = cells.is_empty()
         && judgment.is_empty()
         && !rationale_changed
         && years_added.is_empty()
         && notes.is_empty()
-        && prev != next;
+        && p != n;
     Diff {
         cells,
         judgment,
         rationale_changed,
         years_added,
         notes,
+        frozen,
         other,
     }
 }
@@ -349,6 +364,7 @@ impl Diff {
             && self.judgment.is_empty()
             && !self.rationale_changed
             && self.years_added.is_empty()
+            && self.frozen.is_none()
             && !self.other
     }
 }
@@ -396,6 +412,11 @@ fn summary_of(diff: &Diff, created: bool) -> String {
             parts.push(label.to_string());
         }
     }
+    match diff.frozen {
+        Some(true) => parts.push(HIST_FROZEN_SET.to_string()),
+        Some(false) => parts.push(HIST_FROZEN_REMOVED.to_string()),
+        None => {}
+    }
     if diff.other || parts.is_empty() {
         parts.push(HIST_OTHER.to_string());
     }
@@ -424,6 +445,11 @@ fn detail_of(diff: &Diff, created: bool) -> Vec<String> {
             }
             NoteChange::Deleted(text) => format!("{HIST_NOTE_DELETED} : {text}"),
         });
+    }
+    match diff.frozen {
+        Some(true) => lines.push(HIST_FROZEN_SET.to_string()),
+        Some(false) => lines.push(HIST_FROZEN_REMOVED.to_string()),
+        None => {}
     }
     if diff.other || lines.is_empty() {
         lines.push(HIST_OTHER.to_string());
@@ -535,6 +561,7 @@ fn empty_diff() -> Diff {
         rationale_changed: false,
         years_added: Vec::new(),
         notes: Vec::new(),
+        frozen: None,
         other: false,
     }
 }
@@ -631,6 +658,56 @@ mod tests {
 
     // Story 8.7 (arch A12, spec §5.7): processed drafts merged at their decision time; at the same
     // instant the ★ entry sits after the snapshot it names (newest first: above it).
+    // Story 8.8: a freeze-only snapshot reads « Étude validée ; verdict figé », its undo « Validation
+    // de l'étude annulée » — never « autres champs modifiés », never a note-only entry.
+    #[test]
+    fn a_freeze_reads_as_a_validation_in_the_history() {
+        let before = study(Vec::new(), judgment(), None);
+        let mut after = before.clone();
+        after.frozen_verdict = Some(steadyinvest_contract::FrozenVerdict {
+            frozen_at: Timestamp("2026-09-30T10:00:00Z".to_string()),
+            method_version: "ssg-1.2.0".to_string(),
+            inputs_hash: "h".to_string(),
+            quality_value_candidate: false,
+            present_zone: None,
+            ud_at_or_above_target: steadyinvest_contract::FrozenCriterion::Unmet,
+            relative_value_below_ceiling: steadyinvest_contract::FrozenCriterion::Unmet,
+            present_price_in_low_zone: steadyinvest_contract::FrozenCriterion::Unmet,
+            appreciation_at_or_above_double: steadyinvest_contract::FrozenCriterion::Unmet,
+            upside_downside: steadyinvest_contract::FrozenUpsideDownside::Unknown,
+            relative_value_pct: None,
+            projected_appreciation_pct: None,
+            total_return_pct: None,
+            appreciation_only_pct: None,
+            zones: None,
+            inputs: Default::default(),
+        });
+        let entries = history_entries(
+            &[
+                (
+                    Uuid::from_u128(1),
+                    "2026-09-30T09:00:00Z".to_string(),
+                    before.clone(),
+                ),
+                (
+                    Uuid::from_u128(2),
+                    "2026-09-30T10:00:00Z".to_string(),
+                    after.clone(),
+                ),
+                (
+                    Uuid::from_u128(3),
+                    "2026-09-30T11:00:00Z".to_string(),
+                    before,
+                ),
+            ],
+            &[],
+            NumberFormat::Comma,
+        );
+        assert_eq!(entries[1].summary, HIST_FROZEN_SET);
+        assert_eq!(entries[0].summary, HIST_FROZEN_REMOVED);
+        assert!(!entries[1].notes_only && !entries[0].notes_only);
+    }
+
     #[test]
     fn processed_drafts_merge_into_the_timeline_after_their_snapshot() {
         let study = |low: &str| {

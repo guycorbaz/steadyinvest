@@ -472,6 +472,7 @@ fn causes(
 /// The strip of a study, from ONE frame (the current verdict live, never persisted): the entry
 /// point of the wiring and the tests. A study that does not normalize has no current verdict to
 /// compare: no strip (the study screen already names the normalize failure).
+#[cfg(test)]
 pub fn strip_of(study: &Study, now: &Timestamp, format: NumberFormat) -> StripView {
     if study.frozen_verdict.is_none() {
         return StripView::None;
