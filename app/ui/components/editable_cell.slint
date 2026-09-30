@@ -284,7 +284,14 @@ export component EditableCell inherits Rectangle {
                 Studies.active-draft-validated = root.state.draft-validated; // Story 8.5b: an AI origin
                 // Reveal the plausibility fact on focus (keyboard-reachable, NFR-U2) — "" when none.
                 Studies.active-warning = Warnings.text(root.state.warning-key);
-                self.select-all(); // typing replaces the value (spreadsheet behaviour)
+                // Typing replaces the value (spreadsheet behaviour). The size is read FIRST: the
+                // `active-*` writes above can re-lay the screen, and the shrink-to-fit size depends
+                // on this cell's width. Left dirty, `select-all` (caret metrics) re-evaluates it
+                // while Slint 1.17 holds its text-layout context → « RefCell already borrowed »
+                // panic (seen on-screen 2026-09-30, FemtoVG). Always true; only forces evaluation.
+                if (self.font-size > 0px) {
+                    self.select-all();
+                }
             } else {
                 root.commit(); // commit on focus-out (covers Tab-away and arrow/Enter moves)
             }
