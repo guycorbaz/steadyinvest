@@ -39,9 +39,11 @@ A **Cargo workspace** with a thin Slint UI over a UI-independent, tested calcula
 | `core` | Pure, deterministic SSG calculation engine (`rust_decimal`, no I/O/UI/SQL/net) |
 | `contract` | Versioned serde data contract (`schema_version` / `method_version`), decoupled from Slint & SQLite |
 | `ingestion` | Provider-agnostic acquisition + normalization (IFRS↔GAAP, splits, fiscal periods, currency) |
-| `persistence` | rusqlite (bundled SQLite) hybrid store, journal identity, migrations, export/import |
+| `persistence` | rusqlite (bundled SQLite) hybrid store, journal identity, migrations, export/import, the gated MCP access surface |
 | `report` | PDF/print (faithful, neutral, grayscale-safe), UI-independent |
+| `paths` | The per-machine locations (app-config, default dossier, logs), shared by the app and the MCP server |
 | `app` | Thin Slint UI — native charts (`Path`/`TouchArea`), app-config, OS keychain |
+| `mcp` | `steadyinvest-mcp`, the stdio MCP server an AI client launches: reads studies, records propositions — never writes a study, never sees the portfolio, keys or config |
 
 **Foundational Invariant:** every asserted fact (input, derived value, verdict, journal) carries a
 dated proof of *(source, version, timestamp, hash-of-dependencies)* — any break in that link is a
@@ -52,9 +54,42 @@ Full planning artifacts (PRD, UX, Architecture, Epics & Stories) live in
 
 ## Status
 
-Pre-implementation. Planning complete (PRD · UX · Architecture · Epics & Stories · Implementation
-Readiness — all done, FR coverage 100%). Phase 4 (implementation) starting with the Cargo workspace
-scaffold and the Week-1 native-Slint charting spike.
+Epics 1–8 implemented (see [`sprint-status.yaml`](_bmad-output/implementation-artifacts/sprint-status.yaml)):
+the faithful study and its charts, provider data and reconciliation, watchlist and portfolio risk,
+cumulative memory and portability (history, export/import, backups), multi-portfolio and
+multi-currency, comparison / health review / screening / reports, and **AI assistance over MCP**
+(human-gated propositions, frozen decision-time verdict). Not in production: the owner builds from
+`main`.
+
+## Build and run
+
+```sh
+cargo run                      # the desktop app (or: just run)
+just ci                        # fmt + clippy -D warnings + tests + cargo-deny, as CI
+just mcp-build                 # the MCP server: target/release/steadyinvest-mcp
+```
+
+Linux is the verified platform. Configuration lives in `~/.config/steadyinvest/config.json`,
+logs in `~/.local/share/steadyinvest/logs/`; the dossier (one SQLite file) is wherever
+Réglages shows it.
+
+## Using an AI with SteadyInvest
+
+No AI runs inside the app. An AI client of your choice (verified: Claude Code) launches the
+`steadyinvest-mcp` server, which lets it read your studies and deposit **propositions** that change
+nothing until you validate them, one by one, in the app. Setup, directories, the in-app workflow,
+troubleshooting and an MCP primer for newcomers: **[docs/guide-ia.md](docs/guide-ia.md)** (French).
+
+## Documentation
+
+| Document | Content |
+|---|---|
+| [docs/guide-ia.md](docs/guide-ia.md) | Using an AI with SteadyInvest (MCP setup, workflow, troubleshooting, MCP primer) |
+| [docs/method/ssg-method-spec-v1.md](docs/method/ssg-method-spec-v1.md) | The SSG method as implemented |
+| In-app glossary (Réglages) | Every term the app uses, in French |
+| [`_bmad-output/planning-artifacts/`](_bmad-output/planning-artifacts/) | PRD, UX specifications, architecture, epics |
+| [`_bmad-output/implementation-artifacts/`](_bmad-output/implementation-artifacts/) | Story records, retrospectives, test checklists |
+| [docs/review-checklist.md](docs/review-checklist.md), [docs/definition-of-done.md](docs/definition-of-done.md) | Development rules |
 
 ## License
 
