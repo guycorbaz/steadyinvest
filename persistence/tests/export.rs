@@ -870,3 +870,50 @@ fn notes_round_trip_byte_identically_through_single_study_and_journal_export() {
         "the study payload re-exports byte-identically (journal id rebound aside)"
     );
 }
+
+#[test]
+fn a_frozen_verdict_round_trips_byte_identically_through_single_study_and_journal_export() {
+    // Story 8.8 AC 12 (FR59, FR60): the frozen verdict survives both exports unchanged.
+    use std::collections::BTreeMap;
+    use steadyinvest_contract::{
+        FrozenCriterion, FrozenUpsideDownside, FrozenVerdict, FrozenZone, Timestamp,
+    };
+    let (_da, mut a) = empty_journal("a.db", 0x88A);
+    let mut frozen_study = study(a.id(), 0x8801, "NESN");
+    let mut inputs = BTreeMap::new();
+    inputs.insert("y2024.eps".to_string(), "3.8".to_string());
+    frozen_study.frozen_verdict = Some(FrozenVerdict {
+        frozen_at: Timestamp("2026-09-30T10:00:00Z".to_string()),
+        method_version: "ssg-1.2.0".to_string(),
+        inputs_hash: "ab".repeat(32),
+        quality_value_candidate: false,
+        present_zone: Some(FrozenZone::Middle),
+        ud_at_or_above_target: FrozenCriterion::Unmet,
+        relative_value_below_ceiling: FrozenCriterion::Met,
+        present_price_in_low_zone: FrozenCriterion::Unmet,
+        appreciation_at_or_above_double: FrozenCriterion::UnmetByInsufficiency,
+        upside_downside: FrozenUpsideDownside::Undefined,
+        relative_value_pct: None,
+        projected_appreciation_pct: None,
+        total_return_pct: None,
+        appreciation_only_pct: None,
+        zones: None,
+        inputs,
+    });
+    a.put_study(&frozen_study).unwrap();
+
+    let single = to_export_json(&frozen_study);
+    let back = from_export_json(&single).unwrap();
+    assert_eq!(back, frozen_study);
+    assert_eq!(
+        to_export_json(&back),
+        single,
+        "single-study re-export is byte-identical"
+    );
+
+    let envelope = a.export_journal().unwrap();
+    let (_db, mut b) = empty_journal("b.db", 0x88B);
+    b.import_journal(&envelope).unwrap();
+    let imported = b.get_study(frozen_study.id).unwrap().unwrap();
+    assert_eq!(imported.frozen_verdict, frozen_study.frozen_verdict);
+}

@@ -90,6 +90,16 @@ fn the_eight_tools_read_and_record_propositions_without_touching_the_studies() {
             .contains(&computed["upside_downside_state"].as_str().unwrap())
     );
     let b_before = s.ok("get_study", json!({ "study_id": study_id(STUDY_B) }));
+    // Story 8.8 (FR68 [P4], A13): the frozen verdict beside the current one — neutral words only.
+    let frozen = &b_before["study"]["frozen_verdict"];
+    assert_eq!(frozen["frozen_at"], json!("2026-09-28T08:06:00Z"));
+    assert!(frozen["inputs_hash"].is_string() && b_before["computed"]["inputs_hash"].is_string());
+    for word in ["buy", "sell", "hold"] {
+        assert!(
+            !frozen.to_string().to_lowercase().contains(word),
+            "{word} in the frozen verdict"
+        );
+    }
     let hist = s.ok(
         "get_judgment_history",
         json!({ "study_id": study_id(STUDY_A) }),
