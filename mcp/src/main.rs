@@ -2,7 +2,7 @@
 //!
 //! Usage: `steadyinvest-mcp [--dossier <path>]` · `steadyinvest-mcp --version`.
 //! Without `--dossier`, each call resolves the dossier the app last opened (arch §Phase 4 A10).
-//! During Epic 8, always pass `--dossier` explicitly (docs/mcp-registration.md).
+//! Pass `--dossier` explicitly (docs/guide-ia.md §3.3).
 
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
