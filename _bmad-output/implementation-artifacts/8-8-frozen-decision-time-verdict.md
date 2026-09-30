@@ -1,6 +1,6 @@
 # Story 8.8: Frozen decision-time verdict (FR68)
 
-Status: ready-for-dev
+Status: review
 
 <!-- Created 2026-09-30 by create-story on branch feat/8-8-frozen-verdict (main with 8.1–8.7).
      Autonomous Epic 8 run (Guy, 2026-09-28): questions resolved with the most conservative option,
@@ -120,45 +120,45 @@ FR59, FR60, FR69, NFR-U1.
 
 ## Tasks / Subtasks
 
-- [ ] **T1 — Contract (AC 2, 12).** `contract/src/frozen.rs`: `FrozenVerdict`, `FrozenZone`
+- [x] **T1 — Contract (AC 2, 12).** `contract/src/frozen.rs`: `FrozenVerdict`, `FrozenZone`
   (serde `low` / `middle` / `high`), `FrozenCriterion`, `FrozenUpsideDownside`, `FrozenZoneBounds`,
   `inputs: BTreeMap<String, String>`; `Study.frozen_verdict` with
   `#[serde(default, skip_serializing_if = "Option::is_none")]`; every `Study { … }` literal gains
   `frozen_verdict: None` (list in Dev Notes); tests like `contract/tests/ai_marks.rs` (absent key,
   legacy byte-identical, round-trip); `roundtrip.rs` strategy.
-- [ ] **T2 — Report builder (AC 2, 10).** `report::form`: `freeze(study, now) -> Result<FrozenVerdict,
+- [x] **T2 — Report builder (AC 2, 10).** `report::form`: `freeze(study, now) -> Result<FrozenVerdict,
   NotFull>` from ONE `build_frame` (`verdict()` must be `Verdict::Full`); `frozen_inputs(study)` —
   the hashed input set as keys (`y{year}.{field}`, `j.{field}`, `q.{field}`) → canonical decimal
   strings / « absent »; `current_facts(snapshot)` in the same shape for the comparison. Tests: Full
   only; byte-stable; inputs keys cover the digest's.
-- [ ] **T3 — State (AC 2–6).** `JournalState::freeze_verdict(study_id, replace_confirmed)` via
+- [x] **T3 — State (AC 2–6).** `JournalState::freeze_verdict(study_id, replace_confirmed)` via
   `mutate_study`; `FreezeOutcome`; the not-full refusal; undo discriminator (`Stepped` sees a
   `frozen_verdict` change → the two notices). `MSG_*` constants.
-- [ ] **T4 — Comparison view model (AC 7–9).** `app/src/viewmodel/frozen.rs`: `strip(study,
+- [x] **T4 — Comparison view model (AC 7–9).** `app/src/viewmodel/frozen.rs`: `strip(study,
   snapshot, format) -> FrozenStripView { None | Same{date} | Differs{date, columns, rows, cause} }`;
   row values app-formatted like the verdict bar; « Entrées » diff with field labels; cause derivation
   (pure, tested with provenance fixtures).
-- [ ] **T5 — Slint (AC 1, 7, 8).** `state.slint`: `FrozenStrip` struct + `Studies.frozen-strip`,
+- [x] **T5 — Slint (AC 1, 7, 8).** `state.slint`: `FrozenStrip` struct + `Studies.frozen-strip`,
   `freeze-reason`, `can-freeze`, callback `freeze-verdict()`; `components/frozen_verdict_strip.slint`;
   the button + reason in the action row; confirm via `Dialog.confirm` (the note-delete precedent).
   Wiring in `wiring/push.rs` (push_form + live drag path) and `wiring/judgment.rs` (callback, notices).
-- [ ] **T6 — History (AC 5).** `viewmodel/history.rs` facet `frozen: Option<FrozenChange>`; labels
+- [x] **T6 — History (AC 5).** `viewmodel/history.rs` facet `frozen: Option<FrozenChange>`; labels
   « Étude validée ; verdict figé », « Validation de l'étude annulée »; excluded from `notes_only`.
-- [ ] **T7 — PDF (AC 11).** `report/src/pdf.rs`: the block after « Position : … », strings in
+- [x] **T7 — PDF (AC 11).** `report/src/pdf.rs`: the block after « Position : … », strings in
   `REPORT_USER_FACING`, WinAnsi-safe; tests: frozen same / differs; no-frozen pin unchanged.
-- [ ] **T8 — MCP + export (AC 12, 13).** Tool description; refusal case `frozen_verdict`; the 8.3
+- [x] **T8 — MCP + export (AC 12, 13).** Tool description; refusal case `frozen_verdict`; the 8.3
   engine-denial statement; non-exposure fixture with a frozen study; persistence export round-trip
   test (single study + journal, byte-identical).
-- [ ] **T9 — Tests of AC 10** (freeze → changed EPS refresh → frozen byte-identical, differs, cause
+- [x] **T9 — Tests of AC 10** (freeze → changed EPS refresh → frozen byte-identical, differs, cause
   « rafraîchissement du … »; method change → « changement de méthode (… → …) »); undo / redo; replace.
-- [ ] **T10 — Posture + glossary (AC 14).**
-- [ ] **T11 — Headless walk (DoD).** Temp HOME / XDG, provider « none », a copy of the corpus + the
+- [x] **T10 — Posture + glossary (AC 14).**
+- [x] **T11 — Headless walk (DoD).** Temp HOME / XDG, provider « none », a copy of the corpus + the
   g01 DEMO studies (DEMO1 is Full once every input is validated — use « Toute l'étude » validation):
   disabled button + reason on a provisional study; freeze; « identique » caption; an owner edit of a
   load-bearing input → the • band, comparison expanded (every row marked / not, « Entrées », cause
   « modification de votre part »); replace confirm; undo / redo notices; history entries; 1280 and
   1600. Screens in the session scratchpad `v88/`. No provider fetch (the refresh cause is tested).
-- [ ] **T12 — Record.** Story record, posture deltas, decisions, sprint-status 8-8 → review.
+- [x] **T12 — Record.** Story record, posture deltas, decisions, sprint-status 8-8 → review.
 
 ## Dev Notes
 
@@ -251,6 +251,20 @@ FR59, FR60, FR69, NFR-U1.
     formatter), frozen as its decimal.
 11. **Replace when nothing differs**: « Valider l'étude » still asks the replace confirm (the spec
     confirms whenever a frozen verdict exists); the new freeze carries the new date.
+12. **The « Verdict » row reads « critères réunis » / « critères non réunis »** (the app had no word
+    for the quality-value candidate; neutral, fact-stating) and each criterion « réuni » / « non
+    réuni » / « inconnu » after its figure (« 0,8:1 · ≥ 3 : non réuni »).
+13. **« Entrées » on screen names each changed input** (« PER haut moyen 18 → 20 »); **the PDF gives
+    their count** (« 2 modifiée(s) ») — the screen is the place to read them.
+14. **The PDF block is lines « libellé : figé -> actuel »** with « • » on the changed ones (not a
+    ruled table), after « Position : … » in « Synthèse ».
+15. **The cause / difference logic lives in `report::frozen`** (one logic for the screen and the
+    PDF); the app formats the figures with its own number format.
+16. **« Valider l'étude » sits on its own line under the action row** (the spec says « after
+    Historique »; the row is already wider than the window at 1280 / 1600 — the button would be
+    off-screen); its reason elides on the same line.
+17. **Undoing a REPLACE** restores the previous frozen verdict, so that history entry reads
+    « Étude validée ; verdict figé » (a verdict is set), not « annulée ».
 
 ### Testing standards
 
@@ -279,10 +293,70 @@ New: `contract/src/frozen.rs`, `app/src/viewmodel/frozen.rs`,
 
 ### Agent Model Used
 
+Claude Opus 5.5 (claude-opus-5-5)
+
 ### Debug Log References
+
+- A divergent refresh of a VALIDATED cell never changes it (#110: parked as pending) — the AC 10
+  test therefore accepts the provider values after the refresh (the owner's gesture that lets the
+  new EPS in); the cause reads « rafraîchissement du … » (the accepted cells are provider-sourced).
+- The fixed test clock stamps the freeze and the refresh in the same second; the cause needs a
+  provider write strictly after the freeze → the tests back-date `frozen_at`.
+- `row` and `col` are reserved names inside Slint layouts (renamed `entry` / `half`).
+- A word-wrapped `Text` inside the action `HorizontalLayout` inflated the page height (the whole form
+  below vanished) — the reason now elides on its own line.
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- T1 (contract): `FrozenVerdict` — additive, `skip_serializing_if`, NEUTRAL
+  names (`low` / `middle` / `high`, `low_zone_top`, `present_price_in_low_zone`, `unknown` — the MCP
+  `computed` spelling); pins and legacy blobs byte-identical.
+- T2 (`report::form::freeze` / `verdict_record` / `frozen_inputs`): only a `Verdict::Full`; the
+  inputs are every value the digest covers (5 years × 7 fields + 10 judgment + 5 observations in the
+  test).
+- T3 (`JournalState::freeze_verdict`, `Stepped::Freeze`, `MSG_FREEZE_*`), T4 (`viewmodel::frozen`
+  strip + `report::frozen` shared `same` / `changed_inputs` / `causes`), T5 (the strip component, the
+  button, the confirm, the wiring), T6 (history facet), T7 (PDF block), T8 (MCP + export), T9
+  (tests), T10 (posture + glossary).
+- **Posture deltas (measured)**: `@tr` floor 1147 → 1172 (+25, itemised in `posture.rs`);
+  `USER_FACING_MESSAGES` 248 → 251; `HISTORY_USER_FACING_LABELS` 26 → 28;
+  `FROZEN_USER_FACING_LABELS` 18 (new, scanned); `REPORT_USER_FACING` + the 27 PDF strings (neutral
+  test green). Gates: fmt, clippy `-D warnings`, `cargo test --workspace --no-fail-fast` 1445
+  passed, deny ok.
+- **T11 headless walk** (Xvfb :94, temp HOME / XDG, provider « none », a fresh copy of
+  `persistence/tests/corpus/v8.db` + DEMO1 / DEMO2 from golden g01, `just mcp-seed`; real
+  `~/.config/steadyinvest` + `~/.local/share/steadyinvest` listed + md5 before/after — unchanged).
+  Screens in the session scratchpad `v88/`: 01 (the button off-screen after « Historique » and the
+  form gone → fixed), 02 NESN provisional: « Valider l'étude » disabled, « Verdict incomplet —
+  entrées ouvertes : Prix haut 2021 — non validé, … »; 05 DEMO1 frozen: « Étude validée ; verdict
+  figé le 30/09. » + the caption « … identique au verdict figé »; 07 an owner edit (PER haut 18 →
+  20) → the « • » band; 08 / 10 the comparison (• + semibold on U/D, appreciation, potential,
+  entries; « Entrées : 1 modifiée(s) : PER haut moyen 18 → 20 »; zones « Zone de maintien » in ink;
+  « Cause : modification de votre part »; columns aligned after the fix); 09b collapsed on reopen;
+  11 the replace confirm; 12 replaced (identique again); 14 undo → « Validation de l'étude
+  annulée. » and the previous frozen verdict back; 17 history: « Étude validée ; verdict figé » ×2;
+  18 at 1280.
+- **Found and fixed in the walk**: the button off-screen at the end of an overflowing action row
+  and the page inflated by a word-wrapped reason (→ its own line, elided); the comparison's columns
+  not under their headers and the label column too narrow.
+- **Seen, not changed (pre-existing)**: the study screen wider than the window at 1280 and with the
+  history open (the G6 width debt); after a modal closes no study element holds the keyboard focus,
+  so Ctrl+Z needs a click on a focusable control first (as after any dialog since 2.9).
+- No UI-level harness: the wiring is verified headless only.
 
 ### File List
+
+New: `contract/src/frozen.rs`, `contract/tests/frozen.rs`, `report/src/frozen.rs`,
+`app/src/state/frozen.rs`, `app/src/viewmodel/frozen.rs`,
+`app/ui/components/frozen_verdict_strip.slint`. Modified: `contract/src/{lib,study}.rs`,
+`contract/tests/roundtrip.rs`, `report/src/{lib,form,pdf}.rs`, `app/src/state/{mod,undo,messages,
+tests}.rs`, `app/src/viewmodel/{mod,engine,history,drafts}.rs`, `app/src/wiring/{push,judgment,
+studies}.rs`, `app/src/posture.rs`, `app/ui/{state.slint, components/modal_dialog.slint,
+screens/study_screen.slint, screens/settings.slint}`, `mcp/src/tools.rs`,
+`mcp/tests/{support/mod,stdio_e2e}.rs`, `persistence/src/mcp_access.rs`,
+`persistence/tests/{mcp_access,export,…}.rs` (the `Study` literals),
+`_bmad-output/implementation-artifacts/sprint-status.yaml`.
+
+## Change Log
+
+- 2026-09-30 — create-story (5fd8c0b); dev-story T1–T12; headless walk v88/; status → review.

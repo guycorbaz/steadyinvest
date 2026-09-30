@@ -743,5 +743,6 @@ development_status:
   # 2026-09-29: 8-7 dev + Journey 6 walk + G3 (3 layers, 11 applied) → PR #265 merged → done.
   8-7-draft-study-end-to-end-and-drafts-record: done
   # 2026-09-30: 8-8 story file created (create-story) → ready-for-dev; branch feat/8-8-frozen-verdict.
-  8-8-frozen-decision-time-verdict: ready-for-dev
+  # 2026-09-30: 8-8 dev complete (1445 tests; headless walk v88) → review.
+  8-8-frozen-decision-time-verdict: review
   epic-8-retrospective: optional
