@@ -105,8 +105,11 @@ cd ~/steadyinvest-ia
 claude mcp remove --scope local steadyinvest
 claude mcp add --scope local steadyinvest -- \
     /home/gcorbaz/devel/steadyinvest/target/release/steadyinvest-mcp \
-    --dossier /home/gcorbaz/.local/share/steadyinvest/journal.db
+    --dossier "<le chemin de votre dossier, affiché dans Réglages>"
 ```
+
+Le chemin est celui de la carte du dossier dans Réglages (par exemple
+`/home/gcorbaz/steadyinvest/dossier.db`), pas forcément l'emplacement par défaut.
 
 L'application peut rester ouverte : le serveur ne prend pas son verrou, ne migre jamais le dossier et
 n'y écrit que des propositions. Une proposition déposée pendant que l'application est fermée apparaît

@@ -351,6 +351,33 @@ fn the_server_advertises_tools_only() {
 }
 
 #[test]
+fn tools_list_carries_the_cache_hints_protocol_2026_07_28_requires() {
+    // Guy's on-screen test (2026-09-30): Claude Code refused tools/list without `ttlMs` and
+    // `cacheScope` (SEP-2549) — the lenient rmcp client of the other tests never noticed.
+    for version in ["2025-06-18", "2026-07-28"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fixture_dossier(dir.path());
+        let home = dir.path().join("home");
+        let mut s = spawn(&["--dossier", path.to_str().unwrap()], &home);
+        s.request(
+            "initialize",
+            json!({ "protocolVersion": version, "capabilities": {},
+                    "clientInfo": { "name": "t", "version": "0" } }),
+        );
+        s.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+        let r = s.request("tools/list", json!({}));
+        let result = &r["result"];
+        assert!(result["ttlMs"].is_u64(), "{version}: {r}");
+        assert_eq!(result["cacheScope"], json!("private"), "{version}: {r}");
+        assert_eq!(
+            result["tools"].as_array().map(Vec::len),
+            Some(8),
+            "{version}"
+        );
+    }
+}
+
+#[test]
 fn bounds_unknown_studies_and_long_values_are_named() {
     let dir = tempfile::tempdir().unwrap();
     let path = fixture_dossier(dir.path());

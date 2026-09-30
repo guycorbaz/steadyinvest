@@ -5,9 +5,9 @@
 use crate::tools::{self, CallEnv, INSTRUCTIONS};
 use chrono::{SecondsFormat, Utc};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    InitializeResult, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,
-    Tool,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+    Implementation, InitializeResult, ListToolsResult, PaginatedRequestParams, ServerCapabilities,
+    ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
@@ -55,7 +55,12 @@ impl ServerHandler for SteadyMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(tools_list()))
+        // The cache hints (SEP-2549) are REQUIRED by protocol 2026-07-28 — Claude Code rejects a
+        // tools/list without them (Guy's on-screen test, 2026-09-30); rmcp leaves them optional.
+        // Private: the server speaks for one owner's dossier; never fresh: nothing is cached.
+        Ok(ListToolsResult::with_all_items(tools_list())
+            .with_ttl_ms(0)
+            .with_cache_scope(CacheScope::Private))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
