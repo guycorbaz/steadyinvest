@@ -792,8 +792,10 @@ mod tests {
         // comparaison », the « figé » header and three « actuel » headers, the eight row labels,
         // « Cause : {} », « • {} » (18); the glossary's « Verdict figé » term and definition (2):
         // 1147 + 25 = 1172, measured.
+        // Year validation (Guy's on-screen test, 2026-09-30): the row's label « Valider une année
+        // (cellules renseignées) » (the chips reuse the year headers): 1172 + 1 = 1173, measured.
         assert!(
-            total >= 1172,
+            total >= 1173,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -964,7 +966,9 @@ mod tests {
             // (edited), rejected, undone, redone: 242 + 5 = 247, measured. 8.7: the draft-study
             // duplicate refusal (MSG_DRAFT_STUDY_EXISTS): 247 + 1 = 248, measured. 8.8: the freeze
             // outcome, its undo and the not-full refusal (MSG_FREEZE_*): 248 + 3 = 251, measured.
-            251,
+            // Year validation (Guy's on-screen test, 2026-09-30): validated, some left out,
+            // nothing to validate (MSG_YEAR_*): 251 + 3 = 254, measured.
+            254,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export

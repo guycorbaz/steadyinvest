@@ -878,6 +878,23 @@ export component StudyScreen inherits Rectangle {
                     padding: Tokens.space-12;
                     spacing: Tokens.space-8;
 
+                    // Validate a whole year (Guy's on-screen test, 2026-09-30): every filled cell
+                    // of the column → ✓, one undo step; a pending provider divergence is left out
+                    // and named (the outcome notice).
+                    Text {
+                        text: @tr("Valider une année (cellules renseignées)");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        font-weight: Tokens.weight-medium;
+                    }
+                    HorizontalLayout {
+                        spacing: Tokens.space-8;
+                        alignment: start;
+                        for yh[i] in Studies.year-headers: ActionButton {
+                            label: yh;
+                            clicked => { Studies.validate-year(i); }
+                        }
+                    }
                     Text {
                         text: @tr("Retirer les validations");
                         color: Tokens.text-mid;

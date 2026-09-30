@@ -414,6 +414,45 @@ pub(crate) fn wire_cells(ui: &MainWindow, s: &Session) {
         });
     }
 
+    // Validate a whole year (Guy's on-screen test, 2026-09-30): one gesture, one undo step, the
+    // outcome named (validated count, divergences left out, or nothing to validate).
+    {
+        let ui_weak = ui.as_weak();
+        let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
+        let current_study = Rc::clone(current_study);
+        ui.global::<Studies>().on_validate_year(move |year_index| {
+            let ui = ui_weak.unwrap();
+            let Some(id_text) = current_study.borrow().clone() else {
+                return;
+            };
+            let Ok(id) = Uuid::parse_str(&id_text) else {
+                return;
+            };
+            let Ok(year_index) = usize::try_from(year_index) else {
+                return;
+            };
+            let format = config.borrow().number_format;
+            // Bind first (a `borrow_mut()` in the scrutinee would outlive into the Ok arm).
+            let outcome = journal_state.borrow_mut().validate_year(id, year_index);
+            match outcome {
+                Ok((year, validated, left)) => {
+                    study_notice::outcome(
+                        &ui,
+                        Source::Edit,
+                        &state::year_validated_message(year, validated, left),
+                    );
+                    if validated > 0
+                        && let Some(study) = journal_state.borrow().get_study(id)
+                    {
+                        push_form(&ui, &journal_state.borrow(), &study, format);
+                    }
+                }
+                Err(message) => study_notice::fail(&ui, Source::Edit, &message),
+            }
+        });
+    }
+
     // Cancel a pending "unlock all": dismiss the overlay and forget the scope — nothing is mutated.
     {
         let ui_weak = ui.as_weak();
