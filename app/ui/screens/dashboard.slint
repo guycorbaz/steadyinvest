@@ -158,6 +158,22 @@ component StudyListRow inherits Rectangle {
                 width: 100%;
             }
         }
+        // Guy's on-screen test (2026-09-30): the upside/downside ratio right after the potential —
+        // a neutral FACT like it (no hue, right-aligned tabular figures, « — » when undefined or
+        // unknown). Fixed-width slot so the column aligns across every row.
+        Rectangle {
+            width: 80px;
+            background: transparent;
+            Text {
+                text: root.entry.ud-ratio;
+                color: Tokens.text-mid;
+                font-family: Tokens.font-numeric;
+                font-size: Tokens.font-caption;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                width: 100%;
+            }
+        }
         // Issue #148: a neutral "à compléter" marker when the study still has a MISSING load-bearing
         // input (verdict Withheld) — so an unfinished study is evident from the list, before opening
         // it. NEUTRAL ink only (no hue — the colour budget is the §4 zones). Fixed-width slot ALWAYS
