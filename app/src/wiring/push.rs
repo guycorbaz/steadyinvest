@@ -390,5 +390,9 @@ pub(crate) fn push_frozen(
             cause: c.cause.clone().into(),
         },
     };
+    // The comparison folds when there is nothing to compare (G3: it never reappears open).
+    if out.state != 2 {
+        studies.set_frozen_open(false);
+    }
     studies.set_frozen_strip(out);
 }

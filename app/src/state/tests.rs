@@ -10626,4 +10626,28 @@ mod frozen_8_8 {
             "{refused}"
         );
     }
+
+    // G3 — the same inputs, one of them no longer validated: the verdict is provisional, so the
+    // strip differs (as the PDF does), the Verdict row is marked and the cause names the open inputs.
+    #[test]
+    fn a_verdict_become_provisional_differs_and_names_its_open_inputs() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = full_state(&dir);
+        state.freeze_verdict(id).unwrap();
+        state
+            .set_review(id, 4, entry::FIELD_EPS, Review::ToReview)
+            .unwrap();
+        match strip(&state, id) {
+            StripView::Differs { comparison, .. } => {
+                assert!(comparison.verdict.changed);
+                assert!(!comparison.entries.changed, "the values are the same");
+                assert!(
+                    comparison.cause.starts_with("entrées ouvertes : BPA 2024"),
+                    "{}",
+                    comparison.cause
+                );
+            }
+            other => panic!("expected a difference, got {other:?}"),
+        }
+    }
 }

@@ -4,7 +4,10 @@
 use steadyinvest_contract::Timestamp;
 use uuid::Uuid;
 
-use super::{JournalState, MSG_FREEZE_NOT_FULL, MSG_NO_JOURNAL, MSG_READ_FAILED, MSG_SAVE_FAILED};
+use super::{
+    JournalState, MSG_FREEZE_NOT_FULL, MSG_NO_JOURNAL, MSG_READ_FAILED, MSG_SAVE_FAILED,
+    MSG_STUDY_GONE,
+};
 use crate::viewmodel::engine;
 
 impl JournalState {
@@ -20,7 +23,7 @@ impl JournalState {
         }
         let study = match self.try_get_study(study_id) {
             Ok(Some(study)) => study,
-            Ok(None) => return Err(MSG_SAVE_FAILED.to_string()),
+            Ok(None) => return Err(MSG_STUDY_GONE.to_string()),
             Err(_) => return Err(MSG_READ_FAILED.to_string()),
         };
         let now = self.clock.now();

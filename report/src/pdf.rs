@@ -1316,7 +1316,11 @@ fn frozen_block(
         jj_mm_aaaa(&frozen.frozen_at.0),
         frozen.method_version
     ));
-    if crate::frozen::same(frozen, &current) {
+    // G3: ONE rule with the screen — a current verdict no longer full differs too.
+    let state = frame.snapshot.verdict();
+    let full = matches!(state, steadyinvest_core::verdict::Verdict::Full(_));
+    let withheld = matches!(state, steadyinvest_core::verdict::Verdict::Withheld(_));
+    if !crate::frozen::differs(frozen, &current, full) {
         for (label, f, _) in &table {
             doc.line(&format!("  {label} : {f}"));
         }
@@ -1326,8 +1330,27 @@ fn frozen_block(
         "{FROZEN_DIFFERS} {}",
         jj_mm_aaaa(&frozen.frozen_at.0)
     ));
-    for (label, f, c) in &table {
-        let mark = if f != c { "• " } else { "  " };
+    if !full {
+        doc.line(&format!(
+            "  {} ({}, {})",
+            FROZEN_CURRENT,
+            current.method_version,
+            if withheld {
+                FROZEN_WITHHELD
+            } else {
+                FROZEN_PROVISIONAL
+            }
+        ));
+    }
+    for (i, (label, f, c)) in table.iter().enumerate() {
+        // A withheld current verdict shows no figure (the screen's « retenu »).
+        let c = if withheld && i > 0 {
+            FROZEN_WITHHELD.to_string()
+        } else {
+            c.clone()
+        };
+        let changed = f != &c || (i == 0 && !full);
+        let mark = if changed { "• " } else { "  " };
         doc.line(&format!("{mark}{label} : {f} -> {c}"));
     }
     let changed = crate::frozen::changed_inputs(frozen, &current);
@@ -1347,9 +1370,14 @@ fn frozen_block(
         "{method_mark}{FROZEN_ROW_METHOD} : {} -> {}",
         frozen.method_version, current.method_version
     ));
-    let cause = crate::frozen::causes(study, frozen, &current, &changed, &|t| {
-        jj_mm_aaaa(&t.0).chars().take(5).collect()
-    })
+    let cause = crate::frozen::causes(
+        study,
+        frozen,
+        &current,
+        &changed,
+        None,
+        &crate::frozen::day_month,
+    )
     .replace('→', "->");
     doc.line(&format!("{FROZEN_CAUSE} : {cause}"));
 }
@@ -1385,6 +1413,9 @@ const FROZEN_DOUBLE: &str = ">= doublement";
 const FROZEN_NO_DIV: &str = "hors div.";
 const FROZEN_ENTRIES_SAME: &str = "identiques";
 const FROZEN_ENTRIES_COUNT: &str = "{n} modifiée(s)";
+const FROZEN_CURRENT: &str = "actuel";
+const FROZEN_PROVISIONAL: &str = "provisoire";
+const FROZEN_WITHHELD: &str = "retenu";
 
 /// The `YYYY-MM-DD` prefix of an ISO timestamp (char-safe, no byte slicing).
 fn date_prefix(ts: &str) -> String {
@@ -1483,6 +1514,10 @@ const REPORT_USER_FACING: &[&str] = &[
     FROZEN_NO_DIV,
     FROZEN_ENTRIES_SAME,
     FROZEN_ENTRIES_COUNT,
+    FROZEN_CURRENT,
+    FROZEN_PROVISIONAL,
+    FROZEN_WITHHELD,
+    crate::frozen::CAUSE_OPEN,
     crate::frozen::CAUSE_REFRESH,
     crate::frozen::CAUSE_OWNER,
     crate::frozen::CAUSE_AI,
@@ -4208,6 +4243,16 @@ mod tests {
         assert!(contains(&differs, "Méthode : ssg-1.1.0 -> "));
         assert!(contains(&differs, "changement de méthode (ssg-1.1.0 -> "));
         assert!(!contains(&differs, "→") && !contains(&differs, "≥"));
+        assert!(contains(&differs, "• Méthode : ssg-1.1.0 -> "));
+        assert!(contains(&differs, "Entrées : identiques"));
+        assert!(!contains(&differs, "• Entrées"));
+        // One input changed since the freeze: the entries row is marked and counted.
+        let mut frozen = study.frozen_verdict.clone().unwrap();
+        let key = frozen.inputs.keys().next().unwrap().clone();
+        frozen.inputs.insert(key, "999".to_string());
+        study.frozen_verdict = Some(frozen);
+        let edited = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(&edited, "• Entrées : 1 modifiée(s)"));
     }
 
     #[test]

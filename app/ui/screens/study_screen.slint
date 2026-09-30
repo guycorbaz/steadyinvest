@@ -593,12 +593,12 @@ export component StudyScreen inherits Rectangle {
             // otherwise disabled with the reason beside it. Its own line under the action row (the
             // row is already wider than the window at 1280 / 1600 — the G6 width debt; Decision 16).
             // With a frozen verdict stored, the replace confirmation first.
-            if !Studies.demo-active: HorizontalLayout {
+            HorizontalLayout {
                 alignment: start;
                 spacing: Tokens.space-12;
                 ActionButton {
                     label: @tr("Valider l'étude");
-                    enabled: !Studies.read-only && Studies.freeze-open-list == "";
+                    enabled: !Studies.demo-active && !Studies.read-only && Studies.freeze-open-list == "";
                     clicked => {
                         if (Studies.frozen-strip.state != 0) {
                             Dialog.confirm(@tr("Remplacer le verdict figé ?"),

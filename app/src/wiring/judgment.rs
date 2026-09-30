@@ -653,16 +653,17 @@ fn stepped_outcome(
             refresh_active_facts(ui);
             // Story 8.8: a step over the freeze says so (the redo names the restored date).
             if let state::Stepped::Freeze = stepped {
-                let text = if undo {
-                    state::MSG_FREEZE_UNDONE.to_string()
-                } else {
-                    let date = journal_state
-                        .borrow()
-                        .get_study(id)
-                        .and_then(|s| s.frozen_verdict)
-                        .map(|f| crate::viewmodel::frozen::day_month(&f.frozen_at))
-                        .unwrap_or_default();
-                    state::MSG_FREEZE_DONE.replace("{date}", &date)
+                // G3: a step that leaves a frozen verdict in place (a redo, or the undo of a
+                // replace — the earlier verdict is back) names that verdict's date; only a step
+                // that removes it says the validation is undone.
+                let restored = journal_state
+                    .borrow()
+                    .get_study(id)
+                    .and_then(|s| s.frozen_verdict)
+                    .map(|f| crate::viewmodel::frozen::day_month(&f.frozen_at));
+                let text = match restored {
+                    Some(date) => state::MSG_FREEZE_DONE.replace("{date}", &date),
+                    None => state::MSG_FREEZE_UNDONE.to_string(),
                 };
                 study_notice::outcome(ui, Source::Edit, &text);
             }

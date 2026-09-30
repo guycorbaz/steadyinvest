@@ -14,11 +14,11 @@ component CompareLine inherits HorizontalLayout {
     // The zone row writes keys with the runtime labels.
     in property <bool> zone: false;
     // Fixed columns (label + two equal halves) so every row aligns under the headers.
-    property <length> half: (root.width - 240px - 2 * Tokens.space-12) / 2;
+    property <length> half: max(0px, (root.width - 240px - 2 * Tokens.space-12) / 2);
     spacing: Tokens.space-12;
     function words(key: string) -> string {
         return key == "buy" ? Labels.zone-buy : key == "neutral" ? Labels.zone-hold
-            : key == "sell" ? Labels.zone-sell : "—";
+            : key == "sell" ? Labels.zone-sell : key == "" ? "—" : key;
     }
     Text {
         text: root.entry.changed ? @tr("• {}", root.label) : root.label;
@@ -76,7 +76,7 @@ export component FrozenVerdictStrip inherits VerticalLayout {
             width: parent.width;
             spacing: Tokens.space-4;
             header := HorizontalLayout {
-                property <length> half: (self.width - 240px - 2 * Tokens.space-12) / 2;
+                property <length> half: max(0px, (self.width - 240px - 2 * Tokens.space-12) / 2);
                 spacing: Tokens.space-12;
                 Rectangle { width: 240px; }
                 Text {

@@ -119,10 +119,10 @@ pub enum StripView {
     },
 }
 
-/// JJ/MM of an RFC 3339 stamp, in local time (the history's day rule).
+/// JJ/MM of an RFC 3339 stamp (its UTC date).
 pub fn day_month(stamp: &Timestamp) -> String {
-    let full = crate::viewmodel::notes::date_fr(stamp);
-    full.get(..5).unwrap_or(&full).to_string()
+    // G3: the stamp's UTC date, the PDF's and the history's rule — one date on every surface.
+    steadyinvest_report::frozen::day_month(stamp)
 }
 
 /// Build the strip (Story 8.8). `current`: the live verdict in the frozen shape; `open_inputs`:
@@ -138,17 +138,23 @@ pub fn strip(
         return StripView::None;
     };
     let date = day_month(&frozen.frozen_at);
-    if steadyinvest_report::frozen::same(frozen, current) && current_state == CurrentState::Full {
+    let full = current_state == CurrentState::Full;
+    if !steadyinvest_report::frozen::differs(frozen, current, full) {
         return StripView::Same { date };
     }
     let withheld = |text: String| match (current_state, open_inputs) {
         (CurrentState::Withheld, Some(list)) => FROZEN_WITHHELD.replace("{list}", list),
         _ => text,
     };
-    let row = |f: String, c: String, changed: bool| CompareRow {
-        current: withheld(c.clone()),
-        frozen: f,
-        changed,
+    // A row is marked when what it SHOWS differs (G3: never a « • » over two identical texts —
+    // the PDF's rule too).
+    let row = |f: String, c: String| {
+        let current = withheld(c);
+        CompareRow {
+            changed: f != current,
+            current,
+            frozen: f,
+        }
     };
     let qv = |b: bool| if b { FROZEN_QV_MET } else { FROZEN_QV_UNMET }.to_string();
     let zone_key = |z: Option<FrozenZone>| match z {
@@ -207,49 +213,46 @@ pub fn strip(
         }
     };
     let comparison = Comparison {
-        verdict: row(
-            qv(frozen.quality_value_candidate),
-            qv(current.quality_value_candidate),
-            frozen.quality_value_candidate != current.quality_value_candidate,
-        ),
-        zone: CompareRow {
-            frozen: zone_key(frozen.present_zone).to_string(),
-            current: zone_key(current.present_zone).to_string(),
-            changed: frozen.present_zone != current.present_zone
-                || frozen.present_price_in_low_zone != current.present_price_in_low_zone,
+        verdict: {
+            let mut r = row(
+                qv(frozen.quality_value_candidate),
+                qv(current.quality_value_candidate),
+            );
+            // A current verdict no longer full is itself the difference (G3).
+            r.changed |= !full;
+            r
         },
-        ud: row(
-            ud(frozen),
-            ud(current),
-            frozen.upside_downside != current.upside_downside
-                || frozen.ud_at_or_above_target != current.ud_at_or_above_target,
-        ),
-        relative_value: row(
-            rv(frozen),
-            rv(current),
-            frozen.relative_value_pct != current.relative_value_pct
-                || frozen.relative_value_below_ceiling != current.relative_value_below_ceiling,
-        ),
-        appreciation: row(
-            app(frozen),
-            app(current),
-            frozen.projected_appreciation_pct != current.projected_appreciation_pct
-                || frozen.appreciation_at_or_above_double
-                    != current.appreciation_at_or_above_double,
-        ),
-        potential: row(
-            potential(frozen),
-            potential(current),
-            frozen.total_return_pct != current.total_return_pct
-                || frozen.appreciation_only_pct != current.appreciation_only_pct,
-        ),
+        zone: {
+            let (f, c) = (
+                zone_key(frozen.present_zone).to_string(),
+                zone_key(current.present_zone).to_string(),
+            );
+            // Keys the strip writes with its labels; a withheld cell passes its text through.
+            let c = withheld(c);
+            CompareRow {
+                changed: f != c,
+                frozen: f,
+                current: c,
+            }
+        },
+        ud: row(ud(frozen), ud(current)),
+        relative_value: row(rv(frozen), rv(current)),
+        appreciation: row(app(frozen), app(current)),
+        potential: row(potential(frozen), potential(current)),
         entries,
         method: CompareRow {
             frozen: frozen.method_version.clone(),
             current: current.method_version.clone(),
             changed: frozen.method_version != current.method_version,
         },
-        cause: causes(study, frozen, current, &changed_inputs, &day_month),
+        cause: causes(
+            study,
+            frozen,
+            current,
+            &changed_inputs,
+            if full { None } else { open_inputs },
+            &day_month,
+        ),
     };
     StripView::Differs {
         date,
@@ -340,6 +343,13 @@ fn input_value(key: &str, value: &str, format: NumberFormat) -> String {
             }
         }
         return value.to_string();
+    }
+    // The trailing-twelve-month EPS travels as four quarters, the app filling the first (its TTM
+    // figure) and zeros: show the figure only (G3).
+    if key == "q.ttm_quarterly_eps"
+        && let Some(first) = value.split('|').next()
+    {
+        return format_amount(first, format);
     }
     if value.contains('|') {
         return value
