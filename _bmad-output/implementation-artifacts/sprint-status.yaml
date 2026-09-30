@@ -744,5 +744,6 @@ development_status:
   8-7-draft-study-end-to-end-and-drafts-record: done
   # 2026-09-30: 8-8 story file created (create-story) → ready-for-dev; branch feat/8-8-frozen-verdict.
   # 2026-09-30: 8-8 dev complete (1445 tests; headless walk v88) → review.
-  8-8-frozen-decision-time-verdict: review
+  # 2026-09-30: 8-8 G3 (3 layers, 11 applied) → PR #266 merged → done. Epic 8 retrospective next, WITH Guy.
+  8-8-frozen-decision-time-verdict: done
   epic-8-retrospective: optional
