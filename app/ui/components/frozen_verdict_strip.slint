@@ -19,7 +19,7 @@ component CompareLine inherits HorizontalLayout {
             : key == "sell" ? Labels.zone-sell : "—";
     }
     Text {
-        text: (root.entry.changed ? "• " : "") + root.label;
+        text: root.entry.changed ? @tr("• {}", root.label) : root.label;
         width: 200px;
         color: root.entry.changed ? Tokens.text-high : Tokens.text-mid;
         font-size: Tokens.font-caption;

@@ -985,6 +985,11 @@ export component SettingsScreen inherits Rectangle {
                     term: @tr("Registre");
                     definition: @tr("La liste de toutes les propositions d'une IA et de leur issue : en attente, validée, validée puis annulée, rejetée.");
                 }
+                // Story 8.8 (FR68).
+                GlossaryRow {
+                    term: @tr("Verdict figé");
+                    definition: @tr("Le verdict enregistré quand vous validez l'étude ; il ne change plus. Le verdict actuel, recalculé à chaque ouverture, est comparé au verdict figé et toute différence est signalée.");
+                }
             }
 
             // ── Story 2.13 — Vérifier le moteur (FR9): replay the bundled golden studies on demand. ──
