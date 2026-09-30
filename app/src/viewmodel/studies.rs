@@ -28,6 +28,9 @@ pub struct StudyReturn {
     pub display: String,
     pub incomplete: bool,
     pub zone: &'static str,
+    /// Guy's on-screen test (2026-09-30) — the upside/downside ratio as the study shows it
+    /// (`engine::fmt_ud`: « 3,4:1 », « — » when undefined or unknown).
+    pub ud: String,
     /// 2026-07-12 — the study's user-entered company name (empty when unset), shown after the
     /// ticker on the list row. Owned (read off the full study during refresh, not the summary).
     pub company_name: String,
@@ -42,6 +45,7 @@ impl Default for StudyReturn {
         StudyReturn {
             value: None,
             display: crate::viewmodel::form::EMPTY_SLOT.to_string(),
+            ud: crate::viewmodel::form::EMPTY_SLOT.to_string(),
             incomplete: false,
             zone: "",
             company_name: String::new(),
@@ -56,6 +60,7 @@ impl Default for StudyReturn {
 pub fn to_row(
     summary: &StudySummary,
     potential_return: &str,
+    ud_ratio: &str,
     incomplete: bool,
     zone: &str,
     company_name: &str,
@@ -66,6 +71,7 @@ pub fn to_row(
         created_at: created_at_date(&summary.created_at).into(),
         status: summary.status.clone().into(),
         potential_return: potential_return.into(),
+        ud_ratio: ud_ratio.into(),
         incomplete,
         zone: zone.into(),
         company_name: company_name.into(),
@@ -176,6 +182,7 @@ pub fn curate(
             to_row(
                 s,
                 facts.display.as_str(),
+                facts.ud.as_str(),
                 facts.incomplete,
                 facts.zone,
                 facts.company_name.as_str(),
@@ -221,6 +228,7 @@ mod tests {
         StudyReturn {
             value: Some(Decimal::from_str_exact(value).unwrap()),
             display: display.to_string(),
+            ud: "—".to_string(),
             incomplete: false,
             zone: "",
             company_name: String::new(),
@@ -415,6 +423,7 @@ mod tests {
             StudyReturn {
                 value: None,
                 display: "—".to_string(),
+                ud: "3,4:1".to_string(),
                 incomplete: true,
                 zone: "",
                 company_name: String::new(),
@@ -431,6 +440,9 @@ mod tests {
         );
         assert_eq!(tickers(&rows), vec!["NESN", "ROG"]);
         assert!(rows[0].incomplete, "NESN is flagged à compléter");
+        // The U/D ratio rides onto the row too; an absent study reads « — », never blank.
+        assert_eq!(rows[0].ud_ratio.to_string(), "3,4:1");
+        assert_eq!(rows[1].ud_ratio.to_string(), "—");
         assert!(
             !rows[1].incomplete,
             "ROG (absent from the map) defaults to not incomplete"
