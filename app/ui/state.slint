@@ -621,6 +621,35 @@ export struct HistoryAiDetail {
     ai-text: string,
 }
 
+// Story 8.8 (UX spec §4.6, §5.9) — the frozen verdict against the current one. App text, formatted
+// in Rust (`viewmodel::frozen`); the zone row carries KEYS (`buy` / `neutral` / `sell` / "") the
+// strip writes with `Labels.zone-*`, in ink. `changed` = a leading « • » and semibold figures.
+export struct FrozenRow {
+    frozen: string,
+    current: string,
+    changed: bool,
+}
+
+export struct FrozenStrip {
+    // 0 no frozen verdict (nothing rendered) · 1 frozen = current (caption) · 2 they differ (• band)
+    state: int,
+    // JJ/MM of the freeze
+    date: string,
+    frozen-method: string,
+    current-method: string,
+    // The current verdict: 0 full · 1 provisional · 2 withheld (the « actuel (…) » header)
+    current-state: int,
+    verdict: FrozenRow,
+    zone: FrozenRow,
+    ud: FrozenRow,
+    relative-value: FrozenRow,
+    appreciation: FrozenRow,
+    potential: FrozenRow,
+    entries: FrozenRow,
+    method: FrozenRow,
+    cause: string,
+}
+
 // Story 8.1 (FR78): one row of the study's « Notes » card — newest first; `meta` is the Rust-built
 // date line (« JJ/MM/AAAA », plus « · modifiée le … » once edited); `text` is the owner's own words.
 export struct NoteRow {
@@ -770,6 +799,13 @@ export global Studies {
     // The §4 zone bar + the verdict (badge + sticky bar) + the traceability surface.
     in-out property <ZoneBarState> zone-bar;
     in-out property <VerdictState> verdict;
+    // ── Story 8.8 — « Valider l'étude » and the frozen verdict. `freeze-open-list` names what keeps
+    //    the verdict from being full ("" when it is — the button is enabled); the comparison starts
+    //    collapsed on every open (`frozen-open`). ──
+    in-out property <FrozenStrip> frozen-strip;
+    in-out property <string> freeze-open-list;
+    in-out property <bool> frozen-open;
+    callback freeze-verdict();
     in-out property <TraceState> trace;
     // Issue #114: the JudgmentField keys of the verdict's open judgment gates (load-bearing inputs
     // still missing). A JudgmentField highlights itself when its key is in this set, so the user sees

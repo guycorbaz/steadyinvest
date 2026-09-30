@@ -185,9 +185,11 @@ pub fn tool_specs() -> Vec<(&'static str, String, Map<String, Value>)> {
     );
     out.push((
         "get_study",
-        "Read one study: data cells with provenance, judgments, rationale, notes, status, and its \
-         computed outputs (zones as neutral codes low/middle/high, upside/downside ratio, 5-year \
-         potential, verdict facts and state). Numbers are exact decimals as strings."
+        "Read one study: data cells with provenance, judgments, rationale, notes, status, its \
+         frozen verdict when the owner validated it (study.frozen_verdict: the verdict at that \
+         moment, never recomputed), and its computed outputs — the current verdict, always live \
+         (zones as neutral codes low/middle/high, upside/downside ratio, 5-year potential, verdict \
+         facts and state). Numbers are exact decimals as strings."
             .to_string(),
         schema(p, vec!["study_id"]),
     ));

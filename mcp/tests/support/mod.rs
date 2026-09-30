@@ -109,10 +109,16 @@ pub fn fixture_dossier(dir: &Path) -> PathBuf {
         &ts("2026-09-28T07:00:00Z"),
     )
     .expect("create");
-    for s in [
-        study(STUDY_A, "NESN.SW", "CHF", "2026-09-28T08:00:00Z"),
-        study(STUDY_B, "AAPL", "USD", "2026-09-28T08:05:00Z"),
-    ] {
+    // Story 8.8: study B carries a frozen verdict — every suite then reads it too (the non-exposure
+    // walk, the neutral-word checks): it is readable, never writable, never a buy / sell word.
+    let mut b = study(STUDY_B, "AAPL", "USD", "2026-09-28T08:05:00Z");
+    let frame = steadyinvest_report::form::build_frame(&b).expect("normalizes");
+    b.frozen_verdict = Some(steadyinvest_report::form::verdict_record(
+        &b,
+        &frame,
+        &ts("2026-09-28T08:06:00Z"),
+    ));
+    for s in [study(STUDY_A, "NESN.SW", "CHF", "2026-09-28T08:00:00Z"), b] {
         j.put_study_with_history(&s, &ts("2026-09-28T08:10:00Z"))
             .expect("study");
     }

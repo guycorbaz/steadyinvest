@@ -11,6 +11,7 @@
 
 pub mod comparison;
 pub mod form;
+pub mod frozen;
 pub mod pdf;
 pub mod quick_screen;
 pub mod review;

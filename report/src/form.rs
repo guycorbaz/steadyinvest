@@ -18,9 +18,12 @@
 //! - **`to_observations`**: v1 carries no quarterly data → [`QuarterlyObservations::empty`].
 //! - **splits**: v1 manual entry records no split events → `splits: vec![]`.
 
+use std::collections::BTreeMap;
+
 use rust_decimal::Decimal;
 use steadyinvest_contract::{
-    Cell, ForecastLowOption as CForecastLowOption, Judgment, Money, Study,
+    Cell, ForecastLowOption as CForecastLowOption, FrozenCriterion, FrozenUpsideDownside,
+    FrozenVerdict, FrozenZone, FrozenZoneBounds, Judgment, Money, Study, Timestamp,
 };
 use steadyinvest_core::normalize::{
     self, CanonicalFinancials, CanonicalYear, Finding, NormalizeError, RawAmount, RawFinancials,
@@ -231,6 +234,145 @@ pub fn build_snapshot(study: &Study) -> Result<StudySnapshot, NormalizeError> {
     build_frame(study).map(|frame| frame.snapshot)
 }
 
+/// Why a verdict cannot be frozen (Story 8.8): it is not full, or the study does not normalize.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotFrozen {
+    /// The verdict is provisional or withheld — nothing to freeze.
+    NotFull,
+    Normalize(NormalizeError),
+}
+
+/// Freeze the study's verdict (Story 8.8, FR68, A13) — ONLY a [`Verdict::Full`] of ONE coherent
+/// frame, with that frame's outputs and the inputs its digest covers. Nothing is recomputed later:
+/// the result is stored as is.
+///
+/// [`Verdict::Full`]: steadyinvest_core::verdict::Verdict::Full
+pub fn freeze(study: &Study, now: &Timestamp) -> Result<FrozenVerdict, NotFrozen> {
+    let frame = build_frame(study).map_err(NotFrozen::Normalize)?;
+    if !matches!(
+        frame.snapshot.verdict(),
+        steadyinvest_core::verdict::Verdict::Full(_)
+    ) {
+        return Err(NotFrozen::NotFull);
+    }
+    Ok(verdict_record(study, &frame, now))
+}
+
+/// The verdict of one frame in the frozen shape (Story 8.8) — what [`freeze`] stores for a Full
+/// verdict, and the CURRENT side of the frozen-vs-current comparison (any verdict state: facts are
+/// carried by every state). Never persisted for a current verdict.
+pub fn verdict_record(study: &Study, frame: &StudyFrame, now: &Timestamp) -> FrozenVerdict {
+    use steadyinvest_core::ssg::{CriterionFact, UpsideDownside, Zone};
+    let verdict = frame.snapshot.verdict();
+    let facts = verdict.facts();
+    let out = frame.snapshot.outputs();
+    let rr = &out.risk_reward;
+    let money = |d: Decimal| Money::from(d);
+    let criterion = |c: CriterionFact| match c {
+        CriterionFact::Met => FrozenCriterion::Met,
+        CriterionFact::Unmet => FrozenCriterion::Unmet,
+        CriterionFact::UnmetByInsufficiency => FrozenCriterion::UnmetByInsufficiency,
+    };
+    FrozenVerdict {
+        frozen_at: now.clone(),
+        method_version: verdict.method_version().to_string(),
+        inputs_hash: verdict.inputs_hash().to_string(),
+        quality_value_candidate: facts.quality_value_candidate,
+        present_zone: facts.present_price_zone.map(|z| match z {
+            Zone::Buy => FrozenZone::Low,
+            Zone::Neutral => FrozenZone::Middle,
+            Zone::Sell => FrozenZone::High,
+        }),
+        ud_at_or_above_target: criterion(facts.ud_at_or_above_target),
+        relative_value_below_ceiling: criterion(facts.relative_value_below_ceiling),
+        present_price_in_low_zone: criterion(facts.present_price_in_buy_zone),
+        appreciation_at_or_above_double: criterion(facts.appreciation_at_or_above_double),
+        upside_downside: match rr.upside_downside {
+            UpsideDownside::Ratio(r) => FrozenUpsideDownside::Ratio(money(r)),
+            UpsideDownside::Undefined => FrozenUpsideDownside::Undefined,
+            UpsideDownside::Unknown => FrozenUpsideDownside::Unknown,
+        },
+        relative_value_pct: out.valuation.relative_value_pct.map(money),
+        projected_appreciation_pct: out.returns.projected_appreciation_pct.map(money),
+        total_return_pct: out.returns.projected_total_annualized_return_pct.map(money),
+        appreciation_only_pct: out.returns.appreciation_only_potential().map(money),
+        zones: rr.zones.as_ref().map(|z| FrozenZoneBounds {
+            forecast_low: money(z.forecast_low),
+            low_zone_top: money(z.buy_top),
+            middle_zone_top: money(z.neutral_top),
+            forecast_high: money(z.forecast_high),
+        }),
+        inputs: frozen_inputs(study, &frame.series),
+    }
+}
+
+/// The inputs a verdict's digest covers, keyed for the comparison's « Entrées » row (Story 8.8):
+/// `y{year}.{field}` for every canonical year, `j.{field}` for every judgment input, `q.{field}`
+/// for the quarterly observations — the canonical decimal (normalized) or « absent ». The same
+/// values `core::verdict::digest` hashes, so a hash difference always names its inputs.
+pub fn frozen_inputs(study: &Study, series: &[CanonicalYear]) -> BTreeMap<String, String> {
+    let enc = |v: Option<Decimal>| match v {
+        Some(d) => d.normalize().to_string(),
+        None => ABSENT.to_string(),
+    };
+    let mut map = BTreeMap::new();
+    for y in series {
+        for (field, v) in [
+            ("sales", y.sales),
+            ("eps", y.eps),
+            ("high_price", y.high_price),
+            ("low_price", y.low_price),
+            ("dividend_per_share", y.dividend_per_share),
+            ("pre_tax_profit", y.pre_tax_profit),
+            ("book_value_per_share", y.book_value_per_share),
+        ] {
+            map.insert(format!("y{}.{field}", y.year), enc(v));
+        }
+    }
+    let j = to_judgment_inputs(&study.judgment);
+    for (field, v) in [
+        ("estimated_high_eps", j.estimated_high_eps),
+        ("estimated_low_eps", j.estimated_low_eps),
+        ("projected_sales_growth_pct", j.projected_sales_growth_pct),
+        ("projected_eps_growth_pct", j.projected_eps_growth_pct),
+        ("judged_avg_high_pe", j.judged_avg_high_pe),
+        ("judged_avg_low_pe", j.judged_avg_low_pe),
+        ("recent_severe_low", j.recent_severe_low),
+        ("current_price", j.current_price),
+        ("present_full_year_dividend", j.present_full_year_dividend),
+    ] {
+        map.insert(format!("j.{field}"), enc(v));
+    }
+    map.insert(
+        "j.forecast_low_option".to_string(),
+        steadyinvest_contract::option_name(study.judgment.forecast_low_option).to_string(),
+    );
+    let q = to_observations(study);
+    map.insert(
+        "q.ttm_quarterly_eps".to_string(),
+        match q.ttm_quarterly_eps {
+            Some(qs) => qs
+                .iter()
+                .map(|d| d.normalize().to_string())
+                .collect::<Vec<_>>()
+                .join("|"),
+            None => ABSENT.to_string(),
+        },
+    );
+    for (field, v) in [
+        ("latest_quarter_sales", q.latest_quarter_sales),
+        ("latest_quarter_eps", q.latest_quarter_eps),
+        ("year_ago_quarter_sales", q.year_ago_quarter_sales),
+        ("year_ago_quarter_eps", q.year_ago_quarter_eps),
+    ] {
+        map.insert(format!("q.{field}"), enc(v));
+    }
+    map
+}
+
+/// The value [`frozen_inputs`] writes for an absent input (the digest's sentinel).
+pub const ABSENT: &str = "absent";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +440,37 @@ mod tests {
             })
             .collect();
         s
+    }
+
+    // Story 8.8 — only a Full verdict freezes; the result carries the engine's own hash and method,
+    // and its inputs name exactly what the digest covers.
+    #[test]
+    fn only_a_full_verdict_freezes_with_the_engines_hash_and_inputs() {
+        let study = full_study();
+        let now = Timestamp("2026-09-30T10:00:00Z".to_string());
+        let frozen = freeze(&study, &now).expect("full");
+        let snap = build_snapshot(&study).unwrap();
+        assert_eq!(frozen.inputs_hash, snap.inputs_hash());
+        assert_eq!(frozen.method_version, steadyinvest_core::METHOD_VERSION);
+        assert_eq!(frozen.frozen_at, now);
+        assert_eq!(frozen.inputs["y2025.eps"], "5");
+        assert_eq!(frozen.inputs["j.current_price"], "80");
+        assert_eq!(frozen.inputs["j.recent_severe_low"], ABSENT);
+        assert_eq!(
+            frozen.inputs["j.forecast_low_option"],
+            "avg_low_pe_times_eps"
+        );
+        assert_eq!(
+            frozen.inputs.len(),
+            5 * 7 + 10 + 5,
+            "every year field, every judgment input, every observation"
+        );
+        // Deterministic: the same study freezes to the same value.
+        assert_eq!(freeze(&study, &now).unwrap(), frozen);
+        // A provisional verdict (one input not validated) does not freeze.
+        let mut provisional = study.clone();
+        provisional.years[4].eps.review = Review::ToReview;
+        assert_eq!(freeze(&provisional, &now), Err(NotFrozen::NotFull));
     }
 
     #[test]

@@ -46,6 +46,7 @@ mod confront;
 // Story 8.2b: the draft-decision API — read by the inbox (8.5a), decided through the dialog (8.5b).
 mod drafts;
 mod export_import;
+mod frozen;
 mod fx;
 mod holdings;
 mod journal_io;

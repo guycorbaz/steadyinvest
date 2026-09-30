@@ -643,6 +643,11 @@ fn each_refusal_carries_its_code_and_writes_nothing() {
             "field_not_draftable",
             judgment_draft(&path, 11, "ttm_eps", "4"),
         ),
+        // Story 8.8 (FR68 [P4]): the frozen verdict is no draftable field.
+        (
+            "field_not_draftable",
+            judgment_draft(&path, 23, "frozen_verdict", "1"),
+        ),
         (
             "field_not_draftable",
             cell_draft(&path, 12, 2025, "judged_avg_high_pe", "20"),

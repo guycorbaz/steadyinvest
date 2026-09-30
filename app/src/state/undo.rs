@@ -23,13 +23,15 @@ use super::{
 const UNDO_CAP: usize = 100;
 
 /// What an undo / redo stepped over (Story 8.5b): nothing (the stack was empty), an ordinary study
-/// step, or the validation of an AI draft — whose status moved with the study (the caller then says
+/// step, the validation of an AI draft, or (Story 8.8) a freeze of the verdict — whose status moved with the study (the caller then says
 /// so and re-reads the inbox).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stepped {
     Nothing,
     Study,
     Draft(Uuid),
+    /// Story 8.8: the step moved the frozen verdict (a freeze undone or redone).
+    Freeze,
 }
 
 /// Which way [`JournalState::step`] moves through the history.
@@ -288,6 +290,7 @@ impl JournalState {
             push_back(&mut self.history, restored);
             return Err(MSG_SAVE_FAILED.to_string());
         };
+        let current_frozen = current.frozen_verdict.clone();
         // Issue #34 (FR51): a step back/forward is a real state change — it lands in the durable
         // history honestly (the cadrage decision: no special case for undo in v1). A step over a
         // draft validation (Story 8.2b) moves the draft's status in the SAME transaction.
@@ -320,7 +323,12 @@ impl JournalState {
                     Direction::Undo => self.history.redo.push(step),
                     Direction::Redo => self.history.undo.push(step),
                 }
-                Ok(draft.map_or(Stepped::Study, Stepped::Draft))
+                let freeze = restored.frozen_verdict != current_frozen;
+                Ok(match draft {
+                    Some(id) => Stepped::Draft(id),
+                    None if freeze => Stepped::Freeze,
+                    None => Stepped::Study,
+                })
             }
             // G3 B2/E7: a draft step whose draft is no longer in the state the step expects (decided
             // or removed elsewhere) can never succeed — pushing it back would wedge the history on

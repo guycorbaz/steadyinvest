@@ -1879,6 +1879,8 @@ mod tests {
             "INSERT INTO studies (id, journal_id, security_ticker, created_at, status, \
              schema_version, payload) VALUES ('x','x','X','t','active',1,'{}')",
             "UPDATE studies SET payload = '{}'",
+            // Story 8.8 (FR68 [P4]): no verdict is frozen or changed through MCP.
+            "UPDATE studies SET payload = json_set(payload, '$.frozen_verdict', json('{}'))",
             "UPDATE studies SET status = 'archived'",
             "DELETE FROM studies",
             "UPDATE judgments SET payload = '{}'",

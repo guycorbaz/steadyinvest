@@ -751,6 +751,8 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         ui.global::<Studies>().on_open_study(move |id_text| {
             let ui = ui_weak.unwrap();
             let studies = ui.global::<Studies>();
+            // Story 8.8: the frozen-verdict comparison starts collapsed on every open.
+            studies.set_frozen_open(false);
             let Ok(id) = Uuid::parse_str(&id_text) else {
                 return;
             };

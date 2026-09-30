@@ -787,8 +787,13 @@ mod tests {
         // « Proposé {} » +1; the glossary's « Registre » term and definition +2: 1113 + 33 = 1146,
         // measured. Its G3 review: a decided draft's Registre Détail reads « Proposé {} » only:
         // 1146 + 1 = 1147, measured.
+        // 8.8 (the frozen verdict): « Valider l'étude » ×2 (button, confirm verb), the confirm
+        // title and body, the disabled reason (5); the strip — caption, band, « Voir / Masquer la
+        // comparaison », the « figé » header and three « actuel » headers, the eight row labels,
+        // « Cause : {} », « • {} » (18); the glossary's « Verdict figé » term and definition (2):
+        // 1147 + 25 = 1172, measured.
         assert!(
-            total >= 1147,
+            total >= 1172,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -803,8 +808,10 @@ mod tests {
         assert_eq!(
             crate::viewmodel::history::HISTORY_USER_FACING_LABELS.len(),
             // 8.1: +3 (« Note ajoutée / modifiée / supprimée »). 8.7: the four ★ summaries of a
-            // processed draft and its note / draft-study targets: 20 + 6 = 26, measured.
-            26,
+            // processed draft and its note / draft-study targets: 20 + 6 = 26, measured. 8.8: the
+            // freeze and its undo (« Étude validée ; verdict figé », « Validation de l'étude
+            // annulée »): 26 + 2 = 28, measured.
+            28,
             "history.rs label inventory changed — register the new label"
         );
     }
@@ -955,8 +962,9 @@ mod tests {
             // read subject (MSG_SUBJECT_DRAFTS, « la liste des propositions »): 241 + 1 = 242,
             // measured. 8.5b: the decision outcomes of the 8.0 spec §3.3 — validated, validated
             // (edited), rejected, undone, redone: 242 + 5 = 247, measured. 8.7: the draft-study
-            // duplicate refusal (MSG_DRAFT_STUDY_EXISTS): 247 + 1 = 248, measured.
-            248,
+            // duplicate refusal (MSG_DRAFT_STUDY_EXISTS): 247 + 1 = 248, measured. 8.8: the freeze
+            // outcome, its undo and the not-full refusal (MSG_FREEZE_*): 248 + 3 = 251, measured.
+            251,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -1687,6 +1695,21 @@ mod tests {
             // 8.5b: context line + stale band + gone band + stale confirmation body: 0 + 4 = 4.
             4,
             "decision label inventory changed — register the new label"
+        );
+    }
+
+    /// Story 8.8: the frozen-verdict strip's Rust-built words (rows, criteria, entries, causes),
+    /// scanned and counted.
+    #[test]
+    fn frozen_user_facing_labels_are_neutral_no_banned_verb() {
+        for label in crate::viewmodel::frozen::FROZEN_USER_FACING_LABELS {
+            assert_neutral(label, "viewmodel/frozen.rs (frozen-verdict strip)");
+        }
+        assert_eq!(
+            crate::viewmodel::frozen::FROZEN_USER_FACING_LABELS.len(),
+            // 8.8: twelve strip words, one quarter label, five causes: 0 + 18 = 18.
+            18,
+            "frozen.rs label inventory changed — register the new label"
         );
     }
 

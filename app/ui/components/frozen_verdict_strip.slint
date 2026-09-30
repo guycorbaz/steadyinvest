@@ -1,0 +1,117 @@
+// Story 8.8 — FrozenVerdictStrip (UX spec §4.6, §5.3, §5.9): pinned under the verdict bar. The
+// one-line caption when the frozen verdict equals the current one; a « • » StatusBand when they
+// differ, expandable to the comparison table (capped, scrolling inside). No hue: the only coloured
+// verdict stays the current one (the bar above); a changed row is a leading « • » + semibold figures,
+// an unchanged one text-mid (NFR-U1). Nothing rendered without a frozen verdict.
+
+import { Tokens } from "../tokens.slint";
+import { Studies, Labels, FrozenRow } from "../state.slint";
+import { StatusBand } from "status_band.slint";
+
+component CompareLine inherits HorizontalLayout {
+    in property <string> label;
+    in property <FrozenRow> entry;
+    // The zone row writes keys with the runtime labels.
+    in property <bool> zone: false;
+    // Fixed columns (label + two equal halves) so every row aligns under the headers.
+    property <length> half: max(0px, (root.width - 240px - 2 * Tokens.space-12) / 2);
+    spacing: Tokens.space-12;
+    function words(key: string) -> string {
+        return key == "buy" ? Labels.zone-buy : key == "neutral" ? Labels.zone-hold
+            : key == "sell" ? Labels.zone-sell : key == "" ? "—" : key;
+    }
+    Text {
+        text: root.entry.changed ? @tr("• {}", root.label) : root.label;
+        width: 240px;
+        color: root.entry.changed ? Tokens.text-high : Tokens.text-mid;
+        font-size: Tokens.font-caption;
+        font-weight: root.entry.changed ? Tokens.weight-semibold : Tokens.weight-regular;
+        wrap: word-wrap;
+    }
+    Text {
+        text: root.zone ? root.words(root.entry.frozen) : root.entry.frozen;
+        width: root.half;
+        color: root.entry.changed ? Tokens.text-high : Tokens.text-mid;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-caption;
+        font-weight: root.entry.changed ? Tokens.weight-semibold : Tokens.weight-regular;
+        wrap: word-wrap;
+    }
+    Text {
+        text: root.zone ? root.words(root.entry.current) : root.entry.current;
+        width: root.half;
+        color: root.entry.changed && Studies.frozen-strip.current-state == 0 ? Tokens.text-high : Tokens.text-mid;
+        font-family: Tokens.font-numeric;
+        font-size: Tokens.font-caption;
+        font-weight: root.entry.changed ? Tokens.weight-semibold : Tokens.weight-regular;
+        wrap: word-wrap;
+    }
+}
+
+export component FrozenVerdictStrip inherits VerticalLayout {
+    // The study area's height — the expanded comparison is capped at 40 % of it (spec §5.3).
+    in property <length> area-height: 600px;
+    padding-left: Tokens.space-24;
+    padding-right: Tokens.space-24;
+    padding-top: Studies.frozen-strip.state == 0 ? 0 : Tokens.space-8;
+    padding-bottom: Studies.frozen-strip.state == 0 ? 0 : Tokens.space-8;
+    spacing: Tokens.space-8;
+
+    if Studies.frozen-strip.state == 1: Text {
+        text: @tr("Étude validée le {} ; le verdict actuel est identique au verdict figé.", Studies.frozen-strip.date);
+        color: Tokens.text-mid;
+        font-size: Tokens.font-caption;
+        wrap: word-wrap;
+    }
+    if Studies.frozen-strip.state == 2: StatusBand {
+        icon: "•";
+        text: @tr("Le verdict actuel diffère du verdict figé le {}.", Studies.frozen-strip.date);
+        action-label: Studies.frozen-open ? @tr("Masquer la comparaison") : @tr("Voir la comparaison");
+        action => { Studies.frozen-open = !Studies.frozen-open; }
+    }
+    if Studies.frozen-strip.state == 2 && Studies.frozen-open: Flickable {
+        height: min(table.preferred-height, root.area-height * 0.4);
+        viewport-height: table.preferred-height;
+        table := VerticalLayout {
+            width: parent.width;
+            spacing: Tokens.space-4;
+            header := HorizontalLayout {
+                property <length> half: max(0px, (self.width - 240px - 2 * Tokens.space-12) / 2);
+                spacing: Tokens.space-12;
+                Rectangle { width: 240px; }
+                Text {
+                    text: @tr("figé ({}, {})", Studies.frozen-strip.frozen-method, Studies.frozen-strip.date);
+                    width: header.half;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-caption;
+                    font-weight: Tokens.weight-semibold;
+                }
+                Text {
+                    text: Studies.frozen-strip.current-state == 1
+                        ? @tr("actuel ({}, provisoire)", Studies.frozen-strip.current-method)
+                        : Studies.frozen-strip.current-state == 2
+                        ? @tr("actuel ({}, retenu)", Studies.frozen-strip.current-method)
+                        : @tr("actuel ({}, aujourd'hui)", Studies.frozen-strip.current-method);
+                    width: header.half;
+                    color: Tokens.text-high;
+                    font-size: Tokens.font-caption;
+                    font-weight: Tokens.weight-semibold;
+                }
+            }
+            CompareLine { label: @tr("Verdict"); entry: Studies.frozen-strip.verdict; }
+            CompareLine { label: @tr("Zone du prix"); entry: Studies.frozen-strip.zone; zone: true; }
+            CompareLine { label: @tr("Ratio hausse/baisse"); entry: Studies.frozen-strip.ud; }
+            CompareLine { label: @tr("Valeur relative"); entry: Studies.frozen-strip.relative-value; }
+            CompareLine { label: @tr("Appréciation projetée"); entry: Studies.frozen-strip.appreciation; }
+            CompareLine { label: @tr("Potentiel à 5 ans"); entry: Studies.frozen-strip.potential; }
+            CompareLine { label: @tr("Entrées"); entry: Studies.frozen-strip.entries; }
+            CompareLine { label: @tr("Méthode"); entry: Studies.frozen-strip.method; }
+            Text {
+                text: @tr("Cause : {}", Studies.frozen-strip.cause);
+                color: Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

@@ -902,6 +902,22 @@ pub fn forecast_low_option_from_key(key: &str) -> Option<CForecastLowOption> {
     }
 }
 
+/// What keeps the verdict from being full (Story 8.8, « Valider l'étude »): `None` for a Full
+/// verdict; else the open inputs' labels (« BPA 2023 — non validé », …) joined by « , » — or, a
+/// low-confidence study having no open input, its low-confidence label (Decision 5).
+pub fn open_inputs(snapshot: &StudySnapshot) -> Option<String> {
+    let verdict = snapshot.verdict();
+    if matches!(verdict, Verdict::Full(_)) {
+        return None;
+    }
+    let list: Vec<String> = verdict.open_gates().iter().map(open_gate_label).collect();
+    Some(if list.is_empty() {
+        CONFIDENCE_LOW.to_string()
+    } else {
+        list.join(", ")
+    })
+}
+
 /// One open-gate → a fact-stating French line: "<input label> — <state noun>" (e.g. "BPA 2023 —
 /// non validé"). Neutral nouns only (scanned in [`USER_FACING_LABELS`]).
 fn open_gate_label(gate: &OpenGate) -> String {

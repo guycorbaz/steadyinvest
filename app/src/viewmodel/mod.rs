@@ -9,6 +9,7 @@ pub mod engine;
 pub mod entry;
 pub mod form;
 pub mod format;
+pub mod frozen;
 pub mod history;
 pub mod notes;
 pub mod quick_screen;

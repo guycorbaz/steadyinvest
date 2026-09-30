@@ -175,6 +175,11 @@ pub struct Study {
     /// no `SCHEMA_VERSION` bump (owner, 2026-09-27: the app is not in production).
     #[serde(default)]
     pub notes: Vec<Note>,
+    /// The verdict frozen when the owner last validated the study (Story 8.8, FR68, A13) — `None`
+    /// until then. Additive and skipped when absent, so a study never validated serializes exactly
+    /// as before (pins and legacy blobs byte-identical).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_verdict: Option<crate::frozen::FrozenVerdict>,
     /// When the study was created (RFC3339 UTC).
     pub created_at: Timestamp,
     /// The [`SCHEMA_VERSION`] the study was written under.
@@ -201,6 +206,7 @@ impl Study {
             rationale: None,
             company_name: None,
             notes: Vec::new(),
+            frozen_verdict: None,
             created_at,
             schema_version: SCHEMA_VERSION,
         }

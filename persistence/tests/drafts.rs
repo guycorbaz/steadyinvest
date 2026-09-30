@@ -45,6 +45,7 @@ fn study(id: u128, journal_id: Uuid, ticker: &str) -> Study {
         rationale: None,
         company_name: None,
         notes: Vec::new(),
+        frozen_verdict: None,
         created_at: ts("2026-09-27T08:00:00Z"),
         schema_version: SCHEMA_VERSION,
     }

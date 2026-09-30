@@ -120,6 +120,8 @@ pub(crate) fn push_form(
             studies.set_return_computed(engine::return_computed(outputs, format));
             studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
             studies.set_verdict(engine::verdict_badge(study, snapshot, format));
+            // Story 8.8: the frozen verdict against this live one, and what keeps it from freezing.
+            push_frozen(ui, study, Some(&frame), format);
             // Issue #114: the load-bearing judgment inputs still to fill (drives the field highlight).
             studies.set_required_fields(ModelRc::new(VecModel::from(
                 engine::required_judgment_fields(snapshot),
@@ -182,6 +184,7 @@ pub(crate) fn push_form(
             studies.set_current_price_out_of_scale(false);
             studies.set_zone_bar(ZoneBarState::default());
             studies.set_verdict(VerdictState::default());
+            push_frozen(ui, study, None, format);
             studies.set_growth_chart(viewmodel::chart::unavailable());
             studies.set_pe_chart(viewmodel::chart::pe_chart_unavailable());
             // Story 8.6: no chart drawn — every pending proposal's chip goes under its field.
@@ -303,6 +306,8 @@ pub(crate) fn push_live_preview(
         studies.set_pe_chart(viewmodel::chart::pe_chart(&frame, &study.judgment, format));
         studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
         studies.set_verdict(engine::verdict_badge(study, snapshot, format));
+        // Story 8.8: a drag that moves the verdict moves the comparison with it.
+        push_frozen(ui, study, Some(&frame), format);
         // §4/§5 judgment-dependent numbers stay in step with the recolouring bar (review P1) — the
         // forecast high/low + U/D, the projected return, and the §4 study-level warning all move
         // with the est-high-EPS the drag sets, so the §4 surface never disagrees with itself.
@@ -316,4 +321,78 @@ pub(crate) fn push_live_preview(
                 .into(),
         );
     }
+}
+
+/// Story 8.8: push the frozen-verdict strip (the current verdict from THIS frame — live, never
+/// persisted) and what keeps « Valider l'étude » disabled. Without a frame (the study does not
+/// normalize) there is no current verdict: no strip, the button disabled with the placeholder.
+pub(crate) fn push_frozen(
+    ui: &MainWindow,
+    study: &steadyinvest_contract::Study,
+    frame: Option<&steadyinvest_report::form::StudyFrame>,
+    format: NumberFormat,
+) {
+    use viewmodel::frozen::{CurrentState, StripView, strip};
+    let studies = ui.global::<Studies>();
+    let Some(frame) = frame else {
+        studies.set_frozen_strip(crate::FrozenStrip::default());
+        studies.set_freeze_open_list(viewmodel::history::HIST_EMPTY_SLOT.into());
+        return;
+    };
+    let open = viewmodel::engine::open_inputs(&frame.snapshot);
+    studies.set_freeze_open_list(open.clone().unwrap_or_default().into());
+    let current = steadyinvest_report::form::verdict_record(
+        study,
+        frame,
+        &steadyinvest_contract::Timestamp(String::new()),
+    );
+    let state = match frame.snapshot.verdict() {
+        steadyinvest_core::verdict::Verdict::Full(_) => CurrentState::Full,
+        steadyinvest_core::verdict::Verdict::Provisional(_) => CurrentState::Provisional,
+        steadyinvest_core::verdict::Verdict::Withheld(_) => CurrentState::Withheld,
+    };
+    let row = |r: &viewmodel::frozen::CompareRow| crate::FrozenRow {
+        frozen: r.frozen.clone().into(),
+        current: r.current.clone().into(),
+        changed: r.changed,
+    };
+    let out = match strip(study, &current, state, open.as_deref(), format) {
+        StripView::None => crate::FrozenStrip::default(),
+        StripView::Same { date } => crate::FrozenStrip {
+            state: 1,
+            date: date.into(),
+            ..Default::default()
+        },
+        StripView::Differs {
+            date,
+            frozen_method,
+            current_method,
+            current_state,
+            comparison: c,
+        } => crate::FrozenStrip {
+            state: 2,
+            date: date.into(),
+            frozen_method: frozen_method.into(),
+            current_method: current_method.into(),
+            current_state: match current_state {
+                CurrentState::Full => 0,
+                CurrentState::Provisional => 1,
+                CurrentState::Withheld => 2,
+            },
+            verdict: row(&c.verdict),
+            zone: row(&c.zone),
+            ud: row(&c.ud),
+            relative_value: row(&c.relative_value),
+            appreciation: row(&c.appreciation),
+            potential: row(&c.potential),
+            entries: row(&c.entries),
+            method: row(&c.method),
+            cause: c.cause.clone().into(),
+        },
+    };
+    // The comparison folds when there is nothing to compare (G3: it never reappears open).
+    if out.state != 2 {
+        studies.set_frozen_open(false);
+    }
+    studies.set_frozen_strip(out);
 }

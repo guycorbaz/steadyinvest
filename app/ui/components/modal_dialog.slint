@@ -471,6 +471,9 @@ export component ModalDialog inherits Rectangle {
             Prefs.confirm-restore();
         } else if (action == "delete-note") {
             Studies.delete-note(target);
+        } else if (action == "freeze-replace") {
+            // Story 8.8: the replace confirmation's « Valider l'étude ».
+            Studies.freeze-verdict();
         }
     }
 
