@@ -57,7 +57,8 @@ fn frozen() -> FrozenVerdict {
         upside_downside: FrozenUpsideDownside::Ratio(m("3.2")),
         relative_value_pct: Some(m("85")),
         projected_appreciation_pct: Some(m("120")),
-        five_year_potential_pct: Some(m("17.1")),
+        total_return_pct: Some(m("17.1")),
+        appreciation_only_pct: Some(m("15.9")),
         zones: Some(FrozenZoneBounds {
             forecast_low: m("40"),
             low_zone_top: m("60"),

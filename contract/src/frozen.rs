@@ -83,9 +83,12 @@ pub struct FrozenVerdict {
     pub relative_value_pct: Option<Money>,
     #[serde(default)]
     pub projected_appreciation_pct: Option<Money>,
-    /// The « Potentiel à 5 ans » figure the study header shows.
+    /// The « Potentiel à 5 ans » the study header shows: the projected total annualized return,
+    /// or — only the dividend history missing — the annualized appreciation alone (« hors div. »).
     #[serde(default)]
-    pub five_year_potential_pct: Option<Money>,
+    pub total_return_pct: Option<Money>,
+    #[serde(default)]
+    pub appreciation_only_pct: Option<Money>,
     #[serde(default)]
     pub zones: Option<FrozenZoneBounds>,
     /// Every input the `inputs_hash` covers, keyed `y{year}.{field}`, `j.{field}`, `q.{field}` →
