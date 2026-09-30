@@ -608,6 +608,10 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
     if outputs.low_confidence {
         doc.line("Confiance réduite : moins d'années exploitables que le seuil de la méthode.");
     }
+    // Story 8.8 (spec §7): the frozen verdict, and the current one beside it when they differ.
+    if let Some(frozen) = &study.frozen_verdict {
+        frozen_block(&mut doc, study, &frame, frozen, nf);
+    }
 
     // ── Annexe — every historical figure (the form plots them; the table keeps the exact values) ──
     doc.new_page();
@@ -1225,6 +1229,163 @@ fn verdict_label(verdict: &steadyinvest_core::verdict::Verdict) -> &'static str 
     }
 }
 
+/// Story 8.8 (FR52, spec §7): « Verdict figé le {JJ/MM/AAAA} ({méthode}) » and its figures; when the
+/// current verdict differs, each row « figé -> actuel » with a leading « • » (0x95) on the changed
+/// ones, the inputs count and the cause line. Greyscale, WinAnsi only (« -> », « >= »).
+fn frozen_block(
+    doc: &mut Doc,
+    study: &Study,
+    frame: &crate::form::StudyFrame,
+    frozen: &steadyinvest_contract::FrozenVerdict,
+    nf: NumberStyle,
+) {
+    use steadyinvest_contract::{FrozenCriterion, FrozenUpsideDownside, FrozenVerdict, FrozenZone};
+    let current = crate::form::verdict_record(
+        study,
+        frame,
+        &steadyinvest_contract::Timestamp(String::new()),
+    );
+    let crit = |c: FrozenCriterion| match c {
+        FrozenCriterion::Met => FROZEN_CRIT_MET,
+        FrozenCriterion::Unmet => FROZEN_CRIT_UNMET,
+        FrozenCriterion::UnmetByInsufficiency => FROZEN_CRIT_UNKNOWN,
+    };
+    let dec = |m: &Option<steadyinvest_contract::Money>| m.as_ref().map(|m| m.as_decimal());
+    let verdict = |v: &FrozenVerdict| {
+        if v.quality_value_candidate {
+            FROZEN_QV_MET
+        } else {
+            FROZEN_QV_UNMET
+        }
+        .to_string()
+    };
+    let zone = |v: &FrozenVerdict| {
+        match v.present_zone {
+            Some(FrozenZone::Low) => ZONE_LOW,
+            Some(FrozenZone::Middle) => ZONE_MID,
+            Some(FrozenZone::High) => ZONE_HIGH,
+            None => EM_DASH,
+        }
+        .to_string()
+    };
+    let ud = |v: &FrozenVerdict| {
+        let ratio = match &v.upside_downside {
+            FrozenUpsideDownside::Ratio(r) => {
+                format!(
+                    "{} : 1",
+                    nf.fmt_dec(Some(r.as_decimal()), DisplayField::Ratio)
+                )
+            }
+            _ => EM_DASH.to_string(),
+        };
+        format!(
+            "{ratio} · {FROZEN_UD_TARGET} : {}",
+            crit(v.ud_at_or_above_target)
+        )
+    };
+    let rv = |v: &FrozenVerdict| {
+        format!(
+            "{} · {FROZEN_RV_CEILING} : {}",
+            nf.pct(dec(&v.relative_value_pct)),
+            crit(v.relative_value_below_ceiling)
+        )
+    };
+    let app = |v: &FrozenVerdict| {
+        format!(
+            "{} · {FROZEN_DOUBLE} : {}",
+            nf.pct(dec(&v.projected_appreciation_pct)),
+            crit(v.appreciation_at_or_above_double)
+        )
+    };
+    let potential = |v: &FrozenVerdict| match (&v.total_return_pct, &v.appreciation_only_pct) {
+        (Some(t), _) => nf.pct(Some(t.as_decimal())),
+        (None, Some(a)) => format!("{} ({FROZEN_NO_DIV})", nf.pct(Some(a.as_decimal()))),
+        (None, None) => EM_DASH.to_string(),
+    };
+    let table: Vec<(&str, String, String)> = vec![
+        (FROZEN_ROW_VERDICT, verdict(frozen), verdict(&current)),
+        (FROZEN_ROW_ZONE, zone(frozen), zone(&current)),
+        (FROZEN_ROW_UD, ud(frozen), ud(&current)),
+        (FROZEN_ROW_RV, rv(frozen), rv(&current)),
+        (FROZEN_ROW_APPRECIATION, app(frozen), app(&current)),
+        (FROZEN_ROW_POTENTIAL, potential(frozen), potential(&current)),
+    ];
+    doc.gap(4.0);
+    doc.line(&format!(
+        "{FROZEN_ON} {} ({})",
+        jj_mm_aaaa(&frozen.frozen_at.0),
+        frozen.method_version
+    ));
+    if crate::frozen::same(frozen, &current) {
+        for (label, f, _) in &table {
+            doc.line(&format!("  {label} : {f}"));
+        }
+        return;
+    }
+    doc.line(&format!(
+        "{FROZEN_DIFFERS} {}",
+        jj_mm_aaaa(&frozen.frozen_at.0)
+    ));
+    for (label, f, c) in &table {
+        let mark = if f != c { "• " } else { "  " };
+        doc.line(&format!("{mark}{label} : {f} -> {c}"));
+    }
+    let changed = crate::frozen::changed_inputs(frozen, &current);
+    let entries = if changed.is_empty() {
+        FROZEN_ENTRIES_SAME.to_string()
+    } else {
+        FROZEN_ENTRIES_COUNT.replace("{n}", &changed.len().to_string())
+    };
+    let mark = if changed.is_empty() { "  " } else { "• " };
+    doc.line(&format!("{mark}{FROZEN_ROW_ENTRIES} : {entries}"));
+    let method_mark = if frozen.method_version != current.method_version {
+        "• "
+    } else {
+        "  "
+    };
+    doc.line(&format!(
+        "{method_mark}{FROZEN_ROW_METHOD} : {} -> {}",
+        frozen.method_version, current.method_version
+    ));
+    let cause = crate::frozen::causes(study, frozen, &current, &changed, &|t| {
+        jj_mm_aaaa(&t.0).chars().take(5).collect()
+    })
+    .replace('→', "->");
+    doc.line(&format!("{FROZEN_CAUSE} : {cause}"));
+}
+
+/// `JJ/MM/AAAA` of an ISO timestamp (its UTC date).
+fn jj_mm_aaaa(ts: &str) -> String {
+    let d = date_prefix(ts);
+    match (d.get(0..4), d.get(5..7), d.get(8..10)) {
+        (Some(y), Some(m), Some(day)) => format!("{day}/{m}/{y}"),
+        _ => d,
+    }
+}
+
+const FROZEN_ON: &str = "Verdict figé le";
+const FROZEN_DIFFERS: &str = "Le verdict actuel diffère du verdict figé le";
+const FROZEN_ROW_VERDICT: &str = "Verdict";
+const FROZEN_ROW_ZONE: &str = "Zone du prix";
+const FROZEN_ROW_UD: &str = "Ratio hausse/baisse";
+const FROZEN_ROW_RV: &str = "Valeur relative";
+const FROZEN_ROW_APPRECIATION: &str = "Appréciation projetée";
+const FROZEN_ROW_POTENTIAL: &str = "Potentiel à 5 ans";
+const FROZEN_ROW_ENTRIES: &str = "Entrées";
+const FROZEN_ROW_METHOD: &str = "Méthode";
+const FROZEN_CAUSE: &str = "Cause";
+const FROZEN_QV_MET: &str = "critères réunis";
+const FROZEN_QV_UNMET: &str = "critères non réunis";
+const FROZEN_CRIT_MET: &str = "réuni";
+const FROZEN_CRIT_UNMET: &str = "non réuni";
+const FROZEN_CRIT_UNKNOWN: &str = "inconnu";
+const FROZEN_UD_TARGET: &str = ">= 3";
+const FROZEN_RV_CEILING: &str = "< 100 %";
+const FROZEN_DOUBLE: &str = ">= doublement";
+const FROZEN_NO_DIV: &str = "hors div.";
+const FROZEN_ENTRIES_SAME: &str = "identiques";
+const FROZEN_ENTRIES_COUNT: &str = "{n} modifiée(s)";
+
 /// The `YYYY-MM-DD` prefix of an ISO timestamp (char-safe, no byte slicing).
 fn date_prefix(ts: &str) -> String {
     ts.chars().take(10).collect()
@@ -1299,6 +1460,34 @@ const MARKER_ABOVE: &str = "au-dessus de la plage";
 
 #[cfg(test)]
 const REPORT_USER_FACING: &[&str] = &[
+    // Story 8.8: the frozen verdict block.
+    FROZEN_ON,
+    FROZEN_DIFFERS,
+    FROZEN_ROW_VERDICT,
+    FROZEN_ROW_ZONE,
+    FROZEN_ROW_UD,
+    FROZEN_ROW_RV,
+    FROZEN_ROW_APPRECIATION,
+    FROZEN_ROW_POTENTIAL,
+    FROZEN_ROW_ENTRIES,
+    FROZEN_ROW_METHOD,
+    FROZEN_CAUSE,
+    FROZEN_QV_MET,
+    FROZEN_QV_UNMET,
+    FROZEN_CRIT_MET,
+    FROZEN_CRIT_UNMET,
+    FROZEN_CRIT_UNKNOWN,
+    FROZEN_UD_TARGET,
+    FROZEN_RV_CEILING,
+    FROZEN_DOUBLE,
+    FROZEN_NO_DIV,
+    FROZEN_ENTRIES_SAME,
+    FROZEN_ENTRIES_COUNT,
+    crate::frozen::CAUSE_REFRESH,
+    crate::frozen::CAUSE_OWNER,
+    crate::frozen::CAUSE_AI,
+    crate::frozen::CAUSE_METHOD,
+    crate::frozen::CAUSE_UNKNOWN,
     // Header block.
     "Analyse de sélection de titre",
     "Société",
@@ -3992,6 +4181,33 @@ mod tests {
         bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
             (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
         })
+    }
+
+    // Story 8.8 (spec §7): a frozen verdict prints its block; when the current one differs, the
+    // rows « figé -> actuel » with « • » on the changed ones and the cause; WinAnsi only.
+    #[test]
+    fn a_frozen_verdict_prints_its_block_and_its_difference() {
+        let mut study = demo_study();
+        let frame = crate::form::build_frame(&study).unwrap();
+        let mut frozen = crate::form::verdict_record(
+            &study,
+            &frame,
+            &steadyinvest_contract::Timestamp("2026-09-30T10:00:00Z".to_string()),
+        );
+        study.frozen_verdict = Some(frozen.clone());
+        let same = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(&same, "Verdict figé le 30/09/2026"));
+        assert!(
+            !contains(&same, FROZEN_DIFFERS),
+            "the same verdict: no comparison"
+        );
+        frozen.method_version = "ssg-1.1.0".to_string();
+        study.frozen_verdict = Some(frozen);
+        let differs = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(&differs, FROZEN_DIFFERS));
+        assert!(contains(&differs, "Méthode : ssg-1.1.0 -> "));
+        assert!(contains(&differs, "changement de méthode (ssg-1.1.0 -> "));
+        assert!(!contains(&differs, "→") && !contains(&differs, "≥"));
     }
 
     #[test]
