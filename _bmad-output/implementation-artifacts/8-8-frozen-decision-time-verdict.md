@@ -1,6 +1,6 @@
 # Story 8.8: Frozen decision-time verdict (FR68)
 
-Status: review
+Status: done
 
 <!-- Created 2026-09-30 by create-story on branch feat/8-8-frozen-verdict (main with 8.1–8.7).
      Autonomous Epic 8 run (Guy, 2026-09-28): questions resolved with the most conservative option,
@@ -344,6 +344,60 @@ Claude Opus 5.5 (claude-opus-5-5)
   so Ctrl+Z needs a click on a focusable control first (as after any dialog since 2.9).
 - No UI-level harness: the wiring is verified headless only.
 
+### G3 review (3 layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor)
+
+Applied (0f53dfd), 1449 tests, clippy / fmt / deny green; re-walk `v88g3/01–03` (DEMO1 made
+provisional after its freeze: band « diffère », « Valider l'étude » disabled with its reason, the
+Verdict row marked, « Cause : modification de votre part, entrées ouvertes : BPA 2025 — non
+validé »; real `~/.config` / `~/.local/share` unchanged):
+1. **The screen and the PDF disagreed on « identique »** (all three layers, high): one rule,
+   `report::frozen::differs(frozen, current, current_full)` — a verdict no longer Full differs
+   even with the same figures; its Verdict row is marked and the cause names the open inputs
+   (`CAUSE_OPEN` « entrées ouvertes : {list} »). The PDF prints the current state (« provisoire »
+   / « retenu ») and masks a withheld verdict's figures as the screen does.
+2. **The withheld mask missed the zone row** (blind + auditor): every current cell after the
+   Verdict row reads « retenu — … ».
+3. **Undoing a replacement said « Validation de l'étude annulée »** (blind + edge): the notice
+   follows the restored verdict — the previous one's « verdict figé le {date} », or « annulée »
+   when none is left; it now agrees with the history.
+4. **Dates local on screen, UTC in the PDF** (all three): the UTC date of the stamp on both
+   surfaces (`report::frozen::day_month`, `jj_mm_aaaa`).
+5. **« • » over identical texts** (blind + edge): the mark follows the DISPLAYED text on both
+   surfaces (a change below the display precision, `Undefined` ↔ `Unknown`, or the unshown
+   in-low-zone criterion alone no longer mark a row).
+6. **Causes** (edge + blind): a refresh stamped in the freeze's own second counts (`>=`); a year
+   removed after the freeze is the owner's edit, not « cause inconnue ».
+7. **TTM shown as « 5 · 0 · 0 · 0 »** (edge): only the first quarter is shown.
+8. **A missing study read « échec de l'enregistrement »** (blind + auditor): `MSG_STUDY_GONE`.
+9. **The button was hidden on the demo** (auditor, AC 1): disabled, like its neighbours.
+10. **The comparison could reopen expanded** (blind): it closes whenever the strip leaves the
+    « diffère » state; the table's half columns never go negative in a narrow window.
+11. Tests (auditor 5–7): `report::frozen` unit tests (each cause, AI validated, unknown, several
+    causes once each in order, current price with and without a refresh, a removed year, the
+    open inputs, `differs`, the UTC day); the provisional strip (state); the PDF « • » on the
+    method and the entries rows, « Entrées : identiques / 1 modifiée(s) »; the export fixture
+    with `Money` values carrying trailing zeros (their scale survives both exports).
+    `@tr` unchanged (1172: the G3 edits add no literal).
+
+Dismissed after checking: the « Full only » gate at run time rather than compile time —
+`verdict_record` is also the CURRENT side of every comparison, and `freeze` is the only store
+path in the app (the MCP fixture writes the blob as MCP would read any stored one); string-ordered
+stamps (every stamp is the app clock's RFC 3339 UTC seconds, as in 8.7); the ratio written
+« 5,2:1 » on screen and « 5,2 : 1 » in the PDF (each surface's existing convention, verdict bar
+and PDF « Position »); `area-height: root.height` (the study screen's root IS the study area);
+no `#[serde(other)]` on the frozen enums and an older build dropping the field (not in
+production; the other contract enums follow the same rule).
+
+Deferred (low): `current_price` / `ttm_eps` carry no provenance, so their cause is « rafraîchissement
+du … » when a provider write happened since the freeze, else « cause inconnue » — an owner-typed
+price after a refresh reads as the refresh (owner-pending, final report); re-validating an
+identical verdict is allowed (AC 3's confirm) and adds a step and a history entry; a study that
+does not normalize shows « entrées ouvertes : — » and its refusal reads « échec de
+l'enregistrement »; the four quarterly inputs share the label « Trimestre »; `frozen_inputs`
+mirrors the digest by construction, tested by count only; the comparison is rebuilt on each drag
+tick and the history diff clones two studies per pair; the contract proptest never generates a
+frozen verdict.
+
 ### File List
 
 New: `contract/src/frozen.rs`, `contract/tests/frozen.rs`, `report/src/frozen.rs`,
@@ -360,3 +414,4 @@ screens/study_screen.slint, screens/settings.slint}`, `mcp/src/tools.rs`,
 ## Change Log
 
 - 2026-09-30 — create-story (5fd8c0b); dev-story T1–T12; headless walk v88/; status → review.
+- 2026-09-30 — G3 review (3 layers) applied (0f53dfd); re-walk v88g3/01–03; status → done.
