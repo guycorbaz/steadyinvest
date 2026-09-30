@@ -346,7 +346,7 @@ Claude Opus 5.5 (claude-opus-5-5)
 
 ### G3 review (3 layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor)
 
-Applied (0f53dfd), 1449 tests, clippy / fmt / deny green; re-walk `v88g3/01–03` (DEMO1 made
+Applied (86ccf96), 1449 tests, clippy / fmt / deny green; re-walk `v88g3/01–03` (DEMO1 made
 provisional after its freeze: band « diffère », « Valider l'étude » disabled with its reason, the
 Verdict row marked, « Cause : modification de votre part, entrées ouvertes : BPA 2025 — non
 validé »; real `~/.config` / `~/.local/share` unchanged):
@@ -414,4 +414,4 @@ screens/study_screen.slint, screens/settings.slint}`, `mcp/src/tools.rs`,
 ## Change Log
 
 - 2026-09-30 — create-story (5fd8c0b); dev-story T1–T12; headless walk v88/; status → review.
-- 2026-09-30 — G3 review (3 layers) applied (0f53dfd); re-walk v88g3/01–03; status → done.
+- 2026-09-30 — G3 review (3 layers) applied (86ccf96); re-walk v88g3/01–03; status → done.
