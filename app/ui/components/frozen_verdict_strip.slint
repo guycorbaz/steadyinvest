@@ -13,6 +13,8 @@ component CompareLine inherits HorizontalLayout {
     in property <FrozenRow> entry;
     // The zone row writes keys with the runtime labels.
     in property <bool> zone: false;
+    // Fixed columns (label + two equal halves) so every row aligns under the headers.
+    property <length> half: (root.width - 240px - 2 * Tokens.space-12) / 2;
     spacing: Tokens.space-12;
     function words(key: string) -> string {
         return key == "buy" ? Labels.zone-buy : key == "neutral" ? Labels.zone-hold
@@ -20,7 +22,7 @@ component CompareLine inherits HorizontalLayout {
     }
     Text {
         text: root.entry.changed ? @tr("• {}", root.label) : root.label;
-        width: 200px;
+        width: 240px;
         color: root.entry.changed ? Tokens.text-high : Tokens.text-mid;
         font-size: Tokens.font-caption;
         font-weight: root.entry.changed ? Tokens.weight-semibold : Tokens.weight-regular;
@@ -28,8 +30,7 @@ component CompareLine inherits HorizontalLayout {
     }
     Text {
         text: root.zone ? root.words(root.entry.frozen) : root.entry.frozen;
-        horizontal-stretch: 1;
-        preferred-width: 0;
+        width: root.half;
         color: root.entry.changed ? Tokens.text-high : Tokens.text-mid;
         font-family: Tokens.font-numeric;
         font-size: Tokens.font-caption;
@@ -38,8 +39,7 @@ component CompareLine inherits HorizontalLayout {
     }
     Text {
         text: root.zone ? root.words(root.entry.current) : root.entry.current;
-        horizontal-stretch: 1;
-        preferred-width: 0;
+        width: root.half;
         color: root.entry.changed && Studies.frozen-strip.current-state == 0 ? Tokens.text-high : Tokens.text-mid;
         font-family: Tokens.font-numeric;
         font-size: Tokens.font-caption;
@@ -75,13 +75,13 @@ export component FrozenVerdictStrip inherits VerticalLayout {
         table := VerticalLayout {
             width: parent.width;
             spacing: Tokens.space-4;
-            HorizontalLayout {
+            header := HorizontalLayout {
+                property <length> half: (self.width - 240px - 2 * Tokens.space-12) / 2;
                 spacing: Tokens.space-12;
-                Rectangle { width: 200px; }
+                Rectangle { width: 240px; }
                 Text {
                     text: @tr("figé ({}, {})", Studies.frozen-strip.frozen-method, Studies.frozen-strip.date);
-                    horizontal-stretch: 1;
-                    preferred-width: 0;
+                    width: header.half;
                     color: Tokens.text-high;
                     font-size: Tokens.font-caption;
                     font-weight: Tokens.weight-semibold;
@@ -92,8 +92,7 @@ export component FrozenVerdictStrip inherits VerticalLayout {
                         : Studies.frozen-strip.current-state == 2
                         ? @tr("actuel ({}, retenu)", Studies.frozen-strip.current-method)
                         : @tr("actuel ({}, aujourd'hui)", Studies.frozen-strip.current-method);
-                    horizontal-stretch: 1;
-                    preferred-width: 0;
+                    width: header.half;
                     color: Tokens.text-high;
                     font-size: Tokens.font-caption;
                     font-weight: Tokens.weight-semibold;
