@@ -10448,3 +10448,182 @@ mod drafts_8_2b {
         assert!(!state.can_undo(), "never onto another one");
     }
 }
+
+// ── Story 8.8 — the frozen decision-time verdict (FR68, A13) ──
+mod frozen_8_8 {
+    use super::*;
+    use crate::viewmodel::format::NumberFormat;
+    use crate::viewmodel::frozen::{StripView, strip_of};
+
+    const NOW: &str = "2026-09-30T10:00:00Z";
+
+    /// A study whose verdict reads Full (every load-bearing input validated and fresh, 5 years).
+    fn full_state(dir: &TempDir) -> (JournalState, Uuid) {
+        let mut state = undo_state(dir, 0x88, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_for(&years))
+            .unwrap();
+        for y in 0..years.len() {
+            for field in [
+                entry::FIELD_SALES,
+                entry::FIELD_HIGH,
+                entry::FIELD_LOW,
+                entry::FIELD_EPS,
+            ] {
+                state.set_review(id, y, field, Review::Validated).unwrap();
+            }
+        }
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+            ("current_price", 60),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+        state.reset_undo_for(id);
+        (state, id)
+    }
+
+    fn strip(state: &JournalState, id: Uuid) -> StripView {
+        let study = state.get_study(id).unwrap();
+        strip_of(&study, &Timestamp(NOW.to_string()), NumberFormat::Comma)
+    }
+
+    /// Back-date the freeze (the fixed test clock stamps every write at the same second).
+    fn backdate(state: &mut JournalState, id: Uuid) {
+        state
+            .mutate_study(id, |s| {
+                s.frozen_verdict.as_mut().unwrap().frozen_at =
+                    Timestamp("2026-09-01T08:00:00Z".to_string())
+            })
+            .unwrap();
+    }
+
+    // AC 2, 4, 7 — freeze a Full verdict: stored, the strip reads « identique », undo / redo move it.
+    #[test]
+    fn a_full_verdict_freezes_reads_the_same_and_undo_redo_move_it() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = full_state(&dir);
+        assert_eq!(
+            strip(&state, id),
+            StripView::None,
+            "never validated: no strip"
+        );
+        let at = state.freeze_verdict(id).expect("frozen");
+        assert_eq!(at.0, NOW);
+        let study = state.get_study(id).unwrap();
+        let frozen = study.frozen_verdict.clone().expect("stored");
+        assert_eq!(
+            frozen.inputs_hash,
+            engine::build_snapshot(&study).unwrap().inputs_hash()
+        );
+        assert!(matches!(strip(&state, id), StripView::Same { .. }));
+        assert_eq!(state.undo(id).unwrap(), Stepped::Freeze);
+        assert_eq!(state.get_study(id).unwrap().frozen_verdict, None);
+        assert_eq!(state.redo(id).unwrap(), Stepped::Freeze);
+        assert_eq!(state.get_study(id).unwrap().frozen_verdict, Some(frozen));
+    }
+
+    // AC 10 — freeze, a refresh with a changed EPS series (accepted), the frozen verdict stays
+    // byte-identical while the current one differs, the difference and its cause are shown.
+    #[test]
+    fn a_refresh_after_the_freeze_leaves_it_byte_identical_and_shows_the_difference() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = full_state(&dir);
+        state.freeze_verdict(id).unwrap();
+        backdate(&mut state, id);
+        let before = serde_json::to_string(&state.get_study(id).unwrap().frozen_verdict).unwrap();
+        let years = [2020, 2021, 2022, 2023, 2024];
+        state
+            .apply_provider_refresh(id, &fetched_custom(&years, 1000, 7, 100, 50, "eps7"))
+            .unwrap();
+        for y in 0..years.len() {
+            state
+                .accept_provider_value(id, y, entry::FIELD_EPS)
+                .unwrap();
+        }
+        let after = serde_json::to_string(&state.get_study(id).unwrap().frozen_verdict).unwrap();
+        assert_eq!(before, after, "the frozen verdict is never recomputed");
+        match strip(&state, id) {
+            StripView::Differs { comparison, .. } => {
+                assert!(comparison.entries.changed);
+                assert!(
+                    comparison.entries.current.contains("BPA 2024 5 → 7"),
+                    "{}",
+                    comparison.entries.current
+                );
+                assert!(
+                    comparison.cause.contains("rafraîchissement du"),
+                    "{}",
+                    comparison.cause
+                );
+            }
+            other => panic!("expected a difference, got {other:?}"),
+        }
+    }
+
+    // AC 10 — a method change (the stored method older than today's) is named.
+    #[test]
+    fn a_method_change_is_shown_and_named() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = full_state(&dir);
+        state.freeze_verdict(id).unwrap();
+        state
+            .mutate_study(id, |s| {
+                s.frozen_verdict.as_mut().unwrap().method_version = "ssg-1.1.0".to_string()
+            })
+            .unwrap();
+        match strip(&state, id) {
+            StripView::Differs { comparison, .. } => {
+                assert!(comparison.method.changed);
+                assert_eq!(
+                    comparison.cause,
+                    format!(
+                        "changement de méthode (ssg-1.1.0 → {})",
+                        steadyinvest_core::METHOD_VERSION
+                    )
+                );
+                assert!(!comparison.entries.changed, "« identiques »");
+            }
+            other => panic!("expected a difference, got {other:?}"),
+        }
+    }
+
+    // AC 1, 6, 9 — a verdict not full refuses the freeze with its open inputs named; an owner edit
+    // after the freeze reads « modification de votre part ».
+    #[test]
+    fn a_verdict_not_full_is_refused_and_an_owner_edit_is_named() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = full_state(&dir);
+        state.freeze_verdict(id).unwrap();
+        state
+            .set_judgment_field(id, "high_pe", Some(und_money(22)))
+            .unwrap();
+        match strip(&state, id) {
+            StripView::Differs { comparison, .. } => {
+                assert_eq!(comparison.cause, "modification de votre part");
+                assert!(
+                    comparison
+                        .entries
+                        .current
+                        .contains("PER haut moyen 20 → 22")
+                );
+            }
+            other => panic!("expected a difference, got {other:?}"),
+        }
+        state
+            .set_review(id, 4, entry::FIELD_EPS, Review::ToReview)
+            .unwrap();
+        let refused = state.freeze_verdict(id).unwrap_err();
+        assert!(
+            refused.starts_with("L'étude ne peut pas être validée : le verdict n'est pas complet (entrées ouvertes : BPA 2024"),
+            "{refused}"
+        );
+    }
+}

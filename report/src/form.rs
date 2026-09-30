@@ -248,13 +248,23 @@ pub enum NotFrozen {
 ///
 /// [`Verdict::Full`]: steadyinvest_core::verdict::Verdict::Full
 pub fn freeze(study: &Study, now: &Timestamp) -> Result<FrozenVerdict, NotFrozen> {
-    use steadyinvest_core::ssg::{CriterionFact, UpsideDownside, Zone};
-    use steadyinvest_core::verdict::Verdict;
     let frame = build_frame(study).map_err(NotFrozen::Normalize)?;
-    let Verdict::Full(full) = frame.snapshot.verdict() else {
+    if !matches!(
+        frame.snapshot.verdict(),
+        steadyinvest_core::verdict::Verdict::Full(_)
+    ) {
         return Err(NotFrozen::NotFull);
-    };
-    let facts = full.facts();
+    }
+    Ok(verdict_record(study, &frame, now))
+}
+
+/// The verdict of one frame in the frozen shape (Story 8.8) — what [`freeze`] stores for a Full
+/// verdict, and the CURRENT side of the frozen-vs-current comparison (any verdict state: facts are
+/// carried by every state). Never persisted for a current verdict.
+pub fn verdict_record(study: &Study, frame: &StudyFrame, now: &Timestamp) -> FrozenVerdict {
+    use steadyinvest_core::ssg::{CriterionFact, UpsideDownside, Zone};
+    let verdict = frame.snapshot.verdict();
+    let facts = verdict.facts();
     let out = frame.snapshot.outputs();
     let rr = &out.risk_reward;
     let money = |d: Decimal| Money::from(d);
@@ -263,10 +273,10 @@ pub fn freeze(study: &Study, now: &Timestamp) -> Result<FrozenVerdict, NotFrozen
         CriterionFact::Unmet => FrozenCriterion::Unmet,
         CriterionFact::UnmetByInsufficiency => FrozenCriterion::UnmetByInsufficiency,
     };
-    Ok(FrozenVerdict {
+    FrozenVerdict {
         frozen_at: now.clone(),
-        method_version: full.method_version().to_string(),
-        inputs_hash: full.inputs_hash().to_string(),
+        method_version: verdict.method_version().to_string(),
+        inputs_hash: verdict.inputs_hash().to_string(),
         quality_value_candidate: facts.quality_value_candidate,
         present_zone: facts.present_price_zone.map(|z| match z {
             Zone::Buy => FrozenZone::Low,
@@ -293,7 +303,7 @@ pub fn freeze(study: &Study, now: &Timestamp) -> Result<FrozenVerdict, NotFrozen
             forecast_high: money(z.forecast_high),
         }),
         inputs: frozen_inputs(study, &frame.series),
-    })
+    }
 }
 
 /// The inputs a verdict's digest covers, keyed for the comparison's « Entrées » row (Story 8.8):

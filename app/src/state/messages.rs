@@ -180,6 +180,13 @@ pub const MSG_DRAFT_REDONE: &str = "Validation rétablie.";
 /// the dossier (`{ticker}` / `{currency}` in the EXISTING study's spelling). Nothing was created.
 pub const MSG_DRAFT_STUDY_EXISTS: &str =
     "Une étude {ticker} en {currency} existe déjà ; rien n'a été créé.";
+/// Story 8.8 outcome (UX spec §3.3): the verdict was frozen on `{date}` (JJ/MM).
+pub const MSG_FREEZE_DONE: &str = "Étude validée ; verdict figé le {date}.";
+/// Story 8.8 outcome: an undo over the freeze.
+pub const MSG_FREEZE_UNDONE: &str = "Validation de l'étude annulée.";
+/// Story 8.8 refusal: the verdict stopped being full between the render and the click (`{list}` —
+/// the open inputs).
+pub const MSG_FREEZE_NOT_FULL: &str = "L'étude ne peut pas être validée : le verdict n'est pas complet (entrées ouvertes : {list}) ; rien n'a été enregistré.";
 /// Story 8.2b target-gone reason: the draft's fiscal year left the study (`{year}`).
 pub const MSG_GONE_REASON_YEAR: &str = "l'année {year} n'existe plus dans l'étude";
 /// Story 8.2b target-gone reason: the draft's study was deleted.
@@ -1183,6 +1190,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_DRAFT_UNDONE,
     MSG_DRAFT_REDONE,
     MSG_DRAFT_STUDY_EXISTS,
+    MSG_FREEZE_DONE,
+    MSG_FREEZE_UNDONE,
+    MSG_FREEZE_NOT_FULL,
     MSG_READ_FAILED,
     MSG_CLIPBOARD_UNAVAILABLE,
     MSG_PASTE_CLIPPED,
