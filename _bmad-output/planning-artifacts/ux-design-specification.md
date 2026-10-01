@@ -653,7 +653,7 @@ The Stock Study screen **is** the high-fidelity SSG form, with the five sections
 top-to-bottom and **individually collapsible** to control scrolling. The earlier-explored layout
 directions are folded in as facets, not separate screens:
 
-- **App shell:** a left nav rail (Studies / Watchlist / Portfolio / Settings) + a top bar carrying
+- **App shell:** a left nav rail (Studies / Watchlist / Portfolio / Settings — completed by « Revue » (spec 7.2) and « Propositions » (spec 8.0 §5.1): six destinations as built, Études · Liste de suivi · Portefeuille · Revue · Propositions · Réglages) (réconcilié 2026-10-01 : `app/ui/app.slint`, revue p2 écart 23) + a top bar carrying
   the study identity, the **regime toggle** and expand/collapse-all controls.
 - **Sticky verdict bar** (the essence of the "verdict rail" idea) pinned at the top of the scroll
   area: verdict, present price, projected return, appreciation, capital-at-risk — always visible
@@ -829,7 +829,7 @@ flowchart TD
 
 ### Journey Patterns
 
-- **Navigation:** nav rail (Studies / Watchlist / Portfolio / Settings) → study dashboard
+- **Navigation:** nav rail (six destinations, see App shell above) → study dashboard
   (list/search/sort/filter) → the one faithful study screen; regime toggle and collapsible sections
   are the in-screen navigation; the sticky verdict bar is the constant anchor.
 - **Decision:** the app surfaces **neutral facts + manual actions**, never auto-acts; the
@@ -978,7 +978,8 @@ domain logic — they consume the colour/alpha + metric/typo token families.
 
 ### Navigation Patterns
 
-- **Persistent left nav rail:** Studies / Watchlist / Portfolio / Settings — a small, predictable
+- **Persistent left nav rail:** Études / Liste de suivi / Portefeuille / Revue / Propositions /
+  Réglages (réconcilié 2026-10-01 : specs 7.2 et 8.0 §5.1, `app/ui/app.slint`) — a small, predictable
   set of places.
 - **Study dashboard** (list/search/sort/filter/archive) → the one faithful study screen.
 - **In-screen navigation** = regime toggle + collapsible sections + the **sticky verdict bar** as a
@@ -994,7 +995,9 @@ domain logic — they consume the colour/alpha + metric/typo token families.
 ### Empty & Loading States
 
 - Every main surface has an **actionable empty state** (FR58): no studies → *Create your first
-  study* + a link to the **read-only demo study**.
+  study* + a link to the **read-only demo study**. The demo also stays reachable once studies exist
+  (« Étude de démonstration » beside « Créer une étude… »); on it every field is read-only and the
+  writing gestures are disabled (réconcilié 2026-10-01 : PR #279, PR #284).
 - **Loading** (user-initiated fetch) shows progress **without blocking the UI**; **offline is a
   normal state**, not an error.
 

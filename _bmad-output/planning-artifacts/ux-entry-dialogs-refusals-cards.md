@@ -43,7 +43,7 @@ Today one `notice` string per global carries three different things. The pass se
 
 | Kind | Definition | Surface | Examples (existing `MSG_*`) |
 |---|---|---|---|
-| **Refusal** | The user acted; the write did not happen; the message names the cause. | **Modal notice dialog**, one button « Compris ». Focus returns to the field/control that triggered it; the user's text is kept. | « Le seuil de concentration doit être un pourcentage entre 0 et 100 ; rien n'a été enregistré. » · « La quantité dépasse la quantité détenue à cette date ; rien n'a été enregistré. » · portfolio delete guards · « Le fichier n'est pas un dossier valide ; rien n'a été restauré. » |
+| **Refusal** | The user acted; the write did not happen; the message names the cause. | **Modal notice dialog**, one button « Compris ». The user's text is kept; focus is not returned to the field/control that triggered it (Slint has no element-reference API) (réconcilié 2026-10-01 : story 7.0, « Decisions taken »). | « Le seuil de concentration doit être un pourcentage entre 0 et 100 ; rien n'a été enregistré. » · « La quantité dépasse la quantité détenue à cette date ; rien n'a été enregistré. » · portfolio delete guards · « Le fichier n'est pas un dossier valide ; rien n'a été restauré. » |
 | **State** | A situation that exists regardless of the last gesture and lasts while it exists. | **Status band** (persistent, icon + surface-alt + border, `text-mid`), placed at the top of the card it concerns. Never modal. | « taux manquant USD → CHF » · « non classé (…) » · « Aucune étude liée » · « seuil 50 % approché ou atteint » · « Dossier en lecture seule (schéma plus récent) » · « 1 position sans seuil suiveur (2 000 CHF non couverts) » |
 | **Outcome** | The gesture succeeded; a fact to know, nothing to do. | **Inline notice** in the card's notice slot (F4 rule unchanged: replaces only the in-progress banner or an empty slot). | « Le dossier a été exporté. /path » · « Le dividende a été enregistré. » · « Les taux ont été actualisés. » |
 | **Confirmation** | A destructive or irreversible gesture needs an explicit yes. | **Modal confirm dialog**, two buttons (« Annuler » / the verb). | delete a transaction (6.3), restore a backup (5.4), import an older dossier (#65), delete a portfolio (6.1). |
@@ -86,7 +86,8 @@ export global Dialog {
   raised by the form itself (kept inline: the user must see it next to the offending field, with
   their text intact), buttons « Annuler » / « Enregistrer ». Enter in the last field validates.
 - Keyboard: Esc cancels everywhere; focus is trapped in the card; first field focused on open;
-  on close, focus returns to the control that opened the dialog.
+  on close, focus is not returned to the control that opened the dialog — Slint offers no
+  element-reference API (réconcilié 2026-10-01 : story 7.0, « Decisions taken »).
 - Rust side: `Dialog` is driven by the wiring, not by screens. A refusal today does
   `holdings.set_notice(msg)`; it becomes `dialog::refuse(&ui, msg)` (one helper). Outcomes keep
   `set_notice`. The three existing inline confirms (ledger delete, restore, older-import) move to

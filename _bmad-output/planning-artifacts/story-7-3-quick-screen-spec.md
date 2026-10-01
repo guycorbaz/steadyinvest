@@ -34,11 +34,17 @@ tickers) is **out of scope**: it is provider-locked, quota-hungry, and the PRD k
   configured currencies) + « Examiner » → fetch through the configured provider chain (the 6.9
   path, `fetch_canonical`) → the examination opens in place of the list (`Studies.screen-open`,
   the 7.1 pattern), with « ‹ Retour aux études », « Exporter PDF », « Créer l'étude ».
+  A listing currency other than the one chosen is refused, nothing shown (« … la devise choisie
+  est {DEV} ; rien n'est montré dans une autre devise que la sienne. »), and an unknown symbol's
+  notice names the app's convention (`SAP.DE` → `SAP.XETRA`, else « SYMBOLE.PLACE … ») (réconcilié
+  2026-10-01 : PR #276, PR #277).
 - **On a study** (the study screen's action row): « Examen rapide » — the same screen from the
   study's own saved years, no fetch, « Créer l'étude » absent (it exists).
 - **Liste de suivi**, a button **« Examiner la liste »**: one fetch per watched ticker without a
   study (rate-limited by the 6.9 batching), the saved years for those with one, then a table
-  card « Criblage » under the list. Quota / failure per row → « indisponible » on that row only.
+  card « Criblage » under the list. A failure → « indisponible » on that row only; a quota reply
+  latches the run: that row and every row queued behind it read « non examiné (limite d'usage) »
+  (§6) (réconcilié 2026-10-01 : story 7.3, « Decisions taken in code »).
 
 Nothing is persisted: an examination is a moment (the 7.1 Q3 rule); the study is the record.
 

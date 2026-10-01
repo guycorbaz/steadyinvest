@@ -140,7 +140,8 @@ Mechanisms it imposes:
 - **Three version axes, not two**: `schema_version` (serialized contract) · SQLite schema
   (`PRAGMA user_version`) · **`method_version`/`formula_version`** (calculation semantics).
 - **Theme tokens = one neutral source of truth read by Slint** (intra-binary, not "across an FFI");
-  zone/ink/label tokens in an immutable snapshot (`arc_swap`); theme/regime change forces a redraw.
+  zone/ink/label tokens pushed by a plain main-thread owner (`app/src/theme.rs`; no `arc_swap` —
+  réconcilié 2026-10-01); theme/regime change forces a redraw.
 - **Two distinct quality-gate families**: *trust gates* (types, traceability, reproducibility) vs
   *posture gates* (neutral naming, swappable labels). Do not reduce neutrality to a string grep.
 
@@ -159,9 +160,11 @@ Mechanisms it imposes:
   the SAME immutable state snapshot so an incoherent frame is structurally impossible.
 - **Test architecture (CI gates)**: frontier golden fixtures (synthetic, documented provenance);
   property tests incl. monotonicity / boundary-continuity / idempotence / scale-homogeneity;
-  metamorphic tests; determinism hash asserted equal on the 3 OS (or trivial under decimal); a
+  metamorphic tests; determinism hash pinned (equal across OS by construction under decimal; CI runs
+  on Linux only for now, see §Starter); a
   frozen versioned-journal corpus + schema-drift detector + forward-compat read-only-on-newer-file.
-- PDF/print fidelity (FR52) via `genpdf`/`printpdf` from the calc crate, UI-independent.
+- PDF/print fidelity (FR52) via `pdf-writer` in the `report` crate, UI-independent. (réconcilié
+  2026-10-01 : `.github/workflows/ci.yml` `os: [ubuntu-latest]`, `Cargo.toml` `pdf-writer = "0.12"`)
 - Licensing: GPL-3.0 intended, dependency-license audit (Slint tier). i18n French-first, separate
   from the NAIC↔neutral label set. No vendor data in repo; user brings own key.
 - **Environment**: project tree under a Synology Drive synced path; a live SQLite file must NOT sit in
@@ -228,9 +231,10 @@ for the UI crate.
 
 ### Versions Verified (web, June 2026)
 
-- **Slint 1.16.1** (its own MSRV is Rust 1.88, but the **workspace MSRV is 1.96** — forced by
-  Slint 1.16 transitive deps and libsqlite3-sys 0.38; pinned in `rust-toolchain.toml`, verified
-  Story 1.1) — licensed GPLv3 / royalty-free / commercial; **GPLv3 is
+- **Slint 1.17** (1.16.1 when verified in June; `Cargo.lock` now resolves `slint 1.17.0` from the
+  caret requirement `"1.16"`; its own MSRV is Rust 1.88, but the **workspace MSRV is 1.96** — forced by
+  Slint transitive deps and libsqlite3-sys 0.38; pinned in `rust-toolchain.toml`, verified
+  Story 1.1; réconcilié 2026-10-01 : `Cargo.lock`) — licensed GPLv3 / royalty-free / commercial; **GPLv3 is
   compatible with this project's GPL-3.0**, closing the PRD's "Slint licensing tier" risk. Charts are
   drawn natively (`Path` + `TouchArea`); egui is removed.
 - **rusqlite 0.40.0** with the `bundled` feature — SQLite (public domain) compiled into the binary;
@@ -244,8 +248,11 @@ for the UI crate.
   code and CLI for the Rust Keyring") with **no feature flags** and **mandatory** deps on every
   backend store (`keyring-core`, `db-keystore`, `*-keyring-store`) plus `clap`/`rpassword` — a heavy,
   non-lean tree. The real library is **`keyring = "3"`** (3.6.x), pinned with
-  `default-features = false` and explicit platform features (`linux-native` or `sync-secret-service`
-  on Linux, `apple-native`/Keychain on macOS, `windows-native`/Credential Manager on Windows). The
+  `default-features = false` and explicit platform features — as built: `async-secret-service` +
+  `crypto-rust` + `async-io` on Linux (persistent secret-service backend, Guy 2026-06-25; `async-io`
+  rather than `tokio` to avoid a UI-thread deadlock) — (réconcilié 2026-10-01 : `Cargo.toml` bloc
+  `keyring`, story 3.2 DEVIATION); `apple-native`/Keychain on macOS and `windows-native`/Credential
+  Manager on Windows are not enabled yet (Linux-only build). The
   forward-looking alternative is **`keyring-core` 1.x + a vetted backend store crate** per platform;
   evaluate both in **Story 3.2** and lock the choice with `cargo deny` (lean tree, GPL-3.0-compatible).
   Note: the Linux secret-service backend needs a running D-Bus/secret agent — relevant for
@@ -285,13 +292,13 @@ cargo generate --git https://github.com/slint-ui/slint-rust-template --name app
 #   -> rework the generated crate into the workspace's `app` (UI) member
 
 # 3. Add pinned dependencies to the relevant crates
-cargo add slint@1.16        --package app
+cargo add slint@1.16        --package app          # resolves to 1.17.0 today
 cargo add slint-build@1.16  --package app --build
 cargo add rusqlite@0.40 --features bundled        --package persistence
 cargo add rust_decimal@1 --features maths          --package core
 cargo add serde@1 --features derive                --package contract
 cargo add directories@6                            --package app
-cargo add keyring@3 --no-default-features          --package app         # Story 3.2 only; add explicit platform feature (e.g. linux-native). NOT keyring 4.x (sample/CLI meta-crate)
+cargo add keyring@3 --no-default-features          --package app         # Story 3.2 only; as built: --features async-secret-service,crypto-rust,async-io (réconcilié 2026-10-01). NOT keyring 4.x (sample/CLI meta-crate)
 ```
 
 **Proposed workspace layout (crates):**
@@ -304,17 +311,24 @@ cargo add keyring@3 --no-default-features          --package app         # Story
   fiscal-period, currency-of-report), `MarketDataProvider` trait + adapters. Its own golden fixtures.
 - `persistence/` — rusqlite storage (journal_id, logical version, migrations, `PRAGMA user_version`),
   export/import/backup. Local DB; sync-path detection.
+- `report/`    — study → `core` mapping (the frozen-verdict comparison, the form) and the PDF/print
+  output (`pdf-writer`), UI-independent.
+- `paths/`     — the per-machine locations (app-config, default dossier, logs) and the dossier
+  resolution, shared by `app` and `mcp` (story 8.4, décision 2).
 - `app/`       — thin Slint UI (forms, dense grid, native charts via `Path`/`TouchArea`), app-config
   via `directories`, secrets via `keyring`, theme tokens single-source.
 - `mcp/`       — [P4, G2] `steadyinvest-mcp`: separate stdio binary launched by the AI client; reads
   studies and submits drafts through `persistence::McpAccess`; its dependency closure excludes
   `ingestion`, `reqwest`, `keyring`, `slint` and `app` (see §Phase 4).
 
+As built, the workspace has **eight** members: `core, contract, ingestion, persistence, report, app,
+paths, mcp` (réconcilié 2026-10-01 : `Cargo.toml` `[workspace] members` ; story 8.4 décision 2).
+
 **Architectural Decisions Provided / Implied by this Foundation:**
 
-- **Language & Runtime:** Rust (workspace, MSRV 1.96 — driven by Slint 1.16 transitive deps +
+- **Language & Runtime:** Rust (workspace, MSRV 1.96 — driven by Slint 1.16/1.17 transitive deps +
   libsqlite3-sys 0.38; pinned in `rust-toolchain.toml`); single native binary per OS.
-- **UI:** Slint 1.16 (GPLv3), declarative `.slint` + `slint-build`; charts native; no web, no egui.
+- **UI:** Slint 1.17 (GPLv3; requirement `"1.16"`, resolved 1.17.0 — réconcilié 2026-10-01 : `Cargo.lock`), declarative `.slint` + `slint-build`; charts native; no web, no egui.
 - **Numerics:** `rust_decimal` (+`maths`) exact decimal in the core (determinism + correctness).
 - **Persistence:** rusqlite `bundled` SQLite, single local file.
 - **Secrets / Config:** `keyring` (OS store) + `directories` (app-config), kept out of the journal.
@@ -350,7 +364,8 @@ against this skeleton as the principal go/no-go before committing UI work.
   `CryptoProvider` in code, with `webpki-roots` (bundled roots) or `rustls-native-certs` for the trust
   anchors.
 - Error model (`thiserror` 2.0, neutral cause-named, no silent `.ok()`); logging (`tracing`, local
-  file, no telemetry); test architecture (`proptest` 1.9 + golden/metamorphic + 3-OS CI).
+  file, no telemetry); test architecture (`proptest` 1.9 + golden/metamorphic + CI on Linux only for
+  now — the 3-OS matrix is a target, not the current state; réconcilié 2026-10-01 : `.github/workflows/ci.yml`).
 - App-config vs journal boundary (`directories` + `keyring`); journal identity (`journal_id` + logical
   version); SQLite pragmas + sync-path detection.
 - Export/backup format; decimal rounding policy; UI visual-verification strategy (the four points
@@ -376,8 +391,10 @@ against this skeleton as the principal go/no-go before committing UI work.
   transaction or one draft insert) so the app's writes are never held up noticeably (§Phase 4, A2).
 - **Hybrid model (decided):**
   - *Normalized tables* for what we aggregate/query: `portfolio`, `holding`, `transaction`, `fx_rate`,
-    `watchlist_item`, plus index columns. This is where consolidation (per-currency→per-bank→global),
-    concentration and capital-at-risk run — SQL-friendly.
+    `watchlist_item`, plus index columns. `persistence` returns these rows; consolidation
+    (per-currency→per-bank→global), concentration and capital-at-risk are computed in
+    `app/src/state/{fx,concentration,review}.rs` with `core::risk` — never in SQL
+    (réconcilié 2026-10-01 : `app/src/state/{fx,concentration,review}.rs`, `persistence/Cargo.toml` sans `core` — p2 écart 17).
   - *Versioned serde JSON blob* (`payload TEXT` + `schema_version` column) for what we replay in bulk:
     `study` and its `judgment` snapshots. Append-mostly, read whole, never queried by inner field →
     no SQL migration when the judgment model evolves. [P4] study notes live inside the `Study` blob;
@@ -408,8 +425,9 @@ against this skeleton as the principal go/no-go before committing UI work.
   hash**, NOT a raw `.db` copy — portable across schema evolution and verifiable on import
   (reject/migrate on mismatch, FR60/FR61). A raw `.db` file copy remains the file-level backup unit
   pushed to the NAS sync folder; the JSON export is the exchange/seed/golden unit.
-- **FX:** `fx_rate` rows are dated & source-aware; FX applied only at the consolidation layer; the
-  rate used by a consolidated judgment is frozen at the judgment date.
+- **FX:** `fx_rate` rows are dated & source-aware; FX applied only at the consolidation layer. A study
+  verdict involves no FX, so a frozen verdict stamps none (A13); consolidation reads the latest dated
+  rate per pair and shows its date (réconcilié 2026-10-01 : A13, story 6.6 AC2/AC4).
 
 ### Authentication & Security
 
@@ -426,7 +444,8 @@ against this skeleton as the principal go/no-go before committing UI work.
   the MCP process holds only a `persistence::McpAccess` handle with typed methods (never a
   connection); its read connection's authorizer allows only an allowlist of tables (studies,
   judgments, journal metadata, drafts) and its draft connection's authorizer allows only `INSERT`
-  into `ai_drafts` (the `logical_version` bump runs from a v8 trigger); every other read/write is
+  into `ai_drafts` (the `logical_version` bump runs from a v8 trigger; a v9 trigger refuses an insert
+  over an existing draft id — réconcilié 2026-10-01); every other read/write is
   denied at statement preparation and logged. Drafts carry origin + non-empty comment (DB `NOT NULL` +
   `CHECK`). No provider call is reachable (the crate graph excludes it). Details: §Phase 4, A1/A3.
 
@@ -445,13 +464,24 @@ against this skeleton as the principal go/no-go before committing UI work.
   a worker thread** (sufficient for manual refresh; P2 ticker-batching via concurrent tasks
   `join_all`). Results marshalled back to the Slint event loop via `invoke_from_event_loop`. Provider
   failure is classified (network / quota / invalid-or-absent key), recorded, surfaced as a neutral
-  global banner; last-known values retained and flagged stale.
+  global banner; last-known values retained and flagged stale. As built (réconcilié 2026-10-01 :
+  PR #274, #276, #277): the current price records its origin (`Judgment.current_price_origin`:
+  provider + session date, or owner-typed + date); a failed refresh flags a fetched price stale and
+  the verdict becomes provisional (« Prix actuel — périmé ») until a successful refresh — a price is
+  stale only after a failure, never by age. **Décision en attente (Guy) : horizon d'âge du cours
+  (FR23, « un jour de bourse » par défaut, réglable) — non implémenté.** An unknown symbol's notice
+  names the app's ticker convention (`.DE` → `.XETRA`, `.AX` → `.AU`; `ingestion::ticker`). A
+  provider listing currency different from the study's is **refused** before anything is applied,
+  as is a listing quoted in hundredths (GBX, GBp, ZAc, ILA); statements reported in another
+  currency than the listing are applied with a named **warning**. **Décision en attente (Guy) :
+  comptes publiés dans une autre devise — avertir ou bloquer ; cotations en centièmes (GBX…) —
+  refusées, convertir ou non.**
 - **Errors:** `thiserror` 2.0 domain errors per crate; neutral, cause-named messages; **no silent
   `.ok()`** (explicit lesson from the prior project's chart-rendering bugs).
 
 ### Frontend Architecture
 
-- **Slint 1.16 (GPLv3)**, declarative `.slint` + `slint-build`; thin UI over the calc core.
+- **Slint 1.17 (GPLv3)** (réconcilié 2026-10-01 : `Cargo.lock`), declarative `.slint` + `slint-build`; thin UI over the calc core.
 - **State & recompute (realizes the Foundational Invariant):** a single **immutable study-state
   snapshot** is the source of truth; the UI derives from it; recompute is **transactional and pure**
   (inputs + verdict born together); the verdict is **content-addressed** by `f(hash(inputs),
@@ -461,9 +491,11 @@ against this skeleton as the principal go/no-go before committing UI work.
 - **Charts native in Slint** (`Path` + `TouchArea`, log10 in Rust; <100 ms recolor trivial in Slint's
   dirty-driven retained mode). Week-1 spike is the go/no-go.
 - **Theming:** design tokens (zone colours/ink/label set) live in **one neutral source of truth** read
-  by the UI (intra-binary `arc_swap` snapshot); theme/regime change forces a redraw. Two token
+  by the UI (pushed by a plain main-thread owner in `app/src/theme.rs` — no `arc_swap`, since Slint
+  properties are main-thread; réconcilié 2026-10-01 : `app/src/theme.rs`); theme/regime change forces a redraw. Two token
   families: colour/alpha (free to swap) vs metric/typo (quasi-static, never during a drag).
-- **i18n:** French-first string table, i18n-ready; separate axis from the NAIC↔neutral label set.
+- **i18n:** French-first `@tr()` strings in the `.slint` files (no separate `i18n.rs`), i18n-ready;
+  separate axis from the NAIC↔neutral label set (réconcilié 2026-10-01 : `app/src`).
 - **Verdict integrity in UI:** a `FullVerdict` is constructible only from all-validated-&-fresh
   load-bearing inputs (compiler-enforced); verdict + staleness derive from the same snapshot so an
   incoherent frame is structurally impossible.
@@ -471,7 +503,8 @@ against this skeleton as the principal go/no-go before committing UI work.
 ### Infrastructure & Deployment
 
 - **No cloud, no containers, no server.** Distribution = a native binary per OS (Win/macOS/Linux),
-  built from the Cargo workspace; updates manual in v1 (git pull/rebuild or replace binary). [P4]
+  built from the Cargo workspace — as of 2026-10-01 only the Linux binary is built, tested and used
+  (réconcilié 2026-10-01 : `ci.yml`, revue de projet p1 NFR constat 1); updates manual in v1 (git pull/rebuild or replace binary). [P4]
   a second binary, `steadyinvest-mcp`, ships beside the app; it is a stdio child process of the AI
   client (not a daemon, not a network service), registered by the owner in that client.
 - **CI:** `cargo test` gates (engine golden/property/metamorphic, versioned-journal corpus,
@@ -484,8 +517,11 @@ against this skeleton as the principal go/no-go before committing UI work.
   snapshot gate**, and a **Definition-of-Done rule = "launch the app and visually verify"** before any
   UI story is "done". Detailed in the Implementation Patterns step / TEA phase.
 - **Backup/restore:** delegated to an external system (NAS sync) — the app keeps the journal as a
-  single copy-friendly local file and pushes versioned exports/backups (carrying journal_id, version,
-  hash) to a configurable target; the live DB stays out of the sync-watched folder.
+  single copy-friendly local file. As built (story 5.5 scope decision): backups are **manual**, raw
+  `.db` copies (`VACUUM INTO`, named by journal_id/version/time) written to a `backups/` folder
+  **beside the journal**; the app does not move the live DB out of a sync-watched folder — it
+  switches it to `journal_mode=DELETE` and shows a warning recommending that layout (réconcilié
+  2026-10-01 : `app/src/state/journal_io.rs`, story 5.5).
 - **Quality-gate families (kept distinct):** *trust gates* (types/traceability/reproducibility/
   determinism) vs *posture gates* (neutral naming, banned-verb, swappable labels — not a string grep).
 - **Observability:** `tracing` to a local rotating log; no network, no telemetry.
@@ -511,8 +547,9 @@ against this skeleton as the principal go/no-go before committing UI work.
   discipline gates migrations.
 - The Foundational Invariant cuts across `core` (content-addressed verdict), `persistence` (frozen
   judgments + identity), `ingestion` (provenance/freshness), and `app` (no incoherent frame).
-- FX consolidation sits only at the `persistence`/portfolio aggregation layer, never in `core`'s
-  native-currency calc.
+- FX consolidation sits only at the portfolio aggregation layer — `app/src/state` calling the pure
+  `core::risk::fx::convert` over rows read by `persistence` — never in `core`'s native-currency study
+  calc (réconcilié 2026-10-01 : `app/src/state/{fx,concentration,review}.rs`, `persistence/Cargo.toml` sans `core` — p2 écart 17).
 
 ## Implementation Patterns & Consistency Rules
 
@@ -527,7 +564,7 @@ view-model boundary, the time/ID source, and the i18n-vs-label-set split.
 
 **Workspace & crates:** package names `steadyinvest-core`, `steadyinvest-contract`,
 `steadyinvest-ingestion`, `steadyinvest-persistence`, `steadyinvest-report`, `steadyinvest-app`,
-[P4] `steadyinvest-mcp`; directory names short
+`steadyinvest-paths`, [P4] `steadyinvest-mcp` (réconcilié 2026-10-01 : `Cargo.toml`); directory names short
 (`core/`, `contract/`, …); internal refs via `[workspace.dependencies]` (single source of versions).
 
 **Rust code (rustfmt + clippy enforced):** types/traits `PascalCase`; fns/vars/modules/files
@@ -654,131 +691,90 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
 
 ### Complete Project Directory Structure
 
+*As built on `main` (réconcilié 2026-10-01 : arborescence régénérée depuis le dépôt — p2 écarts 13, 15, 16 ; the June 2026 plan
+it replaces is in git history). Test-only and spike files are abridged.*
+
 ```text
 steadyinvest/
-├── Cargo.toml                     # [workspace] members + [workspace.dependencies] (single version source)
+├── Cargo.toml                     # [workspace] 8 members + [workspace.dependencies] (single version source)
 ├── Cargo.lock                     # committed (application → reproducible builds)
-├── rustfmt.toml                   # formatting rules (CI: cargo fmt --check)
-├── clippy.toml                    # lint config (CI: cargo clippy -- -D warnings)
-├── justfile                       # tooling tasks (build, test, lint, spike, release)
-├── rust-toolchain.toml            # pins 1.96 (MSRV driven by Slint 1.16 transitive deps + libsqlite3-sys 0.38)
+├── rustfmt.toml · clippy.toml     # formatting / lint config (CI: fmt --check, clippy -D warnings)
+├── justfile                       # tooling tasks (run, ci, mcp-build, …)
+├── rust-toolchain.toml            # pins 1.96 (MSRV driven by Slint transitive deps + libsqlite3-sys 0.38)
 ├── deny.toml                      # cargo-deny: GPL-3.0 dependency-license audit
-├── README.md
-├── LICENSE                        # GPL-3.0
-├── .gitignore                     # ignores: target/, *.db, .env, keys, local config
-├── .github/
-│   └── workflows/
-│       └── ci.yml                 # fmt, clippy, test, trust gates, determinism hash (Linux-only for now; 3-OS matrix later)
-├── docs/                          # (existing) NAIC reference PDFs + project docs
+├── README.md · LICENSE (GPL-3.0) · .gitignore
+├── .github/workflows/ci.yml       # fmt, clippy, test, trust gates, cargo deny — Linux only (ubuntu-latest)
+├── docs/                          # NAIC reference PDFs, method spec (docs/method/), guide-ia.md, process docs
 │
-├── core/                          # steadyinvest-core — PURE calc engine (NO I/O, UI, SQL, net)
-│   ├── Cargo.toml                 # deps: rust_decimal (+maths), serde (types only)
-│   ├── benches/                   # criterion: pure recompute cost (feeds nightly latency tracking)
+├── core/                          # steadyinvest-core — PURE calc engine (NO I/O, UI, SQL, net); deps: rust_decimal (+maths), serde, sha2
 │   ├── src/
-│   │   ├── lib.rs
-│   │   ├── ssg/                   # the 5-section SSG method (FR4)
-│   │   │   ├── mod.rs
-│   │   │   ├── growth.rs          # §1 CAGR, projections (powd/exp via rust_decimal maths)
-│   │   │   ├── management.rs      # §2 margin, ROE, debt
-│   │   │   ├── valuation.rs       # §3 P/E history A–H
-│   │   │   ├── risk_reward.rs     # §4 forecast high/low, zoning, U/D ratio
-│   │   │   └── return_proj.rs     # §5 yield, total return
-│   │   ├── normalize/             # IFRS↔GAAP, split/series, fiscal-period, currency-of-report (built here in Story 1.7 — epics superseded the earlier ingestion/ placement; pure, reused by manual entry AND providers)
-│   │   ├── golden/                # golden-fixture schema + pure check/check_all (Story 1.9; file I/O stays caller-side)
-│   │   ├── verdict.rs             # FullVerdict (constructible only from validated+fresh inputs)
-│   │   ├── quality_flags.rs       # FR7 thresholds; plausibility checks (FR10)
-│   │   ├── risk/                  # capital-at-risk, trailing stop, concentration (FR42-45,47)
+│   │   ├── lib.rs                 # + determinism hash test
+│   │   ├── ssg/                   # §1–§5 (growth, management, valuation, risk_reward, return_proj, types); shown_quality_flags
+│   │   ├── normalize/             # IFRS↔GAAP, splits, fiscal-period, currency checks (pure; reused by manual entry AND providers)
+│   │   ├── golden/                # golden-fixture schema + pure check/compare
+│   │   ├── verdict/               # FullVerdict (gates.rs, digest.rs) — constructible only from validated+fresh inputs
+│   │   ├── method/                # load-bearing catalog + numeric thresholds
+│   │   ├── quality_flags.rs       # FR7 / FR10 key catalog
+│   │   ├── checklist.rs
+│   │   ├── risk/                  # capital-at-risk, stops, concentration, ledger, fx::convert (FR28, FR36-48)
 │   │   ├── rounding.rs            # named rounding mode + per-field display scale
-│   │   └── method_version.rs      # method/formula version constant
-│   └── tests/
-│       ├── golden/                # frontier golden fixtures (synthetic, documented provenance)
-│       ├── fixtures/
-│       └── properties.rs          # proptest: monotonicity, continuity, idempotence, scale-homogeneity, metamorphic
+│   │   └── method_version.rs      # METHOD_VERSION (ssg-1.2.0)
+│   └── tests/                     # golden/ (g01–g11), golden_*, ssg_*, normalize_*, verdict_*, spike_c (no benches/)
 │
-├── contract/                      # steadyinvest-contract — versioned serde data contract (no Slint, no SQL)
-│   ├── Cargo.toml                 # deps: serde, rust_decimal, uuid
-│   └── src/
-│       ├── lib.rs
-│       ├── study.rs               # Study, Judgment snapshot (FR2,49-51)
-│       ├── cell.rs                # value + source × freshness × review tri-state (FR17-20)
-│       ├── provenance.rs          # (source, logical_version, timestamp, hash_of_dependencies)
-│       ├── portfolio.rs           # portfolio (=banking relationship), holding, transaction (FR36-41)
-│       ├── fx.rs                  # dated, source-aware FX rate (FR28)
-│       ├── versioning.rs          # schema_version (int) + method_version (string)
-│       └── export.rs              # portable export envelope (JSON + schema_version + integrity hash, FR59-61)
+├── contract/                      # steadyinvest-contract — versioned serde data contract; deps: serde, serde_json, rust_decimal, uuid, sha2
+│   └── src/                       # study.rs, cell.rs (incl. the reconciliation primitive — no ingestion/reconcile.rs),
+│                                  # provenance.rs, money.rs, text.rs, versioning.rs, export.rs,
+│                                  # [P4] ai.rs, draft.rs, draftable.rs, frozen.rs (FrozenVerdict)
+│                                  # (portfolio / holding / transaction / FX row types live in persistence, not here)
 │
-├── ingestion/                     # steadyinvest-ingestion — providers + normalization (FR15-16,21-27)
-│   ├── Cargo.toml                 # deps: reqwest (rustls-no-provider+ring,json), tokio (current_thread), serde, thiserror, contract
+├── ingestion/                     # steadyinvest-ingestion — providers (FR15-16,21-27); deps: contract, core (normalize), reqwest, rustls, tokio, serde_json, sha2, thiserror, chrono
+│   ├── src/                       # lib.rs, provider.rs, fetch.rs, ticker.rs (venue table, convention_suggestion), error.rs,
+│   │                              # adapters/{eodhd,twelvedata,common}.rs
+│   └── tests/                     # eodhd_mapping.rs + fixtures/
+│
+├── persistence/                   # steadyinvest-persistence — rusqlite storage = ROWS only (no core dependency); deps: contract, rusqlite, serde_json, sha2, thiserror, uuid
 │   ├── src/
-│   │   ├── lib.rs
-│   │   ├── provider.rs            # MarketDataProvider trait; keys injected (not read here)
-│   │   ├── adapters/
-│   │   │   └── eodhd.rs           # first adapter (CH/EU+US)
-│   │   ├──                        # (normalize/ moved to core/src/normalize/ — Story 1.7 documented variance; ingestion calls core::normalize)
-│   │   ├── reconcile.rs           # non-destructive: manual wins, provider preserved, divergence→?
-│   │   └── error.rs               # IngestionError (network/quota/key) — thiserror
-│   └── tests/fixtures/            # recollage goldens (split, fiscal change, currency rebasing)
+│   │   ├── journal.rs             # open/create; journal_id + logical version; DELETE mode; single-instance lock sidecar; backup_to
+│   │   ├── schema.rs · migrations.rs   # tables; PRAGMA user_version steps v1…v9
+│   │   ├── studies.rs · holdings.rs · transactions.rs · watchlist.rs · fx.rs · price_history.rs
+│   │   ├── export.rs              # JSON export/import envelope (FR59-60)
+│   │   ├── restore.rs             # backup inspection + restore (marker, staging; FR61, A11)
+│   │   ├── drafts.rs              # [P4] ai_drafts (v8, v9) + decide_draft
+│   │   ├── mcp_access.rs          # [P4] McpAccess: per-call connections, SQLite authorizers, POSIX identity check (unsafe FFI)
+│   │   └── error.rs · util.rs
+│   └── tests/                     # corpus/ (v1.db, v8.db), e2e_lifecycle, export, mcp_access, inbox_polling, drafts, …
 │
-├── persistence/                   # steadyinvest-persistence — rusqlite storage (hybrid model)
-│   ├── Cargo.toml                 # deps: rusqlite (bundled), contract, serde_json, thiserror
-│   ├── src/
-│   │   ├── lib.rs
-│   │   ├── journal.rs             # open/create; journal_id (UUID) + monotonic logical version
-│   │   ├── schema.rs              # normalized tables (portfolios, holdings, transactions, fx_rates, watchlist_items)
-│   │   ├── studies.rs             # studies/judgments as TEXT JSON blob + indexed columns
-│   │   ├── migrations/            # PRAGMA user_version steps; lazy upgrade on save
-│   │   ├── consolidation.rs       # pull rows → compute in Rust w/ core (per-currency→bank→global)
-│   │   ├── export_import.rs       # JSON export/import + integrity/version checks; restore (FR59-61)
-│   │   ├── backup.rs              # versioned backup to configurable target (carries id,version,hash)
-│   │   ├── sync_guard.rs          # sync-path detection; WAL↔DELETE journal_mode; single-instance lock
-│   │   ├── drafts.rs              # [P4] ai_drafts (v8) + decide_draft (study upsert + draft status, one tx)
-│   │   ├── mcp_access.rs          # [P4] McpAccess: per-call read-only + draft connections, SQLite authorizers
-│   │   └── error.rs
-│   └── tests/corpus/              # frozen versioned-journal corpus v{N}.db (append-only)
+├── report/                        # steadyinvest-report — study → core mapping + PDF (FR52-53); deps: core, contract, rust_decimal, pdf-writer
+│   └── src/                       # form.rs (build_snapshot, freeze), frozen.rs (figé vs actuel), pdf.rs, comparison.rs, review.rs, quick_screen.rs
 │
-├── report/                        # steadyinvest-report — PDF/print (UI-independent, does I/O) (FR52-53)
-│   ├── Cargo.toml                 # deps: genpdf/printpdf, core, contract
-│   └── src/lib.rs                 # faithful SSG layout, neutral labels, grayscale-safe
+├── paths/                         # steadyinvest-paths — per-machine locations + dossier resolution (A10); deps: directories, serde, serde_json
+│   └── src/lib.rs                 # never writes
 │
-├── mcp/                           # [P4] steadyinvest-mcp — stdio MCP server binary (G2, §Phase 4)
-│   ├── Cargo.toml                 # deps: contract, persistence (McpAccess only), core, report (form::build_snapshot), MCP SDK; NEVER ingestion/reqwest/keyring/slint/app
-│   ├── src/main.rs                # stdio JSON-RPC loop; dossier resolution (--dossier | config journal_path)
-│   └── tests/                     # whole-surface non-exposure, rejected writes, dependency-closure (cargo metadata)
+├── mcp/                           # [P4] steadyinvest-mcp — stdio MCP server binary (§Phase 4)
+│   ├── Cargo.toml                 # deps: contract, persistence (McpAccess only), core, report, paths, rmcp (server, transport-io), tokio, uuid, chrono, rust_decimal, serde, tracing; NEVER ingestion/reqwest/keyring/slint/app
+│   ├── clippy.toml                # disallowed types (no Journal)
+│   ├── src/                       # main.rs (args, --dossier), server.rs (hand-written rmcp ServerHandler), tools.rs, dto.rs, messages.rs, seed_guard.rs, logging.rs
+│   └── tests/                     # closure.rs (dependency closure), non_exposure.rs, stdio_e2e.rs, home_isolation.rs
 │
 └── app/                           # steadyinvest-app — thin Slint UI (binary)
-    ├── Cargo.toml                 # deps: slint, tokio, directories, keyring, tracing, core, contract, ingestion, persistence, report
     ├── build.rs                   # slint-build
-    ├── assets/                    # bundled static resources
-    │   ├── fonts/                 # Inter (OFL) + tabular-figures numeric font (UX spec)
-    │   ├── icons/                 # neutral app logo/icon (CR #1)
-    │   └── demo_study.json        # read-only demonstration study / golden seed (FR62), synthetic
+    ├── assets/                    # fonts/ (Inter, IBM Plex Sans, OFL); golden/ (g01–g05 — the demo study is g01-worked-example, FR62)
+    ├── examples/                  # spike_a_grid.rs, spike_b_chart.rs
     ├── src/
-    │   ├── main.rs                # entry; single-instance; loads last-used journal
-    │   ├── state.rs               # immutable StudyState snapshot; undo stack; content-addressed verdict
-    │   ├── viewmodel/             # ADAPTER: domain types → Slint structs; money → formatted strings
-    │   ├── config.rs              # app-config via directories (last path, recents, UI prefs)
-    │   ├── keychain.rs            # keyring access; injects keys into ingestion
-    │   ├── clock.rs               # Clock + IdGen providers (injected; fixed in tests)
-    │   ├── fetch.rs               # tokio worker; invoke_from_event_loop marshalling
-    │   ├── theme.rs               # token single-source (arc_swap); pushes to UI on theme/regime change
-    │   ├── i18n.rs                # @tr() wiring (French-first) — distinct from label set
-    │   └── labels.rs              # NAIC↔neutral label set (runtime-swappable data)
-    └── ui/                        # .slint files (snake_case files, PascalCase components, kebab props)
-        ├── app.slint              # nav rail + top bar + sticky verdict bar
-        ├── study_screen.slint     # faithful collapsible SSG form (§1–§5)
-        ├── components/
-        │   ├── data_grid.slint        # dense editable grid, paste-a-column, cell cursor (FR16,56)
-        │   ├── growth_chart.slint     # §1 semi-log, draggable trend lines (Path/TouchArea, FR30-33)
-        │   ├── zone_bar.slint         # §4 vertical Buy/Hold/Sell + price axis (live recolor)
-        │   ├── verdict_badge.slint    # full/provisional/degraded/withheld (FR12)
-        │   ├── trust_markers.slint     # ✓/?/missing/stale (confusability-gated)
-        │   ├── error_banner.slint      # neutral global banner (network/quota/key)
-        │   └── legend_help.slint        # legend, glossary popover, demo study (FR57,62)
-        └── screens/
-            ├── dashboard.slint     # list/search/sort/filter studies (FR54-55)
-            ├── watchlist.slint     # FR34-35
-            ├── portfolio.slint     # holdings, capital-at-risk, stop, sell/raise-stop (FR36,40,42,46)
-            └── settings.slint      # no-wizard: provider/key, currency, thresholds, labels, locale (FR63)
+    │   ├── main.rs · clock.rs · logging.rs · config.rs · keychain.rs · provider.rs · fetch.rs
+    │   ├── labels.rs              # NAIC↔neutral label set (runtime-swappable data)
+    │   ├── theme.rs               # token pushes to UI (plain owner — no arc_swap)
+    │   ├── regime.rs · posture.rs (neutrality gates) · seam_check.rs
+    │   ├── state/                 # JournalState rails: studies, cells, refresh, undo (park/restore), frozen, confront,
+    │   │                          # drafts, notes, holdings, ledger, fx + concentration + review (consolidation, with core::risk),
+    │   │                          # watchlist, replacement, export_import, restore, journal_io (sync-folder detection, backups/), messages
+    │   ├── viewmodel/             # ADAPTER: domain → Slint structs (engine, chart, ai_lines, frozen, history, drafts, verify (demo), …)
+    │   └── wiring/                # Slint callback wiring per surface (cells, fetch, drafts, overlays, holdings, …)
+    └── ui/                        # app.slint, state.slint, tokens.slint (no separate i18n.rs: @tr() in .slint)
+        ├── components/            # growth_chart, pe_history_chart, zone_bar, verdict_badge, trust_markers, editable_cell,
+        │                          # modal_dialog, frozen_verdict_strip, confront_overlay, ai_frame, ai_judgment, choice_chip, …
+        └── screens/               # dashboard, study_screen, watchlist, portfolio, review, propositions,
+                                   # comparison, quick_screen, settings
 ```
 
 *Test fixtures:* each crate owns its fixtures for now (`core/tests/`, `ingestion/tests/`,
@@ -792,7 +788,8 @@ drift appears.
 - **Contract boundary:** `contract` is the only shared vocabulary across `ingestion`, `persistence`,
   `report`, `app` and [P4] `mcp`. Its `schema_version`/`method_version` gate migrations.
 - **Persistence boundary:** only `persistence` touches SQLite. Decimal arithmetic for consolidation is
-  done in Rust (pull rows → compute with `core`), never via SQL on TEXT money columns. [P4] `mcp`
+  done in Rust — `persistence` returns rows (it does not depend on `core`), `app/src/state` computes
+  with `core::risk` — never via SQL on TEXT money columns (réconcilié 2026-10-01 : `app/src/state/{fx,concentration,review}.rs`, `persistence/Cargo.toml` sans `core` — p2 écart 17). [P4] `mcp`
   reaches SQLite only through `persistence::McpAccess`, never `Journal` (clippy `disallowed-types`
   in the `mcp` crate).
 - **UI boundary:** `app` is the only crate depending on Slint; domain types cross into `.slint` solely
@@ -810,18 +807,18 @@ drift appears.
 
 | FR cluster | Primary location |
 |---|---|
-| FR1-8 Stock Study & engine | `core/ssg/`, `core/verdict.rs`, `contract/study.rs`, `app/ui/study_screen.slint` |
+| FR1-8 Stock Study & engine | `core/ssg/`, `core/verdict/`, `contract/study.rs`, `app/ui/study_screen.slint` |
 | FR9-14 Calc integrity & trust | `core` (+ `tests/golden`,`properties.rs`), `app` verdict rendering |
 | FR15-29 Acquisition/provenance/providers | `ingestion/`, `contract/{cell,provenance,fx}.rs`, `persistence` cache |
-| FR30-33 Charts & judgment | `app/ui/components/{growth_chart,zone_bar}.slint`, `app/state.rs` |
+| FR30-33 Charts & judgment | `app/ui/components/{growth_chart,pe_history_chart,zone_bar}.slint`, `app/src/state/`, `app/src/viewmodel/chart.rs` |
 | FR34-35 Watchlist & alerts | `persistence` (watchlist), `app/ui/screens/watchlist.slint` |
-| FR36-41 Portfolio/transactions | `contract/portfolio.rs`, `persistence/{schema,consolidation}.rs`, `core/risk/` |
+| FR36-41 Portfolio/transactions | `persistence/{schema,holdings,transactions,fx}.rs`, `app/src/state/{holdings,ledger,fx,concentration,review}.rs`, `core/risk/` |
 | FR42-48 Risk management | `core/risk/`, `app/ui/screens/portfolio.slint` |
 | FR49-51 Cumulative memory/journal | `contract/{study,provenance}.rs`, `persistence/journal.rs` |
 | FR52-53 Reporting/PDF | `report/` |
-| FR54-62 App shell & data mgmt | `app/ui/screens/dashboard.slint`, `persistence/export_import.rs`, `app/config.rs` |
-| FR63-66 Config/posture | `app/{config,keychain,labels,i18n}.rs`, `app/ui/screens/settings.slint` |
-| Added: DB location + recent journals | `app/config.rs`, `persistence/{journal,sync_guard}.rs` |
+| FR54-62 App shell & data mgmt | `app/ui/screens/dashboard.slint`, `persistence/{export,restore}.rs`, `app/src/state/{export_import,restore,journal_io}.rs`, `app/config.rs` |
+| FR63-66 Config/posture | `app/src/{config,keychain,labels,posture}.rs`, `app/ui/screens/settings.slint` |
+| Added: DB location + recent journals | `app/config.rs`, `paths/`, `persistence/journal.rs`, `app/src/state/journal_io.rs` (sync-folder detection) |
 | FR69-77 AI assistance [P4] (+FR14, FR33) | `mcp/`, `persistence/{mcp_access,drafts}.rs`, `contract` (Draft/AiOrigin/DraftTarget, `Provenance.ai_origin`, `Judgment.ai_placed`), `app` draft inbox + AI frame + AI-annotated chart line |
 | FR78 Study notes [P4] | `contract/study.rs` (`Study.notes`), `app` study screen |
 
@@ -834,9 +831,11 @@ drift appears.
   store via `keyring`; OS config dirs via `directories`; external backup target (NAS) via file export;
   [P4] the owner's AI client via the local stdio MCP server (`mcp` → `persistence::McpAccess`) — the
   only external interface, reads of studies + draft inserts only.
-- **Data flow:** provider → `ingestion` normalize/reconcile → `contract` types (provenance stamped) →
+- **Data flow:** provider → `ingestion` (normalize via `core`) → `contract` types (provenance stamped;
+  reconciliation by the `contract` cell primitive, applied in `app/src/state/refresh.rs`) →
   `persistence` (journal) → `core` recompute (native currency) → `app` viewmodel → Slint render;
-  consolidation/FX applied only at the `persistence`/portfolio layer.
+  consolidation/FX applied only at the portfolio layer (`app/src/state` + `core::risk`)
+  (réconcilié 2026-10-01 : p2 écarts 13 et 17).
 
 ### Development Workflow Integration
 
@@ -892,7 +891,8 @@ and architecture decisions A1–A13 below are final._
 - **Decision:** the MCP server is a separate binary crate **`steadyinvest-mcp`** (`mcp/`), speaking
   MCP over **stdio**, launched by the AI client as a child process. Allowed dependencies:
   `contract`, `persistence` (through `McpAccess` only, A3), `core` and `report` (for computed
-  outputs, O1), the MCP SDK, serde/tracing. Its **dependency closure excludes** `ingestion`,
+  outputs, O1), `paths` (dossier resolution, A10), the MCP SDK (`rmcp`), `tokio` (stdio runtime),
+  `uuid`, `chrono`, `rust_decimal`, serde/tracing (réconcilié 2026-10-01 : `mcp/Cargo.toml`). Its **dependency closure excludes** `ingestion`,
   `reqwest` (and any HTTP client), `keyring`, `slint` and `app` — a CI test walks `cargo metadata`
   and fails on any of them.
 - **Rationale:** NFR-A3 ("no provider call reachable from MCP") and NFR-S1 (keys never in MCP
@@ -906,7 +906,10 @@ and architecture decisions A1–A13 below are final._
   screen. Checked 2026-09-27: `core` depends only on `rust_decimal`, `serde`, `sha2`; `report` adds
   `contract`, `rust_decimal`, `pdf-writer` — no network, no keychain, no GUI. Presentation formatting
   (`app::viewmodel::engine`) is **not** reused: MCP returns raw decimals as strings plus the verdict
-  state, and must never re-derive a value (Cardinal Rule).
+  state, and must never re-derive a value (Cardinal Rule). The quality flags it returns follow the
+  same presentation rule as the screens — `core::ssg::shown_quality_flags` (the highest high-P/E
+  threshold only), shared by `app` and `mcp` — and `computed.quality_flags_assessable` tells an empty
+  list meaning « none » from « not assessable » (réconcilié 2026-10-01 : PR #285).
 
 ### A2 — Per-call connection, no lock, version gate
 
@@ -946,7 +949,10 @@ and architecture decisions A1–A13 below are final._
     trigger, so no direct `UPDATE` can set the counter to an arbitrary value (the stale-restore
     signals depend on it). Every other write (UPDATE/DELETE on any table, DDL, `ATTACH` — which
     also covers `VACUUM INTO` — and `PRAGMA` after setup) is **denied at statement preparation and
-    logged**.
+    logged**. A second trigger, `trg_ai_drafts_refuse_existing_id` (migration **v9**, `BEFORE INSERT`),
+    aborts any insert whose id already exists, so an `INSERT OR REPLACE` — whose conflict clause the
+    authorizer cannot see — can never overwrite a decided draft (réconcilié 2026-10-01 :
+    `persistence/src/schema.rs` `migrate_to_v9`, story 8.3 G3).
   Deny, never `SQLITE_IGNORE` (which would silently read NULLs — no silent `.ok()`). The authorizer
   needs rusqlite's `hooks` feature.
 - **Crate boundary:** in the `mcp` crate, clippy `disallowed-types` forbids `Journal` and
@@ -965,7 +971,16 @@ and architecture decisions A1–A13 below are final._
     field's unit (percent fields as percent, e.g. `12` for 12 %) or, for an enum field such as
     `forecast_low_option`, as one of its variant names — the tool schema lists fields and units;
   - a second pending draft on the same target (D4), or a draft study for a security already studied
-    or pending in the same currency (D2, D8).
+    (archived studies included) or pending in the same currency (D2, D8);
+  - a note, cell or judgment draft on an **archived** study (`study_archived`);
+  - an over-long text or out-of-range value: comment and note ≤ 10 000 characters, company name ≤
+    200, origin client/model ≤ 100, `proposed_value` ≤ 100 characters, a number with |value| < 10¹⁵
+    and at most 10 decimals (`text_too_long`, `value_out_of_range`, `empty_note_text`);
+  - a `draft_id` already used with **another** content (`draft_id_conflict`): the submission may
+    carry an optional `draft_id`, and re-submitting the same draft with the same id is
+    **idempotent** (no second row, no refusal).
+  (réconcilié 2026-10-01 : `persistence/src/mcp_access.rs` `SubmissionRefusal`, `MAX_*_CHARS` —
+  story 8.3 décisions 1, 7, 10, 11 ; story 8.4 écart 2)
 - **Rationale:** NFR-A1/A2 demand "by construction, not by prompt". Filtering at the query-writing
   layer would be one missed `WHERE` away from a leak; the authorizer is enforced by the engine on
   every statement, including ones written later by someone who never read this section, and the
@@ -977,10 +992,13 @@ and architecture decisions A1–A13 below are final._
   origin (backed by DB `CHECK` + `NOT NULL`); metamorphic — every engine output is identical with and
   without pending drafts, and the engine never reads `ai_drafts`.
 
-### A4 — Drafts: `ai_drafts` table (migration v8)
+### A4 — Drafts: `ai_drafts` table (migration v8, guarded by v9)
 
-- **Decision:** a new table `ai_drafts` in the **same SQLite file**, migration **v8** (current
-  latest: v7), hybrid pattern. Columns:
+- **Decision:** a new table `ai_drafts` in the **same SQLite file**, migration **v8** (latest before
+  it: v7), hybrid pattern. **Migration v9** (Story 8.3 G3) adds only the trigger
+  `trg_ai_drafts_refuse_existing_id` (A3); the latest schema is therefore **v9** and the A2 version
+  gate compares against v9 (réconcilié 2026-10-01 : `persistence/src/migrations.rs` `REGISTRY`).
+  Columns:
   - `id`, `kind` (`study|note|cell|judgment`), `study_id` (NULL for a draft study),
     `security_ticker`, `native_currency` (draft study), `status`
     (`pending|validated|validated_undone|rejected`), `created_at`, `decided_at`;
@@ -996,7 +1014,9 @@ and architecture decisions A1–A13 below are final._
   adding a variant later costs a `SCHEMA_VERSION` bump.
 - **Backup/export:** included in the `VACUUM INTO` backup automatically. The JSON export gains an
   `ai_drafts` array (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`); an older build
-  refuses it through the envelope's `deny_unknown_fields` (#78). Frozen corpus gains `v8.db`.
+  refuses it through the envelope's `deny_unknown_fields` (#78). Frozen corpus gains `v8.db` (no
+  `v9.db` was added — the corpus holds `v1.db` and `v8.db`; réconcilié 2026-10-01 :
+  `persistence/tests/corpus/`).
 - **Rationale:** the same file keeps drafts inside the dossier's identity, backup and export (FR77:
   durable record); a separate table keeps pending proposals physically outside the `Study` blob the
   engine reads, which is what makes "a pending draft changes nothing" true by construction.
@@ -1061,9 +1081,11 @@ and architecture decisions A1–A13 below are final._
 ### A8 — Applying a decision through the app state, atomically
 
 - **Decision (D3):** validation goes through the app's study state, never behind it. The draft is
-  applied to the in-memory study and pushed on its **undo stack** — the app keeps one undo history,
-  for the open study, reset when a study is opened, so validating a draft of another study first
-  **opens that study** (the inbox says so), and the validation stays undoable while it remains open;
+  applied to the in-memory study and pushed on its **undo stack** — the app keeps one **active** undo
+  history, for the open study (a closed study's history is parked, see below, not reset), so
+  validating a draft of another study first **opens that study** (the inbox says so), and the
+  validation stays undoable while it remains open — or after it is closed and reopened unchanged
+  (réconcilié 2026-10-01 : `app/src/state/undo.rs`, story 8.5b écart 3 / G3 1);
   then
   `persistence::decide_draft(study, draft_id, decision)` performs the study upsert (with its history
   snapshot) **and** the draft's status / `decided_at` / `stale_at_decision` /
@@ -1071,7 +1093,9 @@ and architecture decisions A1–A13 below are final._
   study is then refreshed from the dossier **without** resetting its undo history. Closing a study (Story
   8.5b) **parks** its history, ownerless, with the study as it stood; reopening it hands the history
   back only while the stored study still equals that snapshot — any write meanwhile (a late fetch,
-  an import, another writer) drops it, so no undo writes back a state that skips a change. Undoing a
+  an import, another writer) drops it, so no undo writes back a state that skips a change. Visiting
+  the read-only demonstration study keeps the parked history (undo/redo are disabled on the demo)
+  (réconcilié 2026-10-01 : PR #279). Undoing a
   validation restores the prior study and sets the draft to `validated_undone` in one transaction;
   redoing it re-applies the value and sets the draft back to `validated`, in one transaction too. Rejection updates only the draft. A draft
   study's validation opens the create-study dialog prefilled (D2); its confirmation creates the study
@@ -1083,9 +1107,12 @@ and architecture decisions A1–A13 below are final._
 
 ### A9 — The open app discovers new drafts by polling `PRAGMA data_version`
 
-- **Decision:** the app polls `PRAGMA data_version` on its own connection every ~2–3 s (a Slint
-  `Timer`), plus on window focus and on opening the inbox; a change triggers a re-read of pending
-  drafts. No file watcher. A failed poll or inbox read shows the inbox as « indisponible » with its
+- **Decision:** the app polls `PRAGMA data_version` on its own connection every 2.5 s (a Slint
+  `Timer`); a change triggers a re-read of pending drafts. The inbox is also re-read on opening it and
+  after each of the app's own draft-affecting writes (decision, undo/redo, study delete, import,
+  restore, dossier switch), which never move `data_version`. There is **no window-focus trigger**:
+  Slint 1.17 has no public window-activation callback; the timer bounds the latency (réconcilié
+  2026-10-01 : `app/src/wiring/drafts.rs` `POLL_PERIOD_MS`, story 8.5a décision 1). No file watcher. A failed poll or inbox read shows the inbox as « indisponible » with its
   cause — never as an empty inbox.
 - **Concurrency case to test:** in DELETE mode, an MCP read holding a shared lock makes the app's
   commit wait (app `busy_timeout` 5000 ms, `persistence/src/journal.rs`); MCP reads are short and
@@ -1103,27 +1130,40 @@ and architecture decisions A1–A13 below are final._
   app runs on the default one (G3 M4 keeps `journal_path` on the refused dossier): MCP must follow
   the dossier the owner sees. Until the app has written `last_opened_path` (an install not yet
   opened with the new build), MCP falls back to `journal_path`, then to the app's default dossier
-  path (`default_journal_path`, `app/src/state/mod.rs`), like the app.
+  path (`default_journal_path`), like the app.
   Resolution happens **per call**, so a dossier switch in the app is followed without restarting the
   server; every response names the dossier (`journal_id` + resolved path), and every submission
   carries both and is refused on mismatch (D10) — the path tells a copy from its original, which the
   `journal_id` alone does not (`VACUUM INTO` backups and test copies keep it). The config-path helper
-  (`app/src/config.rs`) and `default_journal_path` (`app/src/state/mod.rs`) move into a small shared
-  module (depending only on `directories` +
-  serde) so `mcp` does not depend on `app`; it reads the config tolerantly (append-only
-  `#[serde(default)]`).
+  and `default_journal_path` live in the workspace crate **`paths`** (`paths/src/lib.rs`: depends
+  only on `directories` + serde/serde_json, never writes; `resolve_dossier`), used by both `app` and
+  `mcp` so `mcp` does not depend on `app`; it reads the config tolerantly (append-only
+  `#[serde(default)]`) (réconcilié 2026-10-01 : `paths/src/lib.rs`, story 8.4 décision 2).
 - **Rationale:** the owner's AI client must follow the dossier the owner actually uses, and a reply
   must never leave doubt about which universe it describes (real vs test dossier).
 
 ### A11 — Restore while MCP runs
 
 - **Decision:** `restore_journal_file` assumes every connection to the live file is closed — which
-  only the single-instance lock guaranteed, and MCP does not take it. Restore therefore first takes an
-  **exclusive SQLite lock** on the live file (`BEGIN EXCLUSIVE` with a busy wait) and holds it until
-  the rename; and every MCP write re-checks, inside its write transaction, that the file at the
-  resolved path is still the one it opened — a cross-platform file identity (the `same-file` crate's
-  `Handle`: device + inode on Unix, volume serial + file index on Windows, NFR-X1), since the
-  `journal_id` alone does not tell a restored backup from the live file — aborting otherwise.
+  only the single-instance lock guaranteed, and MCP does not take it. As built (réconcilié
+  2026-10-01 : `persistence/src/restore.rs`, `persistence/src/mcp_access.rs` — story 8.3 G3 CRITICAL
+  « POSIX lock loss », décisions 3, 6, 8, 13, 14), the restore runs in order:
+  1. it writes a **marker** `…-restoring` (owner pid + start time) beside the live file first; while
+     it stands, every new MCP call is refused up front (`dossier_busy`); a marker or staging copy left
+     by a process that is gone reads as an interrupted restore (`restore_interrupted`);
+  2. the live file leaves WAL and is **locked exclusively** (`BEGIN EXCLUSIVE` with a busy wait);
+     its `-wal`/`-shm` are removed under that lock — nothing is deleted after the rename;
+  3. the backup is copied to a **staging** sibling (`…-restore-incoming`) and renamed over the live
+     path; on Unix the lock is held until the rename; on **Windows** (which cannot replace a file
+     the process holds open) the lock is released just before the rename;
+  4. the lock is released and the marker removed last.
+  Every MCP write re-checks, inside its write transaction, that the file at the resolved path is
+  still the one it opened, aborting otherwise (the `journal_id` alone does not tell a restored backup
+  from the live file). The identity check differs by OS: on **POSIX**, a `stat(2)` (device + inode)
+  taken before the connection opens plus SQLite's `SQLITE_FCNTL_HAS_MOVED` on the connection's own
+  file, called through **`unsafe` FFI** (`sqlite3_file_control`) — the only `unsafe` code in the
+  workspace — because opening any second descriptor of the file would, on close, release every POSIX
+  lock the process holds on it; on **Windows**, a `same_file::Handle` opened before the connection.
 - **Rationale:** otherwise a draft committed during a restore lands in the unlinked old file (lost
   silently), and its connection's close can delete the restored file's `-wal` by path.
 
@@ -1145,9 +1185,11 @@ and architecture decisions A1–A13 below are final._
 - **AI text containment:** AI-origin text reaches the UI **only** through a dedicated AI-frame
   component (label + disclaimer, FR13); a structural test scans the `.slint` sources and fails if an
   AI-origin property is bound outside that component.
-- **SDK choice:** `rmcp` vs a hand-rolled JSON-RPC loop is decided in Story 8.4; the choice must pass
-  `cargo deny` (licence + advisories) and must not pull `reqwest`/network features into the closure
-  (A1 test).
+- **SDK choice:** decided in Story 8.4 (décision 1): **`rmcp` 3.4** with `default-features = false`
+  and only the `server` + `transport-io` features, and a hand-written `ServerHandler`
+  (`mcp/src/server.rs`); it passes `cargo deny` (licence + advisories) and pulls no
+  `reqwest`/network feature into the closure (A1 test) (réconcilié 2026-10-01 : `Cargo.toml`,
+  `mcp/src/server.rs`).
 
 ### A13 — Frozen decision-time verdict (FR68, owner decision D11)
 
@@ -1161,9 +1203,20 @@ and architecture decisions A1–A13 below are final._
   an ordinary study upsert, undoable in the session (FR32).
 - **Difference:** the current verdict is always computed live (never persisted); when it differs
   from the frozen one — facts, `inputs_hash` or `method_version` — the study shows both, labelled
-  « figé (vNN, JJ/MM) » and « actuel (vMM, aujourd'hui) », naming the changed items and the cause
+  « figé ({méthode}, JJ/MM) » and « actuel ({méthode}, aujourd'hui) », where `{méthode}` is the
+  method version string (e.g. `ssg-1.2.0`) (réconcilié 2026-10-01 : `frozen_verdict_strip.slint`,
+  story 8.8 décision 9), naming the changed items and the cause
   where known (refresh, owner edit, method change — FR29, the #252 method stamp). Neutral wording
   only (FR13).
+- **Confrontation (FR50):** the « Confrontation » view reads the projection band from the frozen
+  verdict — the projection decided, dated the validation day — not from today's study. Three bases
+  (`ConfrontBasis` in `app/src/state/confront.rs`): *Decided* (the frozen band), *FrozenWithoutBand*
+  (a frozen verdict over a degenerate band: today's band, dated and named from the validation),
+  *Current* (no frozen verdict: today's band, said as such, dated the study's creation); the price
+  window starts at that date (réconcilié 2026-10-01 : PR #280). Validating again replaces the frozen
+  verdict, so the confrontation then starts from the latest decision; earlier decisions stay in the
+  history only. **Décision en attente (Guy) : une re-validation déplace la date de décision de la
+  confrontation — à confirmer.**
 - **Compatibility:** additive field only, as A5 (D9 withdrawn).
 - **MCP:** the study read returns the frozen verdict beside the current one; `frozen_verdict` is not a
   draftable field, and the 8.3 rejected-writes suite covers it (FR68 [P4]). A validated AI draft
@@ -1184,7 +1237,7 @@ dependency-closure test, registration doc (A1, A10, A12) · 8.5a AI frame, inbox
 ### Coherence Validation ✅
 
 **Decision Compatibility:** All technology choices are mutually compatible and version-verified
-(June 2026): Slint 1.16.1 (workspace MSRV 1.96, see Tech Stack note) · rusqlite 0.40 (bundled) · rust_decimal 1.42 (+maths) ·
+(June 2026): Slint 1.16.1 — 1.17.0 resolved as of 2026-10-01 (réconcilié 2026-10-01 : `Cargo.lock`) — (workspace MSRV 1.96, see Tech Stack note) · rusqlite 0.40 (bundled) · rust_decimal 1.42 (+maths) ·
 reqwest 0.13 (pure-Rust TLS, exact feature decided in Story 3.1) + tokio 1.52 · thiserror 2.0 · proptest 1.9 · keyring 3.x (NOT 4.0) · directories ·
 tracing. The **Slint GPLv3 licence is compatible with the project's GPL-3.0** (the PRD's "Slint
 licensing tier" risk is closed, pending the `cargo deny` dependency audit). No contradictory
@@ -1197,10 +1250,12 @@ realizes the Foundational Invariant; the Slint view-model adapter + "money as fo
 enforce the UI boundary; injected Clock/IdGen back determinism and testability; the two-axis i18n
 (`@tr()` vs runtime label set) matches the neutral-posture/label-swap requirement.
 
-**Structure Alignment:** The 6-crate workspace (7 with the [P4] `mcp` binary) enforces the
+**Structure Alignment:** The workspace — 8 crates as built: `core, contract, ingestion, persistence,
+report, app, paths, mcp` (réconcilié 2026-10-01 : `Cargo.toml`) — enforces the
 boundaries: `core` (no I/O) holds the Cardinal Rule; `contract` is the shared seam (and the MCP
 vocabulary); only `persistence` touches SQLite (`mcp` only via `McpAccess`); only `ingestion`
-touches the network (absent from `mcp`'s closure); only `app` touches Slint; `report` isolates PDF I/O.
+touches the network (absent from `mcp`'s closure); only `app` touches Slint; `report` isolates PDF I/O;
+`paths` holds the per-machine locations shared by `app` and `mcp`.
 Every boundary in the decisions maps to a crate.
 
 ### Requirements Coverage Validation
@@ -1219,8 +1274,8 @@ The two **added requirements** (user-selectable DB dir + reopen last-used journa
 on-demand recompute) are located and flagged **to be filed as FRs once the repo exists**.
 
 **Non-Functional Requirements Coverage ✅ (one item to validate):**
-- *Correctness* — exact decimal + deterministic core + golden/property/metamorphic + 3-OS
-  determinism hash in CI. ✅
+- *Correctness* — exact decimal + deterministic core + golden/property/metamorphic + pinned
+  determinism hash in CI (Linux-only CI for now — réconcilié 2026-10-01 : `ci.yml`). ✅
 - *Performance* — `<~1 s` recompute and `<~3 s` launch within reach; **`<100 ms` judgment-line
   recolor targeted but NOT yet proven** in native Slint (see Gap). ⚠️
 - *Security/Privacy* — keychain-only secrets, no telemetry, all-local, keys injected not stored in

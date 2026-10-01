@@ -89,7 +89,7 @@ troubleshooting and an MCP primer for newcomers: **[docs/guide-ia.md](docs/guide
 | In-app glossary (Réglages) | Every term the app uses, in French |
 | [`_bmad-output/planning-artifacts/`](_bmad-output/planning-artifacts/) | PRD, UX specifications, architecture, epics |
 | [`_bmad-output/implementation-artifacts/`](_bmad-output/implementation-artifacts/) | Story records, retrospectives, test checklists |
-| [docs/review-checklist.md](docs/review-checklist.md), [docs/definition-of-done.md](docs/definition-of-done.md) | Development rules |
+| [docs/review-checklist.md](docs/review-checklist.md) | Development rules ([docs/definition-of-done.md](docs/definition-of-done.md): legacy web-stack document, kept for history — reconciled 2026-10-01) |
 
 ## License
 
