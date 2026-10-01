@@ -311,7 +311,7 @@ export component DashboardScreen inherits Rectangle {
                 // dossier has studies (it was offered only on the empty list); read-only, never
                 // stored, never a row of the list.
                 if Studies.study-count > 0: ActionButton {
-                    label: @tr("Étude de démonstration");
+                    label: @tr("Charger l'étude de démonstration");
                     clicked => { Studies.load-demo(); }
                 }
             }
