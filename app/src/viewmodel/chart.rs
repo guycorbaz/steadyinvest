@@ -768,7 +768,7 @@ pub fn confront_chart(view: &ConfrontView, format: NumberFormat) -> ConfrontStat
             high_label: Default::default(),
             low_label: Default::default(),
             decision_date: view.decision_date.clone().into(),
-            recorded: view.recorded,
+            basis: view.basis.key().into(),
         };
     }
     let high = view.forecast_high.and_then(|d| d.to_f64()).unwrap_or(0.0);
@@ -833,7 +833,7 @@ pub fn confront_chart(view: &ConfrontView, format: NumberFormat) -> ConfrontStat
         high_label: view.forecast_high.map(label).unwrap_or_default().into(),
         low_label: view.forecast_low.map(label).unwrap_or_default().into(),
         decision_date: view.decision_date.clone().into(),
-        recorded: view.recorded,
+        basis: view.basis.key().into(),
     }
 }
 
@@ -1354,7 +1354,7 @@ mod tests {
                 .iter()
                 .map(|(d, c)| (d.to_string(), money(c).as_decimal()))
                 .collect(),
-            recorded: false,
+            basis: crate::state::ConfrontBasis::Current,
         }
     }
 
