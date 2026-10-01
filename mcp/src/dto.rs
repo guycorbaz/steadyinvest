@@ -64,7 +64,7 @@ fn gated_input(i: GatedInput) -> Value {
 }
 
 /// The computed outputs of one snapshot (Story 8.4 AC 8).
-pub fn computed(snapshot: &StudySnapshot) -> Value {
+pub fn computed(snapshot: &StudySnapshot, study: &Study) -> Value {
     let verdict = snapshot.verdict();
     let state = match verdict {
         Verdict::Full(_) => "full",
@@ -118,7 +118,16 @@ pub fn computed(snapshot: &StudySnapshot) -> Value {
             dec(out.returns.projected_total_annualized_return_pct),
         "sales_cagr_pct": dec(out.growth.sales_cagr_pct),
         "eps_cagr_pct": dec(out.growth.eps_cagr_pct),
-        "quality_flags": out.quality_flags.iter().map(|f| f.as_str()).collect::<Vec<_>>(),
+        // As the owner's screens state them (one high-P/E flag — project review 2026-10-01), with
+        // whether every rule could be checked: an empty list then means « none », else « unknown ».
+        "quality_flags": steadyinvest_core::ssg::shown_quality_flags(&out.quality_flags)
+            .iter()
+            .map(|f| f.as_str())
+            .collect::<Vec<_>>(),
+        "quality_flags_assessable": steadyinvest_core::ssg::quality_flags_assessable(
+            out,
+            &steadyinvest_report::form::to_judgment_inputs(&study.judgment),
+        ),
     })
 }
 
@@ -136,7 +145,7 @@ pub fn study_read(read: &McpStudyRead) -> Value {
     });
     match steadyinvest_report::form::build_snapshot(&read.study) {
         Ok(snapshot) => {
-            v["computed"] = computed(&snapshot);
+            v["computed"] = computed(&snapshot, &read.study);
         }
         Err(e) => {
             v["computed"] = Value::Null;
@@ -292,7 +301,7 @@ mod tests {
         let study = full_study();
         let snapshot = steadyinvest_report::form::build_snapshot(&study).unwrap();
         assert!(matches!(snapshot.verdict(), Verdict::Full(_)));
-        let v = computed(&snapshot);
+        let v = computed(&snapshot, &study);
         assert_eq!(v["verdict_state"], json!("full"));
         assert_eq!(v["open_gates"], json!([]));
         let facts = snapshot.verdict().facts();
@@ -348,5 +357,32 @@ mod tests {
         assert_eq!(v["computed"], Value::Null);
         assert!(v["computed_unavailable"].is_string(), "{v}");
         assert_eq!(v["study"]["security_ticker"], json!("NESN"));
+    }
+
+    // Project review 2026-10-01: the AI reads the flags the owner sees — one high-P/E flag — and
+    // whether they could be assessed at all.
+    #[test]
+    fn the_flags_are_the_shown_ones_with_their_assessability() {
+        let mut study = full_study();
+        study.judgment.judged_avg_high_pe = Some(steadyinvest_contract::Money::from(
+            rust_decimal::Decimal::new(45, 0),
+        ));
+        let snapshot = steadyinvest_report::form::build_snapshot(&study).unwrap();
+        let v = computed(&snapshot, &study);
+        let flags: Vec<&str> = v["quality_flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f.as_str().unwrap())
+            .collect();
+        assert!(
+            flags.contains(&"projected_high_pe_implausible"),
+            "{flags:?}"
+        );
+        assert!(
+            !flags.contains(&"projected_high_pe_aggressive"),
+            "{flags:?}"
+        );
+        assert!(v["quality_flags_assessable"].is_boolean());
     }
 }

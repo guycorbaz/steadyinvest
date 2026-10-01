@@ -140,6 +140,19 @@ pub fn quality_flag_input_known(
     }
 }
 
+/// The flags as SteadyInvest states them (owner decision, Guy 2026-09-26): a judged high P/E over
+/// 25 is also over 20 — only the highest threshold reached is stated, once. Presentation only:
+/// [`SsgOutputs::quality_flags`] keeps both keys (the catalog and the method are unchanged). Shared
+/// by the app's screens and PDFs and the MCP server, so the AI reads the flags the owner sees.
+pub fn shown_quality_flags(flags: &[QualityFlagKey]) -> Vec<QualityFlagKey> {
+    let above_25 = flags.contains(&QualityFlagKey::ProjectedHighPeImplausible);
+    flags
+        .iter()
+        .copied()
+        .filter(|k| !(above_25 && *k == QualityFlagKey::ProjectedHighPeAggressive))
+        .collect()
+}
+
 /// Every quality rule was checked (each input known): only then does an empty
 /// [`SsgOutputs::quality_flags`] mean « none raised » rather than « not assessable » (a flag is
 /// never raised on an unknown metric, so the empty list alone cannot tell them apart).
@@ -325,5 +338,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_shown_flags_state_one_high_pe_flag_the_highest() {
+        use QualityFlagKey as K;
+        assert_eq!(
+            shown_quality_flags(&[
+                K::ProjectedHighPeAggressive,
+                K::ProjectedHighPeImplausible,
+                K::RoeLow
+            ]),
+            vec![K::ProjectedHighPeImplausible, K::RoeLow]
+        );
+        assert_eq!(
+            shown_quality_flags(&[K::ProjectedHighPeAggressive]),
+            vec![K::ProjectedHighPeAggressive],
+            "over 20 only: stated"
+        );
     }
 }
