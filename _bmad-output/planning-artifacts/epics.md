@@ -1362,3 +1362,69 @@ So that my decision stays on record and a later refresh never silently rewrites 
 **And** the MCP study read returns the frozen verdict beside the current one; `frozen_verdict` is not a draftable field, and the 8.3 rejected-writes and 8.4 non-exposure suites are extended to it — no verdict is frozen or changed through MCP (FR68 [P4], FR69)
 **And** a test: freeze, refresh with a changed EPS series, and check that the frozen verdict is byte-identical while the current one differs and the difference is shown; the same with a `METHOD_VERSION` change
 **And** the Epic 8 posture AC holds.
+
+## Epic 9: Getting started & ergonomics (after Guy's on-screen test of Epic 8)
+
+Born from Guy's on-screen test of Epic 8 (H2, 2026-09-30 / 10-01) and the project review of
+2026-10-01: the functions are there, the handling is rough. This epic gathers what makes the
+app usable by a beginner and pleasant day to day. Its first story is the one Guy asked for; an
+ergonomics pass (like 7.0 / 8.0) is expected to join once his test notes are collected.
+
+### Story 9.1: Set up the AI from Réglages
+
+As Guy (and any beginner),
+I want to set up the use of an AI with SteadyInvest from Réglages, without typing commands,
+So that the AI assistance of Epic 8 is within reach of someone who does not know MCP, Claude Code
+or the terminal.
+
+Context: today the setup is manual and documented in `docs/guide-ia.md` §3 (build
+`steadyinvest-mcp`, create `~/steadyinvest-ia`, `claude mcp add --scope local … --dossier …`,
+verify with `claude mcp list` / `/mcp`). Guy, 2026-10-01: « l'installation de la partie IA n'est
+pas triviale pour un débutant : serait-il possible de l'automatiser dans steadyinvest ? par exemple
+dans Réglages ? »
+
+**Acceptance Criteria:**
+
+**Given** Réglages
+**When** I open the new « Assistance IA » card
+**Then** it states, each as a fact with its cause when not met, never an empty-looking card
+(checklist §1):
+- whether the MCP server is available (the `steadyinvest-mcp` binary found beside the app's own
+  executable, else in the build directory) and its version;
+- whether Claude Code (`claude`) is found on the `PATH`;
+- whether a `steadyinvest` server is registered for the AI working directory, and on which dossier;
+- the AI working directory (`~/steadyinvest-ia` by default).
+**Given** the server and Claude Code are both available
+**When** I choose « Préparer l'assistance IA »
+**Then** a confirmation lists exactly what will be done — create the working directory if absent,
+write a starter `CLAUDE.md` there only if none exists, and run
+`claude mcp add --scope local steadyinvest -- <binary> --dossier <dossier>` from that directory —
+and nothing happens until I confirm (an outward write into another program's configuration)
+**And** on confirmation the steps run and the card states the outcome; a failure names its cause
+and the step it stopped at, never a silent half-setup
+**And** the registration is ALWAYS in `local` scope from the working directory, never `user` nor
+`project` (the AI must not see the dossier from the SteadyInvest source tree — arch A12)
+**And** « Retirer » runs `claude mcp remove --scope local steadyinvest` from the same directory,
+after its own confirmation; « Changer de dossier » re-registers on another dossier
+**Given** Claude Code is not found
+**Then** the card shows the exact commands with my real paths, each with « Copier », and a link to
+the guide (`docs/guide-ia.md`)
+**And** the app never launches an AI session, never talks to an AI, and never reads or writes
+`~/.claude.json` itself — only through the `claude` command (the app still contains no AI)
+**And** the server binary is built with the app (a `just` recipe or a workspace setting so that the
+normal build produces both), and the guide and the in-app glossary are updated
+**And** tests: the diagnosis with a fake `claude` on the `PATH` (found / absent / registered /
+not registered), the exact command lines produced, no write before confirmation, the refusal of a
+non-`local` scope; a headless check of the card
+**And** the posture AC holds (French wording, glossary entry, `@tr` / `MSG_*` re-based, no banned
+verb, refusals in « Action refusée »).
+
+Open questions (asked 2026-10-01, unanswered — conservative defaults to be confirmed by Guy at
+create-story):
+- Q1 Level: full (diagnosis + one-click registration + removal) **[default]** or diagnosis +
+  commands to copy only?
+- Q2 Which dossier the AI reads: the dossier open in the app **[default, stated in the
+  confirmation]**, or a copy made for the AI?
+- Q3 Build: make the normal build produce the server too **[default]**, or keep `just mcp-build`?
+- Q4 Architecture A12 (« registration is the owner's act, by hand ») is amended: the owner's
+  confirmed click in Réglages is that act.
